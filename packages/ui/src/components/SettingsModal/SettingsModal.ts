@@ -187,7 +187,7 @@ function renderTabPane(props: SettingsModalProps): string {
               <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">${isZh ? '网关地址 (Dashboard / API)' : 'Gateway URL'}</label>
               <span style="font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono);">推荐 Dashboard 端口 9119 或公网反代</span>
             </div>
-            <input type="text" id="settings-gateway-url" value="${escapeHtml(props.gatewayUrl || 'https://fn-ai.codepower.cloud:1519')}" placeholder="http://127.0.0.1:9119 或 https://..." style="
+            <input type="text" id="settings-gateway-url" value="${escapeHtml(props.gatewayUrl || 'http://127.0.0.1:9119')}" placeholder="http://127.0.0.1:9119 或 https://..." style="
               width: 100%;
               height: 36px;
               background: var(--bg-panel);

@@ -71,11 +71,42 @@ export interface ToolOutputEvent {
   timestamp: number;
 }
 
-export interface ToolFinishEvent {
-  sessionId: string;
-  toolCallId: string;
-  exitCode: number;
-  outputPreview?: string;
-  durationMs: number;
+export interface SessionItemPayload {
+  id: string;
+  title?: string;
+  model?: string;
+  started_at?: number | string;
+  last_active?: number | string;
+  created_at?: number | string;
+  preview?: string;
+  archived?: boolean;
+}
+
+export interface SessionListResult {
+  sessions?: SessionItemPayload[];
+  data?: SessionItemPayload[];
+}
+
+export interface ModelProviderOption {
+  provider?: string;
+  id?: string;
+  models?: Array<string | { id: string; name?: string }>;
+}
+
+export interface ModelOptionsResult {
+  model?: string;
+  models?: string[];
+  providers?: ModelProviderOption[];
+  data?: Array<string | { id: string; name?: string }>;
+}
+
+export interface NormalizedSession {
+  id: string;
+  title: string;
+  model: string;
+  time: string;
+  preview: string;
+  isArchived: boolean;
   timestamp: number;
 }
+

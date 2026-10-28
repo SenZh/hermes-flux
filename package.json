@@ -7,15 +7,16 @@
     "packages/*"
   ],
   "scripts": {
-    "build:core": "npm --workspace=@hermes-aura/core run build",
-    "build:ui": "npm --workspace=@hermes-aura/ui run build",
-    "build:desktop": "npm --workspace=@hermes-aura/desktop run build",
+    "build:core": "tsc --build packages/core/tsconfig.json",
+    "build:ui": "tsc --build packages/ui/tsconfig.json",
+    "build:desktop": "node packages/desktop/scripts/build.mjs",
     "build": "npm run build:core && npm run build:ui && npm run build:desktop",
     "package:desktop:win": "npm --workspace=@hermes-aura/desktop run package:win",
     "package:desktop:win:dir": "npm --workspace=@hermes-aura/desktop run package:win:dir",
-    "test": "node --test --test-reporter spec 'packages/**/__tests__/**/*.test.mjs'",
+    "test": "node --test packages/core/__tests__/**/*.test.mjs packages/ui/__tests__/**/*.test.mjs",
+    "test:gateway": "node --test packages/core/__tests__/rpc/gateway-e2e.test.mjs",
     "lint": "echo 'Checking monorepo lint...'",
-    "typecheck": "npm run build:core && npm run build:ui && npm --workspace=@hermes-aura/desktop run typecheck"
+    "typecheck": "tsc --build packages/core/tsconfig.json packages/ui/tsconfig.json && tsc --project packages/desktop/tsconfig.json --noEmit"
   },
   "devDependencies": {
     "electron": "34.2.0",

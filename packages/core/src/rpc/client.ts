@@ -2,8 +2,9 @@
  * Hermes Gateway JSON-RPC 2.0 WebSocket Client
  */
 
-import { JsonRpcRequest, JsonRpcResponse, JsonRpcNotification } from './types.js';
+import { JsonRpcRequest, JsonRpcResponse, JsonRpcNotification, NormalizedSession } from './types.js';
 import { WebSocketFsm, FsmState } from './fsm.js';
+import { normalizeSessionsResult, extractAvailableModels } from '../models/types.js';
 
 export interface RpcClientOptions {
   url: string;
@@ -11,11 +12,43 @@ export interface RpcClientOptions {
   autoConnect?: boolean;
 }
 
+export type RestFallbackHandler = (path: string, options?: any) => Promise<any>;
+
+/** Result of a session listing attempt, including why it failed when it did. */
+export interface SessionListOutcome {
+  sessions: NormalizedSession[];
+  ok: boolean;
+  error?: string;
+}
+
+/** Models plus the provider that owns the currently active one. */
+export interface ModelCatalog {
+  models: string[];
+  currentModel: string;
+  currentProvider: string;
+  ok: boolean;
+  error?: string;
+}
+
+function describeError(error: unknown): string {
+  if (error && typeof error === 'object') {
+    const candidate = error as { message?: unknown; code?: unknown; data?: unknown };
+    if (typeof candidate.message === 'string' && candidate.message.trim()) {
+      return candidate.message;
+    }
+    if (typeof candidate.code !== 'undefined') {
+      return `RPC 错误 ${String(candidate.code)}`;
+    }
+  }
+  return typeof error === 'string' ? error : '未知错误';
+}
+
 export class HermesGatewayClient {
   private url: string;
   private timeoutMs: number;
   private ws: WebSocket | null = null;
   private nextId = 1;
+  private restFallbackHandler: RestFallbackHandler | null = null;
   private pendingRequests = new Map<
     string | number,
     {
@@ -38,6 +71,15 @@ export class HermesGatewayClient {
       this.connect();
     }
   }
+
+  public setRestFallbackHandler(handler: RestFallbackHandler | null): void {
+    this.restFallbackHandler = handler;
+  }
+
+  public getRawWebSocket(): WebSocket | null {
+    return this.ws;
+  }
+
 
   public getFsm(): WebSocketFsm {
     return this.fsm;
@@ -160,6 +202,129 @@ export class HermesGatewayClient {
       handlers.delete(handler as (params: unknown) => void);
     };
   }
+
+  /**
+   * Resilient dual-channel session listing that keeps the failure reason.
+   *
+   * "No sessions" and "the gateway refused to list them" are different facts; the
+   * rail must be able to tell them apart instead of rendering an empty list for
+   * both.
+   */
+  public async listSessions(profile = 'default', limit = 50): Promise<SessionListOutcome> {
+    let lastError: string | undefined;
+
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      try {
+        const wsResult = await this.call<unknown>('session.list', { profile, limit });
+        const sessions = normalizeSessionsResult(wsResult);
+        // An empty list is a legitimate answer when the gateway replied at all.
+        if (sessions.length > 0 || !this.restFallbackHandler) {
+          return { sessions, ok: true };
+        }
+      } catch (wsErr) {
+        lastError = describeError(wsErr);
+        console.warn('[HermesGatewayClient] WS session.list failed, trying REST fallback:', lastError);
+      }
+    } else {
+      lastError = `WebSocket 未连接 (当前状态: ${this.fsm.getState()})`;
+    }
+
+    if (this.restFallbackHandler) {
+      try {
+        const restResult = await this.restFallbackHandler('/api/sessions', {
+          method: 'GET',
+          params: { profile, limit },
+        });
+        return { sessions: normalizeSessionsResult(restResult), ok: true };
+      } catch (restErr) {
+        lastError = describeError(restErr);
+        console.warn('[HermesGatewayClient] REST session fallback also failed:', lastError);
+      }
+    }
+
+    return { sessions: [], ok: false, error: lastError ?? '网关未返回会话列表' };
+  }
+
+  /**
+   * Session listing without diagnostics. Prefer `listSessions` when the caller
+   * needs to distinguish an empty result from a failed one.
+   */
+  public async listSessionsSafe(profile = 'default', limit = 50): Promise<NormalizedSession[]> {
+    const outcome = await this.listSessions(profile, limit);
+    return outcome.sessions;
+  }
+
+  /**
+   * Resilient model catalog extraction.
+   *
+   * `model.options` answers `{ model, provider, providers: [{ slug, models }] }`.
+   * Both the flattened model list and the provider that owns the active model are
+   * kept, because `config.set` rejects a model id that several providers declare.
+   */
+  public async getModelCatalog(profile = 'default', fallbackModels: string[] = []): Promise<ModelCatalog> {
+    let lastError: string | undefined;
+
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      try {
+        const res = await this.call<any>('model.options', { profile });
+        const models = extractAvailableModels(res, []);
+        if (models.length > 0) {
+          return {
+            models,
+            currentModel: typeof res?.model === 'string' ? res.model : '',
+            currentProvider: typeof res?.provider === 'string' ? res.provider : '',
+            ok: true,
+          };
+        }
+        lastError = '网关返回的模型列表为空';
+      } catch (wsErr) {
+        lastError = describeError(wsErr);
+        console.warn('[HermesGatewayClient] WS model.options failed, trying REST fallback:', lastError);
+      }
+    } else {
+      lastError = `WebSocket 未连接 (当前状态: ${this.fsm.getState()})`;
+    }
+
+    if (this.restFallbackHandler) {
+      try {
+        const restResult = await this.restFallbackHandler('/api/models', {
+          method: 'GET',
+          params: { profile },
+        });
+        const models = extractAvailableModels(restResult, []);
+        if (models.length > 0) {
+          return {
+            models,
+            currentModel: typeof restResult?.model === 'string' ? restResult.model : '',
+            currentProvider: typeof restResult?.provider === 'string' ? restResult.provider : '',
+            ok: true,
+          };
+        }
+        lastError = 'REST 模型接口返回为空';
+      } catch (restErr) {
+        lastError = describeError(restErr);
+        console.warn('[HermesGatewayClient] REST model fallback also failed:', lastError);
+      }
+    }
+
+    return {
+      models: extractAvailableModels(null, fallbackModels),
+      currentModel: '',
+      currentProvider: '',
+      ok: false,
+      error: lastError ?? '网关未返回模型列表',
+    };
+  }
+
+  /**
+   * Model list without diagnostics. Prefer `getModelCatalog` when the caller needs
+   * the active provider or the failure reason.
+   */
+  public async getModelOptionsSafe(profile = 'default', fallbackModels: string[] = []): Promise<string[]> {
+    const catalog = await this.getModelCatalog(profile, fallbackModels);
+    return catalog.models;
+  }
+
 
   private handleMessage(raw: unknown): void {
     if (typeof raw !== 'string') return;

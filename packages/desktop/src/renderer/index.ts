@@ -1,7 +1,7 @@
 /**
- * Hermes Aura Desktop Renderer Application Entry (v3.5 Production)
- * Real Gateway WebSocket / HTTP REST SSE Integration.
- * Zero Fake Data: All sessions, models, and transcripts come from connected Hermes Gateway.
+ * Hermes Aura Desktop Renderer Application Entry (v4.0 Production)
+ * Fully powered by @hermes-aura/core and @hermes-aura/ui
+ * Zero private WS glue code: Dual-channel fallback, TokenCoalescer 120 FPS stream, robust model & session lifecycle.
  */
 
 import {
@@ -12,10 +12,31 @@ import {
   renderInspectionPod,
   renderStatusBar,
   renderSettingsModal,
+  renderMessage,
+  renderMarkdown,
   MessageViewModel,
-  LeftRailSession,
   InspectorTab,
 } from '@hermes-aura/ui';
+
+import {
+  HermesGatewayClient,
+  TokenCoalescer,
+  reduceGatewayEvent,
+  readSessionHandles,
+  toPendingSession,
+  upsertSession,
+  applySessionTitle,
+  type TurnAction,
+  type NormalizedSession,
+} from '@hermes-aura/core';
+
+import type { HermesDesktopBridge } from '../preload/index.js';
+
+declare global {
+  interface Window {
+    hermesDesktop?: HermesDesktopBridge;
+  }
+}
 
 interface AppState {
   platform: 'windows' | 'macos' | 'linux';
@@ -25,9 +46,21 @@ interface AppState {
   leftRailCollapsed: boolean;
   inspectorCollapsed: boolean;
   activeInspectorTab: InspectorTab;
+  /** Stored id of the focused conversation — the id the left rail lists. */
   activeSessionId: string;
+  /** Live transport id of the focused conversation — required by prompt.submit / config.set. */
+  activeLiveSessionId: string;
   selectedModel: string;
   availableModels: string[];
+  currentProvider: string;
+  /** Model menu visibility lives in state so a re-render cannot swallow it. */
+  modelMenuOpen: boolean;
+  /** Inline failure line inside the dock (failure must never be silent). */
+  dockNotice: string;
+  /** Rail-level failure line, distinct from a legitimately empty session list. */
+  sessionListError: string;
+  /** Conversations optimistically inserted while the gateway persists them. */
+  pendingSessionIds: string[];
   reasoningLevel: 'off' | 'low' | 'medium' | 'high';
   approvalMode: 'auto' | 'ask' | 'sandbox';
   isStreaming: boolean;
@@ -42,17 +75,13 @@ interface AppState {
   profileName: string;
   isSettingsOpen: boolean;
   settingsTab: 'gateway' | 'appearance' | 'about';
-  sessions: LeftRailSession[];
+  sessions: NormalizedSession[];
   messages: MessageViewModel[];
   testStatus?: { ok?: boolean; message?: string; latency?: number };
-}
-
-import type { HermesDesktopBridge } from '../preload/index.js';
-
-declare global {
-  interface Window {
-    hermesDesktop?: HermesDesktopBridge;
-  }
+  artifacts: Array<{ id: string; name: string; type: string; size: string; preview?: string }>;
+  browserFrame?: { url: string; title: string; screenshotUrl?: string };
+  gitDiffs: Array<{ file: string; additions: number; deletions: number; patch?: string }>;
+  memories: Array<{ category: string; content: string; updated?: string }>;
 }
 
 const desktopApi: HermesDesktopBridge | undefined = window.hermesDesktop;
@@ -66,15 +95,21 @@ const state: AppState = {
   inspectorCollapsed: false,
   activeInspectorTab: 'artifacts',
   activeSessionId: '',
+  activeLiveSessionId: '',
   selectedModel: '',
   availableModels: [],
+  currentProvider: '',
+  modelMenuOpen: false,
+  dockNotice: '',
+  sessionListError: '',
+  pendingSessionIds: [],
   reasoningLevel: 'high',
   approvalMode: 'auto',
   isStreaming: false,
   gatewayConnected: false,
   gatewayConnecting: false,
   gatewayLatencyMs: 0,
-  gatewayUrl: localStorage.getItem('hermes_aura_gateway_url') || 'https://fn-ai.codepower.cloud:1519',
+  gatewayUrl: localStorage.getItem('hermes_aura_gateway_url') || 'http://127.0.0.1:9119',
   gatewayType: (localStorage.getItem('hermes_aura_gateway_type') as any) || 'dashboard',
   username: localStorage.getItem('hermes_aura_username') || '',
   password: localStorage.getItem('hermes_aura_password') || '',
@@ -85,47 +120,80 @@ const state: AppState = {
   sessions: [],
   messages: [],
   testStatus: undefined,
+  artifacts: [],
+  browserFrame: undefined,
+  gitDiffs: [],
+  memories: [],
 };
 
-// ============================================================================
-// GATEWAY CLIENT HELPERS & REAL WEBSOCKET JSON-RPC PIPELINE
-// ============================================================================
+let gatewayClient: HermesGatewayClient | null = null;
+let currentTicket: string | undefined = undefined;
+let activeStreamingMessageId: string | null = null;
+let sessionsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+let turnWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
 
-let gatewayWsClient: WebSocket | null = null;
-let wsRpcNextId = 1;
-const wsRpcPending = new Map<string, { resolve: (val: any) => void; reject: (err: any) => void; timer: any }>();
+/** Upper bound for a silent turn before the composer is force-unlocked. */
+const TURN_WATCHDOG_MS = 10 * 60 * 1000;
 
-function sendWsRpc(method: string, params: any = {}, timeoutMs = 25000): Promise<any> {
-  return new Promise((resolve, reject) => {
-    if (!gatewayWsClient || gatewayWsClient.readyState !== WebSocket.OPEN) {
-      return reject(new Error('WebSocket 未连接，无法发送请求'));
+/** Extracts a human-readable reason out of a JSON-RPC error, an Error or a string. */
+function describeRpcError(error: unknown): string {
+  if (error && typeof error === 'object') {
+    const candidate = error as { message?: unknown; code?: unknown };
+    if (typeof candidate.code !== 'undefined') {
+      const code = String(candidate.code);
+      const message = typeof candidate.message === 'string' ? candidate.message : '';
+      return message ? `[${code}] ${message}` : `RPC 错误 ${code}`;
     }
-    const id = `rpc-${wsRpcNextId++}-${Date.now()}`;
-    const timer = setTimeout(() => {
-      wsRpcPending.delete(id);
-      reject(new Error(`RPC ${method} timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-
-    wsRpcPending.set(id, { resolve, reject, timer });
-    gatewayWsClient.send(JSON.stringify({
-      jsonrpc: '2.0',
-      id,
-      method,
-      params,
-    }));
-  });
+    if (typeof candidate.message === 'string' && candidate.message.trim()) return candidate.message;
+  }
+  return typeof error === 'string' ? error : '未知错误';
 }
 
+/** The gateway rejects unknown params with a stable phrase; retry without them. */
+function isExtraInputsError(error: unknown): boolean {
+  const message = error && typeof error === 'object' ? (error as { message?: unknown }).message : undefined;
+  return typeof message === 'string' && message.includes('Extra inputs');
+}
+
+
+// Token coalescer for smooth 60-120fps stream updates
+const tokenCoalescer = new TokenCoalescer((flushedMap) => {
+  for (const [msgId, entry] of flushedMap.entries()) {
+    const targetMsg = state.messages.find((m) => m.id === msgId);
+    if (!targetMsg || targetMsg.role !== 'assistant') continue;
+
+    if (entry.content) {
+      targetMsg.content += entry.content;
+      const contentEl = document.getElementById(`msg-content-${targetMsg.id}`);
+      if (contentEl) {
+        contentEl.innerHTML = renderMarkdown(targetMsg.content);
+      }
+    }
+
+    if (entry.thought) {
+      targetMsg.thought = (targetMsg.thought || '') + entry.thought;
+      const thoughtEl = document.getElementById(`msg-thought-${targetMsg.id}`);
+      if (thoughtEl) {
+        thoughtEl.innerText = targetMsg.thought;
+        const fold = thoughtEl.closest('details');
+        if (fold) {
+          fold.style.display = 'block';
+        }
+      }
+    }
+  }
+
+  const stream = document.getElementById('conversation-stream');
+  if (stream) {
+    stream.scrollTop = stream.scrollHeight;
+  }
+});
+
 function getEffectiveUrl(base: string): string {
-  let url = (base || 'https://fn-ai.codepower.cloud:1519').trim();
-  if (url.startsWith('ws://')) {
-    url = url.replace('ws://', 'http://');
-  } else if (url.startsWith('wss://')) {
-    url = url.replace('wss://', 'https://');
-  }
-  if (!url.startsWith('http://') && !url.startsWith('https://')) {
-    url = `https://${url}`;
-  }
+  let url = (base || 'http://127.0.0.1:9119').trim();
+  if (url.startsWith('ws://')) url = url.replace('ws://', 'http://');
+  if (url.startsWith('wss://')) url = url.replace('wss://', 'https://');
+  if (!url.startsWith('http://') && !url.startsWith('https://')) url = `https://${url}`;
   return url.replace(/\/+$/, '');
 }
 
@@ -136,7 +204,6 @@ async function testConnection(
   pass: string,
   token: string
 ): Promise<{ ok: boolean; message: string; latency: number; ticket?: string }> {
-  // 1. Electron Desktop IPC First (bypasses Chromium file:// cookie & CORS limitations)
   if (desktopApi?.authenticateGateway) {
     try {
       const res = await desktopApi.authenticateGateway({
@@ -148,7 +215,7 @@ async function testConnection(
       });
       return res;
     } catch (e: any) {
-      console.warn('[Desktop PAL] authenticateGateway IPC fallback to renderer fetch:', e);
+      console.warn('[Desktop PAL] authenticateGateway fallback:', e);
     }
   }
 
@@ -159,74 +226,47 @@ async function testConnection(
     if (gatewayType === 'dashboard') {
       const statusRes = await fetch(`${baseUrl}/api/status`, {
         method: 'GET',
-        headers: { 'Accept': 'application/json' },
-      }).catch((e) => { throw new Error(`无法连接服务: ${e.message}`); });
-
+        headers: { Accept: 'application/json' },
+      });
       const latency = Date.now() - startTime;
       if (!statusRes.ok) {
         return { ok: false, message: `服务返回异常 HTTP ${statusRes.status}`, latency };
       }
 
       const statusData = await statusRes.json().catch(() => ({}));
-      const authRequired = Boolean(statusData.auth_required);
-
-      if (authRequired) {
+      if (statusData.auth_required) {
         if (!username || !pass) {
-          return {
-            ok: false,
-            message: '该网关开启了安全拦截，必须输入用户名与密码',
-            latency,
-          };
+          return { ok: false, message: '该网关开启了安全拦截，必须输入用户名与密码', latency };
         }
-
         const loginRes = await fetch(`${baseUrl}/auth/password-login`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({
-            username,
-            password: pass,
-            provider: 'basic',
-          }),
+          body: JSON.stringify({ username, password: pass, provider: 'basic' }),
         });
-
-        if (loginRes.ok) {
-          // Attempt ticket mint
-          let ticket: string | undefined;
-          try {
-            const tRes = await fetch(`${baseUrl}/api/auth/ws-ticket`, {
-              method: 'POST',
-              headers: { 'Accept': 'application/json' },
-              credentials: 'include',
-            });
-            if (tRes.ok) {
-              const tData = await tRes.json().catch(() => ({}));
-              ticket = tData.ticket;
-            }
-          } catch {}
-
-          return {
-            ok: true,
-            ticket,
-            message: `认证成功 · 延迟 ${latency}ms · Gateway v${statusData.version || '0.22.5'}`,
-            latency,
-          };
-        } else if (loginRes.status === 401) {
-          return {
-            ok: false,
-            message: '认证失败: 用户名或密码错误 (HTTP 401)',
-            latency,
-          };
-        } else {
-          return {
-            ok: false,
-            message: `登录接口异常 HTTP ${loginRes.status}`,
-            latency,
-          };
+        if (!loginRes.ok) {
+          return { ok: false, message: `认证失败: HTTP ${loginRes.status}`, latency };
         }
+
+        let ticket: string | undefined;
+        try {
+          const tRes = await fetch(`${baseUrl}/api/auth/ws-ticket`, {
+            method: 'POST',
+            headers: { Accept: 'application/json' },
+            credentials: 'include',
+          });
+          if (tRes.ok) {
+            const td = await tRes.json();
+            ticket = td.ticket;
+          }
+        } catch {}
+
+        return {
+          ok: true,
+          ticket,
+          message: `认证成功 · 延迟 ${latency}ms · Gateway v${statusData.version || '0.22.5'}`,
+          latency,
+        };
       }
 
       return {
@@ -238,8 +278,8 @@ async function testConnection(
       const res = await fetch(`${baseUrl}/health`, {
         method: 'GET',
         headers: {
-          'Accept': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+          Accept: 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
       });
       const latency = Date.now() - startTime;
@@ -247,16 +287,11 @@ async function testConnection(
         const data = await res.json().catch(() => ({}));
         return {
           ok: true,
-          message: `连接成功 · ${latency}ms · API Server ${data.platform || 'hermes-agent'} ${data.version || ''}`.trim(),
-          latency,
-        };
-      } else {
-        return {
-          ok: false,
-          message: `API 鉴权失败 HTTP ${res.status}: 请核对 API_SERVER_KEY`,
+          message: `连接成功 · ${latency}ms · API Server ${data.platform || 'hermes'}`,
           latency,
         };
       }
+      return { ok: false, message: `API 鉴权失败 HTTP ${res.status}`, latency };
     }
   } catch (err: any) {
     return {
@@ -267,164 +302,437 @@ async function testConnection(
   }
 }
 
-async function fetchSessions(): Promise<void> {
-  if (!state.gatewayConnected) return;
-
-  try {
-    const res = await sendWsRpc('session.list', { profile: state.profileName || 'default', limit: 50 });
-    const list = res?.sessions || res?.data || [];
-    state.sessions = list.map((s: any) => ({
-      id: s.id,
-      title: s.title || (s.id ? `会话 ${s.id.slice(0, 8)}` : '新对话'),
-      model: s.model || '',
-      time: s.last_active || s.started_at ? formatTimestamp(s.last_active || s.started_at) : '近期',
-      preview: s.preview || '',
-      isArchived: Boolean(s.archived),
-    }));
-
-    if (!state.activeSessionId && state.sessions.length > 0) {
-      selectSession(state.sessions[0].id);
-    } else {
-      render();
-    }
-  } catch (e) {
-    console.warn('[Hermes Gateway WS] Failed to fetch sessions via RPC:', e);
-  }
+/**
+ * Coalesces bursts of `sessions.changed` broadcasts into one list fetch.
+ * The gateway emits several of them per turn, so an unthrottled refresh would
+ * otherwise re-render the whole shell many times in a row.
+ */
+function scheduleSessionsRefresh(delayMs = 180): void {
+  if (sessionsRefreshTimer) clearTimeout(sessionsRefreshTimer);
+  sessionsRefreshTimer = setTimeout(() => {
+    sessionsRefreshTimer = null;
+    void fetchSessions();
+  }, delayMs);
 }
 
-async function fetchModelOptions(): Promise<void> {
-  const defaultFallbackModels = [
-    'deepseek-v4.1-flash',
-    'gemini-3.7-flash',
-    'qwen3.7-plus',
-    'claude-3-7-sonnet',
-  ];
+async function fetchSessions(): Promise<void> {
+  if (!gatewayClient) return;
 
-  if (state.availableModels.length === 0) {
-    state.availableModels = defaultFallbackModels;
-    if (!state.selectedModel) state.selectedModel = defaultFallbackModels[0];
-  }
+  const outcome = await gatewayClient.listSessions(state.profileName || 'default', 50);
 
-  if (!state.gatewayConnected) {
+  if (!outcome.ok) {
+    // Failure is not empty: tell the user why the rail is not refreshing.
+    state.sessionListError = outcome.error || '会话列表拉取失败';
     render();
     return;
   }
 
-  try {
-    const res = await sendWsRpc('model.options', { profile: state.profileName || 'default' });
-    const modelsSet = new Set<string>(state.availableModels);
+  state.sessionListError = '';
 
-    if (res?.model) {
-      modelsSet.add(res.model);
-    }
+  // Keep conversations that were created locally but are not persisted yet; the
+  // gateway only lists a session once its first turn has been stored.
+  const serverIds = new Set(outcome.sessions.map((s) => s.id));
+  const stillPending = state.sessions.filter(
+    (s) => state.pendingSessionIds.includes(s.id) && !serverIds.has(s.id)
+  );
+  state.pendingSessionIds = state.pendingSessionIds.filter((id) => !serverIds.has(id));
 
-    if (Array.isArray(res?.providers)) {
-      for (const p of res.providers) {
-        if (Array.isArray(p.models)) {
-          for (const m of p.models) {
-            if (typeof m === 'string') modelsSet.add(m);
-            else if (m && m.id) modelsSet.add(m.id);
-          }
-        }
-      }
-    }
+  state.sessions = [...stillPending, ...outcome.sessions];
 
-    state.availableModels = Array.from(modelsSet);
-    if (!state.selectedModel && state.availableModels.length > 0) {
-      state.selectedModel = res?.model || state.availableModels[0];
-    }
-    render();
-  } catch (e) {
-    console.warn('[Hermes Gateway WS] Failed to fetch model options via RPC:', e);
+  if (!state.activeSessionId && state.sessions.length > 0) {
+    await selectSession(state.sessions[0].id);
+    return;
   }
+
+  render();
+}
+
+async function fetchModelOptions(options: { clearNotice?: boolean } = {}): Promise<void> {
+  if (!gatewayClient) {
+    state.availableModels = [];
+    state.dockNotice = '未连接网关，暂时无法获取模型列表';
+    render();
+    return;
+  }
+
+  const catalog = await gatewayClient.getModelCatalog(state.profileName || 'default');
+
+  if (!catalog.ok) {
+    // No fabricated fallback models: an invented list is worse than an honest error.
+    state.dockNotice = `模型列表加载失败: ${catalog.error || '网关未返回数据'}`;
+    render();
+    return;
+  }
+
+  state.availableModels = catalog.models;
+  state.currentProvider = catalog.currentProvider;
+  if (catalog.currentModel) {
+    state.selectedModel = catalog.currentModel;
+  } else if (!state.selectedModel && catalog.models.length > 0) {
+    state.selectedModel = catalog.models[0];
+  }
+  if (options.clearNotice !== false) state.dockNotice = '';
+  render();
 }
 
 async function loadMessages(sessionId: string): Promise<void> {
-  if (!sessionId) {
+  if (!sessionId || !gatewayClient) {
     state.messages = [];
     render();
     return;
   }
 
   try {
-    const res = await sendWsRpc('session.resume', {
-      session_id: sessionId,
-      profile: state.profileName || 'default',
-    });
+    // `session.resume` accepts the stored id and answers with the live id, which is
+    // the only id prompt.submit / config.set understand.
+    const res = await gatewayClient.call<any>('session.resume', { session_id: sessionId });
 
-    const list = res?.messages || res?.history || [];
+    const handles = readSessionHandles(res, sessionId);
+    if (handles) {
+      state.activeLiveSessionId = handles.liveId;
+    }
+
+    const list = Array.isArray(res?.messages) ? res.messages : Array.isArray(res?.history) ? res.history : [];
     state.messages = list.map((m: any, idx: number) => {
-      let thought = '';
-      if (m.thought) thought = m.thought;
+      const thought = typeof m.thinking === 'string' ? m.thinking : typeof m.thought === 'string' ? m.thought : '';
 
       const toolCalls = Array.isArray(m.tool_calls)
         ? m.tool_calls.map((tc: any) => ({
             id: tc.id || `tc-${idx}`,
             name: tc.name || tc.function?.name || 'tool',
             status: (tc.status || 'completed') as any,
-            args: typeof tc.args === 'string' ? tc.args : JSON.stringify(tc.args || tc.function?.arguments || {}),
-            output: typeof tc.output === 'string' ? tc.output : tc.output ? JSON.stringify(tc.output) : undefined,
+            args: typeof tc.args === 'string' ? tc.args : JSON.stringify(tc.args || {}),
+            output: tc.output ? String(tc.output) : undefined,
           }))
-        : undefined;
+        : [];
 
       return {
-        id: String(m.id || `msg-${idx}`),
-        role: m.role || 'user',
-        content: m.content || '',
+        id: String(m.row_id ?? m.id ?? `msg-${idx}`),
+        role: (m.role === 'user' || m.role === 'system' ? m.role : 'assistant') as MessageViewModel['role'],
+        content: m.text ?? m.content ?? '',
         thought,
+        thoughtDurationMs: m.thought_duration_ms,
         toolCalls,
-        timestamp: m.timestamp || m.created_at ? formatTimestamp(m.timestamp || m.created_at) : '',
+        timestamp: formatTimestamp(m.timestamp ?? m.created_at ?? Date.now()),
       };
     });
+
+    if (state.activeSessionId === sessionId) state.dockNotice = '';
     render();
+    requestAnimationFrame(() => {
+      const stream = document.getElementById('conversation-stream');
+      if (stream) stream.scrollTop = stream.scrollHeight;
+    });
   } catch (e) {
-    console.warn('[Hermes Gateway WS] Failed to resume/load messages via RPC:', e);
+    console.warn('[Hermes Gateway] Failed to load messages via RPC:', e);
+    state.messages = [];
+    state.dockNotice = `载入会话历史失败: ${describeRpcError(e)}`;
+    render();
   }
 }
 
-async function createNewSession(): Promise<void> {
-  try {
-    const res = await sendWsRpc('session.create', {
-      profile: state.profileName || 'default',
-      title: `新任务 ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
-    });
+/**
+ * Resolves the live transport id for the focused conversation.
+ *
+ * The rail only holds stored ids, while prompt.submit / config.set reject those
+ * with `4001 session not found`. `session.resume` is the documented bridge.
+ */
+async function ensureLiveSessionId(): Promise<string> {
+  if (state.activeLiveSessionId) return state.activeLiveSessionId;
+  if (!gatewayClient || !state.activeSessionId) return '';
 
-    const newId = res?.session_id || res?.session?.id || res?.id;
-    if (newId) {
-      state.activeSessionId = newId;
-      state.messages = [];
-      await fetchSessions();
-      render();
-      const input = document.getElementById('dock-prompt-input');
-      if (input) input.focus();
+  try {
+    const res = await gatewayClient.call<any>('session.resume', { session_id: state.activeSessionId });
+    const handles = readSessionHandles(res, state.activeSessionId);
+    if (handles) {
+      state.activeLiveSessionId = handles.liveId;
+      return handles.liveId;
     }
   } catch (e) {
-    console.error('[Hermes Gateway WS] Create session failed via RPC:', e);
+    console.warn('[Aura] Failed to resolve live session id:', e);
+  }
+  return '';
+}
+
+async function createNewSession(): Promise<void> {
+  if (!gatewayClient) {
+    state.dockNotice = '未连接网关，无法新建会话';
+    render();
+    return;
+  }
+
+  try {
+    let res: any;
+    try {
+      res = await gatewayClient.call<any>('session.create', {
+        title: '新任务',
+        profile: state.profileName || 'default',
+      });
+    } catch (firstErr) {
+      if (isExtraInputsError(firstErr)) {
+        console.warn('[Aura] Gateway rejected extra params on session.create, retrying minimal');
+        res = await gatewayClient.call<any>('session.create', {});
+      } else {
+        throw firstErr;
+      }
+    }
+
+    const handles = readSessionHandles(res);
+    if (!handles) {
+      state.dockNotice = '网关没有返回新会话的标识，无法开始对话';
+      render();
+      return;
+    }
+
+    state.activeSessionId = handles.storedId;
+    state.activeLiveSessionId = handles.liveId;
+    state.messages = [];
+    state.dockNotice = '';
+    state.modelMenuOpen = false;
+
+    // session.list does not expose a brand-new session until its first turn is
+    // persisted, so the rail gets an optimistic entry right away.
+    if (!state.pendingSessionIds.includes(handles.storedId)) {
+      state.pendingSessionIds = [handles.storedId, ...state.pendingSessionIds];
+    }
+    state.sessions = upsertSession(state.sessions, toPendingSession(handles, '新任务'));
+
+    render();
+
+    // Apply the model the user picked before the session existed.
+    if (state.selectedModel) {
+      await applyModelToLiveSession(state.selectedModel);
+    }
+  } catch (e) {
+    console.error('[Hermes Gateway] Create session failed:', e);
+    state.dockNotice = `新建会话失败: ${describeRpcError(e)}`;
+    render();
+  }
+}
+
+async function deleteSession(id: string): Promise<void> {
+  if (!gatewayClient || !id) return;
+
+  try {
+    await gatewayClient.call('session.delete', { session_id: id });
+    state.sessions = state.sessions.filter((s) => s.id !== id);
+    state.pendingSessionIds = state.pendingSessionIds.filter((pid) => pid !== id);
+
+    if (state.activeSessionId === id) {
+      state.activeSessionId = state.sessions[0]?.id || '';
+      state.activeLiveSessionId = '';
+      if (state.activeSessionId) {
+        await selectSession(state.activeSessionId);
+      } else {
+        state.messages = [];
+        render();
+      }
+    } else {
+      render();
+    }
+  } catch (e) {
+    console.error('[Hermes Gateway] Delete session failed:', e);
+    state.dockNotice = `删除会话失败: ${describeRpcError(e)}`;
+    render();
   }
 }
 
 async function selectSession(id: string): Promise<void> {
-  if (state.activeSessionId === id) return;
+  if (!id) return;
+  if (state.activeSessionId === id && state.activeLiveSessionId && state.messages.length > 0) return;
+
   state.activeSessionId = id;
+  state.activeLiveSessionId = ''; // must be re-resolved through session.resume
+  state.modelMenuOpen = false;
   await loadMessages(id);
 }
 
+/**
+ * Pushes the selected model onto the live session.
+ *
+ * `config.set` only accepts the live id, and it rejects a model id declared by
+ * several providers; both cases must reach the user instead of being swallowed.
+ */
+async function applyModelToLiveSession(model: string): Promise<void> {
+  if (!gatewayClient || !model) return;
+
+  const liveId = await ensureLiveSessionId();
+  if (!liveId) return;
+
+  try {
+    await gatewayClient.call('config.set', { session_id: liveId, key: 'model', value: model });
+  } catch (e) {
+    state.dockNotice = `切换模型失败: ${describeRpcError(e)}`;
+    render();
+  }
+}
+
+async function switchModel(model: string): Promise<void> {
+  if (!model) return;
+
+  const previous = state.selectedModel;
+  state.selectedModel = model;
+  state.modelMenuOpen = false;
+  state.dockNotice = '';
+  render();
+
+  if (previous === model) return;
+
+  if (!gatewayClient || !state.activeSessionId) {
+    // No live conversation yet: the choice is applied right after session.create.
+    return;
+  }
+
+  const liveId = await ensureLiveSessionId();
+  if (!liveId) {
+    state.selectedModel = previous;
+    state.dockNotice = '无法切换到该模型：当前会话没有可用的实时通道，请重新进入会话';
+    render();
+    return;
+  }
+
+  try {
+    await gatewayClient.call('config.set', { session_id: liveId, key: 'model', value: model });
+  } catch (e) {
+    state.selectedModel = previous; // an error must not leave the pill lying
+    state.dockNotice = `切换模型失败: ${describeRpcError(e)}`;
+  }
+  render();
+}
+
+async function switchReasoning(effort: 'off' | 'low' | 'medium' | 'high'): Promise<void> {
+  state.reasoningLevel = effort;
+  render();
+
+  if (!gatewayClient || !state.activeSessionId) return;
+
+  const liveId = await ensureLiveSessionId();
+  if (!liveId) {
+    state.dockNotice = '无法设置思考深度：当前会话没有可用的实时通道';
+    render();
+    return;
+  }
+
+  try {
+    await gatewayClient.call('config.set', { session_id: liveId, key: 'reasoning', value: effort });
+    state.dockNotice = '';
+  } catch (e) {
+    state.dockNotice = `设置思考深度失败: ${describeRpcError(e)}`;
+  }
+  render();
+}
+
+async function switchApproval(mode: 'auto' | 'ask' | 'sandbox'): Promise<void> {
+  state.approvalMode = mode;
+  render();
+
+  // Map internal UI mode to gateway approval_mode (off | smart | manual)
+  const gatewayModeMap: Record<string, string> = { auto: 'off', ask: 'smart', sandbox: 'manual' };
+
+  if (!gatewayClient || !state.activeSessionId) return;
+
+  const liveId = await ensureLiveSessionId();
+  if (!liveId) {
+    state.dockNotice = '无法设置审批策略：当前会话没有可用的实时通道';
+    render();
+    return;
+  }
+
+  try {
+    await gatewayClient.call('config.set', {
+      session_id: liveId,
+      key: 'approval_mode',
+      value: gatewayModeMap[mode] || 'smart',
+    });
+    state.dockNotice = '';
+  } catch (e) {
+    state.dockNotice = `设置审批策略失败: ${describeRpcError(e)}`;
+  }
+  render();
+}
+
+
+/** Force-unlocks the composer if a turn goes silent, so the UI can never latch. */
+function armTurnWatchdog(): void {
+  if (turnWatchdogTimer) clearTimeout(turnWatchdogTimer);
+  turnWatchdogTimer = setTimeout(() => {
+    turnWatchdogTimer = null;
+    if (!state.isStreaming) return;
+    tokenCoalescer.flush();
+    state.isStreaming = false;
+    activeStreamingMessageId = null;
+    state.dockNotice = '上游长时间没有回传本轮结果，已解除发送锁定；如需继续请重新发送';
+    render();
+  }, TURN_WATCHDOG_MS);
+}
+
+function disarmTurnWatchdog(): void {
+  if (turnWatchdogTimer) {
+    clearTimeout(turnWatchdogTimer);
+    turnWatchdogTimer = null;
+  }
+}
+
+/** Asks the gateway to stop the running turn (the composer turns into a stop button). */
+async function interruptTurn(): Promise<void> {
+  if (!gatewayClient) return;
+
+  const liveId = await ensureLiveSessionId();
+  if (!liveId) {
+    state.dockNotice = '当前会话没有可中断的实时通道';
+    render();
+    return;
+  }
+
+  try {
+    await gatewayClient.call('session.interrupt', { session_id: liveId });
+    state.dockNotice = '已请求中断本轮生成';
+  } catch (e) {
+    state.dockNotice = `中断失败: ${describeRpcError(e)}`;
+  }
+  render();
+}
+
 async function sendMessage(text: string): Promise<void> {
-  if (!text.trim() || state.isStreaming) return;
+  const trimmed = text.trim();
+  if (!trimmed) return;
+
+  if (!gatewayClient) {
+    state.dockNotice = '未连接网关，无法发送消息';
+    render();
+    return;
+  }
+
+  // A latched busy flag used to swallow every later message without feedback.
+  if (state.isStreaming) {
+    state.dockNotice = '当前回合仍在生成中，请等待完成或稍后重试';
+    render();
+    return;
+  }
 
   if (!state.activeSessionId) {
     await createNewSession();
   }
 
+  const liveId = await ensureLiveSessionId();
+  if (!liveId) {
+    state.dockNotice = '当前会话没有可用的实时通道，请重新选择会话后再发送';
+    render();
+    return;
+  }
+
+  state.dockNotice = '';
+
   const userMsgId = `usr-${Date.now()}`;
   state.messages.push({
     id: userMsgId,
     role: 'user',
-    content: text,
+    content: trimmed,
     timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
   });
 
   const assistantMsgId = `ast-${Date.now()}`;
+  activeStreamingMessageId = assistantMsgId;
   const assistantMsg: MessageViewModel = {
     id: assistantMsgId,
     role: 'assistant',
@@ -435,25 +743,37 @@ async function sendMessage(text: string): Promise<void> {
   state.messages.push(assistantMsg);
 
   state.isStreaming = true;
+  tokenCoalescer.clear();
+  armTurnWatchdog();
   render();
 
+  requestAnimationFrame(() => {
+    const stream = document.getElementById('conversation-stream');
+    if (stream) stream.scrollTop = stream.scrollHeight;
+  });
+
   try {
-    const submitResult = await sendWsRpc('prompt.submit', {
-      session_id: state.activeSessionId,
-      text: text,
-      model: state.selectedModel || undefined,
-      reasoning_effort: state.reasoningLevel === 'off' ? 'none' : state.reasoningLevel,
+    // `reasoning_effort` is not part of PromptSubmitParams on this gateway
+    // (it answers 4000 / Extra inputs), so reasoning is configured through
+    // config.set instead of being smuggled into the submit payload.
+    const submitResult = await gatewayClient.call<any>('prompt.submit', {
+      session_id: liveId,
+      text: trimmed,
     });
 
-    if (submitResult?.error) {
-      assistantMsg.content = `[网关拒绝 RPC ${submitResult.error.code}] ${submitResult.error.message}`;
+    if (submitResult?.status && submitResult.status !== 'streaming' && submitResult.status !== 'queued') {
+      assistantMsg.content = `[网关未受理本轮] status=${String(submitResult.status)}`;
       state.isStreaming = false;
+      activeStreamingMessageId = null;
+      disarmTurnWatchdog();
       render();
     }
-  } catch (err: any) {
-    console.error('[Hermes Gateway WS] prompt.submit failed:', err);
-    assistantMsg.content = `[WebSocket 提交失败] ${err.message || '网络连接中断'}`;
+  } catch (err) {
+    console.error('[Hermes Gateway] prompt.submit failed:', err);
+    assistantMsg.content = `[提交失败] ${describeRpcError(err)}`;
     state.isStreaming = false;
+    activeStreamingMessageId = null;
+    disarmTurnWatchdog();
     render();
   }
 }
@@ -464,63 +784,122 @@ function formatTimestamp(ts: number | string): string {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-// ============================================================================
-// APP LIFECYCLE & RENDER
-// ============================================================================
+/** Writes the authoritative turn text back into the streamed assistant bubble. */
+function setMessageContent(messageId: string, text: string): void {
+  const target = state.messages.find((m) => m.id === messageId);
+  if (!target) return;
+  target.content = text;
+  const el = document.getElementById(`msg-content-${messageId}`);
+  if (el) el.innerHTML = renderMarkdown(text);
+}
 
-async function initPlatform(): Promise<void> {
-  // Try to load default credentials if available
-  if (desktopApi) {
-    try {
-      const sys = await desktopApi.getSystemInfo();
-      state.platform = sys.platform || 'windows';
-      state.isMaximized = await desktopApi.isMaximized();
+/** Applies the actions produced by the pure gateway-event reducer. */
+function applyTurnActions(actions: TurnAction[]): void {
+  let needsRender = false;
+  let finalReplace: { messageId: string; text: string } | null = null;
 
-      desktopApi.onWindowStateChange((ws: { isMaximized: boolean }) => {
-        state.isMaximized = ws.isMaximized;
-        render();
-      });
-
-      if (!state.token && desktopApi?.getDefaultGatewayConfig) {
-        const def = await desktopApi.getDefaultGatewayConfig();
-        if (def) {
-          if (def.url && !localStorage.getItem('hermes_aura_gateway_url')) state.gatewayUrl = def.url;
-          if (def.key && !localStorage.getItem('hermes_aura_token')) state.token = def.key;
-          if (def.profile && !localStorage.getItem('hermes_aura_profile')) state.profileName = def.profile;
+  for (const action of actions) {
+    switch (action.type) {
+      case 'turn-started':
+        if (!state.isStreaming) {
+          state.isStreaming = true;
+          needsRender = true;
         }
+        armTurnWatchdog();
+        break;
+
+      case 'append-content':
+        tokenCoalescer.push({ messageId: action.messageId, delta: action.text, isThought: false });
+        break;
+
+      case 'append-thought':
+        tokenCoalescer.push({ messageId: action.messageId, delta: action.text, isThought: true });
+        break;
+
+      case 'replace-content':
+        // Deferred: buffered deltas must be flushed first, otherwise they would be
+        // appended on top of the authoritative text.
+        finalReplace = { messageId: action.messageId, text: action.text };
+        break;
+
+      case 'turn-completed':
+        tokenCoalescer.flush();
+        if (finalReplace) setMessageContent(finalReplace.messageId, finalReplace.text);
+        state.isStreaming = false;
+        activeStreamingMessageId = null;
+        disarmTurnWatchdog();
+        needsRender = true;
+        break;
+
+      case 'turn-failed': {
+        tokenCoalescer.flush();
+        const pendingMsg = activeStreamingMessageId
+          ? state.messages.find((m) => m.id === activeStreamingMessageId)
+          : undefined;
+        if (pendingMsg && !pendingMsg.content) {
+          pendingMsg.content = `[回合中断] ${action.message}`;
+        }
+        state.isStreaming = false;
+        activeStreamingMessageId = null;
+        state.dockNotice = action.message;
+        disarmTurnWatchdog();
+        needsRender = true;
+        break;
       }
-    } catch (e) {
-      console.warn('[Desktop PAL] Bridge sync notice:', e);
+
+      case 'refresh-sessions':
+        scheduleSessionsRefresh();
+        break;
+
+      case 'session-title':
+        state.sessions = applySessionTitle(state.sessions, action.sessionId, action.title);
+        needsRender = true;
+        break;
     }
   }
 
-  // Close open dropdowns on global click
-  document.addEventListener('click', () => {
-    const modelDropdown = document.getElementById('dock-model-dropdown');
-    if (modelDropdown && modelDropdown.style.display === 'block') {
-      modelDropdown.style.display = 'none';
-    }
-  });
-
-  // Attempt initial connect
-  connect();
+  if (needsRender) render();
 }
 
-let heartbeatTimer: any = null;
+/** Inspector-side events (artifacts, browser frames, workspace diffs). */
+function handleInspectorEvent(params: unknown): void {
+  if (!params || typeof params !== 'object') return;
+  const frame = params as { type?: unknown; payload?: Record<string, any> };
+  const type = typeof frame.type === 'string' ? frame.type : '';
+  const payload = frame.payload || {};
+  if (!type) return;
 
-function startHeartbeat(): void {
-  stopHeartbeat();
-  heartbeatTimer = setInterval(() => {
-    if (gatewayWsClient && gatewayWsClient.readyState === WebSocket.OPEN) {
-      sendWsRpc('system.ping', { timestamp: Date.now() }, 4000).catch(() => {});
+  if (type === 'artifact.created' || type === 'artifact.updated') {
+    if (!payload.id || !payload.name) return;
+    const existing = state.artifacts.find((a) => a.id === payload.id);
+    if (existing) {
+      Object.assign(existing, payload);
+    } else {
+      state.artifacts.unshift({
+        id: payload.id,
+        name: payload.name,
+        type: payload.type || 'FILE',
+        size: payload.size || '1KB',
+        preview: payload.preview || '',
+      });
     }
-  }, 15000);
-}
+    render();
+    return;
+  }
 
-function stopHeartbeat(): void {
-  if (heartbeatTimer) {
-    clearInterval(heartbeatTimer);
-    heartbeatTimer = null;
+  if ((type === 'browser.frame' || type === 'browser.navigate') && payload.url) {
+    state.browserFrame = {
+      url: payload.url,
+      title: payload.title || 'Page',
+      screenshotUrl: payload.screenshotUrl || payload.screenshot,
+    };
+    render();
+    return;
+  }
+
+  if ((type === 'git.diff' || type === 'workspace.diff') && Array.isArray(payload.diffs)) {
+    state.gitDiffs = payload.diffs;
+    render();
   }
 }
 
@@ -547,6 +926,7 @@ async function connect(): Promise<void> {
       return;
     }
 
+    currentTicket = test.ticket;
     localStorage.setItem('hermes_aura_gateway_url', state.gatewayUrl);
     localStorage.setItem('hermes_aura_gateway_type', state.gatewayType);
     localStorage.setItem('hermes_aura_username', state.username);
@@ -554,13 +934,89 @@ async function connect(): Promise<void> {
     localStorage.setItem('hermes_aura_token', state.token);
     localStorage.setItem('hermes_aura_profile', state.profileName);
 
-    // Initialize real WebSocket connection and wait for readyState OPEN
-    await initLiveWebSocket(test.ticket);
-    state.gatewayConnected = true;
-    state.gatewayConnecting = false;
+    // Build WS URL
+    const baseUrl = getEffectiveUrl(state.gatewayUrl);
+    let wsUrl = baseUrl.replace('http://', 'ws://').replace('https://', 'wss://') + '/api/ws';
+    if (test.ticket) {
+      wsUrl += `?ticket=${encodeURIComponent(test.ticket)}`;
+    } else if (state.gatewayType === 'api' && state.token) {
+      wsUrl += `?token=${encodeURIComponent(state.token)}`;
+    }
 
-    // Concurrently fetch sessions and models
-    await Promise.allSettled([fetchSessions(), fetchModelOptions()]);
+    if (gatewayClient) {
+      gatewayClient.disconnect();
+      gatewayClient = null;
+    }
+
+    gatewayClient = new HermesGatewayClient({
+      url: wsUrl,
+      autoConnect: true,
+      timeoutMs: 25000,
+    });
+
+    // Mount desktop HTTP REST Proxy fallback
+    if (desktopApi?.httpProxy) {
+      gatewayClient.setRestFallbackHandler(async (path, opts) => {
+        return await desktopApi!.httpProxy({
+          baseUrl,
+          path,
+          method: opts?.method,
+          token: state.token,
+          ticket: currentTicket,
+          params: opts?.params,
+          body: opts?.body,
+        });
+      });
+    }
+
+    // Register event listeners for streaming
+    gatewayClient.onNotification('event', (params: unknown) => {
+      const actions = reduceGatewayEvent(params, {
+        activeSessionIds: [state.activeLiveSessionId, state.activeSessionId].filter(
+          (id): id is string => Boolean(id)
+        ),
+        activeStreamingMessageId,
+      });
+      if (actions.length > 0) applyTurnActions(actions);
+
+      handleInspectorEvent(params);
+    });
+
+    // Check ready state
+    const rawWs = gatewayClient.getRawWebSocket();
+    if (rawWs) {
+      if (rawWs.readyState === WebSocket.OPEN) {
+        state.gatewayConnected = true;
+        state.gatewayConnecting = false;
+        render();
+        Promise.allSettled([fetchSessions(), fetchModelOptions()]);
+      } else {
+        rawWs.addEventListener('open', () => {
+          state.gatewayConnected = true;
+          state.gatewayConnecting = false;
+          render();
+          Promise.allSettled([fetchSessions(), fetchModelOptions()]);
+        });
+      }
+
+      rawWs.addEventListener('close', () => {
+        state.gatewayConnected = false;
+        state.gatewayConnecting = false;
+        render();
+      });
+
+      rawWs.addEventListener('error', (err) => {
+        console.warn('[Aura WS] Socket error:', err);
+        state.gatewayConnected = false;
+        state.gatewayConnecting = false;
+        render();
+      });
+    } else {
+      state.gatewayConnected = true;
+      state.gatewayConnecting = false;
+      render();
+      await Promise.allSettled([fetchSessions(), fetchModelOptions()]);
+    }
   } catch (err: any) {
     console.error('[Aura Connect] Connection failed:', err);
     state.gatewayConnected = false;
@@ -575,131 +1031,16 @@ async function connect(): Promise<void> {
   render();
 }
 
-async function initLiveWebSocket(ticket?: string): Promise<void> {
-  const baseUrl = getEffectiveUrl(state.gatewayUrl);
-  try {
-    let wsUrl = baseUrl.replace('http://', 'ws://').replace('https://', 'wss://') + '/api/ws';
-
-    if (ticket) {
-      wsUrl += `?ticket=${encodeURIComponent(ticket)}`;
-    } else if (state.gatewayType === 'api' && state.token) {
-      wsUrl += `?token=${encodeURIComponent(state.token)}`;
-    } else if (state.gatewayType === 'dashboard') {
-      try {
-        const ticketRes = await fetch(`${baseUrl}/api/auth/ws-ticket`, {
-          method: 'POST',
-          headers: { 'Accept': 'application/json' },
-          credentials: 'include',
-        });
-        if (ticketRes.ok) {
-          const ticketData = await ticketRes.json().catch(() => ({}));
-          if (ticketData.ticket) {
-            wsUrl += `?ticket=${encodeURIComponent(ticketData.ticket)}`;
-          }
-        }
-      } catch {}
-    }
-
-    if (gatewayWsClient) {
-      try { gatewayWsClient.close(); } catch {}
-      gatewayWsClient = null;
-    }
-
-    await new Promise<void>((resolve, reject) => {
-      let isSettled = false;
-      const ws = new WebSocket(wsUrl);
-      gatewayWsClient = ws;
-
-      const connectTimeout = setTimeout(() => {
-        if (!isSettled) {
-          isSettled = true;
-          try { ws.close(); } catch {}
-          reject(new Error('WebSocket 连接握手超时 (6s)'));
-        }
-      }, 6000);
-
-      ws.onopen = () => {
-        if (!isSettled) {
-          isSettled = true;
-          clearTimeout(connectTimeout);
-          state.gatewayConnected = true;
-          startHeartbeat();
-          console.log('[Aura WS] Connected successfully to', wsUrl);
-          resolve();
-        }
-      };
-
-      ws.onerror = (err) => {
-        console.error('[Aura WS] Connection error:', err);
-        if (!isSettled) {
-          isSettled = true;
-          clearTimeout(connectTimeout);
-          reject(new Error('WebSocket 连接失败，请检查网络或凭据'));
-        }
-      };
-
-      ws.onclose = (event) => {
-        console.warn('[Aura WS] Connection closed:', event.code, event.reason);
-        state.gatewayConnected = false;
-        stopHeartbeat();
-        render();
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const frame = JSON.parse(event.data);
-
-          // 1. JSON-RPC Response handler
-          if (frame.id && wsRpcPending.has(frame.id)) {
-            const pending = wsRpcPending.get(frame.id)!;
-            wsRpcPending.delete(frame.id);
-            clearTimeout(pending.timer);
-            if (frame.error) {
-              pending.reject(frame.error);
-            } else {
-              pending.resolve(frame.result);
-            }
-            return;
-          }
-
-          // 2. Gateway Server Push Events
-          if (frame.method === 'event' && frame.params) {
-            const type = frame.params.type;
-            const payload = frame.params.payload;
-
-            if (type === 'message.delta' && payload?.text) {
-              const lastMsg = state.messages[state.messages.length - 1];
-              if (lastMsg && lastMsg.role === 'assistant') {
-                lastMsg.content += payload.text;
-                renderMessagesStream();
-              }
-            } else if (type === 'thinking.delta' && payload?.text) {
-              const lastMsg = state.messages[state.messages.length - 1];
-              if (lastMsg && lastMsg.role === 'assistant') {
-                lastMsg.thought = (lastMsg.thought || '') + payload.text;
-                renderMessagesStream();
-              }
-            } else if (type === 'session.idle' || type === 'agent.turn_end') {
-              state.isStreaming = false;
-              fetchSessions();
-              render();
-            }
-          }
-        } catch (err) {
-          console.warn('[Aura WS Frame Error]', err);
-        }
-      };
-    });
-  } catch (err) {
-    console.warn('[Aura WS] Failed to init real WebSocket:', err);
-    throw err;
-  }
-}
-
 function disconnect(): void {
-  if (gatewayWsClient) {
-    try { gatewayWsClient.close(); } catch {}
-    gatewayWsClient = null;
+  if (gatewayClient) {
+    gatewayClient.disconnect();
+    gatewayClient = null;
+  }
+  tokenCoalescer.clear();
+  disarmTurnWatchdog();
+  if (sessionsRefreshTimer) {
+    clearTimeout(sessionsRefreshTimer);
+    sessionsRefreshTimer = null;
   }
   state.gatewayConnected = false;
   state.gatewayConnecting = false;
@@ -707,6 +1048,13 @@ function disconnect(): void {
   state.sessions = [];
   state.messages = [];
   state.activeSessionId = '';
+  state.activeLiveSessionId = '';
+  state.pendingSessionIds = [];
+  state.isStreaming = false;
+  state.modelMenuOpen = false;
+  state.sessionListError = '';
+  state.dockNotice = '';
+  activeStreamingMessageId = null;
   render();
 }
 
@@ -714,7 +1062,20 @@ function render(): void {
   const root = document.getElementById('aura-app-root');
   if (!root) return;
 
-  // Apply root theme attribute
+  // The shell re-renders by replacing innerHTML, so transient UI state (draft text,
+  // caret, focus, scroll position) has to be captured and restored by hand.
+  const existingInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
+  const draftText = existingInput ? existingInput.value : '';
+  const inputHadFocus = Boolean(existingInput) && document.activeElement === existingInput;
+  const caretStart = existingInput?.selectionStart ?? draftText.length;
+  const caretEnd = existingInput?.selectionEnd ?? draftText.length;
+
+  const streamEl = document.getElementById('conversation-stream');
+  const streamScrollTop = streamEl ? streamEl.scrollTop : 0;
+  const streamPinnedToBottom = streamEl
+    ? streamEl.scrollHeight - streamEl.scrollTop - streamEl.clientHeight < 80
+    : true;
+
   document.documentElement.setAttribute('data-theme', state.theme);
 
   const activeSession = state.sessions.find((s) => s.id === state.activeSessionId);
@@ -730,7 +1091,7 @@ function render(): void {
     })}
 
     <!-- Main Body Container -->
-    <div class="aura-body-container" style="flex: 1; display: flex; position: relative; overflow: hidden;">
+    <div class="aura-body-container" style="flex: 1; display: flex; position: relative; overflow: hidden; width: 100%;">
       <!-- Left Rail -->
       ${renderLeftRail({
         collapsed: state.leftRailCollapsed,
@@ -739,6 +1100,7 @@ function render(): void {
         profileName: state.profileName,
         gatewayOnline: state.gatewayConnected,
         gatewayLatencyMs: state.gatewayLatencyMs,
+        error: state.sessionListError,
       })}
 
       <!-- Middle Conversation Pod (Full Bleed Fluid Canvas) -->
@@ -765,6 +1127,8 @@ function render(): void {
               approvalMode: state.approvalMode,
               isStreaming: state.isStreaming,
               disabled: !state.gatewayConnected,
+              modelMenuOpen: state.modelMenuOpen,
+              notice: state.dockNotice,
             })
           : ''
       }
@@ -774,6 +1138,10 @@ function render(): void {
         collapsed: state.inspectorCollapsed,
         activeTab: state.activeInspectorTab,
         gatewayConnected: state.gatewayConnected,
+        artifacts: state.artifacts,
+        browserFrame: state.browserFrame,
+        gitDiffs: state.gitDiffs,
+        memories: state.memories,
       })}
     </div>
 
@@ -802,62 +1170,28 @@ function render(): void {
   `;
 
   root.innerHTML = html;
+
+  // Restore the composer draft, its caret and its focus.
+  const newInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
+  if (newInput) {
+    if (draftText) newInput.value = draftText;
+    if (inputHadFocus) {
+      newInput.focus();
+      const max = newInput.value.length;
+      newInput.setSelectionRange(Math.min(caretStart, max), Math.min(caretEnd, max));
+    }
+  }
+
+  const newStream = document.getElementById('conversation-stream');
+  if (newStream) {
+    newStream.scrollTop = streamPinnedToBottom ? newStream.scrollHeight : streamScrollTop;
+  }
+
   bindEvents();
 }
 
-function renderMessagesStream(): void {
-  const container = document.querySelector('.content-fluid-canvas');
-  if (!container || !state.gatewayConnected) return;
-
-  const html = state.messages.length === 0
-    ? `
-      <div style="max-width: 540px; margin: 80px auto 0; text-align: center; color: var(--text-muted);">
-        <h3 style="font-size: 16px; font-weight: 600; color: var(--text-main); margin-bottom: 8px;">Hermes Aura 工作台已就绪</h3>
-        <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.6;">在下方输入框中下达任务，开启全自主 Agent 执行流。</p>
-      </div>
-    `
-    : state.messages
-        .map((m) => {
-          if (m.role === 'user') {
-            return `
-              <div class="message-row user-row" style="display: flex; justify-content: flex-end; width: 100%;">
-                <div class="user-bubble" style="max-width: 760px; background: var(--bg-card); border: 1px solid var(--border-medium); border-radius: 12px 12px 2px 12px; padding: 12px 16px; color: var(--text-main); font-size: 13.5px; line-height: 1.6;">
-                  ${escapeHtml(m.content)}
-                </div>
-              </div>
-            `;
-          }
-          return `
-            <div class="message-row assistant-row" style="display: flex; flex-direction: column; gap: 10px; width: 100%;">
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="font-size: 11px; font-weight: 700; color: var(--accent); text-transform: uppercase;">HERMES AGENT</span>
-                <span style="font-size: 10px; color: var(--text-muted);">${escapeHtml(m.timestamp)}</span>
-              </div>
-              ${
-                m.thought
-                  ? `
-                <details class="thinking-fold" open style="background: var(--bg-panel); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px; font-size: 12px;">
-                  <summary style="cursor: pointer; color: var(--text-muted); font-weight: 500;">🧠 思维推理链</summary>
-                  <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle); color: var(--text-secondary); font-family: var(--font-mono); font-size: 11.5px; white-space: pre-wrap;">${escapeHtml(m.thought)}</div>
-                </details>
-              `
-                  : ''
-              }
-              <div class="assistant-content prose-block" style="color: var(--text-main); font-size: 13.5px; line-height: 1.65;">
-                <p style="margin: 0; white-space: pre-wrap;">${escapeHtml(m.content)}</p>
-              </div>
-            </div>
-          `;
-        })
-        .join('');
-
-  container.innerHTML = html;
-  const stream = document.getElementById('conversation-stream');
-  if (stream) stream.scrollTop = stream.scrollHeight;
-}
-
 function bindEvents(): void {
-  // 1. Windows Caption Buttons
+  // Caption Buttons
   const minBtn = document.getElementById('win-min-btn');
   const maxBtn = document.getElementById('win-max-btn');
   const closeBtn = document.getElementById('win-close-btn');
@@ -873,7 +1207,7 @@ function bindEvents(): void {
   }
   if (closeBtn) closeBtn.onclick = () => desktopApi?.close();
 
-  // Mac traffic lights
+  // Traffic lights
   const macClose = document.querySelector('.traffic-close') as HTMLElement;
   const macMin = document.querySelector('.traffic-min') as HTMLElement;
   const macMax = document.querySelector('.traffic-max') as HTMLElement;
@@ -888,7 +1222,7 @@ function bindEvents(): void {
     };
   }
 
-  // 2. Sidebar & Inspector Toggles
+  // Toggles
   const toggleLeftRail = document.getElementById('toggle-left-rail-btn');
   if (toggleLeftRail) {
     toggleLeftRail.onclick = () => {
@@ -905,7 +1239,7 @@ function bindEvents(): void {
     };
   }
 
-  // 3. Settings Trigger Buttons
+  // Settings
   const btnOpenSettings = document.getElementById('btn-open-settings');
   if (btnOpenSettings) {
     btnOpenSettings.onclick = () => {
@@ -933,7 +1267,6 @@ function bindEvents(): void {
     };
   }
 
-  // 4. Settings Modal Controls
   const btnCloseSettings = document.getElementById('btn-close-settings');
   if (btnCloseSettings) {
     btnCloseSettings.onclick = () => {
@@ -962,19 +1295,6 @@ function bindEvents(): void {
     };
   });
 
-  // Settings: Lang buttons
-  document.querySelectorAll('.settings-lang-btn').forEach((btn) => {
-    (btn as HTMLElement).onclick = (e) => {
-      const lang = (e.currentTarget as HTMLElement).getAttribute('data-lang') as any;
-      if (lang) {
-        state.lang = lang;
-        localStorage.setItem('hermes_aura_lang', lang);
-        render();
-      }
-    };
-  });
-
-  // Settings: Theme buttons
   document.querySelectorAll('.settings-theme-btn').forEach((btn) => {
     (btn as HTMLElement).onclick = (e) => {
       const theme = (e.currentTarget as HTMLElement).getAttribute('data-theme') as any;
@@ -986,9 +1306,8 @@ function bindEvents(): void {
     };
   });
 
-  // Settings: Channel toggle buttons
-  const channelBtns = document.querySelectorAll('.channel-toggle-btn');
-  channelBtns.forEach((btn) => {
+  // Settings: Channel Toggle Buttons
+  document.querySelectorAll('.channel-toggle-btn').forEach((btn) => {
     (btn as HTMLElement).onclick = () => {
       const type = (btn as HTMLElement).dataset.type as 'dashboard' | 'api';
       if (type) {
@@ -999,232 +1318,196 @@ function bindEvents(): void {
     };
   });
 
-  // Settings: Test connection button
-  const btnSettingsTest = document.getElementById('btn-settings-test-connection');
-  if (btnSettingsTest) {
-    btnSettingsTest.onclick = async () => {
-      const urlInput = document.getElementById('settings-gateway-url') as HTMLInputElement;
-      const userInput = document.getElementById('settings-username') as HTMLInputElement;
-      const passInput = document.getElementById('settings-password') as HTMLInputElement;
-      const keyInput = document.getElementById('settings-api-key') as HTMLInputElement;
+  // Settings: Test & Save Buttons
+  const settingsTestBtn = document.getElementById('btn-settings-test-connection');
+  if (settingsTestBtn) {
+    settingsTestBtn.onclick = async () => {
+      const urlInput = (document.getElementById('settings-gateway-url') as HTMLInputElement)?.value;
+      const userInput = (document.getElementById('settings-username') as HTMLInputElement)?.value;
+      const passInput = (document.getElementById('settings-password') as HTMLInputElement)?.value;
+      const keyInput = (document.getElementById('settings-api-key') as HTMLInputElement)?.value;
+      const profileInput = (document.getElementById('settings-profile-name') as HTMLInputElement)?.value;
+
       if (urlInput) {
-        state.gatewayUrl = urlInput.value;
-        localStorage.setItem('hermes_aura_gateway_url', urlInput.value);
+        state.gatewayUrl = urlInput;
+        localStorage.setItem('hermes_aura_gateway_url', urlInput);
       }
-      if (userInput) {
-        state.username = userInput.value;
-        localStorage.setItem('hermes_aura_username', userInput.value);
+      if (userInput !== undefined) {
+        state.username = userInput;
+        localStorage.setItem('hermes_aura_username', userInput);
       }
-      if (passInput) {
-        state.password = passInput.value;
-        localStorage.setItem('hermes_aura_password', passInput.value);
+      if (passInput !== undefined) {
+        state.password = passInput;
+        localStorage.setItem('hermes_aura_password', passInput);
       }
-      if (keyInput) {
-        state.token = keyInput.value;
-        localStorage.setItem('hermes_aura_token', keyInput.value);
+      if (keyInput !== undefined) {
+        state.token = keyInput;
+        localStorage.setItem('hermes_aura_token', keyInput);
+      }
+      if (profileInput !== undefined) {
+        state.profileName = profileInput || 'default';
+        localStorage.setItem('hermes_aura_profile', state.profileName);
       }
 
-      btnSettingsTest.innerText = '测试中...';
-      const res = await testConnection(
-        state.gatewayUrl,
-        state.gatewayType,
-        state.username,
-        state.password,
-        state.token
-      );
+      settingsTestBtn.innerText = '正在测试...';
+      const res = await testConnection(urlInput, state.gatewayType, userInput, passInput, keyInput);
       state.testStatus = res;
+      settingsTestBtn.innerText = '连通性测试';
       render();
     };
   }
 
-  // Settings: Save & Connect button
-  const btnSettingsSave = document.getElementById('btn-settings-save-connect');
-  if (btnSettingsSave) {
-    btnSettingsSave.onclick = async () => {
-      const urlInput = document.getElementById('settings-gateway-url') as HTMLInputElement;
-      const userInput = document.getElementById('settings-username') as HTMLInputElement;
-      const passInput = document.getElementById('settings-password') as HTMLInputElement;
-      const keyInput = document.getElementById('settings-api-key') as HTMLInputElement;
-      const profileInput = document.getElementById('settings-profile-name') as HTMLInputElement;
-      if (urlInput) {
-        state.gatewayUrl = urlInput.value;
-        localStorage.setItem('hermes_aura_gateway_url', urlInput.value);
-      }
-      if (userInput) {
-        state.username = userInput.value;
-        localStorage.setItem('hermes_aura_username', userInput.value);
-      }
-      if (passInput) {
-        state.password = passInput.value;
-        localStorage.setItem('hermes_aura_password', passInput.value);
-      }
-      if (keyInput) {
-        state.token = keyInput.value;
-        localStorage.setItem('hermes_aura_token', keyInput.value);
-      }
-      if (profileInput) {
-        state.profileName = profileInput.value;
-        localStorage.setItem('hermes_aura_profile', profileInput.value);
-      }
-
-      await connect();
-      if (state.gatewayConnected) {
-        state.isSettingsOpen = false;
-        render();
-      }
+  const settingsSaveBtn = document.getElementById('btn-settings-save-connect');
+  if (settingsSaveBtn) {
+    settingsSaveBtn.onclick = () => {
+      state.gatewayUrl = (document.getElementById('settings-gateway-url') as HTMLInputElement)?.value || state.gatewayUrl;
+      state.username = (document.getElementById('settings-username') as HTMLInputElement)?.value || '';
+      state.password = (document.getElementById('settings-password') as HTMLInputElement)?.value || '';
+      state.token = (document.getElementById('settings-api-key') as HTMLInputElement)?.value || '';
+      state.profileName = (document.getElementById('settings-profile-name') as HTMLInputElement)?.value || 'default';
+      state.isSettingsOpen = false;
+      connect();
     };
   }
 
-  // Settings: Disconnect
-  const btnDisconnect = document.getElementById('btn-disconnect-gateway');
-  if (btnDisconnect) {
-    btnDisconnect.onclick = () => {
+  const disconnectBtn = document.getElementById('btn-disconnect-gateway');
+  if (disconnectBtn) {
+    disconnectBtn.onclick = () => {
       disconnect();
     };
   }
 
-  // 5. Onboarding Channel toggle buttons
-  const onboardingChannelBtns = document.querySelectorAll('.onboarding-channel-btn');
-  onboardingChannelBtns.forEach((btn) => {
-    (btn as HTMLElement).onclick = () => {
-      const type = (btn as HTMLElement).dataset.type as 'dashboard' | 'api';
-      if (type) {
-        state.gatewayType = type;
-        localStorage.setItem('hermes_aura_gateway_type', type);
-        render();
-      }
-    };
-  });
-
-  // 5. Onboarding Controls
-  const btnOnboardingTest = document.getElementById('btn-test-connection');
-  if (btnOnboardingTest) {
-    btnOnboardingTest.onclick = async () => {
-      const urlInput = document.getElementById('onboarding-gateway-url') as HTMLInputElement;
-      const userInput = document.getElementById('onboarding-username') as HTMLInputElement;
-      const passInput = document.getElementById('onboarding-password') as HTMLInputElement;
-      const keyInput = document.getElementById('onboarding-api-key') as HTMLInputElement;
-      if (urlInput) {
-        state.gatewayUrl = urlInput.value;
-        localStorage.setItem('hermes_aura_gateway_url', urlInput.value);
-      }
-      if (userInput) {
-        state.username = userInput.value;
-        localStorage.setItem('hermes_aura_username', userInput.value);
-      }
-      if (passInput) {
-        state.password = passInput.value;
-        localStorage.setItem('hermes_aura_password', passInput.value);
-      }
-      if (keyInput) {
-        state.token = keyInput.value;
-        localStorage.setItem('hermes_aura_token', keyInput.value);
-      }
-
-      btnOnboardingTest.innerText = '测试中...';
-      const res = await testConnection(
-        state.gatewayUrl,
-        state.gatewayType,
-        state.username,
-        state.password,
-        state.token
-      );
-      state.testStatus = res;
-      render();
-    };
-  }
-
-  const btnOnboardingConnect = document.getElementById('btn-save-and-connect');
-  if (btnOnboardingConnect) {
-    btnOnboardingConnect.onclick = async () => {
-      const urlInput = document.getElementById('onboarding-gateway-url') as HTMLInputElement;
-      const userInput = document.getElementById('onboarding-username') as HTMLInputElement;
-      const passInput = document.getElementById('onboarding-password') as HTMLInputElement;
-      const keyInput = document.getElementById('onboarding-api-key') as HTMLInputElement;
-      const profileInput = document.getElementById('onboarding-profile-name') as HTMLInputElement;
-      if (urlInput) {
-        state.gatewayUrl = urlInput.value;
-        localStorage.setItem('hermes_aura_gateway_url', urlInput.value);
-      }
-      if (userInput) {
-        state.username = userInput.value;
-        localStorage.setItem('hermes_aura_username', userInput.value);
-      }
-      if (passInput) {
-        state.password = passInput.value;
-        localStorage.setItem('hermes_aura_password', passInput.value);
-      }
-      if (keyInput) {
-        state.token = keyInput.value;
-        localStorage.setItem('hermes_aura_token', keyInput.value);
-      }
-      if (profileInput) {
-        state.profileName = profileInput.value;
-        localStorage.setItem('hermes_aura_profile', profileInput.value);
-      }
-
-      await connect();
-    };
-  }
-
-  // 6. Left Rail: New Chat
-  const btnNewChat = document.getElementById('new-chat-btn');
-  if (btnNewChat) {
-    btnNewChat.onclick = () => {
-      createNewSession();
-    };
-  }
-
-  // Session selection click
-  document.querySelectorAll('.session-item').forEach((item) => {
-    (item as HTMLElement).onclick = (e) => {
-      const id = (e.currentTarget as HTMLElement).getAttribute('data-id');
-      if (id) selectSession(id);
-    };
-  });
-
   // Session search filter
-  const searchInput = document.getElementById('session-search-input') as HTMLInputElement;
+  const searchInput = document.getElementById('session-search-input') as HTMLInputElement | null;
   if (searchInput) {
-    searchInput.oninput = (e) => {
-      const query = (e.target as HTMLInputElement).value.toLowerCase();
+    searchInput.oninput = () => {
+      const query = searchInput.value.toLowerCase().trim();
       document.querySelectorAll('.session-item').forEach((item) => {
-        const title = item.querySelector('.session-title')?.textContent?.toLowerCase() || '';
+        const title = item.querySelector('span')?.textContent?.toLowerCase() || '';
         (item as HTMLElement).style.display = title.includes(query) ? 'flex' : 'none';
       });
     };
   }
 
-  // 7. Right Inspector: Vertical Tab Switching
-  document.querySelectorAll('.vertical-tab-item').forEach((btn) => {
+  // File attach button
+  const attachBtn = document.getElementById('dock-attach-file-btn');
+  if (attachBtn) {
+    attachBtn.onclick = async () => {
+      if (desktopApi?.openFileDialog) {
+        const paths = await desktopApi.openFileDialog();
+        if (paths && paths.length > 0) {
+          const input = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
+          if (input) {
+            input.value += (input.value ? '\n' : '') + `[附加文件: ${paths.join(', ')}]`;
+          }
+        }
+      }
+    };
+  }
+
+  // Onboarding Buttons
+  const onboardingTestBtn = document.getElementById('btn-test-connection');
+  if (onboardingTestBtn) {
+    onboardingTestBtn.onclick = async () => {
+      const urlInput = (document.getElementById('onboarding-gateway-url') as HTMLInputElement)?.value;
+      const userInput = (document.getElementById('onboarding-username') as HTMLInputElement)?.value;
+      const passInput = (document.getElementById('onboarding-password') as HTMLInputElement)?.value;
+      const keyInput = (document.getElementById('onboarding-api-key') as HTMLInputElement)?.value;
+      const profileInput = (document.getElementById('onboarding-profile-name') as HTMLInputElement)?.value;
+
+      if (urlInput) {
+        state.gatewayUrl = urlInput;
+        localStorage.setItem('hermes_aura_gateway_url', urlInput);
+      }
+      if (userInput !== undefined) {
+        state.username = userInput;
+        localStorage.setItem('hermes_aura_username', userInput);
+      }
+      if (passInput !== undefined) {
+        state.password = passInput;
+        localStorage.setItem('hermes_aura_password', passInput);
+      }
+      if (keyInput !== undefined) {
+        state.token = keyInput;
+        localStorage.setItem('hermes_aura_token', keyInput);
+      }
+      if (profileInput !== undefined) {
+        state.profileName = profileInput || 'default';
+        localStorage.setItem('hermes_aura_profile', state.profileName);
+      }
+
+      onboardingTestBtn.innerText = '正在测试...';
+      const res = await testConnection(urlInput, state.gatewayType, userInput, passInput, keyInput);
+      state.testStatus = res;
+      onboardingTestBtn.innerText = '连通性测试';
+      render();
+    };
+  }
+
+  const onboardingSaveBtn = document.getElementById('btn-save-and-connect');
+  if (onboardingSaveBtn) {
+    onboardingSaveBtn.onclick = async () => {
+      state.gatewayUrl = (document.getElementById('onboarding-gateway-url') as HTMLInputElement)?.value || state.gatewayUrl;
+      state.username = (document.getElementById('onboarding-username') as HTMLInputElement)?.value || '';
+      state.password = (document.getElementById('onboarding-password') as HTMLInputElement)?.value || '';
+      state.token = (document.getElementById('onboarding-api-key') as HTMLInputElement)?.value || '';
+      state.profileName = (document.getElementById('onboarding-profile-name') as HTMLInputElement)?.value || 'default';
+      connect();
+    };
+  }
+
+  // Session items & New Chat
+  const newChatBtn = document.getElementById('new-chat-btn');
+  if (newChatBtn) newChatBtn.onclick = () => createNewSession();
+
+  document.querySelectorAll('.session-item').forEach((item) => {
+    (item as HTMLElement).onclick = (e) => {
+      if ((e.target as HTMLElement).classList.contains('btn-delete-session')) return;
+      const id = (item as HTMLElement).dataset.id;
+      if (id) selectSession(id);
+    };
+  });
+
+  document.querySelectorAll('.btn-delete-session').forEach((btn) => {
     (btn as HTMLElement).onclick = (e) => {
-      const tab = (e.currentTarget as HTMLElement).getAttribute('data-tab') as InspectorTab;
-      if (tab) {
-        state.activeInspectorTab = tab;
+      e.stopPropagation();
+      const id = (btn as HTMLElement).dataset.id;
+      if (id && confirm('确定要删除此会话吗？')) {
+        deleteSession(id);
+      }
+    };
+  });
+
+  // Inspector Tabs
+  document.querySelectorAll('.vertical-tab-item').forEach((tab) => {
+    (tab as HTMLElement).onclick = () => {
+      const key = (tab as HTMLElement).dataset.tab as InspectorTab;
+      if (key) {
+        state.activeInspectorTab = key;
         render();
       }
     };
   });
 
-  // 8. Composer Dock: Controls
+  // Model Selector — visibility is application state, never raw DOM poking: every
+  // click handler ends in render(), which rebuilds the subtree from state.
   const modelBtn = document.getElementById('dock-model-selector-btn');
-  const modelDropdown = document.getElementById('dock-model-dropdown');
   const refreshModelBtn = document.getElementById('btn-refresh-models');
 
   if (refreshModelBtn) {
     refreshModelBtn.onclick = (e) => {
       e.stopPropagation();
-      fetchModelOptions();
+      void fetchModelOptions();
     };
   }
 
-  if (modelBtn && modelDropdown) {
+  if (modelBtn) {
     modelBtn.onclick = (e) => {
       e.stopPropagation();
-      const isVisible = modelDropdown.style.display === 'block';
-      modelDropdown.style.display = isVisible ? 'none' : 'block';
-      if (!isVisible && state.gatewayConnected) {
-        fetchModelOptions();
+      state.modelMenuOpen = !state.modelMenuOpen;
+      render();
+      if (state.modelMenuOpen && state.availableModels.length === 0) {
+        void fetchModelOptions();
       }
     };
   }
@@ -1233,82 +1516,78 @@ function bindEvents(): void {
     (opt as HTMLElement).onclick = (e) => {
       e.stopPropagation();
       const model = (e.currentTarget as HTMLElement).getAttribute('data-model');
-      if (model) {
-        state.selectedModel = model;
-        render();
-      }
+      if (model) void switchModel(model);
     };
   });
 
-  document.querySelectorAll('.seg-btn').forEach((btn) => {
-    (btn as HTMLElement).onclick = (e) => {
-      const lvl = (e.currentTarget as HTMLElement).getAttribute('data-level') as any;
-      if (lvl) {
-        state.reasoningLevel = lvl;
-        render();
-      }
-    };
-  });
-
-  document.querySelectorAll('.approval-btn').forEach((btn) => {
-    (btn as HTMLElement).onclick = (e) => {
-      const mode = (e.currentTarget as HTMLElement).getAttribute('data-mode') as any;
-      if (mode) {
-        state.approvalMode = mode;
-        render();
-      }
-    };
-  });
-
-  // Attach file button
-  const attachBtn = document.getElementById('dock-attach-file-btn');
-  if (attachBtn) {
-    attachBtn.onclick = async () => {
-      if (desktopApi?.openFileDialog) {
-        const paths = await desktopApi.openFileDialog();
-        if (paths && paths.length > 0) {
-          const input = document.getElementById('dock-prompt-input') as HTMLTextAreaElement;
-          if (input) {
-            input.value += `\n[附加文件: ${paths.join(', ')}]`;
-          }
-        }
-      }
+  // Reasoning Cycle Toggle (关 -> 低 -> 中 -> 高)
+  const reasoningBtn = document.getElementById('dock-reasoning-toggle-btn');
+  if (reasoningBtn) {
+    reasoningBtn.onclick = () => {
+      const cycle: Record<AppState['reasoningLevel'], AppState['reasoningLevel']> = {
+        off: 'low',
+        low: 'medium',
+        medium: 'high',
+        high: 'off',
+      };
+      const nextLevel = cycle[state.reasoningLevel] || 'high';
+      switchReasoning(nextLevel);
     };
   }
 
-  // Send message
+  // Approval Mode Cycle Toggle (自动 -> 询问 -> 沙箱)
+  const approvalBtn = document.getElementById('dock-approval-toggle-btn');
+  if (approvalBtn) {
+    approvalBtn.onclick = () => {
+      const cycle: Record<AppState['approvalMode'], AppState['approvalMode']> = {
+        auto: 'ask',
+        ask: 'sandbox',
+        sandbox: 'auto',
+      };
+      const nextMode = cycle[state.approvalMode] || 'auto';
+      switchApproval(nextMode);
+    };
+  }
+
+  // Send message & IME Composition defense
   const sendBtn = document.getElementById('dock-send-btn');
   const inputEl = document.getElementById('dock-prompt-input') as HTMLTextAreaElement;
+  let isComposing = false;
 
-  const handleSend = () => {
+  const handleSend = (source: 'button' | 'enter') => {
     if (!inputEl) return;
     const text = inputEl.value.trim();
+
+    if (state.isStreaming) {
+      // Clicking the stop button interrupts; pressing Enter must not.
+      if (source === 'button') {
+        void interruptTurn();
+      } else {
+        state.dockNotice = '当前回合仍在生成中，可点击右侧停止按钮中断';
+        render();
+      }
+      return;
+    }
+
     if (!text) return;
     inputEl.value = '';
-    sendMessage(text);
+    void sendMessage(text);
   };
 
-  if (sendBtn) sendBtn.onclick = handleSend;
+  if (sendBtn) sendBtn.onclick = () => handleSend('button');
   if (inputEl) {
+    inputEl.addEventListener('compositionstart', () => { isComposing = true; });
+    inputEl.addEventListener('compositionend', () => { isComposing = false; });
     inputEl.onkeydown = (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
         e.preventDefault();
-        handleSend();
+        handleSend('enter');
       }
     };
   }
 }
 
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
-// Global keyboard shortcuts (Ctrl+B / Cmd+B for rail, Cmd+\ / Ctrl+\ for inspector, Escape for modal)
+// Global keyboard shortcuts
 window.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
     e.preventDefault();
@@ -1323,8 +1602,49 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && state.isSettingsOpen) {
     state.isSettingsOpen = false;
     render();
+  } else if (e.key === 'Escape' && state.modelMenuOpen) {
+    state.modelMenuOpen = false;
+    render();
   }
 });
 
-// Kick off
-initPlatform().then(() => render());
+// Close the model menu when the pointer goes down outside of it. mousedown is used
+// on purpose: it fires before the button's click handler, so the two never race.
+document.addEventListener('mousedown', (e) => {
+  if (!state.modelMenuOpen) return;
+  const wrapper = document.querySelector('.pill-dropdown-wrapper');
+  if (wrapper && !wrapper.contains(e.target as Node)) {
+    state.modelMenuOpen = false;
+    render();
+  }
+});
+
+async function init(): Promise<void> {
+  if (desktopApi) {
+    try {
+      const sys = await desktopApi.getSystemInfo();
+      state.platform = sys.platform || 'windows';
+      state.isMaximized = await desktopApi.isMaximized();
+
+      desktopApi.onWindowStateChange((ws) => {
+        state.isMaximized = ws.isMaximized;
+        render();
+      });
+
+      if (!state.token && desktopApi?.getDefaultGatewayConfig) {
+        const def = await desktopApi.getDefaultGatewayConfig();
+        if (def) {
+          if (def.url && !localStorage.getItem('hermes_aura_gateway_url')) state.gatewayUrl = def.url;
+          if (def.key && !localStorage.getItem('hermes_aura_token')) state.token = def.key;
+          if (def.profile && !localStorage.getItem('hermes_aura_profile')) state.profileName = def.profile;
+        }
+      }
+    } catch (e) {
+      console.warn('[Desktop PAL] Sync note:', e);
+    }
+  }
+
+  connect();
+}
+
+init();

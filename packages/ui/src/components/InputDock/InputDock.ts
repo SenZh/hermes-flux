@@ -1,12 +1,12 @@
 /**
- * Hermes Aura Floating Input Dock (v3.5)
+ * Hermes Aura Floating Input Dock (v4.5 Refined)
  * Strict Golden Width Constraint:
  * - max-width: 740px; margin: 0 auto;
  * Embedded micro-control strip:
- * - Real model picker
- * - Reasoning depth segmented control
- * - Tool approval mode control
- * - Attachment & Send action button
+ * - Real model selector with smooth dropdown
+ * - Reasoning depth: compact pill toggle (循环切换: 关/低/中/高)
+ * - Approval mode: compact pill toggle (循环切换: 自动/询问/沙箱)
+ * - Attachment & high-gloss Send action button with active feedback
  */
 
 export interface InputDockProps {
@@ -16,36 +16,62 @@ export interface InputDockProps {
   approvalMode: 'auto' | 'ask' | 'sandbox';
   isStreaming: boolean;
   disabled?: boolean;
+  /**
+   * Whether the model menu is expanded. It is owned by the application state, not
+   * by the DOM: the shell re-renders the whole tree on every state change, so a
+   * purely DOM-toggled menu would be destroyed (and appear to snap shut) as soon as
+   * anything re-rendered.
+   */
+  modelMenuOpen?: boolean;
+  /** Inline failure/notice line rendered inside the dock (失败不静默). */
+  notice?: string;
 }
 
 export function renderInputDock(props: InputDockProps): string {
+  const isStreaming = Boolean(props.isStreaming);
+  const modelMenuOpen = Boolean(props.modelMenuOpen);
+  const notice = (props.notice || '').trim();
+
+  const reasoningLabels: Record<string, string> = {
+    off: '关',
+    low: '低',
+    medium: '中',
+    high: '高',
+  };
+
+  const approvalLabels: Record<string, string> = {
+    auto: '自动',
+    ask: '询问',
+    sandbox: '沙箱',
+  };
+
   return `
     <div class="input-dock-container" style="
       position: absolute;
-      bottom: 18px;
+      bottom: 20px;
       left: 0;
       right: 0;
       display: flex;
       justify-content: center;
-      padding: 0 20px;
+      padding: 0 24px;
       pointer-events: none;
       z-index: 40;
     ">
       <div class="input-card-box composer-dock" style="
         pointer-events: auto;
-        width: calc(100% - 40px);
-        max-width: 740px;
+        width: 100%;
+        max-width: 740px; /* 黄金限宽 740px 约束 */
         margin: 0 auto;
         background: var(--bg-backdrop);
         backdrop-filter: blur(28px);
         -webkit-backdrop-filter: blur(28px);
         border: 1px solid var(--border-medium);
-        box-shadow: var(--shadow-dock);
+        box-shadow: var(--shadow-dock), var(--specular-line);
         border-radius: 14px;
-        padding: 10px 14px;
+        padding: 12px 16px 10px;
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 10px;
         transition: border-color 0.15s ease, box-shadow 0.15s ease;
       ">
         <!-- Textarea Field -->
@@ -60,26 +86,45 @@ export function renderInputDock(props: InputDockProps): string {
           resize: none;
           outline: none;
           box-sizing: border-box;
+          max-height: 180px;
         "></textarea>
 
-        <!-- Embedded Micro-Control Strip (Height: 26px) -->
+        ${
+          notice
+            ? `<div id="dock-notice" role="status" style="
+          display: flex;
+          align-items: flex-start;
+          gap: 6px;
+          font-size: 11px;
+          line-height: 1.45;
+          color: #F87171;
+          background: rgba(239, 68, 68, 0.08);
+          border: 1px solid rgba(239, 68, 68, 0.28);
+          border-radius: 6px;
+          padding: 6px 8px;
+          word-break: break-word;
+        "><span>⚠</span><span>${escapeHtml(notice)}</span></div>`
+            : ''
+        }
+
+        <!-- Embedded Micro-Control Strip (Height: 28px) -->
         <div class="input-control-strip" style="
           display: flex;
           align-items: center;
           justify-content: space-between;
-          height: 26px;
-          padding-top: 4px;
+          height: 28px;
+          padding-top: 6px;
           border-top: 1px solid var(--border-subtle);
         ">
           <!-- Left Control Pills -->
           <div style="display: flex; align-items: center; gap: 8px;">
             <!-- 1. Model Selector Pill -->
             <div class="pill-dropdown-wrapper" style="position: relative;">
-              <button id="dock-model-selector-btn" class="micro-pill" title="切换推理模型" style="
+              <button id="dock-model-selector-btn" class="micro-pill" title="点击切换模型" style="
                 height: 24px;
-                padding: 0 8px;
+                padding: 0 9px;
                 border-radius: 6px;
-                background: var(--bg-elevated);
+                background: var(--bg-card);
                 border: 1px solid var(--border-subtle);
                 color: var(--text-main);
                 font-size: 11px;
@@ -88,25 +133,26 @@ export function renderInputDock(props: InputDockProps): string {
                 align-items: center;
                 gap: 5px;
                 cursor: pointer;
+                transition: background 0.15s ease, border-color 0.15s ease;
               ">
                 <span style="color: var(--accent);">⚡</span>
-                <span id="current-model-label">${escapeHtml(props.selectedModel || 'Default Model')}</span>
+                <span id="current-model-label">${escapeHtml(props.selectedModel || '选择模型')}</span>
                 <span style="font-size: 8px; color: var(--text-muted);">▾</span>
               </button>
 
               <div id="dock-model-dropdown" class="model-dropdown-menu" style="
-                display: none;
+                display: ${modelMenuOpen ? 'block' : 'none'};
                 position: absolute;
-                bottom: 30px;
+                bottom: 34px;
                 left: 0;
                 background: var(--bg-card);
                 border: 1px solid var(--border-strong);
-                border-radius: 8px;
+                border-radius: 10px;
                 box-shadow: var(--shadow-window);
                 padding: 6px;
                 max-height: 280px;
                 overflow-y: auto;
-                min-width: 200px;
+                min-width: 220px;
                 z-index: 200;
               ">
                 <div style="font-size: 10.5px; font-weight: 600; color: var(--text-muted); padding: 4px 8px 6px; border-bottom: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center;">
@@ -118,137 +164,110 @@ export function renderInputDock(props: InputDockProps): string {
                     ? props.models
                         .map(
                           (m) => `
-                      <div class="model-option ${m === props.selectedModel ? 'selected' : ''}" data-model="${escapeHtml(m)}" style="
-                        padding: 6px 10px;
-                        font-size: 11.5px;
-                        border-radius: 5px;
-                        color: ${m === props.selectedModel ? 'var(--accent)' : 'var(--text-main)'};
-                        background: ${m === props.selectedModel ? 'var(--bg-card-hover)' : 'transparent'};
-                        cursor: pointer;
-                        display: flex;
-                        align-items: center;
-                        justify-content: space-between;
-                      ">
-                        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(m)}</span>
-                        ${m === props.selectedModel ? '<span style="font-size: 11px;">✓</span>' : ''}
-                      </div>
-                    `
+                  <div class="model-option ${m === props.selectedModel ? 'active' : ''}" data-model="${escapeHtml(m)}" style="
+                    padding: 6px 8px;
+                    border-radius: 6px;
+                    font-size: 11.5px;
+                    font-family: var(--font-mono);
+                    color: ${m === props.selectedModel ? 'var(--accent)' : 'var(--text-main)'};
+                    background: ${m === props.selectedModel ? 'var(--accent-subtle)' : 'transparent'};
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                  ">
+                    <span>${escapeHtml(m)}</span>
+                    ${m === props.selectedModel ? '<span style="font-size: 10px;">✓</span>' : ''}
+                  </div>
+                `
                         )
                         .join('')
-                    : `
-                    <div style="padding: 12px 8px; font-size: 11px; color: var(--text-muted); text-align: center;">
-                      <div>暂无模型或网关未返回</div>
-                      <div style="margin-top: 4px; font-size: 10px; color: var(--text-faint);">连接网关后自动同步</div>
-                    </div>
-                  `
+                    : '<div style="padding: 10px; text-align: center; color: var(--text-muted); font-size: 11px;">无可用模型</div>'
                 }
               </div>
             </div>
 
-            <!-- 2. Reasoning Level Segmented Pill -->
-            <div class="micro-segmented-pill" style="
+            <!-- 2. Reasoning Depth Cycle Pill (点击循环切换: 关 -> 低 -> 中 -> 高) -->
+            <button id="dock-reasoning-toggle-btn" class="micro-pill" title="思考深度 (点击循环切换: 关/低/中/高)" style="
               height: 24px;
-              padding: 1px 2px;
+              padding: 0 8px;
               border-radius: 6px;
               background: var(--bg-card);
               border: 1px solid var(--border-subtle);
+              color: var(--text-main);
+              font-size: 11px;
+              font-weight: 600;
               display: flex;
               align-items: center;
-              gap: 1px;
+              gap: 5px;
+              cursor: pointer;
+              transition: background 0.15s ease, border-color 0.15s ease;
             ">
-              <span style="font-size: 10px; color: var(--text-muted); padding: 0 4px; font-weight: 500;">🧠 思考</span>
-              ${['off', 'low', 'medium', 'high']
-                .map((lvl) => {
-                  const isActive = props.reasoningLevel === lvl;
-                  const labels: Record<string, string> = { off: '关', low: '低', medium: '中', high: '高' };
-                  return `
-                  <button class="seg-btn ${isActive ? 'active' : ''}" data-level="${lvl}" style="
-                    height: 20px;
-                    padding: 0 6px;
-                    border: none;
-                    border-radius: 4px;
-                    background: ${isActive ? 'var(--accent)' : 'transparent'};
-                    color: ${isActive ? '#000000' : 'var(--text-secondary)'};
-                    font-size: 10.5px;
-                    font-weight: ${isActive ? '700' : '500'};
-                    cursor: pointer;
-                  ">${labels[lvl]}</button>
-                `;
-                })
-                .join('')}
-            </div>
+              <span style="font-size: 11px;">🧠</span>
+              <span style="color: var(--text-muted);">思考:</span>
+              <span id="current-reasoning-label" style="color: var(--accent);">${reasoningLabels[props.reasoningLevel] || '高'}</span>
+            </button>
 
-            <!-- 3. Approval Mode Segmented Pill -->
-            <div class="micro-segmented-pill" style="
+            <!-- 3. Approval Mode Cycle Pill (点击循环切换: 自动 -> 询问 -> 沙箱) -->
+            <button id="dock-approval-toggle-btn" class="micro-pill" title="审批策略 (点击循环切换: 自动/询问/沙箱)" style="
               height: 24px;
-              padding: 1px 2px;
+              padding: 0 8px;
               border-radius: 6px;
               background: var(--bg-card);
               border: 1px solid var(--border-subtle);
+              color: var(--text-main);
+              font-size: 11px;
+              font-weight: 600;
               display: flex;
               align-items: center;
-              gap: 1px;
+              gap: 5px;
+              cursor: pointer;
+              transition: background 0.15s ease, border-color 0.15s ease;
             ">
-              <span style="font-size: 10px; color: var(--text-muted); padding: 0 4px; font-weight: 500;">🛡️ 审批</span>
-              ${['auto', 'ask', 'sandbox']
-                .map((mode) => {
-                  const isActive = props.approvalMode === mode;
-                  const labels: Record<string, string> = { auto: '自动', ask: '询问', sandbox: '沙箱' };
-                  return `
-                  <button class="approval-btn ${isActive ? 'active' : ''}" data-mode="${mode}" style="
-                    height: 20px;
-                    padding: 0 6px;
-                    border: none;
-                    border-radius: 4px;
-                    background: ${isActive ? 'var(--accent-subtle)' : 'transparent'};
-                    color: ${isActive ? 'var(--accent)' : 'var(--text-secondary)'};
-                    border: ${isActive ? '1px solid var(--accent-border)' : '1px solid transparent'};
-                    font-size: 10.5px;
-                    font-weight: ${isActive ? '700' : '500'};
-                    cursor: pointer;
-                  ">${labels[mode]}</button>
-                `;
-                })
-                .join('')}
-            </div>
+              <span style="font-size: 11px;">🛡️</span>
+              <span style="color: var(--text-muted);">审批:</span>
+              <span id="current-approval-label" style="color: var(--accent);">${approvalLabels[props.approvalMode] || '自动'}</span>
+            </button>
           </div>
 
-          <!-- Right Send High-Light Button -->
+          <!-- Right Action Buttons -->
           <div style="display: flex; align-items: center; gap: 8px;">
-            <button id="dock-attach-file-btn" title="上传附件或图片 (Cmd+U)" style="
-              width: 24px;
-              height: 24px;
-              border-radius: 6px;
-              border: 1px solid var(--border-subtle);
+            <!-- File Attach -->
+            <button id="dock-attach-file-btn" class="icon-btn" title="附加文件" style="
               background: transparent;
+              border: none;
               color: var(--text-muted);
+              cursor: pointer;
               display: flex;
               align-items: center;
               justify-content: center;
-              cursor: pointer;
+              padding: 4px;
+              border-radius: 4px;
+              transition: color 0.15s ease;
             ">
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
-                <path d="M14 8.5l-6 6a4 4 0 01-5.6-5.6l6-6a2.8 2.8 0 014 4l-6 6a1.4 1.4 0 01-2-2l5-5"/>
-              </svg>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
             </button>
 
-            <button id="dock-send-btn" class="send-action-btn" style="
+            <!-- Send Action Button -->
+            <button id="dock-send-btn" class="send-action-btn" title="${isStreaming ? '中断本轮生成' : '发送 (Enter)'}" ${props.disabled ? 'disabled' : ''} style="
               height: 24px;
-              padding: 0 12px;
+              width: 28px;
               border-radius: 6px;
-              background: var(--accent);
+              background: ${isStreaming ? '#EF4444' : 'var(--accent)'};
               border: none;
-              color: var(--theme-thumb-color, #090A0F);
-              font-size: 11px;
-              font-weight: 700;
+              color: ${isStreaming ? '#FFFFFF' : 'var(--theme-thumb-color, #090A0F)'};
               display: flex;
               align-items: center;
-              gap: 4px;
-              cursor: pointer;
-              box-shadow: 0 1px 4px var(--accent-glow);
+              justify-content: center;
+              cursor: ${props.disabled ? 'not-allowed' : 'pointer'};
+              box-shadow: 0 0 8px ${isStreaming ? 'rgba(239, 68, 68, 0.3)' : 'var(--accent-glow)'};
               transition: transform 0.1s ease, filter 0.1s ease;
             ">
-              <span>${props.isStreaming ? '■ 停止' : '发送 ⇡'}</span>
+              ${
+                isStreaming
+                  ? `<svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><rect width="10" height="10" rx="2"/></svg>`
+                  : `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>`
+              }
             </button>
           </div>
         </div>

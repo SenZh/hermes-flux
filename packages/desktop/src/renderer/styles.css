@@ -1,6 +1,6 @@
 /* ==========================================================================
-   HERMES AURA DESKTOP — CORE STYLES & DESIGN TOKENS
-   Strict adherence to desktop-design-system-spec.md (v3.0)
+   HERMES AURA DESKTOP — CORE STYLES & DESIGN TOKENS (v4.0 Production)
+   Strict adherence to desktop-design-system-spec.md (v3.1)
    ========================================================================== */
 
 :root {
@@ -38,6 +38,7 @@
   --accent-subtle: rgba(245, 158, 11, 0.09);
   --accent-border: rgba(245, 158, 11, 0.35);
   --accent-text: #FEF3C7;
+  --theme-thumb-color: #090A0F;
 
   --text-main: #F8FAFC;
   --text-secondary: #94A3B8;
@@ -78,6 +79,7 @@
   --accent-subtle: rgba(13, 122, 94, 0.08);
   --accent-border: rgba(13, 122, 94, 0.32);
   --accent-text: #08523F;
+  --theme-thumb-color: #FFFFFF;
 
   --text-main: #0F172A;
   --text-secondary: #475569;
@@ -95,7 +97,6 @@
 
   --jade-pulse: #059669;
   --jade-glow: rgba(5, 150, 105, 0.40);
-  --theme-thumb-color: #FFFFFF;
 }
 
 * {
@@ -187,6 +188,10 @@ button:active {
   background: var(--bg-card-hover) !important;
 }
 
+.session-item:hover .btn-delete-session {
+  opacity: 1 !important;
+}
+
 .seg-btn:hover {
   opacity: 0.9;
 }
@@ -194,4 +199,31 @@ button:active {
 .send-action-btn:hover {
   filter: brightness(1.1);
   box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.composer-dock:focus-within {
+  border-color: var(--accent-border) !important;
+  box-shadow: var(--shadow-dock), 0 0 0 1px var(--accent-border) !important;
+}
+
+.vertical-tab-item {
+  transition: all 0.15s ease;
+}
+
+.vertical-tab-item:hover {
+  background: var(--bg-card-hover) !important;
+}
+
+.vertical-tab-item:active {
+  transform: scale(0.96);
+}
+
+.icon-btn:hover {
+  background: var(--bg-card-hover) !important;
+  color: var(--text-main) !important;
+}
+
+.btn-new-chat:hover {
+  background: var(--bg-card-hover) !important;
+  border-color: var(--accent-border) !important;
 }

@@ -41,6 +41,15 @@ export interface HermesDesktopBridge {
     password?: string;
     token?: string;
   }) => Promise<GatewayAuthResult>;
+  httpProxy: (options: {
+    baseUrl: string;
+    path: string;
+    method?: string;
+    token?: string;
+    ticket?: string;
+    body?: any;
+    params?: any;
+  }) => Promise<any>;
   openExternal: (url: string) => Promise<void>;
   openFileDialog: () => Promise<string[] | null>;
 }
@@ -63,6 +72,7 @@ const bridge: HermesDesktopBridge = {
   getDefaultGatewayConfig: () => ipcRenderer.invoke('gateway:get-default-config'),
   restartGateway: () => ipcRenderer.invoke('gateway:restart'),
   authenticateGateway: (options) => ipcRenderer.invoke('gateway:authenticate', options),
+  httpProxy: (options) => ipcRenderer.invoke('gateway:http-proxy', options),
   openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url),
   openFileDialog: () => ipcRenderer.invoke('dialog:open-file'),
 };

@@ -1,11 +1,12 @@
 /**
- * Hermes Aura Middle Conversation Pod (v3.5)
+ * Hermes Aura Middle Conversation Pod (v4.0 Production)
  * Full-Bleed Fluid Canvas:
  * - Canvas spans 100% width edge-to-edge between left and right rails.
- * - Golden-width composer dock floating at bottom.
+ * - Golden-width composer dock floating at bottom (740px).
  * - Shows Onboarding Connect Hero when disconnected.
  * - Shows Ready Welcome Screen when session is empty.
- * - Real streaming and message history rendering without mock data.
+ * - Incremental DOM update hooks (msg-content-ID, msg-thought-ID).
+ * - Meticulous typography, smooth Markdown rendering & thought details.
  */
 
 export interface MessageViewModel {
@@ -48,6 +49,7 @@ export function renderMiddlePod(props: MiddlePodProps): string {
       flex-direction: column;
       background: var(--bg-window);
       overflow: hidden;
+      width: 100%;
     ">
       <!-- Conversation Scroll Stream (100% Full-bleed width) -->
       <div id="conversation-stream" class="messages-stream-area" style="
@@ -57,11 +59,11 @@ export function renderMiddlePod(props: MiddlePodProps): string {
         overflow-x: hidden;
         display: flex;
         flex-direction: column;
-        padding: 24px 32px 160px;
+        padding: 24px 32px 180px;
         scroll-behavior: smooth;
         box-sizing: border-box;
       ">
-        <div class="content-fluid-canvas" style="width: 100%; display: flex; flex-direction: column; gap: 20px;">
+        <div class="content-fluid-canvas" style="width: 100%; max-width: 100%; margin: 0; display: flex; flex-direction: column; gap: 24px;">
           ${
             !props.gatewayConnected
               ? renderGatewayOnboarding(props)
@@ -90,7 +92,7 @@ export function renderMiddlePod(props: MiddlePodProps): string {
 function renderGatewayOnboarding(props: MiddlePodProps): string {
   return `
     <div class="gateway-onboarding-card" style="
-      max-width: 580px;
+      max-width: 600px;
       margin: 40px auto 0;
       background: var(--bg-card);
       border: 1px solid var(--border-medium);
@@ -114,14 +116,15 @@ function renderGatewayOnboarding(props: MiddlePodProps): string {
           align-items: center;
           justify-content: center;
           margin-bottom: 4px;
+          box-shadow: 0 0 20px var(--accent-glow);
         ">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
           </svg>
         </div>
-        <h2 style="font-size: 18px; font-weight: 700; color: var(--text-main); margin: 0;">连接至 Hermes Gateway</h2>
-        <p style="font-size: 12.5px; color: var(--text-secondary); margin: 0; line-height: 1.5; max-width: 440px;">
-          配置本地守护进程或远程服务器的 Hermes 网关地址与鉴权凭证，开启真实的自主 Agent 会话与工业级能力。
+        <h2 style="font-size: 19px; font-weight: 700; color: var(--text-main); margin: 0; letter-spacing: -0.01em;">连接至 Hermes Gateway</h2>
+        <p style="font-size: 12.5px; color: var(--text-secondary); margin: 0; line-height: 1.55; max-width: 440px;">
+          接入本地守护进程或远程云端的 Hermes 网关，开启真实的自主 Agent 会话、流式推理与工业级工具流。
         </p>
       </div>
 
@@ -131,11 +134,11 @@ function renderGatewayOnboarding(props: MiddlePodProps): string {
         <div style="display: flex; flex-direction: column; gap: 6px;">
           <div style="display: flex; justify-content: space-between; align-items: baseline;">
             <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">网关连接地址 (Gateway URL)</label>
-            <span style="font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono);">推荐 9119 或反代域名</span>
+            <span style="font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono);">支持 9119 / 8642 / 反代域名</span>
           </div>
-          <input type="text" id="onboarding-gateway-url" value="${escapeHtml(props.gatewayUrl || 'https://fn-ai.codepower.cloud:1519')}" placeholder="http://127.0.0.1:9119 或 https://..." style="
+          <input type="text" id="onboarding-gateway-url" value="${escapeHtml(props.gatewayUrl || 'http://127.0.0.1:9119')}" placeholder="http://127.0.0.1:9119 或 https://..." style="
             width: 100%;
-            height: 36px;
+            height: 38px;
             background: var(--bg-panel);
             border: 1px solid var(--border-medium);
             border-radius: 8px;
@@ -145,6 +148,7 @@ function renderGatewayOnboarding(props: MiddlePodProps): string {
             color: var(--text-main);
             outline: none;
             box-sizing: border-box;
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
           "/>
         </div>
 
@@ -166,7 +170,7 @@ function renderGatewayOnboarding(props: MiddlePodProps): string {
               justify-content: center;
               gap: 6px;
             ">
-              <span>⚡ Dashboard 族 (9119 / WS 全功能)</span>
+              <span>⚡ Dashboard 族 (9119 / WS 全双工)</span>
             </button>
             <button type="button" class="onboarding-channel-btn ${props.gatewayType === 'api' ? 'active' : ''}" data-type="api" style="
               height: 38px;
@@ -192,7 +196,7 @@ function renderGatewayOnboarding(props: MiddlePodProps): string {
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
             <div style="display: flex; flex-direction: column; gap: 6px;">
               <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">用户名 (Username)</label>
-              <input type="text" id="onboarding-username" value="${escapeHtml(props.username || '')}" placeholder="admin (公网/认证必填)" style="
+              <input type="text" id="onboarding-username" value="${escapeHtml(props.username || '')}" placeholder="admin" style="
                 width: 100%;
                 height: 36px;
                 background: var(--bg-panel);
@@ -208,7 +212,7 @@ function renderGatewayOnboarding(props: MiddlePodProps): string {
             </div>
             <div style="display: flex; flex-direction: column; gap: 6px;">
               <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">登录密码 (Password)</label>
-              <input type="password" id="onboarding-password" value="${escapeHtml(props.password || '')}" placeholder="输入登录密码..." style="
+              <input type="password" id="onboarding-password" value="${escapeHtml(props.password || '')}" placeholder="输入密码..." style="
                 width: 100%;
                 height: 36px;
                 background: var(--bg-panel);
@@ -290,7 +294,6 @@ function renderGatewayOnboarding(props: MiddlePodProps): string {
           font-size: 12.5px;
           font-weight: 500;
           cursor: pointer;
-          transition: background 0.15s ease;
         ">连通性测试</button>
 
         <button id="btn-save-and-connect" style="
@@ -304,7 +307,6 @@ function renderGatewayOnboarding(props: MiddlePodProps): string {
           font-weight: 700;
           cursor: pointer;
           box-shadow: 0 1px 8px var(--accent-glow);
-          transition: transform 0.1s ease, filter 0.1s ease;
         ">${props.gatewayConnecting ? '正在连接...' : '保存并连接 ↗'}</button>
       </div>
     </div>
@@ -314,52 +316,54 @@ function renderGatewayOnboarding(props: MiddlePodProps): string {
 function renderWelcomeEmptyState(): string {
   return `
     <div style="
-      max-width: 540px;
+      max-width: 560px;
       margin: 80px auto 0;
       text-align: center;
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 14px;
+      gap: 16px;
       color: var(--text-muted);
     ">
       <div style="
-        width: 54px;
-        height: 54px;
-        border-radius: 14px;
+        width: 58px;
+        height: 58px;
+        border-radius: 16px;
         background: var(--bg-card);
-        border: 1px solid var(--border-subtle);
+        border: 1px solid var(--border-medium);
         color: var(--accent);
         display: flex;
         align-items: center;
         justify-content: center;
+        box-shadow: var(--shadow-card);
       ">
-        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
       </div>
-      <h3 style="font-size: 16px; font-weight: 600; color: var(--text-main); margin: 0;">Hermes Aura 工作台已就绪</h3>
-      <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin: 0;">
-        已成功接入网关。在下方输入框中下达任务或按 Enter 发送，Hermes 将调用全栈工具集自主执行、流式推理并实时汇报。
+      <h3 style="font-size: 17px; font-weight: 700; color: var(--text-main); margin: 0; letter-spacing: -0.01em;">Hermes Aura 工作台已就绪</h3>
+      <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin: 0; max-width: 480px;">
+        在下方 740px 黄金限宽输入舱下达任务，按 Enter 发送。Hermes 将自主规划多步骤推理、调用工具链并流式呈现。
       </p>
     </div>
   `;
 }
 
-function renderMessage(m: MessageViewModel): string {
+export function renderMessage(m: MessageViewModel): string {
   const isUser = m.role === 'user';
 
   if (isUser) {
     return `
       <div class="message-row user-row" style="display: flex; justify-content: flex-end; width: 100%;">
         <div class="user-bubble" style="
-          max-width: 760px;
+          max-width: min(80%, 780px);
           background: var(--bg-card);
           border: 1px solid var(--border-medium);
-          border-radius: 12px 12px 2px 12px;
-          padding: 12px 16px;
+          border-radius: 14px 14px 3px 14px;
+          padding: 12px 18px;
           color: var(--text-main);
           font-size: 13.5px;
           line-height: 1.6;
           box-shadow: var(--shadow-card);
+          word-break: break-word;
         ">
           ${escapeHtml(m.content)}
         </div>
@@ -367,39 +371,47 @@ function renderMessage(m: MessageViewModel): string {
     `;
   }
 
-  // Assistant Message
   return `
-    <div class="message-row assistant-row" style="display: flex; flex-direction: column; gap: 10px; width: 100%;">
+    <div class="message-row assistant-row" data-id="${m.id}" style="
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      width: 100%;
+    ">
+      <!-- Agent Header Meta -->
       <div style="display: flex; align-items: center; gap: 8px;">
-        <span style="font-size: 11px; font-weight: 700; letter-spacing: 0.05em; color: var(--accent); text-transform: uppercase;">HERMES AGENT</span>
-        <span style="font-size: 10px; color: var(--text-muted);">${escapeHtml(m.timestamp)}</span>
+        <span style="
+          font-size: 11px;
+          font-weight: 700;
+          color: var(--accent);
+          background: var(--accent-subtle);
+          border: 1px solid var(--accent-border);
+          padding: 2px 8px;
+          border-radius: 4px;
+          letter-spacing: 0.05em;
+        ">HERMES AGENT</span>
+        <span style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">${escapeHtml(m.timestamp)}</span>
       </div>
 
-      <!-- Thinking Trace Fold (Optional) -->
+      <!-- Thinking Fold -->
       ${
         m.thought
           ? `
         <details class="thinking-fold" open style="
-          background: var(--bg-panel);
+          background: var(--bg-card);
           border: 1px solid var(--border-subtle);
-          border-radius: 8px;
-          padding: 8px 12px;
+          border-radius: 10px;
+          padding: 10px 14px;
           font-size: 12px;
+          box-shadow: var(--shadow-card);
         ">
-          <summary style="
-            cursor: pointer;
-            color: var(--text-muted);
-            font-weight: 500;
-            user-select: none;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-          ">
-            <span>🧠 思维链 (Chain-of-Thought)</span>
+          <summary style="cursor: pointer; color: var(--text-muted); font-weight: 600; display: flex; align-items: center; gap: 6px;">
+            <span>🧠 思维推理链</span>
+            ${m.thoughtDurationMs ? `<span style="font-size: 10.5px; font-weight: normal; color: var(--text-faint);">(${m.thoughtDurationMs}ms)</span>` : ''}
           </summary>
-          <div style="
-            margin-top: 8px;
-            padding-top: 8px;
+          <div id="msg-thought-${m.id}" style="
+            margin-top: 10px;
+            padding-top: 10px;
             border-top: 1px solid var(--border-subtle);
             color: var(--text-secondary);
             font-family: var(--font-mono);
@@ -409,10 +421,10 @@ function renderMessage(m: MessageViewModel): string {
           ">${escapeHtml(m.thought)}</div>
         </details>
       `
-          : ''
+          : `<div id="msg-thought-${m.id}" style="display: none;"></div>`
       }
 
-      <!-- Tool Execution Capsule (Optional) -->
+      <!-- Tool Execution Capsules -->
       ${
         m.toolCalls && m.toolCalls.length > 0
           ? m.toolCalls
@@ -470,11 +482,11 @@ function renderMessage(m: MessageViewModel): string {
           : ''
       }
 
-      <!-- Core Content -->
-      <div class="assistant-content prose-block" style="
+      <!-- Core Content (Incremental Anchor) -->
+      <div id="msg-content-${m.id}" class="assistant-content prose-block" style="
         color: var(--text-main);
         font-size: 13.5px;
-        line-height: 1.65;
+        line-height: 1.68;
         display: flex;
         flex-direction: column;
         gap: 12px;
@@ -485,7 +497,7 @@ function renderMessage(m: MessageViewModel): string {
   `;
 }
 
-function escapeHtml(str: string): string {
+export function escapeHtml(str: string): string {
   return str
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -494,28 +506,36 @@ function escapeHtml(str: string): string {
     .replace(/'/g, '&#039;');
 }
 
-function renderMarkdown(md: string): string {
+export function renderMarkdown(md: string): string {
+  if (!md) return '';
   let html = escapeHtml(md);
 
   // Triple backticks code block
   html = html.replace(/```([a-zA-Z0-9_-]+)?\n([\s\S]*?)```/g, (_match, lang, code) => {
     return `
-      <div style="border-radius: 8px; overflow: hidden; border: 1px solid var(--border-medium); margin: 8px 0; background: var(--bg-code);">
-        <div style="padding: 6px 12px; background: var(--bg-elevated); font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); display: flex; justify-content: space-between;">
-          <span>${lang || 'code'}</span>
+      <div class="code-block-wrapper" style="border-radius: 10px; overflow: hidden; border: 1px solid var(--border-medium); margin: 10px 0; background: var(--bg-code); box-shadow: var(--shadow-card);">
+        <div style="padding: 7px 14px; background: var(--bg-card); border-bottom: 1px solid var(--border-subtle); font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); display: flex; justify-content: space-between; align-items: center;">
+          <span style="text-transform: uppercase; font-weight: 600;">${lang || 'code'}</span>
+          <button class="btn-copy-code" onclick="navigator.clipboard.writeText(this.closest('.code-block-wrapper').querySelector('code').innerText)" style="background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 11px;">复制</button>
         </div>
-        <pre style="margin: 0; padding: 12px; overflow-x: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; color: #E2E8F0;"><code>${code}</code></pre>
+        <pre style="margin: 0; padding: 14px; overflow-x: auto; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.55; color: #E2E8F0;"><code>${code}</code></pre>
       </div>
     `;
   });
 
   // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code style="background: var(--bg-panel); border: 1px solid var(--border-subtle); padding: 2px 5px; border-radius: 4px; font-family: var(--font-mono); font-size: 12px; color: var(--accent);">$1</code>');
+  html = html.replace(/`([^`]+)`/g, '<code style="background: var(--bg-card); border: 1px solid var(--border-subtle); padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); font-size: 12px; color: var(--accent);">$1</code>');
 
   // Bold
-  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong style="color: var(--text-main); font-weight: 600;">$1</strong>');
 
   // Paragraphs
   const paragraphs = html.split('\n\n').filter((p) => p.trim().length > 0);
-  return paragraphs.map((p) => `<p style="margin: 0;">${p.replace(/\n/g, '<br/>')}</p>`).join('');
+  if (paragraphs.length <= 1) {
+    return `<p style="margin: 0; white-space: pre-wrap;">${html}</p>`;
+  }
+
+  return paragraphs
+    .map((p) => `<p style="margin: 0; white-space: pre-wrap;">${p}</p>`)
+    .join('');
 }

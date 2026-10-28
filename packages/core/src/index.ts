@@ -6,3 +6,5 @@ export * from './rpc/fsm.js';
 export * from './rpc/client.js';
 export * from './coalesce/tokenCoalescer.js';
 export * from './models/types.js';
+export * from './session/eventReducer.js';
+export * from './session/sessionRegistry.js';

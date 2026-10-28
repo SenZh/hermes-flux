@@ -54,7 +54,7 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     const { renderMiddlePod } = await import('../dist/components/MiddlePod/MiddlePod.js');
     const html = renderMiddlePod({
       gatewayConnected: false,
-      gatewayUrl: 'https://fn-ai.codepower.cloud:1519',
+      gatewayUrl: 'http://127.0.0.1:9119',
       gatewayType: 'dashboard',
       username: '',
       password: '',
@@ -65,4 +65,43 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     assert.ok(html.includes('id="onboarding-password"'), 'Onboarding must have password input');
     assert.ok(html.includes('id="btn-test-connection"'), 'Onboarding must have test button');
   });
+
+  await t.test('InputDock must strictly conform to 740px golden width constraint', async () => {
+    const { renderInputDock } = await import('../dist/components/InputDock/InputDock.js');
+    const html = renderInputDock({
+      selectedModel: 'deepseek-v4.1',
+      models: ['deepseek-v4.1', 'claude-3-7'],
+      reasoningLevel: 'high',
+      approvalMode: 'auto',
+      isStreaming: false,
+    });
+
+    assert.ok(html.includes('max-width: 740px'), 'InputDock must have max-width: 740px constraint');
+    assert.ok(html.includes('id="dock-prompt-input"'), 'InputDock must have prompt input textarea');
+    assert.ok(html.includes('id="dock-model-selector-btn"'), 'InputDock must have model selector button');
+    assert.ok(html.includes('id="dock-send-btn"'), 'InputDock must have send action button');
+  });
+
+  await t.test('MiddlePod must span 100% full-bleed and provide incremental DOM hooks', async () => {
+    const { renderMiddlePod } = await import('../dist/components/MiddlePod/MiddlePod.js');
+    const html = renderMiddlePod({
+      gatewayConnected: true,
+      messages: [
+        {
+          id: 'ast-100',
+          role: 'assistant',
+          content: 'Hello, **Aura**!\n```ts\nconst a = 1;\n```',
+          thought: 'Analyzing code...',
+          timestamp: '12:00',
+        },
+      ],
+    });
+
+    assert.ok(html.includes('content-fluid-canvas'), 'MiddlePod must contain content-fluid-canvas');
+    assert.ok(html.includes('width: 100%'), 'MiddlePod canvas must span 100% width');
+    assert.ok(html.includes('id="msg-content-ast-100"'), 'Must have incremental content anchor');
+    assert.ok(html.includes('id="msg-thought-ast-100"'), 'Must have incremental thought anchor');
+    assert.ok(html.includes('code-block-wrapper'), 'Must render Markdown code blocks with wrapper');
+  });
 });
+

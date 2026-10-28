@@ -48,6 +48,7 @@ buildProcess.on('close', (code) => {
     cwd: rootDir,
     stdio: 'inherit',
     env: process.env,
+    shell: true,
   });
 
   builder.on('close', (builderCode) => {

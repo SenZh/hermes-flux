@@ -180,6 +180,59 @@ export function registerIpcHandlers(mainWindow: BrowserWindow, gateway: GatewayD
     }
   );
 
+  // HTTP REST Proxy (bypasses browser CORS / cookie constraints in desktop)
+  ipcMain.handle('gateway:http-proxy', async (_event, options: {
+    baseUrl: string;
+    path: string;
+    method?: string;
+    token?: string;
+    ticket?: string;
+    body?: any;
+    params?: any;
+  }) => {
+    let base = (options.baseUrl || 'http://127.0.0.1:9119').trim();
+    if (base.startsWith('ws://')) base = base.replace('ws://', 'http://');
+    if (base.startsWith('wss://')) base = base.replace('wss://', 'https://');
+    if (!base.startsWith('http://') && !base.startsWith('https://')) base = `https://${base}`;
+    base = base.replace(/\/+$/, '');
+
+    let fullUrl = `${base}${options.path.startsWith('/') ? '' : '/'}${options.path}`;
+    if (options.params && typeof options.params === 'object') {
+      const q = new URLSearchParams();
+      for (const [k, v] of Object.entries(options.params)) {
+        if (typeof v !== 'undefined' && v !== null) q.append(k, String(v));
+      }
+      const qs = q.toString();
+      if (qs) fullUrl += (fullUrl.includes('?') ? '&' : '?') + qs;
+    }
+
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+      Origin: base,
+    };
+    if (options.token) {
+      headers['Authorization'] = `Bearer ${options.token}`;
+    }
+    if (options.ticket) {
+      headers['X-WS-Ticket'] = options.ticket;
+    }
+
+    const fetchOptions: any = {
+      method: options.method || 'GET',
+      headers,
+    };
+    if (options.body && options.method !== 'GET') {
+      headers['Content-Type'] = 'application/json';
+      fetchOptions.body = JSON.stringify(options.body);
+    }
+
+    const res = await fetch(fullUrl, fetchOptions);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    }
+    return await res.json();
+  });
+
   // Shell & Dialogs
   ipcMain.handle('shell:open-external', async (_event, url: string) => {
     if (url.startsWith('http://') || url.startsWith('https://')) {

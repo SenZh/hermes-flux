@@ -610,7 +610,7 @@ function renderGatewayOnboarding(props) {
             <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">\u7F51\u5173\u8FDE\u63A5\u5730\u5740 (Gateway URL)</label>
             <span style="font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono);">\u63A8\u8350 9119 \u6216\u53CD\u4EE3\u57DF\u540D</span>
           </div>
-          <input type="text" id="onboarding-gateway-url" value="${escapeHtml3(props.gatewayUrl || "https://fn-ai.codepower.cloud:1519")}" placeholder="http://127.0.0.1:9119 \u6216 https://..." style="
+          <input type="text" id="onboarding-gateway-url" value="${escapeHtml3(props.gatewayUrl || "http://127.0.0.1:9119")}" placeholder="http://127.0.0.1:9119 \u6216 https://..." style="
             width: 100%;
             height: 36px;
             background: var(--bg-panel);
@@ -1666,7 +1666,7 @@ function renderTabPane(props) {
               <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">${isZh ? "\u7F51\u5173\u5730\u5740 (Dashboard / API)" : "Gateway URL"}</label>
               <span style="font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono);">\u63A8\u8350 Dashboard \u7AEF\u53E3 9119 \u6216\u516C\u7F51\u53CD\u4EE3</span>
             </div>
-            <input type="text" id="settings-gateway-url" value="${escapeHtml6(props.gatewayUrl || "https://fn-ai.codepower.cloud:1519")}" placeholder="http://127.0.0.1:9119 \u6216 https://..." style="
+            <input type="text" id="settings-gateway-url" value="${escapeHtml6(props.gatewayUrl || "http://127.0.0.1:9119")}" placeholder="http://127.0.0.1:9119 \u6216 https://..." style="
               width: 100%;
               height: 36px;
               background: var(--bg-panel);
@@ -1982,7 +1982,7 @@ var state = {
   gatewayConnected: false,
   gatewayConnecting: false,
   gatewayLatencyMs: 0,
-  gatewayUrl: localStorage.getItem("hermes_aura_gateway_url") || "https://fn-ai.codepower.cloud:1519",
+  gatewayUrl: localStorage.getItem("hermes_aura_gateway_url") || "http://127.0.0.1:9119",
   gatewayType: localStorage.getItem("hermes_aura_gateway_type") || "dashboard",
   username: localStorage.getItem("hermes_aura_username") || "",
   password: localStorage.getItem("hermes_aura_password") || "",
@@ -2017,7 +2017,7 @@ function sendWsRpc(method, params = {}, timeoutMs = 25e3) {
   });
 }
 function getEffectiveUrl(base) {
-  let url = (base || "https://fn-ai.codepower.cloud:1519").trim();
+  let url = (base || "http://127.0.0.1:9119").trim();
   if (url.startsWith("ws://")) {
     url = url.replace("ws://", "http://");
   } else if (url.startsWith("wss://")) {
