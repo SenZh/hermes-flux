@@ -1,0 +1,2962 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="obsidian-gold">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hermes Aura Desktop — 真实网关生产客户端</title>
+  <style>
+/* ==========================================================================
+   HERMES AURA DESKTOP — CORE STYLES & DESIGN TOKENS
+   Strict adherence to desktop-design-system-spec.md (v3.0)
+   ========================================================================== */
+
+:root {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, "SF Mono", monospace;
+
+  --radius-window: 14px;
+  --radius-panel: 10px;
+  --radius-card: 10px;
+  --radius-inner: 6px;
+  --radius-pill: 9999px;
+
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 140ms;
+  --duration-normal: 240ms;
+}
+
+/* THEME A: OBSIDIAN GOLD (黑曜琥珀) */
+[data-theme="obsidian-gold"] {
+  --bg-window: #090A0F;
+  --bg-rail: #0E1015;
+  --bg-panel: #111318;
+  --bg-card: #151720;
+  --bg-card-hover: #1B1E29;
+  --bg-card-active: #222634;
+  --bg-elevated: #1F2230;
+  --bg-input: #12141A;
+  --bg-code: #0A0B10;
+  --bg-backdrop: rgba(18, 20, 27, 0.88);
+
+  --accent: #F59E0B;
+  --accent-hover: #FBBF24;
+  --accent-dim: #D97706;
+  --accent-glow: rgba(245, 158, 11, 0.25);
+  --accent-subtle: rgba(245, 158, 11, 0.09);
+  --accent-border: rgba(245, 158, 11, 0.35);
+  --accent-text: #FEF3C7;
+
+  --text-main: #F8FAFC;
+  --text-secondary: #94A3B8;
+  --text-muted: #64748B;
+  --text-faint: #334155;
+
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-medium: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --specular-line: inset 0 1px 0 0 rgba(255, 255, 255, 0.10);
+
+  --shadow-window: 0 24px 70px -12px rgba(0, 0, 0, 0.85);
+  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.45);
+  --shadow-dock: 0 20px 48px -10px rgba(0, 0, 0, 0.75);
+
+  --jade-pulse: #10B981;
+  --jade-glow: rgba(16, 185, 129, 0.45);
+}
+
+/* THEME B: SUET WHITE JADE (羊脂白玉) */
+[data-theme="suet-jade"],
+[data-theme="jade-white"] {
+  --bg-window: #F4F6F9;
+  --bg-rail: #E9ECF2;
+  --bg-panel: #FAFAFC;
+  --bg-card: #FFFFFF;
+  --bg-card-hover: #F1F4F9;
+  --bg-card-active: #E5E9F2;
+  --bg-elevated: #FFFFFF;
+  --bg-input: #FFFFFF;
+  --bg-code: #F4F6FA;
+  --bg-backdrop: rgba(255, 255, 255, 0.90);
+
+  --accent: #0D7A5E;
+  --accent-hover: #0B6850;
+  --accent-dim: #095743;
+  --accent-glow: rgba(13, 122, 94, 0.20);
+  --accent-subtle: rgba(13, 122, 94, 0.08);
+  --accent-border: rgba(13, 122, 94, 0.32);
+  --accent-text: #08523F;
+
+  --text-main: #0F172A;
+  --text-secondary: #475569;
+  --text-muted: #64748B;
+  --text-faint: #94A3B8;
+
+  --border-subtle: rgba(0, 0, 0, 0.06);
+  --border-medium: rgba(0, 0, 0, 0.10);
+  --border-strong: rgba(0, 0, 0, 0.18);
+  --specular-line: inset 0 1px 0 0 rgba(255, 255, 255, 0.90);
+
+  --shadow-window: 0 24px 60px -12px rgba(15, 23, 42, 0.18);
+  --shadow-card: 0 2px 12px rgba(15, 23, 42, 0.06);
+  --shadow-dock: 0 16px 40px -10px rgba(15, 23, 42, 0.14);
+
+  --jade-pulse: #059669;
+  --jade-glow: rgba(5, 150, 105, 0.40);
+  --theme-thumb-color: #FFFFFF;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  background: var(--bg-window);
+  color: var(--text-main);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#aura-app-root {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.aura-body-container {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Scrollbar Customization */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.35);
+}
+
+/* Animations */
+@keyframes aura-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.3);
+    opacity: 1;
+  }
+}
+
+/* Windows Caption Buttons Hover */
+.win-cap-btn:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: var(--text-main) !important;
+}
+
+.win-cap-close:hover {
+  background: #E81123 !important;
+  color: #FFFFFF !important;
+}
+
+/* Buttons and Interactive Elements */
+button {
+  font-family: inherit;
+  transition: all var(--duration-fast) ease;
+}
+
+button:active {
+  transform: scale(0.97);
+}
+
+.session-item:hover {
+  background: var(--bg-card-hover) !important;
+}
+
+.seg-btn:hover {
+  opacity: 0.9;
+}
+
+.send-action-btn:hover {
+  filter: brightness(1.1);
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+
+  </style>
+</head>
+<body>
+  <div id="aura-app-root"></div>
+  <script>
+// ../ui/src/components/Titlebar/Titlebar.ts
+function renderTitlebar(props) {
+  const isWin = props.platform === "windows";
+  const macControls = `
+    <div class="mac-traffic-lights" style="-webkit-app-region: no-drag; display: flex; gap: 7px; align-items: center; padding-left: 12px;">
+      <span class="traffic-btn traffic-close" title="\u5173\u95ED" style="width: 12px; height: 12px; border-radius: 50%; background: #FF5F56; display: inline-block; cursor: pointer;"></span>
+      <span class="traffic-btn traffic-min" title="\u6700\u5C0F\u5316" style="width: 12px; height: 12px; border-radius: 50%; background: #FFBD2E; display: inline-block; cursor: pointer;"></span>
+      <span class="traffic-btn traffic-max" title="\u5168\u5C4F" style="width: 12px; height: 12px; border-radius: 50%; background: #27C93F; display: inline-block; cursor: pointer;"></span>
+    </div>
+  `;
+  const winControls = `
+    <div class="win-caption-controls" style="-webkit-app-region: no-drag; display: flex; align-items: center; height: 100%;">
+      <button class="win-cap-btn" id="win-min-btn" title="\u6700\u5C0F\u5316" style="width: 44px; height: 42px; border: none; background: transparent; color: var(--text-secondary); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.15s ease;">
+        <svg width="11" height="1" viewBox="0 0 11 1"><rect width="11" height="1" fill="currentColor"/></svg>
+      </button>
+      <button class="win-cap-btn" id="win-max-btn" title="${props.isMaximized ? "\u8FD8\u539F" : "\u6700\u5927\u5316"}" style="width: 44px; height: 42px; border: none; background: transparent; color: var(--text-secondary); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.15s ease;">
+        ${props.isMaximized ? `<svg width="11" height="11" viewBox="0 0 11 11"><path d="M2.5 0h8.5v8.5h-2v2.5h-8.5v-8.5h2v-2.5zm1 1v1.5h6v6h1.5v-7.5h-7.5zm-2 2.5v7.5h7.5v-7.5h-7.5zm1 1h5.5v5.5h-5.5v-5.5z" fill="currentColor"/></svg>` : `<svg width="11" height="11" viewBox="0 0 11 11"><rect x="0.5" y="0.5" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>`}
+      </button>
+      <button class="win-cap-btn win-cap-close" id="win-close-btn" title="\u5173\u95ED" style="width: 46px; height: 42px; border: none; background: transparent; color: var(--text-secondary); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.15s ease;">
+        <svg width="11" height="11" viewBox="0 0 11 11"><path d="M0.5 0.5l10 10m0-10l-10 10" stroke="currentColor" stroke-width="1.2"/></svg>
+      </button>
+    </div>
+  `;
+  const pulseColor = props.gatewayConnected ? "#10B981" : "#64748B";
+  const pulseGlow = props.gatewayConnected ? "rgba(16, 185, 129, 0.45)" : "none";
+  const displayTitle = props.title || (props.gatewayConnected ? "Hermes Aura \u2014 \u8BF7\u9009\u62E9\u6216\u65B0\u5EFA\u4F1A\u8BDD" : "\u672A\u8FDE\u63A5\u7F51\u5173");
+  return `
+    <header class="aura-titlebar" style="
+      height: 42px;
+      min-height: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border-subtle);
+      background: var(--bg-rail);
+      user-select: none;
+      -webkit-app-region: drag;
+      position: relative;
+      z-index: 50;
+    ">
+      <!-- Left Wing (250px) -->
+      <div class="titlebar-left" style="display: flex; align-items: center; width: 250px; min-width: 250px; gap: 8px;">
+        ${!isWin ? macControls : ""}
+        <button id="toggle-left-rail-btn" class="icon-btn" title="\u6298\u53E0/\u5C55\u5F00\u4FA7\u680F (Ctrl+B)" style="
+          -webkit-app-region: no-drag;
+          margin-left: ${isWin ? "12px" : "6px"};
+          background: transparent;
+          border: 1px solid var(--border-subtle);
+          border-radius: 6px;
+          color: var(--text-secondary);
+          width: 28px;
+          height: 28px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+        ">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="2" y="2" width="12" height="12" rx="2"/>
+            <line x1="6" y1="2" x2="6" y2="14"/>
+          </svg>
+        </button>
+        <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.05em; color: var(--text-muted); text-transform: uppercase;">AURA DESKTOP</span>
+      </div>
+
+      <!-- Center Focus Area (Flex: 1) -->
+      <div class="titlebar-center" style="display: flex; align-items: center; justify-content: center; flex: 1; min-width: 0; gap: 8px;">
+        <span class="session-live-pulse" title="${props.gatewayConnected ? "\u7F51\u5173\u5DF2\u8FDE\u63A5" : "\u7F51\u5173\u672A\u8FDE\u63A5"}" style="
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          background: ${pulseColor};
+          box-shadow: 0 0 8px ${pulseGlow};
+          display: inline-block;
+          ${props.gatewayConnected ? "animation: aura-pulse 2.4s infinite cubic-bezier(0.4, 0, 0.6, 1);" : ""}
+        "></span>
+        <span class="session-title-text" style="
+          font-size: 13px;
+          font-weight: 500;
+          color: var(--text-main);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          max-width: 520px;
+        ">${escapeHtml(displayTitle)}</span>
+      </div>
+
+      <!-- Right Global Auxiliary Area (250px) -->
+      <div class="titlebar-right" style="display: flex; align-items: center; justify-content: flex-end; width: 250px; min-width: 250px; gap: 8px; height: 100%;">
+        <div style="-webkit-app-region: no-drag; display: flex; align-items: center; gap: 6px; margin-right: 8px;">
+          <!-- Settings gear icon button -->
+          <button id="btn-open-settings" class="icon-btn" title="\u7F51\u5173\u4E0E\u7CFB\u7EDF\u8BBE\u7F6E" style="
+            background: transparent;
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: color 0.15s ease, background 0.15s ease;
+          ">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+          </button>
+
+          <!-- Inspector toggle -->
+          <button id="toggle-inspector-btn" class="icon-btn" title="\u68C0\u67E5\u8231 (Cmd/Ctrl+\\)" style="
+            background: transparent;
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+          ">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="2" y="2" width="12" height="12" rx="2"/>
+              <line x1="10" y1="2" x2="10" y2="14"/>
+            </svg>
+          </button>
+        </div>
+
+        ${isWin ? winControls : ""}
+      </div>
+    </header>
+  `;
+}
+function escapeHtml(str) {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+// ../ui/src/components/LeftRail/LeftRail.ts
+function renderLeftRail(props) {
+  if (props.collapsed) {
+    return `<aside id="aura-left-rail" class="rail-collapsed" style="width: 0px; min-width: 0px; display: none; overflow: hidden;"></aside>`;
+  }
+  const activeSessions = props.sessions.filter((s) => !s.isArchived);
+  const archivedSessions = props.sessions.filter((s) => s.isArchived);
+  return `
+    <aside id="aura-left-rail" class="aura-left-rail" style="
+      width: 260px;
+      min-width: 260px;
+      max-width: 260px;
+      height: 100%;
+      background: var(--bg-rail);
+      border-right: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      user-select: none;
+      transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      position: relative;
+    ">
+      <!-- Search & New Chat -->
+      <div style="padding: 12px 14px 8px; display: flex; flex-direction: column; gap: 8px;">
+        <button id="new-chat-btn" class="btn-new-chat" style="
+          width: 100%;
+          height: 34px;
+          background: var(--bg-card);
+          border: 1px solid var(--border-medium);
+          border-radius: 8px;
+          color: var(--text-main);
+          font-size: 13px;
+          font-weight: 500;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          cursor: pointer;
+          box-shadow: var(--shadow-card);
+          transition: border-color 0.15s ease, background 0.15s ease;
+        ">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="8" y1="3" x2="8" y2="13"/>
+            <line x1="3" y1="8" x2="13" y2="8"/>
+          </svg>
+          <span>+ \u65B0\u5EFA\u4F1A\u8BDD</span>
+        </button>
+
+        <div style="position: relative; width: 100%;">
+          <input type="text" id="session-search-input" placeholder="\u641C\u7D22\u4F1A\u8BDD..." style="
+            width: 100%;
+            height: 28px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            padding: 0 10px 0 28px;
+            font-size: 12px;
+            color: var(--text-main);
+            outline: none;
+            box-sizing: border-box;
+          " />
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" style="position: absolute; left: 9px; top: 8px; color: var(--text-muted);">
+            <circle cx="7" cy="7" r="5"/>
+            <line x1="11" y1="11" x2="15" y2="15"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Session List Stream -->
+      <div class="session-scroll-area" id="session-list-container" style="flex: 1; overflow-y: auto; padding: 6px 8px;">
+        ${props.sessions.length === 0 ? `
+          <div style="padding: 32px 12px; text-align: center; color: var(--text-muted); font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 8px;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <span>\u6682\u65E0\u5386\u53F2\u4F1A\u8BDD</span>
+            <span style="font-size: 11px; color: var(--text-faint);">\u70B9\u51FB\u4E0A\u65B9\u6309\u94AE\u5F00\u542F\u5168\u65B0\u4EFB\u52A1</span>
+          </div>
+        ` : `
+          <div style="font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; padding: 6px 8px 4px;">\u8FD1\u671F\u4F1A\u8BDD (${props.sessions.length})</div>
+          
+          <div style="display: flex; flex-direction: column; gap: 2px;">
+            ${activeSessions.map((s) => {
+    const isActive = s.id === props.activeSessionId;
+    return `
+                <div class="session-item ${isActive ? "active" : ""}" data-id="${s.id}" style="
+                  padding: 8px 10px;
+                  border-radius: 7px;
+                  background: ${isActive ? "var(--bg-card-active)" : "transparent"};
+                  border: 1px solid ${isActive ? "var(--border-medium)" : "transparent"};
+                  cursor: pointer;
+                  transition: background 0.12s ease;
+                  display: flex;
+                  flex-direction: column;
+                  gap: 3px;
+                  position: relative;
+                ">
+                  <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <span class="session-title" style="font-size: 12px; font-weight: ${isActive ? "600" : "500"}; color: ${isActive ? "var(--text-main)" : "var(--text-secondary)"}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px;">${escapeHtml2(s.title || "\u672A\u547D\u540D\u4F1A\u8BDD")}</span>
+                    ${s.time ? `<span style="font-size: 10px; color: var(--text-muted);">${escapeHtml2(s.time)}</span>` : ""}
+                  </div>
+                  ${s.preview ? `<div style="font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml2(s.preview)}</div>` : ""}
+                </div>
+              `;
+  }).join("")}
+          </div>
+
+          ${archivedSessions.length > 0 ? `
+            <div style="font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; padding: 14px 8px 4px;">\u5386\u53F2\u5F52\u6863</div>
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              ${archivedSessions.map(
+    (s) => `
+                <div class="session-item" data-id="${s.id}" style="padding: 7px 10px; border-radius: 6px; opacity: 0.7; cursor: pointer;">
+                  <span style="font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block;">${escapeHtml2(s.title || "\u5386\u53F2\u5F52\u6863")}</span>
+                </div>
+              `
+  ).join("")}
+            </div>
+          ` : ""}
+        `}
+      </div>
+
+      <!-- Footer User Profile & Settings Trigger -->
+      <div class="rail-footer" style="
+        padding: 10px 14px;
+        border-top: 1px solid var(--border-subtle);
+        background: var(--bg-panel);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      ">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <div style="
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: var(--accent);
+            color: var(--theme-thumb-color, #090A0F);
+            font-size: 11px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+          ">
+            ${props.profileName ? props.profileName.charAt(0).toUpperCase() : "A"}
+          </div>
+          <div style="display: flex; flex-direction: column;">
+            <span style="font-size: 11.5px; font-weight: 600; color: var(--text-main);">${escapeHtml2(props.profileName || "default")}</span>
+            <span style="font-size: 9.5px; color: var(--text-muted); font-family: var(--font-mono);">${props.gatewayOnline ? "CONNECTED" : "STANDALONE"}</span>
+          </div>
+        </div>
+        
+        <button id="rail-footer-settings-btn" title="\u6253\u5F00\u8BBE\u7F6E" style="
+          background: transparent;
+          border: none;
+          color: var(--text-secondary);
+          cursor: pointer;
+          padding: 4px;
+          border-radius: 4px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        ">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+      </div>
+    </aside>
+  `;
+}
+function escapeHtml2(str) {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+// ../ui/src/components/MiddlePod/MiddlePod.ts
+function renderMiddlePod(props) {
+  return `
+    <main class="aura-middle-pod conversation-pod" style="
+      flex: 1 1 0%;
+      min-width: 0;
+      height: 100%;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-window);
+      overflow: hidden;
+    ">
+      <!-- Conversation Scroll Stream (100% Full-bleed width) -->
+      <div id="conversation-stream" class="messages-stream-area" style="
+        flex: 1;
+        width: 100%;
+        overflow-y: auto;
+        overflow-x: hidden;
+        display: flex;
+        flex-direction: column;
+        padding: 24px 32px 160px;
+        scroll-behavior: smooth;
+        box-sizing: border-box;
+      ">
+        <div class="content-fluid-canvas" style="width: 100%; display: flex; flex-direction: column; gap: 20px;">
+          ${!props.gatewayConnected ? renderGatewayOnboarding(props) : props.messages.length === 0 ? renderWelcomeEmptyState() : props.messages.map((m) => renderMessage(m)).join("")}
+        </div>
+      </div>
+
+      <!-- Dock Scrim Fade (Bottom gradient to prevent card collision) -->
+      <div class="dock-scrim-fade" style="
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 120px;
+        background: linear-gradient(to top, var(--bg-window) 30%, transparent 100%);
+        pointer-events: none;
+        z-index: 30;
+      "></div>
+    </main>
+  `;
+}
+function renderGatewayOnboarding(props) {
+  return `
+    <div class="gateway-onboarding-card" style="
+      max-width: 580px;
+      margin: 40px auto 0;
+      background: var(--bg-card);
+      border: 1px solid var(--border-medium);
+      border-radius: 16px;
+      padding: 32px;
+      box-shadow: var(--shadow-window);
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    ">
+      <!-- Header -->
+      <div style="display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px;">
+        <div style="
+          width: 52px;
+          height: 52px;
+          border-radius: 14px;
+          background: var(--accent-subtle);
+          border: 1px solid var(--accent-border);
+          color: var(--accent);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin-bottom: 4px;
+        ">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <h2 style="font-size: 18px; font-weight: 700; color: var(--text-main); margin: 0;">\u8FDE\u63A5\u81F3 Hermes Gateway</h2>
+        <p style="font-size: 12.5px; color: var(--text-secondary); margin: 0; line-height: 1.5; max-width: 440px;">
+          \u914D\u7F6E\u672C\u5730\u5B88\u62A4\u8FDB\u7A0B\u6216\u8FDC\u7A0B\u670D\u52A1\u5668\u7684 Hermes \u7F51\u5173\u5730\u5740\u4E0E\u9274\u6743\u51ED\u8BC1\uFF0C\u5F00\u542F\u771F\u5B9E\u7684\u81EA\u4E3B Agent \u4F1A\u8BDD\u4E0E\u5DE5\u4E1A\u7EA7\u80FD\u529B\u3002
+        </p>
+      </div>
+
+      <!-- Form Inputs -->
+      <div style="display: flex; flex-direction: column; gap: 14px;">
+        <!-- Gateway URL -->
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <div style="display: flex; justify-content: space-between; align-items: baseline;">
+            <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">\u7F51\u5173\u8FDE\u63A5\u5730\u5740 (Gateway URL)</label>
+            <span style="font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono);">\u63A8\u8350 9119 \u6216\u53CD\u4EE3\u57DF\u540D</span>
+          </div>
+          <input type="text" id="onboarding-gateway-url" value="${escapeHtml3(props.gatewayUrl || "https://fn-ai.codepower.cloud:1519")}" placeholder="http://127.0.0.1:9119 \u6216 https://..." style="
+            width: 100%;
+            height: 36px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-medium);
+            border-radius: 8px;
+            padding: 0 12px;
+            font-size: 12.5px;
+            font-family: var(--font-mono);
+            color: var(--text-main);
+            outline: none;
+            box-sizing: border-box;
+          "/>
+        </div>
+
+        <!-- Connection Channel Toggle -->
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">\u63A5\u5165\u901A\u9053\u7C7B\u578B</label>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <button type="button" class="onboarding-channel-btn ${props.gatewayType === "dashboard" || !props.gatewayType ? "active" : ""}" data-type="dashboard" style="
+              height: 38px;
+              border-radius: 8px;
+              border: 1px solid ${props.gatewayType === "dashboard" || !props.gatewayType ? "var(--accent)" : "var(--border-medium)"};
+              background: ${props.gatewayType === "dashboard" || !props.gatewayType ? "var(--accent-subtle)" : "var(--bg-panel)"};
+              color: ${props.gatewayType === "dashboard" || !props.gatewayType ? "var(--accent)" : "var(--text-main)"};
+              font-size: 11.5px;
+              font-weight: 600;
+              cursor: pointer;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              gap: 6px;
+            ">
+              <span>\u26A1 Dashboard \u65CF (9119 / WS \u5168\u529F\u80FD)</span>
+            </button>
+            <button type="button" class="onboarding-channel-btn ${props.gatewayType === "api" ? "active" : ""}" data-type="api" style="
+              height: 38px;
+              border-radius: 8px;
+              border: 1px solid ${props.gatewayType === "api" ? "var(--accent)" : "var(--border-medium)"};
+              background: ${props.gatewayType === "api" ? "var(--accent-subtle)" : "var(--bg-panel)"};
+              color: ${props.gatewayType === "api" ? "var(--accent)" : "var(--text-main)"};
+              font-size: 11.5px;
+              font-weight: 600;
+              cursor: pointer;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              gap: 6px;
+            ">
+              <span>\u{1F511} API Server \u65CF (8642 / API Key)</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Dashboard Auth: Username & Password -->
+        <div id="onboarding-section-dashboard" style="display: ${props.gatewayType === "dashboard" || !props.gatewayType ? "flex" : "none"}; flex-direction: column; gap: 10px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">\u7528\u6237\u540D (Username)</label>
+              <input type="text" id="onboarding-username" value="${escapeHtml3(props.username || "")}" placeholder="admin (\u516C\u7F51/\u8BA4\u8BC1\u5FC5\u586B)" style="
+                width: 100%;
+                height: 36px;
+                background: var(--bg-panel);
+                border: 1px solid var(--border-medium);
+                border-radius: 8px;
+                padding: 0 12px;
+                font-size: 12px;
+                font-family: var(--font-mono);
+                color: var(--text-main);
+                outline: none;
+                box-sizing: border-box;
+              "/>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">\u767B\u5F55\u5BC6\u7801 (Password)</label>
+              <input type="password" id="onboarding-password" value="${escapeHtml3(props.password || "")}" placeholder="\u8F93\u5165\u767B\u5F55\u5BC6\u7801..." style="
+                width: 100%;
+                height: 36px;
+                background: var(--bg-panel);
+                border: 1px solid var(--border-medium);
+                border-radius: 8px;
+                padding: 0 12px;
+                font-size: 12px;
+                font-family: var(--font-mono);
+                color: var(--text-main);
+                outline: none;
+                box-sizing: border-box;
+              "/>
+            </div>
+          </div>
+        </div>
+
+        <!-- API Auth: Key -->
+        <div id="onboarding-section-api" style="display: ${props.gatewayType === "api" ? "flex" : "none"}; flex-direction: column; gap: 6px;">
+          <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">API \u9759\u6001\u5BC6\u94A5 (API_SERVER_KEY)</label>
+          <input type="password" id="onboarding-api-key" value="${escapeHtml3(props.token || "")}" placeholder="sk-..." style="
+            width: 100%;
+            height: 36px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-medium);
+            border-radius: 8px;
+            padding: 0 12px;
+            font-size: 12px;
+            font-family: var(--font-mono);
+            color: var(--text-main);
+            outline: none;
+            box-sizing: border-box;
+          "/>
+        </div>
+
+        <!-- Profile Selector -->
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">Profile \u914D\u7F6E\u540D\u79F0</label>
+          <input type="text" id="onboarding-profile-name" value="${escapeHtml3(props.profileName || "default")}" placeholder="default, aura, \u6216\u81EA\u5B9A\u4E49 profile" style="
+            width: 100%;
+            height: 36px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-medium);
+            border-radius: 8px;
+            padding: 0 12px;
+            font-size: 12px;
+            font-family: var(--font-mono);
+            color: var(--text-main);
+            outline: none;
+            box-sizing: border-box;
+          "/>
+        </div>
+      </div>
+
+      <!-- Test Status Feedback -->
+      <div id="onboarding-test-feedback" style="
+        display: ${props.testStatus ? "flex" : "none"};
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border-radius: 8px;
+        background: ${props.testStatus?.ok ? "rgba(16, 185, 129, 0.12)" : "rgba(239, 68, 68, 0.12)"};
+        border: 1px solid ${props.testStatus?.ok ? "rgba(16, 185, 129, 0.3)" : "rgba(239, 68, 68, 0.3)"};
+        color: ${props.testStatus?.ok ? "#10B981" : "#EF4444"};
+        font-size: 12px;
+      ">
+        <span>${props.testStatus?.ok ? "\u2713" : "\u2715"}</span>
+        <span>${escapeHtml3(props.testStatus?.message || "")}</span>
+      </div>
+
+      <!-- Action Buttons -->
+      <div style="display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 6px;">
+        <button id="btn-test-connection" style="
+          height: 36px;
+          padding: 0 16px;
+          border-radius: 8px;
+          background: var(--bg-panel);
+          border: 1px solid var(--border-medium);
+          color: var(--text-main);
+          font-size: 12.5px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: background 0.15s ease;
+        ">\u8FDE\u901A\u6027\u6D4B\u8BD5</button>
+
+        <button id="btn-save-and-connect" style="
+          height: 36px;
+          padding: 0 20px;
+          border-radius: 8px;
+          background: var(--accent);
+          border: none;
+          color: var(--theme-thumb-color, #090A0F);
+          font-size: 12.5px;
+          font-weight: 700;
+          cursor: pointer;
+          box-shadow: 0 1px 8px var(--accent-glow);
+          transition: transform 0.1s ease, filter 0.1s ease;
+        ">${props.gatewayConnecting ? "\u6B63\u5728\u8FDE\u63A5..." : "\u4FDD\u5B58\u5E76\u8FDE\u63A5 \u2197"}</button>
+      </div>
+    </div>
+  `;
+}
+function renderWelcomeEmptyState() {
+  return `
+    <div style="
+      max-width: 540px;
+      margin: 80px auto 0;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      color: var(--text-muted);
+    ">
+      <div style="
+        width: 54px;
+        height: 54px;
+        border-radius: 14px;
+        background: var(--bg-card);
+        border: 1px solid var(--border-subtle);
+        color: var(--accent);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      ">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+      </div>
+      <h3 style="font-size: 16px; font-weight: 600; color: var(--text-main); margin: 0;">Hermes Aura \u5DE5\u4F5C\u53F0\u5DF2\u5C31\u7EEA</h3>
+      <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin: 0;">
+        \u5DF2\u6210\u529F\u63A5\u5165\u7F51\u5173\u3002\u5728\u4E0B\u65B9\u8F93\u5165\u6846\u4E2D\u4E0B\u8FBE\u4EFB\u52A1\u6216\u6309 Enter \u53D1\u9001\uFF0CHermes \u5C06\u8C03\u7528\u5168\u6808\u5DE5\u5177\u96C6\u81EA\u4E3B\u6267\u884C\u3001\u6D41\u5F0F\u63A8\u7406\u5E76\u5B9E\u65F6\u6C47\u62A5\u3002
+      </p>
+    </div>
+  `;
+}
+function renderMessage(m) {
+  const isUser = m.role === "user";
+  if (isUser) {
+    return `
+      <div class="message-row user-row" style="display: flex; justify-content: flex-end; width: 100%;">
+        <div class="user-bubble" style="
+          max-width: 760px;
+          background: var(--bg-card);
+          border: 1px solid var(--border-medium);
+          border-radius: 12px 12px 2px 12px;
+          padding: 12px 16px;
+          color: var(--text-main);
+          font-size: 13.5px;
+          line-height: 1.6;
+          box-shadow: var(--shadow-card);
+        ">
+          ${escapeHtml3(m.content)}
+        </div>
+      </div>
+    `;
+  }
+  return `
+    <div class="message-row assistant-row" style="display: flex; flex-direction: column; gap: 10px; width: 100%;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 11px; font-weight: 700; letter-spacing: 0.05em; color: var(--accent); text-transform: uppercase;">HERMES AGENT</span>
+        <span style="font-size: 10px; color: var(--text-muted);">${escapeHtml3(m.timestamp)}</span>
+      </div>
+
+      <!-- Thinking Trace Fold (Optional) -->
+      ${m.thought ? `
+        <details class="thinking-fold" open style="
+          background: var(--bg-panel);
+          border: 1px solid var(--border-subtle);
+          border-radius: 8px;
+          padding: 8px 12px;
+          font-size: 12px;
+        ">
+          <summary style="
+            cursor: pointer;
+            color: var(--text-muted);
+            font-weight: 500;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+          ">
+            <span>\u{1F9E0} \u601D\u7EF4\u94FE (Chain-of-Thought)</span>
+          </summary>
+          <div style="
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid var(--border-subtle);
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 11.5px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+          ">${escapeHtml3(m.thought)}</div>
+        </details>
+      ` : ""}
+
+      <!-- Tool Execution Capsule (Optional) -->
+      ${m.toolCalls && m.toolCalls.length > 0 ? m.toolCalls.map(
+    (tc) => `
+          <div class="tool-capsule" style="
+            background: var(--bg-card);
+            border: 1px solid var(--border-medium);
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: var(--shadow-card);
+          ">
+            <div style="
+              padding: 8px 12px;
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              background: var(--bg-elevated);
+              font-size: 12px;
+            ">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span style="color: var(--accent); font-weight: 600;">\u26A1 ${escapeHtml3(tc.name)}</span>
+                <span style="color: var(--text-muted); font-family: var(--font-mono); font-size: 11px;">${escapeHtml3(tc.args)}</span>
+              </div>
+              <span style="
+                font-size: 10px;
+                padding: 2px 6px;
+                border-radius: 4px;
+                background: ${tc.status === "completed" ? "rgba(34, 197, 94, 0.15)" : "rgba(239, 68, 68, 0.15)"};
+                color: ${tc.status === "completed" ? "#4ADE80" : "#F87171"};
+                font-weight: 600;
+              ">${tc.status === "completed" ? "DONE" : "RUNNING"}</span>
+            </div>
+            ${tc.output ? `
+              <pre style="
+                margin: 0;
+                padding: 10px 12px;
+                background: var(--bg-code);
+                color: #A6ACCD;
+                font-family: var(--font-mono);
+                font-size: 11.5px;
+                line-height: 1.5;
+                overflow-x: auto;
+                max-height: 180px;
+              "><code>${escapeHtml3(tc.output)}</code></pre>
+            ` : ""}
+          </div>
+        `
+  ).join("") : ""}
+
+      <!-- Core Content -->
+      <div class="assistant-content prose-block" style="
+        color: var(--text-main);
+        font-size: 13.5px;
+        line-height: 1.65;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      ">
+        ${renderMarkdown(m.content)}
+      </div>
+    </div>
+  `;
+}
+function escapeHtml3(str) {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+function renderMarkdown(md) {
+  let html = escapeHtml3(md);
+  html = html.replace(/```([a-zA-Z0-9_-]+)?\n([\s\S]*?)```/g, (_match, lang, code) => {
+    return `
+      <div style="border-radius: 8px; overflow: hidden; border: 1px solid var(--border-medium); margin: 8px 0; background: var(--bg-code);">
+        <div style="padding: 6px 12px; background: var(--bg-elevated); font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); display: flex; justify-content: space-between;">
+          <span>${lang || "code"}</span>
+        </div>
+        <pre style="margin: 0; padding: 12px; overflow-x: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; color: #E2E8F0;"><code>${code}</code></pre>
+      </div>
+    `;
+  });
+  html = html.replace(/`([^`]+)`/g, '<code style="background: var(--bg-panel); border: 1px solid var(--border-subtle); padding: 2px 5px; border-radius: 4px; font-family: var(--font-mono); font-size: 12px; color: var(--accent);">$1</code>');
+  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  const paragraphs = html.split("\n\n").filter((p) => p.trim().length > 0);
+  return paragraphs.map((p) => `<p style="margin: 0;">${p.replace(/\n/g, "<br/>")}</p>`).join("");
+}
+
+// ../ui/src/components/InputDock/InputDock.ts
+function renderInputDock(props) {
+  return `
+    <div class="input-dock-container" style="
+      position: absolute;
+      bottom: 18px;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: center;
+      padding: 0 20px;
+      pointer-events: none;
+      z-index: 40;
+    ">
+      <div class="input-card-box composer-dock" style="
+        pointer-events: auto;
+        width: calc(100% - 40px);
+        max-width: 740px;
+        margin: 0 auto;
+        background: var(--bg-backdrop);
+        backdrop-filter: blur(28px);
+        -webkit-backdrop-filter: blur(28px);
+        border: 1px solid var(--border-medium);
+        box-shadow: var(--shadow-dock);
+        border-radius: 14px;
+        padding: 10px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease;
+      ">
+        <!-- Textarea Field -->
+        <textarea id="dock-prompt-input" rows="2" placeholder="${props.disabled ? "\u8BF7\u5148\u8FDE\u63A5\u7F51\u5173..." : "\u7ED9 Hermes \u4E0B\u8FBE\u4EFB\u52A1... (Enter \u53D1\u9001, Shift+Enter \u6362\u884C)"}" ${props.disabled ? "disabled" : ""} style="
+          width: 100%;
+          border: none;
+          background: transparent;
+          color: var(--text-main);
+          font-family: inherit;
+          font-size: 13.5px;
+          line-height: 1.5;
+          resize: none;
+          outline: none;
+          box-sizing: border-box;
+        "></textarea>
+
+        <!-- Embedded Micro-Control Strip (Height: 26px) -->
+        <div class="input-control-strip" style="
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          height: 26px;
+          padding-top: 4px;
+          border-top: 1px solid var(--border-subtle);
+        ">
+          <!-- Left Control Pills -->
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <!-- 1. Model Selector Pill -->
+            <div class="pill-dropdown-wrapper" style="position: relative;">
+              <button id="dock-model-selector-btn" class="micro-pill" title="\u5207\u6362\u63A8\u7406\u6A21\u578B" style="
+                height: 24px;
+                padding: 0 8px;
+                border-radius: 6px;
+                background: var(--bg-elevated);
+                border: 1px solid var(--border-subtle);
+                color: var(--text-main);
+                font-size: 11px;
+                font-weight: 600;
+                display: flex;
+                align-items: center;
+                gap: 5px;
+                cursor: pointer;
+              ">
+                <span style="color: var(--accent);">\u26A1</span>
+                <span id="current-model-label">${escapeHtml4(props.selectedModel || "Default Model")}</span>
+                <span style="font-size: 8px; color: var(--text-muted);">\u25BE</span>
+              </button>
+
+              ${props.models && props.models.length > 0 ? `
+                <div id="dock-model-dropdown" class="model-dropdown-menu" style="
+                  display: none;
+                  position: absolute;
+                  bottom: 30px;
+                  left: 0;
+                  background: var(--bg-card);
+                  border: 1px solid var(--border-strong);
+                  border-radius: 8px;
+                  box-shadow: var(--shadow-card);
+                  padding: 4px;
+                  max-height: 240px;
+                  overflow-y: auto;
+                  min-width: 180px;
+                  z-index: 100;
+                ">
+                  ${props.models.map(
+    (m) => `
+                    <div class="model-option ${m === props.selectedModel ? "selected" : ""}" data-model="${escapeHtml4(m)}" style="
+                      padding: 6px 10px;
+                      font-size: 11.5px;
+                      border-radius: 5px;
+                      color: ${m === props.selectedModel ? "var(--accent)" : "var(--text-main)"};
+                      background: ${m === props.selectedModel ? "var(--bg-card-hover)" : "transparent"};
+                      cursor: pointer;
+                    ">${escapeHtml4(m)}</div>
+                  `
+  ).join("")}
+                </div>
+              ` : ""}
+            </div>
+
+            <!-- 2. Reasoning Level Segmented Pill -->
+            <div class="micro-segmented-pill" style="
+              height: 24px;
+              padding: 1px 2px;
+              border-radius: 6px;
+              background: var(--bg-card);
+              border: 1px solid var(--border-subtle);
+              display: flex;
+              align-items: center;
+              gap: 1px;
+            ">
+              <span style="font-size: 10px; color: var(--text-muted); padding: 0 4px; font-weight: 500;">\u{1F9E0} \u601D\u8003</span>
+              ${["off", "low", "medium", "high"].map((lvl) => {
+    const isActive = props.reasoningLevel === lvl;
+    const labels = { off: "\u5173", low: "\u4F4E", medium: "\u4E2D", high: "\u9AD8" };
+    return `
+                  <button class="seg-btn ${isActive ? "active" : ""}" data-level="${lvl}" style="
+                    height: 20px;
+                    padding: 0 6px;
+                    border: none;
+                    border-radius: 4px;
+                    background: ${isActive ? "var(--accent)" : "transparent"};
+                    color: ${isActive ? "#000000" : "var(--text-secondary)"};
+                    font-size: 10.5px;
+                    font-weight: ${isActive ? "700" : "500"};
+                    cursor: pointer;
+                  ">${labels[lvl]}</button>
+                `;
+  }).join("")}
+            </div>
+
+            <!-- 3. Approval Mode Segmented Pill -->
+            <div class="micro-segmented-pill" style="
+              height: 24px;
+              padding: 1px 2px;
+              border-radius: 6px;
+              background: var(--bg-card);
+              border: 1px solid var(--border-subtle);
+              display: flex;
+              align-items: center;
+              gap: 1px;
+            ">
+              <span style="font-size: 10px; color: var(--text-muted); padding: 0 4px; font-weight: 500;">\u{1F6E1}\uFE0F \u5BA1\u6279</span>
+              ${["auto", "ask", "sandbox"].map((mode) => {
+    const isActive = props.approvalMode === mode;
+    const labels = { auto: "\u81EA\u52A8", ask: "\u8BE2\u95EE", sandbox: "\u6C99\u7BB1" };
+    return `
+                  <button class="approval-btn ${isActive ? "active" : ""}" data-mode="${mode}" style="
+                    height: 20px;
+                    padding: 0 6px;
+                    border: none;
+                    border-radius: 4px;
+                    background: ${isActive ? "var(--accent-subtle)" : "transparent"};
+                    color: ${isActive ? "var(--accent)" : "var(--text-secondary)"};
+                    border: ${isActive ? "1px solid var(--accent-border)" : "1px solid transparent"};
+                    font-size: 10.5px;
+                    font-weight: ${isActive ? "700" : "500"};
+                    cursor: pointer;
+                  ">${labels[mode]}</button>
+                `;
+  }).join("")}
+            </div>
+          </div>
+
+          <!-- Right Send High-Light Button -->
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button id="dock-attach-file-btn" title="\u4E0A\u4F20\u9644\u4EF6\u6216\u56FE\u7247 (Cmd+U)" style="
+              width: 24px;
+              height: 24px;
+              border-radius: 6px;
+              border: 1px solid var(--border-subtle);
+              background: transparent;
+              color: var(--text-muted);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              cursor: pointer;
+            ">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M14 8.5l-6 6a4 4 0 01-5.6-5.6l6-6a2.8 2.8 0 014 4l-6 6a1.4 1.4 0 01-2-2l5-5"/>
+              </svg>
+            </button>
+
+            <button id="dock-send-btn" class="send-action-btn" style="
+              height: 24px;
+              padding: 0 12px;
+              border-radius: 6px;
+              background: var(--accent);
+              border: none;
+              color: var(--theme-thumb-color, #090A0F);
+              font-size: 11px;
+              font-weight: 700;
+              display: flex;
+              align-items: center;
+              gap: 4px;
+              cursor: pointer;
+              box-shadow: 0 1px 4px var(--accent-glow);
+              transition: transform 0.1s ease, filter 0.1s ease;
+            ">
+              <span>${props.isStreaming ? "\u25A0 \u505C\u6B62" : "\u53D1\u9001 \u21E1"}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+function escapeHtml4(str) {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+
+// ../ui/src/components/InspectionPod/InspectionPod.ts
+function renderInspectionPod(props) {
+  if (props.collapsed) {
+    return `<aside id="aura-inspector-pod" class="inspector-collapsed" style="width: 0px; min-width: 0px; display: none; overflow: hidden;"></aside>`;
+  }
+  const tabs = [
+    {
+      key: "artifacts",
+      label: "\u6210\u679C\u7269",
+      iconSvg: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`
+    },
+    {
+      key: "browser",
+      label: "\u6D4F\u89C8\u5668",
+      iconSvg: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`
+    },
+    {
+      key: "git",
+      label: "Git\u53D8\u66F4",
+      iconSvg: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`
+    },
+    {
+      key: "memory",
+      label: "\u8BA4\u77E5\u8BB0\u5FC6",
+      iconSvg: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>`
+    }
+  ];
+  const scenarioMeta = {
+    artifacts: { tag: "\u6210\u679C\u7269\u5BA1\u9605", sub: "Artifacts & Outputs" },
+    browser: { tag: "\u8FDC\u7A0B\u6D4F\u89C8\u5668", sub: "CDP Automation View" },
+    git: { tag: "\u5DE5\u4F5C\u533A\u53D8\u66F4", sub: "Git Workspace Diffs" },
+    memory: { tag: "\u8BA4\u77E5\u4E0E\u4E8B\u5B9E", sub: "Cognitive Memory & Facts" }
+  };
+  const meta = scenarioMeta[props.activeTab] || scenarioMeta.artifacts;
+  return `
+    <aside id="aura-inspector-pod" class="aura-inspector-pod" style="
+      width: 390px;
+      min-width: 390px;
+      max-width: 390px;
+      height: 100%;
+      background: var(--bg-panel);
+      border-left: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: row;
+      user-select: none;
+      transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      overflow: hidden;
+    ">
+      <!-- 1. Left Inspector Detail Area (Flex: 1, 326px) -->
+      <div class="inspector-detail-area" style="
+        flex: 1;
+        min-width: 0;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        background: var(--bg-panel);
+        border-right: 1px solid var(--border-subtle);
+      ">
+        <!-- Clean Pane Header (No btnInspectorCloseInline) -->
+        <div class="inspector-pane-header" style="
+          height: 42px;
+          min-height: 42px;
+          border-bottom: 1px solid var(--border-subtle);
+          padding: 0 16px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          background: var(--bg-rail);
+        ">
+          <div style="display: flex; align-items: baseline; gap: 8px; min-width: 0;">
+            <span style="font-size: 12.5px; font-weight: 600; color: var(--text-main);">${meta.tag}</span>
+            <span style="font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${meta.sub}</span>
+          </div>
+        </div>
+
+        <!-- Inspector Content Pane -->
+        <div class="inspector-content-pane" style="
+          flex: 1;
+          overflow-y: auto;
+          padding: 16px;
+          display: flex;
+          flex-direction: column;
+        ">
+          ${renderTabContent(props)}
+        </div>
+      </div>
+
+      <!-- 2. Right: Vertical Tab Rail (64px, docked to the FAR RIGHT edge) -->
+      <nav class="inspector-vertical-rail" style="
+        width: 64px;
+        min-width: 64px;
+        max-width: 64px;
+        height: 100%;
+        background: var(--bg-rail);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 12px 0;
+        gap: 6px;
+        z-index: 2;
+      ">
+        ${tabs.map((t) => {
+    const isActive = props.activeTab === t.key;
+    return `
+            <button class="vertical-tab-item ${isActive ? "active" : ""}" data-tab="${t.key}" title="${t.label}" style="
+              width: 54px;
+              height: 52px;
+              border: none;
+              border-radius: 8px;
+              background: ${isActive ? "var(--bg-card-hover)" : "transparent"};
+              color: ${isActive ? "var(--accent)" : "var(--text-secondary)"};
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              gap: 4px;
+              cursor: pointer;
+              position: relative;
+              transition: all 0.15s ease;
+            ">
+              ${isActive ? `<div class="vertical-tab-indicator" style="position: absolute; right: 0; top: 12px; bottom: 12px; width: 3px; border-radius: 3px 0 0 3px; background: var(--accent);"></div>` : ""}
+              <div style="display: flex; align-items: center; justify-content: center;">
+                ${t.iconSvg}
+              </div>
+              <span style="font-size: 10.5px; font-weight: ${isActive ? "600" : "400"}; white-space: nowrap;">${t.label}</span>
+            </button>
+          `;
+  }).join("")}
+      </nav>
+    </aside>
+  `;
+}
+function renderTabContent(props) {
+  switch (props.activeTab) {
+    case "artifacts": {
+      if (!props.artifacts || props.artifacts.length === 0) {
+        return renderEmptyState(
+          `<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`,
+          "\u6682\u65E0\u751F\u6210\u4EA7\u7269",
+          "Agent \u6267\u884C\u8FC7\u7A0B\u4E2D\u4EA7\u51FA\u7684\u4EE3\u7801\u811A\u672C\u3001\u6587\u6863\u3001\u6570\u636E\u62A5\u8868\u5C06\u5728\u6B64\u5904\u81EA\u52A8\u6C89\u6DC0\u5E76\u652F\u6301\u4E00\u952E\u5BFC\u51FA\u3002"
+        );
+      }
+      return `
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">\u6210\u679C\u7269 (${props.artifacts.length})</span>
+          </div>
+          ${props.artifacts.map(
+        (art) => `
+            <div style="background: var(--bg-card); border: 1px solid var(--border-medium); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px;">
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <span style="font-size: 12.5px; font-weight: 600; color: var(--text-main);">${escapeHtml5(art.name)}</span>
+                <span style="font-size: 10px; color: var(--text-muted); font-family: var(--font-mono);">${escapeHtml5(art.type)} \xB7 ${escapeHtml5(art.size)}</span>
+              </div>
+              ${art.preview ? `<p style="font-size: 11.5px; color: var(--text-secondary); margin: 0;">${escapeHtml5(art.preview)}</p>` : ""}
+            </div>
+          `
+      ).join("")}
+        </div>
+      `;
+    }
+    case "browser": {
+      if (!props.browserFrame) {
+        return renderEmptyState(
+          `<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`,
+          "\u8FDC\u7A0B\u6D4F\u89C8\u5668\u672A\u542F\u52A8",
+          "\u5F53 Agent \u8FD0\u884C\u7F51\u9875\u5BFC\u822A\u3001DOM \u4EA4\u4E92\u6216\u89C6\u89C9\u5206\u6790\u4EFB\u52A1\u65F6\uFF0CCDP \u8FDC\u7A0B\u89C6\u53E3\u5C06\u5728\u6B64\u5B9E\u65F6\u6295\u5C04\u5E76\u652F\u6301\u534F\u540C\u63A5\u7BA1\u3002"
+        );
+      }
+      return `
+        <div style="display: flex; flex-direction: column; gap: 10px; height: 100%;">
+          <div style="display: flex; align-items: center; gap: 6px; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 6px 10px;">
+            <span style="font-size: 10px; color: var(--accent); font-family: var(--font-mono);">URL:</span>
+            <span style="font-size: 11px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml5(props.browserFrame.url)}</span>
+          </div>
+          <div style="flex: 1; min-height: 200px; background: var(--bg-card); border: 1px solid var(--border-medium); border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+            ${props.browserFrame.screenshotUrl ? `<img src="${props.browserFrame.screenshotUrl}" alt="Browser Viewport" style="max-width: 100%; max-height: 100%; border-radius: 6px;" />` : `<span style="font-size: 12px; color: var(--text-muted);">\u89C6\u53E3\u6D3B\u52A8\u4E2D (${escapeHtml5(props.browserFrame.title)})</span>`}
+          </div>
+        </div>
+      `;
+    }
+    case "git": {
+      if (!props.gitDiffs || props.gitDiffs.length === 0) {
+        return renderEmptyState(
+          `<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`,
+          "\u5DE5\u4F5C\u533A\u65E0\u53D8\u66F4",
+          "\u5F53\u524D\u5DE5\u4F5C\u533A\u4EE3\u7801\u4E0E\u4ED3\u5E93\u72B6\u6001\u4E00\u81F4\u3002\u5F53 Agent \u7F16\u8F91\u3001\u91CD\u6784\u6216\u751F\u6210\u6587\u4EF6\u65F6\uFF0C\u7CBE\u786E\u884C\u7EA7 Diff \u5C06\u5728\u6B64\u5448\u73B0\u5BA1\u9605\u3002"
+        );
+      }
+      return `
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">\u53D8\u66F4\u6587\u4EF6 (${props.gitDiffs.length})</span>
+          </div>
+          ${props.gitDiffs.map(
+        (diff) => `
+            <div style="background: var(--bg-card); border: 1px solid var(--border-medium); border-radius: 8px; padding: 10px 12px;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                <span style="font-size: 12px; font-weight: 600; color: var(--text-main);">${escapeHtml5(diff.file)}</span>
+                <div style="display: flex; gap: 6px; font-family: var(--font-mono); font-size: 10px;">
+                  <span style="color: #4ADE80;">+${diff.additions}</span>
+                  <span style="color: #F87171;">-${diff.deletions}</span>
+                </div>
+              </div>
+              ${diff.patch ? `<pre style="font-family: var(--font-mono); font-size: 10.5px; background: var(--bg-code); padding: 8px; border-radius: 4px; overflow-x: auto; margin: 0;">${escapeHtml5(diff.patch)}</pre>` : ""}
+            </div>
+          `
+      ).join("")}
+        </div>
+      `;
+    }
+    case "memory": {
+      if (!props.memories || props.memories.length === 0) {
+        return renderEmptyState(
+          `<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>`,
+          "\u8BA4\u77E5\u8BB0\u5FC6\u5E93\u5C31\u7EEA",
+          "\u7528\u6237\u504F\u597D\u3001\u9879\u76EE\u80CC\u666F\u4E8B\u5B9E\u4E0E\u957F\u65F6\u8BA4\u77E5\u56FE\u8C31\u5DF2\u63A5\u5165\u3002Agent \u5C06\u5728\u4EA4\u4E92\u8FC7\u7A0B\u4E2D\u81EA\u52A8\u68C0\u7D22\u5E76\u52A8\u6001\u6C89\u6DC0\u5173\u952E\u8BB0\u5FC6\u3002"
+        );
+      }
+      return `
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">\u957F\u6548\u8BB0\u5FC6 (${props.memories.length})</span>
+          </div>
+          ${props.memories.map(
+        (mem) => `
+            <div style="background: var(--bg-card); border: 1px solid var(--border-medium); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px;">
+              <span style="font-size: 10px; font-weight: 600; color: var(--accent); text-transform: uppercase;">${escapeHtml5(mem.category)}</span>
+              <p style="font-size: 11.5px; color: var(--text-secondary); margin: 0; line-height: 1.5;">${escapeHtml5(mem.content)}</p>
+            </div>
+          `
+      ).join("")}
+        </div>
+      `;
+    }
+  }
+}
+function renderEmptyState(iconSvg, title, description) {
+  return `
+    <div style="
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 32px 16px;
+      color: var(--text-muted);
+    ">
+      <div style="
+        width: 56px;
+        height: 56px;
+        border-radius: 12px;
+        background: var(--bg-card);
+        border: 1px solid var(--border-subtle);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-muted);
+        margin-bottom: 14px;
+      ">
+        ${iconSvg}
+      </div>
+      <span style="font-size: 13px; font-weight: 600; color: var(--text-main); margin-bottom: 6px;">${escapeHtml5(title)}</span>
+      <p style="font-size: 11.5px; color: var(--text-secondary); line-height: 1.6; margin: 0; max-width: 250px;">${escapeHtml5(description)}</p>
+    </div>
+  `;
+}
+function escapeHtml5(str) {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+// ../ui/src/components/StatusBar/StatusBar.ts
+function renderStatusBar(props) {
+  let dotColor = "#EF4444";
+  let statusText = "\u672A\u8FDE\u63A5";
+  let pulseAnimation = "";
+  if (props.connectionStatus === "connected") {
+    dotColor = "#10B981";
+    statusText = "\u5DF2\u8FDE\u63A5";
+    pulseAnimation = "animation: aura-pulse 2.4s infinite cubic-bezier(0.4, 0, 0.6, 1);";
+  } else if (props.connectionStatus === "connecting") {
+    dotColor = "#F59E0B";
+    statusText = "\u8FDE\u63A5\u4E2D...";
+    pulseAnimation = "animation: aura-pulse 1.2s infinite ease-in-out;";
+  }
+  const latencyText = props.connectionStatus === "connected" ? `${props.latencyMs}ms` : "";
+  return `
+    <footer class="aura-status-bar" id="app-status-bar" style="
+      height: 26px;
+      min-height: 26px;
+      background: var(--bg-rail);
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      padding: 0 14px;
+      user-select: none;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+      z-index: 50;
+      cursor: pointer;
+    " title="\u70B9\u51FB\u6253\u5F00\u7F51\u5173\u8FDE\u63A5\u914D\u7F6E">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          background: ${dotColor};
+          box-shadow: 0 0 6px ${dotColor}88;
+          display: inline-block;
+          ${pulseAnimation}
+        "></span>
+        <span style="color: ${props.connectionStatus === "connected" ? "var(--text-secondary)" : dotColor}; font-weight: 500;">
+          ${statusText}
+        </span>
+        ${latencyText ? `
+          <span style="color: var(--border-medium);">/</span>
+          <span style="color: var(--text-muted);">${latencyText}</span>
+        ` : ""}
+      </div>
+    </footer>
+  `;
+}
+
+// ../ui/src/components/SettingsModal/SettingsModal.ts
+function renderSettingsModal(props) {
+  if (!props.isOpen) {
+    return `<div id="aura-settings-modal-root" style="display: none;"></div>`;
+  }
+  const isZh = props.lang === "zh";
+  return `
+    <div id="aura-settings-modal-root" class="settings-modal-backdrop" style="
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.65);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+    ">
+      <div class="settings-modal-dialog" style="
+        width: 580px;
+        max-width: 90vw;
+        max-height: 85vh;
+        background: var(--bg-card);
+        border: 1px solid var(--border-medium);
+        border-radius: 14px;
+        box-shadow: var(--shadow-window);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      ">
+        <!-- Modal Header -->
+        <div style="
+          height: 48px;
+          min-height: 48px;
+          border-bottom: 1px solid var(--border-subtle);
+          padding: 0 18px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          background: var(--bg-rail);
+        ">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--accent);">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+            <span style="font-size: 13.5px; font-weight: 600; color: var(--text-main);">${isZh ? "\u5DE5\u4F5C\u53F0\u914D\u7F6E\u4E0E\u8BBE\u7F6E\u4E2D\u5FC3" : "Settings & Configuration"}</span>
+          </div>
+          <button id="btn-close-settings" title="${isZh ? "\u5173\u95ED" : "Close"}" style="
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 6px;
+          ">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+
+        <!-- Modal Nav Tabs -->
+        <div style="
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 8px 18px 0;
+          background: var(--bg-rail);
+          border-bottom: 1px solid var(--border-subtle);
+        ">
+          <button class="settings-tab-btn ${props.activeTab === "gateway" ? "active" : ""}" data-tab="gateway" style="
+            padding: 8px 14px;
+            font-size: 12px;
+            font-weight: 600;
+            border: none;
+            background: transparent;
+            color: ${props.activeTab === "gateway" ? "var(--accent)" : "var(--text-secondary)"};
+            border-bottom: 2px solid ${props.activeTab === "gateway" ? "var(--accent)" : "transparent"};
+            cursor: pointer;
+          ">${isZh ? "\u7F51\u5173\u8FDE\u63A5" : "Gateway"}</button>
+
+          <button class="settings-tab-btn ${props.activeTab === "appearance" ? "active" : ""}" data-tab="appearance" style="
+            padding: 8px 14px;
+            font-size: 12px;
+            font-weight: 600;
+            border: none;
+            background: transparent;
+            color: ${props.activeTab === "appearance" ? "var(--accent)" : "var(--text-secondary)"};
+            border-bottom: 2px solid ${props.activeTab === "appearance" ? "var(--accent)" : "transparent"};
+            cursor: pointer;
+          ">${isZh ? "\u5916\u89C2\u4E0E\u8BED\u8A00" : "Appearance & Language"}</button>
+
+          <button class="settings-tab-btn ${props.activeTab === "about" ? "active" : ""}" data-tab="about" style="
+            padding: 8px 14px;
+            font-size: 12px;
+            font-weight: 600;
+            border: none;
+            background: transparent;
+            color: ${props.activeTab === "about" ? "var(--accent)" : "var(--text-secondary)"};
+            border-bottom: 2px solid ${props.activeTab === "about" ? "var(--accent)" : "transparent"};
+            cursor: pointer;
+          ">${isZh ? "\u5173\u4E8E" : "About"}</button>
+        </div>
+
+        <!-- Modal Body Content -->
+        <div style="flex: 1; overflow-y: auto; padding: 20px 24px;">
+          ${renderTabPane(props)}
+        </div>
+      </div>
+    </div>
+  `;
+}
+function renderTabPane(props) {
+  const isZh = props.lang === "zh";
+  switch (props.activeTab) {
+    case "gateway": {
+      return `
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+          <!-- Status Banner -->
+          <div style="
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-medium);
+            border-radius: 8px;
+            padding: 10px 14px;
+          ">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: ${props.connectionStatus === "connected" ? "#10B981" : props.connectionStatus === "connecting" ? "#F59E0B" : "#EF4444"};
+              "></span>
+              <span style="font-size: 12px; font-weight: 600; color: var(--text-main);">
+                ${props.connectionStatus === "connected" ? isZh ? "\u7F51\u5173\u5DF2\u8FDE\u63A5" : "Connected" : props.connectionStatus === "connecting" ? isZh ? "\u6B63\u5728\u8FDE\u63A5..." : "Connecting..." : isZh ? "\u7F51\u5173\u672A\u8FDE\u63A5" : "Disconnected"}
+              </span>
+              ${props.connectionStatus === "connected" ? `<span style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">${props.latencyMs}ms</span>` : ""}
+            </div>
+            
+            ${props.connectionStatus === "connected" ? `<button id="btn-disconnect-gateway" style="padding: 4px 10px; font-size: 11px; border-radius: 5px; border: 1px solid rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.1); color: #EF4444; cursor: pointer;">${isZh ? "\u65AD\u5F00\u8FDE\u63A5" : "Disconnect"}</button>` : ""}
+          </div>
+
+          <!-- URL Input -->
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline;">
+              <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">${isZh ? "\u7F51\u5173\u5730\u5740 (Dashboard / API)" : "Gateway URL"}</label>
+              <span style="font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono);">\u63A8\u8350 Dashboard \u7AEF\u53E3 9119 \u6216\u516C\u7F51\u53CD\u4EE3</span>
+            </div>
+            <input type="text" id="settings-gateway-url" value="${escapeHtml6(props.gatewayUrl || "https://fn-ai.codepower.cloud:1519")}" placeholder="http://127.0.0.1:9119 \u6216 https://..." style="
+              width: 100%;
+              height: 36px;
+              background: var(--bg-panel);
+              border: 1px solid var(--border-medium);
+              border-radius: 8px;
+              padding: 0 12px;
+              font-size: 12px;
+              font-family: var(--font-mono);
+              color: var(--text-main);
+              outline: none;
+              box-sizing: border-box;
+            " />
+          </div>
+
+          <!-- Channel / Mode Selection -->
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">${isZh ? "\u63A5\u5165\u670D\u52A1\u901A\u9053" : "Connection Channel"}</label>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <button type="button" class="channel-toggle-btn ${props.gatewayType === "dashboard" ? "active" : ""}" data-type="dashboard" style="
+                height: 38px;
+                border-radius: 8px;
+                border: 1px solid ${props.gatewayType === "dashboard" ? "var(--accent)" : "var(--border-medium)"};
+                background: ${props.gatewayType === "dashboard" ? "var(--accent-subtle)" : "var(--bg-panel)"};
+                color: ${props.gatewayType === "dashboard" ? "var(--accent)" : "var(--text-main)"};
+                font-size: 11.5px;
+                font-weight: 600;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 6px;
+              ">
+                <span>\u26A1 Dashboard \u65CF (9119 / WS \u5168\u529F\u80FD)</span>
+              </button>
+              <button type="button" class="channel-toggle-btn ${props.gatewayType === "api" ? "active" : ""}" data-type="api" style="
+                height: 38px;
+                border-radius: 8px;
+                border: 1px solid ${props.gatewayType === "api" ? "var(--accent)" : "var(--border-medium)"};
+                background: ${props.gatewayType === "api" ? "var(--accent-subtle)" : "var(--bg-panel)"};
+                color: ${props.gatewayType === "api" ? "var(--accent)" : "var(--text-main)"};
+                font-size: 11.5px;
+                font-weight: 600;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 6px;
+              ">
+                <span>\u{1F511} API Server \u65CF (8642 / API Key)</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Dashboard Auth Fields (Username & Password / Session Token) -->
+          <div id="section-dashboard-auth" style="display: ${props.gatewayType === "dashboard" ? "flex" : "none"}; flex-direction: column; gap: 10px;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">${isZh ? "\u7528\u6237\u540D (Basic Auth)" : "Username"}</label>
+                <input type="text" id="settings-username" value="${escapeHtml6(props.username || "")}" placeholder="admin (\u516C\u7F51/\u8BA4\u8BC1\u5FC5\u586B)" style="
+                  width: 100%;
+                  height: 36px;
+                  background: var(--bg-panel);
+                  border: 1px solid var(--border-medium);
+                  border-radius: 8px;
+                  padding: 0 12px;
+                  font-size: 12px;
+                  font-family: var(--font-mono);
+                  color: var(--text-main);
+                  outline: none;
+                  box-sizing: border-box;
+                " />
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">${isZh ? "\u5BC6\u7801 (Password)" : "Password"}</label>
+                <input type="password" id="settings-password" value="${escapeHtml6(props.password || "")}" placeholder="\u767B\u5F55\u5BC6\u7801..." style="
+                  width: 100%;
+                  height: 36px;
+                  background: var(--bg-panel);
+                  border: 1px solid var(--border-medium);
+                  border-radius: 8px;
+                  padding: 0 12px;
+                  font-size: 12px;
+                  font-family: var(--font-mono);
+                  color: var(--text-main);
+                  outline: none;
+                  box-sizing: border-box;
+                " />
+              </div>
+            </div>
+          </div>
+
+          <!-- API Server Auth Field (API Key) -->
+          <div id="section-api-auth" style="display: ${props.gatewayType === "api" ? "flex" : "none"}; flex-direction: column; gap: 6px;">
+            <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">${isZh ? "API \u9759\u6001\u5BC6\u94A5 (API_SERVER_KEY)" : "API Server Key"}</label>
+            <input type="password" id="settings-api-key" value="${escapeHtml6(props.token || "")}" placeholder="sk-..." style="
+              width: 100%;
+              height: 36px;
+              background: var(--bg-panel);
+              border: 1px solid var(--border-medium);
+              border-radius: 8px;
+              padding: 0 12px;
+              font-size: 12px;
+              font-family: var(--font-mono);
+              color: var(--text-main);
+              outline: none;
+              box-sizing: border-box;
+            " />
+          </div>
+
+          <!-- Profile -->
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">${isZh ? "Profile \u914D\u7F6E\u540D\u79F0" : "Profile Name"}</label>
+            <input type="text" id="settings-profile-name" value="${escapeHtml6(props.profileName || "default")}" style="
+              width: 100%;
+              height: 36px;
+              background: var(--bg-panel);
+              border: 1px solid var(--border-medium);
+              border-radius: 8px;
+              padding: 0 12px;
+              font-size: 12px;
+              font-family: var(--font-mono);
+              color: var(--text-main);
+              outline: none;
+              box-sizing: border-box;
+            " />
+          </div>
+
+          <!-- Feedback message -->
+          <div id="settings-test-feedback" style="
+            display: ${props.testStatus ? "flex" : "none"};
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            border-radius: 8px;
+            background: ${props.testStatus?.ok ? "rgba(16, 185, 129, 0.12)" : "rgba(239, 68, 68, 0.12)"};
+            border: 1px solid ${props.testStatus?.ok ? "rgba(16, 185, 129, 0.3)" : "rgba(239, 68, 68, 0.3)"};
+            color: ${props.testStatus?.ok ? "#10B981" : "#EF4444"};
+            font-size: 12px;
+          ">
+            <span>${props.testStatus?.ok ? "\u2713" : "\u2715"}</span>
+            <span>${escapeHtml6(props.testStatus?.message || "")}</span>
+          </div>
+
+          <!-- Actions -->
+          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px;">
+            <button id="btn-settings-test-connection" style="
+              height: 36px;
+              padding: 0 16px;
+              border-radius: 8px;
+              background: var(--bg-panel);
+              border: 1px solid var(--border-medium);
+              color: var(--text-main);
+              font-size: 12px;
+              font-weight: 500;
+              cursor: pointer;
+            ">${isZh ? "\u8FDE\u901A\u6027\u6D4B\u8BD5" : "Test Connection"}</button>
+
+            <button id="btn-settings-save-connect" style="
+              height: 36px;
+              padding: 0 20px;
+              border-radius: 8px;
+              background: var(--accent);
+              border: none;
+              color: var(--theme-thumb-color, #090A0F);
+              font-size: 12px;
+              font-weight: 700;
+              cursor: pointer;
+              box-shadow: 0 1px 6px var(--accent-glow);
+            ">${isZh ? "\u4FDD\u5B58\u5E76\u8FDE\u63A5" : "Save & Connect"}</button>
+          </div>
+        </div>
+      `;
+    }
+    case "appearance": {
+      const isObsidian = props.theme === "obsidian-gold";
+      return `
+        <div style="display: flex; flex-direction: column; gap: 20px;">
+          <!-- Language Selection -->
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <label style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">${isZh ? "\u754C\u9762\u8BED\u8A00 (Language)" : "Interface Language"}</label>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <button class="settings-lang-btn ${isZh ? "active" : ""}" data-lang="zh" style="
+                height: 42px;
+                border-radius: 8px;
+                border: 1px solid ${isZh ? "var(--accent)" : "var(--border-medium)"};
+                background: ${isZh ? "var(--accent-subtle)" : "var(--bg-panel)"};
+                color: ${isZh ? "var(--accent)" : "var(--text-main)"};
+                font-weight: 600;
+                font-size: 13px;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 6px;
+              ">
+                <span>\u{1F1E8}\u{1F1F3} \u7B80\u4F53\u4E2D\u6587</span>
+              </button>
+              <button class="settings-lang-btn ${!isZh ? "active" : ""}" data-lang="en" style="
+                height: 42px;
+                border-radius: 8px;
+                border: 1px solid ${!isZh ? "var(--accent)" : "var(--border-medium)"};
+                background: ${!isZh ? "var(--accent-subtle)" : "var(--bg-panel)"};
+                color: ${!isZh ? "var(--accent)" : "var(--text-main)"};
+                font-weight: 600;
+                font-size: 13px;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 6px;
+              ">
+                <span>\u{1F1FA}\u{1F1F8} English</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Theme Selection -->
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <label style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">${isZh ? "\u5916\u89C2\u4E3B\u9898 (Color Theme)" : "Appearance Theme"}</label>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <button class="settings-theme-btn ${isObsidian ? "active" : ""}" data-theme="obsidian-gold" style="
+                height: 64px;
+                border-radius: 8px;
+                border: 1px solid ${isObsidian ? "var(--accent)" : "var(--border-medium)"};
+                background: #090A0F;
+                color: #F8FAFC;
+                cursor: pointer;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 4px;
+                box-shadow: ${isObsidian ? "0 0 10px rgba(245, 158, 11, 0.25)" : "none"};
+              ">
+                <span style="font-size: 13px; font-weight: 600; color: #F59E0B;">\u263E \u9ED1\u66DC\u7425\u73C0 (\u6DF1\u8272)</span>
+                <span style="font-size: 10px; color: #94A3B8;">Obsidian Gold \xB7 \u7EAF\u7CB9\u7384\u9ED1\u9AD8\u5962</span>
+              </button>
+
+              <button class="settings-theme-btn ${!isObsidian ? "active" : ""}" data-theme="suet-jade" style="
+                height: 64px;
+                border-radius: 8px;
+                border: 1px solid ${!isObsidian ? "var(--accent)" : "var(--border-medium)"};
+                background: #F4F6F9;
+                color: #0F172A;
+                cursor: pointer;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 4px;
+                box-shadow: ${!isObsidian ? "0 0 10px rgba(13, 122, 94, 0.20)" : "none"};
+              ">
+                <span style="font-size: 13px; font-weight: 600; color: #0D7A5E;">\u263C \u7F8A\u8102\u767D\u7389 (\u6D45\u8272)</span>
+                <span style="font-size: 10px; color: #64748B;">Suet Jade \xB7 \u51DD\u78A7\u6E29\u6DA6\u7EB8\u611F</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+    case "about": {
+      return `
+        <div style="display: flex; flex-direction: column; gap: 14px; text-align: center; align-items: center; padding: 10px 0;">
+          <div style="
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            background: var(--accent);
+            color: var(--theme-thumb-color, #090A0F);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            font-weight: 800;
+          ">
+            A
+          </div>
+          <div>
+            <h3 style="font-size: 15px; font-weight: 700; color: var(--text-main); margin: 0;">Hermes Aura Desktop</h3>
+            <span style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">v0.1.0 (Production Release)</span>
+          </div>
+          <p style="font-size: 12px; color: var(--text-secondary); line-height: 1.6; max-width: 400px; margin: 0;">
+            ${isZh ? "\u6781\u5BA2\u7F8E\u5B66\u4E0E\u771F\u5B9E\u7269\u7406\u8D28\u611F\u7684 Hermes Agent \u684C\u9762\u5DE5\u4F5C\u53F0\u3002\u652F\u6301 JSON-RPC 2.0 / REST SSE \u53CC\u7F51\u5173\u63A5\u5165\u4E0E\u672C\u5730\u8DE8\u5E73\u53F0\u4EA4\u4E92\u3002" : "The elegant universal workspace for Hermes Agent with authentic physics and zero-illusion production engineering."}
+          </p>
+          <div style="font-size: 11px; color: var(--text-muted); margin-top: 10px;">
+            Crafted by Nous Research &amp; Hermes Aura Team
+          </div>
+        </div>
+      `;
+    }
+  }
+}
+function escapeHtml6(str) {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+
+// src/renderer/index.ts
+var desktopApi = window.hermesDesktop;
+var state = {
+  platform: "windows",
+  theme: localStorage.getItem("hermes_aura_theme") || "obsidian-gold",
+  lang: localStorage.getItem("hermes_aura_lang") || "zh",
+  isMaximized: false,
+  leftRailCollapsed: false,
+  inspectorCollapsed: false,
+  activeInspectorTab: "artifacts",
+  activeSessionId: "",
+  selectedModel: "",
+  availableModels: [],
+  reasoningLevel: "high",
+  approvalMode: "auto",
+  isStreaming: false,
+  gatewayConnected: false,
+  gatewayConnecting: false,
+  gatewayLatencyMs: 0,
+  gatewayUrl: localStorage.getItem("hermes_aura_gateway_url") || "https://fn-ai.codepower.cloud:1519",
+  gatewayType: localStorage.getItem("hermes_aura_gateway_type") || "dashboard",
+  username: localStorage.getItem("hermes_aura_username") || "",
+  password: localStorage.getItem("hermes_aura_password") || "",
+  token: localStorage.getItem("hermes_aura_token") || "",
+  profileName: localStorage.getItem("hermes_aura_profile") || "default",
+  isSettingsOpen: false,
+  settingsTab: "gateway",
+  sessions: [],
+  messages: [],
+  testStatus: void 0
+};
+var gatewayWsClient = null;
+var wsRpcNextId = 1;
+var wsRpcPending = /* @__PURE__ */ new Map();
+function sendWsRpc(method, params = {}, timeoutMs = 25e3) {
+  return new Promise((resolve, reject) => {
+    if (!gatewayWsClient || gatewayWsClient.readyState !== WebSocket.OPEN) {
+      return reject(new Error("WebSocket \u672A\u8FDE\u63A5\uFF0C\u65E0\u6CD5\u53D1\u9001\u8BF7\u6C42"));
+    }
+    const id = `rpc-${wsRpcNextId++}-${Date.now()}`;
+    const timer = setTimeout(() => {
+      wsRpcPending.delete(id);
+      reject(new Error(`RPC ${method} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    wsRpcPending.set(id, { resolve, reject, timer });
+    gatewayWsClient.send(JSON.stringify({
+      jsonrpc: "2.0",
+      id,
+      method,
+      params
+    }));
+  });
+}
+function getEffectiveUrl(base) {
+  let url = (base || "https://fn-ai.codepower.cloud:1519").trim();
+  if (url.startsWith("ws://")) {
+    url = url.replace("ws://", "http://");
+  } else if (url.startsWith("wss://")) {
+    url = url.replace("wss://", "https://");
+  }
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    url = `https://${url}`;
+  }
+  return url.replace(/\/+$/, "");
+}
+async function testConnection(url, gatewayType, username, pass, token) {
+  const baseUrl = getEffectiveUrl(url);
+  const startTime = Date.now();
+  try {
+    if (gatewayType === "dashboard") {
+      const statusRes = await fetch(`${baseUrl}/api/status`, {
+        method: "GET",
+        headers: { "Accept": "application/json" }
+      }).catch((e) => {
+        throw new Error(`\u65E0\u6CD5\u8FDE\u63A5\u670D\u52A1: ${e.message}`);
+      });
+      const latency = Date.now() - startTime;
+      if (!statusRes.ok) {
+        return { ok: false, message: `\u670D\u52A1\u8FD4\u56DE\u5F02\u5E38 HTTP ${statusRes.status}`, latency };
+      }
+      const statusData = await statusRes.json().catch(() => ({}));
+      const authRequired = Boolean(statusData.auth_required);
+      if (authRequired) {
+        if (!username || !pass) {
+          return {
+            ok: false,
+            message: "\u8BE5\u7F51\u5173\u5F00\u542F\u4E86\u5B89\u5168\u62E6\u622A\uFF0C\u5FC5\u987B\u8F93\u5165\u7528\u6237\u540D\u4E0E\u5BC6\u7801",
+            latency
+          };
+        }
+        const loginRes = await fetch(`${baseUrl}/auth/password-login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            username,
+            password: pass,
+            provider: "basic"
+          })
+        });
+        if (loginRes.ok) {
+          return {
+            ok: true,
+            message: `\u8BA4\u8BC1\u6210\u529F \xB7 \u5EF6\u8FDF ${latency}ms \xB7 Gateway v${statusData.version || "0.22.5"}`,
+            latency
+          };
+        } else if (loginRes.status === 401) {
+          return {
+            ok: false,
+            message: "\u8BA4\u8BC1\u5931\u8D25: \u7528\u6237\u540D\u6216\u5BC6\u7801\u9519\u8BEF (HTTP 401)",
+            latency
+          };
+        } else {
+          return {
+            ok: false,
+            message: `\u767B\u5F55\u63A5\u53E3\u5F02\u5E38 HTTP ${loginRes.status}`,
+            latency
+          };
+        }
+      }
+      return {
+        ok: true,
+        message: `\u8FDE\u63A5\u6210\u529F (\u514D\u5BC6\u901A\u9053) \xB7 \u5EF6\u8FDF ${latency}ms \xB7 Gateway v${statusData.version || "0.22.5"}`,
+        latency
+      };
+    } else {
+      const res = await fetch(`${baseUrl}/health`, {
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+          ...token ? { "Authorization": `Bearer ${token}` } : {}
+        }
+      });
+      const latency = Date.now() - startTime;
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        return {
+          ok: true,
+          message: `\u8FDE\u63A5\u6210\u529F \xB7 ${latency}ms \xB7 API Server ${data.platform || "hermes-agent"} ${data.version || ""}`.trim(),
+          latency
+        };
+      } else {
+        return {
+          ok: false,
+          message: `API \u9274\u6743\u5931\u8D25 HTTP ${res.status}: \u8BF7\u6838\u5BF9 API_SERVER_KEY`,
+          latency
+        };
+      }
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      message: `\u65E0\u6CD5\u8FDE\u63A5\u7F51\u5173: ${err.message || "\u7F51\u7EDC\u8FDE\u63A5\u8D85\u65F6\u6216\u88AB\u62D2\u7EDD"}`,
+      latency: 0
+    };
+  }
+}
+async function fetchSessions() {
+  if (!state.gatewayConnected) return;
+  try {
+    const res = await sendWsRpc("session.list", { profile: state.profileName || "default", limit: 50 });
+    const list = res?.sessions || res?.data || [];
+    state.sessions = list.map((s) => ({
+      id: s.id,
+      title: s.title || (s.id ? `\u4F1A\u8BDD ${s.id.slice(0, 8)}` : "\u65B0\u5BF9\u8BDD"),
+      model: s.model || "",
+      time: s.last_active || s.started_at ? formatTimestamp(s.last_active || s.started_at) : "\u8FD1\u671F",
+      preview: s.preview || "",
+      isArchived: Boolean(s.archived)
+    }));
+    if (!state.activeSessionId && state.sessions.length > 0) {
+      selectSession(state.sessions[0].id);
+    } else {
+      render();
+    }
+  } catch (e) {
+    console.warn("[Hermes Gateway WS] Failed to fetch sessions via RPC:", e);
+  }
+}
+async function fetchModelOptions() {
+  if (!state.gatewayConnected) return;
+  try {
+    const res = await sendWsRpc("model.options", { profile: state.profileName || "default" });
+    const modelsSet = /* @__PURE__ */ new Set();
+    if (res?.model) {
+      modelsSet.add(res.model);
+    }
+    if (Array.isArray(res?.providers)) {
+      for (const p of res.providers) {
+        if (Array.isArray(p.models)) {
+          for (const m of p.models) {
+            if (typeof m === "string") modelsSet.add(m);
+            else if (m && m.id) modelsSet.add(m.id);
+          }
+        }
+      }
+    }
+    state.availableModels = Array.from(modelsSet);
+    if (!state.selectedModel && state.availableModels.length > 0) {
+      state.selectedModel = res?.model || state.availableModels[0];
+    }
+    render();
+  } catch (e) {
+    console.warn("[Hermes Gateway WS] Failed to fetch model options via RPC:", e);
+  }
+}
+async function loadMessages(sessionId) {
+  if (!sessionId) {
+    state.messages = [];
+    render();
+    return;
+  }
+  try {
+    const res = await sendWsRpc("session.resume", {
+      session_id: sessionId,
+      profile: state.profileName || "default"
+    });
+    const list = res?.messages || res?.history || [];
+    state.messages = list.map((m, idx) => {
+      let thought = "";
+      if (m.thought) thought = m.thought;
+      const toolCalls = Array.isArray(m.tool_calls) ? m.tool_calls.map((tc) => ({
+        id: tc.id || `tc-${idx}`,
+        name: tc.name || tc.function?.name || "tool",
+        status: tc.status || "completed",
+        args: typeof tc.args === "string" ? tc.args : JSON.stringify(tc.args || tc.function?.arguments || {}),
+        output: typeof tc.output === "string" ? tc.output : tc.output ? JSON.stringify(tc.output) : void 0
+      })) : void 0;
+      return {
+        id: String(m.id || `msg-${idx}`),
+        role: m.role || "user",
+        content: m.content || "",
+        thought,
+        toolCalls,
+        timestamp: m.timestamp || m.created_at ? formatTimestamp(m.timestamp || m.created_at) : ""
+      };
+    });
+    render();
+  } catch (e) {
+    console.warn("[Hermes Gateway WS] Failed to resume/load messages via RPC:", e);
+  }
+}
+async function createNewSession() {
+  try {
+    const res = await sendWsRpc("session.create", {
+      profile: state.profileName || "default",
+      title: `\u65B0\u4EFB\u52A1 ${(/* @__PURE__ */ new Date()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+    });
+    const newId = res?.session_id || res?.session?.id || res?.id;
+    if (newId) {
+      state.activeSessionId = newId;
+      state.messages = [];
+      await fetchSessions();
+      render();
+      const input = document.getElementById("dock-prompt-input");
+      if (input) input.focus();
+    }
+  } catch (e) {
+    console.error("[Hermes Gateway WS] Create session failed via RPC:", e);
+  }
+}
+async function selectSession(id) {
+  if (state.activeSessionId === id) return;
+  state.activeSessionId = id;
+  await loadMessages(id);
+}
+async function sendMessage(text) {
+  if (!text.trim() || state.isStreaming) return;
+  if (!state.activeSessionId) {
+    await createNewSession();
+  }
+  const userMsgId = `usr-${Date.now()}`;
+  state.messages.push({
+    id: userMsgId,
+    role: "user",
+    content: text,
+    timestamp: (/* @__PURE__ */ new Date()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+  });
+  const assistantMsgId = `ast-${Date.now()}`;
+  const assistantMsg = {
+    id: assistantMsgId,
+    role: "assistant",
+    content: "",
+    thought: "",
+    timestamp: (/* @__PURE__ */ new Date()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+  };
+  state.messages.push(assistantMsg);
+  state.isStreaming = true;
+  render();
+  try {
+    const submitResult = await sendWsRpc("prompt.submit", {
+      session_id: state.activeSessionId,
+      text,
+      model: state.selectedModel || void 0,
+      reasoning_effort: state.reasoningLevel === "off" ? "none" : state.reasoningLevel
+    });
+    if (submitResult?.error) {
+      assistantMsg.content = `[\u7F51\u5173\u62D2\u7EDD RPC ${submitResult.error.code}] ${submitResult.error.message}`;
+      state.isStreaming = false;
+      render();
+    }
+  } catch (err) {
+    console.error("[Hermes Gateway WS] prompt.submit failed:", err);
+    assistantMsg.content = `[WebSocket \u63D0\u4EA4\u5931\u8D25] ${err.message || "\u7F51\u7EDC\u8FDE\u63A5\u4E2D\u65AD"}`;
+    state.isStreaming = false;
+    render();
+  }
+}
+function formatTimestamp(ts) {
+  if (typeof ts === "string") return ts;
+  const date = new Date(ts > 1e11 ? ts : ts * 1e3);
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+async function initPlatform() {
+  if (desktopApi) {
+    try {
+      const sys = await desktopApi.getSystemInfo();
+      state.platform = sys.platform || "windows";
+      state.isMaximized = await desktopApi.isMaximized();
+      desktopApi.onWindowStateChange((ws) => {
+        state.isMaximized = ws.isMaximized;
+        render();
+      });
+      if (!state.authSecret && desktopApi.getDefaultGatewayConfig) {
+        const def = await desktopApi.getDefaultGatewayConfig();
+        if (def) {
+          if (def.url && !localStorage.getItem("hermes_aura_gateway_url")) state.gatewayUrl = def.url;
+          if (def.key && !localStorage.getItem("hermes_aura_auth_secret")) state.authSecret = def.key;
+          if (def.profile && !localStorage.getItem("hermes_aura_profile")) state.profileName = def.profile;
+        }
+      }
+    } catch (e) {
+      console.warn("[Desktop PAL] Bridge sync notice:", e);
+    }
+  }
+  connect();
+}
+async function connect() {
+  state.gatewayConnecting = true;
+  state.testStatus = void 0;
+  render();
+  const test = await testConnection(
+    state.gatewayUrl,
+    state.gatewayType,
+    state.username,
+    state.password,
+    state.token
+  );
+  state.gatewayConnecting = false;
+  state.gatewayConnected = test.ok;
+  state.gatewayLatencyMs = test.latency;
+  state.testStatus = test;
+  if (test.ok) {
+    localStorage.setItem("hermes_aura_gateway_url", state.gatewayUrl);
+    localStorage.setItem("hermes_aura_gateway_type", state.gatewayType);
+    localStorage.setItem("hermes_aura_username", state.username);
+    localStorage.setItem("hermes_aura_password", state.password);
+    localStorage.setItem("hermes_aura_token", state.token);
+    localStorage.setItem("hermes_aura_profile", state.profileName);
+    await initLiveWebSocket();
+    await Promise.all([fetchSessions(), fetchModelOptions()]);
+  }
+  render();
+}
+async function initLiveWebSocket() {
+  const baseUrl = getEffectiveUrl(state.gatewayUrl);
+  try {
+    let wsUrl = baseUrl.replace("http://", "ws://").replace("https://", "wss://") + "/api/ws";
+    if (state.gatewayType === "dashboard") {
+      const ticketRes = await fetch(`${baseUrl}/api/auth/ws-ticket`, {
+        method: "POST",
+        headers: { "Accept": "application/json" },
+        credentials: "include"
+      });
+      if (ticketRes.ok) {
+        const ticketData = await ticketRes.json().catch(() => ({}));
+        if (ticketData.ticket) {
+          wsUrl += `?ticket=${encodeURIComponent(ticketData.ticket)}`;
+        }
+      }
+    }
+    if (gatewayWsClient) {
+      try {
+        gatewayWsClient.close();
+      } catch {
+      }
+    }
+    await new Promise((resolve, reject) => {
+      const ws = new WebSocket(wsUrl);
+      gatewayWsClient = ws;
+      const connectTimeout = setTimeout(() => {
+        reject(new Error("WebSocket \u8FDE\u63A5\u63E1\u624B\u8D85\u65F6 (5s)"));
+      }, 5e3);
+      ws.onopen = () => {
+        clearTimeout(connectTimeout);
+        console.log("[Aura WS] Connected successfully to", wsUrl);
+        resolve();
+      };
+      ws.onerror = (err) => {
+        clearTimeout(connectTimeout);
+        console.error("[Aura WS] Connection error:", err);
+        reject(new Error("WebSocket \u8FDE\u63A5\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u6216\u8BC1\u4E66"));
+      };
+      ws.onmessage = (event) => {
+        try {
+          const frame = JSON.parse(event.data);
+          if (frame.id && wsRpcPending.has(frame.id)) {
+            const pending = wsRpcPending.get(frame.id);
+            wsRpcPending.delete(frame.id);
+            clearTimeout(pending.timer);
+            if (frame.error) {
+              pending.reject(frame.error);
+            } else {
+              pending.resolve(frame.result);
+            }
+            return;
+          }
+          if (frame.method === "event" && frame.params) {
+            const type = frame.params.type;
+            const payload = frame.params.payload;
+            if (type === "message.delta" && payload?.text) {
+              const lastMsg = state.messages[state.messages.length - 1];
+              if (lastMsg && lastMsg.role === "assistant") {
+                lastMsg.content += payload.text;
+                renderMessagesStream();
+              }
+            } else if (type === "thinking.delta" && payload?.text) {
+              const lastMsg = state.messages[state.messages.length - 1];
+              if (lastMsg && lastMsg.role === "assistant") {
+                lastMsg.thought = (lastMsg.thought || "") + payload.text;
+                renderMessagesStream();
+              }
+            } else if (type === "session.idle" || type === "agent.turn_end") {
+              state.isStreaming = false;
+              fetchSessions();
+              render();
+            }
+          }
+        } catch (err) {
+          console.warn("[Aura WS Frame Error]", err);
+        }
+      };
+      ws.onclose = () => {
+        console.log("[Aura WS] Connection closed");
+      };
+    });
+  } catch (err) {
+    console.warn("[Aura WS] Failed to init real WebSocket:", err);
+    throw err;
+  }
+}
+function disconnect() {
+  if (gatewayWsClient) {
+    try {
+      gatewayWsClient.close();
+    } catch {
+    }
+    gatewayWsClient = null;
+  }
+  state.gatewayConnected = false;
+  state.gatewayConnecting = false;
+  state.gatewayLatencyMs = 0;
+  state.sessions = [];
+  state.messages = [];
+  state.activeSessionId = "";
+  render();
+}
+function render() {
+  const root = document.getElementById("aura-app-root");
+  if (!root) return;
+  document.documentElement.setAttribute("data-theme", state.theme);
+  const activeSession = state.sessions.find((s) => s.id === state.activeSessionId);
+  const currentTitle = activeSession ? activeSession.title : state.gatewayConnected ? "Hermes Aura \u2014 \u8BF7\u9009\u62E9\u6216\u65B0\u5EFA\u4F1A\u8BDD" : "\u672A\u8FDE\u63A5\u7F51\u5173";
+  const html = `
+    <!-- Top Purified Titlebar -->
+    ${renderTitlebar({
+    platform: state.platform,
+    title: currentTitle,
+    isMaximized: state.isMaximized,
+    gatewayConnected: state.gatewayConnected
+  })}
+
+    <!-- Main Body Container -->
+    <div class="aura-body-container" style="flex: 1; display: flex; position: relative; overflow: hidden;">
+      <!-- Left Rail -->
+      ${renderLeftRail({
+    collapsed: state.leftRailCollapsed,
+    activeSessionId: state.activeSessionId,
+    sessions: state.sessions,
+    profileName: state.profileName,
+    gatewayOnline: state.gatewayConnected,
+    gatewayLatencyMs: state.gatewayLatencyMs
+  })}
+
+      <!-- Middle Conversation Pod (Full Bleed Fluid Canvas) -->
+      ${renderMiddlePod({
+    gatewayConnected: state.gatewayConnected,
+    gatewayConnecting: state.gatewayConnecting,
+    gatewayUrl: state.gatewayUrl,
+    gatewayType: state.gatewayType,
+    username: state.username,
+    password: state.password,
+    token: state.token,
+    profileName: state.profileName,
+    messages: state.messages,
+    testStatus: state.testStatus
+  })}
+
+      <!-- Floating Input Dock (Strict Golden Width Constraint) -->
+      ${state.gatewayConnected ? renderInputDock({
+    selectedModel: state.selectedModel,
+    models: state.availableModels,
+    reasoningLevel: state.reasoningLevel,
+    approvalMode: state.approvalMode,
+    isStreaming: state.isStreaming,
+    disabled: !state.gatewayConnected
+  }) : ""}
+
+      <!-- Adaptive Inspection Pod (OpenChamber Vertical Tab Rail) -->
+      ${renderInspectionPod({
+    collapsed: state.inspectorCollapsed,
+    activeTab: state.activeInspectorTab,
+    gatewayConnected: state.gatewayConnected
+  })}
+    </div>
+
+    <!-- Bottom Minimal Status Bar -->
+    ${renderStatusBar({
+    connectionStatus: state.gatewayConnected ? "connected" : state.gatewayConnecting ? "connecting" : "disconnected",
+    latencyMs: state.gatewayLatencyMs
+  })}
+
+    <!-- Settings Modal Drawer -->
+    ${renderSettingsModal({
+    isOpen: state.isSettingsOpen,
+    activeTab: state.settingsTab,
+    gatewayUrl: state.gatewayUrl,
+    gatewayType: state.gatewayType,
+    username: state.username,
+    password: state.password,
+    token: state.token,
+    profileName: state.profileName,
+    theme: state.theme,
+    lang: state.lang,
+    connectionStatus: state.gatewayConnected ? "connected" : state.gatewayConnecting ? "connecting" : "disconnected",
+    latencyMs: state.gatewayLatencyMs,
+    testStatus: state.testStatus
+  })}
+  `;
+  root.innerHTML = html;
+  bindEvents();
+}
+function renderMessagesStream() {
+  const container = document.querySelector(".content-fluid-canvas");
+  if (!container || !state.gatewayConnected) return;
+  const html = state.messages.length === 0 ? `
+      <div style="max-width: 540px; margin: 80px auto 0; text-align: center; color: var(--text-muted);">
+        <h3 style="font-size: 16px; font-weight: 600; color: var(--text-main); margin-bottom: 8px;">Hermes Aura \u5DE5\u4F5C\u53F0\u5DF2\u5C31\u7EEA</h3>
+        <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.6;">\u5728\u4E0B\u65B9\u8F93\u5165\u6846\u4E2D\u4E0B\u8FBE\u4EFB\u52A1\uFF0C\u5F00\u542F\u5168\u81EA\u4E3B Agent \u6267\u884C\u6D41\u3002</p>
+      </div>
+    ` : state.messages.map((m) => {
+    if (m.role === "user") {
+      return `
+              <div class="message-row user-row" style="display: flex; justify-content: flex-end; width: 100%;">
+                <div class="user-bubble" style="max-width: 760px; background: var(--bg-card); border: 1px solid var(--border-medium); border-radius: 12px 12px 2px 12px; padding: 12px 16px; color: var(--text-main); font-size: 13.5px; line-height: 1.6;">
+                  ${escapeHtml7(m.content)}
+                </div>
+              </div>
+            `;
+    }
+    return `
+            <div class="message-row assistant-row" style="display: flex; flex-direction: column; gap: 10px; width: 100%;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 11px; font-weight: 700; color: var(--accent); text-transform: uppercase;">HERMES AGENT</span>
+                <span style="font-size: 10px; color: var(--text-muted);">${escapeHtml7(m.timestamp)}</span>
+              </div>
+              ${m.thought ? `
+                <details class="thinking-fold" open style="background: var(--bg-panel); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px; font-size: 12px;">
+                  <summary style="cursor: pointer; color: var(--text-muted); font-weight: 500;">\u{1F9E0} \u601D\u7EF4\u63A8\u7406\u94FE</summary>
+                  <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle); color: var(--text-secondary); font-family: var(--font-mono); font-size: 11.5px; white-space: pre-wrap;">${escapeHtml7(m.thought)}</div>
+                </details>
+              ` : ""}
+              <div class="assistant-content prose-block" style="color: var(--text-main); font-size: 13.5px; line-height: 1.65;">
+                <p style="margin: 0; white-space: pre-wrap;">${escapeHtml7(m.content)}</p>
+              </div>
+            </div>
+          `;
+  }).join("");
+  container.innerHTML = html;
+  const stream = document.getElementById("conversation-stream");
+  if (stream) stream.scrollTop = stream.scrollHeight;
+}
+function bindEvents() {
+  const minBtn = document.getElementById("win-min-btn");
+  const maxBtn = document.getElementById("win-max-btn");
+  const closeBtn = document.getElementById("win-close-btn");
+  if (minBtn) minBtn.onclick = () => desktopApi?.minimize();
+  if (maxBtn) {
+    maxBtn.onclick = async () => {
+      if (desktopApi) {
+        state.isMaximized = await desktopApi.maximize();
+        render();
+      }
+    };
+  }
+  if (closeBtn) closeBtn.onclick = () => desktopApi?.close();
+  const macClose = document.querySelector(".traffic-close");
+  const macMin = document.querySelector(".traffic-min");
+  const macMax = document.querySelector(".traffic-max");
+  if (macClose) macClose.onclick = () => desktopApi?.close();
+  if (macMin) macMin.onclick = () => desktopApi?.minimize();
+  if (macMax) {
+    macMax.onclick = async () => {
+      if (desktopApi) {
+        state.isMaximized = await desktopApi.maximize();
+        render();
+      }
+    };
+  }
+  const toggleLeftRail = document.getElementById("toggle-left-rail-btn");
+  if (toggleLeftRail) {
+    toggleLeftRail.onclick = () => {
+      state.leftRailCollapsed = !state.leftRailCollapsed;
+      render();
+    };
+  }
+  const toggleInspector = document.getElementById("toggle-inspector-btn");
+  if (toggleInspector) {
+    toggleInspector.onclick = () => {
+      state.inspectorCollapsed = !state.inspectorCollapsed;
+      render();
+    };
+  }
+  const btnOpenSettings = document.getElementById("btn-open-settings");
+  if (btnOpenSettings) {
+    btnOpenSettings.onclick = () => {
+      state.isSettingsOpen = true;
+      state.settingsTab = "gateway";
+      render();
+    };
+  }
+  const railSettingsBtn = document.getElementById("rail-footer-settings-btn");
+  if (railSettingsBtn) {
+    railSettingsBtn.onclick = () => {
+      state.isSettingsOpen = true;
+      state.settingsTab = "gateway";
+      render();
+    };
+  }
+  const statusBar = document.getElementById("app-status-bar");
+  if (statusBar) {
+    statusBar.onclick = () => {
+      state.isSettingsOpen = true;
+      state.settingsTab = "gateway";
+      render();
+    };
+  }
+  const btnCloseSettings = document.getElementById("btn-close-settings");
+  if (btnCloseSettings) {
+    btnCloseSettings.onclick = () => {
+      state.isSettingsOpen = false;
+      render();
+    };
+  }
+  const modalBackdrop = document.querySelector(".settings-modal-backdrop");
+  if (modalBackdrop) {
+    modalBackdrop.onclick = (e) => {
+      if (e.target === modalBackdrop) {
+        state.isSettingsOpen = false;
+        render();
+      }
+    };
+  }
+  document.querySelectorAll(".settings-tab-btn").forEach((btn) => {
+    btn.onclick = (e) => {
+      const tab = e.currentTarget.getAttribute("data-tab");
+      if (tab) {
+        state.settingsTab = tab;
+        render();
+      }
+    };
+  });
+  document.querySelectorAll(".settings-lang-btn").forEach((btn) => {
+    btn.onclick = (e) => {
+      const lang = e.currentTarget.getAttribute("data-lang");
+      if (lang) {
+        state.lang = lang;
+        localStorage.setItem("hermes_aura_lang", lang);
+        render();
+      }
+    };
+  });
+  document.querySelectorAll(".settings-theme-btn").forEach((btn) => {
+    btn.onclick = (e) => {
+      const theme = e.currentTarget.getAttribute("data-theme");
+      if (theme) {
+        state.theme = theme;
+        localStorage.setItem("hermes_aura_theme", theme);
+        render();
+      }
+    };
+  });
+  const channelBtns = document.querySelectorAll(".channel-toggle-btn");
+  channelBtns.forEach((btn) => {
+    btn.onclick = () => {
+      const type = btn.dataset.type;
+      if (type) {
+        state.gatewayType = type;
+        localStorage.setItem("hermes_aura_gateway_type", type);
+        render();
+      }
+    };
+  });
+  const btnSettingsTest = document.getElementById("btn-settings-test-connection");
+  if (btnSettingsTest) {
+    btnSettingsTest.onclick = async () => {
+      const urlInput = document.getElementById("settings-gateway-url");
+      const userInput = document.getElementById("settings-username");
+      const passInput = document.getElementById("settings-password");
+      const keyInput = document.getElementById("settings-api-key");
+      if (urlInput) {
+        state.gatewayUrl = urlInput.value;
+        localStorage.setItem("hermes_aura_gateway_url", urlInput.value);
+      }
+      if (userInput) {
+        state.username = userInput.value;
+        localStorage.setItem("hermes_aura_username", userInput.value);
+      }
+      if (passInput) {
+        state.password = passInput.value;
+        localStorage.setItem("hermes_aura_password", passInput.value);
+      }
+      if (keyInput) {
+        state.token = keyInput.value;
+        localStorage.setItem("hermes_aura_token", keyInput.value);
+      }
+      btnSettingsTest.innerText = "\u6D4B\u8BD5\u4E2D...";
+      const res = await testConnection(
+        state.gatewayUrl,
+        state.gatewayType,
+        state.username,
+        state.password,
+        state.token
+      );
+      state.testStatus = res;
+      render();
+    };
+  }
+  const btnSettingsSave = document.getElementById("btn-settings-save-connect");
+  if (btnSettingsSave) {
+    btnSettingsSave.onclick = async () => {
+      const urlInput = document.getElementById("settings-gateway-url");
+      const userInput = document.getElementById("settings-username");
+      const passInput = document.getElementById("settings-password");
+      const keyInput = document.getElementById("settings-api-key");
+      const profileInput = document.getElementById("settings-profile-name");
+      if (urlInput) {
+        state.gatewayUrl = urlInput.value;
+        localStorage.setItem("hermes_aura_gateway_url", urlInput.value);
+      }
+      if (userInput) {
+        state.username = userInput.value;
+        localStorage.setItem("hermes_aura_username", userInput.value);
+      }
+      if (passInput) {
+        state.password = passInput.value;
+        localStorage.setItem("hermes_aura_password", passInput.value);
+      }
+      if (keyInput) {
+        state.token = keyInput.value;
+        localStorage.setItem("hermes_aura_token", keyInput.value);
+      }
+      if (profileInput) {
+        state.profileName = profileInput.value;
+        localStorage.setItem("hermes_aura_profile", profileInput.value);
+      }
+      await connect();
+      if (state.gatewayConnected) {
+        state.isSettingsOpen = false;
+        render();
+      }
+    };
+  }
+  const btnDisconnect = document.getElementById("btn-disconnect-gateway");
+  if (btnDisconnect) {
+    btnDisconnect.onclick = () => {
+      disconnect();
+    };
+  }
+  const onboardingChannelBtns = document.querySelectorAll(".onboarding-channel-btn");
+  onboardingChannelBtns.forEach((btn) => {
+    btn.onclick = () => {
+      const type = btn.dataset.type;
+      if (type) {
+        state.gatewayType = type;
+        localStorage.setItem("hermes_aura_gateway_type", type);
+        render();
+      }
+    };
+  });
+  const btnOnboardingTest = document.getElementById("btn-test-connection");
+  if (btnOnboardingTest) {
+    btnOnboardingTest.onclick = async () => {
+      const urlInput = document.getElementById("onboarding-gateway-url");
+      const userInput = document.getElementById("onboarding-username");
+      const passInput = document.getElementById("onboarding-password");
+      const keyInput = document.getElementById("onboarding-api-key");
+      if (urlInput) {
+        state.gatewayUrl = urlInput.value;
+        localStorage.setItem("hermes_aura_gateway_url", urlInput.value);
+      }
+      if (userInput) {
+        state.username = userInput.value;
+        localStorage.setItem("hermes_aura_username", userInput.value);
+      }
+      if (passInput) {
+        state.password = passInput.value;
+        localStorage.setItem("hermes_aura_password", passInput.value);
+      }
+      if (keyInput) {
+        state.token = keyInput.value;
+        localStorage.setItem("hermes_aura_token", keyInput.value);
+      }
+      btnOnboardingTest.innerText = "\u6D4B\u8BD5\u4E2D...";
+      const res = await testConnection(
+        state.gatewayUrl,
+        state.gatewayType,
+        state.username,
+        state.password,
+        state.token
+      );
+      state.testStatus = res;
+      render();
+    };
+  }
+  const btnOnboardingConnect = document.getElementById("btn-save-and-connect");
+  if (btnOnboardingConnect) {
+    btnOnboardingConnect.onclick = async () => {
+      const urlInput = document.getElementById("onboarding-gateway-url");
+      const userInput = document.getElementById("onboarding-username");
+      const passInput = document.getElementById("onboarding-password");
+      const keyInput = document.getElementById("onboarding-api-key");
+      const profileInput = document.getElementById("onboarding-profile-name");
+      if (urlInput) {
+        state.gatewayUrl = urlInput.value;
+        localStorage.setItem("hermes_aura_gateway_url", urlInput.value);
+      }
+      if (userInput) {
+        state.username = userInput.value;
+        localStorage.setItem("hermes_aura_username", userInput.value);
+      }
+      if (passInput) {
+        state.password = passInput.value;
+        localStorage.setItem("hermes_aura_password", passInput.value);
+      }
+      if (keyInput) {
+        state.token = keyInput.value;
+        localStorage.setItem("hermes_aura_token", keyInput.value);
+      }
+      if (profileInput) {
+        state.profileName = profileInput.value;
+        localStorage.setItem("hermes_aura_profile", profileInput.value);
+      }
+      await connect();
+    };
+  }
+  const btnNewChat = document.getElementById("new-chat-btn");
+  if (btnNewChat) {
+    btnNewChat.onclick = () => {
+      createNewSession();
+    };
+  }
+  document.querySelectorAll(".session-item").forEach((item) => {
+    item.onclick = (e) => {
+      const id = e.currentTarget.getAttribute("data-id");
+      if (id) selectSession(id);
+    };
+  });
+  const searchInput = document.getElementById("session-search-input");
+  if (searchInput) {
+    searchInput.oninput = (e) => {
+      const query = e.target.value.toLowerCase();
+      document.querySelectorAll(".session-item").forEach((item) => {
+        const title = item.querySelector(".session-title")?.textContent?.toLowerCase() || "";
+        item.style.display = title.includes(query) ? "flex" : "none";
+      });
+    };
+  }
+  document.querySelectorAll(".vertical-tab-item").forEach((btn) => {
+    btn.onclick = (e) => {
+      const tab = e.currentTarget.getAttribute("data-tab");
+      if (tab) {
+        state.activeInspectorTab = tab;
+        render();
+      }
+    };
+  });
+  const modelBtn = document.getElementById("dock-model-selector-btn");
+  const modelDropdown = document.getElementById("dock-model-dropdown");
+  if (modelBtn && modelDropdown) {
+    modelBtn.onclick = (e) => {
+      e.stopPropagation();
+      modelDropdown.style.display = modelDropdown.style.display === "block" ? "none" : "block";
+    };
+    document.addEventListener("click", () => {
+      modelDropdown.style.display = "none";
+    });
+  }
+  document.querySelectorAll(".model-option").forEach((opt) => {
+    opt.onclick = (e) => {
+      const model = e.currentTarget.getAttribute("data-model");
+      if (model) {
+        state.selectedModel = model;
+        render();
+      }
+    };
+  });
+  document.querySelectorAll(".seg-btn").forEach((btn) => {
+    btn.onclick = (e) => {
+      const lvl = e.currentTarget.getAttribute("data-level");
+      if (lvl) {
+        state.reasoningLevel = lvl;
+        render();
+      }
+    };
+  });
+  document.querySelectorAll(".approval-btn").forEach((btn) => {
+    btn.onclick = (e) => {
+      const mode = e.currentTarget.getAttribute("data-mode");
+      if (mode) {
+        state.approvalMode = mode;
+        render();
+      }
+    };
+  });
+  const attachBtn = document.getElementById("dock-attach-file-btn");
+  if (attachBtn) {
+    attachBtn.onclick = async () => {
+      if (desktopApi?.openFileDialog) {
+        const paths = await desktopApi.openFileDialog();
+        if (paths && paths.length > 0) {
+          const input = document.getElementById("dock-prompt-input");
+          if (input) {
+            input.value += `
+[\u9644\u52A0\u6587\u4EF6: ${paths.join(", ")}]`;
+          }
+        }
+      }
+    };
+  }
+  const sendBtn = document.getElementById("dock-send-btn");
+  const inputEl = document.getElementById("dock-prompt-input");
+  const handleSend = () => {
+    if (!inputEl) return;
+    const text = inputEl.value.trim();
+    if (!text) return;
+    inputEl.value = "";
+    sendMessage(text);
+  };
+  if (sendBtn) sendBtn.onclick = handleSend;
+  if (inputEl) {
+    inputEl.onkeydown = (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        handleSend();
+      }
+    };
+  }
+}
+function escapeHtml7(str) {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+window.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+    e.preventDefault();
+    state.leftRailCollapsed = !state.leftRailCollapsed;
+    render();
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key === "\\") {
+    e.preventDefault();
+    state.inspectorCollapsed = !state.inspectorCollapsed;
+    render();
+  }
+  if (e.key === "Escape" && state.isSettingsOpen) {
+    state.isSettingsOpen = false;
+    render();
+  }
+});
+initPlatform().then(() => render());
+//# sourceMappingURL=index.js.map
+
+  </script>
+</body>
+</html>

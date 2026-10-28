@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "@hermes-aura/core": ["../core/src/index.ts"],
+      "@hermes-aura/ui": ["../ui/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*"]
+}

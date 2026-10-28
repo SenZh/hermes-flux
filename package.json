@@ -1,0 +1,26 @@
+{
+  "name": "hermes-aura-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hermes Aura: The Elegant Universal Workspace for Hermes Agent (Desktop, Web, iOS, Android)",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build:core": "npm --workspace=@hermes-aura/core run build",
+    "build:ui": "npm --workspace=@hermes-aura/ui run build",
+    "build:desktop": "npm --workspace=@hermes-aura/desktop run build",
+    "build": "npm run build:core && npm run build:ui && npm run build:desktop",
+    "package:desktop:win": "npm --workspace=@hermes-aura/desktop run package:win",
+    "package:desktop:win:dir": "npm --workspace=@hermes-aura/desktop run package:win:dir",
+    "test": "node --test --test-reporter spec 'packages/**/__tests__/**/*.test.mjs'",
+    "lint": "echo 'Checking monorepo lint...'",
+    "typecheck": "npm run build:core && npm run build:ui && npm --workspace=@hermes-aura/desktop run typecheck"
+  },
+  "devDependencies": {
+    "electron": "34.2.0",
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.8.0"
+  }
+}

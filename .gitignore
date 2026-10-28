@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Builds & Binaries
+dist/
+release/
+build/
+*.exe
+*.zip
+*.dmg
+*.AppImage
+
+# Environment & Credentials (STRICT)
+.env
+.env.*
+*.local
+credentials.json
+*.key
+*.pem
+
+# Test & Logs
+coverage/
+*.log
+npm-debug.log*
+.tsbuildinfo

@@ -1,0 +1,28 @@
+{
+  "name": "@hermes-aura/desktop",
+  "version": "0.1.0",
+  "author": "Nous Research / Hermes Aura Team",
+  "private": true,
+  "description": "Hermes Aura Desktop: The Elegant Universal Workspace for Windows, macOS, and Linux",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist release",
+    "start": "node scripts/build.mjs && electron dist/main/index.js",
+    "package:win": "node scripts/package-win.mjs",
+    "package:win:dir": "node scripts/package-win.mjs --dir",
+    "package:win:portable": "node scripts/package-win.mjs --portable",
+    "package:mac": "node scripts/build.mjs && electron-builder --mac",
+    "package:linux": "node scripts/build.mjs && electron-builder --linux"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@hermes-aura/core": "workspace:*",
+    "@hermes-aura/ui": "workspace:*",
+    "electron": "34.2.0",
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.8.0"
+  }
+}

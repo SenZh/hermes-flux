@@ -1,0 +1,197 @@
+/* ==========================================================================
+   HERMES AURA DESKTOP — CORE STYLES & DESIGN TOKENS
+   Strict adherence to desktop-design-system-spec.md (v3.0)
+   ========================================================================== */
+
+:root {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, "SF Mono", monospace;
+
+  --radius-window: 14px;
+  --radius-panel: 10px;
+  --radius-card: 10px;
+  --radius-inner: 6px;
+  --radius-pill: 9999px;
+
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 140ms;
+  --duration-normal: 240ms;
+}
+
+/* THEME A: OBSIDIAN GOLD (黑曜琥珀) */
+[data-theme="obsidian-gold"] {
+  --bg-window: #090A0F;
+  --bg-rail: #0E1015;
+  --bg-panel: #111318;
+  --bg-card: #151720;
+  --bg-card-hover: #1B1E29;
+  --bg-card-active: #222634;
+  --bg-elevated: #1F2230;
+  --bg-input: #12141A;
+  --bg-code: #0A0B10;
+  --bg-backdrop: rgba(18, 20, 27, 0.88);
+
+  --accent: #F59E0B;
+  --accent-hover: #FBBF24;
+  --accent-dim: #D97706;
+  --accent-glow: rgba(245, 158, 11, 0.25);
+  --accent-subtle: rgba(245, 158, 11, 0.09);
+  --accent-border: rgba(245, 158, 11, 0.35);
+  --accent-text: #FEF3C7;
+
+  --text-main: #F8FAFC;
+  --text-secondary: #94A3B8;
+  --text-muted: #64748B;
+  --text-faint: #334155;
+
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-medium: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --specular-line: inset 0 1px 0 0 rgba(255, 255, 255, 0.10);
+
+  --shadow-window: 0 24px 70px -12px rgba(0, 0, 0, 0.85);
+  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.45);
+  --shadow-dock: 0 20px 48px -10px rgba(0, 0, 0, 0.75);
+
+  --jade-pulse: #10B981;
+  --jade-glow: rgba(16, 185, 129, 0.45);
+}
+
+/* THEME B: SUET WHITE JADE (羊脂白玉) */
+[data-theme="suet-jade"],
+[data-theme="jade-white"] {
+  --bg-window: #F4F6F9;
+  --bg-rail: #E9ECF2;
+  --bg-panel: #FAFAFC;
+  --bg-card: #FFFFFF;
+  --bg-card-hover: #F1F4F9;
+  --bg-card-active: #E5E9F2;
+  --bg-elevated: #FFFFFF;
+  --bg-input: #FFFFFF;
+  --bg-code: #F4F6FA;
+  --bg-backdrop: rgba(255, 255, 255, 0.90);
+
+  --accent: #0D7A5E;
+  --accent-hover: #0B6850;
+  --accent-dim: #095743;
+  --accent-glow: rgba(13, 122, 94, 0.20);
+  --accent-subtle: rgba(13, 122, 94, 0.08);
+  --accent-border: rgba(13, 122, 94, 0.32);
+  --accent-text: #08523F;
+
+  --text-main: #0F172A;
+  --text-secondary: #475569;
+  --text-muted: #64748B;
+  --text-faint: #94A3B8;
+
+  --border-subtle: rgba(0, 0, 0, 0.06);
+  --border-medium: rgba(0, 0, 0, 0.10);
+  --border-strong: rgba(0, 0, 0, 0.18);
+  --specular-line: inset 0 1px 0 0 rgba(255, 255, 255, 0.90);
+
+  --shadow-window: 0 24px 60px -12px rgba(15, 23, 42, 0.18);
+  --shadow-card: 0 2px 12px rgba(15, 23, 42, 0.06);
+  --shadow-dock: 0 16px 40px -10px rgba(15, 23, 42, 0.14);
+
+  --jade-pulse: #059669;
+  --jade-glow: rgba(5, 150, 105, 0.40);
+  --theme-thumb-color: #FFFFFF;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  background: var(--bg-window);
+  color: var(--text-main);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#aura-app-root {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.aura-body-container {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Scrollbar Customization */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.35);
+}
+
+/* Animations */
+@keyframes aura-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.3);
+    opacity: 1;
+  }
+}
+
+/* Windows Caption Buttons Hover */
+.win-cap-btn:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: var(--text-main) !important;
+}
+
+.win-cap-close:hover {
+  background: #E81123 !important;
+  color: #FFFFFF !important;
+}
+
+/* Buttons and Interactive Elements */
+button {
+  font-family: inherit;
+  transition: all var(--duration-fast) ease;
+}
+
+button:active {
+  transform: scale(0.97);
+}
+
+.session-item:hover {
+  background: var(--bg-card-hover) !important;
+}
+
+.seg-btn:hover {
+  opacity: 0.9;
+}
+
+.send-action-btn:hover {
+  filter: brightness(1.1);
+  box-shadow: 0 0 12px var(--accent-glow);
+}

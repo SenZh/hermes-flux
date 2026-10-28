@@ -1,0 +1,20 @@
+{
+  "name": "@hermes-aura/ui",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Hermes Aura UI Component Layer & Design System (Director Masterpiece v3.0)",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@hermes-aura/core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0"
+  }
+}
