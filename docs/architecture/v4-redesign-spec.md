@@ -1,4 +1,4 @@
-# Hermes Aura 全面重构技术方案与架构规范 (v4.0 旗舰美学与全链路闭环)
+# Hermes Flux 全面重构技术方案与架构规范 (v4.0 旗舰美学与全链路闭环)
 
 ## 一、用户意图与现状事实清单 (Facts & Intent)
 
@@ -28,7 +28,7 @@
 │                        packages/desktop                                │
 │  - main/ipc.ts: 提供底层跨域 HTTP 代理与网络诊断 IPC 管道               │
 │  - preload/index.ts: 暴露安全的 hermesDesktop.fetchHttpProxy 桥接      │
-│  - renderer/index.ts: 纯上层装配，彻底使用 @hermes-aura/core 统一客户端  │
+│  - renderer/index.ts: 纯上层装配，彻底使用 @hermes-flux/core 统一客户端  │
 │  - renderer/styles.css: 注入电影级黑曜琥珀 / 羊脂白玉双主题系统        │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │ 调用

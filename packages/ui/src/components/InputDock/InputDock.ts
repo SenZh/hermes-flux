@@ -1,5 +1,5 @@
 /**
- * Hermes Aura Floating Input Dock (v4.5 Refined)
+ * Hermes Flux Floating Input Dock (v4.5 Refined)
  * Strict Golden Width Constraint:
  * - max-width: 740px; margin: 0 auto;
  * Embedded micro-control strip:

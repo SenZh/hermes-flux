@@ -1,5 +1,5 @@
 /**
- * Hermes Aura Purified Titlebar Component (v3.5)
+ * Hermes Flux Purified Titlebar Component (v3.5)
  * Purified of clutter:
  * - Only window controls, sidebar collapse button, session title, settings gear icon, inspector toggle.
  * - Language and theme toggles moved inside Settings Modal.
@@ -57,10 +57,10 @@ export function renderTitlebar(props: TitlebarProps): string {
 
   const pulseColor = props.gatewayConnected ? '#10B981' : '#64748B';
   const pulseGlow = props.gatewayConnected ? 'rgba(16, 185, 129, 0.45)' : 'none';
-  const displayTitle = props.title || (props.gatewayConnected ? 'Hermes Aura — 请选择或新建会话' : '未连接网关');
+  const displayTitle = props.title || (props.gatewayConnected ? 'Hermes Flux — 请选择或新建会话' : '未连接网关');
 
   return `
-    <header class="aura-titlebar" style="
+    <header class="flux-titlebar" style="
       height: 42px;
       min-height: 42px;
       display: flex;
@@ -159,7 +159,7 @@ export function renderTitlebar(props: TitlebarProps): string {
           box-shadow: 0 0 8px ${pulseGlow};
           display: inline-block;
           flex-shrink: 0;
-          ${props.gatewayConnected ? 'animation: aura-pulse 2.4s infinite cubic-bezier(0.4, 0, 0.6, 1);' : ''}
+          ${props.gatewayConnected ? 'animation: flux-pulse 2.4s infinite cubic-bezier(0.4, 0, 0.6, 1);' : ''}
         "></span>
         <span class="session-title-text" style="
           font-size: 13px;

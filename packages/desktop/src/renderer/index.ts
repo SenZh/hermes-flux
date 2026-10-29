@@ -1,6 +1,6 @@
 /**
- * Hermes Aura Desktop Renderer Application Entry (v4.0 Production)
- * Fully powered by @hermes-aura/core and @hermes-aura/ui
+ * Hermes Flux Desktop Renderer Application Entry (v4.0 Production)
+ * Fully powered by @hermes-flux/core and @hermes-flux/ui
  * Zero private WS glue code: Dual-channel fallback, TokenCoalescer 120 FPS stream, robust model & session lifecycle.
  */
 
@@ -18,7 +18,7 @@ import {
   renderMarkdown,
   MessageViewModel,
   InspectorTab,
-} from '@hermes-aura/ui';
+} from '@hermes-flux/ui';
 
 import {
   HermesGatewayClient,
@@ -32,7 +32,7 @@ import {
   type NormalizedSession,
   type ModelDetail,
   type AgentProfile,
-} from '@hermes-aura/core';
+} from '@hermes-flux/core';
 
 import type { HermesDesktopBridge } from '../preload/index.js';
 
@@ -97,10 +97,15 @@ interface AppState {
 
 const desktopApi: HermesDesktopBridge | undefined = window.hermesDesktop;
 
+/**
+ * Storage keys are `hermes_flux_*`; every read also falls back to the legacy
+ * `hermes_aura_*` key so profiles created before the rename keep their theme,
+ * language, gateway credentials and rail widths.
+ */
 const state: AppState = {
   platform: 'windows',
-  theme: (localStorage.getItem('hermes_aura_theme') as any) || 'obsidian-gold',
-  lang: (localStorage.getItem('hermes_aura_lang') as any) || 'zh',
+  theme: (localStorage.getItem('hermes_flux_theme') || localStorage.getItem('hermes_aura_theme') as any) || 'obsidian-gold',
+  lang: (localStorage.getItem('hermes_flux_lang') || localStorage.getItem('hermes_aura_lang') as any) || 'zh',
   isMaximized: false,
   leftRailCollapsed: false,
   inspectorCollapsed: false,
@@ -112,23 +117,23 @@ const state: AppState = {
   modelDetails: [],
   currentProvider: '',
   profiles: [],
-  profileName: localStorage.getItem('hermes_aura_profile') || 'default',
+  profileName: localStorage.getItem('hermes_flux_profile') || localStorage.getItem('hermes_aura_profile') || 'default',
   modelMenuOpen: false,
   dockNotice: '',
   sessionListError: '',
   pendingSessionIds: [],
-  favoriteModels: JSON.parse(localStorage.getItem('hermes_aura_fav_models') || '[]'),
-  recentModels: JSON.parse(localStorage.getItem('hermes_aura_recent_models') || '[]'),
+  favoriteModels: JSON.parse(localStorage.getItem('hermes_flux_fav_models') || localStorage.getItem('hermes_aura_fav_models') || '[]'),
+  recentModels: JSON.parse(localStorage.getItem('hermes_flux_recent_models') || localStorage.getItem('hermes_aura_recent_models') || '[]'),
   modelSearchQuery: '',
   reasoningLevel: 'high',
   approvalMode: 'auto',
   isStreaming: false,
   gatewayConnected: false,
-  gatewayConnecting: Boolean(localStorage.getItem('hermes_aura_gateway_url')),
+  gatewayConnecting: Boolean(localStorage.getItem('hermes_flux_gateway_url') || localStorage.getItem('hermes_aura_gateway_url')),
   gatewayLatencyMs: 0,
-  gatewayUrl: localStorage.getItem('hermes_aura_gateway_url') || 'http://127.0.0.1:9119',
-  username: localStorage.getItem('hermes_aura_username') || '',
-  password: localStorage.getItem('hermes_aura_password') || '',
+  gatewayUrl: localStorage.getItem('hermes_flux_gateway_url') || localStorage.getItem('hermes_aura_gateway_url') || 'http://127.0.0.1:9119',
+  username: localStorage.getItem('hermes_flux_username') || localStorage.getItem('hermes_aura_username') || '',
+  password: localStorage.getItem('hermes_flux_password') || localStorage.getItem('hermes_aura_password') || '',
   isSettingsOpen: false,
   settingsTab: 'gateway',
   sessions: [],
@@ -380,13 +385,14 @@ async function fetchProfiles(): Promise<void> {
     state.profiles = list;
     render();
   } catch (e) {
-    console.warn('[Aura] fetchProfiles failed:', e);
+    console.warn('[Flux] fetchProfiles failed:', e);
   }
 }
 
 async function switchProfile(name: string): Promise<void> {
   if (!name || state.profileName === name) return;
   state.profileName = name;
+  localStorage.setItem('hermes_flux_profile', name);
   localStorage.setItem('hermes_aura_profile', name);
   render();
   await Promise.allSettled([fetchSessions(), fetchModelOptions()]);
@@ -702,7 +708,7 @@ async function ensureLiveSessionId(): Promise<string> {
       return handles.liveId;
     }
   } catch (e) {
-    console.warn('[Aura] Failed to resolve live session id:', e);
+    console.warn('[Flux] Failed to resolve live session id:', e);
   }
   return '';
 }
@@ -723,7 +729,7 @@ async function createNewSession(): Promise<void> {
       });
     } catch (firstErr) {
       if (isExtraInputsError(firstErr)) {
-        console.warn('[Aura] Gateway rejected extra params on session.create, retrying minimal');
+        console.warn('[Flux] Gateway rejected extra params on session.create, retrying minimal');
         res = await gatewayClient.call<any>('session.create', {});
       } else {
         throw firstErr;
@@ -964,6 +970,7 @@ async function switchModel(model: string, provider?: string): Promise<void> {
 
   // Update recent models list (keep top 8, persist in localStorage)
   state.recentModels = [model, ...state.recentModels.filter((m) => m !== model)].slice(0, 8);
+  localStorage.setItem('hermes_flux_recent_models', JSON.stringify(state.recentModels));
   localStorage.setItem('hermes_aura_recent_models', JSON.stringify(state.recentModels));
 
   render();
@@ -1384,6 +1391,10 @@ async function connect(): Promise<void> {
     }
 
     currentTicket = test.ticket;
+    localStorage.setItem('hermes_flux_gateway_url', state.gatewayUrl);
+    localStorage.setItem('hermes_flux_username', state.username);
+    localStorage.setItem('hermes_flux_password', state.password);
+    localStorage.setItem('hermes_flux_profile', state.profileName);
     localStorage.setItem('hermes_aura_gateway_url', state.gatewayUrl);
     localStorage.setItem('hermes_aura_username', state.username);
     localStorage.setItem('hermes_aura_password', state.password);
@@ -1458,7 +1469,7 @@ async function connect(): Promise<void> {
       });
 
       rawWs.addEventListener('error', (err) => {
-        console.warn('[Aura WS] Socket error:', err);
+        console.warn('[Flux WS] Socket error:', err);
         state.gatewayConnected = false;
         state.gatewayConnecting = false;
         render();
@@ -1470,7 +1481,7 @@ async function connect(): Promise<void> {
       await Promise.allSettled([fetchSessions(), fetchModelOptions(), fetchProfiles()]);
     }
   } catch (err: any) {
-    console.error('[Aura Connect] Connection failed:', err);
+    console.error('[Flux Connect] Connection failed:', err);
     state.gatewayConnected = false;
     state.gatewayConnecting = false;
     state.testStatus = {
@@ -1556,7 +1567,7 @@ function applyStreamAnchor(anchor: StreamAnchor): void {
 }
 
 function render(): void {
-  const root = document.getElementById('aura-app-root');
+  const root = document.getElementById('flux-app-root');
   if (!root) return;
 
   // The shell re-renders by replacing innerHTML, so transient UI state (draft text,
@@ -1573,7 +1584,7 @@ function render(): void {
   document.documentElement.dataset.maximized = state.isMaximized ? 'true' : 'false';
 
   const activeSession = state.sessions.find((s) => s.id === state.activeSessionId);
-  const currentTitle = activeSession ? activeSession.title : (state.gatewayConnected ? 'Hermes Aura — 请选择或新建会话' : '未连接网关');
+  const currentTitle = activeSession ? activeSession.title : (state.gatewayConnected ? 'Hermes Flux — 请选择或新建会话' : '未连接网关');
 
   const html = `
     <!-- Top Purified Titlebar -->
@@ -1587,7 +1598,7 @@ function render(): void {
     })}
 
     <!-- Main Body Container -->
-    <div class="aura-body-container" style="flex: 1; display: flex; position: relative; overflow: hidden; width: 100%;">
+    <div class="flux-body-container" style="flex: 1; display: flex; position: relative; overflow: hidden; width: 100%;">
       <!-- Left Rail -->
       ${renderLeftRail({
         collapsed: state.leftRailCollapsed,
@@ -1837,6 +1848,7 @@ function bindEvents(): void {
       const theme = (e.currentTarget as HTMLElement).getAttribute('data-theme') as any;
       if (theme) {
         state.theme = theme;
+        localStorage.setItem('hermes_flux_theme', theme);
         localStorage.setItem('hermes_aura_theme', theme);
         render();
       }
@@ -1863,18 +1875,22 @@ function bindEvents(): void {
 
       if (urlInput) {
         state.gatewayUrl = urlInput;
+        localStorage.setItem('hermes_flux_gateway_url', urlInput);
         localStorage.setItem('hermes_aura_gateway_url', urlInput);
       }
       if (userInput !== undefined) {
         state.username = userInput;
+        localStorage.setItem('hermes_flux_username', userInput);
         localStorage.setItem('hermes_aura_username', userInput);
       }
       if (passInput !== undefined) {
         state.password = passInput;
+        localStorage.setItem('hermes_flux_password', passInput);
         localStorage.setItem('hermes_aura_password', passInput);
       }
       if (profileInput !== undefined) {
         state.profileName = profileInput || 'default';
+        localStorage.setItem('hermes_flux_profile', state.profileName);
         localStorage.setItem('hermes_aura_profile', state.profileName);
       }
 
@@ -1944,18 +1960,22 @@ function bindEvents(): void {
 
       if (urlInput) {
         state.gatewayUrl = urlInput;
+        localStorage.setItem('hermes_flux_gateway_url', urlInput);
         localStorage.setItem('hermes_aura_gateway_url', urlInput);
       }
       if (userInput !== undefined) {
         state.username = userInput;
+        localStorage.setItem('hermes_flux_username', userInput);
         localStorage.setItem('hermes_aura_username', userInput);
       }
       if (passInput !== undefined) {
         state.password = passInput;
+        localStorage.setItem('hermes_flux_password', passInput);
         localStorage.setItem('hermes_aura_password', passInput);
       }
       if (profileInput !== undefined) {
         state.profileName = profileInput || 'default';
+        localStorage.setItem('hermes_flux_profile', state.profileName);
         localStorage.setItem('hermes_aura_profile', state.profileName);
       }
 
@@ -2183,7 +2203,7 @@ function bindRailResizeEvents(): void {
     const minW = isLeft ? 200 : 300;
     const maxW = isLeft ? 450 : 600;
     const defaultW = isLeft ? 260 : 380;
-    const storageKey = isLeft ? 'hermes_aura_rail_w_left' : 'hermes_aura_rail_w_right';
+    const storageKey = isLeft ? 'hermes_flux_rail_w_left' : 'hermes_flux_rail_w_right';
 
     handle.ondblclick = (e) => {
       e.stopPropagation();
@@ -2339,9 +2359,9 @@ document.addEventListener('mousedown', (e) => {
 
 async function init(): Promise<void> {
   // Restore persisted rail widths
-  const savedLeft = localStorage.getItem('hermes_aura_rail_w_left');
+  const savedLeft = localStorage.getItem('hermes_flux_rail_w_left') || localStorage.getItem('hermes_aura_rail_w_left');
   if (savedLeft) document.documentElement.style.setProperty('--rail-w-left', `${savedLeft}px`);
-  const savedRight = localStorage.getItem('hermes_aura_rail_w_right');
+  const savedRight = localStorage.getItem('hermes_flux_rail_w_right') || localStorage.getItem('hermes_aura_rail_w_right');
   if (savedRight) document.documentElement.style.setProperty('--rail-w-right', `${savedRight}px`);
 
   if (desktopApi) {

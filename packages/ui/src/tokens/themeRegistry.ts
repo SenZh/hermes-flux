@@ -1,5 +1,5 @@
 /**
- * Hermes Aura Extensible Theme Registry (v5.0 OpenChamber Architecture)
+ * Hermes Flux Extensible Theme Registry (v5.0 OpenChamber Architecture)
  * Provides schema-validated, hot-swappable skin definitions without touching hardcoded CSS.
  */
 
@@ -215,10 +215,10 @@ export function generateSkinCssVariables(skin: SkinDefinition): string {
 /** Injects or updates active skin CSS variables directly into document head */
 export function applySkinToDom(skin: SkinDefinition): void {
   if (typeof document === 'undefined') return;
-  let styleEl = document.getElementById('aura-skin-variables') as HTMLStyleElement | null;
+  let styleEl = document.getElementById('flux-skin-variables') as HTMLStyleElement | null;
   if (!styleEl) {
     styleEl = document.createElement('style');
-    styleEl.id = 'aura-skin-variables';
+    styleEl.id = 'flux-skin-variables';
     document.head.appendChild(styleEl);
   }
   styleEl.textContent = `

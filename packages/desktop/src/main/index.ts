@@ -1,17 +1,48 @@
 /**
- * Hermes Aura Desktop Main Process
+ * Hermes Flux Desktop Main Process
  */
 
 import { app, BrowserWindow } from 'electron';
+import fs from 'node:fs';
 import path from 'node:path';
 import { createMainWindow } from './window';
 import { registerIpcHandlers } from './ipc';
-import { HermesAuraTray } from './tray';
+import { HermesFluxTray } from './tray';
+
+/**
+ * One-time migration of the legacy "Hermes Aura" profile directory.
+ * productName changed (Hermes Aura -> Hermes Flux), which relocates Electron's
+ * userData folder; copy the old profile over so gateway credentials, theme,
+ * language and rail widths survive the rename.
+ */
+function migrateLegacyUserData(): void {
+  try {
+    const appDataRoot = app.getPath('appData');
+    const currentDir = app.getPath('userData');
+    const legacyDir = path.join(appDataRoot, 'Hermes Aura');
+
+    if (currentDir === legacyDir) return;
+    if (fs.existsSync(currentDir)) return;
+    if (!fs.existsSync(legacyDir)) return;
+
+    // Skip regenerable caches so the first launch after the rename stays fast.
+    const skipped = new Set(['Cache', 'Code Cache', 'GPUCache', 'DawnGraphiteCache', 'DawnWebGPUCache', 'logs']);
+    fs.cpSync(legacyDir, currentDir, {
+      recursive: true,
+      filter: (source) => !skipped.has(path.basename(source)),
+    });
+  } catch (error) {
+    // Migration is best-effort: a fresh profile is still a valid state.
+    console.error('[Hermes Flux] Legacy profile migration failed:', error);
+  }
+}
+
+migrateLegacyUserData();
 
 // Enforce single instance lock
 const gotTheLock = app.requestSingleInstanceLock();
 let mainWindow: BrowserWindow | null = null;
-let trayManager: HermesAuraTray | null = null;
+let trayManager: HermesFluxTray | null = null;
 
 if (!gotTheLock) {
   app.quit();
@@ -31,7 +62,7 @@ if (!gotTheLock) {
     registerIpcHandlers(mainWindow);
 
     // Initialize tray
-    trayManager = new HermesAuraTray(mainWindow);
+    trayManager = new HermesFluxTray(mainWindow);
     trayManager.init();
 
     // Load renderer bundle

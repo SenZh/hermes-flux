@@ -1,4 +1,4 @@
-# Hermes Aura 动态主题引擎与扩展架构设计方案
+# Hermes Flux 动态主题引擎与扩展架构设计方案
 
 > **核心目标**：提供全平台（Web/Desktop/iOS/Android）一致的、高扩展性的动态皮肤（Skin/Theme）引擎。支持声明式 JSON/CSS Token 扩展、运行时热重载、第三方皮肤市场分发与自定义导入。
 
@@ -43,7 +43,7 @@
   "name": "Obsidian Gold",
   "displayName": "黑曜琥珀",
   "version": "1.0.0",
-  "author": "Hermes Aura Team",
+  "author": "Hermes Flux Team",
   "mode": "dark",
   "tokens": {
     "surfaces": {

@@ -1,7 +1,7 @@
 import type { ModelDetail } from '../rpc/types.js';
 
 /**
- * Domain Models for Hermes Aura
+ * Domain Models for Hermes Flux
  */
 
 export interface Session {

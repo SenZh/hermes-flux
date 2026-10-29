@@ -1,5 +1,5 @@
 /**
- * Hermes Aura Noise-Free Minimal Status Bar (v3.5)
+ * Hermes Flux Noise-Free Minimal Status Bar (v3.5)
  * Fixed 26px height.
  * Purified: Keeps ONLY real connection status indicator (red / yellow / green dot) + latency.
  * No mock HTTP2, no mock session id, no fake right-side metrics.
@@ -21,18 +21,18 @@ export function renderStatusBar(props: StatusBarProps): string {
   if (props.connectionStatus === 'connected') {
     dotColor = '#10B981'; // Green
     statusText = '已连接';
-    pulseAnimation = 'animation: aura-pulse 2.4s infinite cubic-bezier(0.4, 0, 0.6, 1);';
+    pulseAnimation = 'animation: flux-pulse 2.4s infinite cubic-bezier(0.4, 0, 0.6, 1);';
   } else if (props.connectionStatus === 'connecting') {
     dotColor = '#F59E0B'; // Amber
     statusText = '连接中...';
-    pulseAnimation = 'animation: aura-pulse 1.2s infinite ease-in-out;';
+    pulseAnimation = 'animation: flux-pulse 1.2s infinite ease-in-out;';
   }
 
   const latencyText = props.connectionStatus === 'connected' ? `${props.latencyMs}ms` : '';
   const locationText = props.serverLocation || 'Local';
 
   return `
-    <footer class="aura-status-bar" id="app-status-bar" style="
+    <footer class="flux-status-bar" id="app-status-bar" style="
       height: 28px;
       min-height: 28px;
       background: var(--bg-rail);

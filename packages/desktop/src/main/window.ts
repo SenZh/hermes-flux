@@ -1,20 +1,23 @@
 /**
- * Hermes Aura Desktop Window Factory
+ * Hermes Flux Desktop Window Factory
  * Handles platform-specific window styling, Windows 11 Mica/Acrylic, and frameless titlebar.
  */
 
 import { BrowserWindow, app } from 'electron';
+import fs from 'node:fs';
 import path from 'node:path';
 
 export function createMainWindow(): BrowserWindow {
   const isWin = process.platform === 'win32';
   const isMac = process.platform === 'darwin';
 
+  const iconPath = path.join(__dirname, '../build/icon.ico');
   const win = new BrowserWindow({
     width: 1280,
     height: 840,
     minWidth: 960,
     minHeight: 600,
+    icon: isWin && fs.existsSync(iconPath) ? iconPath : undefined,
     backgroundColor: '#090A0F',
     show: false,
     autoHideMenuBar: true,

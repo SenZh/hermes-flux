@@ -1,9 +1,9 @@
 {
-  "name": "@hermes-aura/desktop",
+  "name": "@hermes-flux/desktop",
   "version": "0.1.0",
-  "author": "Nous Research / Hermes Aura Team",
+  "author": "Nous Research / Hermes Flux Team",
   "private": true,
-  "description": "Hermes Aura Desktop: The Elegant Universal Workspace for Windows, macOS, and Linux",
+  "description": "Hermes Flux Desktop: The Elegant Universal Workspace for Windows, macOS, and Linux",
   "main": "dist/main/index.js",
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -18,8 +18,8 @@
   },
   "dependencies": {},
   "devDependencies": {
-    "@hermes-aura/core": "workspace:*",
-    "@hermes-aura/ui": "workspace:*",
+    "@hermes-flux/core": "workspace:*",
+    "@hermes-flux/ui": "workspace:*",
     "electron": "34.2.0",
     "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",

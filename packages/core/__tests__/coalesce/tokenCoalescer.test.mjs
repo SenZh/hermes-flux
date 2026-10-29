@@ -11,7 +11,7 @@ test('TokenCoalescer Streaming Coalescing Engine Unit Tests', async (t) => {
 
     coalescer.push({ messageId: 'msg-1', delta: 'Hello ' });
     coalescer.push({ messageId: 'msg-1', delta: 'Hermes ' });
-    coalescer.push({ messageId: 'msg-1', delta: 'Aura!' });
+    coalescer.push({ messageId: 'msg-1', delta: 'World!' });
 
     assert.equal(flushedBatches.length, 0, 'Should not flush synchronously before flush()');
 
@@ -20,7 +20,7 @@ test('TokenCoalescer Streaming Coalescing Engine Unit Tests', async (t) => {
     assert.equal(flushedBatches.length, 1, 'Should have exactly 1 flushed batch');
     const msg1 = flushedBatches[0].get('msg-1');
     assert.ok(msg1, 'Batch must contain msg-1');
-    assert.equal(msg1.content, 'Hello Hermes Aura!');
+    assert.equal(msg1.content, 'Hello Hermes World!');
     assert.equal(msg1.thought, '');
   });
 

@@ -1,11 +1,11 @@
 /**
- * Hermes Aura Standardized i18n Architecture (OpenChamber Parity)
+ * Hermes Flux Standardized i18n Architecture (OpenChamber Parity)
  * Flat key dictionary with compile-time parity validation.
  */
 
 export const zhDict = {
   // Titlebar & Window
-  'titlebar.defaultTitle': 'Hermes Aura — 请选择或新建会话',
+  'titlebar.defaultTitle': 'Hermes Flux — 请选择或新建会话',
   'titlebar.notConnected': '未连接网关',
   'titlebar.toggleLeftRail': '折叠/展开侧栏 (Ctrl+B)',
   'titlebar.toggleInspector': '折叠/展开检查舱 (Ctrl+\\)',
@@ -22,7 +22,7 @@ export const zhDict = {
   'rail.errorSub': '请检查网关连接后重试',
 
   // Middle Pod & Timeline
-  'chat.welcomeTitle': 'Hermes Aura 工作台已就绪',
+  'chat.welcomeTitle': 'Hermes Flux 工作台已就绪',
   'chat.welcomeSub': '在下方 740px 黄金限宽输入舱下达任务，按 Enter 发送。Hermes 将自主规划多步骤推理、调用工具链并流式呈现。',
   'chat.gatewayConnecting': '正在连接 Hermes 网关...',
   'chat.reasoning': '推理',
@@ -69,7 +69,7 @@ export const zhDict = {
 export type I18nKey = keyof typeof zhDict;
 
 export const enDict: Record<I18nKey, string> = {
-  'titlebar.defaultTitle': 'Hermes Aura — Select or create a session',
+  'titlebar.defaultTitle': 'Hermes Flux — Select or create a session',
   'titlebar.notConnected': 'Gateway Disconnected',
   'titlebar.toggleLeftRail': 'Toggle Left Rail (Ctrl+B)',
   'titlebar.toggleInspector': 'Toggle Inspector Pod (Ctrl+\\)',
@@ -84,7 +84,7 @@ export const enDict: Record<I18nKey, string> = {
   'rail.errorTitle': 'Failed to Load Sessions',
   'rail.errorSub': 'Please check gateway connection and retry',
 
-  'chat.welcomeTitle': 'Hermes Aura Workspace Ready',
+  'chat.welcomeTitle': 'Hermes Flux Workspace Ready',
   'chat.welcomeSub': 'Dispatch goals in the golden 740px dock below. Hermes will plan reasoning steps, invoke toolchains, and stream progress.',
   'chat.gatewayConnecting': 'Connecting to Hermes Gateway...',
   'chat.reasoning': 'Reasoning',

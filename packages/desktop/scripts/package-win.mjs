@@ -1,5 +1,5 @@
 /**
- * Hermes Aura Desktop Windows Packaging Automation Script
+ * Hermes Flux Desktop Windows Packaging Automation Script
  * Packages Windows portable .exe, green zip, or unpacked dir directly on Linux/Win/Mac.
  */
 
@@ -20,7 +20,7 @@ const args = process.argv.slice(2);
 const isDirOnly = args.includes('--dir');
 const isNsis = args.includes('--nsis');
 
-console.log('[Hermes Aura Windows Packager]');
+console.log('[Hermes Flux Windows Packager]');
 console.log(`  Target Platform: Windows x64`);
 console.log(`  Electron Mirror: ${process.env.ELECTRON_MIRROR}`);
 console.log(`  Target Dir: ${rootDir}/release/win-unpacked`);
@@ -37,7 +37,7 @@ buildProcess.on('close', (code) => {
     process.exit(code);
   }
 
-  console.log('[Hermes Aura Windows Packager] Invoking electron-builder for win-x64...');
+  console.log('[Hermes Flux Windows Packager] Invoking electron-builder for win-x64...');
 
   const builderArgs = ['electron-builder', '--win', '--x64'];
   if (isDirOnly || !isNsis) {
@@ -59,9 +59,9 @@ buildProcess.on('close', (code) => {
 
     // 2. Generate portable zip archive from win-unpacked if not dir-only
     if (!isDirOnly) {
-      console.log('\n[Hermes Aura Windows Packager] Compressing win-unpacked into portable green package...');
+      console.log('\n[Hermes Flux Windows Packager] Compressing win-unpacked into portable green package...');
       const unpackedDir = path.join(rootDir, 'release/win-unpacked');
-      const zipOutput = path.join(rootDir, 'release/Hermes-Aura-0.1.0-win-x64-portable.zip');
+      const zipOutput = path.join(rootDir, 'release/Hermes-Flux-0.1.0-win-x64-portable.zip');
       const zipScript = path.join(rootDir, 'scripts/make-zip.py');
 
       try {
@@ -72,9 +72,9 @@ buildProcess.on('close', (code) => {
     }
 
     console.log('\n======================================================');
-    console.log('✔ Hermes Aura Desktop Windows delivery build ready!');
-    console.log('  1. Unpacked Binary: packages/desktop/release/win-unpacked/Hermes Aura.exe');
-    console.log('  2. Portable Green Zip: packages/desktop/release/Hermes-Aura-0.1.0-win-x64-portable.zip');
+    console.log('✔ Hermes Flux Desktop Windows delivery build ready!');
+    console.log('  1. Unpacked Binary: packages/desktop/release/win-unpacked/Hermes Flux.exe');
+    console.log('  2. Portable Green Zip: packages/desktop/release/Hermes-Flux-0.1.0-win-x64-portable.zip');
     console.log('======================================================\n');
   });
 });

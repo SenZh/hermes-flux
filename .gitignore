@@ -6,6 +6,9 @@ node_modules/
 dist/
 release/
 build/
+# electron-builder build resources (brand icons) are source assets, not build output
+!packages/desktop/build/
+!packages/desktop/build/**
 *.exe
 *.zip
 *.dmg
@@ -24,3 +27,8 @@ coverage/
 *.log
 npm-debug.log*
 .tsbuildinfo
+
+# Design source files (large binaries stay local)
+*.psd
+ui/aill.jpg
+ui/icon1.jpg

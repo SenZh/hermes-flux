@@ -1,5 +1,5 @@
 /**
- * Hermes Aura Desktop Preload Script
+ * Hermes Flux Desktop Preload Script
  * Securely exposes the Platform Abstraction Layer (PAL) bridge into the renderer window.
  */
 

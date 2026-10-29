@@ -1,30 +1,37 @@
 /**
- * Hermes Aura Desktop System Tray
+ * Hermes Flux Desktop System Tray
  */
 
 import { Tray, Menu, app, BrowserWindow, nativeImage } from 'electron';
+import path from 'node:path';
+import fs from 'node:fs';
 
-export class HermesAuraTray {
+export class HermesFluxTray {
   private tray: Tray | null = null;
 
   constructor(private mainWindow: BrowserWindow) {}
 
   public init(): void {
-    // 16x16 transparent dot or simple icon for tray
-    const icon = nativeImage.createFromBuffer(
-      Buffer.from(
-        'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAMUlEQVQ4T2Nk+M/wn4EIwMjIwMDwn+E/AwN+RVjV4FNHMxhGDQAYMAhQp9jYw88/mQwMAERjFQYk1T3FAAAAAElFTkSuQmCC',
-        'base64'
-      )
-    );
+    let icon: Electron.NativeImage;
+    const trayIconPath = path.join(__dirname, '../build/icon.ico');
+    if (fs.existsSync(trayIconPath)) {
+      icon = nativeImage.createFromPath(trayIconPath).resize({ width: 16, height: 16 });
+    } else {
+      icon = nativeImage.createFromBuffer(
+        Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAMUlEQVQ4T2Nk+M/wn4EIwMjIwMDwn+E/AwN+RVjV4FNHMxhGDQAYMAhQp9jYw88/mQwMAERjFQYk1T3FAAAAAElFTkSuQmCC',
+          'base64'
+        )
+      );
+    }
 
     try {
       this.tray = new Tray(icon);
-      this.tray.setToolTip('Hermes Aura Workspace');
+      this.tray.setToolTip('Hermes Flux Workspace');
 
       const contextMenu = Menu.buildFromTemplate([
         {
-          label: '显示 Hermes Aura',
+          label: '显示 Hermes Flux',
           click: () => {
             this.mainWindow.show();
             this.mainWindow.focus();

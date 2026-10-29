@@ -1,6 +1,6 @@
-# Hermes Aura 核心技术架构与双向数据交互设计规范
+# Hermes Flux 核心技术架构与双向数据交互设计规范
 > **Document Status**: Production Architecture Specification (工业级架构设计方案)  
-> **Target System**: Hermes Aura Universal Geek Workspace (Desktop, Web, iOS, Android, VS Code)  
+> **Target System**: Hermes Flux Universal Geek Workspace (Desktop, Web, iOS, Android, VS Code)  
 > **Author**: Principal Systems Architect  
 > **Date**: October 2026  
 > **Governing Discipline**: `ENGINEERING_DISCIPLINE.md` & `AGENTS.md` (Zero-Illusion Engineering)
@@ -42,13 +42,13 @@
 
 ## 一、架构愿景与全景拓扑
 
-Hermes Aura 是面向 Hermes Agent 全生态构建的端到端、跨平台极客美学工作台。系统不仅需要支撑官方 **252 个 RPC 方法、77 种推送事件与 13 种服务端反向干预请求**，更必须在 **Desktop (macOS / Windows / Linux)**、**Mobile (iOS / Android)**、**Web 工作台** 以及 **VS Code Extension** 之间实现最高达 85% 以上的代码共享率，同时在各个宿主平台提供原生级的性能、触觉震动、物理视口交互与电影级暗黑质感。
+Hermes Flux 是面向 Hermes Agent 全生态构建的端到端、跨平台极客美学工作台。系统不仅需要支撑官方 **252 个 RPC 方法、77 种推送事件与 13 种服务端反向干预请求**，更必须在 **Desktop (macOS / Windows / Linux)**、**Mobile (iOS / Android)**、**Web 工作台** 以及 **VS Code Extension** 之间实现最高达 85% 以上的代码共享率，同时在各个宿主平台提供原生级的性能、触觉震动、物理视口交互与电影级暗黑质感。
 
 ### 1.1 系统全景分层架构图
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                               Hermes Aura Applications                                 │
+│                               Hermes Flux Applications                                 │
 │  ┌───────────────────┐  ┌───────────────────┐  ┌───────────────────┐  ┌─────────────┐  │
 │  │ packages/desktop  │  │  packages/mobile  │  │   packages/web    │  │  (VS Code)  │  │
 │  │ Electron / Tauri  │  │  Expo SDK / Cap.  │  │   Vite PWA Shell  │  │ Extension   │  │
@@ -108,7 +108,7 @@ Hermes Aura 是面向 Hermes Agent 全生态构建的端到端、跨平台极客
 采用 **Bun Workspace + Turborepo** 作为统一 monorepo 工具链，严格禁止跨包双向依赖与底层循环引用。代码仓库结构如下：
 
 ```text
-hermes-aura/
+hermes-flux/
 ├── package.json               # Root Workspace 配置
 ├── turbo.json                 # Turborepo 并行构建与拓扑依赖调度规则
 ├── packages/
@@ -1017,4 +1017,4 @@ export class TombstoneGuard {
 7. **真实 CDP 帧率与内存探针门禁**：在真实 Headed 硬件环境下测试流式打字 10 分钟，内存增长斜率（Least-squares slope）$< 0.05\text{MB/min}$，平均帧率保持在 $60 \sim 120\text{ FPS}$。
 
 ---
-*本文档为 Hermes Aura 项目跨端架构的唯一权威技术规范，任何偏离本规范的实现变更均须通过架构停机坪讨论程序批准。*
+*本文档为 Hermes Flux 项目跨端架构的唯一权威技术规范，任何偏离本规范的实现变更均须通过架构停机坪讨论程序批准。*

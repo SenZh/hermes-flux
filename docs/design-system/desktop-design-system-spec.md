@@ -1,4 +1,4 @@
-# Hermes Aura Desktop 极客美学设计系统规范 (Desktop Design System Spec)
+# Hermes Flux Desktop 极客美学设计系统规范 (Desktop Design System Spec)
 
 > **版本**：v3.1-Director Masterpiece (通栏全宽对话流 · 740px黄金收敛输入舱 · OpenChamber竖向场景轨 · 极致精简微条)  
 > **主持架构师**：Aura 设计总监兼首席 UI/UE 架构师 (Profile: aura)  

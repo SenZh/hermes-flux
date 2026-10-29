@@ -9,8 +9,8 @@
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
     "paths": {
-      "@hermes-aura/core": ["../core/src/index.ts"],
-      "@hermes-aura/ui": ["../ui/src/index.ts"]
+      "@hermes-flux/core": ["../core/src/index.ts"],
+      "@hermes-flux/ui": ["../ui/src/index.ts"]
     }
   },
   "include": ["src/**/*"]

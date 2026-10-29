@@ -1,4 +1,4 @@
-# Hermes Aura ✨
+# Hermes Flux ✨
 
 > **The Elegant Universal Workspace for Hermes Agent**  
 > 全平台极客美学工作台（覆盖 Desktop、Web、iOS 与 Android）
@@ -9,14 +9,14 @@
 
 传统 AI 命令行和大多数社区客户端充斥着糙汉极客风（生硬黑底绿字、粗糙弹窗、长段代码滑动卡顿）。
 
-**Hermes Aura** 的核心使命是：**为 Hermes Agent 打造一套具有顶级电影级暗黑美学、顺滑微交互与统一设计语言的跨端生产力工作台**。无论在 Mac 宽屏显示器、iPad、还是 iPhone / Android 竖屏上，每一次与智能体的交互都赏心悦目。
+**Hermes Flux** 的核心使命是：**为 Hermes Agent 打造一套具有顶级电影级暗黑美学、顺滑微交互与统一设计语言的跨端生产力工作台**。无论在 Mac 宽屏显示器、iPad、还是 iPhone / Android 竖屏上，每一次与智能体的交互都赏心悦目。
 
 ---
 
 ## 核心架构：现代 Monorepo (单核驱动，多端开花)
 
 ```text
-hermes-aura/
+hermes-flux/
 ├── packages/
 │   ├── ui/         # [核心] 跨端共享 React 19 UI、Tailwind 4 设计系统、Zustand 状态
 │   ├── desktop/    # [桌面端] macOS, Windows, Linux (Electron / Tauri 深度集成)

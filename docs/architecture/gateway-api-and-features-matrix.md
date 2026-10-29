@@ -1,6 +1,6 @@
 # Hermes Agent 官方协议与全平台全景对照映射表（权威基线）
 
-> **文档定位**：本文件是 **Hermes Aura**（全平台美学工作台：Desktop, Web, iOS, Android）的核心协议与功能基线。基于 Nous Research 官方 Gateway 协议定义（`contract.generated.ts`）与客户端实现源码进行 100% 逐项对齐校验，包含 **252 个 RPC 方法、77 个下行推送事件、13 个服务端反向干预请求**，并准确记录客户端目前的真实消费覆盖状态与跨端演进蓝图。
+> **文档定位**：本文件是 **Hermes Flux**（全平台美学工作台：Desktop, Web, iOS, Android）的核心协议与功能基线。基于 Nous Research 官方 Gateway 协议定义（`contract.generated.ts`）与客户端实现源码进行 100% 逐项对齐校验，包含 **252 个 RPC 方法、77 个下行推送事件、13 个服务端反向干预请求**，并准确记录客户端目前的真实消费覆盖状态与跨端演进蓝图。
 
 ---
 
@@ -448,7 +448,7 @@ Hermes 网关（Gateway）采用标准的 **JSON-RPC 2.0 over WebSocket** 双向
 | **反向干预请求** | 7 个 | **13 个** | **严重缺漏 6 个**：原文档仅列出 7 个手机端弹窗卡片，遗漏了 `display.install.sudo` 交互卡片与 5 个基于 `WINDOW_ONLY` 机制优雅阻断的桌面视口请求。 |
 | **页面路由总数** | 50 个 | **48 个** | **混淆组件与路由**：原统计将 `src/components/AppLock.tsx` 模态卡片误当做 Expo Router 路由页面，且漏登记了 `billing.tsx`、`memory.tsx`、`import.tsx`、`settings.tsx`、`projects.tsx` 页面。 |
 
-### 2. Hermes Aura 跨端攻坚清单
+### 2. Hermes Flux 跨端攻坚清单
 针对目前移动端尚未实现的 113 个高级 RPC 与 26 个下行事件，Aura 将按以下梯队攻坚：
 1. **第一梯队（多模型争鸣与 MoA 可视化）**：全面接入 `moa.progress` / `moa.reference` / `moa.aggregating` 视觉卡片，支持多模型横向投票；
 2. **第二梯队（桌面端同构接入）**：实现桌面端专属的 5 项 Server Request（`preview.act`, `preview.read`, `terminal.read`, `window.read`, `tour`），解锁桌面沉浸式预览；

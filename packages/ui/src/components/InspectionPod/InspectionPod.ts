@@ -1,5 +1,5 @@
 /**
- * Hermes Aura Streamlined File Previewer Pod (v4.0)
+ * Hermes Flux Streamlined File Previewer Pod (v4.0)
  * Width: 380px, collapsible to 0px (Shortcut: Cmd/Ctrl+\)
  * Clean single-purpose workspace file previewer for inspected artifacts, diffs and code.
  */
@@ -19,7 +19,7 @@ export interface InspectionPodProps {
 
 export function renderInspectionPod(props: InspectionPodProps): string {
   if (props.collapsed) {
-    return `<aside id="aura-inspector-pod" class="inspector-collapsed" style="width: 0px; min-width: 0px; display: none; overflow: hidden;"></aside>`;
+    return `<aside id="flux-inspector-pod" class="inspector-collapsed" style="width: 0px; min-width: 0px; display: none; overflow: hidden;"></aside>`;
   }
 
   const currentFile = props.previewFile || (props.artifacts && props.artifacts.length > 0 ? {
@@ -29,7 +29,7 @@ export function renderInspectionPod(props: InspectionPodProps): string {
   } : undefined);
 
   return `
-    <aside id="aura-inspector-pod" class="aura-inspector-pod" style="
+    <aside id="flux-inspector-pod" class="flux-inspector-pod" style="
       flex: 0 0 var(--rail-w-right, 380px);
       width: var(--rail-w-right, 380px);
       min-width: var(--rail-w-right, 380px);

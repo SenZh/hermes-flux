@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
-  "appId": "com.hermes.aura",
-  "productName": "Hermes Aura",
-  "copyright": "Copyright © 2026 Nous Research / Hermes Aura Team",
+  "appId": "com.hermesflux.desktop",
+  "productName": "Hermes Flux",
+  "copyright": "Copyright © 2026 Nous Research / Hermes Flux Team",
   "electronVersion": "34.2.0",
   "directories": {
     "output": "release",
@@ -34,7 +34,7 @@
     "allowToChangeInstallationDirectory": true,
     "createDesktopShortcut": true,
     "createStartMenuShortcut": true,
-    "shortcutName": "Hermes Aura",
+    "shortcutName": "Hermes Flux",
     "artifactName": "${productName}-${version}-win-x64-setup.${ext}"
   },
   "mac": {

@@ -118,7 +118,7 @@ html, body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-#aura-app-root {
+#flux-app-root {
   width: 100%;
   height: 100%;
   display: flex;
@@ -128,14 +128,14 @@ html, body {
 
 /* Maximized boundary enforcement: prevent any border or shadow leakage */
 html[data-maximized="true"] body,
-html[data-maximized="true"] #aura-app-root {
+html[data-maximized="true"] #flux-app-root {
   border-radius: 0 !important;
   border: none !important;
   box-shadow: none !important;
   margin: 0 !important;
 }
 
-.aura-body-container {
+.flux-body-container {
   flex: 1;
   min-height: 0;
   display: flex;
@@ -160,8 +160,8 @@ html[data-maximized="true"] #aura-app-root {
 }
 
 /* Dragging state: Disable transition & selections across entire window to maintain 120 FPS */
-html[data-rail-resizing] #aura-left-rail,
-html[data-rail-resizing] #aura-inspector-pod {
+html[data-rail-resizing] #flux-left-rail,
+html[data-rail-resizing] #flux-inspector-pod {
   transition: none !important;
 }
 html[data-rail-resizing],
@@ -190,7 +190,7 @@ html[data-rail-resizing] * {
 }
 
 /* Animations */
-@keyframes aura-pulse {
+@keyframes flux-pulse {
   0%, 100% {
     transform: scale(1);
     opacity: 0.85;

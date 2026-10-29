@@ -1,5 +1,5 @@
 /**
- * Hermes Aura Left Rail Component (v4.0 Production)
+ * Hermes Flux Left Rail Component (v4.0 Production)
  * Width: 260px, collapsible to 0px.
  * Features:
  * - Full-width "+ 新建会话" button (no inline collapse button).
@@ -37,7 +37,7 @@ export interface LeftRailProps {
 
 export function renderLeftRail(props: LeftRailProps): string {
   if (props.collapsed) {
-    return `<aside id="aura-left-rail" class="rail-collapsed" style="width: 0px; min-width: 0px; display: none; overflow: hidden;"></aside>`;
+    return `<aside id="flux-left-rail" class="rail-collapsed" style="width: 0px; min-width: 0px; display: none; overflow: hidden;"></aside>`;
   }
 
   const activeSessions = props.sessions.filter((s) => !s.isArchived);
@@ -45,7 +45,7 @@ export function renderLeftRail(props: LeftRailProps): string {
   const railError = (props.error || '').trim();
 
   return `
-    <aside id="aura-left-rail" class="aura-left-rail" style="
+    <aside id="flux-left-rail" class="flux-left-rail" style="
       flex: 0 0 var(--rail-w-left, 260px);
       width: var(--rail-w-left, 260px);
       min-width: var(--rail-w-left, 260px);

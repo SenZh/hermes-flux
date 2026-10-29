@@ -1,5 +1,5 @@
 /**
- * Hermes Aura Desktop Fast esbuild Pipeline
+ * Hermes Flux Desktop Fast esbuild Pipeline
  */
 
 import esbuild from 'esbuild';
@@ -12,7 +12,7 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
 
 async function buildAll() {
-  console.log('[Hermes Aura Build] Starting esbuild compilation...');
+  console.log('[Hermes Flux Build] Starting esbuild compilation...');
   const startTime = Date.now();
 
   // Ensure dist directories
@@ -67,13 +67,20 @@ async function buildAll() {
     path.join(rootDir, 'src/renderer/styles.css'),
     path.join(rootDir, 'dist/renderer/styles.css')
   );
+
+  // 5. Ship the brand icon next to the compiled main process
+  const iconSource = path.join(rootDir, 'build/icon.ico');
+  if (fs.existsSync(iconSource)) {
+    fs.mkdirSync(path.join(rootDir, 'dist/build'), { recursive: true });
+    fs.copyFileSync(iconSource, path.join(rootDir, 'dist/build/icon.ico'));
+  }
   console.log('  ✔ Static renderer assets copied');
 
   const elapsed = Date.now() - startTime;
-  console.log(`[Hermes Aura Build] Compilation complete in ${elapsed}ms`);
+  console.log(`[Hermes Flux Build] Compilation complete in ${elapsed}ms`);
 }
 
 buildAll().catch((err) => {
-  console.error('[Hermes Aura Build] Build failed:', err);
+  console.error('[Hermes Flux Build] Build failed:', err);
   process.exit(1);
 });

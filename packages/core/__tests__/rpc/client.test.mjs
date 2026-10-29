@@ -33,13 +33,13 @@ test('HermesGatewayClient JSON-RPC 2.0 Unit Tests', async (t) => {
       JSON.stringify({
         jsonrpc: '2.0',
         id: sentFrame.id,
-        result: { sessions: [{ id: 's-aura-01', title: 'Aura Real Session' }] },
+        result: { sessions: [{ id: 's-flux-01', title: 'Flux Real Session' }] },
       })
     );
 
     const result = await promise;
     assert.deepEqual(result, {
-      sessions: [{ id: 's-aura-01', title: 'Aura Real Session' }],
+      sessions: [{ id: 's-flux-01', title: 'Flux Real Session' }],
     });
   });
 
@@ -90,7 +90,7 @@ test('HermesGatewayClient JSON-RPC 2.0 Unit Tests', async (t) => {
         jsonrpc: '2.0',
         method: 'message.delta',
         params: {
-          session_id: 's-aura-01',
+          session_id: 's-flux-01',
           delta: '真实流式 Token',
         },
       })

@@ -1,4 +1,4 @@
-# Hermes Aura 多端无缝漫游与输入冲突终极解决方案
+# Hermes Flux 多端无缝漫游与输入冲突终极解决方案
 # (Multi-Device Shared Session Seamless Handover Spec)
 
 > **问题定义**：当用户在多个设备（如工位 Mac/PC 桌面端、手机 iOS/Android、甚至网页端）同时打开同一个 Hermes Session 时，原生网关底层将运行中的会话标记为 `running: true`，此时另一端若尝试输入，经常遭遇“会话繁忙被拒（Session Busy / 4009）”、“输入被强行打断（Hard Interrupt）”或“两端打字冲突割裂”，无法做到类似协同文档或即时通讯般的顺畅多端漫游。

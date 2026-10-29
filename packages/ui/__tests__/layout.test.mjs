@@ -71,7 +71,7 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
         {
           id: 'ast-100',
           role: 'assistant',
-          content: 'Hello, **Aura**!\n```ts\nconst a = 1;\n```',
+          content: 'Hello, **Flux**!\n```ts\nconst a = 1;\n```',
           thought: 'Analyzing code...',
           timestamp: '12:00',
         },
@@ -92,12 +92,12 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
       messages: [],
       dockHtml: '<div class="input-dock-container" data-probe="dock"></div>',
     });
-    const mainOpen = html.indexOf('class="aura-middle-pod');
+    const mainOpen = html.indexOf('class="flux-middle-pod');
     const dockAt = html.indexOf('data-probe="dock"');
     const mainClose = html.lastIndexOf('</main>');
     assert.ok(
       mainOpen >= 0 && mainOpen < dockAt && dockAt < mainClose,
-      `InputDock must be physically mounted inside <main class="aura-middle-pod"> to ensure absolute centering`
+      `InputDock must be physically mounted inside <main class="flux-middle-pod"> to ensure absolute centering`
     );
   });
 

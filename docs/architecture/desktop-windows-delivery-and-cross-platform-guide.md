@@ -1,4 +1,4 @@
-# Hermes Aura Desktop Windows 版本交付与跨平台构建指南
+# Hermes Flux Desktop Windows 版本交付与跨平台构建指南
 > **Document Status**: Production Delivery & Architecture Specification (正式交付规范)  
 > **Author**: Principal Systems Architect  
 > **Date**: October 2026  
@@ -8,11 +8,11 @@
 
 ## 一、跨端统一落地架构设计 (Unified Cross-Platform Architecture)
 
-Hermes Aura 采用现代分层 Monorepo 架构。核心业务逻辑与 UI 展现层具备 100% 平台无关性，通过平台抽象适配层 (Platform Abstraction Layer - PAL) 隔离各宿主环境特异性。
+Hermes Flux 采用现代分层 Monorepo 架构。核心业务逻辑与 UI 展现层具备 100% 平台无关性，通过平台抽象适配层 (Platform Abstraction Layer - PAL) 隔离各宿主环境特异性。
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                                 Hermes Aura Monorepo                                   │
+│                                 Hermes Flux Monorepo                                   │
 │  ┌───────────────────────┐  ┌───────────────────────┐  ┌────────────────────────────┐  │
 │  │   packages/desktop    │  │    packages/mobile    │  │        packages/web        │  │
 │  │   (Electron 34+ /     │  │    (Expo SDK / Cap.)  │  │        (Vite PWA Shell)    │  │
@@ -60,7 +60,7 @@ Hermes Aura 采用现代分层 Monorepo 架构。核心业务逻辑与 UI 展现
 
 ## 二、Windows 专属视窗特性与工业级实现
 
-针对 Windows 11 / 10 现代办公环境，Hermes Aura Desktop 完成了深度平台特质化工程落地：
+针对 Windows 11 / 10 现代办公环境，Hermes Flux Desktop 完成了深度平台特质化工程落地：
 
 ### 2.1 无边框视窗 (Frameless) 与 Aero Snap 边缘吸附
 在 `packages/desktop/src/main/window.ts` 中针对 Windows 平台配置：
@@ -96,7 +96,7 @@ if (process.platform === 'win32') {
 在 Linux (Ubuntu/Debian) 容器中直接构建 Windows x64 二进制是业界面临的一大痛点。本工程通过严格实测，论证了如下两套产物管道：
 
 ### 3.1 免 Wine 零障碍交叉构建：Windows Unpacked 目录与便携绿色 Zip
-- **实测结论**：构建包含原生 `Hermes Aura.exe`、所有 Chromium DLL、`resources/app.asar` 的 Windows x64 运行时包**完全不需要 Wine 环境**！
+- **实测结论**：构建包含原生 `Hermes Flux.exe`、所有 Chromium DLL、`resources/app.asar` 的 Windows x64 运行时包**完全不需要 Wine 环境**！
 - **底层原理**：`electron-builder` 在构建 Windows x64 目标时，直接从镜像源拉取官方编译好的预打包 Windows x64 Electron 压缩包，解压后注入编译好的 `app.asar`，生成完整的 Windows 原生执行目录。
 - **打包速度**：
   1. `esbuild` 编译 Main/Preload/Renderer 仅需 **60~100ms**；
@@ -105,7 +105,7 @@ if (process.platform === 'win32') {
   - **总耗时 < 20 秒，产物 114.16 MB**。
 
 ### 3.2 真实产物 PE32+ 二进制验证
-通过实测提取 `release/win-unpacked/Hermes Aura.exe` 的 PE 头信息证实：
+通过实测提取 `release/win-unpacked/Hermes Flux.exe` 的 PE 头信息证实：
 - `DOS Magic: MZ`
 - `PE Signature: PE\0\0`
 - `Machine Architecture: 0x8664` (`IMAGE_FILE_MACHINE_AMD64`，即标准 Windows x64 原生可执行文件)。
@@ -118,9 +118,9 @@ if (process.platform === 'win32') {
 
 | 产物路径 | 类型 | 大小 | 说明 |
 |---|---|---|---|
-| `packages/desktop/release/Hermes-Aura-0.1.0-win-x64-portable.zip` | ZIP 压缩包 | **114.16 MB** | **【推荐交付】Windows x64 便携绿色免安装包**。解压后直接双击 `Hermes Aura.exe` 即可运行。 |
+| `packages/desktop/release/Hermes-Flux-0.1.0-win-x64-portable.zip` | ZIP 压缩包 | **114.16 MB** | **【推荐交付】Windows x64 便携绿色免安装包**。解压后直接双击 `Hermes Flux.exe` 即可运行。 |
 | `packages/desktop/release/win-unpacked/` | 目录 | **236 MB** | Windows x64 解压态免安装应用目录。 |
-| `packages/desktop/release/win-unpacked/Hermes Aura.exe` | 可执行程序 | 190 MB | Windows 原生主启动程序。 |
+| `packages/desktop/release/win-unpacked/Hermes Flux.exe` | 可执行程序 | 190 MB | Windows 原生主启动程序。 |
 | `packages/desktop/dist/` | 编译代码 | 150 KB | esbuild 编译后的 Main、Preload、Renderer 自包含生产代码。 |
 
 ---
@@ -128,9 +128,9 @@ if (process.platform === 'win32') {
 ## 五、用户验证与本地开发实操指南
 
 ### 5.1 场景一：直接获取并验证 Windows 版本 (零环境门槛)
-Windows 用户只需获取 `packages/desktop/release/Hermes-Aura-0.1.0-win-x64-portable.zip`：
+Windows 用户只需获取 `packages/desktop/release/Hermes-Flux-0.1.0-win-x64-portable.zip`：
 1. 将压缩包解压至任意目录（如 `D:\HermesAura\`）；
-2. 双击 `Hermes Aura.exe` 启动；
+2. 双击 `Hermes Flux.exe` 启动；
 3. **验证重点**：
    - **视觉质感**：沉浸式深黑琥珀主题、翡翠脉冲呼吸灯、无边框亚克力背景；
    - **交互秩序**：顶栏极致净化（拔除模型与温度冗余横条）；
@@ -142,7 +142,7 @@ Windows 用户只需获取 `packages/desktop/release/Hermes-Aura-0.1.0-win-x64-p
 在 Windows 本地开发机（需 Node.js 20+）：
 ```bash
 # 1. 克隆代码后进入工程根目录
-cd hermes-aura
+cd hermes-flux
 
 # 2. 一键编译所有模块 (core, ui, desktop)
 npm run build
@@ -159,7 +159,7 @@ npm start
 npm run package:desktop:win
 
 # 产物即刻生成在:
-# packages/desktop/release/Hermes-Aura-0.1.0-win-x64-portable.zip
+# packages/desktop/release/Hermes-Flux-0.1.0-win-x64-portable.zip
 ```
 
 ---

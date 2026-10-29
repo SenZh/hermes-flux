@@ -1,5 +1,5 @@
 /**
- * Hermes Aura Middle Conversation Pod (v4.0 Production)
+ * Hermes Flux Middle Conversation Pod (v4.0 Production)
  * Full-Bleed Fluid Canvas:
  * - Canvas spans 100% width edge-to-edge between left and right rails.
  * - Golden-width composer dock floating at bottom (740px).
@@ -43,7 +43,7 @@ export function renderMiddlePod(props: MiddlePodProps): string {
   const agentDisplayName = (props.profileName || 'default').toUpperCase();
 
   return `
-    <main class="aura-middle-pod conversation-pod" style="
+    <main class="flux-middle-pod conversation-pod" style="
       flex: 1 1 0%;
       min-width: 0;
       height: 100%;
@@ -292,7 +292,7 @@ function renderWelcomeEmptyState(): string {
       ">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
       </div>
-      <h3 style="font-size: 17px; font-weight: 700; color: var(--text-main); margin: 0; letter-spacing: -0.01em;">Hermes Aura 工作台已就绪</h3>
+      <h3 style="font-size: 17px; font-weight: 700; color: var(--text-main); margin: 0; letter-spacing: -0.01em;">Hermes Flux 工作台已就绪</h3>
       <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin: 0; max-width: 480px;">
         在下方 740px 黄金限宽输入舱下达任务，按 Enter 发送。Hermes 将自主规划多步骤推理、调用工具链并流式呈现。
       </p>

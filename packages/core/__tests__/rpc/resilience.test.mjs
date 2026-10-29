@@ -92,14 +92,14 @@ test('HermesGatewayClient Resilience - Dual-Channel Fallback', async (t) => {
     const client = new HermesGatewayClient({ url: 'ws://127.0.0.1:99999', autoConnect: false });
     client.setRestFallbackHandler(async (path, options) => {
       assert.equal(path, '/api/sessions');
-      assert.equal(options?.params?.profile, 'aura-test');
+      assert.equal(options?.params?.profile, 'flux-test');
       return {
         data: [{ id: 'ses-rest-1', title: 'Restored from REST' }],
       };
     });
 
     // 2. Act
-    const sessions = await client.listSessionsSafe('aura-test');
+    const sessions = await client.listSessionsSafe('flux-test');
 
     // 3. Assert
     assert.equal(sessions.length, 1);

@@ -1,8 +1,8 @@
 {
-  "name": "hermes-aura-monorepo",
+  "name": "hermes-flux-monorepo",
   "version": "0.1.0",
   "private": true,
-  "description": "Hermes Aura: The Elegant Universal Workspace for Hermes Agent (Desktop, Web, iOS, Android)",
+  "description": "Hermes Flux: The Elegant Universal Workspace for Hermes Agent (Desktop, Web, iOS, Android)",
   "workspaces": [
     "packages/*"
   ],
@@ -11,8 +11,8 @@
     "build:ui": "tsc --build packages/ui/tsconfig.json",
     "build:desktop": "node packages/desktop/scripts/build.mjs",
     "build": "npm run build:core && npm run build:ui && npm run build:desktop",
-    "package:desktop:win": "npm --workspace=@hermes-aura/desktop run package:win",
-    "package:desktop:win:dir": "npm --workspace=@hermes-aura/desktop run package:win:dir",
+    "package:desktop:win": "npm --workspace=@hermes-flux/desktop run package:win",
+    "package:desktop:win:dir": "npm --workspace=@hermes-flux/desktop run package:win:dir",
     "test": "node --test packages/core/__tests__/**/*.test.mjs packages/ui/__tests__/**/*.test.mjs",
     "test:gateway": "node --test packages/core/__tests__/rpc/gateway-e2e.test.mjs",
     "lint": "echo 'Checking monorepo lint...'",

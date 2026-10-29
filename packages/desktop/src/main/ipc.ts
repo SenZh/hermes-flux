@@ -1,5 +1,5 @@
 /**
- * Hermes Aura Desktop IPC Handler Registration
+ * Hermes Flux Desktop IPC Handler Registration
  */
 
 import { ipcMain, BrowserWindow, shell, dialog, app } from 'electron';

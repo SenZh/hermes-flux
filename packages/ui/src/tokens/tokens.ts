@@ -1,5 +1,5 @@
 /**
- * Hermes Aura Design Tokens
+ * Hermes Flux Design Tokens
  * Conforming strictly to desktop-design-system-spec.md (v3.0-Director Masterpiece)
  */
 

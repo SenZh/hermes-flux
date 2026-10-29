@@ -1,4 +1,4 @@
-# Hermes Aura 首批 4 套顶级美学视觉方案 (Visual Directions)
+# Hermes Flux 首批 4 套顶级美学视觉方案 (Visual Directions)
 
 > **设计哲学**：
 > “高级感不是堆砌花哨的渐变，而是对**黑色的层次、光的衰减、微距边框与呼吸流动感**的极致掌控。”

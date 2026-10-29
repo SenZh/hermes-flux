@@ -13,7 +13,7 @@
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
     "paths": {
-      "@hermes-aura/core": ["../core/src/index.ts"]
+      "@hermes-flux/core": ["../core/src/index.ts"]
     }
   },
   "include": ["src/**/*"]

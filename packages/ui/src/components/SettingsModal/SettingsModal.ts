@@ -1,10 +1,10 @@
 /**
- * Hermes Aura Settings Modal Component (v3.5)
+ * Hermes Flux Settings Modal Component (v3.5)
  * Houses:
  * - Gateway connection config (URL, Auth, Profile, Test Connection, Reconnect, Disconnect)
  * - Appearance (Obsidian Gold / Suet Jade White themes)
  * - Language (Chinese / English)
- * - About Hermes Aura
+ * - About Hermes Flux
  */
 
 export interface SettingsModalProps {
@@ -23,13 +23,13 @@ export interface SettingsModalProps {
 
 export function renderSettingsModal(props: SettingsModalProps): string {
   if (!props.isOpen) {
-    return `<div id="aura-settings-modal-root" style="display: none;"></div>`;
+    return `<div id="flux-settings-modal-root" style="display: none;"></div>`;
   }
 
   const isZh = props.lang === 'zh';
 
   return `
-    <div id="aura-settings-modal-root" class="settings-modal-backdrop" style="
+    <div id="flux-settings-modal-root" class="settings-modal-backdrop" style="
       position: fixed;
       top: 0;
       left: 0;
@@ -391,7 +391,7 @@ function renderTabPane(props: SettingsModalProps): string {
             A
           </div>
           <div>
-            <h3 style="font-size: 15px; font-weight: 700; color: var(--text-main); margin: 0;">Hermes Aura Desktop</h3>
+            <h3 style="font-size: 15px; font-weight: 700; color: var(--text-main); margin: 0;">Hermes Flux Desktop</h3>
             <span style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">v0.1.0 (Production Release)</span>
           </div>
           <p style="font-size: 12px; color: var(--text-secondary); line-height: 1.6; max-width: 400px; margin: 0;">
@@ -402,7 +402,7 @@ function renderTabPane(props: SettingsModalProps): string {
             }
           </p>
           <div style="font-size: 11px; color: var(--text-muted); margin-top: 10px;">
-            Crafted by Nous Research &amp; Hermes Aura Team
+            Crafted by Nous Research &amp; Hermes Flux Team
           </div>
         </div>
       `;

@@ -1,6 +1,6 @@
-# AGENTS.md - Hermes Aura 全平台美学工作台工程规范与质量门禁指南
+# AGENTS.md - Hermes Flux 全平台美学工作台工程规范与质量门禁指南
 
-本项目是 **Hermes Aura**（面向 Hermes Agent 全生态构建的旗舰级、全平台端到端极客美学工作台，覆盖 Desktop, Web, iOS, Android）的代码库根目录。
+本项目是 **Hermes Flux**（面向 Hermes Agent 全生态构建的旗舰级、全平台端到端极客美学工作台，覆盖 Desktop, Web, iOS, Android）的代码库根目录。
 
 > **核心设计哲学**：
 > 1. **美学即生产力（Aesthetic First）**：
@@ -22,7 +22,7 @@
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────────┐
-│                   Hermes Aura Production Quality Gate Pipeline                   │
+│                   Hermes Flux Production Quality Gate Pipeline                   │
 ├─────────────────┬──────────────────┬─────────────────┬─────────────────┬─────────┤
 │  Gate 1: TYPE   │  Gate 2: TEST    │  Gate 3: INVAR  │  Gate 4: ACCESS │ Gate 5: │
 │  全栈严格类型   │  反 AI 假测试    │  正确性不变量   │  物理入口可达   │ CI 回归 │
