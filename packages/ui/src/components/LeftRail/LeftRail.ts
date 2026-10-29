@@ -46,9 +46,10 @@ export function renderLeftRail(props: LeftRailProps): string {
 
   return `
     <aside id="aura-left-rail" class="aura-left-rail" style="
-      width: 260px;
-      min-width: 260px;
-      max-width: 260px;
+      flex: 0 0 var(--rail-w-left, 260px);
+      width: var(--rail-w-left, 260px);
+      min-width: var(--rail-w-left, 260px);
+      max-width: var(--rail-w-left, 260px);
       height: 100%;
       background: var(--bg-rail);
       border-right: 1px solid var(--border-subtle);
@@ -58,6 +59,17 @@ export function renderLeftRail(props: LeftRailProps): string {
       transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1);
       position: relative;
     ">
+      <!-- Draggable Resize Handle (Left Rail Right Edge) -->
+      <div class="rail-resize-handle" data-rail-handle="left" role="separator" aria-orientation="vertical" tabindex="0" title="拖拽调整左侧栏宽度 · 双击复位" style="
+        position: absolute;
+        right: -3px;
+        top: 0;
+        bottom: 0;
+        width: 6px;
+        z-index: 60;
+        cursor: col-resize;
+        background: transparent;
+      "></div>
       <!-- New Chat Button & Search -->
       <div style="padding: 12px 14px 8px; display: flex; flex-direction: column; gap: 8px;">
         <button id="new-chat-btn" class="btn-new-chat" style="
@@ -135,14 +147,16 @@ export function renderLeftRail(props: LeftRailProps): string {
             : `
           <div style="font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; padding: 6px 8px 4px;">对话列表 (${props.sessions.length})</div>
           
-          <div style="display: flex; flex-direction: column; gap: 2px;">
+          <div style="display: flex; flex-direction: column; gap: 4px;">
             ${activeSessions
               .map((s) => {
                 const isActive = s.id === props.activeSessionId;
                 return `
                 <div class="session-item ${isActive ? 'active' : ''}" data-id="${s.id}" data-title="${escapeHtml(s.title)}" style="
-                  padding: 6px 10px;
-                  border-radius: 6px;
+                  min-height: 38px;
+                  height: 38px;
+                  padding: 0 10px;
+                  border-radius: 8px;
                   background: ${isActive ? 'var(--bg-card-active)' : 'transparent'};
                   border: 1px solid ${isActive ? 'var(--border-medium)' : 'transparent'};
                   cursor: pointer;
@@ -151,12 +165,13 @@ export function renderLeftRail(props: LeftRailProps): string {
                   justify-content: space-between;
                   gap: 8px;
                   position: relative;
-                  transition: background 0.12s ease;
+                  transition: background 0.12s ease, border-color 0.12s ease;
                 ">
-                  ${isActive ? '<div class="active-indicator" style="position: absolute; left: 0; top: 4px; bottom: 4px; width: 3px; background: var(--accent); border-radius: 0 2px 2px 0;"></div>' : ''}
+                  ${isActive ? '<div class="active-indicator" style="position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; background: var(--accent); border-radius: 0 2px 2px 0;"></div>' : ''}
                   
                   <span style="
-                    font-size: 12.5px;
+                    font-size: 13px;
+                    line-height: 20px;
                     font-weight: ${isActive ? '600' : '400'};
                     color: ${isActive ? 'var(--text-main)' : 'var(--text-secondary)'};
                     white-space: nowrap;
@@ -166,7 +181,7 @@ export function renderLeftRail(props: LeftRailProps): string {
                     padding-left: ${isActive ? '4px' : '0'};
                   ">${escapeHtml(s.title)}</span>
 
-                  <span style="font-size: 10px; color: var(--text-faint); font-family: var(--font-mono); flex-shrink: 0;">${escapeHtml(s.time || '')}</span>
+                  <span style="font-size: 10.5px; color: var(--text-faint); font-family: var(--font-mono); flex-shrink: 0;">${escapeHtml(s.time || '')}</span>
                 </div>
               `;
               })
@@ -183,16 +198,17 @@ export function renderLeftRail(props: LeftRailProps): string {
                   const isActive = s.id === props.activeSessionId;
                   return `
                   <div class="session-item ${isActive ? 'active' : ''}" data-id="${s.id}" style="
-                    padding: 8px 10px;
+                    min-height: 38px;
+                    height: 38px;
+                    padding: 0 10px;
                     border-radius: 8px;
                     background: ${isActive ? 'var(--bg-card-active)' : 'transparent'};
                     cursor: pointer;
                     display: flex;
-                    flex-direction: column;
-                    gap: 3px;
+                    align-items: center;
                     opacity: 0.7;
                   ">
-                    <span style="font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(s.title)}</span>
+                    <span style="font-size: 13px; line-height: 20px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(s.title)}</span>
                   </div>
                 `;
                 })

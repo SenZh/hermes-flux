@@ -498,6 +498,8 @@ function renderToolCapsules(m: MessageViewModel): string {
         cleanArgs = JSON.stringify(tc.args);
       }
 
+      const norm = normalizeToolOutput(tc.output);
+
       return `
         <details class="timeline-row tool-row tool-capsule" style="margin: 2px 0;">
           <summary style="
@@ -505,8 +507,8 @@ function renderToolCapsules(m: MessageViewModel): string {
             display: flex;
             align-items: center;
             gap: 7px;
-            padding: 3px 0;
-            cursor: pointer;
+            padding: 4px 0;
+            cursor: ${norm.isEmpty ? 'default' : 'pointer'};
             user-select: none;
             font-size: 13px;
             line-height: 1.5;
@@ -516,13 +518,13 @@ function renderToolCapsules(m: MessageViewModel): string {
             </span>
             <span style="font-weight: 500; color: #D1D5DB; flex-shrink: 0;">${displayName}</span>
             ${
-              cleanArgs
+              cleanArgs && cleanArgs !== '{}'
                 ? `<span style="color: #9CA3AF; font-family: var(--font-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;">${escapeHtml(cleanArgs)}</span>`
                 : ''
             }
           </summary>
           ${
-            tc.output
+            !norm.isEmpty
               ? `
             <div style="
               margin-left: 7px;
@@ -531,7 +533,7 @@ function renderToolCapsules(m: MessageViewModel): string {
               padding-left: 14px;
               border-left: 2px solid rgba(255, 255, 255, 0.08);
             ">
-              ${renderToolOutputBody(String(tc.output))}
+              ${renderToolOutputBody(norm.text, norm.isDiff)}
             </div>
           `
               : ''
@@ -542,11 +544,40 @@ function renderToolCapsules(m: MessageViewModel): string {
     .join('');
 }
 
-function renderToolOutputBody(output: string): string {
+// Normalize tool result to prevent empty output from being serialized as "{}"
+function normalizeToolOutput(output: any): { text: string; isEmpty: boolean; isDiff: boolean } {
+  if (output === null || output === undefined || output === '') {
+    return { text: '', isEmpty: true, isDiff: false };
+  }
+  let str = '';
+  if (typeof output === 'string') {
+    str = output.trim();
+    if (str === '{}' || str === 'null' || str === 'undefined') {
+      return { text: '', isEmpty: true, isDiff: false };
+    }
+  } else if (typeof output === 'object') {
+    // If output is structured { stdout, stderr, exit_code, text, result }
+    const cand = output.stdout ?? output.text ?? output.output ?? output.result ?? output.message;
+    if (typeof cand === 'string' && cand.trim() && cand.trim() !== '{}') {
+      str = cand.trim();
+    } else if (output.diff && typeof output.diff === 'string') {
+      return { text: output.diff.trim(), isEmpty: false, isDiff: true };
+    } else {
+      const keys = Object.keys(output);
+      if (keys.length === 0) return { text: '', isEmpty: true, isDiff: false };
+      str = JSON.stringify(output, null, 2);
+    }
+  } else {
+    str = String(output).trim();
+  }
+  const isDiff = str.includes('--- ') && str.includes('+++ ');
+  return { text: str, isEmpty: str.length === 0, isDiff };
+}
+
+function renderToolOutputBody(output: string, isDiff = false): string {
   if (!output) return '';
 
-  // Check if output is a git diff
-  if (output.includes('--- ') && output.includes('+++ ')) {
+  if (isDiff || (output.includes('--- ') && output.includes('+++ '))) {
     const lines = escapeHtml(output).split('\n');
     const diffHtml = lines
       .map((line) => {

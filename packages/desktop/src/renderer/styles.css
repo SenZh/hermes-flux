@@ -150,6 +150,26 @@ html[data-maximized="true"] #aura-app-root {
   contain-intrinsic-size: auto 160px;
 }
 
+/* Draggable Rail Handles */
+.rail-resize-handle {
+  transition: background-color 150ms ease;
+}
+.rail-resize-handle:hover,
+.rail-resize-handle:focus-visible {
+  background: rgba(56, 189, 248, 0.4) !important;
+}
+
+/* Dragging state: Disable transition & selections across entire window to maintain 120 FPS */
+html[data-rail-resizing] #aura-left-rail,
+html[data-rail-resizing] #aura-inspector-pod {
+  transition: none !important;
+}
+html[data-rail-resizing],
+html[data-rail-resizing] * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
 /* Scrollbar Customization */
 ::-webkit-scrollbar {
   width: 6px;

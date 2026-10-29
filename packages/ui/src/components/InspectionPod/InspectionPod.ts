@@ -30,9 +30,10 @@ export function renderInspectionPod(props: InspectionPodProps): string {
 
   return `
     <aside id="aura-inspector-pod" class="aura-inspector-pod" style="
-      width: 380px;
-      min-width: 380px;
-      max-width: 380px;
+      flex: 0 0 var(--rail-w-right, 380px);
+      width: var(--rail-w-right, 380px);
+      min-width: var(--rail-w-right, 380px);
+      max-width: var(--rail-w-right, 380px);
       height: 100%;
       background: var(--bg-panel);
       border-left: 1px solid var(--border-subtle);
@@ -41,7 +42,19 @@ export function renderInspectionPod(props: InspectionPodProps): string {
       user-select: none;
       transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1);
       overflow: hidden;
+      position: relative;
     ">
+      <!-- Draggable Resize Handle (Inspection Pod Left Edge) -->
+      <div class="rail-resize-handle" data-rail-handle="right" role="separator" aria-orientation="vertical" tabindex="0" title="拖拽调整右侧栏宽度 · 双击复位" style="
+        position: absolute;
+        left: -3px;
+        top: 0;
+        bottom: 0;
+        width: 6px;
+        z-index: 60;
+        cursor: col-resize;
+        background: transparent;
+      "></div>
       <!-- File Preview Header -->
       <div class="inspector-pane-header" style="
         height: 42px;

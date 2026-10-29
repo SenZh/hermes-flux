@@ -548,8 +548,10 @@ async function loadMessages(sessionId: string): Promise<void> {
             continue;
           }
 
+          const validToolOutput = rawText || m.output || (m.result && Object.keys(m.result).length > 0 ? JSON.stringify(m.result) : undefined);
+
           if (prev.toolCalls.length > 0) {
-            prev.toolCalls[prev.toolCalls.length - 1].output = rawText || m.output || JSON.stringify(m.result || {});
+            prev.toolCalls[prev.toolCalls.length - 1].output = validToolOutput;
             continue;
           } else {
             prev.toolCalls.push({
@@ -557,7 +559,7 @@ async function loadMessages(sessionId: string): Promise<void> {
               name: m.name || 'tool',
               status: 'completed',
               args: '',
-              output: rawText || m.output || JSON.stringify(m.result || {}),
+              output: validToolOutput,
             });
             continue;
           }
@@ -2097,6 +2099,56 @@ function bindEvents(): void {
       }
     };
   }
+
+  // Bind Draggable Rails
+  bindRailResizeEvents();
+}
+
+function bindRailResizeEvents(): void {
+  document.querySelectorAll<HTMLElement>('.rail-resize-handle').forEach((handle) => {
+    const isLeft = handle.dataset.railHandle === 'left';
+    const cssVar = isLeft ? '--rail-w-left' : '--rail-w-right';
+    const minW = isLeft ? 200 : 300;
+    const maxW = isLeft ? 450 : 600;
+    const defaultW = isLeft ? 260 : 380;
+    const storageKey = isLeft ? 'hermes_aura_rail_w_left' : 'hermes_aura_rail_w_right';
+
+    handle.ondblclick = (e) => {
+      e.stopPropagation();
+      document.documentElement.style.setProperty(cssVar, `${defaultW}px`);
+      localStorage.setItem(storageKey, String(defaultW));
+    };
+
+    handle.onpointerdown = (ev: PointerEvent) => {
+      if (ev.button !== 0) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+
+      const startX = ev.clientX;
+      const startWidth = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(cssVar)) || defaultW;
+      document.documentElement.setAttribute('data-rail-resizing', isLeft ? 'left' : 'right');
+
+      let currentW = startWidth;
+
+      const onPointerMove = (moveEv: PointerEvent) => {
+        const delta = (moveEv.clientX - startX) * (isLeft ? 1 : -1);
+        currentW = Math.max(minW, Math.min(maxW, startWidth + delta));
+        document.documentElement.style.setProperty(cssVar, `${currentW}px`);
+      };
+
+      const onPointerUp = (upEv: PointerEvent) => {
+        window.removeEventListener('pointermove', onPointerMove);
+        window.removeEventListener('pointerup', onPointerUp);
+        window.removeEventListener('pointercancel', onPointerUp);
+        document.documentElement.removeAttribute('data-rail-resizing');
+        localStorage.setItem(storageKey, String(Math.round(currentW)));
+      };
+
+      window.addEventListener('pointermove', onPointerMove, { passive: true });
+      window.addEventListener('pointerup', onPointerUp);
+      window.addEventListener('pointercancel', onPointerUp);
+    };
+  });
 }
 
 function bindModelDropdownEvents(): void {
@@ -2214,6 +2266,12 @@ document.addEventListener('mousedown', (e) => {
 });
 
 async function init(): Promise<void> {
+  // Restore persisted rail widths
+  const savedLeft = localStorage.getItem('hermes_aura_rail_w_left');
+  if (savedLeft) document.documentElement.style.setProperty('--rail-w-left', `${savedLeft}px`);
+  const savedRight = localStorage.getItem('hermes_aura_rail_w_right');
+  if (savedRight) document.documentElement.style.setProperty('--rail-w-right', `${savedRight}px`);
+
   if (desktopApi) {
     try {
       const sys = await desktopApi.getSystemInfo();
