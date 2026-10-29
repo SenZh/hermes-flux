@@ -35,6 +35,8 @@ export interface MiddlePodProps {
   messages: MessageViewModel[];
   testStatus?: { ok?: boolean; message?: string; latency?: number };
   dockHtml?: string;
+  hasOlderMessages?: boolean;
+  isLoadingOlder?: boolean;
 }
 
 export function renderMiddlePod(props: MiddlePodProps): string {
@@ -74,7 +76,15 @@ export function renderMiddlePod(props: MiddlePodProps): string {
               ? renderGatewayOnboarding(props)
               : props.messages.length === 0
               ? renderWelcomeEmptyState()
-              : props.messages
+              : `
+                ${
+                  props.hasOlderMessages
+                    ? `<div class="older-history-indicator" style="text-align: center; padding: 6px; font-size: 11px; color: var(--text-muted); opacity: 0.75; font-family: var(--font-mono);">
+                        ${props.isLoadingOlder ? '正在加载更早历史...' : '↑ 向上滚动查看更早历史'}
+                       </div>`
+                    : ''
+                }
+                ${props.messages
                   .map((m, idx, arr) => {
                     const prev = arr[idx - 1];
                     const next = arr[idx + 1];
@@ -82,7 +92,8 @@ export function renderMiddlePod(props: MiddlePodProps): string {
                     const isLastInTurn = !next || next.role !== m.role;
                     return renderMessage(m, agentDisplayName, { isFirstInTurn, isLastInTurn });
                   })
-                  .join('')
+                  .join('')}
+              `
           }
         </div>
       </div>

@@ -83,6 +83,8 @@ interface AppState {
   settingsTab: 'gateway' | 'appearance' | 'about';
   sessions: NormalizedSession[];
   messages: MessageViewModel[];
+  hasOlderMessages: boolean;
+  isLoadingOlder: boolean;
   favoriteModels: string[];
   recentModels: string[];
   modelSearchQuery: string;
@@ -131,6 +133,8 @@ const state: AppState = {
   settingsTab: 'gateway',
   sessions: [],
   messages: [],
+  hasOlderMessages: false,
+  isLoadingOlder: false,
   testStatus: undefined,
   artifacts: [],
   browserFrame: undefined,
@@ -388,12 +392,51 @@ async function switchProfile(name: string): Promise<void> {
   await Promise.allSettled([fetchSessions(), fetchModelOptions()]);
 }
 
-// In-memory LRU session messages cache to provide 0ms instant switching between conversations
+// OpenChamber Standard Message Paging: Initial Window 100 items for instant cold launch
+const INITIAL_WINDOW_PAGE_SIZE = 100;
 const sessionMessagesCache = new Map<string, MessageViewModel[]>();
+const sessionOlderQueue = new Map<string, MessageViewModel[]>();
+
+async function loadOlderMessages(): Promise<void> {
+  const sessionId = state.activeSessionId;
+  if (!sessionId || state.isLoadingOlder) return;
+
+  const queue = sessionOlderQueue.get(sessionId);
+  if (!queue || queue.length === 0) {
+    state.hasOlderMessages = false;
+    return;
+  }
+
+  state.isLoadingOlder = true;
+  const stream = document.getElementById('conversation-stream');
+  const prevScrollHeight = stream ? stream.scrollHeight : 0;
+  const prevScrollTop = stream ? stream.scrollTop : 0;
+
+  // Extract earlier slice
+  const batch = queue.slice(-INITIAL_WINDOW_PAGE_SIZE);
+  const remaining = queue.slice(0, -INITIAL_WINDOW_PAGE_SIZE);
+  sessionOlderQueue.set(sessionId, remaining);
+  state.hasOlderMessages = remaining.length > 0;
+
+  // Prepend earlier batch
+  state.messages = [...batch, ...state.messages];
+  state.isLoadingOlder = false;
+  render();
+
+  // Precise scroll compensating (Zero Jump)
+  requestAnimationFrame(() => {
+    const nextStream = document.getElementById('conversation-stream');
+    if (nextStream) {
+      const addedHeight = nextStream.scrollHeight - prevScrollHeight;
+      nextStream.scrollTop = prevScrollTop + addedHeight;
+    }
+  });
+}
 
 async function loadMessages(sessionId: string): Promise<void> {
   if (!sessionId || !gatewayClient) {
     state.messages = [];
+    state.hasOlderMessages = false;
     render();
     return;
   }
@@ -401,7 +444,14 @@ async function loadMessages(sessionId: string): Promise<void> {
   // 1. Instant cache hit: render immediately from memory without waiting for network roundtrip
   const cached = sessionMessagesCache.get(sessionId);
   if (cached && cached.length > 0) {
-    state.messages = [...cached];
+    if (cached.length > INITIAL_WINDOW_PAGE_SIZE) {
+      state.messages = cached.slice(-INITIAL_WINDOW_PAGE_SIZE);
+      sessionOlderQueue.set(sessionId, cached.slice(0, -INITIAL_WINDOW_PAGE_SIZE));
+      state.hasOlderMessages = true;
+    } else {
+      state.messages = [...cached];
+      state.hasOlderMessages = false;
+    }
     render();
   }
 
@@ -606,8 +656,18 @@ async function loadMessages(sessionId: string): Promise<void> {
       });
     }
 
-    state.messages = parsedMessages;
     sessionMessagesCache.set(sessionId, parsedMessages);
+
+    // Initial Window Splitting: Mount only latest 100 messages for instantaneous rendering
+    if (parsedMessages.length > INITIAL_WINDOW_PAGE_SIZE) {
+      state.messages = parsedMessages.slice(-INITIAL_WINDOW_PAGE_SIZE);
+      sessionOlderQueue.set(sessionId, parsedMessages.slice(0, -INITIAL_WINDOW_PAGE_SIZE));
+      state.hasOlderMessages = true;
+    } else {
+      state.messages = parsedMessages;
+      sessionOlderQueue.delete(sessionId);
+      state.hasOlderMessages = false;
+    }
 
     if (state.activeSessionId === sessionId) state.dockNotice = '';
     render();
@@ -1550,6 +1610,8 @@ function render(): void {
         profileName: state.profileName,
         messages: state.messages,
         testStatus: state.testStatus,
+        hasOlderMessages: state.hasOlderMessages,
+        isLoadingOlder: state.isLoadingOlder,
         dockHtml: state.gatewayConnected
           ? renderInputDock({
               selectedModel: state.selectedModel,
@@ -2096,6 +2158,16 @@ function bindEvents(): void {
       if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
         e.preventDefault();
         handleSend('enter');
+      }
+    };
+  }
+
+  // Scroll stream: Auto-load older messages on top reach
+  const streamEl = document.getElementById('conversation-stream');
+  if (streamEl) {
+    streamEl.onscroll = () => {
+      if (streamEl.scrollTop < 120 && state.hasOlderMessages && !state.isLoadingOlder) {
+        void loadOlderMessages();
       }
     };
   }
