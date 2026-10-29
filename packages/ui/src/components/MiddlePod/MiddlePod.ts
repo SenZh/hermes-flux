@@ -65,7 +65,12 @@ export function renderMiddlePod(props: MiddlePodProps): string {
       ">
         <div class="content-fluid-canvas" style="width: 100%; max-width: 100%; margin: 0; display: flex; flex-direction: column; gap: 24px;">
           ${
-            !props.gatewayConnected
+            props.gatewayConnecting
+              ? `<div style="max-width: 480px; margin: 120px auto 0; text-align: center; color: var(--text-muted); font-size: 13px; display: flex; flex-direction: column; align-items: center; gap: 10px;">
+                  <span style="font-size: 20px; animation: pulse 1.5s infinite;">⚡</span>
+                  <span>正在连接 Hermes 网关...</span>
+                </div>`
+              : !props.gatewayConnected
               ? renderGatewayOnboarding(props)
               : props.messages.length === 0
               ? renderWelcomeEmptyState()
@@ -299,7 +304,7 @@ export function renderMessage(
             : ''
         }
         <div class="user-bubble" style="
-          max-width: min(80%, 780px);
+          max-width: 85%;
           background: var(--bg-card);
           border: 1px solid var(--border-medium);
           border-radius: 14px 14px 3px 14px;

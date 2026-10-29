@@ -143,15 +143,58 @@ export function renderInputDock(props: InputDockProps): string {
                 bottom: 34px;
                 left: 0;
                 width: 310px;
-                background: #121212;
+                background: var(--bg-card);
                 border: 1px solid var(--border-strong);
                 border-radius: 12px;
-                box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.08);
+                box-shadow: var(--shadow-window), 0 0 0 1px var(--border-subtle);
                 overflow: hidden;
                 z-index: 200;
                 user-select: none;
               ">
-                ${renderModelPickerMenu(props)}
+                <!-- Top Action & Search Bar -->
+                <div style="padding: 10px 10px 6px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-surface-1);">
+                  <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <span id="btn-add-provider" style="font-size: 11.5px; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                      <span style="font-size: 13px;">+</span> 添加新提供商
+                    </span>
+                    <span id="btn-refresh-models" style="font-size: 11px; color: var(--text-muted); cursor: pointer;" title="刷新列表">刷新 ↻</span>
+                  </div>
+                  <div style="position: relative; display: flex; align-items: center;">
+                    <span style="position: absolute; left: 8px; color: var(--text-muted); font-size: 11.5px;">🔍</span>
+                    <input id="dock-model-search-input" type="text" placeholder="搜索模型" value="${escapeHtml(props.modelSearchQuery || '')}" style="
+                      width: 100%;
+                      height: 28px;
+                      padding: 0 10px 0 26px;
+                      border-radius: 6px;
+                      border: 1px solid var(--border-medium);
+                      background: var(--bg-panel);
+                      color: var(--text-main);
+                      font-size: 12px;
+                      outline: none;
+                      box-sizing: border-box;
+                    " />
+                  </div>
+                </div>
+
+                <!-- Scrollable Model Tree List (Dynamically updated on search) -->
+                <div id="model-picker-scroll-list" style="max-height: 320px; overflow-y: auto; padding: 6px 0;">
+                  ${renderModelPickerTree(props)}
+                </div>
+
+                <!-- Bottom Navigation Hint -->
+                <div style="
+                  padding: 6px 12px;
+                  border-top: 1px solid var(--border-subtle);
+                  background: var(--bg-surface-1);
+                  font-size: 10.5px;
+                  color: var(--text-muted);
+                  display: flex;
+                  align-items: center;
+                  justify-content: space-between;
+                ">
+                  <span>↑↓ 选择模型</span>
+                  <span>Esc 关闭</span>
+                </div>
               </div>
             </div>
 
@@ -265,7 +308,7 @@ function formatContextLength(tokens?: number): string {
   return String(tokens);
 }
 
-export function renderModelPickerMenu(props: InputDockProps): string {
+export function renderModelPickerTree(props: InputDockProps): string {
   const query = (props.modelSearchQuery || '').trim().toLowerCase();
   let allDetails = props.modelDetails && props.modelDetails.length > 0 ? props.modelDetails : [];
   if (allDetails.length === 0 && props.models && props.models.length > 0) {
@@ -306,119 +349,81 @@ export function renderModelPickerMenu(props: InputDockProps): string {
     .filter((d): d is NonNullable<typeof d> => Boolean(d));
 
   return `
-    <!-- Top Action & Search Bar -->
-    <div style="padding: 10px 10px 6px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); background: rgba(255, 255, 255, 0.02);">
-      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-        <span id="btn-add-provider" style="font-size: 11.5px; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; gap: 4px;">
-          <span style="font-size: 13px;">+</span> 添加新提供商
-        </span>
-        <span id="btn-refresh-models" style="font-size: 11px; color: var(--text-muted); cursor: pointer;" title="刷新列表">刷新 ↻</span>
-      </div>
-      <div style="position: relative; display: flex; align-items: center;">
-        <span style="position: absolute; left: 8px; color: var(--text-muted); font-size: 11.5px;">🔍</span>
-        <input id="dock-model-search-input" type="text" placeholder="搜索模型" value="${escapeHtml(props.modelSearchQuery || '')}" style="
-          width: 100%;
-          height: 28px;
-          padding: 0 10px 0 26px;
-          border-radius: 6px;
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          background: rgba(0, 0, 0, 0.35);
-          color: var(--text-main);
-          font-size: 12px;
-          outline: none;
-        " />
-      </div>
-    </div>
-
-    <!-- Scrollable Model Tree List -->
-    <div style="max-height: 320px; overflow-y: auto; padding: 6px 0;">
-      <!-- 1. Favorites Section -->
-      ${
-        !query && favoriteItems.length > 0
-          ? `
-        <div class="model-picker-section" style="margin-bottom: 6px;">
-          <div style="padding: 4px 12px; font-size: 11px; font-weight: 700; color: #38BDF8; display: flex; align-items: center; gap: 6px;">
-            <span>★</span>
-            <span>收藏</span>
-          </div>
-          ${favoriteItems.map((item) => renderModelItemRow(item, props.selectedModel, true)).join('')}
+    <!-- 1. Favorites Section -->
+    ${
+      !query && favoriteItems.length > 0
+        ? `
+      <div class="model-picker-section" style="margin-bottom: 6px;">
+        <div style="padding: 4px 12px; font-size: 11px; font-weight: 700; color: #38BDF8; display: flex; align-items: center; gap: 6px;">
+          <span>★</span>
+          <span>收藏</span>
         </div>
-      `
-          : ''
-      }
+        ${favoriteItems.map((item) => renderModelItemRow(item, props.selectedModel, true)).join('')}
+      </div>
+    `
+        : ''
+    }
 
-      <!-- 2. Recents Section -->
-      ${
-        !query && recentItems.length > 0
-          ? `
-        <div class="model-picker-section" style="margin-bottom: 6px;">
-          <div style="padding: 4px 12px; font-size: 11px; font-weight: 700; color: var(--text-muted); display: flex; align-items: center; gap: 6px;">
-            <span>🕒</span>
-            <span>最近</span>
-          </div>
-          ${recentItems.map((item) => renderModelItemRow(item, props.selectedModel, favorites.has(item.id))).join('')}
+    <!-- 2. Recents Section -->
+    ${
+      !query && recentItems.length > 0
+        ? `
+      <div class="model-picker-section" style="margin-bottom: 6px;">
+        <div style="padding: 4px 12px; font-size: 11px; font-weight: 700; color: var(--text-muted); display: flex; align-items: center; gap: 6px;">
+          <span>🕒</span>
+          <span>最近</span>
         </div>
-      `
-          : ''
-      }
+        ${recentItems.map((item) => renderModelItemRow(item, props.selectedModel, favorites.has(item.id))).join('')}
+      </div>
+    `
+        : ''
+    }
 
-      <!-- 3. Provider Grouped Sections -->
-      ${
-        Object.keys(providerGroups).length > 0
-          ? Object.entries(providerGroups)
-              .map(([providerName, models]) => {
-                const upperName = providerName.toUpperCase();
-                let icon = '⬡';
-                if (upperName.includes('OPENCODE')) icon = '📱';
-                else if (upperName.includes('CURSOR')) icon = '⬡';
-                else if (upperName.includes('ANTHROPIC') || upperName.includes('CLAUDE')) icon = '🧠';
-                else if (upperName.includes('OPENAI')) icon = '⚡';
-                else if (upperName.includes('DEEPSEEK')) icon = '🐋';
+    <!-- 3. Provider Grouped Sections -->
+    ${
+      Object.keys(providerGroups).length > 0
+        ? Object.entries(providerGroups)
+            .map(([providerName, models]) => {
+              const upperName = providerName.toUpperCase();
+              let icon = '⬡';
+              if (upperName.includes('OPENCODE')) icon = '📱';
+              else if (upperName.includes('CURSOR')) icon = '⬡';
+              else if (upperName.includes('ANTHROPIC') || upperName.includes('CLAUDE')) icon = '🧠';
+              else if (upperName.includes('OPENAI')) icon = '⚡';
+              else if (upperName.includes('DEEPSEEK')) icon = '🐋';
 
-                return `
-              <div class="model-provider-group" style="margin-bottom: 6px;">
-                <div style="
-                  padding: 5px 12px;
-                  font-size: 11px;
-                  font-weight: 700;
-                  color: var(--text-muted);
-                  letter-spacing: 0.04em;
-                  display: flex;
-                  align-items: center;
-                  justify-content: space-between;
-                  background: rgba(255, 255, 255, 0.015);
-                ">
-                  <div style="display: flex; align-items: center; gap: 6px;">
-                    <span style="opacity: 0.5;">::</span>
-                    <span>${icon}</span>
-                    <span>${escapeHtml(upperName)}</span>
-                  </div>
-                  <span style="font-size: 10px; opacity: 0.6;">▾</span>
+              return `
+            <div class="model-provider-group" style="margin-bottom: 6px;">
+              <div style="
+                padding: 5px 12px;
+                font-size: 11px;
+                font-weight: 700;
+                color: var(--text-muted);
+                letter-spacing: 0.04em;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                background: var(--bg-surface-1);
+              ">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="opacity: 0.5;">::</span>
+                  <span>${icon}</span>
+                  <span>${escapeHtml(upperName)}</span>
                 </div>
-                ${models.map((item) => renderModelItemRow(item, props.selectedModel, favorites.has(item.id))).join('')}
+                <span style="font-size: 10px; opacity: 0.6;">▾</span>
               </div>
-            `;
-              })
-              .join('')
-          : '<div style="padding: 16px; text-align: center; color: var(--text-muted); font-size: 12px;">未找到匹配的模型</div>'
-      }
-    </div>
-
-    <!-- Bottom Navigation Hint -->
-    <div style="
-      padding: 6px 12px;
-      border-top: 1px solid rgba(255, 255, 255, 0.06);
-      background: rgba(255, 255, 255, 0.02);
-      font-size: 10.5px;
-      color: var(--text-muted);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    ">
-      <span>↑↓ 选择模型</span>
-      <span>Esc 关闭</span>
-    </div>
+              ${models.map((item) => renderModelItemRow(item, props.selectedModel, favorites.has(item.id))).join('')}
+            </div>
+          `;
+            })
+            .join('')
+        : '<div style="padding: 16px; text-align: center; color: var(--text-muted); font-size: 12px;">未找到匹配的模型</div>'
+    }
   `;
+}
+
+export function renderModelPickerMenu(props: InputDockProps): string {
+  return renderModelPickerTree(props);
 }
 
 function renderModelItemRow(
@@ -433,17 +438,17 @@ function renderModelItemRow(
     <div class="model-option ${isSelected ? 'active' : ''}" data-model="${escapeHtml(item.id)}" data-provider="${escapeHtml(item.provider)}" style="
       padding: 6px 12px;
       font-size: 12px;
-      color: ${isSelected ? 'var(--accent)' : '#F5F5F7'};
+      color: ${isSelected ? 'var(--accent)' : 'var(--text-main)'};
       background: ${isSelected ? 'rgba(255, 191, 0, 0.12)' : 'transparent'};
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: space-between;
       transition: background 0.1s ease;
-    " onmouseenter="if (!this.classList.contains('active')) this.style.background='rgba(255,255,255,0.06)'" onmouseleave="if (!this.classList.contains('active')) this.style.background='transparent'">
+    " onmouseenter="if (!this.classList.contains('active')) this.style.background='var(--bg-hover)'" onmouseleave="if (!this.classList.contains('active')) this.style.background='transparent'">
       <div style="display: flex; align-items: center; gap: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
         <span class="btn-toggle-favorite" data-model="${escapeHtml(item.id)}" style="
-          color: ${isFav ? '#38BDF8' : 'rgba(255, 255, 255, 0.25)'};
+          color: ${isFav ? '#38BDF8' : 'var(--text-faint)'};
           font-size: 12px;
           cursor: pointer;
           flex-shrink: 0;

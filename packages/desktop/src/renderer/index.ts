@@ -13,6 +13,7 @@ import {
   renderStatusBar,
   renderSettingsModal,
   renderModelPickerMenu,
+  renderModelPickerTree,
   renderMessage,
   renderMarkdown,
   MessageViewModel,
@@ -121,7 +122,7 @@ const state: AppState = {
   approvalMode: 'auto',
   isStreaming: false,
   gatewayConnected: false,
-  gatewayConnecting: false,
+  gatewayConnecting: Boolean(localStorage.getItem('hermes_aura_gateway_url')),
   gatewayLatencyMs: 0,
   gatewayUrl: localStorage.getItem('hermes_aura_gateway_url') || 'http://127.0.0.1:9119',
   username: localStorage.getItem('hermes_aura_username') || '',
@@ -1671,15 +1672,6 @@ function bindEvents(): void {
     };
   }
 
-  const railSettingsBtn = document.getElementById('rail-footer-settings-btn');
-  if (railSettingsBtn) {
-    railSettingsBtn.onclick = () => {
-      state.isSettingsOpen = true;
-      state.settingsTab = 'gateway';
-      render();
-    };
-  }
-
   // Status Bar Toolbar & Node
   const statusSettings = document.getElementById('status-bar-settings-btn');
   if (statusSettings) {
@@ -2122,10 +2114,9 @@ function bindModelDropdownEvents(): void {
 }
 
 function updateModelDropdownSubtree(): void {
-  const dropdown = document.getElementById('dock-model-dropdown');
-  if (!dropdown) return;
-  const currentVal = (document.getElementById('dock-model-search-input') as HTMLInputElement | null)?.value ?? '';
-  dropdown.innerHTML = renderModelPickerMenu({
+  const scrollList = document.getElementById('model-picker-scroll-list');
+  if (!scrollList) return;
+  scrollList.innerHTML = renderModelPickerTree({
     selectedModel: state.selectedModel,
     models: state.availableModels,
     modelDetails: state.modelDetails,
@@ -2136,12 +2127,6 @@ function updateModelDropdownSubtree(): void {
     approvalMode: state.approvalMode,
     isStreaming: state.isStreaming,
   });
-  const input = document.getElementById('dock-model-search-input') as HTMLInputElement | null;
-  if (input) {
-    input.value = currentVal;
-    input.focus();
-    input.setSelectionRange(input.value.length, input.value.length);
-  }
   bindModelDropdownEvents();
 }
 

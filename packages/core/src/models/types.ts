@@ -122,6 +122,13 @@ export function extractModelDetails(payload: any): ModelDetail[] {
         continue;
       }
 
+      // System default provider (nous) is only valid if explicitly configured with credentials
+      if (pSlugLower === 'nous' || pSlugLower === 'system') {
+        if (p.configured !== true && p.has_key !== true && p.connected !== true && !p.api_key) {
+          continue;
+        }
+      }
+
       // Check explicit negative flags
       if (
         p.configured === false ||

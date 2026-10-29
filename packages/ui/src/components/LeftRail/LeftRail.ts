@@ -205,44 +205,8 @@ export function renderLeftRail(props: LeftRailProps): string {
         }
       </div>
 
-      <!-- Rail Footer: Connection Status & Settings -->
-      <div class="rail-footer" style="
-        padding: 8px 12px;
-        border-top: 1px solid var(--border-subtle);
-        background: var(--bg-rail);
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-      ">
-        <div style="display: flex; align-items: center; gap: 6px;">
-          <span style="
-            width: 7px;
-            height: 7px;
-            border-radius: 50%;
-            background: ${props.gatewayOnline ? '#10B981' : '#EF4444'};
-            box-shadow: 0 0 5px ${props.gatewayOnline ? '#10B98188' : '#EF444488'};
-            display: inline-block;
-          "></span>
-          <span style="font-size: 11px; font-family: var(--font-mono); color: var(--text-secondary);">
-            ${props.gatewayOnline ? `网关在线 · ${props.gatewayLatencyMs}ms` : '网关未连接'}
-          </span>
-        </div>
-
-        <button id="rail-footer-settings-btn" class="icon-btn" title="网关与系统设置" style="
-          background: transparent;
-          border: 1px solid var(--border-subtle);
-          border-radius: 6px;
-          color: var(--text-secondary);
-          width: 24px;
-          height: 24px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-        ">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-        </button>
-      </div>
+      <!-- Rail Bottom Spacer -->
+      <div style="flex-shrink: 0; height: 10px;"></div>
     </aside>
   `;
 }

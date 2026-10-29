@@ -33,16 +33,16 @@ export function renderStatusBar(props: StatusBarProps): string {
 
   return `
     <footer class="aura-status-bar" id="app-status-bar" style="
-      height: 24px;
-      min-height: 24px;
+      height: 28px;
+      min-height: 28px;
       background: var(--bg-rail);
       border-top: 1px solid var(--border-subtle);
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 14px;
+      padding: 0 16px;
       user-select: none;
-      font-size: 11px;
+      font-size: 11.5px;
       font-family: var(--font-mono);
       color: var(--text-muted);
       z-index: 50;
