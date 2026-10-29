@@ -17,16 +17,19 @@ function captureConsole(t) {
   const calls = [];
   const originals = {
     debug: console.debug,
+    info: console.info,
     warn: console.warn,
     error: console.error,
   };
 
   console.debug = (...args) => calls.push({ channel: 'debug', args });
+  console.info = (...args) => calls.push({ channel: 'info', args });
   console.warn = (...args) => calls.push({ channel: 'warn', args });
   console.error = (...args) => calls.push({ channel: 'error', args });
 
   t.after(() => {
     console.debug = originals.debug;
+    console.info = originals.info;
     console.warn = originals.warn;
     console.error = originals.error;
   });
@@ -99,6 +102,20 @@ test('Leveled logger contract', async (t) => {
     assert.equal(calls.length, 2, 'error and warn both pass an info threshold');
     assert.equal(calls[0].channel, 'error', 'error must route to console.error');
     assert.equal(calls[1].channel, 'warn', 'warn must route to console.warn');
+  });
+
+  await t.test('info uses the info channel so DevTools shows it by default', (tt) => {
+    const calls = captureConsole(tt);
+    const previous = getLogLevel();
+    tt.after(() => setLogLevel(previous));
+
+    setLogLevel('info');
+    const log = createLogger('session');
+    log.info('session loaded', { rpcMs: 12 });
+
+    assert.equal(calls.length, 1, 'info is visible at the info threshold');
+    assert.equal(calls[0].channel, 'info', 'info must not be hidden behind DevTools "Verbose"');
+    assert.equal(calls[0].args[0], '[Flux:session] session loaded');
   });
 
   await t.test('messages below the threshold never reach the console', (tt) => {

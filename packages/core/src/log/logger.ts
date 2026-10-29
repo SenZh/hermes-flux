@@ -61,7 +61,17 @@ function emit(scope: string, level: Exclude<LogLevel, 'silent'>, message: string
   if (!isLogLevelEnabled(level)) return;
 
   const prefix = `[Flux:${scope}] ${message}`;
-  const sink = level === 'error' ? console.error : level === 'warn' ? console.warn : console.debug;
+  // Channel per severity so DevTools' default level filter behaves predictably:
+  // info is visible by default, debug/trace sit under "Verbose", and failures
+  // land on the error channel.
+  const sink =
+    level === 'error'
+      ? console.error
+      : level === 'warn'
+        ? console.warn
+        : level === 'info'
+          ? console.info
+          : console.debug;
 
   if (typeof data === 'undefined') {
     sink(prefix);

@@ -46,6 +46,25 @@ export function createMainWindow(): BrowserWindow {
     win.show();
   });
 
+  // DevTools entry that works on a frameless window: the default application
+  // menu accelerator is easy to lose with `autoHideMenuBar` + `frame: false`.
+  // Detached mode keeps the panel out of the layout, so inspecting a long
+  // conversation cannot resize the stream and shift the viewport.
+  win.webContents.on('before-input-event', (event, input) => {
+    const withModifier = input.control || input.meta;
+    const togglesDevTools =
+      input.type === 'keyDown' &&
+      ((withModifier && input.shift && input.key.toLowerCase() === 'i') || input.key === 'F12');
+    if (!togglesDevTools) return;
+
+    event.preventDefault();
+    if (win.webContents.isDevToolsOpened()) {
+      win.webContents.closeDevTools();
+    } else {
+      win.webContents.openDevTools({ mode: 'detach' });
+    }
+  });
+
   // Forward window state changes to renderer for caption button updates
   win.on('maximize', () => {
     win.webContents.send('window:state-changed', { isMaximized: true });
