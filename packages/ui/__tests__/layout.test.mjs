@@ -103,5 +103,87 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     assert.ok(html.includes('id="msg-thought-ast-100"'), 'Must have incremental thought anchor');
     assert.ok(html.includes('code-block-wrapper'), 'Must render Markdown code blocks with wrapper');
   });
+
+  await t.test('MiddlePod must render reasoning chain, tool capsules, GFM tables and task lists', async () => {
+    const { renderMiddlePod } = await import('../dist/components/MiddlePod/MiddlePod.js');
+    const html = renderMiddlePod({
+      gatewayConnected: true,
+      messages: [
+        {
+          id: 'ast-101',
+          role: 'assistant',
+          content: 'Here is table:\n| Name | Status |\n|---|---|\n| Core | Active |\n- [x] Done\n- [ ] Todo',
+          thought: 'Deep reasoning in progress...',
+          thoughtDurationMs: 450,
+          timestamp: '12:01',
+          toolCalls: [
+            {
+              id: 'tool-1',
+              name: 'shell',
+              status: 'completed',
+              args: '{"command":"npm test"}',
+              output: 'Tests passed',
+            },
+            {
+              id: 'tool-2',
+              name: 'read_file',
+              status: 'running',
+              args: '{"path":"src/index.ts"}',
+            },
+          ],
+        },
+      ],
+    });
+
+    assert.ok(html.includes('🧠'), 'Must include reasoning brain icon');
+    assert.ok(html.includes('深度推理链'), 'Must render reasoning title');
+    assert.ok(html.includes('450ms'), 'Must render reasoning duration badge');
+    assert.ok(html.includes('tool-capsule'), 'Must render tool capsules');
+    assert.ok(html.includes('💻'), 'Must render shell icon for shell tool');
+    assert.ok(html.includes('✓ DONE'), 'Must render completed badge');
+    assert.ok(html.includes('● RUNNING'), 'Must render running badge');
+    assert.ok(html.includes('<table'), 'Must render GFM HTML table');
+    assert.ok(html.includes('Core'), 'Table must contain cell data');
+  });
+
+  await t.test('MiddlePod and renderMarkdown must handle edge cases without crash or corruption', async () => {
+    const { renderMiddlePod, renderMarkdown } = await import('../dist/components/MiddlePod/MiddlePod.js');
+
+    // 1. Tool args with nested object must not crash with TypeError
+    const htmlWithNestedArgs = renderMiddlePod({
+      gatewayConnected: true,
+      messages: [
+        {
+          id: 'ast-102',
+          role: 'assistant',
+          content: 'test',
+          timestamp: '12:02',
+          toolCalls: [
+            {
+              id: 't-nested',
+              name: 'shell',
+              status: 'completed',
+              args: JSON.stringify({ command: { complex: 'nested' } }),
+            },
+          ],
+        },
+      ],
+    });
+    assert.ok(htmlWithNestedArgs.includes('tool-capsule'), 'Nested object args must render safely');
+
+    // 2. Code block with empty lines and special $& pattern
+    const codeWithEmptyLinesAndSpecial = '```js\nconst x = "$&";\n\nconst y = 2;\n```';
+    const renderedCode = renderMarkdown(codeWithEmptyLinesAndSpecial);
+    assert.ok(!renderedCode.includes('</div><div'), 'Code block must not be severed by paragraph splits');
+    assert.ok(renderedCode.includes('$&'), 'Special replacement token $& must be preserved faithfully');
+
+    // 3. GFM table without trailing newline must keep all rows
+    const tableNoTrailingNewline = '| Col1 | Col2 |\n|---|---|\n| ValA | ValB |';
+    const renderedTable = renderMarkdown(tableNoTrailingNewline);
+    assert.ok(renderedTable.includes('<table'), 'Table must be recognized even without trailing newline');
+    assert.ok(renderedTable.includes('ValA'), 'Cell data ValA must be present');
+    assert.ok(renderedTable.includes('ValB'), 'Cell data ValB must be present');
+    assert.ok(!renderedTable.includes('<table<br/>'), 'Table must not be contaminated by foster-parented <br/>');
+  });
 });
 

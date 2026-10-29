@@ -170,6 +170,9 @@ const tokenCoalescer = new TokenCoalescer((flushedMap) => {
       targetMsg.content += entry.content;
       const contentEl = document.getElementById(`msg-content-${targetMsg.id}`);
       if (contentEl) {
+        if (contentEl.style.display === 'none') {
+          contentEl.style.display = 'flex';
+        }
         contentEl.innerHTML = renderMarkdown(targetMsg.content);
       }
     }
@@ -182,6 +185,7 @@ const tokenCoalescer = new TokenCoalescer((flushedMap) => {
         const fold = thoughtEl.closest('details');
         if (fold) {
           fold.style.display = 'block';
+          if (!fold.open) fold.open = true;
         }
       }
     }
@@ -1054,7 +1058,12 @@ function setMessageContent(messageId: string, text: string): void {
   if (!target) return;
   target.content = text;
   const el = document.getElementById(`msg-content-${messageId}`);
-  if (el) el.innerHTML = renderMarkdown(text);
+  if (el) {
+    if (el.style.display === 'none') {
+      el.style.display = 'flex';
+    }
+    el.innerHTML = renderMarkdown(text);
+  }
 }
 
 /** Applies the actions produced by the pure gateway-event reducer. */

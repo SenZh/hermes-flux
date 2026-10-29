@@ -320,93 +320,10 @@ export function renderMessage(m: MessageViewModel, agentDisplayName = 'HERMES AG
       </div>
 
       <!-- Thinking Fold -->
-      ${
-        m.thought
-          ? `
-        <details class="thinking-fold" open style="
-          background: var(--bg-card);
-          border: 1px solid var(--border-subtle);
-          border-radius: 10px;
-          padding: 10px 14px;
-          font-size: 12px;
-          box-shadow: var(--shadow-card);
-        ">
-          <summary style="cursor: pointer; color: var(--text-muted); font-weight: 600; display: flex; align-items: center; gap: 6px;">
-            <span>🧠 思维推理链</span>
-            ${m.thoughtDurationMs ? `<span style="font-size: 10.5px; font-weight: normal; color: var(--text-faint);">(${m.thoughtDurationMs}ms)</span>` : ''}
-          </summary>
-          <div id="msg-thought-${m.id}" style="
-            margin-top: 10px;
-            padding-top: 10px;
-            border-top: 1px solid var(--border-subtle);
-            color: var(--text-secondary);
-            font-family: var(--font-mono);
-            font-size: 11.5px;
-            line-height: 1.6;
-            white-space: pre-wrap;
-          ">${escapeHtml(m.thought)}</div>
-        </details>
-      `
-          : `<div id="msg-thought-${m.id}" style="display: none;"></div>`
-      }
+      ${renderThinkingFold(m)}
 
       <!-- Tool Execution Capsules -->
-      ${
-        m.toolCalls && m.toolCalls.length > 0
-          ? m.toolCalls
-              .map(
-                (tc) => `
-          <div class="tool-capsule" style="
-            background: var(--bg-card);
-            border: 1px solid var(--border-medium);
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: var(--shadow-card);
-          ">
-            <div style="
-              padding: 8px 12px;
-              display: flex;
-              align-items: center;
-              justify-content: space-between;
-              background: var(--bg-elevated);
-              font-size: 12px;
-            ">
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <span style="color: var(--accent); font-weight: 600;">⚡ ${escapeHtml(tc.name)}</span>
-                <span style="color: var(--text-muted); font-family: var(--font-mono); font-size: 11px;">${escapeHtml(tc.args)}</span>
-              </div>
-              <span style="
-                font-size: 10px;
-                padding: 2px 6px;
-                border-radius: 4px;
-                background: ${tc.status === 'completed' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)'};
-                color: ${tc.status === 'completed' ? '#4ADE80' : '#F87171'};
-                font-weight: 600;
-              ">${tc.status === 'completed' ? 'DONE' : 'RUNNING'}</span>
-            </div>
-            ${
-              tc.output
-                ? `
-              <pre style="
-                margin: 0;
-                padding: 10px 12px;
-                background: var(--bg-code);
-                color: #A6ACCD;
-                font-family: var(--font-mono);
-                font-size: 11.5px;
-                line-height: 1.5;
-                overflow-x: auto;
-                max-height: 180px;
-              "><code>${escapeHtml(tc.output)}</code></pre>
-            `
-                : ''
-            }
-          </div>
-        `
-              )
-              .join('')
-          : ''
-      }
+      ${renderToolCapsules(m)}
 
       <!-- Core Content (Incremental Anchor) -->
       ${
@@ -429,6 +346,183 @@ export function renderMessage(m: MessageViewModel, agentDisplayName = 'HERMES AG
   `;
 }
 
+function renderThinkingFold(m: MessageViewModel): string {
+  const hasThought = Boolean(m.thought && m.thought.trim());
+  const durationBadge = m.thoughtDurationMs
+    ? `<span style="font-size: 11px; font-family: var(--font-mono); color: #C084FC; background: rgba(168, 85, 247, 0.12); padding: 1px 6px; border-radius: 4px; border: 1px solid rgba(168, 85, 247, 0.25);">${m.thoughtDurationMs}ms</span>`
+    : '';
+
+  return `
+    <details class="thinking-fold" ${hasThought ? 'open' : ''} style="
+      background: rgba(18, 14, 28, 0.7);
+      border: 1px solid rgba(168, 85, 247, 0.22);
+      border-left: 3px solid #A855F7;
+      border-radius: 8px;
+      overflow: hidden;
+      margin: 4px 0;
+      box-shadow: 0 2px 14px rgba(168, 85, 247, 0.05);
+      ${hasThought ? '' : 'display: none;'}
+    ">
+      <summary style="
+        cursor: pointer;
+        padding: 9px 13px;
+        background: rgba(26, 18, 40, 0.65);
+        color: #E9D5FF;
+        font-size: 12px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        user-select: none;
+      ">
+        <div style="display: flex; align-items: center; gap: 7px;">
+          <span style="font-size: 13px;">🧠</span>
+          <span style="letter-spacing: 0.02em;">深度推理链</span>
+          ${durationBadge}
+        </div>
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="font-size: 10px; color: #C084FC; background: rgba(168, 85, 247, 0.18); padding: 1px 6px; border-radius: 3px; font-family: var(--font-mono);">REASONING</span>
+        </div>
+      </summary>
+      <div id="msg-thought-${m.id}" style="
+        padding: 12px 14px;
+        color: #A1A1AA;
+        font-family: var(--font-mono);
+        font-size: 12px;
+        line-height: 1.62;
+        white-space: pre-wrap;
+        word-break: break-word;
+        border-top: 1px solid rgba(168, 85, 247, 0.12);
+      ">${escapeHtml(m.thought || '')}</div>
+    </details>
+  `;
+}
+
+function renderToolCapsules(m: MessageViewModel): string {
+  if (!m.toolCalls || m.toolCalls.length === 0) return '';
+
+  return m.toolCalls
+    .map((tc) => {
+      const toolName = String(tc.name || '').toLowerCase();
+      let icon = '⚡';
+      let themeColor = 'var(--accent)';
+      let toolTag = 'TOOL';
+
+      if (toolName.includes('shell') || toolName.includes('bash') || toolName.includes('cmd') || toolName.includes('terminal')) {
+        icon = '💻';
+        themeColor = '#00E5FF'; // aura-cyan
+        toolTag = 'SHELL';
+      } else if (toolName.includes('read') || toolName.includes('write') || toolName.includes('edit') || toolName.includes('file')) {
+        icon = '📄';
+        themeColor = '#10B981'; // Emerald
+        toolTag = 'FILE';
+      } else if (toolName.includes('search') || toolName.includes('grep') || toolName.includes('glob') || toolName.includes('find')) {
+        icon = '🔍';
+        themeColor = '#FFBF00'; // aura-amber
+        toolTag = 'SEARCH';
+      } else if (toolName.includes('subagent') || toolName.includes('agent') || toolName.includes('delegate')) {
+        icon = '🤖';
+        themeColor = '#A855F7'; // aura-violet
+        toolTag = 'AGENT';
+      }
+
+      // Defensive arguments parsing: ensure cleanArgs is GUARANTEED to be a string
+      let cleanArgs = '';
+      if (typeof tc.args === 'string') {
+        cleanArgs = tc.args;
+        try {
+          const parsed = JSON.parse(tc.args);
+          if (parsed && typeof parsed === 'object') {
+            const candidate = parsed.command ?? parsed.path ?? parsed.file ?? parsed.query ?? parsed.prompt;
+            if (typeof candidate === 'string') {
+              cleanArgs = candidate;
+            } else if (candidate !== undefined) {
+              cleanArgs = JSON.stringify(candidate);
+            }
+          }
+        } catch {
+          // keep string as is
+        }
+      } else if (tc.args != null) {
+        cleanArgs = JSON.stringify(tc.args);
+      }
+
+      const isCompleted = tc.status === 'completed';
+
+      return `
+        <div class="tool-capsule" style="
+          background: #080808;
+          border: 1px solid var(--border-medium);
+          border-left: 3px solid ${themeColor};
+          border-radius: 8px;
+          overflow: hidden;
+          margin: 4px 0;
+          box-shadow: var(--shadow-card);
+        ">
+          <div style="
+            padding: 8px 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #121212;
+            font-size: 12px;
+          ">
+            <div style="display: flex; align-items: center; gap: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+              <span>${icon}</span>
+              <span style="color: ${themeColor}; font-weight: 700; font-family: var(--font-mono); font-size: 11.5px;">${escapeHtml(tc.name || 'tool')}</span>
+              <span style="
+                font-size: 10px;
+                padding: 1px 5px;
+                border-radius: 3px;
+                background: rgba(255, 255, 255, 0.06);
+                color: var(--text-muted);
+                font-family: var(--font-mono);
+              ">${toolTag}</span>
+              ${
+                cleanArgs
+                  ? `<span style="color: var(--text-secondary); font-family: var(--font-mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(cleanArgs)}</span>`
+                  : ''
+              }
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
+              <span style="
+                font-size: 10px;
+                padding: 2px 7px;
+                border-radius: 4px;
+                background: ${isCompleted ? 'rgba(34, 197, 94, 0.15)' : 'rgba(234, 179, 8, 0.15)'};
+                color: ${isCompleted ? '#4ADE80' : '#FACC15'};
+                font-weight: 700;
+                font-family: var(--font-mono);
+                border: 1px solid ${isCompleted ? 'rgba(34, 197, 94, 0.3)' : 'rgba(234, 179, 8, 0.3)'};
+              ">${isCompleted ? '✓ DONE' : '● RUNNING'}</span>
+            </div>
+          </div>
+          ${
+            tc.output
+              ? `
+            <div style="position: relative;">
+              <pre style="
+                margin: 0;
+                padding: 10px 14px;
+                background: #080808;
+                color: #C9D1D9;
+                font-family: var(--font-mono);
+                font-size: 11.5px;
+                line-height: 1.55;
+                overflow-x: auto;
+                max-height: 220px;
+                border-top: 1px solid rgba(255, 255, 255, 0.05);
+              "><code>${escapeHtml(String(tc.output))}</code></pre>
+            </div>
+          `
+              : ''
+          }
+        </div>
+      `;
+    })
+    .join('');
+}
+
 export function escapeHtml(str: string): string {
   return str
     .replace(/&/g, '&amp;')
@@ -440,54 +534,219 @@ export function escapeHtml(str: string): string {
 
 export function renderMarkdown(md: string): string {
   if (!md) return '';
-  let html = escapeHtml(md);
 
-  // 1. Triple backticks code block with syntax and copy button
-  html = html.replace(/```([a-zA-Z0-9_-]+)?\n([\s\S]*?)```/g, (_match, lang, code) => {
-    return `
-      <div class="code-block-wrapper" style="border-radius: 10px; overflow: hidden; border: 1px solid var(--border-medium); margin: 12px 0; background: var(--bg-code); box-shadow: var(--shadow-card);">
-        <div style="padding: 7px 14px; background: var(--bg-card); border-bottom: 1px solid var(--border-subtle); font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); display: flex; justify-content: space-between; align-items: center;">
-          <span style="text-transform: uppercase; font-weight: 600;">${lang || 'code'}</span>
-          <button class="btn-copy-code" onclick="navigator.clipboard.writeText(this.closest('.code-block-wrapper').querySelector('code').innerText)" style="background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 11px;">复制</button>
+  const protectedBlocks: Record<string, string> = {};
+  let blockCounter = 0;
+
+  // 1. Extract and protect code blocks
+  let processed = md.replace(/```([a-zA-Z0-9_-]+)?\n([\s\S]*?)```/g, (_match, lang, code) => {
+    const key = `__AURA_CODE_${blockCounter++}__`;
+    const highlighted = highlightCodeSyntax(code);
+
+    const blockHtml = `
+      <div class="code-block-wrapper" style="
+        border-radius: 8px;
+        overflow: hidden;
+        border: 1px solid var(--border-medium);
+        margin: 12px 0;
+        background: #080808;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+      ">
+        <div style="
+          padding: 6px 14px;
+          background: #121212;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+          font-size: 11px;
+          color: var(--text-muted);
+          font-family: var(--font-mono);
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          user-select: none;
+        ">
+          <span style="text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em; color: var(--accent);">${lang || 'TEXT'}</span>
+          <button class="btn-copy-code" onclick="navigator.clipboard.writeText(this.closest('.code-block-wrapper').querySelector('code').innerText)" style="
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-secondary);
+            border-radius: 4px;
+            padding: 2px 8px;
+            cursor: pointer;
+            font-size: 10.5px;
+            font-family: var(--font-sans);
+            transition: all 0.15s ease;
+          ">复制</button>
         </div>
-        <pre style="margin: 0; padding: 14px; overflow-x: auto; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.55; color: #E2E8F0;"><code>${code}</code></pre>
+        <pre style="
+          margin: 0;
+          padding: 14px 16px;
+          overflow-x: auto;
+          font-family: var(--font-mono);
+          font-size: 12px;
+          line-height: 1.6;
+          color: #E2E8F0;
+        "><code>${highlighted}</code></pre>
       </div>
     `;
+    protectedBlocks[key] = blockHtml;
+    return key;
   });
 
-  // 2. Headings (###, ##, #)
-  html = html.replace(/^### (.*$)/gim, '<h3 style="font-size: 1.15em; font-weight: 700; margin: 14px 0 6px; color: var(--text-main);">$1</h3>');
-  html = html.replace(/^## (.*$)/gim, '<h2 style="font-size: 1.3em; font-weight: 700; margin: 18px 0 8px; color: var(--text-main); border-bottom: 1px solid var(--border-subtle); padding-bottom: 4px;">$1</h2>');
-  html = html.replace(/^# (.*$)/gim, '<h1 style="font-size: 1.45em; font-weight: 800; margin: 20px 0 10px; color: var(--text-main);">$1</h1>');
+  // 2. Extract and protect GFM Tables (ensuring last line without trailing newline is captured)
+  processed = extractAndProtectTables(processed, protectedBlocks, () => `__AURA_TBL_${blockCounter++}__`);
 
-  // 3. Blockquotes
-  html = html.replace(/^\> (.*$)/gim, '<blockquote style="border-left: 3px solid var(--accent); padding-left: 12px; margin: 8px 0; color: var(--text-secondary); font-style: italic;">$1</blockquote>');
+  // 3. Escape HTML on the rest of markdown content
+  let html = escapeHtml(processed);
 
-  // 4. Unordered & Ordered lists
+  // 4. Headings (###, ##, #)
+  html = html.replace(/^### (.*$)/gim, '<h3 style="font-size: 1.15em; font-weight: 700; margin: 16px 0 6px; color: var(--text-main); letter-spacing: -0.01em;">$1</h3>');
+  html = html.replace(/^## (.*$)/gim, '<h2 style="font-size: 1.3em; font-weight: 700; margin: 20px 0 8px; color: var(--text-main); border-bottom: 1px solid var(--border-subtle); padding-bottom: 6px; letter-spacing: -0.01em;">$1</h2>');
+  html = html.replace(/^# (.*$)/gim, '<h1 style="font-size: 1.45em; font-weight: 800; margin: 24px 0 10px; color: var(--text-main); letter-spacing: -0.02em;">$1</h1>');
+
+  // 5. Blockquotes
+  html = html.replace(/^\&gt;\s?(.*$)/gim, '<blockquote style="border-left: 3px solid var(--accent); padding: 4px 12px; margin: 8px 0; color: var(--text-secondary); background: rgba(255, 191, 0, 0.03); border-radius: 0 6px 6px 0;">$1</blockquote>');
+
+  // 6. Task lists (- [ ] / - [x])
+  html = html.replace(/^\s*[\-\*]\s+\[ \]\s+(.*$)/gim, '<li style="margin-left: 20px; list-style-type: none;"><span style="display: inline-block; width: 13px; height: 13px; border: 1.5px solid var(--text-muted); border-radius: 3px; vertical-align: middle; margin-right: 6px;"></span>$1</li>');
+  html = html.replace(/^\s*[\-\*]\s+\[x\]\s+(.*$)/gim, '<li style="margin-left: 20px; list-style-type: none;"><span style="display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; background: var(--accent); border-radius: 3px; vertical-align: middle; margin-right: 6px; color: #000; font-size: 9px; font-weight: bold;">✓</span>$1</li>');
+
+  // 7. Regular Unordered & Ordered lists
   html = html.replace(/^\s*[\-\*]\s+(.*$)/gim, '<li style="margin-left: 20px; list-style-type: disc;">$1</li>');
   html = html.replace(/^\s*(\d+)\.\s+(.*$)/gim, '<li style="margin-left: 20px; list-style-type: decimal;">$2</li>');
 
-  // 5. Inline code
-  html = html.replace(/`([^`]+)`/g, '<code style="background: var(--bg-card); border: 1px solid var(--border-subtle); padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); font-size: 12px; color: var(--accent);">$1</code>');
+  // 8. Inline code
+  html = html.replace(/`([^`]+)`/g, '<code style="background: rgba(255, 255, 255, 0.06); border: 1px solid var(--border-subtle); padding: 1.5px 5.5px; border-radius: 4px; font-family: var(--font-mono); font-size: 12px; color: var(--accent);">$1</code>');
 
-  // 6. Bold & Italic
+  // 9. Bold, Italic & Strikethrough
   html = html.replace(/\*\*([^*]+)\*\*/g, '<strong style="color: var(--text-main); font-weight: 600;">$1</strong>');
   html = html.replace(/\*([^*]+)\*/g, '<em style="color: var(--text-secondary);">$1</em>');
+  html = html.replace(/~~([^~]+)~~/g, '<del style="color: var(--text-muted);">$1</del>');
 
-  // 7. Horizontal Rule
-  html = html.replace(/^---$/gim, '<hr style="border: none; border-top: 1px solid var(--border-subtle); margin: 16px 0;" />');
+  // 10. Horizontal Rule
+  html = html.replace(/^---$/gim, '<hr style="border: none; border-top: 1px solid var(--border-subtle); margin: 18px 0;" />');
 
-  // 8. Paragraphs & Line Breaks
-  const paragraphs = html.split('\n\n').filter((p) => p.trim().length > 0);
-  if (paragraphs.length <= 1) {
+  // 11. Paragraphs & Line Breaks on non-block content
+  const rawParagraphs = html.split('\n\n').filter((p) => p.trim().length > 0);
+  let renderedResult = '';
+
+  if (rawParagraphs.length <= 1) {
     const withBreaks = html.replace(/\n/g, '<br/>');
-    return `<div style="margin: 0; line-height: 1.68;">${withBreaks}</div>`;
+    renderedResult = `<div style="margin: 0; line-height: 1.68;">${withBreaks}</div>`;
+  } else {
+    renderedResult = rawParagraphs
+      .map((p) => {
+        const withBreaks = p.replace(/\n/g, '<br/>');
+        return `<div style="margin-bottom: 10px; line-height: 1.68;">${withBreaks}</div>`;
+      })
+      .join('');
   }
 
-  return paragraphs
-    .map((p) => {
-      const withBreaks = p.replace(/\n/g, '<br/>');
-      return `<div style="margin-bottom: 10px; line-height: 1.68;">${withBreaks}</div>`;
-    })
-    .join('');
+  // 12. Safely restore protected blocks using function replacement to prevent $& injection
+  for (const [placeholder, blockContent] of Object.entries(protectedBlocks)) {
+    renderedResult = renderedResult.replace(placeholder, () => blockContent);
+  }
+
+  return renderedResult;
+}
+
+/** Single-pass lexical tokenizer for code syntax highlighting that never corrupts HTML attributes */
+function highlightCodeSyntax(code: string): string {
+  if (!code) return '';
+
+  // Token definition regex: Comments, Strings, Keywords, Numbers
+  const tokenRegex = /(\/\/[^\n]*)|(["'`][\s\S]*?["'`])|\b(const|let|var|function|return|if|else|for|while|import|from|export|default|class|async|await|try|catch|type|interface|extends|implements)\b|\b(\d+)\b/g;
+
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let output = '';
+
+  while ((match = tokenRegex.exec(code)) !== null) {
+    // Escape and append plain code text before match
+    if (match.index > lastIndex) {
+      output += escapeHtml(code.slice(lastIndex, match.index));
+    }
+
+    const [fullMatch, comment, stringLit, keyword, numberLit] = match;
+
+    if (comment) {
+      output += `<span style="color: #6272A4; font-style: italic;">${escapeHtml(comment)}</span>`;
+    } else if (stringLit) {
+      output += `<span style="color: #F1FA8C;">${escapeHtml(stringLit)}</span>`;
+    } else if (keyword) {
+      output += `<span style="color: #FF79C6; font-weight: 600;">${escapeHtml(keyword)}</span>`;
+    } else if (numberLit) {
+      output += `<span style="color: #BD93F9;">${escapeHtml(numberLit)}</span>`;
+    }
+
+    lastIndex = tokenRegex.lastIndex;
+  }
+
+  if (lastIndex < code.length) {
+    output += escapeHtml(code.slice(lastIndex));
+  }
+
+  return output;
+}
+
+/** Extracts GFM tables, compiles them directly to clean HTML, and stores them in protected map */
+function extractAndProtectTables(
+  content: string,
+  blockMap: Record<string, string>,
+  keyGen: () => string
+): string {
+  // Matches consecutive lines starting and ending with pipe, ending with newline or EOF
+  const tableRegex = /((?:\|.+?\|(?:\r?\n|$))+)/g;
+
+  return content.replace(tableRegex, (rawTable) => {
+    const lines = rawTable
+      .trim()
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean);
+
+    if (lines.length < 2) return rawTable;
+
+    const headerLine = lines[0];
+    const separatorLine = lines[1];
+    if (!separatorLine.includes('-')) return rawTable;
+
+    const parseRow = (line: string): string[] =>
+      line
+        .replace(/^\|/, '')
+        .replace(/\|$/, '')
+        .split('|')
+        .map((c) => escapeHtml(c.trim()));
+
+    const headers = parseRow(headerLine);
+    const rows = lines.slice(2).map(parseRow);
+
+    const theadHtml = `
+      <tr style="background: rgba(255, 255, 255, 0.04); border-bottom: 1.5px solid var(--border-medium);">
+        ${headers.map((h) => `<th style="padding: 8px 12px; font-weight: 700; color: var(--text-main); font-size: 12px; text-align: left;">${h}</th>`).join('')}
+      </tr>
+    `;
+
+    const tbodyHtml = rows
+      .map(
+        (r, idx) => `
+      <tr style="background: ${idx % 2 === 0 ? 'transparent' : 'rgba(255, 255, 255, 0.015)'}; border-bottom: 1px solid var(--border-subtle);">
+        ${r.map((c) => `<td style="padding: 7px 12px; color: var(--text-secondary); font-size: 12px;">${c}</td>`).join('')}
+      </tr>
+    `
+      )
+      .join('');
+
+    const tableHtml = `
+      <div style="overflow-x: auto; margin: 14px 0; border: 1px solid var(--border-medium); border-radius: 8px; box-shadow: var(--shadow-card);">
+        <table style="width: 100%; border-collapse: collapse; text-align: left;">
+          <thead>${theadHtml}</thead>
+          <tbody>${tbodyHtml}</tbody>
+        </table>
+      </div>
+    `;
+
+    const key = keyGen();
+    blockMap[key] = tableHtml;
+    return key;
+  });
 }
