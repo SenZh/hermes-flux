@@ -384,13 +384,45 @@ async function loadMessages(sessionId: string): Promise<void> {
   }
 
   try {
-    // `session.resume` accepts the stored id and answers with the live id, which is
-    // the only id prompt.submit / config.set understand.
-    const res = await gatewayClient.call<any>('session.resume', { session_id: sessionId });
+    let res: any;
+    try {
+      // 1. Try session.resume with profile parameter so the gateway resolves it in the active profile context
+      res = await gatewayClient.call<any>('session.resume', {
+        session_id: sessionId,
+        profile: state.profileName || 'default',
+      });
+    } catch (firstErr: any) {
+      const firstMsg = describeRpcError(firstErr);
+      if (firstMsg.includes('Extra inputs')) {
+        // Fallback without profile
+        res = await gatewayClient.call<any>('session.resume', { session_id: sessionId });
+      } else {
+        // 2. Try REST history endpoint if session.resume gave 4007
+        if (desktopApi?.httpProxy && (firstMsg.includes('4007') || firstMsg.includes('not found'))) {
+          const baseUrl = getEffectiveUrl(state.gatewayUrl);
+          const historyRes = await desktopApi.httpProxy({
+            baseUrl,
+            path: `/api/sessions/${encodeURIComponent(sessionId)}/history`,
+            method: 'GET',
+            ticket: currentTicket,
+          }).catch(() => null);
+
+          if (historyRes && (Array.isArray(historyRes.messages) || Array.isArray(historyRes.history))) {
+            res = historyRes;
+          } else {
+            throw firstErr;
+          }
+        } else {
+          throw firstErr;
+        }
+      }
+    }
 
     const handles = readSessionHandles(res, sessionId);
     if (handles) {
       state.activeLiveSessionId = handles.liveId;
+    } else {
+      state.activeLiveSessionId = sessionId;
     }
 
     const list = Array.isArray(res?.messages) ? res.messages : Array.isArray(res?.history) ? res.history : [];
@@ -428,20 +460,6 @@ async function loadMessages(sessionId: string): Promise<void> {
     console.warn('[Hermes Gateway] Failed to load messages via RPC:', e);
     const errText = describeRpcError(e);
     state.messages = [];
-
-    // [4007] session not found: Session has expired or was removed on gateway
-    if (errText.includes('4007') || errText.includes('not found')) {
-      state.sessions = state.sessions.filter((s) => s.id !== sessionId);
-      state.pendingSessionIds = state.pendingSessionIds.filter((pid) => pid !== sessionId);
-      if (state.activeSessionId === sessionId) {
-        state.activeSessionId = state.sessions[0]?.id || '';
-        state.activeLiveSessionId = '';
-      }
-      state.dockNotice = '该会话已在服务端失效或被清除，已自动从会话列表中移除';
-      render();
-      return;
-    }
-
     state.dockNotice = `载入会话历史失败: ${errText}`;
     render();
   }
@@ -530,15 +548,44 @@ async function deleteSession(id: string): Promise<void> {
   if (!gatewayClient || !id) return;
 
   try {
-    // 1. If session is currently streaming or running, gracefully interrupt it first
+    // 1. If session is active/running, close/interrupt it first
+    try {
+      await gatewayClient.call('session.close', { session_id: id });
+    } catch {}
     try {
       await gatewayClient.call('session.interrupt', { session_id: id });
-    } catch {
-      // Ignore if session was not running
-    }
+    } catch {}
 
     // 2. Perform delete
-    await gatewayClient.call('session.delete', { session_id: id });
+    let deleted = false;
+    try {
+      await gatewayClient.call('session.delete', { session_id: id });
+      deleted = true;
+    } catch (delErr: any) {
+      const delMsg = describeRpcError(delErr);
+      // If 4023 cannot delete an active session, try session.set_hidden or REST
+      if (delMsg.includes('4023') || delMsg.includes('active session')) {
+        try {
+          await gatewayClient.call('session.set_hidden', { session_id: id, hidden: true });
+          deleted = true;
+        } catch {
+          // Try REST delete proxy
+          if (desktopApi?.httpProxy) {
+            const baseUrl = getEffectiveUrl(state.gatewayUrl);
+            await desktopApi.httpProxy({
+              baseUrl,
+              path: `/api/sessions/${encodeURIComponent(id)}`,
+              method: 'DELETE',
+              ticket: currentTicket,
+            }).catch(() => null);
+            deleted = true;
+          }
+        }
+      } else {
+        throw delErr;
+      }
+    }
+
     state.sessions = state.sessions.filter((s) => s.id !== id);
     state.pendingSessionIds = state.pendingSessionIds.filter((pid) => pid !== id);
 
@@ -556,7 +603,6 @@ async function deleteSession(id: string): Promise<void> {
     }
   } catch (e: any) {
     console.error('[Hermes Gateway] Delete session failed:', e);
-    // If it's a 4007 session not found, remove it locally as it's already gone on server
     const msg = describeRpcError(e);
     if (msg.includes('4007') || msg.includes('not found')) {
       state.sessions = state.sessions.filter((s) => s.id !== id);
@@ -565,7 +611,6 @@ async function deleteSession(id: string): Promise<void> {
         state.activeSessionId = state.sessions[0]?.id || '';
         state.activeLiveSessionId = '';
       }
-      state.dockNotice = '该会话在服务端已不存在，已自动从列表中清理';
       render();
       return;
     }

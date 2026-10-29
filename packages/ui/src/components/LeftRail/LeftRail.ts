@@ -141,45 +141,32 @@ export function renderLeftRail(props: LeftRailProps): string {
                 const isActive = s.id === props.activeSessionId;
                 return `
                 <div class="session-item ${isActive ? 'active' : ''}" data-id="${s.id}" data-title="${escapeHtml(s.title)}" style="
-                  padding: 8px 10px;
-                  border-radius: 8px;
+                  padding: 6px 10px;
+                  border-radius: 6px;
                   background: ${isActive ? 'var(--bg-card-active)' : 'transparent'};
                   border: 1px solid ${isActive ? 'var(--border-medium)' : 'transparent'};
                   cursor: pointer;
                   display: flex;
-                  flex-direction: column;
-                  gap: 3px;
+                  align-items: center;
+                  justify-content: space-between;
+                  gap: 8px;
                   position: relative;
                   transition: background 0.12s ease;
                 ">
-                  ${isActive ? '<div class="active-indicator" style="position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; background: var(--accent); border-radius: 0 2px 2px 0;"></div>' : ''}
+                  ${isActive ? '<div class="active-indicator" style="position: absolute; left: 0; top: 4px; bottom: 4px; width: 3px; background: var(--accent); border-radius: 0 2px 2px 0;"></div>' : ''}
                   
-                  <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; padding-left: ${isActive ? '4px' : '0'};">
-                    <span style="
-                      font-size: 12.5px;
-                      font-weight: ${isActive ? '600' : '500'};
-                      color: ${isActive ? 'var(--text-main)' : 'var(--text-secondary)'};
-                      white-space: nowrap;
-                      overflow: hidden;
-                      text-overflow: ellipsis;
-                      flex: 1;
-                    ">${escapeHtml(s.title)}</span>
+                  <span style="
+                    font-size: 12.5px;
+                    font-weight: ${isActive ? '600' : '400'};
+                    color: ${isActive ? 'var(--text-main)' : 'var(--text-secondary)'};
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    flex: 1;
+                    padding-left: ${isActive ? '4px' : '0'};
+                  ">${escapeHtml(s.title)}</span>
 
-                    <button class="btn-delete-session" data-id="${s.id}" title="删除会话" style="
-                      background: transparent;
-                      border: none;
-                      color: var(--text-muted);
-                      cursor: pointer;
-                      padding: 2px 4px;
-                      border-radius: 4px;
-                      font-size: 10px;
-                      opacity: 0.6;
-                    ">✕</button>
-                  </div>
-
-                  <div style="display: flex; align-items: center; justify-content: flex-end; font-size: 10px; color: var(--text-faint); padding-left: ${isActive ? '4px' : '0'};">
-                    <span>${escapeHtml(s.time || '')}</span>
-                  </div>
+                  <span style="font-size: 10px; color: var(--text-faint); font-family: var(--font-mono); flex-shrink: 0;">${escapeHtml(s.time || '')}</span>
                 </div>
               `;
               })
@@ -218,37 +205,27 @@ export function renderLeftRail(props: LeftRailProps): string {
         }
       </div>
 
-      <!-- Rail Footer: Profile & Settings -->
+      <!-- Rail Footer: Connection Status & Settings -->
       <div class="rail-footer" style="
-        padding: 10px 14px;
+        padding: 8px 12px;
         border-top: 1px solid var(--border-subtle);
         background: var(--bg-rail);
         display: flex;
         align-items: center;
         justify-content: space-between;
       ">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <div style="
-            width: 24px;
-            height: 24px;
-            border-radius: 6px;
-            background: var(--bg-card);
-            border: 1px solid var(--border-subtle);
-            color: var(--accent);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 11px;
-            font-weight: 700;
-          ">
-            ${(props.profileName || 'D')[0].toUpperCase()}
-          </div>
-          <div style="display: flex; flex-direction: column;">
-            <span style="font-size: 11.5px; font-weight: 600; color: var(--text-main);">${escapeHtml(props.profileName || 'Default')}</span>
-            <span style="font-size: 10px; color: ${props.gatewayOnline ? '#10B981' : '#EF4444'};">
-              ● ${props.gatewayOnline ? `在线 ${props.gatewayLatencyMs}ms` : '未连接'}
-            </span>
-          </div>
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: ${props.gatewayOnline ? '#10B981' : '#EF4444'};
+            box-shadow: 0 0 5px ${props.gatewayOnline ? '#10B98188' : '#EF444488'};
+            display: inline-block;
+          "></span>
+          <span style="font-size: 11px; font-family: var(--font-mono); color: var(--text-secondary);">
+            ${props.gatewayOnline ? `网关在线 · ${props.gatewayLatencyMs}ms` : '网关未连接'}
+          </span>
         </div>
 
         <button id="rail-footer-settings-btn" class="icon-btn" title="网关与系统设置" style="
@@ -256,14 +233,14 @@ export function renderLeftRail(props: LeftRailProps): string {
           border: 1px solid var(--border-subtle);
           border-radius: 6px;
           color: var(--text-secondary);
-          width: 26px;
-          height: 26px;
+          width: 24px;
+          height: 24px;
           display: flex;
           align-items: center;
           justify-content: center;
           cursor: pointer;
         ">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
       </div>
     </aside>

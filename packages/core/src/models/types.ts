@@ -103,6 +103,10 @@ export function extractModelDetails(payload: any): ModelDetail[] {
   // 1. Providers list (most specific)
   if (Array.isArray(payload.providers)) {
     for (const p of payload.providers) {
+      // Filter out unconfigured or disconnected providers if configured/connected flags exist
+      if (p.configured === false || p.connected === false || p.active === false || p.enabled === false) {
+        continue;
+      }
       const pSlug = String(p.slug || p.provider || p.id || '').trim();
       if (Array.isArray(p.models)) {
         for (const m of p.models) {

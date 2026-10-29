@@ -68,8 +68,8 @@ export function renderTitlebar(props: TitlebarProps): string {
       position: relative;
       z-index: 50;
     ">
-      <!-- Left Wing (250px) -->
-      <div class="titlebar-left" style="display: flex; align-items: center; width: 250px; min-width: 250px; gap: 8px;">
+      <!-- Left Wing: Agent Profiles Align Left & Collapser -->
+      <div class="titlebar-left" style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;">
         ${!isWin ? macControls : ''}
         <button id="toggle-left-rail-btn" class="icon-btn" title="折叠/展开侧栏 (Ctrl+B)" style="
           -webkit-app-region: no-drag;
@@ -84,55 +84,55 @@ export function renderTitlebar(props: TitlebarProps): string {
           align-items: center;
           justify-content: center;
           cursor: pointer;
+          flex-shrink: 0;
         ">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
             <rect x="2" y="2" width="12" height="12" rx="2"/>
             <line x1="6" y1="2" x2="6" y2="14"/>
           </svg>
         </button>
-        <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.05em; color: var(--text-muted); text-transform: uppercase;">AURA DESKTOP</span>
-      </div>
 
-      <!-- Center Focus Area (Flex: 1) -->
-      <div class="titlebar-center" style="display: flex; align-items: center; justify-content: center; flex: 1; min-width: 0; gap: 12px;">
-        <!-- Agent Profiles Switcher Pills in Center Titlebar -->
+        <!-- Agent Profiles Switcher Pills Aligned Left -->
         ${
           props.profiles && props.profiles.length > 0
             ? `
-          <div class="titlebar-agent-chips" style="-webkit-app-region: no-drag; display: flex; align-items: center; gap: 5px; background: var(--bg-card); padding: 2px 6px; border-radius: 20px; border: 1px solid var(--border-subtle); max-width: 320px; overflow-x: auto;">
+          <div class="titlebar-agent-chips" style="-webkit-app-region: no-drag; display: flex; align-items: center; gap: 6px; background: var(--bg-card); padding: 3px 6px; border-radius: 20px; border: 1px solid var(--border-subtle); overflow-x: auto;">
             ${props.profiles
               .map((p) => {
                 const isSelected = (props.profileName || 'default') === p.name;
-                const avatarChar = (p.displayName || p.name || 'A')[0].toUpperCase();
+                const avatarImg = p.avatar
+                  ? `<img src="${escapeHtml(p.avatar)}" style="width: 18px; height: 18px; border-radius: 50%; object-fit: cover;" />`
+                  : `<span style="
+                      width: 18px;
+                      height: 18px;
+                      border-radius: 50%;
+                      background: ${isSelected ? 'var(--accent)' : 'var(--border-medium)'};
+                      color: ${isSelected ? '#000' : 'var(--text-main)'};
+                      font-size: 10px;
+                      font-weight: 700;
+                      display: inline-flex;
+                      align-items: center;
+                      justify-content: center;
+                    ">${(p.displayName || p.name || 'A')[0].toUpperCase()}</span>`;
+
                 return `
                 <button type="button" class="btn-profile-chip ${isSelected ? 'active' : ''}" data-profile="${escapeHtml(p.name)}" style="
-                  height: 24px;
-                  padding: 0 8px 0 4px;
-                  border-radius: 12px;
+                  height: 26px;
+                  padding: 0 10px 0 4px;
+                  border-radius: 13px;
                   background: ${isSelected ? 'var(--accent-subtle)' : 'transparent'};
                   border: 1px solid ${isSelected ? 'var(--accent)' : 'transparent'};
                   color: ${isSelected ? 'var(--accent)' : 'var(--text-secondary)'};
-                  font-size: 11px;
+                  font-size: 11.5px;
                   font-weight: ${isSelected ? '600' : '400'};
                   display: flex;
                   align-items: center;
-                  gap: 5px;
+                  gap: 6px;
                   cursor: pointer;
                   white-space: nowrap;
                   transition: all 0.15s ease;
                 " title="${escapeHtml(p.displayName || p.name)}">
-                  <span style="
-                    width: 16px;
-                    height: 16px;
-                    border-radius: 50%;
-                    background: ${isSelected ? 'var(--accent)' : 'var(--border-medium)'};
-                    color: ${isSelected ? '#000' : 'var(--text-main)'};
-                    font-size: 9px;
-                    font-weight: 700;
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                  ">${avatarChar}</span>
+                  ${avatarImg}
                   <span>${escapeHtml(p.displayName || p.name)}</span>
                 </button>
               `;
@@ -142,28 +142,29 @@ export function renderTitlebar(props: TitlebarProps): string {
         `
             : ''
         }
+      </div>
 
-        <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
-          <span class="session-live-pulse" title="${props.gatewayConnected ? '网关已连接' : '网关未连接'}" style="
-            width: 7px;
-            height: 7px;
-            border-radius: 50%;
-            background: ${pulseColor};
-            box-shadow: 0 0 8px ${pulseGlow};
-            display: inline-block;
-            flex-shrink: 0;
-            ${props.gatewayConnected ? 'animation: aura-pulse 2.4s infinite cubic-bezier(0.4, 0, 0.6, 1);' : ''}
-          "></span>
-          <span class="session-title-text" style="
-            font-size: 13px;
-            font-weight: 500;
-            color: var(--text-main);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            max-width: 380px;
-          ">${escapeHtml(displayTitle)}</span>
-        </div>
+      <!-- Center Title -->
+      <div class="titlebar-center" style="display: flex; align-items: center; justify-content: center; gap: 8px; flex-shrink: 0;">
+        <span class="session-live-pulse" title="${props.gatewayConnected ? '网关已连接' : '网关未连接'}" style="
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          background: ${pulseColor};
+          box-shadow: 0 0 8px ${pulseGlow};
+          display: inline-block;
+          flex-shrink: 0;
+          ${props.gatewayConnected ? 'animation: aura-pulse 2.4s infinite cubic-bezier(0.4, 0, 0.6, 1);' : ''}
+        "></span>
+        <span class="session-title-text" style="
+          font-size: 13px;
+          font-weight: 500;
+          color: var(--text-main);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          max-width: 300px;
+        ">${escapeHtml(displayTitle)}</span>
       </div>
 
       <!-- Right Global Auxiliary Area (250px) -->
