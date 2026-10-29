@@ -11,10 +11,8 @@ export interface SettingsModalProps {
   isOpen: boolean;
   activeTab: 'gateway' | 'appearance' | 'about';
   gatewayUrl: string;
-  gatewayType: 'dashboard' | 'api';
   username?: string;
   password?: string;
-  token?: string;
   profileName: string;
   theme: 'obsidian-gold' | 'suet-jade' | 'jade-white';
   lang: 'zh' | 'en';
@@ -202,51 +200,12 @@ function renderTabPane(props: SettingsModalProps): string {
             " />
           </div>
 
-          <!-- Channel / Mode Selection -->
-          <div style="display: flex; flex-direction: column; gap: 6px;">
-            <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">${isZh ? '接入服务通道' : 'Connection Channel'}</label>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-              <button type="button" class="channel-toggle-btn ${props.gatewayType === 'dashboard' ? 'active' : ''}" data-type="dashboard" style="
-                height: 38px;
-                border-radius: 8px;
-                border: 1px solid ${props.gatewayType === 'dashboard' ? 'var(--accent)' : 'var(--border-medium)'};
-                background: ${props.gatewayType === 'dashboard' ? 'var(--accent-subtle)' : 'var(--bg-panel)'};
-                color: ${props.gatewayType === 'dashboard' ? 'var(--accent)' : 'var(--text-main)'};
-                font-size: 11.5px;
-                font-weight: 600;
-                cursor: pointer;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                gap: 6px;
-              ">
-                <span>⚡ Dashboard 族 (9119 / WS 全功能)</span>
-              </button>
-              <button type="button" class="channel-toggle-btn ${props.gatewayType === 'api' ? 'active' : ''}" data-type="api" style="
-                height: 38px;
-                border-radius: 8px;
-                border: 1px solid ${props.gatewayType === 'api' ? 'var(--accent)' : 'var(--border-medium)'};
-                background: ${props.gatewayType === 'api' ? 'var(--accent-subtle)' : 'var(--bg-panel)'};
-                color: ${props.gatewayType === 'api' ? 'var(--accent)' : 'var(--text-main)'};
-                font-size: 11.5px;
-                font-weight: 600;
-                cursor: pointer;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                gap: 6px;
-              ">
-                <span>🔑 API Server 族 (8642 / API Key)</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- Dashboard Auth Fields (Username & Password / Session Token) -->
-          <div id="section-dashboard-auth" style="display: ${props.gatewayType === 'dashboard' ? 'flex' : 'none'}; flex-direction: column; gap: 10px;">
+          <!-- Gateway Auth Fields (Username & Password) -->
+          <div id="section-dashboard-auth" style="display: flex; flex-direction: column; gap: 10px;">
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
               <div style="display: flex; flex-direction: column; gap: 6px;">
                 <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">${isZh ? '用户名 (Basic Auth)' : 'Username'}</label>
-                <input type="text" id="settings-username" value="${escapeHtml(props.username || '')}" placeholder="admin (公网/认证必填)" style="
+                <input type="text" id="settings-username" value="${escapeHtml(props.username || '')}" placeholder="免密网关可留空" style="
                   width: 100%;
                   height: 36px;
                   background: var(--bg-panel);
@@ -262,7 +221,7 @@ function renderTabPane(props: SettingsModalProps): string {
               </div>
               <div style="display: flex; flex-direction: column; gap: 6px;">
                 <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">${isZh ? '密码 (Password)' : 'Password'}</label>
-                <input type="password" id="settings-password" value="${escapeHtml(props.password || '')}" placeholder="登录密码..." style="
+                <input type="password" id="settings-password" value="${escapeHtml(props.password || '')}" placeholder="免密网关可留空" style="
                   width: 100%;
                   height: 36px;
                   background: var(--bg-panel);
@@ -277,24 +236,6 @@ function renderTabPane(props: SettingsModalProps): string {
                 " />
               </div>
             </div>
-          </div>
-
-          <!-- API Server Auth Field (API Key) -->
-          <div id="section-api-auth" style="display: ${props.gatewayType === 'api' ? 'flex' : 'none'}; flex-direction: column; gap: 6px;">
-            <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">${isZh ? 'API 静态密钥 (API_SERVER_KEY)' : 'API Server Key'}</label>
-            <input type="password" id="settings-api-key" value="${escapeHtml(props.token || '')}" placeholder="sk-..." style="
-              width: 100%;
-              height: 36px;
-              background: var(--bg-panel);
-              border: 1px solid var(--border-medium);
-              border-radius: 8px;
-              padding: 0 12px;
-              font-size: 12px;
-              font-family: var(--font-mono);
-              color: var(--text-main);
-              outline: none;
-              box-sizing: border-box;
-            " />
           </div>
 
           <!-- Profile -->

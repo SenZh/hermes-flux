@@ -6,13 +6,11 @@ import { app, BrowserWindow } from 'electron';
 import path from 'node:path';
 import { createMainWindow } from './window';
 import { registerIpcHandlers } from './ipc';
-import { GatewayDaemonManager } from './gateway';
 import { HermesAuraTray } from './tray';
 
 // Enforce single instance lock
 const gotTheLock = app.requestSingleInstanceLock();
 let mainWindow: BrowserWindow | null = null;
-let gatewayManager: GatewayDaemonManager | null = null;
 let trayManager: HermesAuraTray | null = null;
 
 if (!gotTheLock) {
@@ -26,15 +24,11 @@ if (!gotTheLock) {
   });
 
   app.whenReady().then(() => {
-    // Start local gateway watchdog
-    gatewayManager = new GatewayDaemonManager();
-    gatewayManager.startWatchdog();
-
     // Create main window
     mainWindow = createMainWindow();
 
     // Register IPC channels
-    registerIpcHandlers(mainWindow, gatewayManager);
+    registerIpcHandlers(mainWindow);
 
     // Initialize tray
     trayManager = new HermesAuraTray(mainWindow);
@@ -47,7 +41,7 @@ if (!gotTheLock) {
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         mainWindow = createMainWindow();
-        registerIpcHandlers(mainWindow, gatewayManager!);
+        registerIpcHandlers(mainWindow);
         mainWindow.loadFile(indexPath);
       }
     });
@@ -55,7 +49,6 @@ if (!gotTheLock) {
 
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
-      if (gatewayManager) gatewayManager.stopWatchdog();
       if (trayManager) trayManager.destroy();
       app.quit();
     }

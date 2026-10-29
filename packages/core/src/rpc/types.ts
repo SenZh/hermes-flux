@@ -93,11 +93,27 @@ export interface ModelProviderOption {
   models?: Array<string | { id: string; name?: string }>;
 }
 
+export interface ModelDetail {
+  id: string;
+  provider: string;
+  name: string;
+  displayName: string;
+}
+
 export interface ModelOptionsResult {
   model?: string;
   models?: string[];
   providers?: ModelProviderOption[];
   data?: Array<string | { id: string; name?: string }>;
+}
+
+export interface AgentProfile {
+  name: string;
+  displayName: string;
+  description?: string;
+  avatar?: string;
+  model?: string;
+  isDefault?: boolean;
 }
 
 export interface NormalizedSession {

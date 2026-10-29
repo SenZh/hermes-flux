@@ -3,9 +3,8 @@
  */
 
 import { ipcMain, BrowserWindow, shell, dialog, app } from 'electron';
-import { GatewayDaemonManager } from './gateway';
 
-export function registerIpcHandlers(mainWindow: BrowserWindow, gateway: GatewayDaemonManager): void {
+export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // Window management IPC
   ipcMain.handle('window:minimize', () => {
     mainWindow.minimize();
@@ -45,26 +44,17 @@ export function registerIpcHandlers(mainWindow: BrowserWindow, gateway: GatewayD
     };
   });
 
-  // Gateway Daemon IPC
-  ipcMain.handle('gateway:get-status', () => {
-    return gateway.getStatus();
-  });
-
   ipcMain.handle('gateway:get-default-config', () => {
     return {
-      url: process.env.HERMES_GATEWAY_URL || 'http://127.0.0.1:8642',
-      key: process.env.API_SERVER_KEY || '',
+      url: process.env.HERMES_GATEWAY_URL || 'http://127.0.0.1:9119',
+      key: '',
       profile: process.env.HERMES_PROFILE || 'default',
     };
   });
 
-  ipcMain.handle('gateway:restart', async () => {
-    return await gateway.restart();
-  });
-
   ipcMain.handle(
     'gateway:authenticate',
-    async (_event, options: { url: string; gatewayType: 'dashboard' | 'api'; username?: string; password?: string; token?: string }) => {
+    async (_event, options: { url: string; username?: string; password?: string }) => {
       let baseUrl = (options.url || 'http://127.0.0.1:9119').trim();
       if (baseUrl.startsWith('ws://')) baseUrl = baseUrl.replace('ws://', 'http://');
       if (baseUrl.startsWith('wss://')) baseUrl = baseUrl.replace('wss://', 'https://');
@@ -73,18 +63,6 @@ export function registerIpcHandlers(mainWindow: BrowserWindow, gateway: GatewayD
 
       const start = Date.now();
       try {
-        if (options.gatewayType === 'api') {
-          const testRes = await fetch(`${baseUrl}/health`, {
-            headers: options.token ? { Authorization: `Bearer ${options.token}` } : {},
-          }).catch(() => null);
-          const latency = Date.now() - start;
-          return {
-            ok: true,
-            message: `API 服务响应正常 · 延迟 ${latency}ms`,
-            latency,
-          };
-        }
-
         // Dashboard flow: GET /api/status
         const statusRes = await fetch(`${baseUrl}/api/status`, {
           headers: { Accept: 'application/json' },

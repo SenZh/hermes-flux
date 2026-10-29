@@ -31,15 +31,11 @@ export interface HermesDesktopBridge {
   close: () => Promise<void>;
   isMaximized: () => Promise<boolean>;
   onWindowStateChange: (callback: (state: { isMaximized: boolean }) => void) => () => void;
-  getGatewayStatus: () => Promise<unknown>;
   getDefaultGatewayConfig: () => Promise<{ url: string; key: string; profile: string }>;
-  restartGateway: () => Promise<boolean>;
   authenticateGateway: (options: {
     url: string;
-    gatewayType: 'dashboard' | 'api';
     username?: string;
     password?: string;
-    token?: string;
   }) => Promise<GatewayAuthResult>;
   httpProxy: (options: {
     baseUrl: string;
@@ -68,9 +64,7 @@ const bridge: HermesDesktopBridge = {
       ipcRenderer.removeListener('window:state-changed', handler);
     };
   },
-  getGatewayStatus: () => ipcRenderer.invoke('gateway:get-status'),
   getDefaultGatewayConfig: () => ipcRenderer.invoke('gateway:get-default-config'),
-  restartGateway: () => ipcRenderer.invoke('gateway:restart'),
   authenticateGateway: (options) => ipcRenderer.invoke('gateway:authenticate', options),
   httpProxy: (options) => ipcRenderer.invoke('gateway:http-proxy', options),
   openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url),

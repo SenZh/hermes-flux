@@ -23,6 +23,7 @@ export interface LeftRailProps {
   activeSessionId: string;
   sessions: LeftRailSession[];
   profileName: string;
+  profiles?: Array<{ name: string; displayName: string; avatar?: string; isDefault?: boolean }>;
   gatewayOnline: boolean;
   gatewayLatencyMs: number;
   /** Why the session list could not be loaded — an empty rail is not a failure. */
@@ -31,6 +32,7 @@ export interface LeftRailProps {
   onSelectSession?: (id: string) => void;
   onDeleteSession?: (id: string) => void;
   onOpenSettings?: () => void;
+  onSwitchProfile?: (profileName: string) => void;
 }
 
 export function renderLeftRail(props: LeftRailProps): string {
@@ -56,8 +58,51 @@ export function renderLeftRail(props: LeftRailProps): string {
       transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1);
       position: relative;
     ">
-      <!-- Search & New Chat -->
+      <!-- Agent Profiles Switcher & New Chat -->
       <div style="padding: 12px 14px 8px; display: flex; flex-direction: column; gap: 8px;">
+        <!-- Agent Switcher Capsule -->
+        <div class="agent-profile-selector" style="position: relative; width: 100%;">
+          <div style="font-size: 10.5px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
+            <span>当前智能体 (AGENT)</span>
+            <span style="font-size: 9px; padding: 1px 4px; border-radius: 3px; background: var(--accent-subtle); color: var(--accent);">PROFILE</span>
+          </div>
+          <div style="display: flex; gap: 4px; overflow-x: auto; padding-bottom: 2px;">
+            ${(props.profiles && props.profiles.length > 0
+              ? props.profiles
+              : [{ name: props.profileName || 'default', displayName: props.profileName || 'Default' }]
+            )
+              .map((p) => {
+                const isSelected = (props.profileName || 'default') === p.name;
+                return `
+                <button type="button" class="btn-profile-chip ${isSelected ? 'active' : ''}" data-profile="${escapeHtml(p.name)}" style="
+                  flex: 1;
+                  min-width: 70px;
+                  height: 28px;
+                  padding: 0 8px;
+                  border-radius: 6px;
+                  background: ${isSelected ? 'var(--accent-subtle)' : 'var(--bg-panel)'};
+                  border: 1px solid ${isSelected ? 'var(--accent)' : 'var(--border-subtle)'};
+                  color: ${isSelected ? 'var(--accent)' : 'var(--text-main)'};
+                  font-size: 11px;
+                  font-weight: 600;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  gap: 4px;
+                  cursor: pointer;
+                  white-space: nowrap;
+                  text-overflow: ellipsis;
+                  overflow: hidden;
+                " title="${escapeHtml(p.displayName || p.name)}">
+                  <span>🤖</span>
+                  <span style="overflow: hidden; text-overflow: ellipsis;">${escapeHtml(p.displayName || p.name)}</span>
+                </button>
+              `;
+              })
+              .join('')}
+          </div>
+        </div>
+
         <button id="new-chat-btn" class="btn-new-chat" style="
           width: 100%;
           height: 36px;

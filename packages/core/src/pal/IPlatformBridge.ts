@@ -48,12 +48,6 @@ export interface IPlatformBridge {
   setWindowMaterial?(material: 'mica' | 'acrylic' | 'tabbed' | 'none'): Promise<boolean>;
   setTheme(theme: 'obsidian-gold' | 'jade-white' | 'system'): Promise<void>;
   
-  // Gateway Daemon lifecycle (Desktop specific, noop on Web/Mobile)
-  getGatewayStatus(): Promise<GatewayProcessStatus>;
-  restartGateway(): Promise<boolean>;
-  startGateway(): Promise<boolean>;
-  stopGateway(): Promise<boolean>;
-  
   // Native Shell & Dialogs
   openExternal(url: string): Promise<void>;
   showSaveDialog?(options: { title?: string; defaultPath?: string; filters?: { name: string; extensions: string[] }[] }): Promise<string | null>;

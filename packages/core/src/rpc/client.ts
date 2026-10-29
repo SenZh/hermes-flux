@@ -2,9 +2,9 @@
  * Hermes Gateway JSON-RPC 2.0 WebSocket Client
  */
 
-import { JsonRpcRequest, JsonRpcResponse, JsonRpcNotification, NormalizedSession } from './types.js';
+import { JsonRpcRequest, JsonRpcResponse, JsonRpcNotification, NormalizedSession, ModelDetail, AgentProfile } from './types.js';
 import { WebSocketFsm, FsmState } from './fsm.js';
-import { normalizeSessionsResult, extractAvailableModels } from '../models/types.js';
+import { normalizeSessionsResult, extractAvailableModels, extractModelDetails } from '../models/types.js';
 
 export interface RpcClientOptions {
   url: string;
@@ -24,6 +24,7 @@ export interface SessionListOutcome {
 /** Models plus the provider that owns the currently active one. */
 export interface ModelCatalog {
   models: string[];
+  details: ModelDetail[];
   currentModel: string;
   currentProvider: string;
   ok: boolean;
@@ -268,9 +269,11 @@ export class HermesGatewayClient {
       try {
         const res = await this.call<any>('model.options', { profile });
         const models = extractAvailableModels(res, []);
+        const details = extractModelDetails(res);
         if (models.length > 0) {
           return {
             models,
+            details,
             currentModel: typeof res?.model === 'string' ? res.model : '',
             currentProvider: typeof res?.provider === 'string' ? res.provider : '',
             ok: true,
@@ -292,9 +295,11 @@ export class HermesGatewayClient {
           params: { profile },
         });
         const models = extractAvailableModels(restResult, []);
+        const details = extractModelDetails(restResult);
         if (models.length > 0) {
           return {
             models,
+            details,
             currentModel: typeof restResult?.model === 'string' ? restResult.model : '',
             currentProvider: typeof restResult?.provider === 'string' ? restResult.provider : '',
             ok: true,
@@ -309,6 +314,7 @@ export class HermesGatewayClient {
 
     return {
       models: extractAvailableModels(null, fallbackModels),
+      details: [],
       currentModel: '',
       currentProvider: '',
       ok: false,
@@ -325,6 +331,28 @@ export class HermesGatewayClient {
     return catalog.models;
   }
 
+  /**
+   * Fetches agent profiles configured on the gateway.
+   */
+  public async listProfiles(): Promise<AgentProfile[]> {
+    try {
+      const res = await this.call<any>('profiles.list', {});
+      const list = Array.isArray(res) ? res : Array.isArray(res?.profiles) ? res.profiles : [];
+      return list.map((item: any) => ({
+        name: String(item.name || item.id || 'default'),
+        displayName: String(item.display_name || item.title || item.name || '默认 Agent'),
+        description: typeof item.description === 'string' ? item.description : '',
+        avatar: typeof item.avatar === 'string' ? item.avatar : '',
+        model: typeof item.model === 'string' ? item.model : '',
+        isDefault: Boolean(item.is_default || item.name === 'default'),
+      }));
+    } catch (e) {
+      console.warn('[HermesGatewayClient] profiles.list failed, returning default profile:', e);
+      return [
+        { name: 'default', displayName: '通用助手 (Default)', description: '默认通用智能体', isDefault: true },
+      ];
+    }
+  }
 
   private handleMessage(raw: unknown): void {
     if (typeof raw !== 'string') return;

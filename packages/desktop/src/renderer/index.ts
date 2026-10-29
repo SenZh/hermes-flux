@@ -28,6 +28,8 @@ import {
   applySessionTitle,
   type TurnAction,
   type NormalizedSession,
+  type ModelDetail,
+  type AgentProfile,
 } from '@hermes-aura/core';
 
 import type { HermesDesktopBridge } from '../preload/index.js';
@@ -52,7 +54,10 @@ interface AppState {
   activeLiveSessionId: string;
   selectedModel: string;
   availableModels: string[];
+  modelDetails: ModelDetail[];
   currentProvider: string;
+  profiles: AgentProfile[];
+  profileName: string;
   /** Model menu visibility lives in state so a re-render cannot swallow it. */
   modelMenuOpen: boolean;
   /** Inline failure line inside the dock (failure must never be silent). */
@@ -68,11 +73,8 @@ interface AppState {
   gatewayConnecting: boolean;
   gatewayLatencyMs: number;
   gatewayUrl: string;
-  gatewayType: 'dashboard' | 'api';
   username: string;
   password: string;
-  token: string;
-  profileName: string;
   isSettingsOpen: boolean;
   settingsTab: 'gateway' | 'appearance' | 'about';
   sessions: NormalizedSession[];
@@ -98,7 +100,10 @@ const state: AppState = {
   activeLiveSessionId: '',
   selectedModel: '',
   availableModels: [],
+  modelDetails: [],
   currentProvider: '',
+  profiles: [],
+  profileName: localStorage.getItem('hermes_aura_profile') || 'default',
   modelMenuOpen: false,
   dockNotice: '',
   sessionListError: '',
@@ -110,11 +115,8 @@ const state: AppState = {
   gatewayConnecting: false,
   gatewayLatencyMs: 0,
   gatewayUrl: localStorage.getItem('hermes_aura_gateway_url') || 'http://127.0.0.1:9119',
-  gatewayType: (localStorage.getItem('hermes_aura_gateway_type') as any) || 'dashboard',
   username: localStorage.getItem('hermes_aura_username') || '',
   password: localStorage.getItem('hermes_aura_password') || '',
-  token: localStorage.getItem('hermes_aura_token') || '',
-  profileName: localStorage.getItem('hermes_aura_profile') || 'default',
   isSettingsOpen: false,
   settingsTab: 'gateway',
   sessions: [],
@@ -199,19 +201,15 @@ function getEffectiveUrl(base: string): string {
 
 async function testConnection(
   url: string,
-  gatewayType: 'dashboard' | 'api',
   username: string,
-  pass: string,
-  token: string
+  pass: string
 ): Promise<{ ok: boolean; message: string; latency: number; ticket?: string }> {
   if (desktopApi?.authenticateGateway) {
     try {
       const res = await desktopApi.authenticateGateway({
         url,
-        gatewayType,
         username,
         password: pass,
-        token,
       });
       return res;
     } catch (e: any) {
@@ -223,76 +221,56 @@ async function testConnection(
   const startTime = Date.now();
 
   try {
-    if (gatewayType === 'dashboard') {
-      const statusRes = await fetch(`${baseUrl}/api/status`, {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
+    const statusRes = await fetch(`${baseUrl}/api/status`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+    const latency = Date.now() - startTime;
+    if (!statusRes.ok) {
+      return { ok: false, message: `网关返回异常 HTTP ${statusRes.status}`, latency };
+    }
+
+    const statusData = await statusRes.json().catch(() => ({}));
+    if (statusData.auth_required) {
+      if (!username || !pass) {
+        return { ok: false, message: '该网关开启了安全拦截，必须输入用户名与密码', latency };
+      }
+      const loginRes = await fetch(`${baseUrl}/auth/password-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ username, password: pass, provider: 'basic' }),
       });
-      const latency = Date.now() - startTime;
-      if (!statusRes.ok) {
-        return { ok: false, message: `服务返回异常 HTTP ${statusRes.status}`, latency };
+      if (!loginRes.ok) {
+        return { ok: false, message: `认证失败: HTTP ${loginRes.status}`, latency };
       }
 
-      const statusData = await statusRes.json().catch(() => ({}));
-      if (statusData.auth_required) {
-        if (!username || !pass) {
-          return { ok: false, message: '该网关开启了安全拦截，必须输入用户名与密码', latency };
-        }
-        const loginRes = await fetch(`${baseUrl}/auth/password-login`, {
+      let ticket: string | undefined;
+      try {
+        const tRes = await fetch(`${baseUrl}/api/auth/ws-ticket`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          headers: { Accept: 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ username, password: pass, provider: 'basic' }),
         });
-        if (!loginRes.ok) {
-          return { ok: false, message: `认证失败: HTTP ${loginRes.status}`, latency };
+        if (tRes.ok) {
+          const td = await tRes.json();
+          ticket = td.ticket;
         }
-
-        let ticket: string | undefined;
-        try {
-          const tRes = await fetch(`${baseUrl}/api/auth/ws-ticket`, {
-            method: 'POST',
-            headers: { Accept: 'application/json' },
-            credentials: 'include',
-          });
-          if (tRes.ok) {
-            const td = await tRes.json();
-            ticket = td.ticket;
-          }
-        } catch {}
-
-        return {
-          ok: true,
-          ticket,
-          message: `认证成功 · 延迟 ${latency}ms · Gateway v${statusData.version || '0.22.5'}`,
-          latency,
-        };
-      }
+      } catch {}
 
       return {
         ok: true,
-        message: `连接成功 (免密通道) · 延迟 ${latency}ms · Gateway v${statusData.version || '0.22.5'}`,
+        ticket,
+        message: `认证成功 · 延迟 ${latency}ms · Gateway v${statusData.version || '0.22.5'}`,
         latency,
       };
-    } else {
-      const res = await fetch(`${baseUrl}/health`, {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      });
-      const latency = Date.now() - startTime;
-      if (res.ok) {
-        const data = await res.json().catch(() => ({}));
-        return {
-          ok: true,
-          message: `连接成功 · ${latency}ms · API Server ${data.platform || 'hermes'}`,
-          latency,
-        };
-      }
-      return { ok: false, message: `API 鉴权失败 HTTP ${res.status}`, latency };
     }
+
+    return {
+      ok: true,
+      message: `连接成功 (免密通道) · 延迟 ${latency}ms · Gateway v${statusData.version || '0.22.5'}`,
+      latency,
+    };
   } catch (err: any) {
     return {
       ok: false,
@@ -350,6 +328,7 @@ async function fetchSessions(): Promise<void> {
 async function fetchModelOptions(options: { clearNotice?: boolean } = {}): Promise<void> {
   if (!gatewayClient) {
     state.availableModels = [];
+    state.modelDetails = [];
     state.dockNotice = '未连接网关，暂时无法获取模型列表';
     render();
     return;
@@ -365,6 +344,7 @@ async function fetchModelOptions(options: { clearNotice?: boolean } = {}): Promi
   }
 
   state.availableModels = catalog.models;
+  state.modelDetails = catalog.details;
   state.currentProvider = catalog.currentProvider;
   if (catalog.currentModel) {
     state.selectedModel = catalog.currentModel;
@@ -373,6 +353,25 @@ async function fetchModelOptions(options: { clearNotice?: boolean } = {}): Promi
   }
   if (options.clearNotice !== false) state.dockNotice = '';
   render();
+}
+
+async function fetchProfiles(): Promise<void> {
+  if (!gatewayClient) return;
+  try {
+    const list = await gatewayClient.listProfiles();
+    state.profiles = list;
+    render();
+  } catch (e) {
+    console.warn('[Aura] fetchProfiles failed:', e);
+  }
+}
+
+async function switchProfile(name: string): Promise<void> {
+  if (!name || state.profileName === name) return;
+  state.profileName = name;
+  localStorage.setItem('hermes_aura_profile', name);
+  render();
+  await Promise.allSettled([fetchSessions(), fetchModelOptions()]);
 }
 
 async function loadMessages(sessionId: string): Promise<void> {
@@ -550,33 +549,52 @@ async function selectSession(id: string): Promise<void> {
 /**
  * Pushes the selected model onto the live session.
  *
- * `config.set` only accepts the live id, and it rejects a model id declared by
- * several providers; both cases must reach the user instead of being swallowed.
+ * Handles both plain model id and optional provider-specific configuration.
  */
-async function applyModelToLiveSession(model: string): Promise<void> {
+async function applyModelToLiveSession(model: string, provider?: string): Promise<void> {
   if (!gatewayClient || !model) return;
 
   const liveId = await ensureLiveSessionId();
   if (!liveId) return;
 
   try {
-    await gatewayClient.call('config.set', { session_id: liveId, key: 'model', value: model });
+    const payload: { session_id: string; key: string; value: string; provider?: string } = {
+      session_id: liveId,
+      key: 'model',
+      value: model,
+    };
+    if (provider) {
+      payload.provider = provider;
+    }
+    await gatewayClient.call('config.set', payload);
   } catch (e) {
+    if (provider && isExtraInputsError(e)) {
+      // Gateway rejected provider field, retry with bare model
+      try {
+        await gatewayClient.call('config.set', { session_id: liveId, key: 'model', value: model });
+        return;
+      } catch (retryErr) {
+        state.dockNotice = `切换模型失败: ${describeRpcError(retryErr)}`;
+        render();
+        return;
+      }
+    }
     state.dockNotice = `切换模型失败: ${describeRpcError(e)}`;
     render();
   }
 }
 
-async function switchModel(model: string): Promise<void> {
+async function switchModel(model: string, provider?: string): Promise<void> {
   if (!model) return;
 
   const previous = state.selectedModel;
   state.selectedModel = model;
+  if (provider) state.currentProvider = provider;
   state.modelMenuOpen = false;
   state.dockNotice = '';
   render();
 
-  if (previous === model) return;
+  if (previous === model && !provider) return;
 
   if (!gatewayClient || !state.activeSessionId) {
     // No live conversation yet: the choice is applied right after session.create.
@@ -592,12 +610,31 @@ async function switchModel(model: string): Promise<void> {
   }
 
   try {
-    await gatewayClient.call('config.set', { session_id: liveId, key: 'model', value: model });
+    const payload: { session_id: string; key: string; value: string; provider?: string } = {
+      session_id: liveId,
+      key: 'model',
+      value: model,
+    };
+    if (provider) {
+      payload.provider = provider;
+    }
+    await gatewayClient.call('config.set', payload);
   } catch (e) {
-    state.selectedModel = previous; // an error must not leave the pill lying
+    if (provider && isExtraInputsError(e)) {
+      try {
+        await gatewayClient.call('config.set', { session_id: liveId, key: 'model', value: model });
+        return;
+      } catch (retryErr) {
+        state.selectedModel = previous;
+        state.dockNotice = `切换模型失败: ${describeRpcError(retryErr)}`;
+        render();
+        return;
+      }
+    }
+    state.selectedModel = previous;
     state.dockNotice = `切换模型失败: ${describeRpcError(e)}`;
+    render();
   }
-  render();
 }
 
 async function switchReasoning(effort: 'off' | 'low' | 'medium' | 'high'): Promise<void> {
@@ -911,10 +948,8 @@ async function connect(): Promise<void> {
   try {
     const test = await testConnection(
       state.gatewayUrl,
-      state.gatewayType,
       state.username,
-      state.password,
-      state.token
+      state.password
     );
     state.gatewayLatencyMs = test.latency;
     state.testStatus = test;
@@ -928,10 +963,8 @@ async function connect(): Promise<void> {
 
     currentTicket = test.ticket;
     localStorage.setItem('hermes_aura_gateway_url', state.gatewayUrl);
-    localStorage.setItem('hermes_aura_gateway_type', state.gatewayType);
     localStorage.setItem('hermes_aura_username', state.username);
     localStorage.setItem('hermes_aura_password', state.password);
-    localStorage.setItem('hermes_aura_token', state.token);
     localStorage.setItem('hermes_aura_profile', state.profileName);
 
     // Build WS URL
@@ -939,8 +972,6 @@ async function connect(): Promise<void> {
     let wsUrl = baseUrl.replace('http://', 'ws://').replace('https://', 'wss://') + '/api/ws';
     if (test.ticket) {
       wsUrl += `?ticket=${encodeURIComponent(test.ticket)}`;
-    } else if (state.gatewayType === 'api' && state.token) {
-      wsUrl += `?token=${encodeURIComponent(state.token)}`;
     }
 
     if (gatewayClient) {
@@ -961,7 +992,6 @@ async function connect(): Promise<void> {
           baseUrl,
           path,
           method: opts?.method,
-          token: state.token,
           ticket: currentTicket,
           params: opts?.params,
           body: opts?.body,
@@ -989,13 +1019,13 @@ async function connect(): Promise<void> {
         state.gatewayConnected = true;
         state.gatewayConnecting = false;
         render();
-        Promise.allSettled([fetchSessions(), fetchModelOptions()]);
+        Promise.allSettled([fetchSessions(), fetchModelOptions(), fetchProfiles()]);
       } else {
         rawWs.addEventListener('open', () => {
           state.gatewayConnected = true;
           state.gatewayConnecting = false;
           render();
-          Promise.allSettled([fetchSessions(), fetchModelOptions()]);
+          Promise.allSettled([fetchSessions(), fetchModelOptions(), fetchProfiles()]);
         });
       }
 
@@ -1015,7 +1045,7 @@ async function connect(): Promise<void> {
       state.gatewayConnected = true;
       state.gatewayConnecting = false;
       render();
-      await Promise.allSettled([fetchSessions(), fetchModelOptions()]);
+      await Promise.allSettled([fetchSessions(), fetchModelOptions(), fetchProfiles()]);
     }
   } catch (err: any) {
     console.error('[Aura Connect] Connection failed:', err);
@@ -1098,6 +1128,7 @@ function render(): void {
         activeSessionId: state.activeSessionId,
         sessions: state.sessions,
         profileName: state.profileName,
+        profiles: state.profiles,
         gatewayOnline: state.gatewayConnected,
         gatewayLatencyMs: state.gatewayLatencyMs,
         error: state.sessionListError,
@@ -1108,10 +1139,8 @@ function render(): void {
         gatewayConnected: state.gatewayConnected,
         gatewayConnecting: state.gatewayConnecting,
         gatewayUrl: state.gatewayUrl,
-        gatewayType: state.gatewayType,
         username: state.username,
         password: state.password,
-        token: state.token,
         profileName: state.profileName,
         messages: state.messages,
         testStatus: state.testStatus,
@@ -1123,6 +1152,7 @@ function render(): void {
           ? renderInputDock({
               selectedModel: state.selectedModel,
               models: state.availableModels,
+              modelDetails: state.modelDetails,
               reasoningLevel: state.reasoningLevel,
               approvalMode: state.approvalMode,
               isStreaming: state.isStreaming,
@@ -1156,10 +1186,8 @@ function render(): void {
       isOpen: state.isSettingsOpen,
       activeTab: state.settingsTab,
       gatewayUrl: state.gatewayUrl,
-      gatewayType: state.gatewayType,
       username: state.username,
       password: state.password,
-      token: state.token,
       profileName: state.profileName,
       theme: state.theme,
       lang: state.lang,
@@ -1306,15 +1334,12 @@ function bindEvents(): void {
     };
   });
 
-  // Settings: Channel Toggle Buttons
-  document.querySelectorAll('.channel-toggle-btn').forEach((btn) => {
-    (btn as HTMLElement).onclick = () => {
-      const type = (btn as HTMLElement).dataset.type as 'dashboard' | 'api';
-      if (type) {
-        state.gatewayType = type;
-        localStorage.setItem('hermes_aura_gateway_type', type);
-        render();
-      }
+  // Agent Profile Switcher Chips
+  document.querySelectorAll('.btn-profile-chip').forEach((btn) => {
+    (btn as HTMLElement).onclick = (e) => {
+      e.stopPropagation();
+      const profile = (btn as HTMLElement).dataset.profile;
+      if (profile) switchProfile(profile);
     };
   });
 
@@ -1325,7 +1350,6 @@ function bindEvents(): void {
       const urlInput = (document.getElementById('settings-gateway-url') as HTMLInputElement)?.value;
       const userInput = (document.getElementById('settings-username') as HTMLInputElement)?.value;
       const passInput = (document.getElementById('settings-password') as HTMLInputElement)?.value;
-      const keyInput = (document.getElementById('settings-api-key') as HTMLInputElement)?.value;
       const profileInput = (document.getElementById('settings-profile-name') as HTMLInputElement)?.value;
 
       if (urlInput) {
@@ -1340,17 +1364,13 @@ function bindEvents(): void {
         state.password = passInput;
         localStorage.setItem('hermes_aura_password', passInput);
       }
-      if (keyInput !== undefined) {
-        state.token = keyInput;
-        localStorage.setItem('hermes_aura_token', keyInput);
-      }
       if (profileInput !== undefined) {
         state.profileName = profileInput || 'default';
         localStorage.setItem('hermes_aura_profile', state.profileName);
       }
 
       settingsTestBtn.innerText = '正在测试...';
-      const res = await testConnection(urlInput, state.gatewayType, userInput, passInput, keyInput);
+      const res = await testConnection(urlInput, userInput, passInput);
       state.testStatus = res;
       settingsTestBtn.innerText = '连通性测试';
       render();
@@ -1363,7 +1383,6 @@ function bindEvents(): void {
       state.gatewayUrl = (document.getElementById('settings-gateway-url') as HTMLInputElement)?.value || state.gatewayUrl;
       state.username = (document.getElementById('settings-username') as HTMLInputElement)?.value || '';
       state.password = (document.getElementById('settings-password') as HTMLInputElement)?.value || '';
-      state.token = (document.getElementById('settings-api-key') as HTMLInputElement)?.value || '';
       state.profileName = (document.getElementById('settings-profile-name') as HTMLInputElement)?.value || 'default';
       state.isSettingsOpen = false;
       connect();
@@ -1412,7 +1431,6 @@ function bindEvents(): void {
       const urlInput = (document.getElementById('onboarding-gateway-url') as HTMLInputElement)?.value;
       const userInput = (document.getElementById('onboarding-username') as HTMLInputElement)?.value;
       const passInput = (document.getElementById('onboarding-password') as HTMLInputElement)?.value;
-      const keyInput = (document.getElementById('onboarding-api-key') as HTMLInputElement)?.value;
       const profileInput = (document.getElementById('onboarding-profile-name') as HTMLInputElement)?.value;
 
       if (urlInput) {
@@ -1427,17 +1445,13 @@ function bindEvents(): void {
         state.password = passInput;
         localStorage.setItem('hermes_aura_password', passInput);
       }
-      if (keyInput !== undefined) {
-        state.token = keyInput;
-        localStorage.setItem('hermes_aura_token', keyInput);
-      }
       if (profileInput !== undefined) {
         state.profileName = profileInput || 'default';
         localStorage.setItem('hermes_aura_profile', state.profileName);
       }
 
       onboardingTestBtn.innerText = '正在测试...';
-      const res = await testConnection(urlInput, state.gatewayType, userInput, passInput, keyInput);
+      const res = await testConnection(urlInput, userInput, passInput);
       state.testStatus = res;
       onboardingTestBtn.innerText = '连通性测试';
       render();
@@ -1450,7 +1464,6 @@ function bindEvents(): void {
       state.gatewayUrl = (document.getElementById('onboarding-gateway-url') as HTMLInputElement)?.value || state.gatewayUrl;
       state.username = (document.getElementById('onboarding-username') as HTMLInputElement)?.value || '';
       state.password = (document.getElementById('onboarding-password') as HTMLInputElement)?.value || '';
-      state.token = (document.getElementById('onboarding-api-key') as HTMLInputElement)?.value || '';
       state.profileName = (document.getElementById('onboarding-profile-name') as HTMLInputElement)?.value || 'default';
       connect();
     };
@@ -1516,7 +1529,8 @@ function bindEvents(): void {
     (opt as HTMLElement).onclick = (e) => {
       e.stopPropagation();
       const model = (e.currentTarget as HTMLElement).getAttribute('data-model');
-      if (model) void switchModel(model);
+      const provider = (e.currentTarget as HTMLElement).getAttribute('data-provider') || undefined;
+      if (model) void switchModel(model, provider);
     };
   });
 
@@ -1631,11 +1645,10 @@ async function init(): Promise<void> {
         render();
       });
 
-      if (!state.token && desktopApi?.getDefaultGatewayConfig) {
+      if (desktopApi?.getDefaultGatewayConfig) {
         const def = await desktopApi.getDefaultGatewayConfig();
         if (def) {
           if (def.url && !localStorage.getItem('hermes_aura_gateway_url')) state.gatewayUrl = def.url;
-          if (def.key && !localStorage.getItem('hermes_aura_token')) state.token = def.key;
           if (def.profile && !localStorage.getItem('hermes_aura_profile')) state.profileName = def.profile;
         }
       }

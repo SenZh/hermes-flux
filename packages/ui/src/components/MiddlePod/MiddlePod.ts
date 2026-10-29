@@ -29,10 +29,8 @@ export interface MiddlePodProps {
   gatewayConnected: boolean;
   gatewayConnecting?: boolean;
   gatewayUrl?: string;
-  gatewayType?: 'dashboard' | 'api';
   username?: string;
   password?: string;
-  token?: string;
   profileName?: string;
   messages: MessageViewModel[];
   testStatus?: { ok?: boolean; message?: string; latency?: number };
@@ -152,51 +150,12 @@ function renderGatewayOnboarding(props: MiddlePodProps): string {
           "/>
         </div>
 
-        <!-- Connection Channel Toggle -->
-        <div style="display: flex; flex-direction: column; gap: 6px;">
-          <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">接入通道类型</label>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-            <button type="button" class="onboarding-channel-btn ${props.gatewayType === 'dashboard' || !props.gatewayType ? 'active' : ''}" data-type="dashboard" style="
-              height: 38px;
-              border-radius: 8px;
-              border: 1px solid ${props.gatewayType === 'dashboard' || !props.gatewayType ? 'var(--accent)' : 'var(--border-medium)'};
-              background: ${props.gatewayType === 'dashboard' || !props.gatewayType ? 'var(--accent-subtle)' : 'var(--bg-panel)'};
-              color: ${props.gatewayType === 'dashboard' || !props.gatewayType ? 'var(--accent)' : 'var(--text-main)'};
-              font-size: 11.5px;
-              font-weight: 600;
-              cursor: pointer;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              gap: 6px;
-            ">
-              <span>⚡ Dashboard 族 (9119 / WS 全双工)</span>
-            </button>
-            <button type="button" class="onboarding-channel-btn ${props.gatewayType === 'api' ? 'active' : ''}" data-type="api" style="
-              height: 38px;
-              border-radius: 8px;
-              border: 1px solid ${props.gatewayType === 'api' ? 'var(--accent)' : 'var(--border-medium)'};
-              background: ${props.gatewayType === 'api' ? 'var(--accent-subtle)' : 'var(--bg-panel)'};
-              color: ${props.gatewayType === 'api' ? 'var(--accent)' : 'var(--text-main)'};
-              font-size: 11.5px;
-              font-weight: 600;
-              cursor: pointer;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              gap: 6px;
-            ">
-              <span>🔑 API Server 族 (8642 / API Key)</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- Dashboard Auth: Username & Password -->
-        <div id="onboarding-section-dashboard" style="display: ${props.gatewayType === 'dashboard' || !props.gatewayType ? 'flex' : 'none'}; flex-direction: column; gap: 10px;">
+        <!-- Gateway 9119 Auth: Username & Password -->
+        <div id="onboarding-section-dashboard" style="display: flex; flex-direction: column; gap: 10px;">
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
             <div style="display: flex; flex-direction: column; gap: 6px;">
               <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">用户名 (Username)</label>
-              <input type="text" id="onboarding-username" value="${escapeHtml(props.username || '')}" placeholder="admin" style="
+              <input type="text" id="onboarding-username" value="${escapeHtml(props.username || '')}" placeholder="免密网关可留空" style="
                 width: 100%;
                 height: 36px;
                 background: var(--bg-panel);
@@ -212,7 +171,7 @@ function renderGatewayOnboarding(props: MiddlePodProps): string {
             </div>
             <div style="display: flex; flex-direction: column; gap: 6px;">
               <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">登录密码 (Password)</label>
-              <input type="password" id="onboarding-password" value="${escapeHtml(props.password || '')}" placeholder="输入密码..." style="
+              <input type="password" id="onboarding-password" value="${escapeHtml(props.password || '')}" placeholder="免密网关可留空" style="
                 width: 100%;
                 height: 36px;
                 background: var(--bg-panel);
@@ -227,24 +186,6 @@ function renderGatewayOnboarding(props: MiddlePodProps): string {
               "/>
             </div>
           </div>
-        </div>
-
-        <!-- API Auth: Key -->
-        <div id="onboarding-section-api" style="display: ${props.gatewayType === 'api' ? 'flex' : 'none'}; flex-direction: column; gap: 6px;">
-          <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">API 静态密钥 (API_SERVER_KEY)</label>
-          <input type="password" id="onboarding-api-key" value="${escapeHtml(props.token || '')}" placeholder="sk-..." style="
-            width: 100%;
-            height: 36px;
-            background: var(--bg-panel);
-            border: 1px solid var(--border-medium);
-            border-radius: 8px;
-            padding: 0 12px;
-            font-size: 12px;
-            font-family: var(--font-mono);
-            color: var(--text-main);
-            outline: none;
-            box-sizing: border-box;
-          "/>
         </div>
 
         <!-- Profile Selector -->

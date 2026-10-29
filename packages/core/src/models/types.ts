@@ -1,3 +1,5 @@
+import type { ModelDetail } from '../rpc/types.js';
+
 /**
  * Domain Models for Hermes Aura
  */
@@ -90,52 +92,87 @@ export function normalizeSessionsResult(payload: any): Array<{
     });
 }
 
-export function extractAvailableModels(payload: any, fallbackModels: string[] = []): string[] {
-  const set = new Set<string>();
+export function extractModelDetails(payload: any): ModelDetail[] {
+  const result: ModelDetail[] = [];
+  const seen = new Set<string>();
 
-  if (!payload) {
-    return [...fallbackModels];
-  }
+  if (!payload || typeof payload !== 'object') return result;
 
-  // 1. Direct model root
-  if (typeof payload.model === 'string' && payload.model.trim()) {
-    set.add(payload.model.trim());
-  }
+  const rootProvider = typeof payload.provider === 'string' ? payload.provider.trim() : '';
 
-  // 2. models array
-  if (Array.isArray(payload.models)) {
-    for (const m of payload.models) {
-      if (typeof m === 'string' && m.trim()) set.add(m.trim());
-      else if (m && typeof m.id === 'string' && m.id.trim()) set.add(m.id.trim());
-    }
-  }
-
-  // 3. providers array
+  // 1. Providers list (most specific)
   if (Array.isArray(payload.providers)) {
     for (const p of payload.providers) {
+      const pSlug = String(p.slug || p.provider || p.id || '').trim();
       if (Array.isArray(p.models)) {
         for (const m of p.models) {
-          if (typeof m === 'string' && m.trim()) set.add(m.trim());
-          else if (m && typeof m.id === 'string' && m.id.trim()) set.add(m.id.trim());
+          const mId = typeof m === 'string' ? m.trim() : typeof m?.id === 'string' ? m.id.trim() : '';
+          const mName = typeof m === 'object' && typeof m?.name === 'string' ? m.name.trim() : mId;
+          if (mId) {
+            const key = pSlug ? `${pSlug}:${mId}` : mId;
+            if (!seen.has(key)) {
+              seen.add(key);
+              result.push({
+                id: mId,
+                provider: pSlug,
+                name: mName || mId,
+                displayName: pSlug ? `${mName || mId} (${pSlug})` : (mName || mId),
+              });
+            }
+          }
         }
       }
     }
   }
 
-  // 4. data array
-  if (Array.isArray(payload.data)) {
-    for (const m of payload.data) {
-      if (typeof m === 'string' && m.trim()) set.add(m.trim());
-      else if (m && typeof m.id === 'string' && m.id.trim()) set.add(m.id.trim());
+  // 2. Direct models array
+  if (Array.isArray(payload.models)) {
+    for (const m of payload.models) {
+      const mId = typeof m === 'string' ? m.trim() : typeof m?.id === 'string' ? m.id.trim() : '';
+      const mName = typeof m === 'object' && typeof m?.name === 'string' ? m.name.trim() : mId;
+      if (mId && !seen.has(mId)) {
+        seen.add(mId);
+        result.push({
+          id: mId,
+          provider: rootProvider,
+          name: mName || mId,
+          displayName: rootProvider ? `${mName || mId} (${rootProvider})` : (mName || mId),
+        });
+      }
     }
   }
 
-  if (set.size === 0 && fallbackModels.length > 0) {
-    for (const fm of fallbackModels) {
-      set.add(fm);
+  // 3. Root model
+  if (typeof payload.model === 'string' && payload.model.trim()) {
+    const rootId = payload.model.trim();
+    if (!seen.has(rootId)) {
+      seen.add(rootId);
+      result.unshift({
+        id: rootId,
+        provider: rootProvider,
+        name: rootId,
+        displayName: rootProvider ? `${rootId} (${rootProvider})` : rootId,
+      });
     }
   }
 
-  return Array.from(set);
+  return result;
+}
+
+export function extractAvailableModels(payload: any, fallbackModels: string[] = []): string[] {
+  const details = extractModelDetails(payload);
+  if (details.length > 0) {
+    const set = new Set<string>();
+    for (const d of details) {
+      set.add(d.id);
+    }
+    return Array.from(set);
+  }
+
+  if (fallbackModels.length > 0) {
+    return [...fallbackModels];
+  }
+
+  return [];
 }
 

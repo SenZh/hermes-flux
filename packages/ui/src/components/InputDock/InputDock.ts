@@ -12,18 +12,12 @@
 export interface InputDockProps {
   selectedModel: string;
   models?: string[];
+  modelDetails?: Array<{ id: string; provider: string; name: string; displayName: string }>;
   reasoningLevel: 'off' | 'low' | 'medium' | 'high';
   approvalMode: 'auto' | 'ask' | 'sandbox';
   isStreaming: boolean;
   disabled?: boolean;
-  /**
-   * Whether the model menu is expanded. It is owned by the application state, not
-   * by the DOM: the shell re-renders the whole tree on every state change, so a
-   * purely DOM-toggled menu would be destroyed (and appear to snap shut) as soon as
-   * anything re-rendered.
-   */
   modelMenuOpen?: boolean;
-  /** Inline failure/notice line rendered inside the dock (失败不静默). */
   notice?: string;
 }
 
@@ -160,7 +154,29 @@ export function renderInputDock(props: InputDockProps): string {
                   <span id="btn-refresh-models" style="color: var(--accent); cursor: pointer;" title="重新从网关拉取">刷新 ↻</span>
                 </div>
                 ${
-                  props.models && props.models.length > 0
+                  props.modelDetails && props.modelDetails.length > 0
+                    ? props.modelDetails
+                        .map(
+                          (md) => `
+                  <div class="model-option ${md.id === props.selectedModel ? 'active' : ''}" data-model="${escapeHtml(md.id)}" data-provider="${escapeHtml(md.provider)}" style="
+                    padding: 6px 8px;
+                    border-radius: 6px;
+                    font-size: 11.5px;
+                    font-family: var(--font-mono);
+                    color: ${md.id === props.selectedModel ? 'var(--accent)' : 'var(--text-main)'};
+                    background: ${md.id === props.selectedModel ? 'var(--accent-subtle)' : 'transparent'};
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                  ">
+                    <span>${escapeHtml(md.displayName)}</span>
+                    ${md.id === props.selectedModel ? '<span style="font-size: 10px;">✓</span>' : ''}
+                  </div>
+                `
+                        )
+                        .join('')
+                    : props.models && props.models.length > 0
                     ? props.models
                         .map(
                           (m) => `

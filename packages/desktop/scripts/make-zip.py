@@ -22,7 +22,7 @@ def make_portable_zip(src_dir, dest_zip):
 
     size_mb = os.path.getsize(dest_zip) / (1024 * 1024)
     duration = time.time() - start
-    print(f"✔ Successfully created portable green package: {dest_zip}")
+    print(f"[OK] Successfully created portable green package: {dest_zip}")
     print(f"  Package size: {size_mb:.2f} MB | Duration: {duration:.2f}s")
 
 if __name__ == '__main__':
