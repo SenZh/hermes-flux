@@ -238,24 +238,6 @@ function renderTabPane(props: SettingsModalProps): string {
             </div>
           </div>
 
-          <!-- Profile -->
-          <div style="display: flex; flex-direction: column; gap: 6px;">
-            <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">${isZh ? 'Profile 配置名称' : 'Profile Name'}</label>
-            <input type="text" id="settings-profile-name" value="${escapeHtml(props.profileName || 'default')}" style="
-              width: 100%;
-              height: 36px;
-              background: var(--bg-panel);
-              border: 1px solid var(--border-medium);
-              border-radius: 8px;
-              padding: 0 12px;
-              font-size: 12px;
-              font-family: var(--font-mono);
-              color: var(--text-main);
-              outline: none;
-              box-sizing: border-box;
-            " />
-          </div>
-
           <!-- Feedback message -->
           <div id="settings-test-feedback" style="
             display: ${props.testStatus ? 'flex' : 'none'};

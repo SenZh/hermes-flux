@@ -60,6 +60,8 @@ interface AppState {
   profileName: string;
   /** Model menu visibility lives in state so a re-render cannot swallow it. */
   modelMenuOpen: boolean;
+  /** Context menu for session item */
+  sessionContextMenu?: { x: number; y: number; sessionId: string; sessionTitle: string };
   /** Inline failure line inside the dock (failure must never be silent). */
   dockNotice: string;
   /** Rail-level failure line, distinct from a legitimately empty session list. */
@@ -424,8 +426,23 @@ async function loadMessages(sessionId: string): Promise<void> {
     });
   } catch (e) {
     console.warn('[Hermes Gateway] Failed to load messages via RPC:', e);
+    const errText = describeRpcError(e);
     state.messages = [];
-    state.dockNotice = `载入会话历史失败: ${describeRpcError(e)}`;
+
+    // [4007] session not found: Session has expired or was removed on gateway
+    if (errText.includes('4007') || errText.includes('not found')) {
+      state.sessions = state.sessions.filter((s) => s.id !== sessionId);
+      state.pendingSessionIds = state.pendingSessionIds.filter((pid) => pid !== sessionId);
+      if (state.activeSessionId === sessionId) {
+        state.activeSessionId = state.sessions[0]?.id || '';
+        state.activeLiveSessionId = '';
+      }
+      state.dockNotice = '该会话已在服务端失效或被清除，已自动从会话列表中移除';
+      render();
+      return;
+    }
+
+    state.dockNotice = `载入会话历史失败: ${errText}`;
     render();
   }
 }
@@ -513,6 +530,14 @@ async function deleteSession(id: string): Promise<void> {
   if (!gatewayClient || !id) return;
 
   try {
+    // 1. If session is currently streaming or running, gracefully interrupt it first
+    try {
+      await gatewayClient.call('session.interrupt', { session_id: id });
+    } catch {
+      // Ignore if session was not running
+    }
+
+    // 2. Perform delete
     await gatewayClient.call('session.delete', { session_id: id });
     state.sessions = state.sessions.filter((s) => s.id !== id);
     state.pendingSessionIds = state.pendingSessionIds.filter((pid) => pid !== id);
@@ -529,11 +554,91 @@ async function deleteSession(id: string): Promise<void> {
     } else {
       render();
     }
-  } catch (e) {
+  } catch (e: any) {
     console.error('[Hermes Gateway] Delete session failed:', e);
-    state.dockNotice = `删除会话失败: ${describeRpcError(e)}`;
+    // If it's a 4007 session not found, remove it locally as it's already gone on server
+    const msg = describeRpcError(e);
+    if (msg.includes('4007') || msg.includes('not found')) {
+      state.sessions = state.sessions.filter((s) => s.id !== id);
+      state.pendingSessionIds = state.pendingSessionIds.filter((pid) => pid !== id);
+      if (state.activeSessionId === id) {
+        state.activeSessionId = state.sessions[0]?.id || '';
+        state.activeLiveSessionId = '';
+      }
+      state.dockNotice = '该会话在服务端已不存在，已自动从列表中清理';
+      render();
+      return;
+    }
+    state.dockNotice = `删除会话失败: ${msg}`;
     render();
   }
+}
+
+async function renameSession(id: string, currentTitle: string): Promise<void> {
+  const newTitle = prompt('重命名会话', currentTitle);
+  if (!newTitle || newTitle.trim() === '' || newTitle.trim() === currentTitle) return;
+  const trimmed = newTitle.trim();
+
+  try {
+    if (gatewayClient) {
+      await gatewayClient.call('session.title', { session_id: id, title: trimmed });
+    }
+    state.sessions = state.sessions.map((s) => (s.id === id ? { ...s, title: trimmed } : s));
+    render();
+  } catch (e) {
+    // Optimistically update locally even if server returns error
+    state.sessions = state.sessions.map((s) => (s.id === id ? { ...s, title: trimmed } : s));
+    render();
+  }
+}
+
+async function copySessionId(id: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(id);
+    state.dockNotice = `已复制会话 ID: ${id}`;
+    render();
+  } catch {
+    state.dockNotice = `会话 ID: ${id}`;
+    render();
+  }
+}
+
+async function pinSession(id: string): Promise<void> {
+  const target = state.sessions.find((s) => s.id === id);
+  if (!target) return;
+  state.sessions = [target, ...state.sessions.filter((s) => s.id !== id)];
+  state.dockNotice = `已将会话「${target.title}」置顶`;
+  render();
+}
+
+async function exportMarkdown(id: string): Promise<void> {
+  const activeTitle = state.sessions.find((s) => s.id === id)?.title || 'session';
+  const mdContent = state.messages
+    .map((m) => {
+      const header = m.role === 'user' ? '### User' : `### Assistant (${state.profileName || 'Agent'})`;
+      return `${header} - ${m.timestamp}\n\n${m.thought ? `> 思考链：\n> ${m.thought.replace(/\n/g, '\n> ')}\n\n` : ''}${m.content}\n`;
+    })
+    .join('\n---\n\n');
+
+  try {
+    await navigator.clipboard.writeText(mdContent);
+    state.dockNotice = `已将「${activeTitle}」全量对话导出并复制至剪贴板`;
+    render();
+  } catch {
+    state.dockNotice = '导出失败，请检查剪贴板权限';
+    render();
+  }
+}
+
+async function archiveSession(id: string): Promise<void> {
+  try {
+    if (gatewayClient) {
+      await gatewayClient.call('session.archive', { session_id: id });
+    }
+  } catch {}
+  state.sessions = state.sessions.map((s) => (s.id === id ? { ...s, isArchived: !s.isArchived } : s));
+  state.dockNotice = `已更新会话归档状态`;
+  render();
 }
 
 async function selectSession(id: string): Promise<void> {
@@ -1118,6 +1223,8 @@ function render(): void {
       title: currentTitle,
       isMaximized: state.isMaximized,
       gatewayConnected: state.gatewayConnected,
+      profileName: state.profileName,
+      profiles: state.profiles,
     })}
 
     <!-- Main Body Container -->
@@ -1195,6 +1302,51 @@ function render(): void {
       latencyMs: state.gatewayLatencyMs,
       testStatus: state.testStatus,
     })}
+
+    <!-- Session Right-Click Context Menu (OpenChamber Style) -->
+    ${
+      state.sessionContextMenu
+        ? `
+      <div id="session-context-menu" style="
+        position: fixed;
+        left: ${state.sessionContextMenu.x}px;
+        top: ${state.sessionContextMenu.y}px;
+        background: var(--bg-card);
+        border: 1px solid var(--border-strong);
+        border-radius: 8px;
+        box-shadow: var(--shadow-window);
+        padding: 5px;
+        min-width: 170px;
+        z-index: 2000;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        font-size: 12px;
+        user-select: none;
+      ">
+        <button type="button" class="ctx-item" data-action="rename" style="padding: 6px 10px; border-radius: 5px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;">
+          <span>✏️</span><span>重命名</span>
+        </button>
+        <button type="button" class="ctx-item" data-action="copy-id" style="padding: 6px 10px; border-radius: 5px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;">
+          <span>📋</span><span>复制会话 ID</span>
+        </button>
+        <button type="button" class="ctx-item" data-action="pin" style="padding: 6px 10px; border-radius: 5px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;">
+          <span>📌</span><span>置顶会话</span>
+        </button>
+        <button type="button" class="ctx-item" data-action="export" style="padding: 6px 10px; border-radius: 5px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;">
+          <span>📥</span><span>导出 Markdown</span>
+        </button>
+        <div style="height: 1px; background: var(--border-subtle); margin: 3px 0;"></div>
+        <button type="button" class="ctx-item" data-action="archive" style="padding: 6px 10px; border-radius: 5px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;">
+          <span>🗄️</span><span>归档</span>
+        </button>
+        <button type="button" class="ctx-item" data-action="delete" style="padding: 6px 10px; border-radius: 5px; border: none; background: transparent; color: #EF4444; display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;">
+          <span>🗑️</span><span>删除</span>
+        </button>
+      </div>
+    `
+        : ''
+    }
   `;
 
   root.innerHTML = html;
@@ -1286,9 +1438,49 @@ function bindEvents(): void {
     };
   }
 
-  const statusBar = document.getElementById('app-status-bar');
-  if (statusBar) {
-    statusBar.onclick = () => {
+  // Status Bar Toolbar & Node
+  const statusSettings = document.getElementById('status-bar-settings-btn');
+  if (statusSettings) {
+    statusSettings.onclick = (e) => {
+      e.stopPropagation();
+      state.isSettingsOpen = true;
+      state.settingsTab = 'gateway';
+      render();
+    };
+  }
+
+  const statusMetrics = document.getElementById('status-bar-metrics-btn');
+  if (statusMetrics) {
+    statusMetrics.onclick = (e) => {
+      e.stopPropagation();
+      state.dockNotice = `网关延迟: ${state.gatewayLatencyMs}ms | 连接状态: ${state.gatewayConnected ? '已连接' : '未连接'}`;
+      render();
+    };
+  }
+
+  const statusShortcuts = document.getElementById('status-bar-shortcuts-btn');
+  if (statusShortcuts) {
+    statusShortcuts.onclick = (e) => {
+      e.stopPropagation();
+      state.dockNotice = '快捷键：Ctrl+B 折叠侧栏 | Ctrl+\\ 折叠检查舱 | Enter 发送 | Shift+Enter 换行';
+      render();
+    };
+  }
+
+  const statusInfo = document.getElementById('status-bar-info-btn');
+  if (statusInfo) {
+    statusInfo.onclick = (e) => {
+      e.stopPropagation();
+      state.isSettingsOpen = true;
+      state.settingsTab = 'about';
+      render();
+    };
+  }
+
+  const statusServerNode = document.getElementById('status-bar-server-node');
+  if (statusServerNode) {
+    statusServerNode.onclick = (e) => {
+      e.stopPropagation();
       state.isSettingsOpen = true;
       state.settingsTab = 'gateway';
       render();
@@ -1469,7 +1661,7 @@ function bindEvents(): void {
     };
   }
 
-  // Session items & New Chat
+  // Session items & Context Menu
   const newChatBtn = document.getElementById('new-chat-btn');
   if (newChatBtn) newChatBtn.onclick = () => createNewSession();
 
@@ -1478,6 +1670,50 @@ function bindEvents(): void {
       if ((e.target as HTMLElement).classList.contains('btn-delete-session')) return;
       const id = (item as HTMLElement).dataset.id;
       if (id) selectSession(id);
+    };
+
+    (item as HTMLElement).oncontextmenu = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = (item as HTMLElement).dataset.id;
+      const title = (item as HTMLElement).dataset.title || '';
+      if (id) {
+        state.sessionContextMenu = {
+          x: Math.min(e.clientX, window.innerWidth - 180),
+          y: Math.min(e.clientY, window.innerHeight - 220),
+          sessionId: id,
+          sessionTitle: title,
+        };
+        render();
+      }
+    };
+  });
+
+  // Handle Context Menu Actions
+  document.querySelectorAll('#session-context-menu .ctx-item').forEach((btn) => {
+    (btn as HTMLElement).onclick = (e) => {
+      e.stopPropagation();
+      const action = (btn as HTMLElement).dataset.action;
+      const ctx = state.sessionContextMenu;
+      state.sessionContextMenu = undefined;
+      render();
+
+      if (!ctx) return;
+      if (action === 'rename') {
+        void renameSession(ctx.sessionId, ctx.sessionTitle);
+      } else if (action === 'copy-id') {
+        void copySessionId(ctx.sessionId);
+      } else if (action === 'pin') {
+        void pinSession(ctx.sessionId);
+      } else if (action === 'export') {
+        void exportMarkdown(ctx.sessionId);
+      } else if (action === 'archive') {
+        void archiveSession(ctx.sessionId);
+      } else if (action === 'delete') {
+        if (confirm(`确定要删除会话「${ctx.sessionTitle || ctx.sessionId}」吗？`)) {
+          void deleteSession(ctx.sessionId);
+        }
+      }
     };
   });
 
@@ -1622,9 +1858,16 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
-// Close the model menu when the pointer goes down outside of it. mousedown is used
-// on purpose: it fires before the button's click handler, so the two never race.
+// Close the model menu or context menu when the pointer goes down outside of it.
 document.addEventListener('mousedown', (e) => {
+  if (state.sessionContextMenu) {
+    const ctxMenu = document.getElementById('session-context-menu');
+    if (!ctxMenu || !ctxMenu.contains(e.target as Node)) {
+      state.sessionContextMenu = undefined;
+      render();
+    }
+  }
+
   if (!state.modelMenuOpen) return;
   const wrapper = document.querySelector('.pill-dropdown-wrapper');
   if (wrapper && !wrapper.contains(e.target as Node)) {

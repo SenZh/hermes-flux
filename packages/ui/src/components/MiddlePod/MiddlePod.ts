@@ -37,6 +37,8 @@ export interface MiddlePodProps {
 }
 
 export function renderMiddlePod(props: MiddlePodProps): string {
+  const agentDisplayName = (props.profileName || 'default').toUpperCase();
+
   return `
     <main class="aura-middle-pod conversation-pod" style="
       flex: 1 1 0%;
@@ -67,7 +69,7 @@ export function renderMiddlePod(props: MiddlePodProps): string {
               ? renderGatewayOnboarding(props)
               : props.messages.length === 0
               ? renderWelcomeEmptyState()
-              : props.messages.map((m) => renderMessage(m)).join('')
+              : props.messages.map((m) => renderMessage(m, agentDisplayName)).join('')
           }
         </div>
       </div>
@@ -188,23 +190,6 @@ function renderGatewayOnboarding(props: MiddlePodProps): string {
           </div>
         </div>
 
-        <!-- Profile Selector -->
-        <div style="display: flex; flex-direction: column; gap: 6px;">
-          <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">Profile 配置名称</label>
-          <input type="text" id="onboarding-profile-name" value="${escapeHtml(props.profileName || 'default')}" placeholder="default, aura, 或自定义 profile" style="
-            width: 100%;
-            height: 36px;
-            background: var(--bg-panel);
-            border: 1px solid var(--border-medium);
-            border-radius: 8px;
-            padding: 0 12px;
-            font-size: 12px;
-            font-family: var(--font-mono);
-            color: var(--text-main);
-            outline: none;
-            box-sizing: border-box;
-          "/>
-        </div>
       </div>
 
       <!-- Test Status Feedback -->
@@ -288,7 +273,7 @@ function renderWelcomeEmptyState(): string {
   `;
 }
 
-export function renderMessage(m: MessageViewModel): string {
+export function renderMessage(m: MessageViewModel, agentDisplayName = 'HERMES AGENT'): string {
   const isUser = m.role === 'user';
 
   if (isUser) {
@@ -330,7 +315,7 @@ export function renderMessage(m: MessageViewModel): string {
           padding: 2px 8px;
           border-radius: 4px;
           letter-spacing: 0.05em;
-        ">HERMES AGENT</span>
+        ">${escapeHtml(agentDisplayName)}</span>
         <span style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">${escapeHtml(m.timestamp)}</span>
       </div>
 

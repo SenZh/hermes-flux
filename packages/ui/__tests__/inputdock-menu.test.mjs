@@ -153,6 +153,6 @@ test('LeftRail - an empty rail is not the same as a failed rail', async (t) => {
     // 3. Assert
     assert.ok(html.indexOf('data-id="s-new"') < html.indexOf('data-id="s-old"'), 'Newest session must lead');
     assert.ok(html.includes('class="session-item active" data-id="s-new"'), 'Active session must be highlighted');
-    assert.ok(html.includes('近期任务 (2)'), 'Header must count the real sessions');
+    assert.ok(html.includes('对话列表 (2)'), 'Header must count the real sessions');
   });
 });
