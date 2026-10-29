@@ -1070,6 +1070,34 @@ function applyTurnActions(actions: TurnAction[]): void {
         tokenCoalescer.push({ messageId: action.messageId, delta: action.text, isThought: true });
         break;
 
+      case 'tool-start': {
+        const target = state.messages.find((m) => m.id === action.messageId);
+        if (target) {
+          if (!target.toolCalls) target.toolCalls = [];
+          target.toolCalls.push({
+            id: action.toolCall.id,
+            name: action.toolCall.name,
+            status: 'running',
+            args: action.toolCall.args,
+          });
+          needsRender = true;
+        }
+        break;
+      }
+
+      case 'tool-complete': {
+        const target = state.messages.find((m) => m.id === action.messageId);
+        if (target && target.toolCalls) {
+          const tc = target.toolCalls.find((t) => !action.toolCallId || t.id === action.toolCallId);
+          if (tc) {
+            tc.status = 'completed';
+            if (action.output) tc.output = action.output;
+            needsRender = true;
+          }
+        }
+        break;
+      }
+
       case 'replace-content':
         // Deferred: buffered deltas must be flushed first, otherwise they would be
         // appended on top of the authoritative text.

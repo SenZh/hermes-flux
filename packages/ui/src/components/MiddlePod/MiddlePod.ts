@@ -436,10 +436,10 @@ export function renderMarkdown(md: string): string {
   if (!md) return '';
   let html = escapeHtml(md);
 
-  // Triple backticks code block
+  // 1. Triple backticks code block with syntax and copy button
   html = html.replace(/```([a-zA-Z0-9_-]+)?\n([\s\S]*?)```/g, (_match, lang, code) => {
     return `
-      <div class="code-block-wrapper" style="border-radius: 10px; overflow: hidden; border: 1px solid var(--border-medium); margin: 10px 0; background: var(--bg-code); box-shadow: var(--shadow-card);">
+      <div class="code-block-wrapper" style="border-radius: 10px; overflow: hidden; border: 1px solid var(--border-medium); margin: 12px 0; background: var(--bg-code); box-shadow: var(--shadow-card);">
         <div style="padding: 7px 14px; background: var(--bg-card); border-bottom: 1px solid var(--border-subtle); font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); display: flex; justify-content: space-between; align-items: center;">
           <span style="text-transform: uppercase; font-weight: 600;">${lang || 'code'}</span>
           <button class="btn-copy-code" onclick="navigator.clipboard.writeText(this.closest('.code-block-wrapper').querySelector('code').innerText)" style="background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 11px;">复制</button>
@@ -449,19 +449,32 @@ export function renderMarkdown(md: string): string {
     `;
   });
 
-  // Inline code
+  // 2. Headings (###, ##, #)
+  html = html.replace(/^### (.*$)/gim, '<h3 style="font-size: 1.15em; font-weight: 700; margin: 14px 0 6px; color: var(--text-main);">$1</h3>');
+  html = html.replace(/^## (.*$)/gim, '<h2 style="font-size: 1.3em; font-weight: 700; margin: 18px 0 8px; color: var(--text-main); border-bottom: 1px solid var(--border-subtle); padding-bottom: 4px;">$1</h2>');
+  html = html.replace(/^# (.*$)/gim, '<h1 style="font-size: 1.45em; font-weight: 800; margin: 20px 0 10px; color: var(--text-main);">$1</h1>');
+
+  // 3. Blockquotes
+  html = html.replace(/^\> (.*$)/gim, '<blockquote style="border-left: 3px solid var(--accent); padding-left: 12px; margin: 8px 0; color: var(--text-secondary); font-style: italic;">$1</blockquote>');
+
+  // 4. Unordered & Ordered lists
+  html = html.replace(/^\s*[\-\*]\s+(.*$)/gim, '<li style="margin-left: 20px; list-style-type: disc;">$1</li>');
+  html = html.replace(/^\s*(\d+)\.\s+(.*$)/gim, '<li style="margin-left: 20px; list-style-type: decimal;">$2</li>');
+
+  // 5. Inline code
   html = html.replace(/`([^`]+)`/g, '<code style="background: var(--bg-card); border: 1px solid var(--border-subtle); padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); font-size: 12px; color: var(--accent);">$1</code>');
 
-  // Bold
+  // 6. Bold & Italic
   html = html.replace(/\*\*([^*]+)\*\*/g, '<strong style="color: var(--text-main); font-weight: 600;">$1</strong>');
+  html = html.replace(/\*([^*]+)\*/g, '<em style="color: var(--text-secondary);">$1</em>');
 
-  // Paragraphs
+  // 7. Paragraphs
   const paragraphs = html.split('\n\n').filter((p) => p.trim().length > 0);
   if (paragraphs.length <= 1) {
-    return `<p style="margin: 0; white-space: pre-wrap;">${html}</p>`;
+    return `<div style="margin: 0; line-height: 1.68;">${html}</div>`;
   }
 
   return paragraphs
-    .map((p) => `<p style="margin: 0; white-space: pre-wrap;">${p}</p>`)
+    .map((p) => `<div style="margin-bottom: 10px; line-height: 1.68;">${p}</div>`)
     .join('');
 }

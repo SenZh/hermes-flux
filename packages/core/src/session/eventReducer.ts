@@ -25,6 +25,8 @@ export type TurnAction =
   | { type: 'append-content'; messageId: string; text: string }
   | { type: 'append-thought'; messageId: string; text: string }
   | { type: 'replace-content'; messageId: string; text: string }
+  | { type: 'tool-start'; messageId: string; toolCall: { id: string; name: string; args: string } }
+  | { type: 'tool-complete'; messageId: string; toolCallId: string; output?: string }
   | { type: 'refresh-sessions' }
   | { type: 'session-title'; sessionId: string; title: string };
 
@@ -89,6 +91,33 @@ export function reduceGatewayEvent(params: unknown, ctx: TurnEventContext): Turn
       const text = asText(payload.text);
       if (!text || !messageId) return [];
       return [{ type: 'append-thought', messageId, text }];
+    }
+
+    case 'tool.start':
+    case 'subagent.tool': {
+      if (!messageId) return [];
+      const toolId = asText(payload.id) || asText(payload.tool_call_id) || `tool-${Date.now()}`;
+      const name = asText(payload.name) || asText(payload.tool) || '工具执行';
+      const args = typeof payload.args === 'string'
+        ? payload.args
+        : typeof payload.arguments === 'string'
+        ? payload.arguments
+        : JSON.stringify(payload.args || payload.parameters || payload.input || {});
+      return [{ type: 'tool-start', messageId, toolCall: { id: toolId, name, args } }];
+    }
+
+    case 'tool.complete':
+    case 'subagent.complete': {
+      if (!messageId) return [];
+      const toolCallId = asText(payload.id) || asText(payload.tool_call_id) || '';
+      const output = payload.output
+        ? String(payload.output)
+        : payload.result
+        ? String(payload.result)
+        : payload.text
+        ? String(payload.text)
+        : undefined;
+      return [{ type: 'tool-complete', messageId, toolCallId, output }];
     }
 
     case 'message.complete': {
