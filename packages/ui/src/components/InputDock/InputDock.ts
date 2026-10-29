@@ -12,7 +12,10 @@
 export interface InputDockProps {
   selectedModel: string;
   models?: string[];
-  modelDetails?: Array<{ id: string; provider: string; name: string; displayName: string }>;
+  modelDetails?: Array<{ id: string; provider: string; name: string; displayName: string; contextLength?: number }>;
+  favoriteModels?: string[];
+  recentModels?: string[];
+  modelSearchQuery?: string;
   reasoningLevel: 'off' | 'low' | 'medium' | 'high';
   approvalMode: 'auto' | 'ask' | 'sandbox';
   isStreaming: boolean;
@@ -139,67 +142,16 @@ export function renderInputDock(props: InputDockProps): string {
                 position: absolute;
                 bottom: 34px;
                 left: 0;
-                background: var(--bg-card);
+                width: 310px;
+                background: #121212;
                 border: 1px solid var(--border-strong);
-                border-radius: 10px;
-                box-shadow: var(--shadow-window);
-                padding: 6px;
-                max-height: 280px;
-                overflow-y: auto;
-                min-width: 220px;
+                border-radius: 12px;
+                box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.08);
+                overflow: hidden;
                 z-index: 200;
+                user-select: none;
               ">
-                <div style="font-size: 10.5px; font-weight: 600; color: var(--text-muted); padding: 4px 8px 6px; border-bottom: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center;">
-                  <span>可用模型列表</span>
-                  <span id="btn-refresh-models" style="color: var(--accent); cursor: pointer;" title="重新从网关拉取">刷新 ↻</span>
-                </div>
-                ${
-                  props.modelDetails && props.modelDetails.length > 0
-                    ? props.modelDetails
-                        .map(
-                          (md) => `
-                  <div class="model-option ${md.id === props.selectedModel ? 'active' : ''}" data-model="${escapeHtml(md.id)}" data-provider="${escapeHtml(md.provider)}" style="
-                    padding: 6px 8px;
-                    border-radius: 6px;
-                    font-size: 11.5px;
-                    font-family: var(--font-mono);
-                    color: ${md.id === props.selectedModel ? 'var(--accent)' : 'var(--text-main)'};
-                    background: ${md.id === props.selectedModel ? 'var(--accent-subtle)' : 'transparent'};
-                    cursor: pointer;
-                    display: flex;
-                    align-items: center;
-                    justify-content: space-between;
-                  ">
-                    <span>${escapeHtml(md.displayName)}</span>
-                    ${md.id === props.selectedModel ? '<span style="font-size: 10px;">✓</span>' : ''}
-                  </div>
-                `
-                        )
-                        .join('')
-                    : props.models && props.models.length > 0
-                    ? props.models
-                        .map(
-                          (m) => `
-                  <div class="model-option ${m === props.selectedModel ? 'active' : ''}" data-model="${escapeHtml(m)}" style="
-                    padding: 6px 8px;
-                    border-radius: 6px;
-                    font-size: 11.5px;
-                    font-family: var(--font-mono);
-                    color: ${m === props.selectedModel ? 'var(--accent)' : 'var(--text-main)'};
-                    background: ${m === props.selectedModel ? 'var(--accent-subtle)' : 'transparent'};
-                    cursor: pointer;
-                    display: flex;
-                    align-items: center;
-                    justify-content: space-between;
-                  ">
-                    <span>${escapeHtml(m)}</span>
-                    ${m === props.selectedModel ? '<span style="font-size: 10px;">✓</span>' : ''}
-                  </div>
-                `
-                        )
-                        .join('')
-                    : '<div style="padding: 10px; text-align: center; color: var(--text-muted); font-size: 11px;">无可用模型</div>'
-                }
+                ${renderModelPickerMenu(props)}
               </div>
             </div>
 
@@ -299,4 +251,213 @@ function escapeHtml(str: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+function formatContextLength(tokens?: number): string {
+  if (!tokens || typeof tokens !== 'number') return '';
+  if (tokens >= 10000) {
+    const wan = (tokens / 10000).toFixed(1).replace(/\.0$/, '');
+    return `${wan}万`;
+  }
+  if (tokens >= 1000) {
+    return `${(tokens / 1000).toFixed(0)}k`;
+  }
+  return String(tokens);
+}
+
+function renderModelPickerMenu(props: InputDockProps): string {
+  const query = (props.modelSearchQuery || '').trim().toLowerCase();
+  let allDetails = props.modelDetails && props.modelDetails.length > 0 ? props.modelDetails : [];
+  if (allDetails.length === 0 && props.models && props.models.length > 0) {
+    allDetails = props.models.map((m) => ({
+      id: m,
+      provider: 'DEFAULT',
+      name: m,
+      displayName: m,
+    }));
+  }
+  const favorites = new Set(props.favoriteModels || []);
+  const recents = props.recentModels || [];
+
+  // Filter models by search query
+  const filtered = allDetails.filter((d) => {
+    if (!query) return true;
+    return (
+      d.id.toLowerCase().includes(query) ||
+      d.name.toLowerCase().includes(query) ||
+      d.provider.toLowerCase().includes(query)
+    );
+  });
+
+  // Group by provider
+  const providerGroups: Record<string, typeof allDetails> = {};
+  for (const d of filtered) {
+    const p = d.provider || 'OTHER';
+    if (!providerGroups[p]) providerGroups[p] = [];
+    providerGroups[p].push(d);
+  }
+
+  // Favorite items
+  const favoriteItems = allDetails.filter((d) => favorites.has(d.id));
+
+  // Recent items
+  const recentItems = recents
+    .map((rId) => allDetails.find((d) => d.id === rId))
+    .filter((d): d is NonNullable<typeof d> => Boolean(d));
+
+  return `
+    <!-- Top Action & Search Bar -->
+    <div style="padding: 10px 10px 6px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); background: rgba(255, 255, 255, 0.02);">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+        <span id="btn-add-provider" style="font-size: 11.5px; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; gap: 4px;">
+          <span style="font-size: 13px;">+</span> 添加新提供商
+        </span>
+        <span id="btn-refresh-models" style="font-size: 11px; color: var(--text-muted); cursor: pointer;" title="刷新列表">刷新 ↻</span>
+      </div>
+      <div style="position: relative; display: flex; align-items: center;">
+        <span style="position: absolute; left: 8px; color: var(--text-muted); font-size: 11.5px;">🔍</span>
+        <input id="dock-model-search-input" type="text" placeholder="搜索模型" value="${escapeHtml(props.modelSearchQuery || '')}" style="
+          width: 100%;
+          height: 28px;
+          padding: 0 10px 0 26px;
+          border-radius: 6px;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          background: rgba(0, 0, 0, 0.35);
+          color: var(--text-main);
+          font-size: 12px;
+          outline: none;
+        " />
+      </div>
+    </div>
+
+    <!-- Scrollable Model Tree List -->
+    <div style="max-height: 320px; overflow-y: auto; padding: 6px 0;">
+      <!-- 1. Favorites Section -->
+      ${
+        !query && favoriteItems.length > 0
+          ? `
+        <div class="model-picker-section" style="margin-bottom: 6px;">
+          <div style="padding: 4px 12px; font-size: 11px; font-weight: 700; color: #38BDF8; display: flex; align-items: center; gap: 6px;">
+            <span>★</span>
+            <span>收藏</span>
+          </div>
+          ${favoriteItems.map((item) => renderModelItemRow(item, props.selectedModel, true)).join('')}
+        </div>
+      `
+          : ''
+      }
+
+      <!-- 2. Recents Section -->
+      ${
+        !query && recentItems.length > 0
+          ? `
+        <div class="model-picker-section" style="margin-bottom: 6px;">
+          <div style="padding: 4px 12px; font-size: 11px; font-weight: 700; color: var(--text-muted); display: flex; align-items: center; gap: 6px;">
+            <span>🕒</span>
+            <span>最近</span>
+          </div>
+          ${recentItems.map((item) => renderModelItemRow(item, props.selectedModel, favorites.has(item.id))).join('')}
+        </div>
+      `
+          : ''
+      }
+
+      <!-- 3. Provider Grouped Sections -->
+      ${
+        Object.keys(providerGroups).length > 0
+          ? Object.entries(providerGroups)
+              .map(([providerName, models]) => {
+                const upperName = providerName.toUpperCase();
+                let icon = '⬡';
+                if (upperName.includes('OPENCODE')) icon = '📱';
+                else if (upperName.includes('CURSOR')) icon = '⬡';
+                else if (upperName.includes('ANTHROPIC') || upperName.includes('CLAUDE')) icon = '🧠';
+                else if (upperName.includes('OPENAI')) icon = '⚡';
+                else if (upperName.includes('DEEPSEEK')) icon = '🐋';
+
+                return `
+              <div class="model-provider-group" style="margin-bottom: 6px;">
+                <div style="
+                  padding: 5px 12px;
+                  font-size: 11px;
+                  font-weight: 700;
+                  color: var(--text-muted);
+                  letter-spacing: 0.04em;
+                  display: flex;
+                  align-items: center;
+                  justify-content: space-between;
+                  background: rgba(255, 255, 255, 0.015);
+                ">
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    <span style="opacity: 0.5;">::</span>
+                    <span>${icon}</span>
+                    <span>${escapeHtml(upperName)}</span>
+                  </div>
+                  <span style="font-size: 10px; opacity: 0.6;">▾</span>
+                </div>
+                ${models.map((item) => renderModelItemRow(item, props.selectedModel, favorites.has(item.id))).join('')}
+              </div>
+            `;
+              })
+              .join('')
+          : '<div style="padding: 16px; text-align: center; color: var(--text-muted); font-size: 12px;">未找到匹配的模型</div>'
+      }
+    </div>
+
+    <!-- Bottom Navigation Hint -->
+    <div style="
+      padding: 6px 12px;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      background: rgba(255, 255, 255, 0.02);
+      font-size: 10.5px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    ">
+      <span>↑↓ 导航</span>
+      <span>Tab 切换智能体</span>
+    </div>
+  `;
+}
+
+function renderModelItemRow(
+  item: { id: string; provider: string; name: string; contextLength?: number },
+  selectedModel: string,
+  isFav: boolean
+): string {
+  const isSelected = item.id === selectedModel;
+  const contextBadge = item.contextLength ? formatContextLength(item.contextLength) : '';
+
+  return `
+    <div class="model-option ${isSelected ? 'active' : ''}" data-model="${escapeHtml(item.id)}" data-provider="${escapeHtml(item.provider)}" style="
+      padding: 6px 12px;
+      font-size: 12px;
+      color: ${isSelected ? 'var(--accent)' : 'var(--text-main)'};
+      background: ${isSelected ? 'rgba(255, 191, 0, 0.08)' : 'transparent'};
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: background 0.1s ease;
+    ">
+      <div style="display: flex; align-items: center; gap: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+        <span class="btn-toggle-favorite" data-model="${escapeHtml(item.id)}" style="
+          color: ${isFav ? '#38BDF8' : 'rgba(255, 255, 255, 0.2)'};
+          font-size: 12px;
+          cursor: pointer;
+          flex-shrink: 0;
+        ">${isFav ? '★' : '☆'}</span>
+        <span style="font-weight: 500; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(item.name || item.id)}</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
+        ${
+          contextBadge
+            ? `<span style="font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono);">${contextBadge}</span>`
+            : ''
+        }
+        ${isSelected ? '<span style="font-size: 11px; color: var(--accent); font-weight: 700;">✓</span>' : ''}
+      </div>
+    </div>
+  `;
 }

@@ -635,7 +635,10 @@ export function renderMarkdown(md: string): string {
   // 3. Escape HTML on the rest of markdown content
   let html = escapeHtml(processed);
 
-  // 4. Headings (###, ##, #)
+  // 4. Full range of Headings (######, #####, ####, ###, ##, #)
+  html = html.replace(/^###### (.*$)/gim, '<h6 style="font-size: 0.95em; font-weight: 700; margin: 10px 0 4px; color: var(--text-muted);">$1</h6>');
+  html = html.replace(/^##### (.*$)/gim, '<h5 style="font-size: 1.0em; font-weight: 700; margin: 12px 0 4px; color: var(--text-main);">$1</h5>');
+  html = html.replace(/^#### (.*$)/gim, '<h4 style="font-size: 1.08em; font-weight: 700; margin: 14px 0 6px; color: var(--text-main);">$1</h4>');
   html = html.replace(/^### (.*$)/gim, '<h3 style="font-size: 1.15em; font-weight: 700; margin: 16px 0 6px; color: var(--text-main); letter-spacing: -0.01em;">$1</h3>');
   html = html.replace(/^## (.*$)/gim, '<h2 style="font-size: 1.3em; font-weight: 700; margin: 20px 0 8px; color: var(--text-main); border-bottom: 1px solid var(--border-subtle); padding-bottom: 6px; letter-spacing: -0.01em;">$1</h2>');
   html = html.replace(/^# (.*$)/gim, '<h1 style="font-size: 1.45em; font-weight: 800; margin: 24px 0 10px; color: var(--text-main); letter-spacing: -0.02em;">$1</h1>');
@@ -725,16 +728,25 @@ function highlightCodeSyntax(code: string): string {
   return output;
 }
 
-/** Extracts GFM tables, compiles them directly to clean HTML, and stores them in protected map */
+/** Helper to format inline markdown within table cells safely */
+function formatCellInlineMarkdown(rawCell: string): string {
+  let cell = escapeHtml(rawCell.trim());
+  cell = cell.replace(/`([^`]+)`/g, '<code style="background: rgba(255, 255, 255, 0.08); padding: 1px 4px; border-radius: 3px; font-family: var(--font-mono); font-size: 11px; color: var(--accent);">$1</code>');
+  cell = cell.replace(/\*\*([^*]+)\*\*/g, '<strong style="color: var(--text-main); font-weight: 600;">$1</strong>');
+  cell = cell.replace(/\*([^*]+)\*/g, '<em style="color: var(--text-secondary);">$1</em>');
+  return cell;
+}
+
+/** Extracts GFM tables & TSV tables, compiles them directly to clean HTML, and stores them in protected map */
 function extractAndProtectTables(
   content: string,
   blockMap: Record<string, string>,
   keyGen: () => string
 ): string {
-  // Matches consecutive lines starting and ending with pipe, ending with newline or EOF
-  const tableRegex = /((?:\|.+?\|(?:\r?\n|$))+)/g;
+  // 1. Matches consecutive lines starting and ending with pipe, ending with newline or EOF
+  const pipeTableRegex = /((?:\|.+?\|(?:\r?\n|$))+)/g;
 
-  return content.replace(tableRegex, (rawTable) => {
+  let result = content.replace(pipeTableRegex, (rawTable) => {
     const lines = rawTable
       .trim()
       .split('\n')
@@ -752,7 +764,7 @@ function extractAndProtectTables(
         .replace(/^\|/, '')
         .replace(/\|$/, '')
         .split('|')
-        .map((c) => escapeHtml(c.trim()));
+        .map(formatCellInlineMarkdown);
 
     const headers = parseRow(headerLine);
     const rows = lines.slice(2).map(parseRow);
@@ -786,4 +798,52 @@ function extractAndProtectTables(
     blockMap[key] = tableHtml;
     return key;
   });
+
+  // 2. Matches TSV (Tab-separated) tables (consecutive lines with at least one tab each)
+  const tsvTableRegex = /((?:[^\n\r]+\t[^\n\r]+(?:\r?\n|$)){2,})/g;
+  result = result.replace(tsvTableRegex, (rawTsv) => {
+    const lines = rawTsv
+      .trim()
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.includes('\t'));
+
+    if (lines.length < 2) return rawTsv;
+
+    const parseTsvRow = (line: string): string[] => line.split('\t').map(formatCellInlineMarkdown);
+
+    const headers = parseTsvRow(lines[0]);
+    const rows = lines.slice(1).map(parseTsvRow);
+
+    const theadHtml = `
+      <tr style="background: rgba(255, 255, 255, 0.05); border-bottom: 1.5px solid var(--border-medium);">
+        ${headers.map((h) => `<th style="padding: 8px 12px; font-weight: 700; color: var(--text-main); font-size: 12px; text-align: left;">${h}</th>`).join('')}
+      </tr>
+    `;
+
+    const tbodyHtml = rows
+      .map(
+        (r, idx) => `
+      <tr style="background: ${idx % 2 === 0 ? 'transparent' : 'rgba(255, 255, 255, 0.015)'}; border-bottom: 1px solid var(--border-subtle);">
+        ${r.map((c) => `<td style="padding: 7px 12px; color: var(--text-secondary); font-size: 12px; line-height: 1.5;">${c}</td>`).join('')}
+      </tr>
+    `
+      )
+      .join('');
+
+    const tableHtml = `
+      <div style="overflow-x: auto; margin: 14px 0; border: 1px solid var(--border-medium); border-radius: 8px; box-shadow: var(--shadow-card);">
+        <table style="width: 100%; border-collapse: collapse; text-align: left;">
+          <thead>${theadHtml}</thead>
+          <tbody>${tbodyHtml}</tbody>
+        </table>
+      </div>
+    `;
+
+    const key = keyGen();
+    blockMap[key] = tableHtml;
+    return key;
+  });
+
+  return result;
 }

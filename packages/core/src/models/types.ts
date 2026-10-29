@@ -102,16 +102,70 @@ export function extractModelDetails(payload: any): ModelDetail[] {
 
   // 1. Providers list (most specific)
   if (Array.isArray(payload.providers)) {
+    // Check if any provider in the list explicitly has configured === true or connected === true
+    const hasExplicitConfiguredFlags = payload.providers.some(
+      (p: any) => p && (p.configured === true || p.connected === true || p.is_configured === true || p.has_key === true)
+    );
+
+    const configuredSet = Array.isArray(payload.configured_providers)
+      ? new Set(payload.configured_providers.map((s: any) => String(s).toLowerCase().trim()))
+      : null;
+
     for (const p of payload.providers) {
-      // Filter out unconfigured or disconnected providers if configured/connected flags exist
-      if (p.configured === false || p.connected === false || p.active === false || p.enabled === false) {
+      if (!p || typeof p !== 'object') continue;
+
+      const pSlug = String(p.slug || p.provider || p.id || '').trim();
+      const pSlugLower = pSlug.toLowerCase();
+
+      // Check against explicit configured list if provided
+      if (configuredSet && !configuredSet.has(pSlugLower)) {
         continue;
       }
-      const pSlug = String(p.slug || p.provider || p.id || '').trim();
-      if (Array.isArray(p.models)) {
+
+      // Check explicit negative flags
+      if (
+        p.configured === false ||
+        p.is_configured === false ||
+        p.connected === false ||
+        p.active === false ||
+        p.ready === false ||
+        p.enabled === false ||
+        p.has_key === false
+      ) {
+        continue;
+      }
+
+      // Check string status
+      if (typeof p.status === 'string') {
+        const statusLower = p.status.toLowerCase();
+        if (
+          statusLower === 'unconfigured' ||
+          statusLower === 'disabled' ||
+          statusLower === 'disconnected' ||
+          statusLower === 'inactive'
+        ) {
+          continue;
+        }
+      }
+
+      // If the gateway uses positive flags and at least one provider has it, enforce positive flag
+      if (
+        hasExplicitConfiguredFlags &&
+        p.configured !== true &&
+        p.connected !== true &&
+        p.is_configured !== true &&
+        p.has_key !== true
+      ) {
+        continue;
+      }
+
+      if (Array.isArray(p.models) && p.models.length > 0) {
         for (const m of p.models) {
           const mId = typeof m === 'string' ? m.trim() : typeof m?.id === 'string' ? m.id.trim() : '';
           const mName = typeof m === 'object' && typeof m?.name === 'string' ? m.name.trim() : mId;
+          const contextTokens =
+            typeof m === 'object' &&
+            (m?.context_length || m?.context_window || m?.max_tokens || m?.context_tokens);
           if (mId) {
             const key = pSlug ? `${pSlug}:${mId}` : mId;
             if (!seen.has(key)) {
@@ -121,6 +175,7 @@ export function extractModelDetails(payload: any): ModelDetail[] {
                 provider: pSlug,
                 name: mName || mId,
                 displayName: pSlug ? `${mName || mId} (${pSlug})` : (mName || mId),
+                contextLength: typeof contextTokens === 'number' ? contextTokens : undefined,
               });
             }
           }
@@ -129,7 +184,7 @@ export function extractModelDetails(payload: any): ModelDetail[] {
     }
   }
 
-  // 2. Direct models array
+  // 2. Direct models array (merged and deduplicated)
   if (Array.isArray(payload.models)) {
     for (const m of payload.models) {
       const mId = typeof m === 'string' ? m.trim() : typeof m?.id === 'string' ? m.id.trim() : '';

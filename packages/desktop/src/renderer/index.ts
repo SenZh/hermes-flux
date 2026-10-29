@@ -81,6 +81,9 @@ interface AppState {
   settingsTab: 'gateway' | 'appearance' | 'about';
   sessions: NormalizedSession[];
   messages: MessageViewModel[];
+  favoriteModels: string[];
+  recentModels: string[];
+  modelSearchQuery: string;
   testStatus?: { ok?: boolean; message?: string; latency?: number };
   artifacts: Array<{ id: string; name: string; type: string; size: string; preview?: string }>;
   browserFrame?: { url: string; title: string; screenshotUrl?: string };
@@ -110,6 +113,9 @@ const state: AppState = {
   dockNotice: '',
   sessionListError: '',
   pendingSessionIds: [],
+  favoriteModels: JSON.parse(localStorage.getItem('hermes_aura_fav_models') || '[]'),
+  recentModels: JSON.parse(localStorage.getItem('hermes_aura_recent_models') || '[]'),
+  modelSearchQuery: '',
   reasoningLevel: 'high',
   approvalMode: 'auto',
   isStreaming: false,
@@ -380,11 +386,21 @@ async function switchProfile(name: string): Promise<void> {
   await Promise.allSettled([fetchSessions(), fetchModelOptions()]);
 }
 
+// In-memory LRU session messages cache to provide 0ms instant switching between conversations
+const sessionMessagesCache = new Map<string, MessageViewModel[]>();
+
 async function loadMessages(sessionId: string): Promise<void> {
   if (!sessionId || !gatewayClient) {
     state.messages = [];
     render();
     return;
+  }
+
+  // 1. Instant cache hit: render immediately from memory without waiting for network roundtrip
+  const cached = sessionMessagesCache.get(sessionId);
+  if (cached && cached.length > 0) {
+    state.messages = [...cached];
+    render();
   }
 
   try {
@@ -587,6 +603,7 @@ async function loadMessages(sessionId: string): Promise<void> {
     }
 
     state.messages = parsedMessages;
+    sessionMessagesCache.set(sessionId, parsedMessages);
 
     if (state.activeSessionId === sessionId) state.dockNotice = '';
     render();
@@ -880,6 +897,11 @@ async function switchModel(model: string, provider?: string): Promise<void> {
   if (provider) state.currentProvider = provider;
   state.modelMenuOpen = false;
   state.dockNotice = '';
+
+  // Update recent models list (keep top 8, persist in localStorage)
+  state.recentModels = [model, ...state.recentModels.filter((m) => m !== model)].slice(0, 8);
+  localStorage.setItem('hermes_aura_recent_models', JSON.stringify(state.recentModels));
+
   render();
 
   if (previous === model && !provider) return;
@@ -1476,6 +1498,9 @@ function render(): void {
               selectedModel: state.selectedModel,
               models: state.availableModels,
               modelDetails: state.modelDetails,
+              favoriteModels: state.favoriteModels,
+              recentModels: state.recentModels,
+              modelSearchQuery: state.modelSearchQuery,
               reasoningLevel: state.reasoningLevel,
               approvalMode: state.approvalMode,
               isStreaming: state.isStreaming,
@@ -1976,6 +2001,39 @@ function bindEvents(): void {
       }
     };
   }
+
+  // Search model input
+  const modelSearchInput = document.getElementById('dock-model-search-input') as HTMLInputElement | null;
+  if (modelSearchInput) {
+    modelSearchInput.onclick = (e) => e.stopPropagation();
+    modelSearchInput.oninput = (e) => {
+      e.stopPropagation();
+      state.modelSearchQuery = (e.target as HTMLInputElement).value;
+      render();
+      const nextInput = document.getElementById('dock-model-search-input') as HTMLInputElement | null;
+      if (nextInput) {
+        nextInput.focus();
+        nextInput.setSelectionRange(nextInput.value.length, nextInput.value.length);
+      }
+    };
+  }
+
+  // Toggle favorite model
+  document.querySelectorAll('.btn-toggle-favorite').forEach((btn) => {
+    (btn as HTMLElement).onclick = (e) => {
+      e.stopPropagation();
+      const modelId = (e.currentTarget as HTMLElement).getAttribute('data-model');
+      if (modelId) {
+        if (state.favoriteModels.includes(modelId)) {
+          state.favoriteModels = state.favoriteModels.filter((m) => m !== modelId);
+        } else {
+          state.favoriteModels.push(modelId);
+        }
+        localStorage.setItem('hermes_aura_fav_models', JSON.stringify(state.favoriteModels));
+        render();
+      }
+    };
+  });
 
   document.querySelectorAll('.model-option').forEach((opt) => {
     (opt as HTMLElement).onclick = (e) => {

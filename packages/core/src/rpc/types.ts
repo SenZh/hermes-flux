@@ -98,6 +98,7 @@ export interface ModelDetail {
   provider: string;
   name: string;
   displayName: string;
+  contextLength?: number;
 }
 
 export interface ModelOptionsResult {

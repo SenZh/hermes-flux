@@ -181,6 +181,14 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     assert.ok(renderedTable.includes('ValA'), 'Cell data ValA must be present');
     assert.ok(renderedTable.includes('ValB'), 'Cell data ValB must be present');
     assert.ok(!renderedTable.includes('<table<br/>'), 'Table must not be contaminated by foster-parented <br/>');
+
+    // 4. TSV table and H4 headings (user reported scenario)
+    const tsvContent = '二、 横向对比\n维度\tHermes Agent\tDeepSeek\n**核心定位**\t全能自治\t基准评测\n\n#### 1. 它适不适合？';
+    const renderedTsv = renderMarkdown(tsvContent);
+    assert.ok(renderedTsv.includes('<table'), 'TSV table must render as table');
+    assert.ok(renderedTsv.includes('全能自治'), 'Cell text in TSV must be present');
+    assert.ok(renderedTsv.includes('<h4'), 'H4 header must be compiled to h4 tag');
+    assert.ok(renderedTsv.includes('它适不适合？'), 'H4 header text must be compiled');
   });
 });
 
