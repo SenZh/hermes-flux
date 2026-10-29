@@ -426,29 +426,96 @@ async function loadMessages(sessionId: string): Promise<void> {
     }
 
     const list = Array.isArray(res?.messages) ? res.messages : Array.isArray(res?.history) ? res.history : [];
-    state.messages = list.map((m: any, idx: number) => {
-      const thought = typeof m.thinking === 'string' ? m.thinking : typeof m.thought === 'string' ? m.thought : '';
+    
+    // Filter and transform messages
+    const parsedMessages: MessageViewModel[] = [];
 
-      const toolCalls = Array.isArray(m.tool_calls)
-        ? m.tool_calls.map((tc: any) => ({
-            id: tc.id || `tc-${idx}`,
-            name: tc.name || tc.function?.name || 'tool',
-            status: (tc.status || 'completed') as any,
-            args: typeof tc.args === 'string' ? tc.args : JSON.stringify(tc.args || {}),
-            output: tc.output ? String(tc.output) : undefined,
-          }))
+    for (let idx = 0; idx < list.length; idx++) {
+      const m = list[idx];
+      if (!m || typeof m !== 'object') continue;
+
+      // Extract raw role
+      const rawRole = String(m.role || '').toLowerCase();
+      
+      // Determine content text from diverse gateway schemas
+      let rawText = '';
+      if (typeof m.text === 'string') {
+        rawText = m.text;
+      } else if (typeof m.content === 'string') {
+        rawText = m.content;
+      } else if (Array.isArray(m.content)) {
+        // Multi-part content blocks (Anthropic / OpenAI format: [{type: 'text', text: '...'}])
+        rawText = m.content
+          .map((part: any) => {
+            if (typeof part === 'string') return part;
+            if (part && typeof part.text === 'string') return part.text;
+            if (part && part.type === 'tool_use') return `[调用工具: ${part.name || 'tool'}]`;
+            return '';
+          })
+          .filter(Boolean)
+          .join('\n');
+      } else if (typeof m.message === 'string') {
+        rawText = m.message;
+      } else if (m.delta && typeof m.delta.text === 'string') {
+        rawText = m.delta.text;
+      }
+
+      // Extract thinking / reasoning
+      const thought = typeof m.thinking === 'string'
+        ? m.thinking
+        : typeof m.thought === 'string'
+        ? m.thought
+        : typeof m.reasoning === 'string'
+        ? m.reasoning
+        : '';
+
+      // Extract tool calls
+      const rawToolCalls = Array.isArray(m.tool_calls)
+        ? m.tool_calls
+        : Array.isArray(m.tools)
+        ? m.tools
+        : Array.isArray(m.tool_use)
+        ? m.tool_use
         : [];
 
-      return {
+      const toolCalls = rawToolCalls.map((tc: any, tIdx: number) => ({
+        id: tc.id || `tc-${idx}-${tIdx}`,
+        name: tc.name || tc.function?.name || 'tool',
+        status: (tc.status || 'completed') as any,
+        args: typeof tc.args === 'string' ? tc.args : typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.args || tc.arguments || tc.input || {}),
+        output: tc.output ? String(tc.output) : tc.result ? String(tc.result) : undefined,
+      }));
+
+      // Internal intermediate messages (e.g. tool output without user text, pure protocol frames)
+      // If an assistant message has NO text, NO thought, and NO tool calls, it's a blank turn frame
+      if (rawRole === 'tool' || rawRole === 'function') {
+        // If it's a tool response, attach to previous assistant if possible, or show as tool output
+        if (parsedMessages.length > 0 && parsedMessages[parsedMessages.length - 1].role === 'assistant') {
+          const prev = parsedMessages[parsedMessages.length - 1];
+          if (prev.toolCalls && prev.toolCalls.length > 0) {
+            prev.toolCalls[prev.toolCalls.length - 1].output = rawText || m.output || JSON.stringify(m.result || {});
+            continue;
+          }
+        }
+      }
+
+      // If an assistant message is completely empty (no content, no thought, no tools), DO NOT render a blank ghost bubble
+      if (rawRole === 'assistant' && !rawText.trim() && !thought.trim() && toolCalls.length === 0) {
+        continue;
+      }
+
+      parsedMessages.push({
         id: String(m.row_id ?? m.id ?? `msg-${idx}`),
-        role: (m.role === 'user' || m.role === 'system' ? m.role : 'assistant') as MessageViewModel['role'],
-        content: m.text ?? m.content ?? '',
+        role: (rawRole === 'user' || rawRole === 'system' ? rawRole : 'assistant') as MessageViewModel['role'],
+        content: rawText,
         thought,
         thoughtDurationMs: m.thought_duration_ms,
         toolCalls,
         timestamp: formatTimestamp(m.timestamp ?? m.created_at ?? Date.now()),
-      };
-    });
+      });
+    }
+
+    state.messages = parsedMessages;
 
     if (state.activeSessionId === sessionId) state.dockNotice = '';
     render();
