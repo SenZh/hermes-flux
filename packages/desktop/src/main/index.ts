@@ -19,18 +19,46 @@ function migrateLegacyUserData(): void {
   try {
     const appDataRoot = app.getPath('appData');
     const currentDir = app.getPath('userData');
-    const legacyDir = path.join(appDataRoot, 'Hermes Aura');
 
-    if (currentDir === legacyDir) return;
-    if (fs.existsSync(currentDir)) return;
-    if (!fs.existsSync(legacyDir)) return;
+    // Candidate legacy directories in priority order:
+    const candidates = [
+      path.join(appDataRoot, '@hermes-flux', 'desktop'),
+      path.join(appDataRoot, '@hermes-aura', 'desktop'),
+      path.join(appDataRoot, 'Hermes Aura'),
+      path.join(appDataRoot, 'Hermes'),
+    ];
 
-    // Skip regenerable caches so the first launch after the rename stays fast.
-    const skipped = new Set(['Cache', 'Code Cache', 'GPUCache', 'DawnGraphiteCache', 'DawnWebGPUCache', 'logs']);
-    fs.cpSync(legacyDir, currentDir, {
-      recursive: true,
-      filter: (source) => !skipped.has(path.basename(source)),
-    });
+    // Helper: determine if a directory contains real Local Storage data
+    const hasValidLevelDb = (dir: string): boolean => {
+      const ldbPath = path.join(dir, 'Local Storage', 'leveldb');
+      if (!fs.existsSync(ldbPath)) return false;
+      try {
+        const files = fs.readdirSync(ldbPath);
+        return files.some(
+          (f) =>
+            (f.endsWith('.ldb') || f.endsWith('.log')) &&
+            fs.statSync(path.join(ldbPath, f)).size > 100
+        );
+      } catch {
+        return false;
+      }
+    };
+
+    if (hasValidLevelDb(currentDir)) return;
+
+    for (const legacyDir of candidates) {
+      if (currentDir === legacyDir) continue;
+      if (!fs.existsSync(legacyDir)) continue;
+      if (hasValidLevelDb(legacyDir)) {
+        console.log(`[Hermes Flux] Migrating profile from ${legacyDir} -> ${currentDir}`);
+        const skipped = new Set(['Cache', 'Code Cache', 'GPUCache', 'DawnGraphiteCache', 'DawnWebGPUCache', 'logs']);
+        fs.cpSync(legacyDir, currentDir, {
+          recursive: true,
+          filter: (source) => !skipped.has(path.basename(source)),
+        });
+        break;
+      }
+    }
   } catch (error) {
     // Migration is best-effort: a fresh profile is still a valid state.
     console.error('[Hermes Flux] Legacy profile migration failed:', error);

@@ -11,27 +11,52 @@
 >    - `packages/desktop`、`packages/mobile`、`packages/web`：保持轻量壳容器包装。
 > 3. **工程严谨与零假冒交付（Zero-Illusion Engineering）**：
 >    - 核心业务逻辑必须有确定性单测覆盖，严禁循环自证伪测试与假类型降级。
-> 4. **项目隔离铁律**：
+> 4. **架构设计至高无上（Architecture-First & Alignment Mandate）**：
+>    - **代码实现必须 100% 按照架构设计落地，严禁违背分层绕过 Core/PAL 自建简陋胶水逻辑；代码 Review 与单测设计必须无条件以架构文档为基准验收。**
+> 5. **项目隔离铁律**：
 >    - 本项目所有技术细节、架构设计、踩坑经验与流程规范仅沉淀在本目录内部，严禁污染中枢与全局。
+
+---
+
+## 零、项目权威架构与设计文档索引 (Architecture Documentation Index)
+
+本代码库沉淀了完整的工业级系统架构与美学规范，任何功能演进、接口调用、重构修复与审查测试**必须首先研读并严格遵守对应设计文档**：
+
+| 文档分类 | 文档名称与绝对路径 | 核心规范与设计约束 |
+|---|---|---|
+| **核心架构** | [`docs/architecture/core-architecture-and-data-flow-spec.md`](docs/architecture/core-architecture-and-data-flow-spec.md) | **系统全景拓扑与双向数据流规范**：Monorepo 包职责划分、PAL (平台抽象层) 接口定义、WebSocket 5态 FSM、全抖动退避算法、120FPS Token 合流引擎、Zustand 双层 Store 拓扑。 |
+| **协议基线** | [`docs/architecture/gateway-api-and-features-matrix.md`](docs/architecture/gateway-api-and-features-matrix.md) | **Hermes Agent 官方协议权威基线**：252 个 RPC 方法、77 个下行推送事件、13 个服务端反向干预请求契约全景，官方 REST `/api/*` 辅助通道规范。 |
+| **桌面工程** | [`docs/architecture/desktop-windows-delivery-and-cross-platform-guide.md`](docs/architecture/desktop-windows-delivery-and-cross-platform-guide.md) | **桌面端 Windows 交付与跨平台打包指南**：无边框窗口、Frameless 标题栏穿透、Cookie 跨域宿主代理、Windows 11 Mica 规避与单实例守护。 |
+| **工作台重构**| [`docs/architecture/v4-redesign-spec.md`](docs/architecture/v4-redesign-spec.md) | **v4.0 极客美学通栏流式工作台规范**：全宽顶满流式对话舱、740px 黄金居中悬浮输入舱、双列自适应场景检查舱、22px 纯净翡翠状态栏。 |
+| **多端流转** | [`docs/architecture/multi-device-shared-session-handover.md`](docs/architecture/multi-device-shared-session-handover.md) | **多设备共享会话与接力流转设计**：跨端会话握手、状态迁移、局域网直连探测与离线同步机制。 |
+| **主题引擎** | [`docs/architecture/theme-engine-spec.md`](docs/architecture/theme-engine-spec.md) | **标准化可插拔主题注册表规范**：CSS 变量注入系统、暗黑极夜金/白玉翡翠皮肤、动态 Token 运行时切换。 |
+| **问题档案** | [`docs/architecture/known-issues-and-backlog.md`](docs/architecture/known-issues-and-backlog.md) | **已知架构缺陷与演进 Backlog**：技术债务登记簿、时序竞态历史陷阱与中长程规划。 |
+| **设计系统 1**| [`docs/design-system/01-classic-books-and-theories.md`](docs/design-system/01-classic-books-and-theories.md) | **经典设计书籍与排版理论基石**：网格系统、微距阅读律动、字体阶梯与对比度科学。 |
+| **设计系统 2**| [`docs/design-system/02-aesthetic-philosophy-and-standards.md`](docs/design-system/02-aesthetic-philosophy-and-standards.md) | **美学哲学与电影级暗黑质感标准**：微距物理受光、双层边框高光、极黑纯净空间与翡翠微光点。 |
+| **设计系统 3**| [`docs/design-system/03-director-design-workflow.md`](docs/design-system/03-director-design-workflow.md) | **设计总监级评审与审查工作流**：视觉对齐检查清单、不可妥协的工程排版细节。 |
+| **设计系统 4**| [`docs/design-system/04-tokens-and-design-system-spec.md`](docs/design-system/04-tokens-and-design-system-spec.md) | **设计系统 Tokens 与物理几何规范**：全色板 Palette、Border Radius、Shadow 物理层级与尺寸规范。 |
+| **桌面规范** | [`docs/design-system/desktop-design-system-spec.md`](docs/design-system/desktop-design-system-spec.md) | **桌面端专用设计系统规范**：窗口标题栏尺寸、可拖动分割轨阻尼、快捷键映射标准。 |
+| **视觉方向** | [`docs/design-system/visual-directions.md`](docs/design-system/visual-directions.md) | **视觉方向与暗黑微距物理质感指南**：多智能体色彩指纹、思维链展开呼吸律动。 |
 
 ---
 
 ## 一、工业级自动化质量门禁 (Quality Gates - 一票否决硬红线)
 
-全工作区所有代码修改、功能新增与缺陷修复，在提交或合并前必须无条件通过以下 **5 大硬门禁**。任何一项未通过直接**一票否决**：
+全工作区所有代码修改、功能新增与缺陷修复，在提交或合并前必须无条件通过以下 **6 大硬门禁**。任何一项未通过直接**一票否决**：
 
 ```text
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│                   Hermes Flux Production Quality Gate Pipeline                   │
-├─────────────────┬──────────────────┬─────────────────┬─────────────────┬─────────┤
-│  Gate 1: TYPE   │  Gate 2: TEST    │  Gate 3: INVAR  │  Gate 4: ACCESS │ Gate 5: │
-│  全栈严格类型   │  反 AI 假测试    │  正确性不变量   │  物理入口可达   │ CI 回归 │
-│ (tsc --noEmit)  │ (真实DI/零Mock)  │ (Failure!=Empty)│ (Tokens强一致)  │ (100%绿)│
-└─────────────────┴──────────────────┴─────────────────┴─────────────────┴─────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                           Hermes Flux Production Quality Gate Pipeline                           │
+├─────────────────┬─────────────────┬──────────────────┬─────────────────┬─────────────────┬───────┤
+│ Gate 0: ARCH    │  Gate 1: TYPE   │  Gate 2: TEST    │  Gate 3: INVAR  │  Gate 4: ACCESS │Gate 5:│
+│ 架构符合性审查  │  全栈严格类型   │  反 AI 假测试    │  正确性不变量   │  物理入口可达   │CI回归 │
+│ (严格按设计编码)│ (tsc --noEmit)  │ (真实DI/零Mock)  │ (Failure!=Empty)│ (Tokens强一致)  │(100%绿│
+└─────────────────┴─────────────────┴──────────────────┴─────────────────┴─────────────────┴───────┘
 ```
 
 | 门禁代号 | 门禁名称 | 审查标准与执行命令 | 违规一票否决典型场景 |
 |---|---|---|---|
+| **Gate 0** | **架构符合性门禁** | 代码实现必须 100% 符合 `docs/` 设计规范 | 业务层（UI/Renderer）越过 Core/PAL 自行发起裸 `fetch`；破坏 Monorepo 依赖单向拓扑；自行构造未经 Core 校验的临时数据结构 |
 | **Gate 1** | **全栈严格类型门禁** | `npm run typecheck`<br>（强制递归对 `core`、`ui`、`desktop` 执行 `tsc --noEmit`，零类型报错） | 出现 `as any`、`as unknown as T`、隐式 any、未声明字段访问（如历史遗留的 `state.authSecret`） |
 | **Gate 2** | **反 AI 假测试门禁** | `npm test`<br>（严禁 `vi.mock()` / `jest.mock()` 整体劫持，必须依赖注入与真实 import 生产模块） | 测试文件内自己构造假函数冒充生产实现；只测 Mock 对象的返回值，生产代码修改后测试依然绿灯 |
 | **Gate 3** | **正确性不变量门禁** | 显式失败检验（Failure Is Not Empty） | 网络断开、网关异常或解析失败时，界面把错误静默吞掉并展示为空列表，导致用户无法感知真实故障 |
@@ -67,7 +92,11 @@
 1. **最小完整变更 (Smallest Complete Change)**：只动与当前任务直接相关的最窄代码层，严禁借修复之名做投机性重构或无依据的代码搬迁；
 2. **反 AI 糊弄增量棘轮 (Anti-Slop Ratchet)**：严格定义所有数据结构接口（Interface / Type），坚决不用 `any`，新增代码必须推动类型覆盖率向上提升；
 3. **消除临时胶水代码**：优先复用 Monorepo 现有沉淀（如调用 `packages/core` 的 `HermesGatewayClient` 与 `WebSocketFsm`，严禁在业务层自建重复简陋轮子）；
-4. **明确状态演变 (State Diff)**：涉及状态机、并发、长连接时，明确流转前后的精确状态转移。
+4. **明确状态演变 (State Diff)**：涉及状态机、并发、长连接时，明确流转前后的精确状态转移；
+5. **关键代码必须写清晰注释（Crucial Code Comments Mandate）**：
+   - 关键代码（包括架构分层边界、网络/RPC 契约调用、状态机转移、DOM 增量合流、CSS 布局核心约束、防抖与时序补偿）**必须编写清晰、严谨的高密度中文注释**；
+   - 注释既是给用户审查代码看的，也是给后续协同与接力的 Agent 看的；
+   - 注释必须阐明三要素：① **设计意图 (Why)** 为什么这么写、② **防范的历史坑 (Pitfall)** 规避了什么具体失败模式（如防止 flex 默认 row 导致多段落横向分列排版崩塌、防止跨域剥离 Cookie）、③ **约束与规则 (Rules)** 明确说明调用边界与不可破坏的不变量。
 
 ### 3. 阶段三：验证、审查与落盘 (Verification & Commit)
 1. **本地全量 CI 必须全绿**：本地终端无条件执行并通过 `npm run typecheck && npm test && npm run build`；
@@ -234,5 +263,78 @@ test('FSM should compute exponential backoff with full jitter within bounds', ()
 - **渲染前判定**：`render()` 必须先在旧 DOM 上判定是否处于跟随模式，再决定贴底还是走 `StreamAnchor` 补偿，
   禁止渲染后再猜。
 - **禁止高度估算**：`.message-row` 不得使用 `content-visibility` / `contain-intrinsic-size` 等会用估算高度替代真实布局的属性；
-  超长会话的性能靠"窗口化挂载 100 条 + 触顶回补"保证，而不是靠隐藏行的布局。
+  超长会话的性能靠"窗口化挂载 50 条 + 触顶回补"保证，而不是靠隐藏行的布局。
 - **禁止 `scroll-behavior: smooth`**：程序化滚动必须即时生效，平滑滚动会与补偿逻辑叠加成抖动。
+
+---
+
+## 九、接口契约前置验证规范 (API Verification Protocol - 铁律)
+
+在编写、调用或修改任何后端网关接口（JSON-RPC 2.0 方法、REST API、平台 IPC）之前，**严禁凭直觉或假设直接写调用代码**。必须在官方文档、OpenAPI 规范或后端源码中逐项完成**接口前置三要素取证**并闭环：
+
+```text
+┌────────────────────────────────────────────────────────────────────────┐
+│               API Contract Triad Verification (接口前置三要素)          │
+├───────────────────┬───────────────────┬────────────────────────────────┤
+│ 1. 存在性确认     │ 2. 功能边界确认   │ 3. 入参与出参契约确认          │
+│ (Existence)       │ (Functionality)   │ (Payload & Response Contract)  │
+│ 接口是否真实注册  │ 接口究竟做什么    │ 字段名、类型、必填项与返回 Schema│
+└───────────────────┴───────────────────┴────────────────────────────────┘
+```
+
+### 1. 确认三要素审查清单
+1. **要素一：接口是否存在（Existence）**：
+   - 查证源：查阅后端 Gateway 源码路由表（如 `server.py`、`routes.py`、RPC 注册清单）或官方文档；
+   - 严禁行为：禁止凭经验臆造方法名（如凭空调用 `session.list_all`、`chat.history` 等未注册方法）；
+2. **要素二：接口的核心功能与边界（Functionality & Side Effects）**：
+   - 查证源：阅读接口实现逻辑，明确其职责边界、错误码含义（如 4007 会话未激活、4001 未授权）以及是否有副作用（如调用后是否会持久化、是否会广播全局通知）；
+   - 严禁行为：把只读查询当成状态重置，或误判接口的作用域（如全局会话与 Profile 上下文隔离）；
+3. **要素三：精确出入参契约（Payload & Response Contract）**：
+   - 查证源：检查 Pydantic Schema / Type 声明，核实每个参数的实名、类型、默认值与合法取值；
+   - 严禁行为：传未声明的多余字段（触发服务端的 `Extra inputs are not permitted` 致命报错）；传错类型（如将 string 传为 number、把毫秒时间戳当成秒）；
+   - 出参兼容：明确响应数据结构是 `{ messages: [...] }` 还是 `{ history: [...] }` 还是 `{ data: [...] }`，写防御性解包逻辑，禁止单一假设直接访问。
+
+---
+
+## 十、前端工程架构与渲染性能规范 (Frontend Architecture & Performance Standards)
+
+针对富文本、多代码块的大型会话场景，前端渲染必须遵循**局部隔离更新**与**反抖动加载流程**，坚决杜绝因全量重绘导致的界面卡死：
+
+### 1. 渲染架构红线与禁令清单 (Strict Prohibitions)
+- ❌ **严禁会话流无辜重绘（Zero Stream Thrashing）**：
+  - 点击任何非消息控件（折叠侧边栏、切换检查舱 Tab、打开/关闭设置弹窗、展开模型菜单、输入框输入等），**绝对禁止销毁或重绘 `#conversation-stream` 的 DOM 树**；
+  - 必须通过区域 Slot（Titlebar、LeftRail、InspectionPod、StatusBar、InputDock、Modal）进行局部 outerHTML/DOM 替换，保持消息流 100% 原始 DOM 节点不动；
+- ❌ **严禁插入 DOM 后同步强制重排（Forced Synchronous Layout）**：
+  - 严禁在修改 innerHTML/outerHTML 之后，同一事件循环内直接同步读取 `scrollHeight`、`scrollTop`、`offsetHeight`、`getBoundingClientRect`；
+  - 几何计算与滚动补偿必须拆分在 `requestAnimationFrame` 中分帧完成；
+- ❌ **严禁高开销 API 混入渲染热链路**：
+  - 严禁在渲染循环或列表 map 中调用 `toLocaleTimeString` 等 `Intl` 格式化（必须使用纯算术格式化）；
+  - 严禁在渲染热路径上频繁做无缓存的非必要深度反序列化；
+- ❌ **严禁分页加载竞态重入**：
+  - 向上触顶加载历史时，必须先置加锁标志 `isLoadingOlder = true`，**必须等待第二帧高度补偿完全平移稳定后**方可释放锁，杜绝滚动条归零触发的级联并发雪崩。
+
+### 2. 标准化会话加载与分页流线 (Standard Loading Pipeline)
+
+```text
+[用户点击会话 / 切会话]
+       │
+       ▼
+1. 内存/本地缓存秒开 (Cache-First)
+   └── 若缓存存在，瞬间渲染最新 50 条 (0ms 白屏)，立即贴底呈现
+       │
+       ▼
+2. 校验通过的 RPC 唤醒 (Verified session.resume)
+   └── 携带准确 profile 与 session_id 契约调用网关
+       │
+       ▼
+3. 窗口化挂载与队列分离 (Initial Windowing)
+   └── 仅将最新 50 条挂载到 DOM 树 (700KB 缩减至 150KB，渲染排版耗时降 80%)
+   └── 剩余早前历史存入内存队列 `sessionOlderQueue`，点亮向上回补指示器
+       │
+       ▼
+4. 触顶无感步进回补 (Incremental 30-item Paging)
+   └── stream.scrollTop < 120 且未加载时触发
+   └── 加锁 isLoadingOlder = true ➔ 从队列取出 30 条切片前置拼接
+   └── 首帧测量高度差：nextScrollTop = prevScrollTop + addedHeight
+   └── 次帧吸收字体/排版残余漂移 ➔ 释放加锁标志 isLoadingOlder = false
+```

@@ -22,12 +22,44 @@ export interface InputDockProps {
   disabled?: boolean;
   modelMenuOpen?: boolean;
   notice?: string;
+  activityStatus?: string;
 }
 
 export function renderInputDock(props: InputDockProps): string {
   const isStreaming = Boolean(props.isStreaming);
   const modelMenuOpen = Boolean(props.modelMenuOpen);
   const notice = (props.notice || '').trim();
+  const activityStatus = (props.activityStatus || '').trim();
+
+  // Model display label
+  const selectedDetail = props.modelDetails?.find((m) => m.id === props.selectedModel);
+  const modelLabel = selectedDetail ? selectedDetail.displayName || selectedDetail.name : props.selectedModel || 'Hermes Agent';
+
+  const activityPillHtml = activityStatus
+    ? `
+      <div class="agent-activity-pill" style="
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        background: var(--bg-card);
+        border: 1px solid var(--border-medium);
+        border-radius: 20px;
+        padding: 4px 14px;
+        font-size: 12px;
+        color: var(--text-main);
+        margin-bottom: 8px;
+        pointer-events: auto;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+        user-select: none;
+        animation: fadeIn 0.2s ease;
+      ">
+        <span style="color: var(--accent); font-size: 13px; display: inline-flex; align-items: center; animation: pulse 2s infinite;">✨</span>
+        <span style="font-weight: 500;">${escapeHtml(modelLabel)}</span>
+        <span style="color: var(--text-muted);">·</span>
+        <span style="color: var(--text-secondary);">${escapeHtml(activityStatus)}</span>
+      </div>
+    `
+    : '';
 
   const reasoningLabels: Record<string, string> = {
     default: '默认',
@@ -52,11 +84,13 @@ export function renderInputDock(props: InputDockProps): string {
       left: 0;
       right: 0;
       display: flex;
-      justify-content: center;
+      flex-direction: column;
+      align-items: center;
       padding: 0 24px;
       pointer-events: none;
       z-index: 40;
     ">
+      ${activityPillHtml}
       <div class="input-card-box composer-dock" style="
         pointer-events: auto;
         width: 100%;

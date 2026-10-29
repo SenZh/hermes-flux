@@ -256,6 +256,54 @@ export class HermesGatewayClient {
   }
 
   /**
+   * Resilient session messages pagination via official high-speed REST channel.
+   * 
+   * 【设计意图 (Why)】
+   * 遵循 Hermes Agent 官方协议矩阵（docs/architecture/gateway-api-and-features-matrix.md）。
+   * 网关 session.resume 在超大会话下无分页且耗时高达 6~7 秒，官方专门开放了高速 REST 消息游标/分页接口。
+   * 
+   * 【防范的历史坑 (Pitfall)】
+   * 1. 严禁上层业务直接用浏览器裸 fetch 跨层调用（file:// 协议会剥离 Cookie 导致 401）；
+   * 2. 严禁传 order='newest' 或 order='desc'（网关 Pydantic 校验严格，非法值直接返回 400）；
+   * 3. 必须通过 restFallbackHandler 转接宿主代理通道，统一注入鉴权凭证。
+   * 
+   * 【规则 (Rules)】
+   * order 只能取 'latest' 或 'oldest'；首屏必须限制在 50 条以内实现 30ms 极速加载。
+   */
+  public async fetchSessionMessages(
+    sessionId: string,
+    options: { limit?: number; offset?: number; order?: 'latest' | 'oldest' } = {}
+  ): Promise<{ messages: any[]; pagination?: any; ok: boolean; error?: string }> {
+    if (!this.restFallbackHandler) {
+      return { messages: [], ok: false, error: '未注入 REST 通信代理处理器' };
+    }
+
+    try {
+      const res = await this.restFallbackHandler(
+        `/api/sessions/${encodeURIComponent(sessionId)}/messages`,
+        {
+          method: 'GET',
+          params: {
+            limit: options.limit ?? 50,
+            offset: options.offset ?? 0,
+            order: options.order ?? 'latest',
+          },
+        }
+      );
+
+      const messages = Array.isArray(res?.messages) ? res.messages : [];
+      return {
+        messages,
+        pagination: res?.pagination,
+        ok: true,
+      };
+    } catch (err) {
+      const errorMsg = describeError(err);
+      return { messages: [], ok: false, error: errorMsg };
+    }
+  }
+
+  /**
    * Resilient model catalog extraction.
    *
    * `model.options` answers `{ model, provider, providers: [{ slug, models }] }`.

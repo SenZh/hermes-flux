@@ -37,7 +37,7 @@ export interface LeftRailProps {
 
 export function renderLeftRail(props: LeftRailProps): string {
   if (props.collapsed) {
-    return `<aside id="flux-left-rail" class="rail-collapsed" style="width: 0px; min-width: 0px; display: none; overflow: hidden;"></aside>`;
+    return `<aside id="flux-left-rail" class="flux-left-rail rail-collapsed" style="width: 0px; min-width: 0px; display: none; overflow: hidden;"></aside>`;
   }
 
   const activeSessions = props.sessions.filter((s) => !s.isArchived);

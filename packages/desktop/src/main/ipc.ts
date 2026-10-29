@@ -5,6 +5,8 @@
 import { ipcMain, BrowserWindow, shell, dialog, app } from 'electron';
 
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
+  let activeGatewayCookies = '';
+
   // Window management IPC
   ipcMain.handle('window:minimize', () => {
     mainWindow.minimize();
@@ -121,6 +123,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         } else {
           cookies = loginRes.headers.get('set-cookie') || '';
         }
+        activeGatewayCookies = cookies;
 
         // Mint WS Ticket
         const ticketRes = await fetch(`${baseUrl}/api/auth/ws-ticket`, {
@@ -159,6 +162,11 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   );
 
   // HTTP REST Proxy (bypasses browser CORS / cookie constraints in desktop)
+  // 【设计意图 (Why)】
+  // Electron 渲染层运行在 file:// 协议沙箱中，直接 fetch 跨域调用网关会被浏览器剥离 Cookie。
+  // 主进程作为受信任的 Node.js 宿主，不受浏览器 Cookie 策略约束。
+  // 【防范的陷阱 (Pitfall)】
+  // 必须把登录提取的 activeGatewayCookies 持久化并自动注入请求头，否则网关会返回 401 Unauthorized (reason: no_cookie)。
   ipcMain.handle('gateway:http-proxy', async (_event, options: {
     baseUrl: string;
     path: string;
@@ -188,6 +196,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       Accept: 'application/json',
       Origin: base,
     };
+    if (activeGatewayCookies) {
+      headers['Cookie'] = activeGatewayCookies;
+    }
     if (options.token) {
       headers['Authorization'] = `Bearer ${options.token}`;
     }

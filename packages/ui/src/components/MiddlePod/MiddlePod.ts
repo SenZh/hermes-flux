@@ -39,9 +39,45 @@ export interface MiddlePodProps {
   isLoadingOlder?: boolean;
 }
 
-export function renderMiddlePod(props: MiddlePodProps): string {
+export function renderConversationCanvas(props: MiddlePodProps): string {
   const agentDisplayName = (props.profileName || 'default').toUpperCase();
 
+  return `
+    <div class="content-fluid-canvas" style="width: 100%; max-width: 100%; margin: 0; display: flex; flex-direction: column; gap: 24px;">
+      ${
+        props.gatewayConnecting
+          ? `<div style="max-width: 480px; margin: 120px auto 0; text-align: center; color: var(--text-muted); font-size: 13px; display: flex; flex-direction: column; align-items: center; gap: 10px;">
+              <span style="font-size: 20px; animation: pulse 1.5s infinite;">⚡</span>
+              <span>正在连接 Hermes 网关...</span>
+            </div>`
+          : !props.gatewayConnected
+          ? renderGatewayOnboarding(props)
+          : props.messages.length === 0
+          ? renderWelcomeEmptyState()
+          : `
+            ${
+              props.hasOlderMessages
+                ? `<div class="older-history-indicator" style="text-align: center; padding: 6px; font-size: 11px; color: var(--text-muted); opacity: 0.75; font-family: var(--font-mono);">
+                    ${props.isLoadingOlder ? '正在加载更早历史...' : '↑ 向上滚动查看更早历史'}
+                   </div>`
+                : ''
+            }
+            ${props.messages
+              .map((m, idx, arr) => {
+                const prev = arr[idx - 1];
+                const next = arr[idx + 1];
+                const isFirstInTurn = !prev || prev.role !== m.role;
+                const isLastInTurn = !next || next.role !== m.role;
+                return renderMessage(m, agentDisplayName, { isFirstInTurn, isLastInTurn });
+              })
+              .join('')}
+          `
+      }
+    </div>
+  `;
+}
+
+export function renderMiddlePod(props: MiddlePodProps): string {
   return `
     <main class="flux-middle-pod conversation-pod" style="
       flex: 1 1 0%;
@@ -65,37 +101,7 @@ export function renderMiddlePod(props: MiddlePodProps): string {
         padding: 24px 32px 180px;
         box-sizing: border-box;
       ">
-        <div class="content-fluid-canvas" style="width: 100%; max-width: 100%; margin: 0; display: flex; flex-direction: column; gap: 24px;">
-          ${
-            props.gatewayConnecting
-              ? `<div style="max-width: 480px; margin: 120px auto 0; text-align: center; color: var(--text-muted); font-size: 13px; display: flex; flex-direction: column; align-items: center; gap: 10px;">
-                  <span style="font-size: 20px; animation: pulse 1.5s infinite;">⚡</span>
-                  <span>正在连接 Hermes 网关...</span>
-                </div>`
-              : !props.gatewayConnected
-              ? renderGatewayOnboarding(props)
-              : props.messages.length === 0
-              ? renderWelcomeEmptyState()
-              : `
-                ${
-                  props.hasOlderMessages
-                    ? `<div class="older-history-indicator" style="text-align: center; padding: 6px; font-size: 11px; color: var(--text-muted); opacity: 0.75; font-family: var(--font-mono);">
-                        ${props.isLoadingOlder ? '正在加载更早历史...' : '↑ 向上滚动查看更早历史'}
-                       </div>`
-                    : ''
-                }
-                ${props.messages
-                  .map((m, idx, arr) => {
-                    const prev = arr[idx - 1];
-                    const next = arr[idx + 1];
-                    const isFirstInTurn = !prev || prev.role !== m.role;
-                    const isLastInTurn = !next || next.role !== m.role;
-                    return renderMessage(m, agentDisplayName, { isFirstInTurn, isLastInTurn });
-                  })
-                  .join('')}
-              `
-          }
-        </div>
+        ${renderConversationCanvas(props)}
       </div>
 
       <!-- Dock Scrim Fade (Bottom gradient to prevent card collision) -->
@@ -369,14 +375,27 @@ export function renderMessage(
           font-size: 13.5px;
           line-height: 1.68;
           display: flex;
-          flex-direction: column;
+          flex-direction: column; /* 必须显式声明 column，严禁使用默认 row 导致多段落被横向排成多列 */
           gap: 12px;
           margin-top: 4px;
         ">
           ${renderMarkdown(m.content)}
         </div>
       `
-          : `<div id="msg-content-${m.id}" class="assistant-content prose-block" style="display: none;"></div>`
+          : `
+        <div id="msg-content-${m.id}" class="assistant-content prose-block" style="
+          color: var(--text-main);
+          font-size: 13.5px;
+          line-height: 1.68;
+          display: flex;
+          flex-direction: column; /* 占位容器同样必须锁定 column，确保动态 SSE 增量追加段落时保持正常纵向流 */
+          gap: 12px;
+          margin-top: 4px;
+          min-height: 24px;
+        ">
+          <div><span class="flux-typing-cursor" style="display: inline-block; width: 6px; height: 14px; background: var(--accent); border-radius: 1px; animation: flux-cursor-blink 0.9s infinite;"></span></div>
+        </div>
+      `
       }
 
       <!-- Turn Footer (Optional subtle end time if needed) -->
@@ -441,7 +460,7 @@ function renderThinkingFold(m: MessageViewModel): string {
   `;
 }
 
-function getCleanReasoningSummary(text: string): string {
+export function getCleanReasoningSummary(text: string): string {
   if (!text) return '';
   const clean = text
     .replace(/```[\s\S]*?```/g, '')
@@ -453,6 +472,41 @@ function getCleanReasoningSummary(text: string): string {
   return `${clean.substring(0, 75).trimEnd()}…`;
 }
 
+function getFileBadge(pathStr: string): string {
+  const match = pathStr.match(/\.([a-zA-Z0-9]+)(?:$|[?#:])/);
+  if (!match) return '';
+  const ext = match[1].toLowerCase();
+  if (ext === 'js' || ext === 'mjs' || ext === 'cjs') {
+    return `<span style="background: #EAB308; color: #000; font-size: 9px; font-weight: 700; padding: 1px 3.5px; border-radius: 3px; font-family: var(--font-mono); line-height: 1.1; flex-shrink: 0;">JS</span>`;
+  }
+  if (ext === 'ts' || ext === 'mts' || ext === 'cts' || ext === 'tsx') {
+    return `<span style="background: #3B82F6; color: #fff; font-size: 9px; font-weight: 700; padding: 1px 3.5px; border-radius: 3px; font-family: var(--font-mono); line-height: 1.1; flex-shrink: 0;">TS</span>`;
+  }
+  if (ext === 'py') {
+    return `<span style="background: #38BDF8; color: #000; font-size: 9px; font-weight: 700; padding: 1px 3.5px; border-radius: 3px; font-family: var(--font-mono); line-height: 1.1; flex-shrink: 0;">PY</span>`;
+  }
+  if (ext === 'json') {
+    return `<span style="background: #F59E0B; color: #000; font-size: 9px; font-weight: 700; padding: 1px 3.5px; border-radius: 3px; font-family: var(--font-mono); line-height: 1.1; flex-shrink: 0;">JSON</span>`;
+  }
+  if (ext === 'md') {
+    return `<span style="background: #6B7280; color: #fff; font-size: 9px; font-weight: 700; padding: 1px 3.5px; border-radius: 3px; font-family: var(--font-mono); line-height: 1.1; flex-shrink: 0;">MD</span>`;
+  }
+  return '';
+}
+
+function calculateDiffStats(diffText: string): { adds: number; dels: number } | null {
+  if (!diffText || !diffText.includes('\n')) return null;
+  let adds = 0;
+  let dels = 0;
+  const lines = diffText.split('\n');
+  for (const line of lines) {
+    if (line.startsWith('+') && !line.startsWith('+++')) adds++;
+    else if (line.startsWith('-') && !line.startsWith('---')) dels++;
+  }
+  if (adds === 0 && dels === 0) return null;
+  return { adds, dels };
+}
+
 function renderToolCapsules(m: MessageViewModel): string {
   if (!m.toolCalls || m.toolCalls.length === 0) return '';
 
@@ -461,31 +515,35 @@ function renderToolCapsules(m: MessageViewModel): string {
       const rawName = String(tc.name || '').toLowerCase();
       let displayName = 'Tool Call';
       let iconSvg = '';
+      let isShell = false;
+      let isEdit = false;
 
       if (rawName.includes('shell') || rawName.includes('bash') || rawName.includes('cmd') || rawName.includes('terminal')) {
         displayName = 'Shell Command';
-        iconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="3"/><path d="m7 10 3 2-3 2"/><path d="M12 14h5"/></svg>`;
+        isShell = true;
+        iconSvg = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>`;
       } else if (rawName.includes('edit') || rawName.includes('patch')) {
         displayName = 'Edit File';
-        iconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m10 15 5-5"/></svg>`;
+        isEdit = true;
+        iconSvg = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>`;
       } else if (rawName.includes('read') || rawName.includes('file')) {
         displayName = 'Read File';
-        iconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>`;
+        iconSvg = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>`;
       } else if (rawName.includes('write')) {
         displayName = 'Write File';
-        iconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M12 18h6"/></svg>`;
+        iconSvg = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="16" y2="18"/></svg>`;
       } else if (rawName.includes('grep') || rawName.includes('search')) {
         displayName = 'Search Files';
-        iconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>`;
+        iconSvg = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
       } else if (rawName.includes('glob') || rawName.includes('find')) {
         displayName = 'Find Files';
-        iconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>`;
+        iconSvg = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
       } else if (rawName.includes('subagent') || rawName.includes('agent')) {
         displayName = 'Agent Task';
-        iconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="1.5"/><circle cx="15" cy="9" r="1.5"/><path d="M8 15h8"/></svg>`;
+        iconSvg = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="1.5"/><circle cx="15" cy="9" r="1.5"/><path d="M8 15h8"/></svg>`;
       } else {
         displayName = tc.name || 'Tool';
-        iconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`;
+        iconSvg = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`;
       }
 
       // Defensive arguments parsing: ensure cleanArgs is GUARANTEED to be a string
@@ -510,39 +568,57 @@ function renderToolCapsules(m: MessageViewModel): string {
       }
 
       const norm = normalizeToolOutput(tc.output);
+      const fileBadge = getFileBadge(cleanArgs);
+      const diffStats = norm.isDiff ? calculateDiffStats(norm.text) : null;
+      const canExpand = !norm.isEmpty;
 
       return `
-        <details class="timeline-row tool-row tool-capsule" style="margin: 2px 0;">
+        <details class="timeline-row tool-row tool-capsule openchamber-tool-item" style="margin: 3px 0;" ${isShell && canExpand ? 'open' : ''}>
           <summary style="
             list-style: none;
             display: flex;
             align-items: center;
             gap: 7px;
-            padding: 4px 0;
-            cursor: ${norm.isEmpty ? 'default' : 'pointer'};
+            padding: 3px 4px;
+            border-radius: 5px;
+            cursor: ${canExpand ? 'pointer' : 'default'};
             user-select: none;
-            font-size: 13px;
+            font-size: 12.5px;
             line-height: 1.5;
+            color: var(--text-secondary);
+            transition: background 0.12s ease;
           ">
-            <span style="color: #9CA3AF; display: inline-flex; align-items: center; flex-shrink: 0;">
+            <span class="tool-chevron" style="display: inline-flex; align-items: center; justify-content: center; width: 14px; font-size: 10px; color: var(--text-muted); opacity: 0.8; flex-shrink: 0;">
+              ${canExpand ? '▾' : '•'}
+            </span>
+            <span style="color: var(--text-secondary); display: inline-flex; align-items: center; flex-shrink: 0; opacity: 0.9;">
               ${iconSvg}
             </span>
-            <span style="font-weight: 500; color: #D1D5DB; flex-shrink: 0;">${displayName}</span>
+            <span style="font-weight: 500; color: var(--text-main); flex-shrink: 0;">${displayName}</span>
+            ${fileBadge}
             ${
               cleanArgs && cleanArgs !== '{}'
-                ? `<span style="color: #9CA3AF; font-family: var(--font-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;">${escapeHtml(cleanArgs)}</span>`
+                ? `<span style="color: var(--text-secondary); font-family: var(--font-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; opacity: 0.9;">${escapeHtml(cleanArgs)}</span>`
+                : ''
+            }
+            ${
+              diffStats
+                ? `<span style="font-size: 11px; font-family: var(--font-mono); font-weight: 600; display: inline-flex; gap: 4px; flex-shrink: 0; margin-left: 6px;">
+                    <span style="color: #22C55E;">+${diffStats.adds}</span>
+                    <span style="color: #EF4444;">-${diffStats.dels}</span>
+                   </span>`
                 : ''
             }
           </summary>
           ${
-            !norm.isEmpty
+            canExpand
               ? `
-            <div style="
-              margin-left: 7px;
-              margin-top: 4px;
-              margin-bottom: 6px;
-              padding-left: 14px;
-              border-left: 2px solid rgba(255, 255, 255, 0.08);
+            <div class="tool-output-container" style="
+              margin: 4px 0 6px 21px;
+              border-radius: 6px;
+              overflow: hidden;
+              background: var(--bg-card, #121214);
+              border: 1px solid var(--border-subtle);
             ">
               ${renderToolOutputBody(norm.text, norm.isDiff)}
             </div>

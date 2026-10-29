@@ -8,6 +8,7 @@ import {
   renderTitlebar,
   renderLeftRail,
   renderMiddlePod,
+  renderConversationCanvas,
   renderInputDock,
   renderInspectionPod,
   renderStatusBar,
@@ -16,6 +17,8 @@ import {
   renderModelPickerTree,
   renderMessage,
   renderMarkdown,
+  getCleanReasoningSummary,
+  escapeHtml,
   MessageViewModel,
   InspectorTab,
 } from '@hermes-flux/ui';
@@ -104,6 +107,7 @@ interface AppState {
   browserFrame?: { url: string; title: string; screenshotUrl?: string };
   gitDiffs: Array<{ file: string; additions: number; deletions: number; patch?: string }>;
   memories: Array<{ category: string; content: string; updated?: string }>;
+  agentActivityStatus?: string;
 }
 
 const desktopApi: HermesDesktopBridge | undefined = window.hermesDesktop;
@@ -158,7 +162,7 @@ const state: AppState = {
   lang: (localStorage.getItem('hermes_flux_lang') || localStorage.getItem('hermes_aura_lang') as any) || 'zh',
   isMaximized: false,
   leftRailCollapsed: false,
-  inspectorCollapsed: false,
+  inspectorCollapsed: true,
   activeInspectorTab: 'artifacts',
   activeSessionId: '',
   activeLiveSessionId: '',
@@ -318,7 +322,15 @@ const tokenCoalescer = new TokenCoalescer((flushedMap) => {
         if (contentEl.style.display === 'none') {
           contentEl.style.display = 'flex';
         }
-        contentEl.innerHTML = renderMarkdown(targetMsg.content);
+        // 关键规则：必须显式锁定 flexDirection = 'column'，严禁 flex 默认的 row 布局将多个 Markdown 段落横向排成多列
+        if (contentEl.style.flexDirection !== 'column') {
+          contentEl.style.flexDirection = 'column';
+        }
+        const rendered = renderMarkdown(targetMsg.content);
+        const cursorHtml = state.isStreaming
+          ? `<span class="flux-typing-cursor" style="display: inline-block; width: 6px; height: 13px; background: var(--accent); margin-left: 2px; vertical-align: -1px; border-radius: 1px; animation: flux-cursor-blink 0.9s infinite;"></span>`
+          : '';
+        contentEl.innerHTML = `${rendered}${cursorHtml}`;
       }
     }
 
@@ -331,6 +343,10 @@ const tokenCoalescer = new TokenCoalescer((flushedMap) => {
         if (fold) {
           fold.style.display = 'block';
           if (!fold.open) fold.open = true;
+          const summaryEl = fold.querySelector('summary span:last-child') as HTMLElement | null;
+          if (summaryEl) {
+            summaryEl.innerText = getCleanReasoningSummary(targetMsg.thought);
+          }
         }
       }
     }
@@ -534,63 +550,218 @@ async function switchProfile(name: string): Promise<void> {
   await Promise.allSettled([fetchSessions(), fetchModelOptions()]);
 }
 
-// OpenChamber Standard Message Paging: Initial Window 100 items for instant cold launch
-const INITIAL_WINDOW_PAGE_SIZE = 100;
+// OpenChamber Standard Message Paging: Initial Window 50 items for instant cold launch
+const INITIAL_WINDOW_PAGE_SIZE = 50;
+const OLDER_BATCH_PAGE_SIZE = 30;
 const sessionMessagesCache = new Map<string, MessageViewModel[]>();
-const sessionOlderQueue = new Map<string, MessageViewModel[]>();
+const sessionServerOffset = new Map<string, number>();
+
+function parseRawMessages(list: any[]): MessageViewModel[] {
+  const parsedMessages: MessageViewModel[] = [];
+
+  for (let idx = 0; idx < list.length; idx++) {
+    const m = list[idx];
+    if (!m || typeof m !== 'object') continue;
+
+    const rawRole = String(m.role || '').toLowerCase();
+    
+    let rawText = '';
+    if (typeof m.text === 'string') {
+      rawText = m.text;
+    } else if (typeof m.content === 'string') {
+      rawText = m.content;
+    } else if (Array.isArray(m.content)) {
+      rawText = m.content
+        .map((part: any) => {
+          if (typeof part === 'string') return part;
+          if (part && typeof part.text === 'string') return part.text;
+          if (part && part.type === 'tool_use') return `[调用工具: ${part.name || 'tool'}]`;
+          return '';
+        })
+        .filter(Boolean)
+        .join('\n');
+    } else if (typeof m.message === 'string') {
+      rawText = m.message;
+    } else if (m.delta && typeof m.delta.text === 'string') {
+      rawText = m.delta.text;
+    }
+
+    const thought = typeof m.thinking === 'string'
+      ? m.thinking
+      : typeof m.thought === 'string'
+      ? m.thought
+      : typeof m.reasoning === 'string'
+      ? m.reasoning
+      : '';
+
+    const rawToolCalls = Array.isArray(m.tool_calls)
+      ? m.tool_calls
+      : Array.isArray(m.tools)
+      ? m.tools
+      : Array.isArray(m.tool_use)
+      ? m.tool_use
+      : [];
+
+    const toolCalls = rawToolCalls.map((tc: any, tIdx: number) => ({
+      id: tc.id || `tc-${idx}-${tIdx}`,
+      name: tc.name || tc.function?.name || 'tool',
+      status: (tc.status || 'completed') as any,
+      args: typeof tc.args === 'string' ? tc.args : typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.args || tc.arguments || tc.input || {}),
+      output: tc.output ? String(tc.output) : tc.result ? String(tc.result) : undefined,
+    }));
+
+    let isToolPayload = rawRole === 'tool' || rawRole === 'function';
+    let synthesizedToolCall: any = null;
+
+    if (!isToolPayload && rawText.trim().startsWith('{') && rawText.trim().endsWith('}')) {
+      try {
+        const parsed = JSON.parse(rawText.trim());
+        if (
+          parsed &&
+          typeof parsed === 'object' &&
+          ('success' in parsed || 'diff' in parsed || 'files_modified' in parsed || 'stdout' in parsed || 'exitCode' in parsed)
+        ) {
+          isToolPayload = true;
+          const toolName = ('diff' in parsed || 'files_modified' in parsed) ? 'edit' : 'tool';
+          const targetArg = parsed.resolved_path || (parsed.files_modified ? parsed.files_modified[0] : '') || '';
+          synthesizedToolCall = {
+            id: m.tool_call_id || `tc-synth-${idx}`,
+            name: toolName,
+            status: 'completed',
+            args: targetArg,
+            output: parsed.diff || rawText,
+          };
+        }
+      } catch {
+        // not json
+      }
+    }
+
+    if (isToolPayload) {
+      if (parsedMessages.length > 0 && parsedMessages[parsedMessages.length - 1].role === 'assistant') {
+        const prev = parsedMessages[parsedMessages.length - 1];
+        if (!prev.toolCalls) prev.toolCalls = [];
+
+        if (synthesizedToolCall) {
+          prev.toolCalls.push(synthesizedToolCall);
+          continue;
+        }
+
+        const validToolOutput = rawText || m.output || (m.result && Object.keys(m.result).length > 0 ? JSON.stringify(m.result) : undefined);
+
+        if (prev.toolCalls.length > 0) {
+          prev.toolCalls[prev.toolCalls.length - 1].output = validToolOutput;
+          continue;
+        } else {
+          prev.toolCalls.push({
+            id: m.tool_call_id || `tc-${idx}`,
+            name: m.name || 'tool',
+            status: 'completed',
+            args: '',
+            output: validToolOutput,
+          });
+          continue;
+        }
+      } else if (synthesizedToolCall) {
+        parsedMessages.push({
+          id: String(m.row_id ?? m.id ?? `msg-${idx}`),
+          role: 'assistant',
+          content: '',
+          thought: '',
+          toolCalls: [synthesizedToolCall],
+          timestamp: formatTimestamp(m.timestamp ?? m.created_at ?? Date.now()),
+        });
+        continue;
+      } else {
+        continue;
+      }
+    }
+
+    const hasContent = Boolean(rawText && rawText.trim());
+    const hasThought = Boolean(thought && thought.trim());
+    const hasTools = toolCalls.length > 0;
+
+    if (rawRole === 'assistant' && !hasContent && !hasThought && !hasTools) {
+      continue;
+    }
+
+    if (rawRole !== 'assistant' && !hasContent) {
+      continue;
+    }
+
+    parsedMessages.push({
+      id: String(m.row_id ?? m.id ?? `msg-${idx}`),
+      role: (rawRole === 'user' || rawRole === 'system' ? rawRole : 'assistant') as MessageViewModel['role'],
+      content: rawText,
+      thought,
+      thoughtDurationMs: m.thought_duration_ms,
+      toolCalls,
+      timestamp: formatTimestamp(m.timestamp ?? m.created_at ?? Date.now()),
+    });
+  }
+
+  return parsedMessages;
+}
 
 async function loadOlderMessages(): Promise<void> {
   const sessionId = state.activeSessionId;
-  if (!sessionId || state.isLoadingOlder) return;
+  if (!sessionId || state.isLoadingOlder || !gatewayClient) return;
 
-  const queue = sessionOlderQueue.get(sessionId);
-  if (!queue || queue.length === 0) {
-    state.hasOlderMessages = false;
-    return;
-  }
-
+  const currentOffset = sessionServerOffset.get(sessionId) || 0;
   state.isLoadingOlder = true;
   const startedAt = performance.now();
   const stream = document.getElementById('conversation-stream');
   const prevScrollHeight = stream ? stream.scrollHeight : 0;
   const prevScrollTop = stream ? stream.scrollTop : 0;
 
-  // Extract earlier slice
-  const batch = queue.slice(-INITIAL_WINDOW_PAGE_SIZE);
-  const remaining = queue.slice(0, -INITIAL_WINDOW_PAGE_SIZE);
-  sessionOlderQueue.set(sessionId, remaining);
-  state.hasOlderMessages = remaining.length > 0;
+  try {
+    const outcome = await gatewayClient.fetchSessionMessages(sessionId, {
+      limit: OLDER_BATCH_PAGE_SIZE,
+      offset: currentOffset,
+      order: 'latest',
+    });
 
-  // Prepend earlier batch
-  state.messages = [...batch, ...state.messages];
+    if (outcome.ok && outcome.messages.length > 0) {
+      const batch = parseRawMessages(outcome.messages);
+      sessionServerOffset.set(sessionId, currentOffset + outcome.messages.length);
+      state.hasOlderMessages = outcome.messages.length >= OLDER_BATCH_PAGE_SIZE;
+      state.messages = [...batch, ...state.messages];
+      render();
+
+      requestAnimationFrame(() => {
+        const nextStream = document.getElementById('conversation-stream');
+        if (!nextStream) {
+          state.isLoadingOlder = false;
+          return;
+        }
+        const addedHeight = nextStream.scrollHeight - prevScrollHeight;
+        nextStream.scrollTop = prevScrollTop + addedHeight;
+
+        requestAnimationFrame(() => {
+          const settled = document.getElementById('conversation-stream');
+          if (settled) {
+            const settledAdded = settled.scrollHeight - prevScrollHeight;
+            const drift = settledAdded - addedHeight;
+            if (Math.abs(drift) >= 1) settled.scrollTop += drift;
+          }
+          state.isLoadingOlder = false;
+
+          logScroll.debug('older batch prepended via REST pagination', {
+            batch: batch.length,
+            totalLoaded: state.messages.length,
+            ms: Math.round((performance.now() - startedAt) * 10) / 10,
+          });
+        });
+      });
+      return;
+    }
+  } catch (err) {
+    console.warn('[Flux] loadOlderMessages failed:', err);
+  }
+
+  state.hasOlderMessages = false;
   state.isLoadingOlder = false;
   render();
-
-  // Precise scroll compensating (Zero Jump)
-  requestAnimationFrame(() => {
-    const nextStream = document.getElementById('conversation-stream');
-    if (!nextStream) return;
-    const addedHeight = nextStream.scrollHeight - prevScrollHeight;
-    nextStream.scrollTop = prevScrollTop + addedHeight;
-
-    // Second pass: web fonts and wrapped rows can add height after the first
-    // frame; absorb that residual so the reader's line stays put.
-    requestAnimationFrame(() => {
-      const settled = document.getElementById('conversation-stream');
-      if (!settled) return;
-      const settledAdded = settled.scrollHeight - prevScrollHeight;
-      const drift = settledAdded - addedHeight;
-      if (Math.abs(drift) >= 1) settled.scrollTop += drift;
-
-      logScroll.debug('older batch prepended', {
-        batch: batch.length,
-        remaining: remaining.length,
-        addedHeight: Math.round(settledAdded),
-        residualDrift: Math.round(drift),
-        ms: Math.round((performance.now() - startedAt) * 10) / 10,
-      });
-    });
-  });
 }
 
 async function loadMessages(sessionId: string): Promise<void> {
@@ -602,272 +773,115 @@ async function loadMessages(sessionId: string): Promise<void> {
   }
 
   const loadStartedAt = performance.now();
+  state.activeSessionId = sessionId;
 
-  // 1. Instant cache hit: render immediately from memory without waiting for network roundtrip
+  // 1. Instant Cache Hit (0ms)
   const cached = sessionMessagesCache.get(sessionId);
   if (cached && cached.length > 0) {
-    if (cached.length > INITIAL_WINDOW_PAGE_SIZE) {
-      state.messages = cached.slice(-INITIAL_WINDOW_PAGE_SIZE);
-      sessionOlderQueue.set(sessionId, cached.slice(0, -INITIAL_WINDOW_PAGE_SIZE));
-      state.hasOlderMessages = true;
-    } else {
-      state.messages = [...cached];
-      state.hasOlderMessages = false;
-    }
+    state.messages = [...cached];
+    state.hasOlderMessages = (sessionServerOffset.get(sessionId) || 0) >= INITIAL_WINDOW_PAGE_SIZE;
     pendingScrollToBottom = true;
     render();
     scrollStreamToBottom('cache hit');
     logSession.debug('session rendered from cache', {
       sessionId,
-      total: cached.length,
       mounted: state.messages.length,
       ms: Math.round((performance.now() - loadStartedAt) * 10) / 10,
     });
   }
 
-  const rpcStartedAt = performance.now();
-  let rpcMs = 0;
-
+  // 2. High-speed REST pagination: 50 items latest-first (<50ms vs 6500ms WS dump)
+  let fastLoaded = false;
   try {
-    let res: any;
-    try {
-      // 1. Try session.resume with profile parameter so the gateway resolves it in the active profile context
-      res = await gatewayClient.call<any>('session.resume', {
-        session_id: sessionId,
-        profile: state.profileName || 'default',
-      });
-    } catch (firstErr: any) {
-      const firstMsg = describeRpcError(firstErr);
-      if (firstMsg.includes('Extra inputs')) {
-        // Fallback without profile
-        res = await gatewayClient.call<any>('session.resume', { session_id: sessionId });
-      } else {
-        // 2. Try REST history endpoint if session.resume gave 4007
-        if (desktopApi?.httpProxy && (firstMsg.includes('4007') || firstMsg.includes('not found'))) {
-          const baseUrl = getEffectiveUrl(state.gatewayUrl);
-          const historyRes = await desktopApi.httpProxy({
-            baseUrl,
-            path: `/api/sessions/${encodeURIComponent(sessionId)}/history`,
-            method: 'GET',
-            ticket: currentTicket,
-          }).catch(() => null);
+    const outcome = await gatewayClient.fetchSessionMessages(sessionId, {
+      limit: INITIAL_WINDOW_PAGE_SIZE,
+      order: 'latest',
+    });
 
-          if (historyRes && (Array.isArray(historyRes.messages) || Array.isArray(historyRes.history))) {
-            res = historyRes;
-          } else {
-            throw firstErr;
-          }
+    if (outcome.ok && outcome.messages.length > 0) {
+      const parsed = parseRawMessages(outcome.messages);
+      sessionMessagesCache.set(sessionId, parsed);
+      sessionServerOffset.set(sessionId, outcome.pagination?.returned || outcome.messages.length);
+      state.messages = parsed;
+      state.hasOlderMessages = Boolean(outcome.pagination && outcome.pagination.returned >= INITIAL_WINDOW_PAGE_SIZE);
+      state.dockNotice = '';
+      pendingScrollToBottom = true;
+      render();
+      scrollStreamToBottom('fast rest loaded');
+      fastLoaded = true;
+
+      logSession.info('session loaded via high-speed REST', {
+        sessionId,
+        returned: outcome.messages.length,
+        mounted: parsed.length,
+        ms: Math.round((performance.now() - loadStartedAt) * 10) / 10,
+      });
+    }
+  } catch (err) {
+    logSession.debug('fast REST load failed, falling back to session.resume', { err });
+  }
+
+  // 3. Background asynchronous session.resume for live session activation & handle resolution
+  const resumePromise = (async () => {
+    const rpcStartedAt = performance.now();
+    try {
+      let res: any;
+      try {
+        res = await gatewayClient.call<any>('session.resume', {
+          session_id: sessionId,
+          profile: state.profileName || 'default',
+        });
+      } catch (firstErr: any) {
+        const firstMsg = describeRpcError(firstErr);
+        if (firstMsg.includes('Extra inputs')) {
+          res = await gatewayClient.call<any>('session.resume', { session_id: sessionId });
         } else {
           throw firstErr;
         }
       }
-    }
 
-    rpcMs = Math.round((performance.now() - rpcStartedAt) * 10) / 10;
-
-    const handles = readSessionHandles(res, sessionId);
-    if (handles) {
-      state.activeLiveSessionId = handles.liveId;
-    } else {
-      state.activeLiveSessionId = sessionId;
-    }
-
-    const list = Array.isArray(res?.messages) ? res.messages : Array.isArray(res?.history) ? res.history : [];
-    const parseStartedAt = performance.now();
-
-    // Filter and transform messages
-    const parsedMessages: MessageViewModel[] = [];
-
-    for (let idx = 0; idx < list.length; idx++) {
-      const m = list[idx];
-      if (!m || typeof m !== 'object') continue;
-
-      // Extract raw role
-      const rawRole = String(m.role || '').toLowerCase();
-      
-      // Determine content text from diverse gateway schemas
-      let rawText = '';
-      if (typeof m.text === 'string') {
-        rawText = m.text;
-      } else if (typeof m.content === 'string') {
-        rawText = m.content;
-      } else if (Array.isArray(m.content)) {
-        // Multi-part content blocks (Anthropic / OpenAI format: [{type: 'text', text: '...'}])
-        rawText = m.content
-          .map((part: any) => {
-            if (typeof part === 'string') return part;
-            if (part && typeof part.text === 'string') return part.text;
-            if (part && part.type === 'tool_use') return `[调用工具: ${part.name || 'tool'}]`;
-            return '';
-          })
-          .filter(Boolean)
-          .join('\n');
-      } else if (typeof m.message === 'string') {
-        rawText = m.message;
-      } else if (m.delta && typeof m.delta.text === 'string') {
-        rawText = m.delta.text;
+      const handles = readSessionHandles(res, sessionId);
+      if (handles) {
+        state.activeLiveSessionId = handles.liveId;
+      } else {
+        state.activeLiveSessionId = sessionId;
       }
 
-      // Extract thinking / reasoning
-      const thought = typeof m.thinking === 'string'
-        ? m.thinking
-        : typeof m.thought === 'string'
-        ? m.thought
-        : typeof m.reasoning === 'string'
-        ? m.reasoning
-        : '';
-
-      // Extract tool calls
-      const rawToolCalls = Array.isArray(m.tool_calls)
-        ? m.tool_calls
-        : Array.isArray(m.tools)
-        ? m.tools
-        : Array.isArray(m.tool_use)
-        ? m.tool_use
-        : [];
-
-      const toolCalls = rawToolCalls.map((tc: any, tIdx: number) => ({
-        id: tc.id || `tc-${idx}-${tIdx}`,
-        name: tc.name || tc.function?.name || 'tool',
-        status: (tc.status || 'completed') as any,
-        args: typeof tc.args === 'string' ? tc.args : typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.args || tc.arguments || tc.input || {}),
-        output: tc.output ? String(tc.output) : tc.result ? String(tc.result) : undefined,
-      }));
-
-      // Internal intermediate messages (e.g. tool output without user text, pure protocol frames)
-      // Check if this message is a tool response, or if rawText itself is a serialized tool output (JSON with diff/success/etc.)
-      let isToolPayload = rawRole === 'tool' || rawRole === 'function';
-      let synthesizedToolCall: any = null;
-
-      if (!isToolPayload && rawText.trim().startsWith('{') && rawText.trim().endsWith('}')) {
-        try {
-          const parsed = JSON.parse(rawText.trim());
-          if (
-            parsed &&
-            typeof parsed === 'object' &&
-            ('success' in parsed || 'diff' in parsed || 'files_modified' in parsed || 'stdout' in parsed || 'exitCode' in parsed)
-          ) {
-            isToolPayload = true;
-            const toolName = ('diff' in parsed || 'files_modified' in parsed) ? 'edit' : 'tool';
-            const targetArg = parsed.resolved_path || (parsed.files_modified ? parsed.files_modified[0] : '') || '';
-            synthesizedToolCall = {
-              id: m.tool_call_id || `tc-synth-${idx}`,
-              name: toolName,
-              status: 'completed',
-              args: targetArg,
-              output: parsed.diff || rawText,
-            };
-          }
-        } catch {
-          // not json
-        }
-      }
-
-      if (isToolPayload) {
-        // Attach tool result to previous assistant message
-        if (parsedMessages.length > 0 && parsedMessages[parsedMessages.length - 1].role === 'assistant') {
-          const prev = parsedMessages[parsedMessages.length - 1];
-          if (!prev.toolCalls) prev.toolCalls = [];
-
-          if (synthesizedToolCall) {
-            prev.toolCalls.push(synthesizedToolCall);
-            continue;
-          }
-
-          const validToolOutput = rawText || m.output || (m.result && Object.keys(m.result).length > 0 ? JSON.stringify(m.result) : undefined);
-
-          if (prev.toolCalls.length > 0) {
-            prev.toolCalls[prev.toolCalls.length - 1].output = validToolOutput;
-            continue;
-          } else {
-            prev.toolCalls.push({
-              id: m.tool_call_id || `tc-${idx}`,
-              name: m.name || 'tool',
-              status: 'completed',
-              args: '',
-              output: validToolOutput,
-            });
-            continue;
-          }
-        } else if (synthesizedToolCall) {
-          // If no previous assistant message, create one containing ONLY this tool call
-          parsedMessages.push({
-            id: String(m.row_id ?? m.id ?? `msg-${idx}`),
-            role: 'assistant',
-            content: '',
-            thought: '',
-            toolCalls: [synthesizedToolCall],
-            timestamp: formatTimestamp(m.timestamp ?? m.created_at ?? Date.now()),
-          });
-          continue;
+      // If REST load did not succeed, fallback to mounting messages from WS result
+      if (!fastLoaded) {
+        const list = Array.isArray(res?.messages) ? res.messages : Array.isArray(res?.history) ? res.history : [];
+        const parsed = parseRawMessages(list);
+        sessionMessagesCache.set(sessionId, parsed);
+        if (parsed.length > INITIAL_WINDOW_PAGE_SIZE) {
+          state.messages = parsed.slice(-INITIAL_WINDOW_PAGE_SIZE);
+          state.hasOlderMessages = true;
         } else {
-          // Drop orphaned protocol frames
-          continue;
+          state.messages = parsed;
+          state.hasOlderMessages = false;
         }
+        pendingScrollToBottom = true;
+        render();
+        scrollStreamToBottom('ws fallback loaded');
       }
 
-      // If an assistant message is completely empty (no content, no thought, no tools), DO NOT render a blank ghost bubble
-      const hasContent = Boolean(rawText && rawText.trim());
-      const hasThought = Boolean(thought && thought.trim());
-      const hasTools = toolCalls.length > 0;
-
-      // Filter out empty assistant turn frames
-      if (rawRole === 'assistant' && !hasContent && !hasThought && !hasTools) {
-        continue;
-      }
-
-      // If user or system message has no text, skip as well
-      if (rawRole !== 'assistant' && !hasContent) {
-        continue;
-      }
-
-      parsedMessages.push({
-        id: String(m.row_id ?? m.id ?? `msg-${idx}`),
-        role: (rawRole === 'user' || rawRole === 'system' ? rawRole : 'assistant') as MessageViewModel['role'],
-        content: rawText,
-        thought,
-        thoughtDurationMs: m.thought_duration_ms,
-        toolCalls,
-        timestamp: formatTimestamp(m.timestamp ?? m.created_at ?? Date.now()),
+      logSession.debug('background session.resume activated', {
+        sessionId,
+        liveId: state.activeLiveSessionId,
+        ms: Math.round((performance.now() - rpcStartedAt) * 10) / 10,
       });
+    } catch (e) {
+      if (!fastLoaded) {
+        console.warn('[Hermes Gateway] Failed to load messages via RPC fallback:', e);
+        const errText = describeRpcError(e);
+        state.messages = [];
+        state.dockNotice = `载入会话历史失败: ${errText}`;
+        render();
+      }
     }
+  })();
 
-    sessionMessagesCache.set(sessionId, parsedMessages);
-
-    const parseMs = Math.round((performance.now() - parseStartedAt) * 10) / 10;
-
-    // Initial Window Splitting: Mount only latest 100 messages for instantaneous rendering
-    if (parsedMessages.length > INITIAL_WINDOW_PAGE_SIZE) {
-      state.messages = parsedMessages.slice(-INITIAL_WINDOW_PAGE_SIZE);
-      sessionOlderQueue.set(sessionId, parsedMessages.slice(0, -INITIAL_WINDOW_PAGE_SIZE));
-      state.hasOlderMessages = true;
-    } else {
-      state.messages = parsedMessages;
-      sessionOlderQueue.delete(sessionId);
-      state.hasOlderMessages = false;
-    }
-
-    if (state.activeSessionId === sessionId) state.dockNotice = '';
-    pendingScrollToBottom = true;
-    render();
-    scrollStreamToBottom('session loaded');
-
-    logSession.info('session loaded', {
-      sessionId,
-      fetched: list.length,
-      parsed: parsedMessages.length,
-      mounted: state.messages.length,
-      older: sessionOlderQueue.get(sessionId)?.length ?? 0,
-      rpcMs,
-      parseMs,
-      totalMs: Math.round((performance.now() - loadStartedAt) * 10) / 10,
-    });
-  } catch (e) {
-    console.warn('[Hermes Gateway] Failed to load messages via RPC:', e);
-    const errText = describeRpcError(e);
-    state.messages = [];
-    state.dockNotice = `载入会话历史失败: ${errText}`;
-    render();
+  if (!fastLoaded) {
+    await resumePromise;
   }
 }
 
@@ -1357,10 +1371,12 @@ async function sendMessage(text: string): Promise<void> {
   state.messages.push(assistantMsg);
 
   state.isStreaming = true;
+  state.agentActivityStatus = 'thinking';
   tokenCoalescer.clear();
   armTurnWatchdog();
   pendingScrollToBottom = true;
   render();
+  updateActivityPill('thinking');
   scrollStreamToBottom('message sent');
   logStream.info('turn started', { session: state.activeLiveSessionId, chars: trimmed.length });
 
@@ -1376,6 +1392,8 @@ async function sendMessage(text: string): Promise<void> {
     if (submitResult?.status && submitResult.status !== 'streaming' && submitResult.status !== 'queued') {
       assistantMsg.content = `[网关未受理本轮] status=${String(submitResult.status)}`;
       state.isStreaming = false;
+      state.agentActivityStatus = undefined;
+      updateActivityPill(undefined);
       activeStreamingMessageId = null;
       disarmTurnWatchdog();
       render();
@@ -1384,6 +1402,8 @@ async function sendMessage(text: string): Promise<void> {
     console.error('[Hermes Gateway] prompt.submit failed:', err);
     assistantMsg.content = `[提交失败] ${describeRpcError(err)}`;
     state.isStreaming = false;
+    state.agentActivityStatus = undefined;
+    updateActivityPill(undefined);
     activeStreamingMessageId = null;
     disarmTurnWatchdog();
     render();
@@ -1392,8 +1412,54 @@ async function sendMessage(text: string): Promise<void> {
 
 function formatTimestamp(ts: number | string): string {
   if (typeof ts === 'string') return ts;
-  const date = new Date(ts > 1e11 ? ts : ts * 1000);
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const d = new Date(ts > 1e11 ? ts : ts * 1000);
+  const h = d.getHours();
+  const m = d.getMinutes();
+  return `${h < 10 ? '0' : ''}${h}:${m < 10 ? '0' : ''}${m}`;
+}
+
+function updateActivityPill(statusText?: string): void {
+  const container = document.querySelector('.input-dock-container');
+  if (!container) return;
+  const existingPill = container.querySelector('.agent-activity-pill') as HTMLElement | null;
+
+  if (!statusText) {
+    if (existingPill) existingPill.remove();
+    return;
+  }
+
+  const selectedDetail = state.modelDetails?.find((m) => m.id === state.selectedModel);
+  const modelLabel = selectedDetail ? selectedDetail.displayName || selectedDetail.name : state.selectedModel || 'Hermes Agent';
+
+  if (existingPill) {
+    const textSpan = existingPill.querySelector('span:last-child');
+    if (textSpan) textSpan.textContent = statusText;
+  } else {
+    const pillHtml = `
+      <div class="agent-activity-pill" style="
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        background: var(--bg-card);
+        border: 1px solid var(--border-medium);
+        border-radius: 20px;
+        padding: 4px 14px;
+        font-size: 12px;
+        color: var(--text-main);
+        margin-bottom: 8px;
+        pointer-events: auto;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+        user-select: none;
+        animation: fadeIn 0.2s ease;
+      ">
+        <span style="color: var(--accent); font-size: 13px; display: inline-flex; align-items: center; animation: pulse 2s infinite;">✨</span>
+        <span style="font-weight: 500;">${escapeHtml(modelLabel)}</span>
+        <span style="color: var(--text-muted);">·</span>
+        <span style="color: var(--text-secondary);">${escapeHtml(statusText)}</span>
+      </div>
+    `;
+    container.insertAdjacentHTML('afterbegin', pillHtml);
+  }
 }
 
 /** Writes the authoritative turn text back into the streamed assistant bubble. */
@@ -1405,6 +1471,10 @@ function setMessageContent(messageId: string, text: string): void {
   if (el) {
     if (el.style.display === 'none') {
       el.style.display = 'flex';
+    }
+    // 关键规则：必须显式锁定 flexDirection = 'column'，严禁 flex 默认的 row 布局将多个 Markdown 段落横向排成多列
+    if (el.style.flexDirection !== 'column') {
+      el.style.flexDirection = 'column';
     }
     el.innerHTML = renderMarkdown(text);
   }
@@ -1422,18 +1492,37 @@ function applyTurnActions(actions: TurnAction[]): void {
           state.isStreaming = true;
           needsRender = true;
         }
+        state.agentActivityStatus = 'thinking';
+        updateActivityPill('thinking');
         armTurnWatchdog();
         break;
 
       case 'append-content':
+        if (state.agentActivityStatus !== 'writing response') {
+          state.agentActivityStatus = 'writing response';
+          updateActivityPill('writing response');
+        }
         tokenCoalescer.push({ messageId: action.messageId, delta: action.text, isThought: false });
         break;
 
       case 'append-thought':
+        if (state.agentActivityStatus !== 'thinking') {
+          state.agentActivityStatus = 'thinking';
+          updateActivityPill('thinking');
+        }
         tokenCoalescer.push({ messageId: action.messageId, delta: action.text, isThought: true });
         break;
 
       case 'tool-start': {
+        const rawName = String(action.toolCall.name || '').toLowerCase();
+        let status = 'executing tool';
+        if (rawName.includes('read') || rawName.includes('file')) status = 'reading a file';
+        else if (rawName.includes('shell') || rawName.includes('bash') || rawName.includes('cmd') || rawName.includes('terminal')) status = 'running command';
+        else if (rawName.includes('edit') || rawName.includes('patch') || rawName.includes('write')) status = 'editing a file';
+        else if (rawName.includes('grep') || rawName.includes('search') || rawName.includes('find') || rawName.includes('glob')) status = 'searching files';
+        state.agentActivityStatus = status;
+        updateActivityPill(status);
+
         const target = state.messages.find((m) => m.id === action.messageId);
         if (target) {
           if (!target.toolCalls) target.toolCalls = [];
@@ -1449,6 +1538,9 @@ function applyTurnActions(actions: TurnAction[]): void {
       }
 
       case 'tool-complete': {
+        state.agentActivityStatus = 'thinking';
+        updateActivityPill('thinking');
+
         const target = state.messages.find((m) => m.id === action.messageId);
         if (target && target.toolCalls) {
           const tc = target.toolCalls.find((t) => !action.toolCallId || t.id === action.toolCallId);
@@ -1471,6 +1563,8 @@ function applyTurnActions(actions: TurnAction[]): void {
         tokenCoalescer.flush();
         if (finalReplace) setMessageContent(finalReplace.messageId, finalReplace.text);
         state.isStreaming = false;
+        state.agentActivityStatus = undefined;
+        updateActivityPill(undefined);
         activeStreamingMessageId = null;
         disarmTurnWatchdog();
         needsRender = true;
@@ -1485,6 +1579,8 @@ function applyTurnActions(actions: TurnAction[]): void {
           pendingMsg.content = `[回合中断] ${action.message}`;
         }
         state.isStreaming = false;
+        state.agentActivityStatus = undefined;
+        updateActivityPill(undefined);
         activeStreamingMessageId = null;
         state.dockNotice = action.message;
         disarmTurnWatchdog();
@@ -1778,14 +1874,70 @@ function stabilizeStreamAnchor(anchor: StreamAnchor): void {
   }
 }
 
+interface RenderMessagesSnapshot {
+  sessionId: string;
+  count: number;
+  lastMsgId: string;
+  lastContentLen: number;
+  isStreaming: boolean;
+  gatewayConnected: boolean;
+  gatewayConnecting: boolean;
+  hasOlder: boolean;
+  isLoadingOlder: boolean;
+  profileName: string;
+}
+
+let lastMessagesSnapshot: RenderMessagesSnapshot | null = null;
+
+function renderContextMenuHtml(ctx?: AppState['sessionContextMenu']): string {
+  if (!ctx) return '';
+  return `
+    <div id="session-context-menu" style="
+      position: fixed;
+      left: ${ctx.x}px;
+      top: ${ctx.y}px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      box-shadow: var(--shadow-window);
+      padding: 5px;
+      min-width: 170px;
+      z-index: 2000;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-size: 12px;
+      user-select: none;
+    ">
+      <button type="button" class="ctx-item" data-action="rename" style="padding: 6px 10px; border-radius: 5px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;">
+        <span>✏️</span><span>重命名</span>
+      </button>
+      <button type="button" class="ctx-item" data-action="copy-id" style="padding: 6px 10px; border-radius: 5px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;">
+        <span>📋</span><span>复制会话 ID</span>
+      </button>
+      <button type="button" class="ctx-item" data-action="pin" style="padding: 6px 10px; border-radius: 5px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;">
+        <span>📌</span><span>置顶会话</span>
+      </button>
+      <button type="button" class="ctx-item" data-action="export" style="padding: 6px 10px; border-radius: 5px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;">
+        <span>📥</span><span>导出 Markdown</span>
+      </button>
+      <div style="height: 1px; background: var(--border-subtle); margin: 3px 0;"></div>
+      <button type="button" class="ctx-item" data-action="archive" style="padding: 6px 10px; border-radius: 5px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;">
+        <span>🗄️</span><span>归档</span>
+      </button>
+      <button type="button" class="ctx-item" data-action="delete" style="padding: 6px 10px; border-radius: 5px; border: none; background: transparent; color: #EF4444; display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;">
+        <span>🗑️</span><span>删除</span>
+      </button>
+    </div>
+  `;
+}
+
 function render(): void {
   const root = document.getElementById('flux-app-root');
   if (!root) return;
 
   const renderStartedAt = performance.now();
 
-  // The shell re-renders by replacing innerHTML, so transient UI state (draft text,
-  // caret, focus, scroll position) has to be captured and restored by hand.
   const existingInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
   const draftText = existingInput ? existingInput.value : '';
   const inputHadFocus = Boolean(existingInput) && document.activeElement === existingInput;
@@ -1794,9 +1946,8 @@ function render(): void {
 
   const forcedBottom = pendingScrollToBottom;
   pendingScrollToBottom = false;
-  // Follow mode is inherited: a reader parked at the bottom keeps following
-  // across any re-render, not only the one right after they sent a prompt.
-  const wasNearBottom = isStreamNearBottom(document.getElementById('conversation-stream'));
+  const streamEl = document.getElementById('conversation-stream');
+  const wasNearBottom = isStreamNearBottom(streamEl);
   const pinBottom = forcedBottom || wasNearBottom;
   const streamAnchor = captureStreamAnchor();
 
@@ -1806,21 +1957,148 @@ function render(): void {
   const activeSession = state.sessions.find((s) => s.id === state.activeSessionId);
   const currentTitle = activeSession ? activeSession.title : (state.gatewayConnected ? 'Hermes Flux — 请选择或新建会话' : '未连接网关');
 
-  const html = `
-    <!-- Top Purified Titlebar -->
-    ${renderTitlebar({
-      platform: state.platform,
-      title: currentTitle,
-      isMaximized: state.isMaximized,
-      gatewayConnected: state.gatewayConnected,
-      profileName: state.profileName,
-      profiles: state.profiles,
-    })}
+  const currentLastMsg = state.messages.length > 0 ? state.messages[state.messages.length - 1] : null;
+  const currentMessagesSnapshot: RenderMessagesSnapshot = {
+    sessionId: state.activeSessionId,
+    count: state.messages.length,
+    lastMsgId: currentLastMsg ? currentLastMsg.id : '',
+    lastContentLen: currentLastMsg ? (currentLastMsg.content?.length || 0) : 0,
+    isStreaming: state.isStreaming,
+    gatewayConnected: state.gatewayConnected,
+    gatewayConnecting: state.gatewayConnecting,
+    hasOlder: state.hasOlderMessages,
+    isLoadingOlder: state.isLoadingOlder,
+    profileName: state.profileName,
+  };
 
-    <!-- Main Body Container -->
-    <div class="flux-body-container" style="flex: 1; display: flex; position: relative; overflow: hidden; width: 100%;">
-      <!-- Left Rail -->
-      ${renderLeftRail({
+  const inOngoingStreamingTurn =
+    state.isStreaming &&
+    lastMessagesSnapshot?.isStreaming &&
+    lastMessagesSnapshot.sessionId === currentMessagesSnapshot.sessionId &&
+    lastMessagesSnapshot.count === currentMessagesSnapshot.count;
+
+  const messagesChanged =
+    !inOngoingStreamingTurn &&
+    (!lastMessagesSnapshot ||
+      lastMessagesSnapshot.sessionId !== currentMessagesSnapshot.sessionId ||
+      lastMessagesSnapshot.count !== currentMessagesSnapshot.count ||
+      lastMessagesSnapshot.lastMsgId !== currentMessagesSnapshot.lastMsgId ||
+      lastMessagesSnapshot.isStreaming !== currentMessagesSnapshot.isStreaming ||
+      lastMessagesSnapshot.gatewayConnected !== currentMessagesSnapshot.gatewayConnected ||
+      lastMessagesSnapshot.gatewayConnecting !== currentMessagesSnapshot.gatewayConnecting ||
+      lastMessagesSnapshot.hasOlder !== currentMessagesSnapshot.hasOlder ||
+      lastMessagesSnapshot.isLoadingOlder !== currentMessagesSnapshot.isLoadingOlder ||
+      lastMessagesSnapshot.profileName !== currentMessagesSnapshot.profileName);
+
+  const bodyContainer = root.querySelector('.flux-body-container');
+
+  if (!bodyContainer) {
+    // 1. Initial full skeleton mount
+    const html = `
+      ${renderTitlebar({
+        platform: state.platform,
+        title: currentTitle,
+        isMaximized: state.isMaximized,
+        gatewayConnected: state.gatewayConnected,
+        profileName: state.profileName,
+        profiles: state.profiles,
+      })}
+
+      <div class="flux-body-container" style="flex: 1; display: flex; position: relative; overflow: hidden; width: 100%;">
+        ${renderLeftRail({
+          collapsed: state.leftRailCollapsed,
+          activeSessionId: state.activeSessionId,
+          sessions: state.sessions,
+          profileName: state.profileName,
+          profiles: state.profiles,
+          gatewayOnline: state.gatewayConnected,
+          gatewayLatencyMs: state.gatewayLatencyMs,
+          error: state.sessionListError,
+        })}
+
+        ${renderMiddlePod({
+          gatewayConnected: state.gatewayConnected,
+          gatewayConnecting: state.gatewayConnecting,
+          gatewayUrl: state.gatewayUrl,
+          username: state.username,
+          password: state.password,
+          profileName: state.profileName,
+          messages: state.messages,
+          testStatus: state.testStatus,
+          hasOlderMessages: state.hasOlderMessages,
+          isLoadingOlder: state.isLoadingOlder,
+          dockHtml: state.gatewayConnected
+            ? renderInputDock({
+                selectedModel: state.selectedModel,
+                models: state.availableModels,
+                modelDetails: state.modelDetails,
+                favoriteModels: state.favoriteModels,
+                recentModels: state.recentModels,
+                modelSearchQuery: state.modelSearchQuery,
+                reasoningLevel: state.reasoningLevel,
+                approvalMode: state.approvalMode,
+                isStreaming: state.isStreaming,
+                disabled: !state.gatewayConnected,
+                modelMenuOpen: state.modelMenuOpen,
+                notice: state.dockNotice,
+                activityStatus: state.agentActivityStatus,
+              })
+            : '',
+        })}
+
+        ${renderInspectionPod({
+          collapsed: state.inspectorCollapsed,
+          activeTab: state.activeInspectorTab,
+          gatewayConnected: state.gatewayConnected,
+          artifacts: state.artifacts,
+          browserFrame: state.browserFrame,
+          gitDiffs: state.gitDiffs,
+          memories: state.memories,
+        })}
+      </div>
+
+      ${renderStatusBar({
+        connectionStatus: state.gatewayConnected ? 'connected' : state.gatewayConnecting ? 'connecting' : 'disconnected',
+        latencyMs: state.gatewayLatencyMs,
+      })}
+
+      ${renderSettingsModal({
+        isOpen: state.isSettingsOpen,
+        activeTab: state.settingsTab,
+        gatewayUrl: state.gatewayUrl,
+        username: state.username,
+        password: state.password,
+        profileName: state.profileName,
+        theme: state.theme,
+        lang: state.lang,
+        connectionStatus: state.gatewayConnected ? 'connected' : state.gatewayConnecting ? 'connecting' : 'disconnected',
+        latencyMs: state.gatewayLatencyMs,
+        testStatus: state.testStatus,
+      })}
+
+      ${renderContextMenuHtml(state.sessionContextMenu)}
+    `;
+
+    root.innerHTML = html;
+    lastMessagesSnapshot = currentMessagesSnapshot;
+    applyStreamAnchor(streamAnchor, pinBottom);
+  } else {
+    // 2. High-performance Subtree/Section Isolation Update (Zero DOM thrashing on conversation stream)
+    const titlebarEl = root.querySelector('.flux-titlebar');
+    if (titlebarEl) {
+      titlebarEl.outerHTML = renderTitlebar({
+        platform: state.platform,
+        title: currentTitle,
+        isMaximized: state.isMaximized,
+        gatewayConnected: state.gatewayConnected,
+        profileName: state.profileName,
+        profiles: state.profiles,
+      });
+    }
+
+    const railEl = root.querySelector('#flux-left-rail') || root.querySelector('.flux-left-rail');
+    if (railEl) {
+      railEl.outerHTML = renderLeftRail({
         collapsed: state.leftRailCollapsed,
         activeSessionId: state.activeSessionId,
         sessions: state.sessions,
@@ -1829,40 +2107,12 @@ function render(): void {
         gatewayOnline: state.gatewayConnected,
         gatewayLatencyMs: state.gatewayLatencyMs,
         error: state.sessionListError,
-      })}
+      });
+    }
 
-      <!-- Middle Conversation Pod (Full Bleed Fluid Canvas with Center-Locked Input Dock) -->
-      ${renderMiddlePod({
-        gatewayConnected: state.gatewayConnected,
-        gatewayConnecting: state.gatewayConnecting,
-        gatewayUrl: state.gatewayUrl,
-        username: state.username,
-        password: state.password,
-        profileName: state.profileName,
-        messages: state.messages,
-        testStatus: state.testStatus,
-        hasOlderMessages: state.hasOlderMessages,
-        isLoadingOlder: state.isLoadingOlder,
-        dockHtml: state.gatewayConnected
-          ? renderInputDock({
-              selectedModel: state.selectedModel,
-              models: state.availableModels,
-              modelDetails: state.modelDetails,
-              favoriteModels: state.favoriteModels,
-              recentModels: state.recentModels,
-              modelSearchQuery: state.modelSearchQuery,
-              reasoningLevel: state.reasoningLevel,
-              approvalMode: state.approvalMode,
-              isStreaming: state.isStreaming,
-              disabled: !state.gatewayConnected,
-              modelMenuOpen: state.modelMenuOpen,
-              notice: state.dockNotice,
-            })
-          : '',
-      })}
-
-      <!-- Adaptive Inspection Pod (OpenChamber Vertical Tab Rail) -->
-      ${renderInspectionPod({
+    const inspectEl = root.querySelector('#flux-inspector-pod') || root.querySelector('.flux-inspector-pod');
+    if (inspectEl) {
+      inspectEl.outerHTML = renderInspectionPod({
         collapsed: state.inspectorCollapsed,
         activeTab: state.activeInspectorTab,
         gatewayConnected: state.gatewayConnected,
@@ -1870,17 +2120,50 @@ function render(): void {
         browserFrame: state.browserFrame,
         gitDiffs: state.gitDiffs,
         memories: state.memories,
-      })}
-    </div>
+      });
+    }
 
-    <!-- Bottom Minimal Status Bar -->
-    ${renderStatusBar({
-      connectionStatus: state.gatewayConnected ? 'connected' : state.gatewayConnecting ? 'connecting' : 'disconnected',
-      latencyMs: state.gatewayLatencyMs,
-    })}
+    const statusEl = root.querySelector('.flux-status-bar');
+    if (statusEl) {
+      statusEl.outerHTML = renderStatusBar({
+        connectionStatus: state.gatewayConnected ? 'connected' : state.gatewayConnecting ? 'connecting' : 'disconnected',
+        latencyMs: state.gatewayLatencyMs,
+      });
+    }
 
-    <!-- Settings Modal Drawer -->
-    ${renderSettingsModal({
+    // Input Dock update
+    const existingDock = root.querySelector('.input-dock-container');
+    const nextDockHtml = state.gatewayConnected
+      ? renderInputDock({
+          selectedModel: state.selectedModel,
+          models: state.availableModels,
+          modelDetails: state.modelDetails,
+          favoriteModels: state.favoriteModels,
+          recentModels: state.recentModels,
+          modelSearchQuery: state.modelSearchQuery,
+          reasoningLevel: state.reasoningLevel,
+          approvalMode: state.approvalMode,
+          isStreaming: state.isStreaming,
+          disabled: !state.gatewayConnected,
+          modelMenuOpen: state.modelMenuOpen,
+          notice: state.dockNotice,
+          activityStatus: state.agentActivityStatus,
+        })
+      : '';
+    if (existingDock) {
+      if (nextDockHtml) {
+        existingDock.outerHTML = nextDockHtml;
+      } else {
+        existingDock.remove();
+      }
+    } else if (nextDockHtml) {
+      const middlePod = root.querySelector('.flux-middle-pod');
+      if (middlePod) middlePod.insertAdjacentHTML('beforeend', nextDockHtml);
+    }
+
+    // Settings Modal
+    const modalRoot = document.getElementById('flux-settings-modal-root');
+    const nextModalHtml = renderSettingsModal({
       isOpen: state.isSettingsOpen,
       activeTab: state.settingsTab,
       gatewayUrl: state.gatewayUrl,
@@ -1892,60 +2175,47 @@ function render(): void {
       connectionStatus: state.gatewayConnected ? 'connected' : state.gatewayConnecting ? 'connecting' : 'disconnected',
       latencyMs: state.gatewayLatencyMs,
       testStatus: state.testStatus,
-    })}
-
-    <!-- Session Right-Click Context Menu (OpenChamber Style) -->
-    ${
-      state.sessionContextMenu
-        ? `
-      <div id="session-context-menu" style="
-        position: fixed;
-        left: ${state.sessionContextMenu.x}px;
-        top: ${state.sessionContextMenu.y}px;
-        background: var(--bg-card);
-        border: 1px solid var(--border-strong);
-        border-radius: 8px;
-        box-shadow: var(--shadow-window);
-        padding: 5px;
-        min-width: 170px;
-        z-index: 2000;
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        font-size: 12px;
-        user-select: none;
-      ">
-        <button type="button" class="ctx-item" data-action="rename" style="padding: 6px 10px; border-radius: 5px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;">
-          <span>✏️</span><span>重命名</span>
-        </button>
-        <button type="button" class="ctx-item" data-action="copy-id" style="padding: 6px 10px; border-radius: 5px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;">
-          <span>📋</span><span>复制会话 ID</span>
-        </button>
-        <button type="button" class="ctx-item" data-action="pin" style="padding: 6px 10px; border-radius: 5px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;">
-          <span>📌</span><span>置顶会话</span>
-        </button>
-        <button type="button" class="ctx-item" data-action="export" style="padding: 6px 10px; border-radius: 5px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;">
-          <span>📥</span><span>导出 Markdown</span>
-        </button>
-        <div style="height: 1px; background: var(--border-subtle); margin: 3px 0;"></div>
-        <button type="button" class="ctx-item" data-action="archive" style="padding: 6px 10px; border-radius: 5px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;">
-          <span>🗄️</span><span>归档</span>
-        </button>
-        <button type="button" class="ctx-item" data-action="delete" style="padding: 6px 10px; border-radius: 5px; border: none; background: transparent; color: #EF4444; display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;">
-          <span>🗑️</span><span>删除</span>
-        </button>
-      </div>
-    `
-        : ''
+    });
+    if (modalRoot) {
+      modalRoot.outerHTML = nextModalHtml;
+    } else {
+      root.insertAdjacentHTML('beforeend', nextModalHtml);
     }
-  `;
 
-  root.innerHTML = html;
+    // Context Menu
+    const existingMenu = document.getElementById('session-context-menu');
+    const nextMenuHtml = renderContextMenuHtml(state.sessionContextMenu);
+    if (existingMenu) {
+      if (nextMenuHtml) existingMenu.outerHTML = nextMenuHtml;
+      else existingMenu.remove();
+    } else if (nextMenuHtml) {
+      root.insertAdjacentHTML('beforeend', nextMenuHtml);
+    }
 
-  // Restore the composer draft, its caret and its focus.
+    // Conversation Stream: ONLY update if messages or connection state genuinely changed!
+    const activeStream = document.getElementById('conversation-stream');
+    if (activeStream && messagesChanged) {
+      activeStream.innerHTML = renderConversationCanvas({
+        gatewayConnected: state.gatewayConnected,
+        gatewayConnecting: state.gatewayConnecting,
+        gatewayUrl: state.gatewayUrl,
+        username: state.username,
+        password: state.password,
+        profileName: state.profileName,
+        messages: state.messages,
+        testStatus: state.testStatus,
+        hasOlderMessages: state.hasOlderMessages,
+        isLoadingOlder: state.isLoadingOlder,
+      });
+      applyStreamAnchor(streamAnchor, pinBottom);
+      lastMessagesSnapshot = currentMessagesSnapshot;
+    }
+  }
+
+  // Restore the composer draft, its caret and its focus
   const newInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
   if (newInput) {
-    if (draftText) newInput.value = draftText;
+    if (draftText && newInput.value !== draftText) newInput.value = draftText;
     if (inputHadFocus) {
       newInput.focus({ preventScroll: true });
       const max = newInput.value.length;
@@ -1953,24 +2223,23 @@ function render(): void {
     }
   }
 
-  applyStreamAnchor(streamAnchor, pinBottom);
   bindEvents();
 
-  requestAnimationFrame(() => {
-    if (pinBottom) {
-      // Re-pin once layout settles so a late row growth cannot leave the
-      // viewport a few pixels above the newest message.
-      const stream = document.getElementById('conversation-stream');
-      if (stream) stream.scrollTop = stream.scrollHeight;
-    } else {
-      stabilizeStreamAnchor(streamAnchor);
-    }
-  });
+  if (messagesChanged) {
+    requestAnimationFrame(() => {
+      if (pinBottom) {
+        const stream = document.getElementById('conversation-stream');
+        if (stream) stream.scrollTop = stream.scrollHeight;
+      } else {
+        stabilizeStreamAnchor(streamAnchor);
+      }
+    });
+  }
 
   logRender.debug('render', {
     ms: Math.round((performance.now() - renderStartedAt) * 10) / 10,
     messages: state.messages.length,
-    htmlKB: Math.round(html.length / 1024),
+    messagesChanged,
     session: state.activeSessionId || '(none)',
     forcedBottom,
     pinBottom,

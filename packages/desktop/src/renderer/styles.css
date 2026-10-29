@@ -261,3 +261,14 @@ button {
   background: var(--bg-card-hover) !important;
   border-color: var(--accent-border) !important;
 }
+
+@keyframes flux-cursor-blink {
+  0%, 100% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+  50% {
+    opacity: 0.15;
+    transform: scaleY(0.9);
+  }
+}

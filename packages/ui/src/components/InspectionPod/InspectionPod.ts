@@ -19,7 +19,7 @@ export interface InspectionPodProps {
 
 export function renderInspectionPod(props: InspectionPodProps): string {
   if (props.collapsed) {
-    return `<aside id="flux-inspector-pod" class="inspector-collapsed" style="width: 0px; min-width: 0px; display: none; overflow: hidden;"></aside>`;
+    return `<aside id="flux-inspector-pod" class="flux-inspector-pod inspector-collapsed" style="width: 0px; min-width: 0px; display: none; overflow: hidden;"></aside>`;
   }
 
   const currentFile = props.previewFile || (props.artifacts && props.artifacts.length > 0 ? {

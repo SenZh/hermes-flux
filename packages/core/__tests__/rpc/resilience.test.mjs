@@ -120,4 +120,46 @@ test('HermesGatewayClient Resilience - Dual-Channel Fallback', async (t) => {
     // 3. Assert
     assert.deepEqual(models, ['safe-fallback-1']);
   });
+
+  await t.test('fetchSessionMessages should route to official REST endpoint with pagination params', async () => {
+    // 1. Arrange
+    const client = new HermesGatewayClient({ url: 'ws://127.0.0.1:99999', autoConnect: false });
+    let capturedPath = '';
+    let capturedOptions = null;
+    client.setRestFallbackHandler(async (path, options) => {
+      capturedPath = path;
+      capturedOptions = options;
+      return {
+        session_id: 's-android-01',
+        messages: [{ role: 'user', content: 'hello' }],
+        pagination: { limit: 50, offset: 0, order: 'latest', returned: 1 },
+      };
+    });
+
+    // 2. Act
+    const res = await client.fetchSessionMessages('s-android-01', { limit: 50, offset: 0, order: 'latest' });
+
+    // 3. Assert
+    assert.equal(capturedPath, '/api/sessions/s-android-01/messages');
+    assert.deepEqual(capturedOptions?.params, { limit: 50, offset: 0, order: 'latest' });
+    assert.equal(res.ok, true);
+    assert.equal(res.messages.length, 1);
+    assert.equal(res.pagination.returned, 1);
+  });
+
+  await t.test('fetchSessionMessages should gracefully report error when restFallbackHandler throws', async () => {
+    // 1. Arrange
+    const client = new HermesGatewayClient({ url: 'ws://127.0.0.1:99999', autoConnect: false });
+    client.setRestFallbackHandler(async () => {
+      throw new Error('HTTP 401: Unauthorized');
+    });
+
+    // 2. Act
+    const res = await client.fetchSessionMessages('s-err-01');
+
+    // 3. Assert
+    assert.equal(res.ok, false);
+    assert.equal(res.messages.length, 0);
+    assert.ok(res.error.includes('401'));
+  });
 });
