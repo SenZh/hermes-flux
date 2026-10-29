@@ -34,18 +34,23 @@ export function renderTitlebar(props: TitlebarProps): string {
 
   const winControls = `
     <div class="win-caption-controls" style="-webkit-app-region: no-drag; display: flex; align-items: center; height: 100%;">
-      <button class="win-cap-btn" id="win-min-btn" title="最小化" style="width: 44px; height: 42px; border: none; background: transparent; color: var(--text-secondary); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.15s ease;">
-        <svg width="11" height="1" viewBox="0 0 11 1"><rect width="11" height="1" fill="currentColor"/></svg>
+      <button class="win-cap-btn" id="win-min-btn" title="最小化" style="width: 46px; height: 100%; border: none; background: transparent; color: var(--text-secondary); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.1s ease;">
+        <svg width="10" height="10" viewBox="0 0 10 10"><line x1="0" y1="5" x2="10" y2="5" stroke="currentColor" stroke-width="1"/></svg>
       </button>
-      <button class="win-cap-btn" id="win-max-btn" title="${props.isMaximized ? '还原' : '最大化'}" style="width: 44px; height: 42px; border: none; background: transparent; color: var(--text-secondary); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.15s ease;">
+      <button class="win-cap-btn" id="win-max-btn" title="${props.isMaximized ? '向下还原' : '最大化'}" style="width: 46px; height: 100%; border: none; background: transparent; color: var(--text-secondary); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.1s ease;">
         ${
           props.isMaximized
-            ? `<svg width="11" height="11" viewBox="0 0 11 11"><path d="M2.5 0h8.5v8.5h-2v2.5h-8.5v-8.5h2v-2.5zm1 1v1.5h6v6h1.5v-7.5h-7.5zm-2 2.5v7.5h7.5v-7.5h-7.5zm1 1h5.5v5.5h-5.5v-5.5z" fill="currentColor"/></svg>`
-            : `<svg width="11" height="11" viewBox="0 0 11 11"><rect x="0.5" y="0.5" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>`
+            ? `<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1">
+                <path d="M2.5 2.5V0.5H9.5V7.5H7.5" />
+                <rect x="0.5" y="2.5" width="7" height="7" />
+              </svg>`
+            : `<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1">
+                <rect x="0.5" y="0.5" width="9" height="9" />
+              </svg>`
         }
       </button>
-      <button class="win-cap-btn win-cap-close" id="win-close-btn" title="关闭" style="width: 46px; height: 42px; border: none; background: transparent; color: var(--text-secondary); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.15s ease;">
-        <svg width="11" height="11" viewBox="0 0 11 11"><path d="M0.5 0.5l10 10m0-10l-10 10" stroke="currentColor" stroke-width="1.2"/></svg>
+      <button class="win-cap-btn win-cap-close" id="win-close-btn" title="关闭" style="width: 46px; height: 100%; border: none; background: transparent; color: var(--text-secondary); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.1s ease, color 0.1s ease;">
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1"><path d="M1 1L9 9M9 1L1 9"/></svg>
       </button>
     </div>
   `;

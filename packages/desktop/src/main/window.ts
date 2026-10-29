@@ -19,8 +19,8 @@ export function createMainWindow(): BrowserWindow {
     show: false,
     autoHideMenuBar: true,
     // Multi-platform frame configuration:
-    frame: !isWin && !isMac, // Linux can use native frame or frameless
-    titleBarStyle: isMac ? 'hiddenInset' : isWin ? 'hidden' : 'default',
+    frame: !isWin && !isMac ? true : false,
+    titleBarStyle: isMac ? 'hiddenInset' : undefined,
     trafficLightPosition: isMac ? { x: 14, y: 14 } : undefined,
     vibrancy: isMac ? 'under-window' : undefined,
     webPreferences: {
