@@ -32,17 +32,11 @@ export function createMainWindow(): BrowserWindow {
     },
   });
 
-  // Windows 11 Mica / Acrylic material activation
-  if (isWin) {
-    try {
-      // Electron 34 supports setBackgroundMaterial on Windows 11 22H2+
-      if (typeof (win as any).setBackgroundMaterial === 'function') {
-        (win as any).setBackgroundMaterial('mica');
-      }
-    } catch (err) {
-      console.warn('[WindowFactory] Failed to apply Windows Mica material:', err);
-    }
-  }
+  // Disable setBackgroundMaterial('mica'/'acrylic') on Windows:
+  // In Windows 11 frameless mode, Mica material alters the DWM maximization bounds,
+  // preventing Electron from pushing WS_THICKFRAME resize borders outside the screen,
+  // causing a 2px semi-transparent desktop background leak at the top/right edges.
+  // Using pure opaque canvas background eliminates border leaking completely.
 
   // Graceful show on ready-to-show to prevent visual flash
   win.once('ready-to-show', () => {

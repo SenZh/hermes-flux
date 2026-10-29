@@ -60,7 +60,6 @@ export function renderMiddlePod(props: MiddlePodProps): string {
         display: flex;
         flex-direction: column;
         padding: 24px 32px 180px;
-        scroll-behavior: smooth;
         box-sizing: border-box;
       ">
         <div class="content-fluid-canvas" style="width: 100%; max-width: 100%; margin: 0; display: flex; flex-direction: column; gap: 24px;">
@@ -297,7 +296,7 @@ export function renderMessage(
 
   if (isUser) {
     return `
-      <div class="message-row user-row" style="display: flex; flex-direction: column; align-items: flex-end; width: 100%; margin: 6px 0;">
+      <div class="message-row user-row" data-msg-id="${m.id}" style="display: flex; flex-direction: column; align-items: flex-end; width: 100%; margin: 6px 0;">
         ${
           m.timestamp
             ? `<span style="font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono); margin-bottom: 4px; padding-right: 4px;">${escapeHtml(m.timestamp)}</span>`
@@ -322,7 +321,7 @@ export function renderMessage(
   }
 
   return `
-    <div class="message-row assistant-row" data-id="${m.id}" style="
+    <div class="message-row assistant-row" data-id="${m.id}" data-msg-id="${m.id}" style="
       display: flex;
       flex-direction: column;
       gap: 6px;
@@ -634,7 +633,7 @@ export function renderMarkdown(md: string): string {
           align-items: center;
           user-select: none;
         ">
-          <span style="text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em; color: var(--accent);">${lang || 'TEXT'}</span>
+          <span style="text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; color: #94A3B8;">${lang || 'TEXT'}</span>
           <button class="btn-copy-code" onclick="navigator.clipboard.writeText(this.closest('.code-block-wrapper').querySelector('code').innerText)" style="
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(255, 255, 255, 0.1);
@@ -687,8 +686,8 @@ export function renderMarkdown(md: string): string {
   html = html.replace(/^\s*[\-\*]\s+(.*$)/gim, '<li style="margin-left: 20px; list-style-type: disc;">$1</li>');
   html = html.replace(/^\s*(\d+)\.\s+(.*$)/gim, '<li style="margin-left: 20px; list-style-type: decimal;">$2</li>');
 
-  // 8. Inline code
-  html = html.replace(/`([^`]+)`/g, '<code style="background: rgba(255, 255, 255, 0.06); border: 1px solid var(--border-subtle); padding: 1.5px 5.5px; border-radius: 4px; font-family: var(--font-mono); font-size: 12px; color: var(--accent);">$1</code>');
+  // 8. Inline code (Refined Clean Ice-Blue High-Contrast Accent)
+  html = html.replace(/`([^`]+)`/g, '<code style="background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.2); padding: 1.5px 5.5px; border-radius: 4px; font-family: var(--font-mono); font-size: 12px; color: #38BDF8;">$1</code>');
 
   // 9. Bold, Italic & Strikethrough
   html = html.replace(/\*\*([^*]+)\*\*/g, '<strong style="color: var(--text-main); font-weight: 600;">$1</strong>');
@@ -764,7 +763,7 @@ function highlightCodeSyntax(code: string): string {
 /** Helper to format inline markdown within table cells safely */
 function formatCellInlineMarkdown(rawCell: string): string {
   let cell = escapeHtml(rawCell.trim());
-  cell = cell.replace(/`([^`]+)`/g, '<code style="background: rgba(255, 255, 255, 0.08); padding: 1px 4px; border-radius: 3px; font-family: var(--font-mono); font-size: 11px; color: var(--accent);">$1</code>');
+  cell = cell.replace(/`([^`]+)`/g, '<code style="background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.2); padding: 1px 4px; border-radius: 3px; font-family: var(--font-mono); font-size: 11px; color: #38BDF8;">$1</code>');
   cell = cell.replace(/\*\*([^*]+)\*\*/g, '<strong style="color: var(--text-main); font-weight: 600;">$1</strong>');
   cell = cell.replace(/\*([^*]+)\*/g, '<em style="color: var(--text-secondary);">$1</em>');
   return cell;

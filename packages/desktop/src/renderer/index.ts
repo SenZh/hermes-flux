@@ -70,7 +70,7 @@ interface AppState {
   sessionListError: string;
   /** Conversations optimistically inserted while the gateway persists them. */
   pendingSessionIds: string[];
-  reasoningLevel: 'off' | 'low' | 'medium' | 'high';
+  reasoningLevel: 'default' | 'none' | 'low' | 'high' | 'max' | 'off' | 'medium';
   approvalMode: 'auto' | 'ask' | 'sandbox';
   isStreaming: boolean;
   gatewayConnected: boolean;
@@ -949,7 +949,7 @@ async function switchModel(model: string, provider?: string): Promise<void> {
   }
 }
 
-async function switchReasoning(effort: 'off' | 'low' | 'medium' | 'high'): Promise<void> {
+async function switchReasoning(effort: AppState['reasoningLevel']): Promise<void> {
   state.reasoningLevel = effort;
   render();
 
@@ -962,8 +962,23 @@ async function switchReasoning(effort: 'off' | 'low' | 'medium' | 'high'): Promi
     return;
   }
 
+  // Map internal UI level to gateway values
+  const gatewayEffortMap: Record<string, string> = {
+    default: 'default',
+    none: 'off',
+    off: 'off',
+    low: 'low',
+    medium: 'high',
+    high: 'high',
+    max: 'max',
+  };
+
   try {
-    await gatewayClient.call('config.set', { session_id: liveId, key: 'reasoning', value: effort });
+    await gatewayClient.call('config.set', {
+      session_id: liveId,
+      key: 'reasoning',
+      value: gatewayEffortMap[effort] || 'default',
+    });
     state.dockNotice = '';
   } catch (e) {
     state.dockNotice = `设置思考深度失败: ${describeRpcError(e)}`;
@@ -1433,6 +1448,51 @@ function disconnect(): void {
   render();
 }
 
+interface StreamAnchor {
+  sessionId: string;
+  id: string | null;
+  offset: number;
+  rawScrollTop: number;
+}
+
+function captureStreamAnchor(): StreamAnchor {
+  const stream = document.getElementById('conversation-stream');
+  if (!stream) return { sessionId: state.activeSessionId, id: null, offset: 0, rawScrollTop: 0 };
+  const streamTop = stream.getBoundingClientRect().top;
+  const rows = stream.querySelectorAll<HTMLElement>('[data-msg-id]');
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const rect = row.getBoundingClientRect();
+    if (rect.bottom > streamTop) {
+      return { sessionId: state.activeSessionId, id: row.getAttribute('data-msg-id'), offset: rect.top - streamTop, rawScrollTop: stream.scrollTop };
+    }
+  }
+  return { sessionId: state.activeSessionId, id: null, offset: 0, rawScrollTop: stream.scrollTop };
+}
+
+function applyStreamAnchor(anchor: StreamAnchor): void {
+  const stream = document.getElementById('conversation-stream');
+  if (!stream) return;
+
+  // If we switched to a different session, don't inherit old session scroll offset!
+  if (anchor.sessionId !== state.activeSessionId) {
+    stream.scrollTop = stream.scrollHeight;
+    return;
+  }
+
+  if (anchor.id) {
+    const target = stream.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(anchor.id)}"]`);
+    if (target) {
+      const streamTop = stream.getBoundingClientRect().top;
+      const currentOffset = target.getBoundingClientRect().top - streamTop;
+      const delta = currentOffset - anchor.offset;
+      stream.scrollTop += delta;
+      return;
+    }
+  }
+  stream.scrollTop = anchor.rawScrollTop;
+}
+
 function render(): void {
   const root = document.getElementById('aura-app-root');
   if (!root) return;
@@ -1445,13 +1505,10 @@ function render(): void {
   const caretStart = existingInput?.selectionStart ?? draftText.length;
   const caretEnd = existingInput?.selectionEnd ?? draftText.length;
 
-  const streamEl = document.getElementById('conversation-stream');
-  const streamScrollTop = streamEl ? streamEl.scrollTop : 0;
-  const streamPinnedToBottom = streamEl
-    ? streamEl.scrollHeight - streamEl.scrollTop - streamEl.clientHeight < 80
-    : true;
+  const streamAnchor = captureStreamAnchor();
 
   document.documentElement.setAttribute('data-theme', state.theme);
+  document.documentElement.dataset.maximized = state.isMaximized ? 'true' : 'false';
 
   const activeSession = state.sessions.find((s) => s.id === state.activeSessionId);
   const currentTitle = activeSession ? activeSession.title : (state.gatewayConnected ? 'Hermes Aura — 请选择或新建会话' : '未连接网关');
@@ -1599,16 +1656,13 @@ function render(): void {
   if (newInput) {
     if (draftText) newInput.value = draftText;
     if (inputHadFocus) {
-      newInput.focus();
+      newInput.focus({ preventScroll: true });
       const max = newInput.value.length;
       newInput.setSelectionRange(Math.min(caretStart, max), Math.min(caretEnd, max));
     }
   }
 
-  const newStream = document.getElementById('conversation-stream');
-  if (newStream) {
-    newStream.scrollTop = streamPinnedToBottom ? newStream.scrollHeight : streamScrollTop;
-  }
+  applyStreamAnchor(streamAnchor);
 
   bindEvents();
 }
@@ -1973,33 +2027,42 @@ function bindEvents(): void {
   // Bind dropdown options
   bindModelDropdownEvents();
 
-  // Reasoning Cycle Toggle (关 -> 低 -> 中 -> 高)
+  // Reasoning Dropdown Toggle (对标 OpenChamber 思考下拉卡片)
   const reasoningBtn = document.getElementById('dock-reasoning-toggle-btn');
-  if (reasoningBtn) {
-    reasoningBtn.onclick = () => {
-      const cycle: Record<AppState['reasoningLevel'], AppState['reasoningLevel']> = {
-        off: 'low',
-        low: 'medium',
-        medium: 'high',
-        high: 'off',
-      };
-      const nextLevel = cycle[state.reasoningLevel] || 'high';
-      switchReasoning(nextLevel);
+  const reasoningDropdown = document.getElementById('dock-reasoning-dropdown');
+  if (reasoningBtn && reasoningDropdown) {
+    reasoningBtn.onclick = (e) => {
+      e.stopPropagation();
+      const isOpen = reasoningDropdown.style.display === 'block';
+      reasoningDropdown.style.display = isOpen ? 'none' : 'block';
     };
+    document.querySelectorAll('.reasoning-option').forEach((opt) => {
+      (opt as HTMLElement).onclick = (e) => {
+        e.stopPropagation();
+        const level = (e.currentTarget as HTMLElement).getAttribute('data-level') as AppState['reasoningLevel'];
+        reasoningDropdown.style.display = 'none';
+        if (level) void switchReasoning(level);
+      };
+    });
   }
 
-  // Approval Mode Cycle Toggle (自动 -> 询问 -> 沙箱)
+  // Approval Mode Dropdown Toggle
   const approvalBtn = document.getElementById('dock-approval-toggle-btn');
-  if (approvalBtn) {
-    approvalBtn.onclick = () => {
-      const cycle: Record<AppState['approvalMode'], AppState['approvalMode']> = {
-        auto: 'ask',
-        ask: 'sandbox',
-        sandbox: 'auto',
-      };
-      const nextMode = cycle[state.approvalMode] || 'auto';
-      switchApproval(nextMode);
+  const approvalDropdown = document.getElementById('dock-approval-dropdown');
+  if (approvalBtn && approvalDropdown) {
+    approvalBtn.onclick = (e) => {
+      e.stopPropagation();
+      const isOpen = approvalDropdown.style.display === 'block';
+      approvalDropdown.style.display = isOpen ? 'none' : 'block';
     };
+    document.querySelectorAll('.approval-option').forEach((opt) => {
+      (opt as HTMLElement).onclick = (e) => {
+        e.stopPropagation();
+        const mode = (e.currentTarget as HTMLElement).getAttribute('data-mode') as AppState['approvalMode'];
+        approvalDropdown.style.display = 'none';
+        if (mode) void switchApproval(mode);
+      };
+    });
   }
 
   // Send message & IME Composition defense
@@ -2120,8 +2183,24 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
-// Close the model menu or context menu when the pointer goes down outside of it.
+// Close the model menu, reasoning menu or context menu when the pointer goes down outside of it.
 document.addEventListener('mousedown', (e) => {
+  const reasoningDropdown = document.getElementById('dock-reasoning-dropdown');
+  const reasoningBtn = document.getElementById('dock-reasoning-toggle-btn');
+  if (reasoningDropdown && reasoningDropdown.style.display === 'block') {
+    if (!reasoningDropdown.contains(e.target as Node) && !reasoningBtn?.contains(e.target as Node)) {
+      reasoningDropdown.style.display = 'none';
+    }
+  }
+
+  const approvalDropdown = document.getElementById('dock-approval-dropdown');
+  const approvalBtn = document.getElementById('dock-approval-toggle-btn');
+  if (approvalDropdown && approvalDropdown.style.display === 'block') {
+    if (!approvalDropdown.contains(e.target as Node) && !approvalBtn?.contains(e.target as Node)) {
+      approvalDropdown.style.display = 'none';
+    }
+  }
+
   if (state.sessionContextMenu) {
     const ctxMenu = document.getElementById('session-context-menu');
     if (!ctxMenu || !ctxMenu.contains(e.target as Node)) {

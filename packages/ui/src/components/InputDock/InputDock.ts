@@ -16,7 +16,7 @@ export interface InputDockProps {
   favoriteModels?: string[];
   recentModels?: string[];
   modelSearchQuery?: string;
-  reasoningLevel: 'off' | 'low' | 'medium' | 'high';
+  reasoningLevel: 'default' | 'none' | 'low' | 'high' | 'max' | 'off' | 'medium';
   approvalMode: 'auto' | 'ask' | 'sandbox';
   isStreaming: boolean;
   disabled?: boolean;
@@ -30,10 +30,13 @@ export function renderInputDock(props: InputDockProps): string {
   const notice = (props.notice || '').trim();
 
   const reasoningLabels: Record<string, string> = {
-    off: '关',
-    low: '低',
-    medium: '中',
-    high: '高',
+    default: '默认',
+    none: 'None',
+    off: 'None',
+    low: 'Low',
+    medium: 'High',
+    high: 'High',
+    max: 'Max',
   };
 
   const approvalLabels: Record<string, string> = {
@@ -198,47 +201,111 @@ export function renderInputDock(props: InputDockProps): string {
               </div>
             </div>
 
-            <!-- 2. Reasoning Depth Cycle Pill (点击循环切换: 关 -> 低 -> 中 -> 高) -->
-            <button id="dock-reasoning-toggle-btn" class="micro-pill" title="思考深度 (点击循环切换: 关/低/中/高)" style="
-              height: 24px;
-              padding: 0 8px;
-              border-radius: 6px;
-              background: var(--bg-card);
-              border: 1px solid var(--border-subtle);
-              color: var(--text-main);
-              font-size: 11px;
-              font-weight: 500;
-              display: flex;
-              align-items: center;
-              gap: 5px;
-              cursor: pointer;
-              transition: background 0.15s ease, border-color 0.15s ease;
-            ">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-secondary); flex-shrink: 0;"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 4.44-2.04z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-4.44-2.04z"/></svg>
-              <span style="color: var(--text-muted); font-size: 11px;">思考:</span>
-              <span id="current-reasoning-label" style="color: var(--accent); font-weight: 600;">${reasoningLabels[props.reasoningLevel] || '高'}</span>
-            </button>
+            <!-- 2. Reasoning Dropdown Pill (对标 OpenChamber 思考下拉菜单) -->
+            <div class="pill-dropdown-wrapper" style="position: relative;">
+              <button id="dock-reasoning-toggle-btn" class="micro-pill" title="选择思考深度" style="
+                height: 24px;
+                padding: 0 8px;
+                border-radius: 6px;
+                background: var(--bg-card);
+                border: 1px solid var(--border-subtle);
+                color: var(--text-main);
+                font-size: 11px;
+                font-weight: 500;
+                display: flex;
+                align-items: center;
+                gap: 5px;
+                cursor: pointer;
+                transition: background 0.15s ease, border-color 0.15s ease;
+              ">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-secondary); flex-shrink: 0;"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                <span id="current-reasoning-label" style="color: var(--text-main); font-weight: 500;">${reasoningLabels[props.reasoningLevel] || '默认'}</span>
+                <span style="font-size: 8px; color: var(--text-muted);">▾</span>
+              </button>
 
-            <!-- 3. Approval Mode Cycle Pill (点击循环切换: 自动 -> 询问 -> 沙箱) -->
-            <button id="dock-approval-toggle-btn" class="micro-pill" title="审批策略 (点击循环切换: 自动/询问/沙箱)" style="
-              height: 24px;
-              padding: 0 8px;
-              border-radius: 6px;
-              background: var(--bg-card);
-              border: 1px solid var(--border-subtle);
-              color: var(--text-main);
-              font-size: 11px;
-              font-weight: 500;
-              display: flex;
-              align-items: center;
-              gap: 5px;
-              cursor: pointer;
-              transition: background 0.15s ease, border-color 0.15s ease;
-            ">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-secondary); flex-shrink: 0;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-              <span style="color: var(--text-muted); font-size: 11px;">审批:</span>
-              <span id="current-approval-label" style="color: var(--accent); font-weight: 600;">${approvalLabels[props.approvalMode] || '自动'}</span>
-            </button>
+              <div id="dock-reasoning-dropdown" class="reasoning-dropdown-menu" style="
+                display: none;
+                position: absolute;
+                bottom: 32px;
+                left: 0;
+                min-width: 140px;
+                background: var(--bg-card);
+                border: 1px solid var(--border-medium);
+                border-radius: 10px;
+                box-shadow: var(--shadow-window);
+                padding: 6px;
+                max-height: 240px;
+                overflow-y: auto;
+                z-index: 210;
+                user-select: none;
+              ">
+                <div style="font-size: 11px; font-weight: 700; color: var(--text-main); padding: 4px 8px 6px; border-bottom: 1px solid var(--border-subtle);">思考</div>
+                ${['default', 'none', 'low', 'high', 'max']
+                  .map((lvl) => {
+                    const isSelected = props.reasoningLevel === lvl || (lvl === 'default' && (!props.reasoningLevel || props.reasoningLevel === 'high')) || (lvl === 'none' && props.reasoningLevel === 'off');
+                    return `
+                  <div class="reasoning-option" data-level="${lvl}" style="padding: 6px 8px; font-size: 12px; cursor: pointer; border-radius: 6px; display: flex; align-items: center; justify-content: space-between; color: ${isSelected ? '#38BDF8' : 'var(--text-main)'}; background: ${isSelected ? 'rgba(56, 189, 248, 0.08)' : 'transparent'};">
+                    <span>${reasoningLabels[lvl] || lvl}</span>
+                    ${isSelected ? '<span style="color: #38BDF8; font-weight: 700;">✓</span>' : ''}
+                  </div>
+                `;
+                  })
+                  .join('')}
+              </div>
+            </div>
+
+            <!-- 3. Approval Mode Dropdown Pill (对标安全人像盾牌图标与下拉浮层) -->
+            <div class="pill-dropdown-wrapper" style="position: relative;">
+              <button id="dock-approval-toggle-btn" class="micro-pill" title="审批策略 (点击切换)" style="
+                height: 24px;
+                padding: 0 8px;
+                border-radius: 6px;
+                background: var(--bg-card);
+                border: 1px solid var(--border-subtle);
+                color: var(--text-main);
+                font-size: 11px;
+                font-weight: 500;
+                display: flex;
+                align-items: center;
+                gap: 5px;
+                cursor: pointer;
+                transition: background 0.15s ease, border-color 0.15s ease;
+              ">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-secondary); flex-shrink: 0;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><circle cx="12" cy="10" r="2.5"/><path d="M8.5 16a3.5 3.5 0 0 1 7 0"/></svg>
+                <span id="current-approval-label" style="color: var(--text-main); font-weight: 500;">${approvalLabels[props.approvalMode] || '自动'}</span>
+                <span style="font-size: 8px; color: var(--text-muted);">▾</span>
+              </button>
+
+              <div id="dock-approval-dropdown" class="approval-dropdown-menu" style="
+                display: none;
+                position: absolute;
+                bottom: 32px;
+                left: 0;
+                min-width: 140px;
+                background: var(--bg-card);
+                border: 1px solid var(--border-medium);
+                border-radius: 10px;
+                box-shadow: var(--shadow-window);
+                padding: 6px;
+                max-height: 200px;
+                overflow-y: auto;
+                z-index: 210;
+                user-select: none;
+              ">
+                <div style="font-size: 11px; font-weight: 700; color: var(--text-main); padding: 4px 8px 6px; border-bottom: 1px solid var(--border-subtle);">权限审批</div>
+                ${['auto', 'ask', 'sandbox']
+                  .map((mode) => {
+                    const isSelected = props.approvalMode === mode;
+                    return `
+                  <div class="approval-option" data-mode="${mode}" style="padding: 6px 8px; font-size: 12px; cursor: pointer; border-radius: 6px; display: flex; align-items: center; justify-content: space-between; color: ${isSelected ? '#38BDF8' : 'var(--text-main)'}; background: ${isSelected ? 'rgba(56, 189, 248, 0.08)' : 'transparent'};">
+                    <span>${approvalLabels[mode] || mode}</span>
+                    ${isSelected ? '<span style="color: #38BDF8; font-weight: 700;">✓</span>' : ''}
+                  </div>
+                `;
+                  })
+                  .join('')}
+              </div>
+            </div>
           </div>
 
           <!-- Right Action Buttons -->
@@ -259,19 +326,19 @@ export function renderInputDock(props: InputDockProps): string {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
             </button>
 
-            <!-- Send Action Button: Aura Accent Pill -->
+            <!-- Send Action Button: Refined Clean Ice-Blue Pill -->
             <button id="dock-send-btn" class="send-action-btn" title="${isStreaming ? '中断本轮生成' : '发送 (Enter)'}" ${props.disabled ? 'disabled' : ''} style="
               height: 24px;
               width: 28px;
               border-radius: 6px;
-              background: ${isStreaming ? 'rgba(239, 68, 68, 0.15)' : 'rgba(255, 191, 0, 0.12)'};
-              border: 1px solid ${isStreaming ? '#EF4444' : 'rgba(255, 191, 0, 0.35)'};
-              color: ${isStreaming ? '#EF4444' : 'var(--accent)'};
+              background: ${isStreaming ? 'rgba(239, 68, 68, 0.15)' : 'rgba(56, 189, 248, 0.12)'};
+              border: 1px solid ${isStreaming ? '#EF4444' : 'rgba(56, 189, 248, 0.35)'};
+              color: ${isStreaming ? '#EF4444' : '#38BDF8'};
               display: flex;
               align-items: center;
               justify-content: center;
               cursor: ${props.disabled ? 'not-allowed' : 'pointer'};
-              box-shadow: 0 0 8px ${isStreaming ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255, 191, 0, 0.12)'};
+              box-shadow: 0 0 8px ${isStreaming ? 'rgba(239, 68, 68, 0.2)' : 'rgba(56, 189, 248, 0.15)'};
               transition: all 0.15s ease;
             ">
               ${
@@ -438,8 +505,8 @@ function renderModelItemRow(
     <div class="model-option ${isSelected ? 'active' : ''}" data-model="${escapeHtml(item.id)}" data-provider="${escapeHtml(item.provider)}" style="
       padding: 6px 12px;
       font-size: 12px;
-      color: ${isSelected ? 'var(--accent)' : 'var(--text-main)'};
-      background: ${isSelected ? 'rgba(255, 191, 0, 0.12)' : 'transparent'};
+      color: ${isSelected ? '#38BDF8' : 'var(--text-main)'};
+      background: ${isSelected ? 'rgba(56, 189, 248, 0.12)' : 'transparent'};
       cursor: pointer;
       display: flex;
       align-items: center;
@@ -461,7 +528,7 @@ function renderModelItemRow(
             ? `<span style="font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono);">${contextBadge}</span>`
             : ''
         }
-        ${isSelected ? '<span style="font-size: 11px; color: var(--accent); font-weight: 700;">✓</span>' : ''}
+        ${isSelected ? '<span style="font-size: 11px; color: #38BDF8; font-weight: 700;">✓</span>' : ''}
       </div>
     </div>
   `;

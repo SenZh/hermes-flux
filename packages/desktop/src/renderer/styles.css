@@ -126,6 +126,15 @@ html, body {
   position: relative;
 }
 
+/* Maximized boundary enforcement: prevent any border or shadow leakage */
+html[data-maximized="true"] body,
+html[data-maximized="true"] #aura-app-root {
+  border-radius: 0 !important;
+  border: none !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+}
+
 .aura-body-container {
   flex: 1;
   min-height: 0;
@@ -179,11 +188,7 @@ html, body {
 /* Buttons and Interactive Elements */
 button {
   font-family: inherit;
-  transition: all var(--duration-fast) ease;
-}
-
-button:active {
-  transform: scale(0.97);
+  transition: background-color var(--duration-fast) ease, border-color var(--duration-fast) ease, color var(--duration-fast) ease;
 }
 
 .session-item:hover {
