@@ -167,9 +167,9 @@ export function extractModelDetails(payload: any): ModelDetail[] {
             typeof m === 'object' &&
             (m?.context_length || m?.context_window || m?.max_tokens || m?.context_tokens);
           if (mId) {
-            const key = pSlug ? `${pSlug}:${mId}` : mId;
-            if (!seen.has(key)) {
-              seen.add(key);
+            const lowerId = mId.toLowerCase();
+            if (!seen.has(lowerId)) {
+              seen.add(lowerId);
               result.push({
                 id: mId,
                 provider: pSlug,
@@ -189,14 +189,17 @@ export function extractModelDetails(payload: any): ModelDetail[] {
     for (const m of payload.models) {
       const mId = typeof m === 'string' ? m.trim() : typeof m?.id === 'string' ? m.id.trim() : '';
       const mName = typeof m === 'object' && typeof m?.name === 'string' ? m.name.trim() : mId;
-      if (mId && !seen.has(mId)) {
-        seen.add(mId);
-        result.push({
-          id: mId,
-          provider: rootProvider,
-          name: mName || mId,
-          displayName: rootProvider ? `${mName || mId} (${rootProvider})` : (mName || mId),
-        });
+      if (mId) {
+        const lowerId = mId.toLowerCase();
+        if (!seen.has(lowerId)) {
+          seen.add(lowerId);
+          result.push({
+            id: mId,
+            provider: rootProvider,
+            name: mName || mId,
+            displayName: rootProvider ? `${mName || mId} (${rootProvider})` : (mName || mId),
+          });
+        }
       }
     }
   }
@@ -204,8 +207,9 @@ export function extractModelDetails(payload: any): ModelDetail[] {
   // 3. Root model
   if (typeof payload.model === 'string' && payload.model.trim()) {
     const rootId = payload.model.trim();
-    if (!seen.has(rootId)) {
-      seen.add(rootId);
+    const lowerId = rootId.toLowerCase();
+    if (!seen.has(lowerId)) {
+      seen.add(lowerId);
       result.unshift({
         id: rootId,
         provider: rootProvider,

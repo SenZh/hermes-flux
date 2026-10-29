@@ -69,7 +69,15 @@ export function renderMiddlePod(props: MiddlePodProps): string {
               ? renderGatewayOnboarding(props)
               : props.messages.length === 0
               ? renderWelcomeEmptyState()
-              : props.messages.map((m) => renderMessage(m, agentDisplayName)).join('')
+              : props.messages
+                  .map((m, idx, arr) => {
+                    const prev = arr[idx - 1];
+                    const next = arr[idx + 1];
+                    const isFirstInTurn = !prev || prev.role !== m.role;
+                    const isLastInTurn = !next || next.role !== m.role;
+                    return renderMessage(m, agentDisplayName, { isFirstInTurn, isLastInTurn });
+                  })
+                  .join('')
           }
         </div>
       </div>
@@ -273,12 +281,23 @@ function renderWelcomeEmptyState(): string {
   `;
 }
 
-export function renderMessage(m: MessageViewModel, agentDisplayName = 'HERMES AGENT'): string {
+export function renderMessage(
+  m: MessageViewModel,
+  _agentDisplayName = 'HERMES AGENT',
+  options: { isFirstInTurn?: boolean; isLastInTurn?: boolean } = {}
+): string {
   const isUser = m.role === 'user';
+  const isFirstInTurn = options.isFirstInTurn ?? true;
+  const isLastInTurn = options.isLastInTurn ?? true;
 
   if (isUser) {
     return `
-      <div class="message-row user-row" style="display: flex; justify-content: flex-end; width: 100%;">
+      <div class="message-row user-row" style="display: flex; flex-direction: column; align-items: flex-end; width: 100%; margin: 6px 0;">
+        ${
+          m.timestamp
+            ? `<span style="font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono); margin-bottom: 4px; padding-right: 4px;">${escapeHtml(m.timestamp)}</span>`
+            : ''
+        }
         <div class="user-bubble" style="
           max-width: min(80%, 780px);
           background: var(--bg-card);
@@ -301,23 +320,20 @@ export function renderMessage(m: MessageViewModel, agentDisplayName = 'HERMES AG
     <div class="message-row assistant-row" data-id="${m.id}" style="
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 6px;
       width: 100%;
+      margin: 2px 0;
     ">
-      <!-- Agent Header Meta -->
-      <div style="display: flex; align-items: center; gap: 8px;">
-        <span style="
-          font-size: 11px;
-          font-weight: 700;
-          color: var(--accent);
-          background: var(--accent-subtle);
-          border: 1px solid var(--accent-border);
-          padding: 2px 8px;
-          border-radius: 4px;
-          letter-spacing: 0.05em;
-        ">${escapeHtml(agentDisplayName)}</span>
-        <span style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">${escapeHtml(m.timestamp)}</span>
-      </div>
+      <!-- Turn Header Time (Only shown at the beginning of an assistant turn, completely removing agent name capsule) -->
+      ${
+        isFirstInTurn && m.timestamp
+          ? `
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
+          <span style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); opacity: 0.85;">${escapeHtml(m.timestamp)}</span>
+        </div>
+      `
+          : ''
+      }
 
       <!-- Thinking Fold -->
       ${renderThinkingFold(m)}
@@ -336,11 +352,23 @@ export function renderMessage(m: MessageViewModel, agentDisplayName = 'HERMES AG
           display: flex;
           flex-direction: column;
           gap: 12px;
+          margin-top: 4px;
         ">
           ${renderMarkdown(m.content)}
         </div>
       `
           : `<div id="msg-content-${m.id}" class="assistant-content prose-block" style="display: none;"></div>`
+      }
+
+      <!-- Turn Footer (Optional subtle end time if needed) -->
+      ${
+        !isFirstInTurn && isLastInTurn && m.timestamp && m.content && m.content.trim()
+          ? `
+        <div style="display: flex; justify-content: flex-end; margin-top: 2px;">
+          <span style="font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); opacity: 0.65;">${escapeHtml(m.timestamp)}</span>
+        </div>
+      `
+          : ''
       }
     </div>
   `;

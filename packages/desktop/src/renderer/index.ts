@@ -12,6 +12,7 @@ import {
   renderInspectionPod,
   renderStatusBar,
   renderSettingsModal,
+  renderModelPickerMenu,
   renderMessage,
   renderMarkdown,
   MessageViewModel,
@@ -1994,55 +1995,22 @@ function bindEvents(): void {
   if (modelBtn) {
     modelBtn.onclick = (e) => {
       e.stopPropagation();
+      const dropdown = document.getElementById('dock-model-dropdown');
+      if (!dropdown) return;
       state.modelMenuOpen = !state.modelMenuOpen;
-      render();
-      if (state.modelMenuOpen && state.availableModels.length === 0) {
-        void fetchModelOptions();
-      }
-    };
-  }
-
-  // Search model input
-  const modelSearchInput = document.getElementById('dock-model-search-input') as HTMLInputElement | null;
-  if (modelSearchInput) {
-    modelSearchInput.onclick = (e) => e.stopPropagation();
-    modelSearchInput.oninput = (e) => {
-      e.stopPropagation();
-      state.modelSearchQuery = (e.target as HTMLInputElement).value;
-      render();
-      const nextInput = document.getElementById('dock-model-search-input') as HTMLInputElement | null;
-      if (nextInput) {
-        nextInput.focus();
-        nextInput.setSelectionRange(nextInput.value.length, nextInput.value.length);
-      }
-    };
-  }
-
-  // Toggle favorite model
-  document.querySelectorAll('.btn-toggle-favorite').forEach((btn) => {
-    (btn as HTMLElement).onclick = (e) => {
-      e.stopPropagation();
-      const modelId = (e.currentTarget as HTMLElement).getAttribute('data-model');
-      if (modelId) {
-        if (state.favoriteModels.includes(modelId)) {
-          state.favoriteModels = state.favoriteModels.filter((m) => m !== modelId);
-        } else {
-          state.favoriteModels.push(modelId);
+      dropdown.style.display = state.modelMenuOpen ? 'block' : 'none';
+      if (state.modelMenuOpen) {
+        if (state.availableModels.length === 0) {
+          void fetchModelOptions();
         }
-        localStorage.setItem('hermes_aura_fav_models', JSON.stringify(state.favoriteModels));
-        render();
+        const search = document.getElementById('dock-model-search-input') as HTMLInputElement | null;
+        if (search) search.focus();
       }
     };
-  });
+  }
 
-  document.querySelectorAll('.model-option').forEach((opt) => {
-    (opt as HTMLElement).onclick = (e) => {
-      e.stopPropagation();
-      const model = (e.currentTarget as HTMLElement).getAttribute('data-model');
-      const provider = (e.currentTarget as HTMLElement).getAttribute('data-provider') || undefined;
-      if (model) void switchModel(model, provider);
-    };
-  });
+  // Bind dropdown options
+  bindModelDropdownEvents();
 
   // Reasoning Cycle Toggle (关 -> 低 -> 中 -> 高)
   const reasoningBtn = document.getElementById('dock-reasoning-toggle-btn');
@@ -2109,6 +2077,72 @@ function bindEvents(): void {
       }
     };
   }
+}
+
+function bindModelDropdownEvents(): void {
+  // Search model input
+  const modelSearchInput = document.getElementById('dock-model-search-input') as HTMLInputElement | null;
+  if (modelSearchInput) {
+    modelSearchInput.onclick = (e) => e.stopPropagation();
+    modelSearchInput.oninput = (e) => {
+      e.stopPropagation();
+      state.modelSearchQuery = (e.target as HTMLInputElement).value;
+      updateModelDropdownSubtree();
+    };
+  }
+
+  // Toggle favorite model
+  document.querySelectorAll('.btn-toggle-favorite').forEach((btn) => {
+    (btn as HTMLElement).onclick = (e) => {
+      e.stopPropagation();
+      const modelId = (e.currentTarget as HTMLElement).getAttribute('data-model');
+      if (modelId) {
+        if (state.favoriteModels.includes(modelId)) {
+          state.favoriteModels = state.favoriteModels.filter((m) => m !== modelId);
+        } else {
+          state.favoriteModels.push(modelId);
+        }
+        localStorage.setItem('hermes_aura_fav_models', JSON.stringify(state.favoriteModels));
+        updateModelDropdownSubtree();
+      }
+    };
+  });
+
+  document.querySelectorAll('.model-option').forEach((opt) => {
+    (opt as HTMLElement).onclick = (e) => {
+      e.stopPropagation();
+      const model = (e.currentTarget as HTMLElement).getAttribute('data-model');
+      const provider = (e.currentTarget as HTMLElement).getAttribute('data-provider') || undefined;
+      const dropdown = document.getElementById('dock-model-dropdown');
+      if (dropdown) dropdown.style.display = 'none';
+      state.modelMenuOpen = false;
+      if (model) void switchModel(model, provider);
+    };
+  });
+}
+
+function updateModelDropdownSubtree(): void {
+  const dropdown = document.getElementById('dock-model-dropdown');
+  if (!dropdown) return;
+  const currentVal = (document.getElementById('dock-model-search-input') as HTMLInputElement | null)?.value ?? '';
+  dropdown.innerHTML = renderModelPickerMenu({
+    selectedModel: state.selectedModel,
+    models: state.availableModels,
+    modelDetails: state.modelDetails,
+    favoriteModels: state.favoriteModels,
+    recentModels: state.recentModels,
+    modelSearchQuery: state.modelSearchQuery,
+    reasoningLevel: state.reasoningLevel,
+    approvalMode: state.approvalMode,
+    isStreaming: state.isStreaming,
+  });
+  const input = document.getElementById('dock-model-search-input') as HTMLInputElement | null;
+  if (input) {
+    input.value = currentVal;
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  }
+  bindModelDropdownEvents();
 }
 
 // Global keyboard shortcuts

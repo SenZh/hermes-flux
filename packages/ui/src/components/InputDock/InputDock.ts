@@ -265,7 +265,7 @@ function formatContextLength(tokens?: number): string {
   return String(tokens);
 }
 
-function renderModelPickerMenu(props: InputDockProps): string {
+export function renderModelPickerMenu(props: InputDockProps): string {
   const query = (props.modelSearchQuery || '').trim().toLowerCase();
   let allDetails = props.modelDetails && props.modelDetails.length > 0 ? props.modelDetails : [];
   if (allDetails.length === 0 && props.models && props.models.length > 0) {
@@ -415,8 +415,8 @@ function renderModelPickerMenu(props: InputDockProps): string {
       align-items: center;
       justify-content: space-between;
     ">
-      <span>↑↓ 导航</span>
-      <span>Tab 切换智能体</span>
+      <span>↑↓ 选择模型</span>
+      <span>Esc 关闭</span>
     </div>
   `;
 }
@@ -433,22 +433,22 @@ function renderModelItemRow(
     <div class="model-option ${isSelected ? 'active' : ''}" data-model="${escapeHtml(item.id)}" data-provider="${escapeHtml(item.provider)}" style="
       padding: 6px 12px;
       font-size: 12px;
-      color: ${isSelected ? 'var(--accent)' : 'var(--text-main)'};
-      background: ${isSelected ? 'rgba(255, 191, 0, 0.08)' : 'transparent'};
+      color: ${isSelected ? 'var(--accent)' : '#F5F5F7'};
+      background: ${isSelected ? 'rgba(255, 191, 0, 0.12)' : 'transparent'};
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: space-between;
       transition: background 0.1s ease;
-    ">
+    " onmouseenter="if (!this.classList.contains('active')) this.style.background='rgba(255,255,255,0.06)'" onmouseleave="if (!this.classList.contains('active')) this.style.background='transparent'">
       <div style="display: flex; align-items: center; gap: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
         <span class="btn-toggle-favorite" data-model="${escapeHtml(item.id)}" style="
-          color: ${isFav ? '#38BDF8' : 'rgba(255, 255, 255, 0.2)'};
+          color: ${isFav ? '#38BDF8' : 'rgba(255, 255, 255, 0.25)'};
           font-size: 12px;
           cursor: pointer;
           flex-shrink: 0;
         ">${isFav ? '★' : '☆'}</span>
-        <span style="font-weight: 500; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(item.name || item.id)}</span>
+        <span style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; color: inherit;">${escapeHtml(item.name || item.id)}</span>
       </div>
       <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
         ${
