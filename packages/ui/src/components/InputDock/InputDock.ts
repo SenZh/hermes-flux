@@ -132,9 +132,9 @@ export function renderInputDock(props: InputDockProps): string {
                 cursor: pointer;
                 transition: background 0.15s ease, border-color 0.15s ease;
               ">
-                <span style="color: var(--accent);">⚡</span>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent); flex-shrink: 0;"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2"/></svg>
                 <span id="current-model-label">${escapeHtml(props.selectedModel || '选择模型')}</span>
-                <span style="font-size: 8px; color: var(--text-muted);">▾</span>
+                <span style="font-size: 8px; color: var(--text-muted); margin-left: 1px;">▾</span>
               </button>
 
               <div id="dock-model-dropdown" class="model-dropdown-menu" style="
@@ -207,16 +207,16 @@ export function renderInputDock(props: InputDockProps): string {
               border: 1px solid var(--border-subtle);
               color: var(--text-main);
               font-size: 11px;
-              font-weight: 600;
+              font-weight: 500;
               display: flex;
               align-items: center;
               gap: 5px;
               cursor: pointer;
               transition: background 0.15s ease, border-color 0.15s ease;
             ">
-              <span style="font-size: 11px;">🧠</span>
-              <span style="color: var(--text-muted);">思考:</span>
-              <span id="current-reasoning-label" style="color: var(--accent);">${reasoningLabels[props.reasoningLevel] || '高'}</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-secondary); flex-shrink: 0;"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 4.44-2.04z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-4.44-2.04z"/></svg>
+              <span style="color: var(--text-muted); font-size: 11px;">思考:</span>
+              <span id="current-reasoning-label" style="color: var(--accent); font-weight: 600;">${reasoningLabels[props.reasoningLevel] || '高'}</span>
             </button>
 
             <!-- 3. Approval Mode Cycle Pill (点击循环切换: 自动 -> 询问 -> 沙箱) -->
@@ -228,16 +228,16 @@ export function renderInputDock(props: InputDockProps): string {
               border: 1px solid var(--border-subtle);
               color: var(--text-main);
               font-size: 11px;
-              font-weight: 600;
+              font-weight: 500;
               display: flex;
               align-items: center;
               gap: 5px;
               cursor: pointer;
               transition: background 0.15s ease, border-color 0.15s ease;
             ">
-              <span style="font-size: 11px;">🛡️</span>
-              <span style="color: var(--text-muted);">审批:</span>
-              <span id="current-approval-label" style="color: var(--accent);">${approvalLabels[props.approvalMode] || '自动'}</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-secondary); flex-shrink: 0;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              <span style="color: var(--text-muted); font-size: 11px;">审批:</span>
+              <span id="current-approval-label" style="color: var(--accent); font-weight: 600;">${approvalLabels[props.approvalMode] || '自动'}</span>
             </button>
           </div>
 
@@ -256,28 +256,28 @@ export function renderInputDock(props: InputDockProps): string {
               border-radius: 4px;
               transition: color 0.15s ease;
             ">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
             </button>
 
-            <!-- Send Action Button -->
+            <!-- Send Action Button: Aura Accent Pill -->
             <button id="dock-send-btn" class="send-action-btn" title="${isStreaming ? '中断本轮生成' : '发送 (Enter)'}" ${props.disabled ? 'disabled' : ''} style="
               height: 24px;
               width: 28px;
               border-radius: 6px;
-              background: ${isStreaming ? '#EF4444' : 'var(--accent)'};
-              border: none;
-              color: ${isStreaming ? '#FFFFFF' : 'var(--theme-thumb-color, #090A0F)'};
+              background: ${isStreaming ? 'rgba(239, 68, 68, 0.15)' : 'rgba(255, 191, 0, 0.12)'};
+              border: 1px solid ${isStreaming ? '#EF4444' : 'rgba(255, 191, 0, 0.35)'};
+              color: ${isStreaming ? '#EF4444' : 'var(--accent)'};
               display: flex;
               align-items: center;
               justify-content: center;
               cursor: ${props.disabled ? 'not-allowed' : 'pointer'};
-              box-shadow: 0 0 8px ${isStreaming ? 'rgba(239, 68, 68, 0.3)' : 'var(--accent-glow)'};
-              transition: transform 0.1s ease, filter 0.1s ease;
+              box-shadow: 0 0 8px ${isStreaming ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255, 191, 0, 0.12)'};
+              transition: all 0.15s ease;
             ">
               ${
                 isStreaming
-                  ? `<svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><rect width="10" height="10" rx="2"/></svg>`
-                  : `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>`
+                  ? `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>`
+                  : `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>`
               }
             </button>
           </div>

@@ -1655,9 +1655,16 @@ function bindEvents(): void {
   }
 
   const toggleInspector = document.getElementById('toggle-inspector-btn');
+  const toggleInspectorClose = document.getElementById('toggle-inspector-close-btn');
   if (toggleInspector) {
     toggleInspector.onclick = () => {
       state.inspectorCollapsed = !state.inspectorCollapsed;
+      render();
+    };
+  }
+  if (toggleInspectorClose) {
+    toggleInspectorClose.onclick = () => {
+      state.inspectorCollapsed = true;
       render();
     };
   }
@@ -1673,44 +1680,6 @@ function bindEvents(): void {
   }
 
   // Status Bar Toolbar & Node
-  const statusSettings = document.getElementById('status-bar-settings-btn');
-  if (statusSettings) {
-    statusSettings.onclick = (e) => {
-      e.stopPropagation();
-      state.isSettingsOpen = true;
-      state.settingsTab = 'gateway';
-      render();
-    };
-  }
-
-  const statusMetrics = document.getElementById('status-bar-metrics-btn');
-  if (statusMetrics) {
-    statusMetrics.onclick = (e) => {
-      e.stopPropagation();
-      state.dockNotice = `网关延迟: ${state.gatewayLatencyMs}ms | 连接状态: ${state.gatewayConnected ? '已连接' : '未连接'}`;
-      render();
-    };
-  }
-
-  const statusShortcuts = document.getElementById('status-bar-shortcuts-btn');
-  if (statusShortcuts) {
-    statusShortcuts.onclick = (e) => {
-      e.stopPropagation();
-      state.dockNotice = '快捷键：Ctrl+B 折叠侧栏 | Ctrl+\\ 折叠检查舱 | Enter 发送 | Shift+Enter 换行';
-      render();
-    };
-  }
-
-  const statusInfo = document.getElementById('status-bar-info-btn');
-  if (statusInfo) {
-    statusInfo.onclick = (e) => {
-      e.stopPropagation();
-      state.isSettingsOpen = true;
-      state.settingsTab = 'about';
-      render();
-    };
-  }
-
   const statusServerNode = document.getElementById('status-bar-server-node');
   if (statusServerNode) {
     statusServerNode.onclick = (e) => {

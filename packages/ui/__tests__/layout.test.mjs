@@ -5,35 +5,16 @@ import { renderStatusBar } from '../dist/components/StatusBar/StatusBar.js';
 import { renderSettingsModal } from '../dist/components/SettingsModal/SettingsModal.js';
 
 test('UI Components Layout & Engineering Guardrails', async (t) => {
-  await t.test('InspectionPod vertical rail must dock to the far right', () => {
+  await t.test('InspectionPod streamlined file previewer', () => {
     const html = renderInspectionPod({
       collapsed: false,
-      activeTab: 'artifacts',
       gatewayConnected: true,
-      artifacts: [{ id: '1', name: 'report.pdf', type: 'PDF', size: '12KB' }],
+      previewFile: { path: 'src/main.ts', content: 'console.log("hello");' },
     });
 
-    // 1. Verify child elements order: Left content pane first, vertical rail last
-    const detailIdx = html.indexOf('inspector-detail-area');
-    const railIdx = html.indexOf('inspector-vertical-rail');
-    assert.ok(detailIdx !== -1, 'Must contain inspector-detail-area');
-    assert.ok(railIdx !== -1, 'Must contain inspector-vertical-rail');
-    assert.ok(
-      detailIdx < railIdx,
-      'inspector-detail-area MUST be on the left of inspector-vertical-rail'
-    );
-
-    // 2. Indicator border-radius for right docking
-    assert.ok(
-      html.includes('border-radius: 3px 0 0 3px'),
-      'Tab active indicator must be right-anchored (border-radius: 3px 0 0 3px)'
-    );
-
-    // 3. Physically no inline close button
-    assert.ok(
-      !html.includes('id="btnInspectorCloseInline"') && !html.includes('class="btnInspectorCloseInline"'),
-      'Must NOT contain btnInspectorCloseInline button element'
-    );
+    assert.ok(html.includes('src/main.ts'), 'Must display preview file path');
+    assert.ok(html.includes('console.log(&quot;hello&quot;);'), 'Must display preview file content');
+    assert.ok(html.includes('id="toggle-inspector-close-btn"'), 'Must have close/collapse button');
   });
 
   await t.test('StatusBar must be extremely clean without HTTP2 or fake session ID', () => {
