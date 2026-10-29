@@ -85,6 +85,22 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     assert.ok(html.includes('code-block-wrapper'), 'Must render Markdown code blocks with wrapper');
   });
 
+  await t.test('InputDock must be mounted strictly inside the middle pod conversation area', async () => {
+    const { renderMiddlePod } = await import('../dist/components/MiddlePod/MiddlePod.js');
+    const html = renderMiddlePod({
+      gatewayConnected: true,
+      messages: [],
+      dockHtml: '<div class="input-dock-container" data-probe="dock"></div>',
+    });
+    const mainOpen = html.indexOf('class="aura-middle-pod');
+    const dockAt = html.indexOf('data-probe="dock"');
+    const mainClose = html.lastIndexOf('</main>');
+    assert.ok(
+      mainOpen >= 0 && mainOpen < dockAt && dockAt < mainClose,
+      `InputDock must be physically mounted inside <main class="aura-middle-pod"> to ensure absolute centering`
+    );
+  });
+
   await t.test('MiddlePod must render reasoning chain, tool capsules, GFM tables and task lists', async () => {
     const { renderMiddlePod } = await import('../dist/components/MiddlePod/MiddlePod.js');
     const html = renderMiddlePod({

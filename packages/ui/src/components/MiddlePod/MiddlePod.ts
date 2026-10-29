@@ -34,6 +34,7 @@ export interface MiddlePodProps {
   profileName?: string;
   messages: MessageViewModel[];
   testStatus?: { ok?: boolean; message?: string; latency?: number };
+  dockHtml?: string;
 }
 
 export function renderMiddlePod(props: MiddlePodProps): string {
@@ -97,6 +98,9 @@ export function renderMiddlePod(props: MiddlePodProps): string {
         pointer-events: none;
         z-index: 30;
       "></div>
+
+      <!-- Centered Input Dock mounted strictly inside the conversation pod -->
+      ${props.dockHtml || ''}
     </main>
   `;
 }
@@ -601,8 +605,13 @@ export function escapeHtml(str: string): string {
     .replace(/'/g, '&#039;');
 }
 
+const markdownRenderCache = new Map<string, string>();
+const MARKDOWN_CACHE_MAX = 500;
+
 export function renderMarkdown(md: string): string {
   if (!md) return '';
+  const cached = markdownRenderCache.get(md);
+  if (cached !== undefined) return cached;
 
   const protectedBlocks: Record<string, string> = {};
   let blockCounter = 0;
@@ -717,6 +726,12 @@ export function renderMarkdown(md: string): string {
   for (const [placeholder, blockContent] of Object.entries(protectedBlocks)) {
     renderedResult = renderedResult.replace(placeholder, () => blockContent);
   }
+
+  if (markdownRenderCache.size >= MARKDOWN_CACHE_MAX) {
+    const oldestKey = markdownRenderCache.keys().next().value;
+    if (oldestKey) markdownRenderCache.delete(oldestKey);
+  }
+  markdownRenderCache.set(md, renderedResult);
 
   return renderedResult;
 }

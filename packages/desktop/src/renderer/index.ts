@@ -1538,7 +1538,7 @@ function render(): void {
         error: state.sessionListError,
       })}
 
-      <!-- Middle Conversation Pod (Full Bleed Fluid Canvas) -->
+      <!-- Middle Conversation Pod (Full Bleed Fluid Canvas with Center-Locked Input Dock) -->
       ${renderMiddlePod({
         gatewayConnected: state.gatewayConnected,
         gatewayConnecting: state.gatewayConnecting,
@@ -1548,11 +1548,7 @@ function render(): void {
         profileName: state.profileName,
         messages: state.messages,
         testStatus: state.testStatus,
-      })}
-
-      <!-- Floating Input Dock (Strict Golden Width Constraint) -->
-      ${
-        state.gatewayConnected
+        dockHtml: state.gatewayConnected
           ? renderInputDock({
               selectedModel: state.selectedModel,
               models: state.availableModels,
@@ -1567,8 +1563,8 @@ function render(): void {
               modelMenuOpen: state.modelMenuOpen,
               notice: state.dockNotice,
             })
-          : ''
-      }
+          : '',
+      })}
 
       <!-- Adaptive Inspection Pod (OpenChamber Vertical Tab Rail) -->
       ${renderInspectionPod({
