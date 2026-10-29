@@ -409,16 +409,22 @@ export function renderMessage(m: MessageViewModel, agentDisplayName = 'HERMES AG
       }
 
       <!-- Core Content (Incremental Anchor) -->
-      <div id="msg-content-${m.id}" class="assistant-content prose-block" style="
-        color: var(--text-main);
-        font-size: 13.5px;
-        line-height: 1.68;
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-      ">
-        ${renderMarkdown(m.content)}
-      </div>
+      ${
+        m.content && m.content.trim()
+          ? `
+        <div id="msg-content-${m.id}" class="assistant-content prose-block" style="
+          color: var(--text-main);
+          font-size: 13.5px;
+          line-height: 1.68;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        ">
+          ${renderMarkdown(m.content)}
+        </div>
+      `
+          : `<div id="msg-content-${m.id}" class="assistant-content prose-block" style="display: none;"></div>`
+      }
     </div>
   `;
 }
@@ -468,13 +474,20 @@ export function renderMarkdown(md: string): string {
   html = html.replace(/\*\*([^*]+)\*\*/g, '<strong style="color: var(--text-main); font-weight: 600;">$1</strong>');
   html = html.replace(/\*([^*]+)\*/g, '<em style="color: var(--text-secondary);">$1</em>');
 
-  // 7. Paragraphs
+  // 7. Horizontal Rule
+  html = html.replace(/^---$/gim, '<hr style="border: none; border-top: 1px solid var(--border-subtle); margin: 16px 0;" />');
+
+  // 8. Paragraphs & Line Breaks
   const paragraphs = html.split('\n\n').filter((p) => p.trim().length > 0);
   if (paragraphs.length <= 1) {
-    return `<div style="margin: 0; line-height: 1.68;">${html}</div>`;
+    const withBreaks = html.replace(/\n/g, '<br/>');
+    return `<div style="margin: 0; line-height: 1.68;">${withBreaks}</div>`;
   }
 
   return paragraphs
-    .map((p) => `<div style="margin-bottom: 10px; line-height: 1.68;">${p}</div>`)
+    .map((p) => {
+      const withBreaks = p.replace(/\n/g, '<br/>');
+      return `<div style="margin-bottom: 10px; line-height: 1.68;">${withBreaks}</div>`;
+    })
     .join('');
 }

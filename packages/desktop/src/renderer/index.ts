@@ -500,7 +500,17 @@ async function loadMessages(sessionId: string): Promise<void> {
       }
 
       // If an assistant message is completely empty (no content, no thought, no tools), DO NOT render a blank ghost bubble
-      if (rawRole === 'assistant' && !rawText.trim() && !thought.trim() && toolCalls.length === 0) {
+      const hasContent = Boolean(rawText && rawText.trim());
+      const hasThought = Boolean(thought && thought.trim());
+      const hasTools = toolCalls.length > 0;
+
+      // Filter out empty assistant turn frames
+      if (rawRole === 'assistant' && !hasContent && !hasThought && !hasTools) {
+        continue;
+      }
+
+      // If user or system message has no text, skip as well
+      if (rawRole !== 'assistant' && !hasContent) {
         continue;
       }
 
