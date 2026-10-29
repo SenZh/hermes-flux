@@ -609,14 +609,15 @@ function renderToolOutputBody(output: string, isDiff = false): string {
       <pre style="
         margin: 0;
         padding: 8px 10px;
-        background: #080808;
-        border: 1px solid rgba(255, 255, 255, 0.06);
+        background: var(--bg-code);
+        border: 1px solid var(--border-medium);
         border-radius: 6px;
         font-family: var(--font-mono);
         font-size: 11.5px;
         line-height: 1.5;
         overflow-x: auto;
         max-height: 240px;
+        color: var(--text-main);
       "><code>${diffHtml}</code></pre>
     `;
   }
@@ -625,10 +626,10 @@ function renderToolOutputBody(output: string, isDiff = false): string {
     <pre style="
       margin: 0;
       padding: 8px 10px;
-      background: #080808;
-      border: 1px solid rgba(255, 255, 255, 0.06);
+      background: var(--bg-code);
+      border: 1px solid var(--border-medium);
       border-radius: 6px;
-      color: #9CA3AF;
+      color: var(--text-main);
       font-family: var(--font-mono);
       font-size: 11.5px;
       line-height: 1.5;
@@ -669,13 +670,13 @@ export function renderMarkdown(md: string): string {
         overflow: hidden;
         border: 1px solid var(--border-medium);
         margin: 12px 0;
-        background: #080808;
-        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+        background: var(--bg-code);
+        box-shadow: var(--shadow-card);
       ">
         <div style="
           padding: 6px 14px;
-          background: #121212;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+          background: var(--bg-elevated);
+          border-bottom: 1px solid var(--border-subtle);
           font-size: 11px;
           color: var(--text-muted);
           font-family: var(--font-mono);
@@ -687,7 +688,7 @@ export function renderMarkdown(md: string): string {
           <span style="text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; color: #94A3B8;">${lang || 'TEXT'}</span>
           <button class="btn-copy-code" onclick="navigator.clipboard.writeText(this.closest('.code-block-wrapper').querySelector('code').innerText)" style="
             background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            border: 1px solid var(--border-subtle);
             color: var(--text-secondary);
             border-radius: 4px;
             padding: 2px 8px;
@@ -704,7 +705,7 @@ export function renderMarkdown(md: string): string {
           font-family: var(--font-mono);
           font-size: 12px;
           line-height: 1.6;
-          color: #E2E8F0;
+          color: var(--text-main);
         "><code>${highlighted}</code></pre>
       </div>
     `;

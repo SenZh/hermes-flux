@@ -1,5 +1,7 @@
 export * from './tokens/tokens.js';
 export * from './tokens/types.js';
+export * from './tokens/themeRegistry.js';
+export * from './i18n/index.js';
 export * from './components/Titlebar/Titlebar.js';
 export * from './components/LeftRail/LeftRail.js';
 export * from './components/MiddlePod/MiddlePod.js';
