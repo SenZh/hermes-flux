@@ -143,12 +143,12 @@ html[data-maximized="true"] #flux-app-root {
   overflow: hidden;
 }
 
-/* Long conversation high-performance virtual rendering:
-   Skips layout & text shaping for off-screen message rows, boosting FPS by 85%+ */
-.message-row {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 160px;
-}
+/* Long conversations keep real layout heights.
+   `content-visibility: auto` was removed on purpose: with estimated
+   `contain-intrinsic-size` heights the stream's scrollHeight changed whenever a
+   row entered the viewport, which made the viewport jump while streaming and
+   while paging older messages. Windowed mounting (100 rows) is what keeps long
+   sessions fast. */
 
 /* Draggable Rail Handles */
 .rail-resize-handle {

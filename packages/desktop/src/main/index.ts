@@ -54,26 +54,40 @@ if (!gotTheLock) {
     }
   });
 
+  /**
+   * Renderer diagnostics level. An unpackaged run (npm start / dev build) opens
+   * the window with `?log=debug` so streaming and paging timings are visible
+   * without touching storage; FUS_LOG_LEVEL overrides it either way.
+   */
+  const rendererLogLevel = process.env.FUS_LOG_LEVEL || (app.isPackaged ? '' : 'debug');
+  const loadRenderer = (win: BrowserWindow): void => {
+    const indexPath = path.join(__dirname, '../renderer/index.html');
+    void (rendererLogLevel
+      ? win.loadFile(indexPath, { query: { log: rendererLogLevel } })
+      : win.loadFile(indexPath));
+  };
+
   app.whenReady().then(() => {
     // Create main window
-    mainWindow = createMainWindow();
+    const win = createMainWindow();
+    mainWindow = win;
 
     // Register IPC channels
-    registerIpcHandlers(mainWindow);
+    registerIpcHandlers(win);
 
     // Initialize tray
-    trayManager = new HermesFluxTray(mainWindow);
+    trayManager = new HermesFluxTray(win);
     trayManager.init();
 
     // Load renderer bundle
-    const indexPath = path.join(__dirname, '../renderer/index.html');
-    mainWindow.loadFile(indexPath);
+    loadRenderer(win);
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
-        mainWindow = createMainWindow();
-        registerIpcHandlers(mainWindow);
-        mainWindow.loadFile(indexPath);
+        const next = createMainWindow();
+        mainWindow = next;
+        registerIpcHandlers(next);
+        loadRenderer(next);
       }
     });
   });

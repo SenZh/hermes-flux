@@ -152,10 +152,41 @@
 | 失败被静默吞掉 | 满屏 `.catch(console.warn)`；`listSessionsSafe` 把失败当空列表 | 输入舱 `notice` 条 + 会话栏失败态；`client.listSessions()` 返回 `{ok,error}` |
 | 编造的兜底模型列表 | `defaultFallbackModels` 是假模型名 | 删除假数据，改为如实报错 |
 | 仓库内硬编码个人网关地址 | 默认连接地址写死了自建域名，随源码进入公开仓库 | 统一改为中性默认 `http://127.0.0.1:9119`；连接信息只走本机 `localStorage` / 设置页，账号与内网地址一律不入库 |
+| 对话区在发送与流式期间来回跳动 | `content-visibility: auto` + `contain-intrinsic-size` 让离屏行用估算高度，`scrollHeight` 随行进出视口反复变化；流式 flush 无条件 `scrollTop = scrollHeight`，与后台 `render()` 的锚点恢复互相拉扯 | 删除 `.message-row` 的 `content-visibility`；flush 仅在"距底 ≤ 48px"时跟随；`render()` 继承 follow 模式（渲染前在底部就渲染后贴底），否则走锚点校正 |
 
 ---
 
-## 六、建议的下一步顺序
+## 六、可观测性：分级日志与滚动诊断（2026-10-29 第二轮）
+
+### 6.1 分级日志
+
+- 实现：[logger.ts](../packages/core/src/log/logger.ts)，零依赖，主进程 / 渲染进程 / 单测共用。
+- 级别：`silent < error < warn < info < debug < trace`，默认 `info`。
+- 级别来源优先级：`?log=<level>` → `localStorage.hermes_flux_log_level` → `info`。
+- 开发态自动开 `debug`：主进程在 `app.isPackaged === false` 时以 `loadFile(..., { query: { log: 'debug' } })` 打开窗口；
+  可用 `FUS_LOG_LEVEL` 环境变量覆盖，打包版始终默认 `info`。
+- 运行期切换：DevTools 里 `__fluxLog.setLevel('trace')`（同时写入 `localStorage` 持久化），`__fluxLog.level` 读当前值。
+- 注意：`info` 走 `console.debug` 通道（避免 DevTools 把常规信息标成警告），所以 DevTools 里 `type=debug` 不等于级别是 `debug`。
+
+### 6.2 已埋点位置
+
+| 事件 | 位置 | 关键字段 |
+|---|---|---|
+| `renderer boot` | `init()` | 级别、主题、平台 |
+| `session loaded` | `loadMessages()` | `fetched / parsed / mounted / older`、`rpcMs`、`parseMs`、`totalMs` |
+| `session rendered from cache` | `loadMessages()` 缓存命中 | `total / mounted / ms` |
+| `render` | `render()` | `ms`、`messages`、`htmlKB`、`forcedBottom`、`pinBottom`、`anchor` |
+| `flush` | TokenCoalescer 回调（trace） | `ms`、`messages`、`chars`、`followBottom`、`scrollTop` |
+| `layout shift` | PerformanceObserver(`layout-shift`) | `value`、`scrollTop`、`scrollHeight`、`streaming` |
+| `pinned to bottom` / `anchor corrected` / `post-layout anchor drift absorbed` | 滚动路径 | 位移量与原因 |
+| `older batch prepended` | `loadOlderMessages()` | `batch`、`addedHeight`、`residualDrift`、`ms` |
+
+定位大会话"打开慢"时看 `session loaded`：`rpcMs` 高是网关往返，`parseMs` 高是消息解析，`render` 的 `ms`/`htmlKB` 高是 DOM 重建。
+定位"跳动"时看 `layout shift` 与 `anchor corrected` 的时间相邻关系。
+
+---
+
+## 七、建议的下一步顺序
 
 1. 🔴-1 断线自愈（FSM 订阅）—— 否则桌面端在弱网下不可用
 2. 🟡-2 剩余部分（把 e2e 断言改成事件驱动、跑完清理会话）—— 凭据与地址泄漏面已收口

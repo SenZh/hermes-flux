@@ -13,8 +13,13 @@ export class HermesFluxTray {
 
   public init(): void {
     let icon: Electron.NativeImage;
+    // Prefer the 512px PNG so Windows can downsample a clean glyph for both the
+    // 16px tray and the 32px overflow area; the ICO stays as a fallback.
+    const trayPngPath = path.join(__dirname, '../build/icon.png');
     const trayIconPath = path.join(__dirname, '../build/icon.ico');
-    if (fs.existsSync(trayIconPath)) {
+    if (fs.existsSync(trayPngPath)) {
+      icon = nativeImage.createFromPath(trayPngPath).resize({ width: 16, height: 16 });
+    } else if (fs.existsSync(trayIconPath)) {
       icon = nativeImage.createFromPath(trayIconPath).resize({ width: 16, height: 16 });
     } else {
       icon = nativeImage.createFromBuffer(

@@ -31,6 +31,13 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     assert.ok(html.includes('18ms'), 'Must show real latencyMs');
   });
 
+  await t.test('StatusBar must not print a brand wordmark on the left', () => {
+    const html = renderStatusBar({ connectionStatus: 'connected', latencyMs: 12 });
+
+    assert.ok(!/HERMES\s+AURA/i.test(html), 'Left corner must not carry the legacy wordmark');
+    assert.ok(html.includes('已连接'), 'Left corner shows the real connection state instead');
+  });
+
   await t.test('MiddlePod Onboarding must provide Username & Password fields for Dashboard', async () => {
     const { renderMiddlePod } = await import('../dist/components/MiddlePod/MiddlePod.js');
     const html = renderMiddlePod({

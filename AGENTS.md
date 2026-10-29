@@ -215,3 +215,24 @@ test('FSM should compute exponential backoff with full jitter within bounds', ()
   - 继承底层 C++ 流式下载与分享（零 JS 堆内存介入，杜绝 JVM OOM），适配灵动岛与触觉反馈。
 * **`packages/web`**：
   - 独立 Web 工作台，支持部署为 Web App / PWA，支持公网或内网反代访问。
+
+---
+
+## 八、诊断日志与滚动稳定性红线 (Diagnostics)
+
+### 1. 日志必须走分级 logger
+
+- 唯一入口：`packages/core/src/log/logger.ts` 的 `createLogger(scope)`，禁止在渲染层直接 `console.log` 输出调试信息。
+- 级别：`silent < error < warn < info < debug < trace`，默认 `info`；未经打包的开发运行自动以 `?log=debug` 启动。
+- 运行期切换：DevTools 执行 `__fluxLog.setLevel('trace')`（会持久化到 `localStorage.hermes_flux_log_level`）。
+- 性能敏感路径（`render()`、流式 flush、分页回补）只允许 `debug` / `trace` 级别埋点，且埋点本身不得引入同步布局读取以外的额外开销。
+
+### 2. 会话流滚动不变量 (Scroll Invariants)
+
+- **跟随模式**：读者距底 ≤ `STICK_TO_BOTTOM_THRESHOLD_PX`(48px) 视为"跟随中"，渲染与流式 flush 都必须贴底；
+  距底更远视为"正在阅读历史"，任何自动滚动都是缺陷。
+- **渲染前判定**：`render()` 必须先在旧 DOM 上判定是否处于跟随模式，再决定贴底还是走 `StreamAnchor` 补偿，
+  禁止渲染后再猜。
+- **禁止高度估算**：`.message-row` 不得使用 `content-visibility` / `contain-intrinsic-size` 等会用估算高度替代真实布局的属性；
+  超长会话的性能靠"窗口化挂载 100 条 + 触顶回补"保证，而不是靠隐藏行的布局。
+- **禁止 `scroll-behavior: smooth`**：程序化滚动必须即时生效，平滑滚动会与补偿逻辑叠加成抖动。

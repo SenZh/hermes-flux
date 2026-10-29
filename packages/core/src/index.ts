@@ -8,3 +8,4 @@ export * from './coalesce/tokenCoalescer.js';
 export * from './models/types.js';
 export * from './session/eventReducer.js';
 export * from './session/sessionRegistry.js';
+export * from './log/logger.js';

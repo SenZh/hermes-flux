@@ -68,13 +68,17 @@ async function buildAll() {
     path.join(rootDir, 'dist/renderer/styles.css')
   );
 
-  // 5. Ship the brand icon next to the compiled main process
-  const iconSource = path.join(rootDir, 'build/icon.ico');
-  if (fs.existsSync(iconSource)) {
+  // 5. Ship the brand icons next to the compiled main process
+  const iconDir = path.join(rootDir, 'build');
+  const iconTargets = ['icon.ico', 'icon.png'];
+  const shippedIcons = iconTargets.filter((name) => fs.existsSync(path.join(iconDir, name)));
+  if (shippedIcons.length > 0) {
     fs.mkdirSync(path.join(rootDir, 'dist/build'), { recursive: true });
-    fs.copyFileSync(iconSource, path.join(rootDir, 'dist/build/icon.ico'));
+    for (const name of shippedIcons) {
+      fs.copyFileSync(path.join(iconDir, name), path.join(rootDir, 'dist/build', name));
+    }
   }
-  console.log('  ✔ Static renderer assets copied');
+  console.log(`  ✔ Static renderer assets copied (icons: ${shippedIcons.join(', ') || 'none'})`);
 
   const elapsed = Date.now() - startTime;
   console.log(`[Hermes Flux Build] Compilation complete in ${elapsed}ms`);

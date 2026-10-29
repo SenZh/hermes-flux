@@ -28,6 +28,12 @@ import {
   toPendingSession,
   upsertSession,
   applySessionTitle,
+  createLogger,
+  setLogLevel,
+  getLogLevel,
+  parseLogLevel,
+  isLogLevelEnabled,
+  type LogLevel,
   type TurnAction,
   type NormalizedSession,
   type ModelDetail,
@@ -39,6 +45,11 @@ import type { HermesDesktopBridge } from '../preload/index.js';
 declare global {
   interface Window {
     hermesDesktop?: HermesDesktopBridge;
+    /** Runtime log level control: `__fluxLog.setLevel('trace')` in DevTools. */
+    __fluxLog?: {
+      readonly level: LogLevel;
+      setLevel(next: string): LogLevel;
+    };
   }
 }
 
@@ -96,6 +107,45 @@ interface AppState {
 }
 
 const desktopApi: HermesDesktopBridge | undefined = window.hermesDesktop;
+
+/* --------------------------------------------------------------------------
+   Leveled diagnostics
+   Level resolution order:
+     1. `?log=<level>` on the URL — the unpackaged dev build passes `debug`.
+     2. `localStorage.hermes_flux_log_level` — persisted runtime override.
+     3. `info` in production.
+   Change it live from DevTools with `__fluxLog.setLevel('trace')`.
+   -------------------------------------------------------------------------- */
+
+const LOG_LEVEL_STORAGE_KEY = 'hermes_flux_log_level';
+
+function resolveInitialLogLevel(): LogLevel {
+  const fromUrl = new URLSearchParams(window.location.search).get('log');
+  if (fromUrl) return parseLogLevel(fromUrl, 'debug');
+  const stored = window.localStorage.getItem(LOG_LEVEL_STORAGE_KEY);
+  if (stored) return parseLogLevel(stored, 'info');
+  return 'info';
+}
+
+setLogLevel(resolveInitialLogLevel());
+
+window.__fluxLog = {
+  get level() {
+    return getLogLevel();
+  },
+  setLevel(next: string) {
+    const level = parseLogLevel(next, getLogLevel());
+    setLogLevel(level);
+    window.localStorage.setItem(LOG_LEVEL_STORAGE_KEY, level);
+    return level;
+  },
+};
+
+const logApp = createLogger('app');
+const logRender = createLogger('render');
+const logSession = createLogger('session');
+const logStream = createLogger('stream');
+const logScroll = createLogger('scroll');
 
 /**
  * Storage keys are `hermes_flux_*`; every read also falls back to the legacy
@@ -177,14 +227,92 @@ function isExtraInputsError(error: unknown): boolean {
 }
 
 
+/**
+ * Distance from the bottom, in px, inside which the stream counts as
+ * "following the conversation". Anything further up means the reader scrolled
+ * back deliberately and must not be dragged along by new tokens.
+ */
+const STICK_TO_BOTTOM_THRESHOLD_PX = 48;
+
+/**
+ * Set right before a render that must land at the newest message (session
+ * switch, first load, sending a prompt). `applyStreamAnchor` consumes it so the
+ * viewport never flashes at the old position for a frame.
+ */
+let pendingScrollToBottom = false;
+
+function isStreamNearBottom(stream: HTMLElement | null): boolean {
+  if (!stream) return false;
+  return stream.scrollHeight - stream.scrollTop - stream.clientHeight <= STICK_TO_BOTTOM_THRESHOLD_PX;
+}
+
+/** Pins the stream to the newest message, then re-pins once layout settles. */
+function scrollStreamToBottom(reason: string): void {
+  const stream = document.getElementById('conversation-stream');
+  if (!stream) return;
+  stream.scrollTop = stream.scrollHeight;
+
+  requestAnimationFrame(() => {
+    const settled = document.getElementById('conversation-stream');
+    if (!settled) return;
+    const drift = settled.scrollHeight - settled.scrollTop - settled.clientHeight;
+    if (drift > 1) {
+      settled.scrollTop = settled.scrollHeight;
+    }
+    logScroll.debug('pinned to bottom', {
+      reason,
+      scrollHeight: settled.scrollHeight,
+      clientHeight: settled.clientHeight,
+      residualDrift: Math.round(drift),
+    });
+  });
+}
+
+/**
+ * Chromium reports every unexplained layout shift; a viewport that "jumps" is
+ * exactly a run of these. Logged so a jump can be traced to the frame that
+ * caused it instead of guessed at.
+ */
+function installLayoutShiftDiagnostics(): void {
+  if (typeof PerformanceObserver === 'undefined') return;
+  if (!isLogLevelEnabled('debug')) return;
+
+  try {
+    const observer = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries() as Array<PerformanceEntry & { value?: number; hadRecentInput?: boolean }>) {
+        const value = entry.value ?? 0;
+        if (value < 0.0005 || entry.hadRecentInput) continue;
+        const stream = document.getElementById('conversation-stream');
+        logScroll.debug('layout shift', {
+          value: Math.round(value * 1000) / 1000,
+          scrollTop: stream ? Math.round(stream.scrollTop) : null,
+          scrollHeight: stream ? stream.scrollHeight : null,
+          streaming: state.isStreaming,
+        });
+      }
+    });
+    observer.observe({ type: 'layout-shift', buffered: true });
+  } catch {
+    // The API is Chromium-only; its absence is not an error.
+  }
+}
+
 // Token coalescer for smooth 60-120fps stream updates
 const tokenCoalescer = new TokenCoalescer((flushedMap) => {
+  const flushStartedAt = performance.now();
+
+  // Follow-or-not is decided BEFORE content mutates: a reader who scrolled up
+  // must never be yanked back by an incoming token.
+  const followBottom = isStreamNearBottom(document.getElementById('conversation-stream'));
+  let renderedChars = 0;
+
   for (const [msgId, entry] of flushedMap.entries()) {
     const targetMsg = state.messages.find((m) => m.id === msgId);
     if (!targetMsg || targetMsg.role !== 'assistant') continue;
 
     if (entry.content) {
       targetMsg.content += entry.content;
+      renderedChars += entry.content.length;
       const contentEl = document.getElementById(`msg-content-${targetMsg.id}`);
       if (contentEl) {
         if (contentEl.style.display === 'none') {
@@ -209,9 +337,17 @@ const tokenCoalescer = new TokenCoalescer((flushedMap) => {
   }
 
   const stream = document.getElementById('conversation-stream');
-  if (stream) {
+  if (stream && followBottom) {
     stream.scrollTop = stream.scrollHeight;
   }
+
+  logStream.trace('flush', {
+    ms: Math.round((performance.now() - flushStartedAt) * 10) / 10,
+    messages: flushedMap.size,
+    chars: renderedChars,
+    followBottom,
+    scrollTop: stream ? Math.round(stream.scrollTop) : null,
+  });
 });
 
 function getEffectiveUrl(base: string): string {
@@ -414,6 +550,7 @@ async function loadOlderMessages(): Promise<void> {
   }
 
   state.isLoadingOlder = true;
+  const startedAt = performance.now();
   const stream = document.getElementById('conversation-stream');
   const prevScrollHeight = stream ? stream.scrollHeight : 0;
   const prevScrollTop = stream ? stream.scrollTop : 0;
@@ -432,10 +569,27 @@ async function loadOlderMessages(): Promise<void> {
   // Precise scroll compensating (Zero Jump)
   requestAnimationFrame(() => {
     const nextStream = document.getElementById('conversation-stream');
-    if (nextStream) {
-      const addedHeight = nextStream.scrollHeight - prevScrollHeight;
-      nextStream.scrollTop = prevScrollTop + addedHeight;
-    }
+    if (!nextStream) return;
+    const addedHeight = nextStream.scrollHeight - prevScrollHeight;
+    nextStream.scrollTop = prevScrollTop + addedHeight;
+
+    // Second pass: web fonts and wrapped rows can add height after the first
+    // frame; absorb that residual so the reader's line stays put.
+    requestAnimationFrame(() => {
+      const settled = document.getElementById('conversation-stream');
+      if (!settled) return;
+      const settledAdded = settled.scrollHeight - prevScrollHeight;
+      const drift = settledAdded - addedHeight;
+      if (Math.abs(drift) >= 1) settled.scrollTop += drift;
+
+      logScroll.debug('older batch prepended', {
+        batch: batch.length,
+        remaining: remaining.length,
+        addedHeight: Math.round(settledAdded),
+        residualDrift: Math.round(drift),
+        ms: Math.round((performance.now() - startedAt) * 10) / 10,
+      });
+    });
   });
 }
 
@@ -446,6 +600,8 @@ async function loadMessages(sessionId: string): Promise<void> {
     render();
     return;
   }
+
+  const loadStartedAt = performance.now();
 
   // 1. Instant cache hit: render immediately from memory without waiting for network roundtrip
   const cached = sessionMessagesCache.get(sessionId);
@@ -458,8 +614,19 @@ async function loadMessages(sessionId: string): Promise<void> {
       state.messages = [...cached];
       state.hasOlderMessages = false;
     }
+    pendingScrollToBottom = true;
     render();
+    scrollStreamToBottom('cache hit');
+    logSession.debug('session rendered from cache', {
+      sessionId,
+      total: cached.length,
+      mounted: state.messages.length,
+      ms: Math.round((performance.now() - loadStartedAt) * 10) / 10,
+    });
   }
+
+  const rpcStartedAt = performance.now();
+  let rpcMs = 0;
 
   try {
     let res: any;
@@ -496,6 +663,8 @@ async function loadMessages(sessionId: string): Promise<void> {
       }
     }
 
+    rpcMs = Math.round((performance.now() - rpcStartedAt) * 10) / 10;
+
     const handles = readSessionHandles(res, sessionId);
     if (handles) {
       state.activeLiveSessionId = handles.liveId;
@@ -504,7 +673,8 @@ async function loadMessages(sessionId: string): Promise<void> {
     }
 
     const list = Array.isArray(res?.messages) ? res.messages : Array.isArray(res?.history) ? res.history : [];
-    
+    const parseStartedAt = performance.now();
+
     // Filter and transform messages
     const parsedMessages: MessageViewModel[] = [];
 
@@ -664,6 +834,8 @@ async function loadMessages(sessionId: string): Promise<void> {
 
     sessionMessagesCache.set(sessionId, parsedMessages);
 
+    const parseMs = Math.round((performance.now() - parseStartedAt) * 10) / 10;
+
     // Initial Window Splitting: Mount only latest 100 messages for instantaneous rendering
     if (parsedMessages.length > INITIAL_WINDOW_PAGE_SIZE) {
       state.messages = parsedMessages.slice(-INITIAL_WINDOW_PAGE_SIZE);
@@ -676,10 +848,19 @@ async function loadMessages(sessionId: string): Promise<void> {
     }
 
     if (state.activeSessionId === sessionId) state.dockNotice = '';
+    pendingScrollToBottom = true;
     render();
-    requestAnimationFrame(() => {
-      const stream = document.getElementById('conversation-stream');
-      if (stream) stream.scrollTop = stream.scrollHeight;
+    scrollStreamToBottom('session loaded');
+
+    logSession.info('session loaded', {
+      sessionId,
+      fetched: list.length,
+      parsed: parsedMessages.length,
+      mounted: state.messages.length,
+      older: sessionOlderQueue.get(sessionId)?.length ?? 0,
+      rpcMs,
+      parseMs,
+      totalMs: Math.round((performance.now() - loadStartedAt) * 10) / 10,
     });
   } catch (e) {
     console.warn('[Hermes Gateway] Failed to load messages via RPC:', e);
@@ -1178,12 +1359,10 @@ async function sendMessage(text: string): Promise<void> {
   state.isStreaming = true;
   tokenCoalescer.clear();
   armTurnWatchdog();
+  pendingScrollToBottom = true;
   render();
-
-  requestAnimationFrame(() => {
-    const stream = document.getElementById('conversation-stream');
-    if (stream) stream.scrollTop = stream.scrollHeight;
-  });
+  scrollStreamToBottom('message sent');
+  logStream.info('turn started', { session: state.activeLiveSessionId, chars: trimmed.length });
 
   try {
     // `reasoning_effort` is not part of PromptSubmitParams on this gateway
@@ -1543,9 +1722,19 @@ function captureStreamAnchor(): StreamAnchor {
   return { sessionId: state.activeSessionId, id: null, offset: 0, rawScrollTop: stream.scrollTop };
 }
 
-function applyStreamAnchor(anchor: StreamAnchor): void {
+function applyStreamAnchor(anchor: StreamAnchor, pinBottom: boolean): void {
   const stream = document.getElementById('conversation-stream');
   if (!stream) return;
+
+  // Follow mode (a deliberate jump, or the reader was already at the bottom)
+  // wins over position preservation. Without this a background re-render during
+  // streaming restores the old scrollTop while the rows keep growing, and the
+  // next token flush snaps back down — the "bouncing" conversation.
+  if (pinBottom) {
+    stream.scrollTop = stream.scrollHeight;
+    logScroll.trace('pinned after render', { session: state.activeSessionId });
+    return;
+  }
 
   // If we switched to a different session, don't inherit old session scroll offset!
   if (anchor.sessionId !== state.activeSessionId) {
@@ -1559,16 +1748,41 @@ function applyStreamAnchor(anchor: StreamAnchor): void {
       const streamTop = stream.getBoundingClientRect().top;
       const currentOffset = target.getBoundingClientRect().top - streamTop;
       const delta = currentOffset - anchor.offset;
-      stream.scrollTop += delta;
+      if (Math.abs(delta) >= 1) {
+        stream.scrollTop += delta;
+        logScroll.trace('anchor corrected', { id: anchor.id, delta: Math.round(delta) });
+      }
       return;
     }
   }
   stream.scrollTop = anchor.rawScrollTop;
 }
 
+/**
+ * After a full re-render the anchor is applied synchronously; late layout work
+ * (web fonts, images, wrapped rows) can still move the pinned row a frame
+ * later. Re-measure once and absorb the residual drift.
+ */
+function stabilizeStreamAnchor(anchor: StreamAnchor): void {
+  if (!anchor.id) return;
+  const stream = document.getElementById('conversation-stream');
+  if (!stream) return;
+  const target = stream.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(anchor.id)}"]`);
+  if (!target) return;
+
+  const streamTop = stream.getBoundingClientRect().top;
+  const drift = (target.getBoundingClientRect().top - streamTop) - anchor.offset;
+  if (Math.abs(drift) >= 1) {
+    stream.scrollTop += drift;
+    logScroll.debug('post-layout anchor drift absorbed', { id: anchor.id, drift: Math.round(drift) });
+  }
+}
+
 function render(): void {
   const root = document.getElementById('flux-app-root');
   if (!root) return;
+
+  const renderStartedAt = performance.now();
 
   // The shell re-renders by replacing innerHTML, so transient UI state (draft text,
   // caret, focus, scroll position) has to be captured and restored by hand.
@@ -1578,6 +1792,12 @@ function render(): void {
   const caretStart = existingInput?.selectionStart ?? draftText.length;
   const caretEnd = existingInput?.selectionEnd ?? draftText.length;
 
+  const forcedBottom = pendingScrollToBottom;
+  pendingScrollToBottom = false;
+  // Follow mode is inherited: a reader parked at the bottom keeps following
+  // across any re-render, not only the one right after they sent a prompt.
+  const wasNearBottom = isStreamNearBottom(document.getElementById('conversation-stream'));
+  const pinBottom = forcedBottom || wasNearBottom;
   const streamAnchor = captureStreamAnchor();
 
   document.documentElement.setAttribute('data-theme', state.theme);
@@ -1733,9 +1953,29 @@ function render(): void {
     }
   }
 
-  applyStreamAnchor(streamAnchor);
-
+  applyStreamAnchor(streamAnchor, pinBottom);
   bindEvents();
+
+  requestAnimationFrame(() => {
+    if (pinBottom) {
+      // Re-pin once layout settles so a late row growth cannot leave the
+      // viewport a few pixels above the newest message.
+      const stream = document.getElementById('conversation-stream');
+      if (stream) stream.scrollTop = stream.scrollHeight;
+    } else {
+      stabilizeStreamAnchor(streamAnchor);
+    }
+  });
+
+  logRender.debug('render', {
+    ms: Math.round((performance.now() - renderStartedAt) * 10) / 10,
+    messages: state.messages.length,
+    htmlKB: Math.round(html.length / 1024),
+    session: state.activeSessionId || '(none)',
+    forcedBottom,
+    pinBottom,
+    anchor: streamAnchor.id,
+  });
 }
 
 function bindEvents(): void {
@@ -2358,6 +2598,14 @@ document.addEventListener('mousedown', (e) => {
 });
 
 async function init(): Promise<void> {
+  logApp.info('renderer boot', {
+    level: getLogLevel(),
+    theme: state.theme,
+    platform: navigator.platform,
+    electron: navigator.userAgent.includes('Electron'),
+  });
+  installLayoutShiftDiagnostics();
+
   // Restore persisted rail widths
   const savedLeft = localStorage.getItem('hermes_flux_rail_w_left') || localStorage.getItem('hermes_aura_rail_w_left');
   if (savedLeft) document.documentElement.style.setProperty('--rail-w-left', `${savedLeft}px`);

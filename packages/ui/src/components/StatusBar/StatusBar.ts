@@ -47,9 +47,18 @@ export function renderStatusBar(props: StatusBarProps): string {
       color: var(--text-muted);
       z-index: 50;
     ">
-      <!-- Left: Clean and Minimal Brand Indicator -->
-      <div style="display: flex; align-items: center; gap: 8px;">
-        <span style="font-size: 11px; color: var(--text-muted); opacity: 0.65;">HERMES AURA</span>
+      <!-- Left: connection state only — no brand text -->
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <span style="
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: ${dotColor};
+          box-shadow: 0 0 5px ${dotColor}88;
+          display: inline-block;
+          ${pulseAnimation}
+        "></span>
+        <span style="font-size: 10.5px; color: var(--text-faint);">${escapeHtml(statusText)}</span>
       </div>
 
       <!-- Right: Server Ingress Node (OpenChamber Style) -->
@@ -63,16 +72,6 @@ export function renderStatusBar(props: StatusBarProps): string {
         <span style="color: ${props.connectionStatus === 'connected' ? 'var(--text-main)' : 'var(--text-muted)'}; font-weight: 500;">
           ${escapeHtml(locationText)}
         </span>
-        <span style="
-          width: 6px;
-          height: 6px;
-          border-radius: 50%;
-          background: ${dotColor};
-          box-shadow: 0 0 5px ${dotColor}88;
-          display: inline-block;
-          margin-left: 2px;
-          ${pulseAnimation}
-        "></span>
         ${
           latencyText
             ? `<span style="font-size: 10px; color: var(--text-faint); margin-left: 2px;">${latencyText}</span>`
