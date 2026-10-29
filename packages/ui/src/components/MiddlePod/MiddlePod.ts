@@ -348,54 +348,62 @@ export function renderMessage(m: MessageViewModel, agentDisplayName = 'HERMES AG
 
 function renderThinkingFold(m: MessageViewModel): string {
   const hasThought = Boolean(m.thought && m.thought.trim());
+  const summary = getCleanReasoningSummary(m.thought || '');
   const durationBadge = m.thoughtDurationMs
-    ? `<span style="font-size: 11px; font-family: var(--font-mono); color: #C084FC; background: rgba(168, 85, 247, 0.12); padding: 1px 6px; border-radius: 4px; border: 1px solid rgba(168, 85, 247, 0.25);">${m.thoughtDurationMs}ms</span>`
+    ? `<span style="font-size: 12px; color: #6B7280; font-family: var(--font-mono); flex-shrink: 0;">${(m.thoughtDurationMs / 1000).toFixed(1)}s</span>`
     : '';
 
   return `
-    <details class="thinking-fold" ${hasThought ? 'open' : ''} style="
-      background: rgba(18, 14, 28, 0.7);
-      border: 1px solid rgba(168, 85, 247, 0.22);
-      border-left: 3px solid #A855F7;
-      border-radius: 8px;
-      overflow: hidden;
-      margin: 4px 0;
-      box-shadow: 0 2px 14px rgba(168, 85, 247, 0.05);
-      ${hasThought ? '' : 'display: none;'}
-    ">
+    <details class="timeline-row thinking-row" ${hasThought ? '' : 'style="display: none;"'} style="margin: 2px 0;">
       <summary style="
-        cursor: pointer;
-        padding: 9px 13px;
-        background: rgba(26, 18, 40, 0.65);
-        color: #E9D5FF;
-        font-size: 12px;
-        font-weight: 600;
+        list-style: none;
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        gap: 7px;
+        padding: 3px 0;
+        cursor: pointer;
         user-select: none;
+        font-size: 13px;
+        line-height: 1.5;
       ">
-        <div style="display: flex; align-items: center; gap: 7px;">
-          <span style="font-size: 13px;">🧠</span>
-          <span style="letter-spacing: 0.02em;">深度推理链</span>
-          ${durationBadge}
-        </div>
-        <div style="display: flex; align-items: center; gap: 6px;">
-          <span style="font-size: 10px; color: #C084FC; background: rgba(168, 85, 247, 0.18); padding: 1px 6px; border-radius: 3px; font-family: var(--font-mono);">REASONING</span>
-        </div>
+        <span style="color: #9CA3AF; display: inline-flex; align-items: center; flex-shrink: 0;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1Z"/>
+          </svg>
+        </span>
+        <span style="font-weight: 500; color: #D1D5DB; flex-shrink: 0;">推理</span>
+        ${durationBadge}
+        <span style="color: #9CA3AF; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;">
+          ${escapeHtml(summary)}
+        </span>
       </summary>
       <div id="msg-thought-${m.id}" style="
-        padding: 12px 14px;
-        color: #A1A1AA;
-        font-family: var(--font-mono);
-        font-size: 12px;
+        margin-left: 7px;
+        margin-top: 4px;
+        margin-bottom: 6px;
+        padding-left: 14px;
+        border-left: 2px solid rgba(255, 255, 255, 0.08);
+        color: #9CA3AF;
+        font-size: 12.5px;
         line-height: 1.62;
         white-space: pre-wrap;
         word-break: break-word;
-        border-top: 1px solid rgba(168, 85, 247, 0.12);
       ">${escapeHtml(m.thought || '')}</div>
     </details>
   `;
+}
+
+function getCleanReasoningSummary(text: string): string {
+  if (!text) return '';
+  const clean = text
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/[#*_\->]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (clean.length <= 75) return clean;
+  return `${clean.substring(0, 75).trimEnd()}…`;
 }
 
 function renderToolCapsules(m: MessageViewModel): string {
@@ -403,27 +411,34 @@ function renderToolCapsules(m: MessageViewModel): string {
 
   return m.toolCalls
     .map((tc) => {
-      const toolName = String(tc.name || '').toLowerCase();
-      let icon = '⚡';
-      let themeColor = 'var(--accent)';
-      let toolTag = 'TOOL';
+      const rawName = String(tc.name || '').toLowerCase();
+      let displayName = 'Tool Call';
+      let iconSvg = '';
 
-      if (toolName.includes('shell') || toolName.includes('bash') || toolName.includes('cmd') || toolName.includes('terminal')) {
-        icon = '💻';
-        themeColor = '#00E5FF'; // aura-cyan
-        toolTag = 'SHELL';
-      } else if (toolName.includes('read') || toolName.includes('write') || toolName.includes('edit') || toolName.includes('file')) {
-        icon = '📄';
-        themeColor = '#10B981'; // Emerald
-        toolTag = 'FILE';
-      } else if (toolName.includes('search') || toolName.includes('grep') || toolName.includes('glob') || toolName.includes('find')) {
-        icon = '🔍';
-        themeColor = '#FFBF00'; // aura-amber
-        toolTag = 'SEARCH';
-      } else if (toolName.includes('subagent') || toolName.includes('agent') || toolName.includes('delegate')) {
-        icon = '🤖';
-        themeColor = '#A855F7'; // aura-violet
-        toolTag = 'AGENT';
+      if (rawName.includes('shell') || rawName.includes('bash') || rawName.includes('cmd') || rawName.includes('terminal')) {
+        displayName = 'Shell Command';
+        iconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="3"/><path d="m7 10 3 2-3 2"/><path d="M12 14h5"/></svg>`;
+      } else if (rawName.includes('edit') || rawName.includes('patch')) {
+        displayName = 'Edit File';
+        iconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m10 15 5-5"/></svg>`;
+      } else if (rawName.includes('read') || rawName.includes('file')) {
+        displayName = 'Read File';
+        iconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>`;
+      } else if (rawName.includes('write')) {
+        displayName = 'Write File';
+        iconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M12 18h6"/></svg>`;
+      } else if (rawName.includes('grep') || rawName.includes('search')) {
+        displayName = 'Search Files';
+        iconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>`;
+      } else if (rawName.includes('glob') || rawName.includes('find')) {
+        displayName = 'Find Files';
+        iconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>`;
+      } else if (rawName.includes('subagent') || rawName.includes('agent')) {
+        displayName = 'Agent Task';
+        iconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="1.5"/><circle cx="15" cy="9" r="1.5"/><path d="M8 15h8"/></svg>`;
+      } else {
+        displayName = tc.name || 'Tool';
+        iconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`;
       }
 
       // Defensive arguments parsing: ensure cleanArgs is GUARANTEED to be a string
@@ -433,7 +448,7 @@ function renderToolCapsules(m: MessageViewModel): string {
         try {
           const parsed = JSON.parse(tc.args);
           if (parsed && typeof parsed === 'object') {
-            const candidate = parsed.command ?? parsed.path ?? parsed.file ?? parsed.query ?? parsed.prompt;
+            const candidate = parsed.command ?? parsed.path ?? parsed.file ?? parsed.query ?? parsed.pattern ?? parsed.description ?? parsed.prompt;
             if (typeof candidate === 'string') {
               cleanArgs = candidate;
             } else if (candidate !== undefined) {
@@ -441,86 +456,108 @@ function renderToolCapsules(m: MessageViewModel): string {
             }
           }
         } catch {
-          // keep string as is
+          // keep string
         }
       } else if (tc.args != null) {
         cleanArgs = JSON.stringify(tc.args);
       }
 
-      const isCompleted = tc.status === 'completed';
-
       return `
-        <div class="tool-capsule" style="
-          background: #080808;
-          border: 1px solid var(--border-medium);
-          border-left: 3px solid ${themeColor};
-          border-radius: 8px;
-          overflow: hidden;
-          margin: 4px 0;
-          box-shadow: var(--shadow-card);
-        ">
-          <div style="
-            padding: 8px 12px;
+        <details class="timeline-row tool-row tool-capsule" style="margin: 2px 0;">
+          <summary style="
+            list-style: none;
             display: flex;
             align-items: center;
-            justify-content: space-between;
-            background: #121212;
-            font-size: 12px;
+            gap: 7px;
+            padding: 3px 0;
+            cursor: pointer;
+            user-select: none;
+            font-size: 13px;
+            line-height: 1.5;
           ">
-            <div style="display: flex; align-items: center; gap: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-              <span>${icon}</span>
-              <span style="color: ${themeColor}; font-weight: 700; font-family: var(--font-mono); font-size: 11.5px;">${escapeHtml(tc.name || 'tool')}</span>
-              <span style="
-                font-size: 10px;
-                padding: 1px 5px;
-                border-radius: 3px;
-                background: rgba(255, 255, 255, 0.06);
-                color: var(--text-muted);
-                font-family: var(--font-mono);
-              ">${toolTag}</span>
-              ${
-                cleanArgs
-                  ? `<span style="color: var(--text-secondary); font-family: var(--font-mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(cleanArgs)}</span>`
-                  : ''
-              }
-            </div>
-            <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
-              <span style="
-                font-size: 10px;
-                padding: 2px 7px;
-                border-radius: 4px;
-                background: ${isCompleted ? 'rgba(34, 197, 94, 0.15)' : 'rgba(234, 179, 8, 0.15)'};
-                color: ${isCompleted ? '#4ADE80' : '#FACC15'};
-                font-weight: 700;
-                font-family: var(--font-mono);
-                border: 1px solid ${isCompleted ? 'rgba(34, 197, 94, 0.3)' : 'rgba(234, 179, 8, 0.3)'};
-              ">${isCompleted ? '✓ DONE' : '● RUNNING'}</span>
-            </div>
-          </div>
+            <span style="color: #9CA3AF; display: inline-flex; align-items: center; flex-shrink: 0;">
+              ${iconSvg}
+            </span>
+            <span style="font-weight: 500; color: #D1D5DB; flex-shrink: 0;">${displayName}</span>
+            ${
+              cleanArgs
+                ? `<span style="color: #9CA3AF; font-family: var(--font-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;">${escapeHtml(cleanArgs)}</span>`
+                : ''
+            }
+          </summary>
           ${
             tc.output
               ? `
-            <div style="position: relative;">
-              <pre style="
-                margin: 0;
-                padding: 10px 14px;
-                background: #080808;
-                color: #C9D1D9;
-                font-family: var(--font-mono);
-                font-size: 11.5px;
-                line-height: 1.55;
-                overflow-x: auto;
-                max-height: 220px;
-                border-top: 1px solid rgba(255, 255, 255, 0.05);
-              "><code>${escapeHtml(String(tc.output))}</code></pre>
+            <div style="
+              margin-left: 7px;
+              margin-top: 4px;
+              margin-bottom: 6px;
+              padding-left: 14px;
+              border-left: 2px solid rgba(255, 255, 255, 0.08);
+            ">
+              ${renderToolOutputBody(String(tc.output))}
             </div>
           `
               : ''
           }
-        </div>
+        </details>
       `;
     })
     .join('');
+}
+
+function renderToolOutputBody(output: string): string {
+  if (!output) return '';
+
+  // Check if output is a git diff
+  if (output.includes('--- ') && output.includes('+++ ')) {
+    const lines = escapeHtml(output).split('\n');
+    const diffHtml = lines
+      .map((line) => {
+        if (line.startsWith('+') && !line.startsWith('+++')) {
+          return `<div style="background: rgba(34, 197, 94, 0.15); color: #4ADE80; padding: 0 4px;">${line}</div>`;
+        }
+        if (line.startsWith('-') && !line.startsWith('---')) {
+          return `<div style="background: rgba(239, 68, 68, 0.15); color: #F87171; padding: 0 4px;">${line}</div>`;
+        }
+        if (line.startsWith('@@')) {
+          return `<div style="color: #60A5FA; padding: 0 4px; font-weight: 600;">${line}</div>`;
+        }
+        return `<div style="color: #9CA3AF; padding: 0 4px;">${line}</div>`;
+      })
+      .join('');
+
+    return `
+      <pre style="
+        margin: 0;
+        padding: 8px 10px;
+        background: #080808;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 6px;
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+        line-height: 1.5;
+        overflow-x: auto;
+        max-height: 240px;
+      "><code>${diffHtml}</code></pre>
+    `;
+  }
+
+  return `
+    <pre style="
+      margin: 0;
+      padding: 8px 10px;
+      background: #080808;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 6px;
+      color: #9CA3AF;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      line-height: 1.5;
+      overflow-x: auto;
+      max-height: 240px;
+    "><code>${escapeHtml(output)}</code></pre>
+  `;
 }
 
 export function escapeHtml(str: string): string {

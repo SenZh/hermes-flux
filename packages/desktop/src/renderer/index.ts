@@ -491,15 +491,72 @@ async function loadMessages(sessionId: string): Promise<void> {
       }));
 
       // Internal intermediate messages (e.g. tool output without user text, pure protocol frames)
-      // If an assistant message has NO text, NO thought, and NO tool calls, it's a blank turn frame
-      if (rawRole === 'tool' || rawRole === 'function') {
-        // If it's a tool response, attach to previous assistant if possible, or show as tool output
+      // Check if this message is a tool response, or if rawText itself is a serialized tool output (JSON with diff/success/etc.)
+      let isToolPayload = rawRole === 'tool' || rawRole === 'function';
+      let synthesizedToolCall: any = null;
+
+      if (!isToolPayload && rawText.trim().startsWith('{') && rawText.trim().endsWith('}')) {
+        try {
+          const parsed = JSON.parse(rawText.trim());
+          if (
+            parsed &&
+            typeof parsed === 'object' &&
+            ('success' in parsed || 'diff' in parsed || 'files_modified' in parsed || 'stdout' in parsed || 'exitCode' in parsed)
+          ) {
+            isToolPayload = true;
+            const toolName = ('diff' in parsed || 'files_modified' in parsed) ? 'edit' : 'tool';
+            const targetArg = parsed.resolved_path || (parsed.files_modified ? parsed.files_modified[0] : '') || '';
+            synthesizedToolCall = {
+              id: m.tool_call_id || `tc-synth-${idx}`,
+              name: toolName,
+              status: 'completed',
+              args: targetArg,
+              output: parsed.diff || rawText,
+            };
+          }
+        } catch {
+          // not json
+        }
+      }
+
+      if (isToolPayload) {
+        // Attach tool result to previous assistant message
         if (parsedMessages.length > 0 && parsedMessages[parsedMessages.length - 1].role === 'assistant') {
           const prev = parsedMessages[parsedMessages.length - 1];
-          if (prev.toolCalls && prev.toolCalls.length > 0) {
-            prev.toolCalls[prev.toolCalls.length - 1].output = rawText || m.output || JSON.stringify(m.result || {});
+          if (!prev.toolCalls) prev.toolCalls = [];
+
+          if (synthesizedToolCall) {
+            prev.toolCalls.push(synthesizedToolCall);
             continue;
           }
+
+          if (prev.toolCalls.length > 0) {
+            prev.toolCalls[prev.toolCalls.length - 1].output = rawText || m.output || JSON.stringify(m.result || {});
+            continue;
+          } else {
+            prev.toolCalls.push({
+              id: m.tool_call_id || `tc-${idx}`,
+              name: m.name || 'tool',
+              status: 'completed',
+              args: '',
+              output: rawText || m.output || JSON.stringify(m.result || {}),
+            });
+            continue;
+          }
+        } else if (synthesizedToolCall) {
+          // If no previous assistant message, create one containing ONLY this tool call
+          parsedMessages.push({
+            id: String(m.row_id ?? m.id ?? `msg-${idx}`),
+            role: 'assistant',
+            content: '',
+            thought: '',
+            toolCalls: [synthesizedToolCall],
+            timestamp: formatTimestamp(m.timestamp ?? m.created_at ?? Date.now()),
+          });
+          continue;
+        } else {
+          // Drop orphaned protocol frames
+          continue;
         }
       }
 

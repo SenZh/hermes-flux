@@ -135,13 +135,10 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
       ],
     });
 
-    assert.ok(html.includes('🧠'), 'Must include reasoning brain icon');
-    assert.ok(html.includes('深度推理链'), 'Must render reasoning title');
-    assert.ok(html.includes('450ms'), 'Must render reasoning duration badge');
-    assert.ok(html.includes('tool-capsule'), 'Must render tool capsules');
-    assert.ok(html.includes('💻'), 'Must render shell icon for shell tool');
-    assert.ok(html.includes('✓ DONE'), 'Must render completed badge');
-    assert.ok(html.includes('● RUNNING'), 'Must render running badge');
+    assert.ok(html.includes('thinking-row'), 'Must include reasoning row');
+    assert.ok(html.includes('推理'), 'Must render reasoning title');
+    assert.ok(html.includes('tool-row'), 'Must render tool rows');
+    assert.ok(html.includes('Shell Command'), 'Must render Shell Command title for shell tool');
     assert.ok(html.includes('<table'), 'Must render GFM HTML table');
     assert.ok(html.includes('Core'), 'Table must contain cell data');
   });
