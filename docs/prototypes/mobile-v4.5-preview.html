@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Hermes Flux 移动端全景交互原型 (v4.5 Mobile Flow)</title>
+  <style>
+    :root {
+      --bg-canvas: #090A0D;
+      --bg-card: #12151D;
+      --bg-surface: #181C26;
+      --bg-terminal: #040507;
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --border-focus: rgba(245, 158, 11, 0.5);
+      --text-main: #F3F4F6;
+      --text-muted: #9CA3AF;
+      --text-dim: #525966;
+      --accent-jade: #10B981;
+      --accent-amber: #F59E0B;
+      --accent-indigo: #6366F1;
+      --accent-pink: #EC4899;
+      --accent-cyan: #06B6D4;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
+      --font-mono: "JetBrains Mono", Consolas, Menlo, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body {
+      background: #000;
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    /* 手机外壳容器 (390px iPhone 标准视口模拟，可响应式撑满真实手机) */
+    .mobile-phone-container {
+      width: 100%;
+      max-width: 412px;
+      height: 100vh;
+      max-height: 890px;
+      background: var(--bg-canvas);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 0 50px rgba(0,0,0,0.8);
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    /* 1. 移动端顶栏 (Top Bar) */
+    .mobile-topbar {
+      height: 52px;
+      padding: 0 16px;
+      background: rgba(18, 21, 29, 0.96);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 50;
+      flex-shrink: 0;
+    }
+    .top-menu-btn {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      color: var(--text-muted);
+      cursor: pointer;
+      background: var(--bg-surface);
+    }
+    /* 核心：顶栏可下拉切会话胶囊 (Top Switcher Capsule) */
+    .bot-header-capsule {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      padding: 5px 12px;
+      border-radius: 18px;
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .bot-header-capsule:active {
+      transform: scale(0.97);
+    }
+
+    /* 2. 主聊天流 (Chat Stage) */
+    .mobile-chat-stage {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 14px 100px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      -webkit-overflow-scrolling: touch;
+    }
+    .msg-row {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+    }
+    .msg-avatar {
+      width: 30px;
+      height: 30px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      color: #FFF;
+      flex-shrink: 0;
+    }
+    .msg-bubble {
+      flex: 1;
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 13.5px;
+      line-height: 1.55;
+    }
+    .msg-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+    }
+
+    /* 移动端派生任务卡片 */
+    .mobile-worker-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-focus);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-top: 8px;
+    }
+    .sheet-trigger-btn {
+      width: 100%;
+      background: rgba(245, 158, 11, 0.15);
+      color: var(--accent-amber);
+      border: 1px solid rgba(245, 158, 11, 0.4);
+      padding: 6px;
+      border-radius: 6px;
+      font-size: 11.5px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+
+    /* 3. 输入控制区 (输入框贴合底部，规避 Tab 栏冲突) */
+    .mobile-input-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(18, 21, 29, 0.98);
+      backdrop-filter: blur(20px);
+      border-top: 1px solid var(--border-subtle);
+      padding: 8px 12px 24px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      z-index: 40;
+    }
+    .input-pill {
+      font-size: 11px;
+      color: var(--accent-jade);
+      background: rgba(16,185,129,0.12);
+      padding: 4px 8px;
+      border-radius: 12px;
+      flex-shrink: 0;
+    }
+    .mobile-input {
+      flex: 1;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 18px;
+      padding: 7px 12px;
+      outline: none;
+      color: var(--text-main);
+      font-size: 13.5px;
+    }
+    .mobile-input:focus {
+      border-color: var(--accent-jade);
+    }
+    .send-circle-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--accent-jade);
+      color: #000;
+      border: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 700;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+
+    /* 任务卡片上的终端唤起按钮 (优化文案与层级) */
+    .sheet-trigger-btn {
+      width: 100%;
+      background: rgba(245, 158, 11, 0.12);
+      color: var(--accent-amber);
+      border: 1px solid rgba(245, 158, 11, 0.35);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 11.5px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+
+    /* 4. 底部经典导航栏 (Bottom Tab Bar) */
+    .mobile-tabbar {
+      height: 52px;
+      background: #08090C;
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      z-index: 50;
+      flex-shrink: 0;
+    }
+    .tab-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      font-size: 10px;
+      color: var(--text-dim);
+      cursor: pointer;
+      width: 25%;
+    }
+    .tab-item.active {
+      color: var(--accent-jade);
+    }
+    .tab-icon {
+      font-size: 16px;
+    }
+
+    /* 5. 顶栏弹出的会话选择器菜单 (Top Session Dropdown) */
+    .top-dropdown-menu {
+      position: absolute;
+      top: 56px;
+      left: 16px;
+      right: 16px;
+      background: #141720;
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.8);
+      z-index: 100;
+      display: none;
+      flex-direction: column;
+      padding: 8px;
+    }
+    .dropdown-row {
+      padding: 9px 12px;
+      font-size: 12.5px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--text-muted);
+    }
+    .dropdown-row.active {
+      background: var(--bg-surface);
+      color: var(--text-main);
+      font-weight: 600;
+    }
+
+    /* 6. 侧边滑出抽屉 (Left Drawer - 项目与团队树) */
+    .mobile-left-drawer {
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 78%;
+      height: 100%;
+      background: #0C0E14;
+      border-right: 1px solid var(--border-subtle);
+      z-index: 200;
+      transition: left 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex;
+      flex-direction: column;
+      padding: 20px 14px;
+      box-shadow: 20px 0 50px rgba(0,0,0,0.8);
+    }
+    .drawer-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.6);
+      z-index: 150;
+      display: none;
+    }
+
+    /* 7. 底部半屏升降终端抽屉 (Draggable Bottom Sheet) */
+    .mobile-bottom-sheet {
+      position: absolute;
+      bottom: -100%;
+      left: 0;
+      right: 0;
+      height: 68%;
+      background: #0E1118;
+      border-top: 1px solid rgba(255,255,255,0.15);
+      border-radius: 16px 16px 0 0;
+      z-index: 300;
+      transition: bottom 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 -10px 40px rgba(0,0,0,0.9);
+    }
+    .sheet-handle {
+      width: 36px;
+      height: 4px;
+      border-radius: 2px;
+      background: var(--text-dim);
+      margin: 8px auto 4px auto;
+      cursor: pointer;
+    }
+    .sheet-header {
+      padding: 6px 14px 10px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .sheet-terminal-body {
+      flex: 1;
+      background: var(--bg-terminal);
+      padding: 12px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      line-height: 1.55;
+      color: #94A3B8;
+      overflow-y: auto;
+    }
+
+    /* 8. 全屏横滑看板模态 */
+    .mobile-kanban-overlay {
+      position: absolute;
+      top: 0;
+      left: 100%;
+      width: 100%;
+      height: 100%;
+      background: var(--bg-canvas);
+      z-index: 250;
+      transition: left 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex;
+      flex-direction: column;
+    }
+    .kanban-topbar {
+      height: 52px;
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .kanban-swimlane {
+      flex: 1;
+      padding: 14px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .k-mobile-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 12.5px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 手机外壳容器 -->
+  <div class="mobile-phone-container">
+
+    <!-- 1. 顶栏 (Top Bar) -->
+    <header class="mobile-topbar">
+      <!-- 汉堡按钮：滑出左侧项目/旁聊抽屉 -->
+      <div class="top-menu-btn" onclick="toggleLeftDrawer()">
+        ☰
+      </div>
+
+      <!-- 顶栏核心：下拉胶囊（无感切换主工位与旁聊） -->
+      <div class="bot-header-capsule" onclick="toggleTopDropdown()">
+        <span id="capsule-avatar" style="color: var(--accent-indigo);">🤖</span>
+        <span id="capsule-name">老王 · 核心主工位</span>
+        <span style="font-size: 9px; color: var(--text-dim);">▼</span>
+      </div>
+
+      <!-- 右上角：一键直切看板 -->
+      <div class="top-menu-btn" onclick="openKanbanOverlay()" title="查看项目看板">
+        📋
+      </div>
+    </header>
+
+    <!-- 顶栏下拉菜单 (Top Dropdown: 选主工位还是旁聊) -->
+    <div class="top-dropdown-menu" id="top-dropdown">
+      <div style="font-size: 10.5px; color: var(--text-dim); margin-bottom: 6px; padding-left: 6px;">
+        当前 BOT：架构师 · 老王 (Claude 3.7)
+      </div>
+      <div class="dropdown-row active" onclick="switchMobileChat('main')">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="color: var(--accent-amber);">👑</span>
+          <span>核心主工位 (Forever)</span>
+        </div>
+        <span style="font-size: 10px; color: var(--accent-jade);">当前</span>
+      </div>
+      <div class="dropdown-row" onclick="switchMobileChat('side-1')">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span>⑂</span>
+          <span>[旁聊] 锁冲突排查</span>
+        </div>
+      </div>
+      <div class="dropdown-row" onclick="switchMobileChat('side-2')">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span>⑂</span>
+          <span>[旁聊] 接口幂等论证</span>
+        </div>
+      </div>
+      <div style="margin-top: 6px; border-top: 1px solid var(--border-subtle); padding-top: 6px;">
+        <div class="dropdown-row" style="color: var(--accent-jade);" onclick="alert('+ 已新建独立旁聊'); toggleTopDropdown();">
+          <span>+ 新建专属旁聊</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. 主聊天流 (Chat Stage) -->
+    <main class="mobile-chat-stage" id="chat-stage">
+      <!-- 消息 1: 人类用户 -->
+      <div class="msg-row">
+        <div class="msg-avatar" style="background: #374151;">ME</div>
+        <div class="msg-bubble">
+          <div class="msg-meta">
+            <span>You</span>
+            <span>14:30</span>
+          </div>
+          <div>老王，去 hermes-flux 项目把 OAuth 监听重构一下，在 Worktree 执行。</div>
+        </div>
+      </div>
+
+      <!-- 消息 2: 架构师回复 + 派生任务卡片 -->
+      <div class="msg-row">
+        <div class="msg-avatar" style="background: var(--accent-indigo);">A</div>
+        <div class="msg-bubble">
+          <div class="msg-meta">
+            <span style="color: #818CF8; font-weight: 600;">架构师 · 老王</span>
+            <span>14:31</span>
+          </div>
+          <div>
+            收到，已在项目建立 <code>wt-104</code> 独立分支跑单测。<br>
+            
+            <!-- 移动端执行卡片 -->
+            <div class="mobile-worker-card">
+              <div style="display: flex; justify-content: space-between; font-size: 11.5px; font-weight: 600; color: var(--accent-amber);">
+                <span>⚡ TASK-104: OAuth 回调重构</span>
+                <span style="color: var(--accent-jade);">● 运行中</span>
+              </div>
+              <div style="font-size: 10.5px; color: var(--text-dim); margin-top: 4px;">
+                进程: PID 4801 · 分支: feat/auth-loopback
+              </div>
+              <!-- 点击直穿半屏升降终端 -->
+              <div class="sheet-trigger-btn" onclick="openBottomSheet()">
+                <span>⚡ 实时终端流水 (PID 4801)</span>
+                <span style="font-size: 11px; opacity: 0.8;">查看 ⇡</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- 3. 贴底安全输入区 (规避键盘弹起与 Tab 冲突) -->
+    <div class="mobile-input-bar">
+      <span class="input-pill">🤖 老王</span>
+      <input type="text" class="mobile-input" placeholder="发消息... @ 叫人 /task 工单">
+      <button class="send-circle-btn">↑</button>
+    </div>
+
+    <!-- ── 遮罩层 (Drawer Overlay) ── -->
+    <div class="drawer-overlay" id="drawer-overlay" onclick="closeAllDrawers()"></div>
+
+    <!-- ── 5. 侧边滑出抽屉 (Left Drawer - 团队/项目/旁聊) ── -->
+    <aside class="mobile-left-drawer" id="left-drawer">
+      <div style="font-size: 14px; font-weight: 700; color: #FFF; margin-bottom: 16px; display: flex; justify-content: space-between;">
+        <span>Hermes Flux 导航</span>
+        <span style="color: var(--text-dim); cursor: pointer;" onclick="toggleLeftDrawer()">✕</span>
+      </div>
+
+      <div style="font-size: 11px; font-weight: 700; color: var(--text-dim); margin-bottom: 8px;">数字专家 (BOTS)</div>
+      <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 18px;">
+        <div class="dropdown-row active" onclick="selectBotInDrawer('arch')">
+          <span>🤖 架构老王 (Claude 3.7)</span>
+          <span style="color: var(--accent-jade); font-size: 10px;">在线</span>
+        </div>
+        <div class="dropdown-row" onclick="selectBotInDrawer('fe')">
+          <span>🎨 前端小张 (DeepSeek-V3)</span>
+        </div>
+        <div class="dropdown-row" onclick="selectBotInDrawer('rev')">
+          <span>🛡️ 代码审查员 (Qwen-2.5)</span>
+        </div>
+      </div>
+
+      <div style="font-size: 11px; font-weight: 700; color: var(--text-dim); margin-bottom: 8px;">归属工程项目 (PROJECTS)</div>
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div class="dropdown-row" onclick="alert('进入 hermes-flux 独立项目会话'); closeAllDrawers();">
+          <span>📁 hermes-flux (主工程)</span>
+          <span style="font-size: 10px; color: var(--accent-amber);">2 任务</span>
+        </div>
+        <div class="dropdown-row" onclick="alert('进入 mp-langchao 项目会话'); closeAllDrawers();">
+          <span>📁 mp-langchao</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ── 6. 底部半屏升降终端抽屉 (Draggable Bottom Sheet) ── -->
+    <div class="mobile-bottom-sheet" id="bottom-sheet">
+      <div class="sheet-handle" onclick="closeBottomSheet()"></div>
+      <div class="sheet-header">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span>⚡ Worker-1 实时终端输出</span>
+          <span style="font-size: 9px; background: rgba(245,158,11,0.2); color: var(--accent-amber); padding: 1px 4px; border-radius: 4px;">LIVE</span>
+        </div>
+        <span style="color: var(--text-dim); cursor: pointer;" onclick="closeBottomSheet()">收起 ✕</span>
+      </div>
+      <div class="sheet-terminal-body">
+        <span style="color: #64748B;">[14:31:02]</span> Worktree ready: /projects/hermes-flux/.worktrees/wt-104<br>
+        <span style="color: #64748B;">[14:31:04]</span> $ vitest run auth.test.mjs<br>
+        <span style="color: var(--accent-jade);">PASS packages/core/__tests__/auth.test.mjs</span><br>
+        <span style="color: var(--accent-jade);">✓ 8 tests passed (12ms)</span><br>
+        <span style="color: #64748B;">[14:31:07]</span> $ tsc --noEmit<br>
+        <span style="color: var(--accent-jade);">✔ TypeScript 0 errors</span><br>
+        <span style="color: var(--accent-amber);">[14:31:08] 测试全绿！正在向代码审查员发起验收...</span>
+      </div>
+    </div>
+
+    <!-- ── 7. 全屏横滑看板模态 (Kanban Overlay) ── -->
+    <div class="mobile-kanban-overlay" id="kanban-overlay">
+      <header class="kanban-topbar">
+        <span style="color: var(--text-dim); cursor: pointer;" onclick="closeKanbanOverlay()">← 返回会话</span>
+        <span>📋 hermes-flux 交付看板</span>
+        <span style="color: var(--accent-jade);">+ 任务</span>
+      </header>
+      <div class="kanban-swimlane">
+        <div style="font-size: 11px; font-weight: 700; color: var(--text-dim);">进行中 (DOING · 1)</div>
+        <div class="k-mobile-card" style="border-left: 3px solid var(--accent-amber);" onclick="closeKanbanOverlay(); openBottomSheet();">
+          <div style="font-weight: 600; color: #FFF;">TASK-104: OAuth 回调重构</div>
+          <div style="font-size: 11px; color: var(--accent-amber); margin-top: 4px;">Worker PID 4801 (点击滑出终端)</div>
+        </div>
+
+        <div style="font-size: 11px; font-weight: 700; color: var(--text-dim); margin-top: 8px;">待处理 (TODO · 2)</div>
+        <div class="k-mobile-card">
+          <div>[UI] 状态栏 22px 翡翠呼吸灯适配</div>
+          <div style="font-size: 10.5px; color: var(--text-dim); margin-top: 4px;">指派: 前端 · 小张</div>
+        </div>
+        <div class="k-mobile-card">
+          <div>[Core] FSM 5态抖动退避算法</div>
+          <div style="font-size: 10.5px; color: var(--text-dim); margin-top: 4px;">指派: 后端 · 李雷</div>
+        </div>
+
+        <div style="font-size: 11px; font-weight: 700; color: var(--text-dim); margin-top: 8px;">已完成 (DONE · 4)</div>
+        <div class="k-mobile-card" style="opacity: 0.6;">
+          <div>Titlebar 42px 原生按键适配</div>
+          <div style="font-size: 10.5px; color: var(--accent-jade); margin-top: 4px;">✔ 已合并主干</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // 1. 顶栏下拉会话菜单
+    function toggleTopDropdown() {
+      const dd = document.getElementById('top-dropdown');
+      dd.style.display = (dd.style.display === 'flex') ? 'none' : 'flex';
+    }
+
+    // 2. 侧边抽屉显隐
+    function toggleLeftDrawer() {
+      const drawer = document.getElementById('left-drawer');
+      const overlay = document.getElementById('drawer-overlay');
+      const isOpen = drawer.style.left === '0px';
+      drawer.style.left = isOpen ? '-100%' : '0px';
+      overlay.style.display = isOpen ? 'none' : 'block';
+    }
+
+    function closeAllDrawers() {
+      document.getElementById('left-drawer').style.left = '-100%';
+      document.getElementById('drawer-overlay').style.display = 'none';
+      document.getElementById('top-dropdown').style.display = 'none';
+    }
+
+    // 3. 底部升降终端抽屉 (Bottom Sheet)
+    function openBottomSheet() {
+      document.getElementById('bottom-sheet').style.bottom = '0px';
+    }
+    function closeBottomSheet() {
+      document.getElementById('bottom-sheet').style.bottom = '-100%';
+    }
+
+    // 4. 全屏看板横滑显隐
+    function openKanbanOverlay() {
+      document.getElementById('kanban-overlay').style.left = '0px';
+    }
+    function closeKanbanOverlay() {
+      document.getElementById('kanban-overlay').style.left = '100%';
+    }
+
+    // 5. 切换会话
+    function switchMobileChat(type) {
+      const name = document.getElementById('capsule-name');
+      if (type === 'main') {
+        name.innerText = '老王 · 核心主工位';
+      } else if (type === 'side-1') {
+        name.innerText = '老王 · 锁冲突排查';
+      } else if (type === 'side-2') {
+        name.innerText = '老王 · 接口幂等论证';
+      }
+      toggleTopDropdown();
+    }
+
+    function selectBotInDrawer(bot) {
+      if (bot === 'arch') {
+        document.getElementById('capsule-name').innerText = '老王 · 核心主工位';
+      } else if (bot === 'fe') {
+        document.getElementById('capsule-name').innerText = '小张 · 核心主工位';
+      } else if (bot === 'rev') {
+        document.getElementById('capsule-name').innerText = '审查员 · 核心主工位';
+      }
+      closeAllDrawers();
+    }
+
+    function switchBottomTab(tab, el) {
+      document.querySelectorAll('.tab-item').forEach(t => t.classList.remove('active'));
+      el.classList.add('active');
+      if (tab === 'projects') {
+        openKanbanOverlay();
+      } else if (tab === 'team') {
+        toggleLeftDrawer();
+      } else {
+        closeAllDrawers();
+      }
+    }
+  </script>
+</body>
+</html>
