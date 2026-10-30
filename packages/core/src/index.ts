@@ -9,4 +9,5 @@ export * from './models/types.js';
 export * from './session/eventReducer.js';
 export * from './session/sessionRegistry.js';
 export * from './session/sessionStore.js';
+export * from './fs/fileService.js';
 export * from './log/logger.js';

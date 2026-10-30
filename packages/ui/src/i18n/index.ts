@@ -89,11 +89,23 @@ export const zhDict = {
   'inspector.resizeHandleTitle': '拖拽调整右侧栏宽度 · 双击复位',
   'inspector.remoteNotice': '该文件位于远程网关工作区，网关未开放直接文件读取通道',
   'inspector.loadingNotice': '正在从工作区加载最新版本内容...',
+  'inspector.clickToPreview': '点击在右侧检查舱预览与下载: {file}',
+  'inspector.clickToOpenLink': '点击在右侧检查舱预览或打开链接: {url}',
+  'inspector.downloadSuccess': '已成功保存文件',
+  'inspector.imageLoadError': '图片未能加载',
+  'inspector.imageLoadErrorSub': '该图片位于远端网关工作区，可通过下方按钮尝试下载或重新拉取',
+  'inspector.sliceNotice': '会话工具切片读取',
+  'inspector.gapNotice': '未在会话中读取',
 
   // Status Bar
   'status.connected': '已连接',
   'status.connecting': '连接中...',
   'status.disconnected': '未连接',
+  'status.configureGateway': '点击配置网关服务器',
+
+  // Common Feedback
+  'common.copy': '复制',
+  'common.copied': '已复制',
 } as const;
 
 export type I18nKey = keyof typeof zhDict;
@@ -179,10 +191,21 @@ export const enDict: Record<I18nKey, string> = {
   'inspector.resizeHandleTitle': 'Drag to resize right pane · Double click to reset',
   'inspector.remoteNotice': 'File located in remote gateway workspace without direct access',
   'inspector.loadingNotice': 'Loading latest content from workspace...',
+  'inspector.clickToPreview': 'Click to preview and download in inspector: {file}',
+  'inspector.clickToOpenLink': 'Click to preview or open link in inspector: {url}',
+  'inspector.downloadSuccess': 'File saved successfully',
+  'inspector.imageLoadError': 'Image failed to load',
+  'inspector.imageLoadErrorSub': 'This asset is located in remote gateway workspace. Click download to fetch.',
+  'inspector.sliceNotice': 'Session Tool Slice Read',
+  'inspector.gapNotice': 'not captured in session',
 
   'status.connected': 'Connected',
   'status.connecting': 'Connecting...',
   'status.disconnected': 'Disconnected',
+  'status.configureGateway': 'Configure Gateway Server',
+
+  'common.copy': 'Copy',
+  'common.copied': 'Copied',
 };
 
 export type Locale = 'zh-CN' | 'en-US';

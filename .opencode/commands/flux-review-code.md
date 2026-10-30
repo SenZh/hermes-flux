@@ -1,5 +1,5 @@
 ---
-description: 委派代码门禁审查（架构 / 类型 / 状态 / 测试有效性）
+description: 委派代码门禁审查（架构 / 类型 / 状态 / 业务逻辑落盘测试与无遗漏）
 subagent: true
 agent: flux-code-reviewer
 ---
@@ -12,7 +12,13 @@ agent: flux-code-reviewer
 
 1. `node scripts/gates/run.mjs --changed --json`
 2. `git diff HEAD`
-3. `npm run typecheck`（必须自己执行，不得采信转述）
+3. `git status` 核查测试文件是否物理落盘
+4. `npm run typecheck`（必须自己执行，不得采信转述）
+5. `npm test`（必须自己执行全量回归）
+
+【核心硬性质量门禁】：
+所有的业务逻辑都必须有落盘的测试用例代码，且测试用例经过 review 没有遗漏才能通过。
+必须对比生产代码与测试代码，核查正向、边界、负向、时序四大象限是否有遗漏分支。存在任何遗漏直接 FAIL。
 
 必须完成**变异检验**：针对本次新增或修改的每个测试，回答「如果把生产代码改错，
 这个测试会变红吗」。任何答案为「不会」的测试判定为假测试，直接 FAIL。

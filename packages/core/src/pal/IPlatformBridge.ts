@@ -73,6 +73,11 @@ export interface IPlatformBridge {
   openExternal(url: string, content?: string): Promise<void>;
   openFileDialog?(): Promise<string[] | null>;
   readFile?(filePath: string): Promise<string | null>;
+  saveFile?(options: { fileName: string; content: string; isBase64?: boolean }): Promise<{ success: boolean; canceled?: boolean; filePath?: string; error?: string }>;
   showSaveDialog?(options: { title?: string; defaultPath?: string; filters?: { name: string; extensions: string[] }[] }): Promise<string | null>;
   showOpenDialog?(options: { title?: string; properties?: string[]; filters?: { name: string; extensions: string[] }[] }): Promise<string[] | null>;
+
+  // Native Clipboard Operations
+  clipboardWrite?(text: string): Promise<boolean>;
+  clipboardRead?(): Promise<string>;
 }

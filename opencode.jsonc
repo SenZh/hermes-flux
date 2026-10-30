@@ -63,7 +63,7 @@
     },
 
     "flux-code-reviewer": {
-      "description": "代码改动强制审查：架构分层、类型真实性、测试有效性、门禁不变量。只读，结论 Binding",
+      "description": "代码改动强制审查：架构分层、类型真实性、业务逻辑落盘测试与无遗漏、门禁不变量。只读，结论 Binding",
       "mode": "subagent",
       "steps": 40,
       "permissions": [

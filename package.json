@@ -27,7 +27,7 @@
     "gates:mutation": "node scripts/gates/mutation-check.mjs",
     "gates:config": "node scripts/gates/verify-config.mjs",
     "verify": "npm run gates && npm run typecheck && npm test",
-    "prepare": "git config core.hooksPath .githooks 2>/dev/null || true"
+    "prepare": "node -e \"try { require('child_process').execSync('git config core.hooksPath .githooks'); } catch {}\""
   },
   "devDependencies": {
     "electron": "34.2.0",

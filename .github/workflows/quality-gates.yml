@@ -37,7 +37,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install --ignore-scripts || npm install --legacy-peer-deps
 
       - name: Gate 0/4 · 静态门禁（架构 / 换肤 / i18n / 性能）
         run: node scripts/gates/run.mjs
@@ -74,6 +74,6 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-      - run: npm ci
+      - run: npm install --ignore-scripts || npm install --legacy-peer-deps
       - name: 全量严格扫描（预期失败，用于量化剩余债务）
         run: node scripts/gates/run.mjs --strict

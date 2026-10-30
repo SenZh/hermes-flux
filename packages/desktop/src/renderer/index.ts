@@ -21,6 +21,7 @@ import {
   escapeHtml,
   MessageViewModel,
   InspectorTab,
+  t,
 } from '@hermes-flux/ui';
 
 import {
@@ -41,6 +42,7 @@ import {
   type NormalizedSession,
   type ModelDetail,
   type AgentProfile,
+  resolveFileContent,
 } from '@hermes-flux/core';
 
 import type { HermesDesktopBridge } from '../preload/index.js';
@@ -53,6 +55,8 @@ declare global {
       readonly level: LogLevel;
       setLevel(next: string): LogLevel;
     };
+    /** Native & fallback safe clipboard copy helper. */
+    __fluxCopyText?: (text: string) => Promise<boolean>;
   }
 }
 
@@ -141,6 +145,44 @@ function resolveInitialLogLevel(): LogLevel {
 }
 
 setLogLevel(resolveInitialLogLevel());
+
+/**
+ * 跨平台安全剪贴板写入工具 (Triple Fallback)
+ * 1. desktopApi.clipboardWrite (Electron 原生剪贴板 IPC，不受窗口失焦和权限限制)
+ * 2. navigator.clipboard.writeText
+ * 3. 隐藏 textarea + document.execCommand('copy') 物理保底
+ */
+async function safeCopyText(text: string): Promise<boolean> {
+  const content = typeof text === 'string' ? text : String(text || '');
+  if (desktopApi?.clipboardWrite) {
+    try {
+      const ok = await desktopApi.clipboardWrite(content);
+      if (ok) return true;
+    } catch {}
+  }
+  if (navigator?.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(content);
+      return true;
+    } catch {}
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = content;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const success = document.execCommand('copy');
+    document.body.removeChild(ta);
+    if (success) return true;
+  } catch {}
+  return false;
+}
+
+window.__fluxCopyText = safeCopyText;
 
 const state: AppState = {
   platform: 'windows',
@@ -2534,6 +2576,94 @@ function render(): void {
   });
 }
 
+/**
+ * 统一处理对话流或工具调用中的文件/超链接点击预览与下载挂载
+ * 【设计意图 (Why)】
+ * 用户点击对话流中的文件路径（无论来自工具胶囊还是正文中的行内代码/Markdown链接）或 HTTP 链接时，
+ * 统一驱动右侧 Inspection Pod 自动展开，并根据文件类型（HTML 原型、PNG/JPG 截图、代码/Diff、网页）
+ * 匹配最佳呈现模式并加载最新内容，同时保证顶部下载工具栏可以一键保存该文件。
+ * 【防范的陷阱 (Pitfall)】
+ * 1. HTML 原型文档必须默认启用 rendered 视图，避免用户看到一堆 HTML 源码而非设计界面；
+ * 2. 图片格式支持 data:image/ 或 HTTP 直接渲染，规避 utf8 二进制乱码；
+ * 3. 避免会话流重绘销毁导致的 DOM 重复绑定失效，配合事件委托机制实现无感响应。
+ * 【约束与规则 (Rules)】
+ * 更新 openFiles 与 artifacts 状态机，维护活动标签索引，严格保持单向数据流。
+ */
+async function handleOpenFilePreview(filePath: string, previewUrl?: string): Promise<void> {
+  const target = (filePath || previewUrl || '').trim();
+  if (!target) return;
+
+  const isHttp = target.startsWith('http://') || target.startsWith('https://');
+  const ext = (target.split(/[?#]/)[0].split('.').pop() || '').toLowerCase();
+  const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp'].includes(ext);
+  const isHtml = ext === 'html' || ext === 'htm';
+
+  // 1. 自动展开右侧 Inspection Pod
+  state.inspectorCollapsed = false;
+  state.activeInspectorTab = 'preview';
+  state.activeFilePath = target;
+
+  // HTML 单文件原型默认开启富渲染模式，所见即所得
+  if (isHtml) {
+    state.fileViewMode = 'rendered';
+  }
+
+  // 2. 统一调用底层通用文件解析服务组件 (resolveFileContent)
+  const initialResolved = await resolveFileContent(target, {
+    platformBridge: desktopApi,
+    gatewayClient,
+    gatewayUrl: state.gatewayUrl,
+    messages: state.messages,
+    fallbackNotice: `// ${target}\n\n${t('inspector.loadingNotice')}`,
+  });
+
+  // 3. 挂载到 state.openFiles
+  let existingOpenFile = state.openFiles.find((f) => f.path === target);
+  if (!existingOpenFile) {
+    existingOpenFile = {
+      id: `file-${Date.now()}`,
+      path: target,
+      content: initialResolved.content,
+    };
+    state.openFiles.push(existingOpenFile);
+  } else {
+    existingOpenFile.content = initialResolved.content;
+  }
+
+  // 4. 挂载到 state.artifacts
+  let existing = state.artifacts.find((a) => a.name === target);
+  if (!existing) {
+    existing = {
+      id: `art-${Date.now()}`,
+      name: target,
+      type: isHttp ? 'LINK' : 'FILE',
+      size: '',
+      preview: initialResolved.content,
+    };
+    state.artifacts.unshift(existing);
+  } else {
+    existing.preview = initialResolved.content;
+    state.artifacts = [existing, ...state.artifacts.filter((a) => a.name !== target)];
+  }
+
+  render();
+
+  // 5. 若首次未从缓存或本地读取到，进行异步最终获取并刷新
+  if (initialResolved.source === 'fallback') {
+    const finalResolved = await resolveFileContent(target, {
+      platformBridge: desktopApi,
+      gatewayClient,
+      gatewayUrl: state.gatewayUrl,
+      messages: state.messages,
+      fallbackNotice: `// ${target}\n\n${t('inspector.remoteNotice')}`,
+    });
+
+    if (existing) existing.preview = finalResolved.content;
+    if (existingOpenFile) existingOpenFile.content = finalResolved.content;
+    render();
+  }
+}
+
 function bindEvents(): void {
   // Caption Buttons
   const minBtn = document.getElementById('win-min-btn');
@@ -2718,10 +2848,10 @@ function bindEvents(): void {
   // 7. Toolbar: Copy Full Content (Silent Clipboard Copy, no dockNotice pollution)
   const btnCopyContent = document.getElementById('btn-file-copy-content');
   if (btnCopyContent) {
-    btnCopyContent.onclick = () => {
+    btnCopyContent.onclick = async () => {
       const activeFile = state.openFiles.find((f) => f.path === state.activeFilePath) || state.openFiles[0];
       if (activeFile) {
-        void navigator.clipboard.writeText(activeFile.content);
+        await safeCopyText(activeFile.content);
         // Visual button feedback instead of polluting dockNotice
         btnCopyContent.style.color = 'var(--accent)';
         setTimeout(() => {
@@ -2734,10 +2864,10 @@ function bindEvents(): void {
   // 11. Toolbar: Copy Path
   const btnCopyPath = document.getElementById('btn-file-copy-path');
   if (btnCopyPath) {
-    btnCopyPath.onclick = () => {
+    btnCopyPath.onclick = async () => {
       const activeFile = state.openFiles.find((f) => f.path === state.activeFilePath) || state.openFiles[0];
       if (activeFile) {
-        void navigator.clipboard.writeText(activeFile.path);
+        await safeCopyText(activeFile.path);
         btnCopyPath.style.color = 'var(--accent)';
         setTimeout(() => {
           btnCopyPath.style.color = '';
@@ -2746,22 +2876,74 @@ function bindEvents(): void {
     };
   }
 
-  // 12. Toolbar: Download File
+  // 12. Toolbar: Download / Save File (Enhanced for Native File Dialog & Binary Image Support)
   const btnDownload = document.getElementById('btn-file-download');
   if (btnDownload) {
-    btnDownload.onclick = () => {
+    btnDownload.onclick = async () => {
       const activeFile = state.openFiles.find((f) => f.path === state.activeFilePath) || state.openFiles[0];
-      if (activeFile) {
-        const blob = new Blob([activeFile.content], { type: 'text/plain;charset=utf-8' });
+      if (!activeFile) return;
+
+      const rawFileName = activeFile.path.split(/[/\\]/).pop() || 'download.txt';
+      const isDataUrl = activeFile.content.startsWith('data:');
+      const isHttp = activeFile.path.startsWith('http://') || activeFile.path.startsWith('https://');
+
+      // 1. 优先调用桌面端原生 SaveDialog 另存为（支持原生文件选择、大文件二进制流式写入与远程 URL 直落）
+      if (desktopApi?.saveFile) {
+        try {
+          const downloadPayload = isHttp
+            ? activeFile.path
+            : activeFile.content.includes(t('inspector.remoteNotice')) && state.gatewayUrl
+            ? `${state.gatewayUrl}/api/files/download?path=${encodeURIComponent(activeFile.path)}`
+            : activeFile.content;
+
+          const res = await desktopApi.saveFile({
+            fileName: rawFileName,
+            content: downloadPayload,
+            isBase64: isDataUrl,
+          });
+          if (res.success) {
+            btnDownload.style.color = 'var(--accent)';
+            setTimeout(() => {
+              btnDownload.style.color = '';
+            }, 1200);
+            return;
+          }
+          if (res.canceled) return;
+        } catch (e) {
+          console.warn('[Desktop Save] Native save dialog failed, fallback to blob:', e);
+        }
+      }
+
+      // 2. Web 浏览器或降级：Blob / Data URL 模拟下载
+      if (isDataUrl) {
+        const a = document.createElement('a');
+        a.href = activeFile.content;
+        a.download = rawFileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      } else {
+        const ext = (rawFileName.split('.').pop() || '').toLowerCase();
+        let mime = 'text/plain;charset=utf-8';
+        if (ext === 'html' || ext === 'htm') mime = 'text/html;charset=utf-8';
+        else if (ext === 'json') mime = 'application/json;charset=utf-8';
+        else if (ext === 'md' || ext === 'markdown') mime = 'text/markdown;charset=utf-8';
+
+        const blob = new Blob([activeFile.content], { type: mime });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = activeFile.path.split(/[/\\]/).pop() || 'download.txt';
+        a.download = rawFileName;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
       }
+
+      btnDownload.style.color = 'var(--accent)';
+      setTimeout(() => {
+        btnDownload.style.color = '';
+      }, 1200);
     };
   }
 
@@ -3189,208 +3371,33 @@ function bindEvents(): void {
     };
   }
 
-  // Tool file link click -> Inspect file in right Inspection Pod
-  document.querySelectorAll<HTMLElement>('.tool-file-link').forEach((link) => {
+  // Stream & Global Event Delegation: Click on any .tool-file-link / [data-preview-file] / [data-preview-url]
+  if (streamEl && streamEl.dataset.fileLinkDelegated !== 'true') {
+    streamEl.dataset.fileLinkDelegated = 'true';
+    streamEl.addEventListener('click', (e) => {
+      const linkEl = (e.target as HTMLElement).closest<HTMLElement>('.tool-file-link, [data-preview-file], [data-preview-url]');
+      if (linkEl) {
+        e.stopPropagation();
+        e.preventDefault();
+        const filePath = linkEl.getAttribute('data-preview-file') || linkEl.dataset.previewFile || '';
+        const previewUrl = linkEl.getAttribute('data-preview-url') || linkEl.dataset.previewUrl || '';
+        if (filePath || previewUrl) {
+          void handleOpenFilePreview(filePath || previewUrl, previewUrl);
+        }
+      }
+    });
+  }
+
+  // Direct element binding fallback for pre-rendered tool capsules
+  document.querySelectorAll<HTMLElement>('.tool-file-link, [data-preview-file], [data-preview-url]').forEach((link) => {
     link.onclick = (e) => {
       e.stopPropagation();
       e.preventDefault();
-      const filePath = link.dataset.previewFile;
-      if (!filePath) return;
-
-      // Try extracting existing content from messages toolCalls if already present in session
-      let existingContent = '';
-      for (const m of state.messages) {
-        if (!m.toolCalls) continue;
-        for (const tc of m.toolCalls) {
-          const rawName = String(tc.name || '').toLowerCase();
-          let tcPath = '';
-          let tcArgsObj: any = null;
-          if (typeof tc.args === 'string') {
-            const trimmed = tc.args.trim();
-            if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-              try { tcArgsObj = JSON.parse(trimmed); } catch {}
-              tcPath = tcArgsObj?.path || tcArgsObj?.file || tcArgsObj?.filePath || tcArgsObj?.file_path || tcArgsObj?.resolved_path || '';
-            } else {
-              tcPath = trimmed;
-            }
-          } else if (tc.args && typeof tc.args === 'object') {
-            tcArgsObj = tc.args;
-            tcPath = tcArgsObj?.path || tcArgsObj?.file || tcArgsObj?.filePath || tcArgsObj?.file_path || tcArgsObj?.resolved_path || '';
-          }
-
-          const isMatch = tcPath && (
-            tcPath === filePath ||
-            tcPath.endsWith(filePath) ||
-            filePath.endsWith(tcPath) ||
-            tcPath.split('/').pop() === filePath.split('/').pop()
-          );
-
-          // 1. If write tool and has input.content
-          if (isMatch && (rawName.includes('write') || rawName.includes('create'))) {
-            if (tcArgsObj && typeof tcArgsObj.content === 'string') {
-              existingContent = tcArgsObj.content;
-              break;
-            }
-          }
-
-          // 2. If edit/patch tool and output has diff
-          if (isMatch && (rawName.includes('edit') || rawName.includes('patch'))) {
-            let outStr = typeof tc.output === 'string' ? tc.output : tc.output ? JSON.stringify(tc.output) : '';
-            if (outStr.startsWith('{') && outStr.endsWith('}')) {
-              try {
-                const parsed = JSON.parse(outStr);
-                if (typeof parsed.diff === 'string') outStr = parsed.diff;
-                else if (typeof parsed.content === 'string') outStr = parsed.content;
-              } catch {}
-            }
-            if (!outStr && tcArgsObj && typeof tcArgsObj.diff === 'string') {
-              outStr = tcArgsObj.diff;
-            }
-            if (!outStr && tcArgsObj && typeof tcArgsObj.patch === 'string') {
-              outStr = tcArgsObj.patch;
-            }
-            if (outStr) {
-              existingContent = outStr;
-              break;
-            }
-          }
-
-          // 3. If read_file output matches target file
-          if (isMatch && (rawName.includes('read') || rawName === 'file')) {
-            let outStr = typeof tc.output === 'string' ? tc.output : tc.output ? JSON.stringify(tc.output) : '';
-            if (outStr.startsWith('{') && outStr.endsWith('}')) {
-              try {
-                const parsed = JSON.parse(outStr);
-                if (typeof parsed.content === 'string') outStr = parsed.content;
-                else if (typeof parsed.text === 'string') outStr = parsed.text;
-                else if (typeof parsed.output === 'string') outStr = parsed.output;
-              } catch {}
-            }
-            if (!outStr && tcArgsObj && typeof tcArgsObj.content === 'string') {
-              outStr = tcArgsObj.content;
-            }
-            if (outStr) {
-              existingContent = outStr;
-              break;
-            }
-          }
-        }
-        if (existingContent) break;
+      const filePath = link.getAttribute('data-preview-file') || link.dataset.previewFile || '';
+      const previewUrl = link.getAttribute('data-preview-url') || link.dataset.previewUrl || '';
+      if (filePath || previewUrl) {
+        void handleOpenFilePreview(filePath || previewUrl, previewUrl);
       }
-
-      state.inspectorCollapsed = false;
-      state.activeFilePath = filePath;
-      // Sync into openFiles
-      let existingOpenFile = state.openFiles.find((f) => f.path === filePath);
-      if (!existingOpenFile) {
-        existingOpenFile = {
-          id: `file-${Date.now()}`,
-          path: filePath,
-          content: existingContent || `// ${filePath}\n\n正在从工作区加载最新版本内容...`,
-        };
-        state.openFiles.push(existingOpenFile);
-      } else if (existingContent) {
-        existingOpenFile.content = existingContent;
-      }
-
-      // Find or push artifact
-      let existing = state.artifacts.find((a) => a.name === filePath);
-      if (!existing) {
-        existing = {
-          id: `art-${Date.now()}`,
-          name: filePath,
-          type: 'FILE',
-          size: '',
-          preview: existingContent ? existingContent : `// ${filePath}\n\n正在从工作区加载最新版本内容...`,
-        };
-        state.artifacts.unshift(existing);
-      } else {
-        if (existingContent && (!existing.preview || existing.preview.includes('正在从工作区加载'))) {
-          existing.preview = existingContent;
-        }
-        // Bring existing to the top so InspectionPod prioritizes viewing it
-        state.artifacts = [existing, ...state.artifacts.filter((a) => a.name !== filePath)];
-      }
-      render();
-
-      // Async fetch file content if available via local desktop bridge, gateway REST or RPC
-      const fetchFileContent = async () => {
-        // Attempt 0: Local Desktop File System Bridge (instant local file access)
-        if (desktopApi?.readFile) {
-          try {
-            const localContent = await desktopApi.readFile(filePath);
-            if (typeof localContent === 'string' && localContent.length > 0) {
-              if (existing) existing.preview = localContent;
-              if (existingOpenFile) existingOpenFile.content = localContent;
-              render();
-              return;
-            }
-          } catch {}
-        }
-
-        // Attempt 1: Standard OpenChamber /api/fs/read REST endpoint via desktop bridge
-        if (desktopApi?.httpProxy) {
-          try {
-            const res = await desktopApi.httpProxy({
-              baseUrl: state.gatewayUrl || 'http://127.0.0.1:9119',
-              path: `/api/fs/read?path=${encodeURIComponent(filePath)}&optional=true`,
-              method: 'GET',
-            });
-            const text = typeof res === 'string' ? res : typeof res?.content === 'string' ? res.content : '';
-            if (text) {
-              if (existing) existing.preview = text;
-              if (existingOpenFile) existingOpenFile.content = text;
-              render();
-              return;
-            }
-          } catch {}
-        }
-
-        // Attempt 2: RPC workspace.readFile
-        if (gatewayClient) {
-          try {
-            const res = await gatewayClient.call<any>('workspace.readFile', { path: filePath });
-            const content = typeof res?.content === 'string' ? res.content : typeof res === 'string' ? res : '';
-            if (content) {
-              if (existing) existing.preview = content;
-              if (existingOpenFile) existingOpenFile.content = content;
-              render();
-              return;
-            }
-          } catch {}
-        }
-
-        // Attempt 3: RPC file.read
-        if (gatewayClient) {
-          try {
-            const res = await gatewayClient.call<any>('file.read', { path: filePath });
-            const content = typeof res?.content === 'string' ? res.content : typeof res === 'string' ? res : '';
-            if (content) {
-              if (existing) existing.preview = content;
-              if (existingOpenFile) existingOpenFile.content = content;
-              render();
-              return;
-            }
-          } catch {}
-        }
-
-        // If not fetchable from remote gateway backend but we have local session content, KEEP existingContent!
-        if (existingContent) {
-          if (existing) existing.preview = existingContent;
-          if (existingOpenFile) existingOpenFile.content = existingContent;
-          render();
-          return;
-        }
-
-        if (existing && (!existing.preview || existing.preview.includes('正在从工作区加载'))) {
-          const fallbackText = `// ${filePath}\n\n（该文件位于远程网关工作区，网关未开放直接文件读取通道）`;
-          existing.preview = fallbackText;
-          if (existingOpenFile) existingOpenFile.content = fallbackText;
-          render();
-        }
-      };
-
-      void fetchFileContent();
     };
   });
 

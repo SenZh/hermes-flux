@@ -2,7 +2,7 @@
  * Hermes Flux Desktop IPC Handler Registration
  */
 
-import { ipcMain, BrowserWindow, shell, dialog, app } from 'electron';
+import { ipcMain, BrowserWindow, shell, dialog, app, clipboard } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -47,6 +47,25 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       isMobile: false,
       isWeb: false,
     };
+  });
+
+  // Desktop Native Clipboard Bridge (100% reliable copy without focus restriction)
+  ipcMain.handle('clipboard:write-text', (_event, text: string) => {
+    try {
+      clipboard.writeText(typeof text === 'string' ? text : String(text || ''));
+      return true;
+    } catch (err) {
+      console.error('[Hermes Flux] clipboard.writeText failed:', err);
+      return false;
+    }
+  });
+
+  ipcMain.handle('clipboard:read-text', () => {
+    try {
+      return clipboard.readText();
+    } catch {
+      return '';
+    }
   });
 
   ipcMain.handle('gateway:get-default-config', () => {
@@ -222,9 +241,16 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}: ${res.statusText}`);
     }
-    const contentType = res.headers.get('content-type') || '';
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
     if (contentType.includes('application/json')) {
       return await res.json();
+    }
+    // 图像二进制自动转换为 Base64 Data URL
+    if (contentType.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg|ico|bmp)$/i.test(options.path)) {
+      const arrayBuffer = await res.arrayBuffer();
+      const base64 = Buffer.from(arrayBuffer).toString('base64');
+      const mime = contentType.split(';')[0] || 'image/png';
+      return `data:${mime};base64,${base64}`;
     }
     return await res.text();
   });
@@ -301,34 +327,122 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     return result.filePaths;
   });
 
+  // Helper: Read physical file with image binary Base64 Data URL detection & memory size protection
+  // 【设计意图 (Why)】
+  // 如果读取的是 PNG/JPG/SVG 等图片，直接用 utf8 读取会导致乱码甚至字节损坏；
+  // 必须将其转为 data:image/...;base64,... Data URL 形式，以便前端 <img> 标签直接渲染并安全下载。
+  // 【防范的陷阱 (Pitfall)】
+  // 严禁将图片二进制作为 utf8 字符串返回，否则在写入或渲染时会导致二进制签名丢失。
+  // 必须对读取文件的大小进行严格限制（50MB），严禁直接读入超大文件导致 Node.js / V8 进程 OOM 崩溃。
+  // 必须进行物理路径安全校验，防止恶意通过 ../ 路径遍历读取系统密码等敏感目录。
+  // 【约束与规则 (Rules)】
+  // 限制单文件读取上限为 50MB，超出上限返回 null。
+  const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
+
+  const isSafeReadablePath = (targetFile: string): boolean => {
+    try {
+      const resolved = path.resolve(targetFile);
+      const cwd = process.cwd();
+      const tempDir = app.getPath('temp');
+      const userDataDir = app.getPath('userData');
+
+      // 允许当前工作区目录及其子目录、应用临时目录、应用数据目录
+      const isInside = (parent: string, child: string) => {
+        const rel = path.relative(parent, child);
+        return !rel.startsWith('..') && !path.isAbsolute(rel);
+      };
+
+      if (isInside(cwd, resolved) || isInside(tempDir, resolved) || isInside(userDataDir, resolved)) {
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  };
+
+  const readPhysicalFileSafely = (absoluteFilePath: string): string | null => {
+    try {
+      if (!fs.existsSync(absoluteFilePath)) return null;
+      const stat = fs.statSync(absoluteFilePath);
+      if (!stat.isFile() || stat.size > MAX_FILE_SIZE_BYTES) {
+        return null;
+      }
+
+      const ext = path.extname(absoluteFilePath).toLowerCase();
+      const imageMimeMap: Record<string, string> = {
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp',
+        '.svg': 'image/svg+xml',
+        '.ico': 'image/x-icon',
+        '.bmp': 'image/bmp',
+      };
+
+      if (imageMimeMap[ext]) {
+        const buffer = fs.readFileSync(absoluteFilePath);
+        return `data:${imageMimeMap[ext]};base64,${buffer.toString('base64')}`;
+      }
+
+      return fs.readFileSync(absoluteFilePath, 'utf8');
+    } catch {
+      return null;
+    }
+  };
+
   // Local File System Read for Inspection Pod
   ipcMain.handle('fs:read-file', async (_event, targetPath: string) => {
     if (!targetPath || typeof targetPath !== 'string') return null;
     try {
-      // 1. Direct path check
-      if (fs.existsSync(targetPath) && fs.statSync(targetPath).isFile()) {
-        return fs.readFileSync(targetPath, 'utf8');
+      const cwd = process.cwd();
+
+      // 1. Direct path check (with safe path boundary validation)
+      if (isSafeReadablePath(targetPath)) {
+        const directResult = readPhysicalFileSafely(path.resolve(targetPath));
+        if (directResult !== null) return directResult;
       }
 
       // 2. Normalize separators
       const normalized = targetPath.replace(/\\/g, '/');
-      if (fs.existsSync(normalized) && fs.statSync(normalized).isFile()) {
-        return fs.readFileSync(normalized, 'utf8');
+      if (isSafeReadablePath(normalized)) {
+        const normResult = readPhysicalFileSafely(path.resolve(normalized));
+        if (normResult !== null) return normResult;
       }
 
       // 3. Search relative to current working directory or known workspace root
-      const cwd = process.cwd();
       const relPath = path.resolve(cwd, targetPath);
-      if (fs.existsSync(relPath) && fs.statSync(relPath).isFile()) {
-        return fs.readFileSync(relPath, 'utf8');
+      if (isSafeReadablePath(relPath)) {
+        const relResult = readPhysicalFileSafely(relPath);
+        if (relResult !== null) return relResult;
       }
 
-      // 4. Relative to targetPath stripped of remote prefixes (e.g. /opt/data/projects/hermes-flux/)
-      const matchProject = normalized.match(/hermes-flux\/(.+)$/);
+      // 4. Relative to targetPath stripped of remote prefixes (e.g. /opt/data/projects/hermes-flux/ or hermes-aura/)
+      const matchProject = normalized.match(/(?:hermes-flux|hermes-aura)\/(.+)$/);
       if (matchProject) {
         const subPath = path.resolve(cwd, matchProject[1]);
-        if (fs.existsSync(subPath) && fs.statSync(subPath).isFile()) {
-          return fs.readFileSync(subPath, 'utf8');
+        if (isSafeReadablePath(subPath)) {
+          const subResult = readPhysicalFileSafely(subPath);
+          if (subResult !== null) return subResult;
+        }
+      }
+
+      // 5. Look for matching file basename across typical project directories (docs/prototypes, docs, packages, etc.)
+      const baseName = path.basename(normalized);
+      if (baseName && baseName.length > 2) {
+        const candidateDirs = [
+          path.join(cwd, 'docs', 'prototypes'),
+          path.join(cwd, 'docs'),
+          path.join(cwd, 'packages', 'desktop', 'src', 'renderer'),
+          path.join(cwd, 'release'),
+        ];
+        for (const dir of candidateDirs) {
+          const candidatePath = path.join(dir, baseName);
+          if (isSafeReadablePath(candidatePath)) {
+            const candResult = readPhysicalFileSafely(candidatePath);
+            if (candResult !== null) return candResult;
+          }
         }
       }
 
@@ -337,4 +451,72 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       return null;
     }
   });
+
+  // Local File System Save / Download for Inspection Pod
+  // 【设计意图 (Why)】
+  // 用户在右侧检查舱点击下载时，调出系统原生保存文件对话框，允许用户自由挑选保存位置。
+  // 【防范的陷阱 (Pitfall)】
+  // 对于 Base64 Data URL（如图片），必须将其正确解码为 Buffer 真实二进制写入，严禁写成纯文本。
+  // 【约束与规则 (Rules)】
+  // 支持 canceled 状态回传，避免取消保存被误判为报错。
+  ipcMain.handle(
+    'fs:save-file',
+    async (_event, options: { fileName: string; content: string; isBase64?: boolean }) => {
+      try {
+        const defaultName = path.basename(options.fileName) || 'download';
+        const ext = path.extname(defaultName).toLowerCase().replace('.', '');
+        const filters: Array<{ name: string; extensions: string[] }> = [];
+
+        if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp'].includes(ext)) {
+          filters.push({ name: 'Images', extensions: [ext, 'png', 'jpg', 'jpeg', 'webp'] });
+        } else if (['html', 'htm'].includes(ext)) {
+          filters.push({ name: 'HTML Document', extensions: ['html', 'htm'] });
+        } else if (['json'].includes(ext)) {
+          filters.push({ name: 'JSON Document', extensions: ['json'] });
+        } else if (['md', 'markdown'].includes(ext)) {
+          filters.push({ name: 'Markdown Document', extensions: ['md', 'markdown'] });
+        }
+        filters.push({ name: 'All Files', extensions: ['*'] });
+
+        const result = await dialog.showSaveDialog(mainWindow, {
+          title: '保存文件',
+          defaultPath: path.join(app.getPath('downloads'), defaultName),
+          filters,
+        });
+        if (result.canceled || !result.filePath) {
+          return { success: false, canceled: true };
+        }
+
+        let dataToWrite: Buffer | string;
+        // 1. 如果指定了 remoteDownloadUrl，直接由宿主网络以二进制流下载写入，不受 V8 字符串上限与前端内存限制
+        if (options.content.startsWith('http://') || options.content.startsWith('https://')) {
+          const fetchHeaders: Record<string, string> = {};
+          if (activeGatewayCookies) fetchHeaders['Cookie'] = activeGatewayCookies;
+          const dlRes = await fetch(options.content, { headers: fetchHeaders });
+          if (!dlRes.ok) {
+            return { success: false, error: `下载远程文件失败 HTTP ${dlRes.status}` };
+          }
+          const arrayBuffer = await dlRes.arrayBuffer();
+          fs.writeFileSync(result.filePath, Buffer.from(arrayBuffer));
+          return { success: true, filePath: result.filePath };
+        }
+
+        if (options.content.startsWith('data:')) {
+          const commaIdx = options.content.indexOf(',');
+          const b64 = commaIdx >= 0 ? options.content.slice(commaIdx + 1) : options.content;
+          dataToWrite = Buffer.from(b64, 'base64');
+        } else if (options.isBase64) {
+          dataToWrite = Buffer.from(options.content, 'base64');
+        } else {
+          dataToWrite = options.content;
+        }
+
+        fs.writeFileSync(result.filePath, dataToWrite);
+        return { success: true, filePath: result.filePath };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { success: false, error: message || '保存失败' };
+      }
+    }
+  );
 }

@@ -26,6 +26,9 @@ export interface HermesDesktopBridge extends IPlatformBridge {
   }) => Promise<any>;
   openFileDialog: () => Promise<string[] | null>;
   readFile: (path: string) => Promise<string | null>;
+  saveFile: (options: { fileName: string; content: string; isBase64?: boolean }) => Promise<{ success: boolean; canceled?: boolean; filePath?: string; error?: string }>;
+  clipboardWrite: (text: string) => Promise<boolean>;
+  clipboardRead: () => Promise<string>;
 }
 
 const bridge: HermesDesktopBridge = {
@@ -48,6 +51,9 @@ const bridge: HermesDesktopBridge = {
   openExternal: (url: string, content?: string) => ipcRenderer.invoke('shell:open-external', url, content),
   openFileDialog: () => ipcRenderer.invoke('dialog:open-file'),
   readFile: (filePath: string) => ipcRenderer.invoke('fs:read-file', filePath),
+  saveFile: (options) => ipcRenderer.invoke('fs:save-file', options),
+  clipboardWrite: (text: string) => ipcRenderer.invoke('clipboard:write-text', text),
+  clipboardRead: () => ipcRenderer.invoke('clipboard:read-text'),
 };
 
 contextBridge.exposeInMainWorld('hermesDesktop', bridge);

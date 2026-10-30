@@ -9,6 +9,8 @@
  * - Meticulous typography, smooth Markdown rendering & thought details.
  */
 
+import { t } from '../../i18n/index.js';
+
 export interface MessageViewModel {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -45,7 +47,7 @@ export function renderConversationCanvas(props: MiddlePodProps): string {
   const agentDisplayName = (props.profileName || 'default').toUpperCase();
 
   return `
-    <div class="content-fluid-canvas" style="width: 100%; max-width: 100%; margin: 0; display: flex; flex-direction: column; gap: 14px;">
+    <div class="content-fluid-canvas" style="width: 100%; max-width: 100%; margin: 0; display: flex; flex-direction: column; gap: 8px;">
       ${
         props.gatewayConnecting
           ? `<div style="max-width: 480px; margin: 120px auto 0; text-align: center; color: var(--text-muted); font-size: 13px; display: flex; flex-direction: column; align-items: center; gap: 10px;">
@@ -363,21 +365,21 @@ export function renderMessage(
 
   if (isUser) {
     return `
-      <div class="message-row user-row" data-msg-id="${m.id}" style="display: flex; flex-direction: column; align-items: flex-end; width: 100%; margin: 6px 0;">
+      <div class="message-row user-row" data-msg-id="${m.id}" style="display: flex; flex-direction: column; align-items: flex-end; width: 100%; margin: 3px 0;">
         ${
           m.timestamp
-            ? `<span style="font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono); margin-bottom: 4px; padding-right: 4px;">${escapeHtml(m.timestamp)}</span>`
+            ? `<span style="font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono); margin-bottom: 2px; padding-right: 4px;">${escapeHtml(m.timestamp)}</span>`
             : ''
         }
         <div class="user-bubble" style="
           max-width: 85%;
           background: var(--bg-card);
           border: 1px solid var(--border-medium);
-          border-radius: 14px 14px 3px 14px;
-          padding: 12px 18px;
+          border-radius: 12px 12px 3px 12px;
+          padding: 8px 14px;
           color: var(--text-main);
-          font-size: 13.5px;
-          line-height: 1.6;
+          font-size: 13px;
+          line-height: 1.42;
           box-shadow: var(--shadow-card);
           word-break: break-word;
         ">
@@ -396,7 +398,7 @@ export function renderMessage(
     <div class="message-row assistant-row" data-id="${m.id}" data-msg-id="${m.id}" style="
       display: flex;
       flex-direction: column;
-      gap: 3px;
+      gap: 2px;
       width: 100%;
       margin: 1px 0;
     ">
@@ -404,7 +406,7 @@ export function renderMessage(
       ${
         isFirstInTurn && m.timestamp
           ? `
-        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 1px;">
           <span style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); opacity: 0.85;">${escapeHtml(m.timestamp)}</span>
         </div>
       `
@@ -423,12 +425,12 @@ export function renderMessage(
           ? `
         <div id="msg-content-${m.id}" class="assistant-content prose-block" style="
           color: var(--text-main);
-          font-size: 13.5px;
-          line-height: 1.6;
+          font-size: 13px;
+          line-height: 1.42;
           display: flex;
           flex-direction: column;
-          gap: 8px;
-          margin-top: 4px;
+          gap: 3px;
+          margin-top: 2px;
         ">
           ${renderMarkdown(cleanContent)}
         </div>
@@ -436,12 +438,12 @@ export function renderMessage(
           : `
         <div id="msg-content-${m.id}" class="assistant-content prose-block" style="
           color: var(--text-main);
-          font-size: 13.5px;
-          line-height: 1.6;
+          font-size: 13px;
+          line-height: 1.42;
           display: flex;
           flex-direction: column;
-          gap: 8px;
-          margin-top: 2px;
+          gap: 3px;
+          margin-top: 1px;
         "></div>
       `
       }
@@ -468,20 +470,20 @@ function renderThinkingFold(m: MessageViewModel): string {
     : '';
 
   return `
-    <details class="timeline-row thinking-row" ${hasThought ? '' : 'style="display: none;"'} style="margin: 2px 0;">
+    <details class="timeline-row thinking-row" ${hasThought ? '' : 'style="display: none;"'} style="margin: 1.5px 0;">
       <summary style="
         list-style: none;
         display: flex;
         align-items: center;
-        gap: 7px;
-        padding: 3px 0;
+        gap: 6px;
+        padding: 2px 0;
         cursor: pointer;
         user-select: none;
-        font-size: 13px;
-        line-height: 1.5;
+        font-size: 12.5px;
+        line-height: 1.4;
       ">
         <span style="color: #9CA3AF; display: inline-flex; align-items: center; flex-shrink: 0;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/>
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1Z"/>
           </svg>
@@ -494,13 +496,13 @@ function renderThinkingFold(m: MessageViewModel): string {
       </summary>
       <div id="msg-thought-${m.id}" style="
         margin-left: 7px;
-        margin-top: 4px;
-        margin-bottom: 6px;
-        padding-left: 14px;
+        margin-top: 2px;
+        margin-bottom: 3px;
+        padding-left: 12px;
         border-left: 2px solid rgba(255, 255, 255, 0.08);
         color: #9CA3AF;
-        font-size: 12.5px;
-        line-height: 1.62;
+        font-size: 12px;
+        line-height: 1.5;
         white-space: pre-wrap;
         word-break: break-word;
       ">${escapeHtml(m.thought || '')}</div>
@@ -524,22 +526,36 @@ function getFileBadge(pathStr: string): string {
   const match = pathStr.match(/\.([a-zA-Z0-9]+)(?:$|[?#:])/);
   if (!match) return '';
   const ext = match[1].toLowerCase();
-  if (ext === 'js' || ext === 'mjs' || ext === 'cjs') {
-    return `<span style="background: #EAB308; color: #000; font-size: 9px; font-weight: 700; padding: 1px 3.5px; border-radius: 3px; font-family: var(--font-mono); line-height: 1.1; flex-shrink: 0;">JS</span>`;
+  
+  // OpenChamber 经典微距胶囊：带语义底色与清晰文字对比，全走 CSS 变量 Token
+  const baseStyle = 'display: inline-flex; align-items: center; justify-content: center; font-size: 9.5px; font-weight: 700; padding: 1px 4.5px; border-radius: 4px; font-family: var(--font-mono); line-height: 1.2; flex-shrink: 0; letter-spacing: 0.02em;';
+
+  switch (ext) {
+    case 'js':
+    case 'mjs':
+    case 'cjs':
+      return `<span style="${baseStyle} background: var(--badge-js-bg, var(--accent-subtle)); color: var(--badge-js-text, var(--accent)); border: 1px solid var(--badge-js-border, var(--border-subtle));">JS</span>`;
+    case 'ts':
+    case 'mts':
+    case 'cts':
+    case 'tsx':
+      return `<span style="${baseStyle} background: var(--badge-ts-bg, var(--accent-subtle)); color: var(--badge-ts-text, var(--accent)); border: 1px solid var(--badge-ts-border, var(--border-subtle));">TS</span>`;
+    case 'py':
+      return `<span style="${baseStyle} background: var(--badge-py-bg, var(--accent-subtle)); color: var(--badge-py-text, var(--accent)); border: 1px solid var(--badge-py-border, var(--border-subtle));">PY</span>`;
+    case 'json':
+      return `<span style="${baseStyle} background: rgba(255, 255, 255, 0.06); color: var(--text-secondary); border: 1px solid var(--border-subtle);">JSON</span>`;
+    case 'md':
+    case 'markdown':
+      return `<span style="${baseStyle} background: rgba(255, 255, 255, 0.06); color: var(--text-secondary); border: 1px solid var(--border-subtle);">MD</span>`;
+    case 'html':
+    case 'htm':
+      return `<span style="${baseStyle} background: var(--badge-html-bg, var(--accent-subtle)); color: var(--badge-html-text, var(--accent)); border: 1px solid var(--badge-html-border, var(--border-subtle));">HTML</span>`;
+    case 'css':
+    case 'scss':
+      return `<span style="${baseStyle} background: var(--badge-css-bg, var(--accent-subtle)); color: var(--badge-css-text, var(--accent)); border: 1px solid var(--badge-css-border, var(--border-subtle));">CSS</span>`;
+    default:
+      return `<span style="${baseStyle} background: rgba(255, 255, 255, 0.05); color: var(--text-muted); border: 1px solid var(--border-subtle);">${ext.toUpperCase().slice(0, 4)}</span>`;
   }
-  if (ext === 'ts' || ext === 'mts' || ext === 'cts' || ext === 'tsx') {
-    return `<span style="background: #3B82F6; color: #fff; font-size: 9px; font-weight: 700; padding: 1px 3.5px; border-radius: 3px; font-family: var(--font-mono); line-height: 1.1; flex-shrink: 0;">TS</span>`;
-  }
-  if (ext === 'py') {
-    return `<span style="background: #38BDF8; color: #000; font-size: 9px; font-weight: 700; padding: 1px 3.5px; border-radius: 3px; font-family: var(--font-mono); line-height: 1.1; flex-shrink: 0;">PY</span>`;
-  }
-  if (ext === 'json') {
-    return `<span style="background: #F59E0B; color: #000; font-size: 9px; font-weight: 700; padding: 1px 3.5px; border-radius: 3px; font-family: var(--font-mono); line-height: 1.1; flex-shrink: 0;">JSON</span>`;
-  }
-  if (ext === 'md') {
-    return `<span style="background: #6B7280; color: #fff; font-size: 9px; font-weight: 700; padding: 1px 3.5px; border-radius: 3px; font-family: var(--font-mono); line-height: 1.1; flex-shrink: 0;">MD</span>`;
-  }
-  return '';
 }
 
 function buildWritePreviewPatch(filePath: string | undefined, content: string): string | undefined {
@@ -631,11 +647,14 @@ function parseToolItem(tc: NonNullable<MessageViewModel['toolCalls']>[0]): Parse
     iconSvg = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>`;
   } else if (rawName.includes('grep') || rawName.includes('search')) {
     displayName = 'Search Files';
-    isReadOnly = true;
+    // Search Files 为搜索检索工具，非只读文件预览工具，禁止绑定文件链接，允许展开详情查阅搜索结果
+    isFileTool = false;
+    isReadOnly = false;
     iconSvg = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
   } else if (rawName.includes('glob') || rawName.includes('find')) {
     displayName = 'Find Files';
-    isReadOnly = true;
+    isFileTool = false;
+    isReadOnly = false;
     iconSvg = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
   } else if (rawName.includes('subagent') || rawName.includes('agent')) {
     displayName = 'Agent Task';
@@ -763,7 +782,7 @@ function parseToolItem(tc: NonNullable<MessageViewModel['toolCalls']>[0]): Parse
 }
 
 function renderPathLikeGitChanges(filePath: string, isToolLink = true): string {
-  const normalized = filePath.replace(/\\/g, '/');
+  const normalized = filePath.replace(/\\/g, '/').replace(/\/+/g, '/');
   const lastSlash = normalized.lastIndexOf('/');
   if (lastSlash === -1) {
     const linkAttr = isToolLink ? `class="tool-file-link" data-preview-file="${escapeHtml(normalized)}" title="点击在右侧检查舱预览文件"` : '';
@@ -802,19 +821,19 @@ function renderSingleToolCapsule(parsed: ParsedToolItem): string {
   if (isStaticCompact) {
     return `
       <div class="timeline-row tool-row tool-capsule flux-tool-capsule" style="
-        margin: 1.5px 0;
+        margin: 1px 0;
         display: flex;
         align-items: center;
         gap: 6px;
-        padding: 3px 6px;
+        padding: 2.5px 7px;
         background: var(--bg-panel);
         border: 1px solid var(--border-subtle);
         border-radius: 6px;
-        font-size: 12px;
-        line-height: 1.45;
+        font-size: 11.5px;
+        line-height: 1.38;
         color: var(--text-secondary);
       ">
-        <span class="tool-chevron" style="display: inline-flex; align-items: center; justify-content: center; width: 12px; font-size: 9px; color: var(--text-muted); opacity: 0.5; flex-shrink: 0;">
+        <span class="tool-chevron" style="display: inline-flex; align-items: center; justify-content: center; width: 10px; font-size: 9px; color: var(--text-muted); opacity: 0.5; flex-shrink: 0;">
           •
         </span>
         <span style="color: var(--text-secondary); display: inline-flex; align-items: center; flex-shrink: 0; opacity: 0.85;">
@@ -823,15 +842,15 @@ function renderSingleToolCapsule(parsed: ParsedToolItem): string {
         <span style="font-weight: 500; color: var(--text-main); flex-shrink: 0;">${displayName}</span>
         ${
           durationStr
-            ? `<span class="tool-duration-badge" ${parsed.status === 'running' && parsed.status && parsed.startTime ? `data-start-time="${parsed.startTime}"` : ''} style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); flex-shrink: 0; opacity: 0.75;">${escapeHtml(durationStr)}</span>`
+            ? `<span class="tool-duration-badge" ${parsed.status === 'running' && parsed.status && parsed.startTime ? `data-start-time="${parsed.startTime}"` : ''} style="font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono); flex-shrink: 0; opacity: 0.75;">${escapeHtml(durationStr)}</span>`
             : ''
         }
         ${fileBadge}
         ${
-          effectivePath && isFileTool
+          effectivePath && (isFileTool || isLikelyFilePath(effectivePath))
             ? renderPathLikeGitChanges(effectivePath, true)
             : rawDisplay
-            ? `<span style="color: var(--text-muted); font-family: var(--font-mono); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; opacity: 0.85;" title="${escapeHtml(rawDisplay)}">${escapeHtml(truncatedCommand)}</span>`
+            ? `<span style="color: var(--text-muted); font-family: var(--font-mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; opacity: 0.85;" title="${escapeHtml(rawDisplay)}">${escapeHtml(truncatedCommand)}</span>`
             : ''
         }
         ${
@@ -847,27 +866,27 @@ function renderSingleToolCapsule(parsed: ParsedToolItem): string {
   }
 
   const durationBadge = durationStr
-    ? `<span class="tool-duration-badge" ${parsed.status === 'running' && parsed.startTime ? `data-start-time="${parsed.startTime}"` : ''} style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); flex-shrink: 0; opacity: 0.75;">${escapeHtml(durationStr)}</span>`
+    ? `<span class="tool-duration-badge" ${parsed.status === 'running' && parsed.startTime ? `data-start-time="${parsed.startTime}"` : ''} style="font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono); flex-shrink: 0; opacity: 0.75;">${escapeHtml(durationStr)}</span>`
     : '';
 
   return `
-    <details class="timeline-row tool-row tool-capsule flux-tool-capsule" style="margin: 1.5px 0;">
+    <details class="timeline-row tool-row tool-capsule flux-tool-capsule" style="margin: 1px 0;">
       <summary style="
         list-style: none;
         display: flex;
         align-items: center;
         gap: 6px;
-        padding: 3px 6px;
+        padding: 2.5px 7px;
         background: var(--bg-panel);
         border: 1px solid var(--border-subtle);
         border-radius: 6px;
         cursor: pointer;
         user-select: none;
-        font-size: 12px;
-        line-height: 1.45;
+        font-size: 11.5px;
+        line-height: 1.38;
         color: var(--text-secondary);
       ">
-        <span class="tool-chevron" style="display: inline-flex; align-items: center; justify-content: center; width: 12px; font-size: 9px; color: var(--text-muted); opacity: 0.7; flex-shrink: 0;">
+        <span class="tool-chevron" style="display: inline-flex; align-items: center; justify-content: center; width: 10px; font-size: 9px; color: var(--text-muted); opacity: 0.7; flex-shrink: 0;">
           ▸
         </span>
         <span style="color: var(--text-secondary); display: inline-flex; align-items: center; flex-shrink: 0; opacity: 0.85;">
@@ -877,7 +896,7 @@ function renderSingleToolCapsule(parsed: ParsedToolItem): string {
         ${durationBadge}
         ${fileBadge}
         ${
-          effectivePath && isFileTool
+          effectivePath && (isFileTool || isLikelyFilePath(effectivePath))
             ? renderPathLikeGitChanges(effectivePath, true)
             : rawDisplay
             ? `<span style="color: var(--text-muted); font-family: var(--font-mono); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; opacity: 0.85;" title="${escapeHtml(rawDisplay)}">${escapeHtml(truncatedCommand)}</span>`
@@ -929,23 +948,23 @@ function renderReadOnlyToolGroup(items: ParsedToolItem[]): string {
     .join('');
 
   return `
-    <details class="timeline-row tool-row tool-capsule flux-tool-capsule" style="margin: 2px 0;">
+    <details class="timeline-row tool-row tool-capsule flux-tool-capsule" style="margin: 1px 0;">
       <summary style="
         list-style: none;
         display: flex;
         align-items: center;
         gap: 6px;
-        padding: 3px 6px;
+        padding: 2.5px 7px;
         background: var(--bg-panel);
         border: 1px solid var(--border-subtle);
         border-radius: 6px;
         cursor: pointer;
         user-select: none;
-        font-size: 12px;
-        line-height: 1.45;
+        font-size: 11.5px;
+        line-height: 1.38;
         color: var(--text-secondary);
       ">
-        <span class="tool-chevron" style="display: inline-flex; align-items: center; justify-content: center; width: 12px; font-size: 9px; color: var(--text-muted); opacity: 0.7; flex-shrink: 0;">
+        <span class="tool-chevron" style="display: inline-flex; align-items: center; justify-content: center; width: 10px; font-size: 9px; color: var(--text-muted); opacity: 0.7; flex-shrink: 0;">
           ▸
         </span>
         <span style="color: var(--accent); display: inline-flex; align-items: center; flex-shrink: 0;">
@@ -958,7 +977,7 @@ function renderReadOnlyToolGroup(items: ParsedToolItem[]): string {
       </summary>
       <div class="tool-output-container" style="
         margin: 0;
-        padding: 6px 8px;
+        padding: 4px 6px;
         border-bottom-left-radius: 6px;
         border-bottom-right-radius: 6px;
         overflow: hidden;
@@ -967,7 +986,7 @@ function renderReadOnlyToolGroup(items: ParsedToolItem[]): string {
         border-top: none;
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        gap: 2px;
       ">
         ${items.map((it) => renderSingleToolCapsule(it)).join('')}
       </div>
@@ -998,7 +1017,11 @@ function renderToolCapsules(m: MessageViewModel): string {
     }
   }
 
-  return blocks.join('');
+  return `
+    <div class="tool-capsules-group" style="display: flex; flex-direction: column; gap: 2px; margin: 2px 0;">
+      ${blocks.join('')}
+    </div>
+  `;
 }
 
 function renderChangedFilesBar(m: MessageViewModel): string {
@@ -1202,6 +1225,111 @@ export function escapeHtml(str: string): string {
     .replace(/'/g, '&#039;');
 }
 
+const COMMON_FILE_EXTENSIONS = new Set([
+  'html', 'htm', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp',
+  'md', 'markdown', 'txt', 'log', 'pdf', 'csv',
+  'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'json', 'yaml', 'yml', 'toml', 'xml',
+  'py', 'rs', 'go', 'java', 'c', 'cpp', 'h', 'hpp', 'cs', 'sh', 'bash', 'zsh', 'ps1',
+  'css', 'scss', 'sass', 'less', 'sql', 'diff', 'patch', 'env', 'dockerfile', 'lock'
+]);
+
+/**
+ * 校验目标字符串是否具备文件路径特征
+ */
+export function isLikelyFilePath(str: string): boolean {
+  if (!str || typeof str !== 'string') return false;
+  const trimmed = str.trim();
+  if (trimmed.length < 2 || trimmed.length > 500 || /\s/.test(trimmed)) return false;
+  if (trimmed.startsWith('-')) return false;
+
+  // 1. Unix / Linux 绝对路径 (以 / 开头且至少含两层路径或常见目录)
+  if (trimmed.startsWith('/') && !trimmed.startsWith('//') && (trimmed.includes('/', 1) || COMMON_FILE_EXTENSIONS.has((trimmed.split('.').pop() || '').toLowerCase()))) {
+    return true;
+  }
+
+  // 2. Windows 绝对路径 (以 盘符: 开头)
+  if (/^[a-zA-Z]:[\\/]/.test(trimmed)) {
+    return true;
+  }
+
+  // 3. 显式相对路径
+  if (trimmed.startsWith('./') || trimmed.startsWith('../') || trimmed.startsWith('.\\') || trimmed.startsWith('..\\')) {
+    return true;
+  }
+
+  // 4. 提取扩展名并比对
+  const extMatch = trimmed.match(/\.([a-zA-Z0-9_-]+)$/);
+  if (extMatch) {
+    const ext = extMatch[1].toLowerCase();
+    if (COMMON_FILE_EXTENSIONS.has(ext)) {
+      return true;
+    }
+  }
+
+  // 5. 常见源码目录结构
+  if (/^(src|docs|packages|app|lib|components|utils|tests?|scripts)\//.test(trimmed)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * 校验目标字符串是否为完整的 HTTP/HTTPS 链接
+ */
+export function isLikelyHttpUrl(str: string): boolean {
+  if (!str || typeof str !== 'string') return false;
+  const trimmed = str.trim();
+  return /^https?:\/\/[^\s"'`<>]+$/i.test(trimmed);
+}
+
+/**
+ * 格式化行内代码或可交互路径/链接
+ * 【设计意图 (Why)】
+ * 智能识别行内代码中的文件路径与 HTTP 链接，将其提升为具有 .tool-file-link 属性的交互式胶囊。
+ * 用户点击后，能够在右侧 Inspection Pod 实时预览 HTML 单文件原型、图片与代码，并支持一键下载。
+ * 【防范的陷阱 (Pitfall)】
+ * 1. 严格使用 Design Tokens，避免硬编码色相导致不同皮肤下对比度翻车；
+ * 2. title 提示文本走 t() 国际化，规避 i18n 门禁拦截；
+ * 3. 仅对符合路径与 URL 特征的文本增强，普通代码依然保持纯 code 标签。
+ * 【约束与规则 (Rules)】
+ * 保持语义化与无障碍支持，生成合规的 data-preview-file 与 data-preview-url 属性。
+ */
+export function formatInlineCodeOrLink(escapedContent: string): string {
+  // 反转基本实体以供精准路径与 URL 校验
+  const unescaped = escapedContent
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'");
+
+  const isHttp = isLikelyHttpUrl(unescaped);
+  const isFile = isLikelyFilePath(unescaped);
+
+  if (!isHttp && !isFile) {
+    return `<code style="background: rgba(255, 255, 255, 0.06); border: 1px solid var(--border-subtle); padding: 1.5px 5.5px; border-radius: 4px; font-family: var(--font-mono); font-size: 12px; color: var(--accent);">${escapedContent}</code>`;
+  }
+
+  const tip = isHttp
+    ? t('inspector.clickToOpenLink', { url: unescaped })
+    : t('inspector.clickToPreview', { file: unescaped });
+
+  const ext = (unescaped.split(/[?#]/)[0].split('.').pop() || '').toLowerCase();
+  const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp'].includes(ext);
+
+  // 精致的微型指示图标 (中性遮蔽/accent，严格走 Token，无死色相)
+  const iconSvg = isImage
+    ? `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink: 0; opacity: 0.85; vertical-align: -1px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`
+    : isHttp
+    ? `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink: 0; opacity: 0.85; vertical-align: -1px;"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`
+    : `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink: 0; opacity: 0.85; vertical-align: -1px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+
+  return `<code class="tool-file-link content-interactive-link" data-preview-file="${escapeHtml(unescaped)}" ${
+    isHttp ? `data-preview-url="${escapeHtml(unescaped)}"` : ''
+  } title="${escapeHtml(tip)}" style="background: rgba(255, 255, 255, 0.06); border: 1px solid var(--border-subtle); padding: 1.5px 6px; border-radius: 4px; font-family: var(--font-mono); font-size: 12px; color: var(--accent); cursor: pointer; display: inline-flex; align-items: baseline; gap: 4px; text-decoration: underline; text-decoration-color: var(--border-medium); text-underline-offset: 2px;">${iconSvg}<span>${escapedContent}</span><span style="font-size: 9px; opacity: 0.65; margin-left: 1px;">↗</span></code>`;
+}
+
 const markdownRenderCache = new Map<string, string>();
 const MARKDOWN_CACHE_MAX = 500;
 
@@ -1244,7 +1372,7 @@ export function renderMarkdown(md: string): string {
           user-select: none;
         ">
           <span style="text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; color: #94A3B8;">${lang || 'TEXT'}</span>
-          <button class="btn-copy-code" onclick="navigator.clipboard.writeText(this.closest('.code-block-wrapper').querySelector('code').innerText)" style="
+          <button class="btn-copy-code" onclick="(window.__fluxCopyText ? window.__fluxCopyText(this.closest('.code-block-wrapper').querySelector('code').innerText) : navigator.clipboard.writeText(this.closest('.code-block-wrapper').querySelector('code').innerText)); this.innerText='${escapeHtml(t('common.copied'))}'; this.style.color='var(--accent)'; setTimeout(() => { this.innerText='${escapeHtml(t('common.copy'))}'; this.style.color=''; }, 1500);" style="
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid var(--border-subtle);
             color: var(--text-secondary);
@@ -1254,15 +1382,15 @@ export function renderMarkdown(md: string): string {
             font-size: 10.5px;
             font-family: var(--font-sans);
             transition: all 0.15s ease;
-          ">复制</button>
+          ">${escapeHtml(t('common.copy'))}</button>
         </div>
         <pre style="
           margin: 0;
-          padding: 14px 16px;
+          padding: 8px 12px;
           overflow-x: auto;
           font-family: var(--font-mono);
-          font-size: 12px;
-          line-height: 1.6;
+          font-size: 11.5px;
+          line-height: 1.45;
           color: var(--text-main);
         "><code>${highlighted}</code></pre>
       </div>
@@ -1278,26 +1406,43 @@ export function renderMarkdown(md: string): string {
   let html = escapeHtml(processed);
 
   // 4. Full range of Headings (######, #####, ####, ###, ##, #)
-  html = html.replace(/^###### (.*$)/gim, '<h6 style="font-size: 0.95em; font-weight: 700; margin: 10px 0 4px; color: var(--text-muted);">$1</h6>');
-  html = html.replace(/^##### (.*$)/gim, '<h5 style="font-size: 1.0em; font-weight: 700; margin: 12px 0 4px; color: var(--text-main);">$1</h5>');
-  html = html.replace(/^#### (.*$)/gim, '<h4 style="font-size: 1.08em; font-weight: 700; margin: 14px 0 6px; color: var(--text-main);">$1</h4>');
-  html = html.replace(/^### (.*$)/gim, '<h3 style="font-size: 1.15em; font-weight: 700; margin: 16px 0 6px; color: var(--text-main); letter-spacing: -0.01em;">$1</h3>');
-  html = html.replace(/^## (.*$)/gim, '<h2 style="font-size: 1.3em; font-weight: 700; margin: 20px 0 8px; color: var(--text-main); border-bottom: 1px solid var(--border-subtle); padding-bottom: 6px; letter-spacing: -0.01em;">$1</h2>');
-  html = html.replace(/^# (.*$)/gim, '<h1 style="font-size: 1.45em; font-weight: 800; margin: 24px 0 10px; color: var(--text-main); letter-spacing: -0.02em;">$1</h1>');
+  html = html.replace(/^###### (.*$)/gim, '<h6 style="font-size: 0.95em; font-weight: 700; margin: 6px 0 2px; color: var(--text-muted);">$1</h6>');
+  html = html.replace(/^##### (.*$)/gim, '<h5 style="font-size: 1.0em; font-weight: 700; margin: 8px 0 2px; color: var(--text-main);">$1</h5>');
+  html = html.replace(/^#### (.*$)/gim, '<h4 style="font-size: 1.05em; font-weight: 700; margin: 9px 0 3px; color: var(--text-main);">$1</h4>');
+  html = html.replace(/^### (.*$)/gim, '<h3 style="font-size: 1.1em; font-weight: 700; margin: 11px 0 3px; color: var(--text-main); letter-spacing: -0.01em;">$1</h3>');
+  html = html.replace(/^## (.*$)/gim, '<h2 style="font-size: 1.22em; font-weight: 700; margin: 13px 0 4px; color: var(--text-main); border-bottom: 1px solid var(--border-subtle); padding-bottom: 4px; letter-spacing: -0.01em;">$1</h2>');
+  html = html.replace(/^# (.*$)/gim, '<h1 style="font-size: 1.35em; font-weight: 800; margin: 15px 0 5px; color: var(--text-main); letter-spacing: -0.02em;">$1</h1>');
 
   // 5. Blockquotes
-  html = html.replace(/^\&gt;\s?(.*$)/gim, '<blockquote style="border-left: 3px solid var(--accent); padding: 4px 12px; margin: 8px 0; color: var(--text-secondary); background: rgba(255, 191, 0, 0.03); border-radius: 0 6px 6px 0;">$1</blockquote>');
+  html = html.replace(/^\&gt;\s?(.*$)/gim, '<blockquote style="border-left: 3px solid var(--accent); padding: 2px 10px; margin: 4px 0; color: var(--text-secondary); background: var(--accent-subtle); border-radius: 0 6px 6px 0;">$1</blockquote>');
 
   // 6. Task lists (- [ ] / - [x])
-  html = html.replace(/^\s*[\-\*]\s+\[ \]\s+(.*$)/gim, '<li style="margin-left: 20px; list-style-type: none;"><span style="display: inline-block; width: 13px; height: 13px; border: 1.5px solid var(--text-muted); border-radius: 3px; vertical-align: middle; margin-right: 6px;"></span>$1</li>');
-  html = html.replace(/^\s*[\-\*]\s+\[x\]\s+(.*$)/gim, '<li style="margin-left: 20px; list-style-type: none;"><span style="display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; background: var(--accent); border-radius: 3px; vertical-align: middle; margin-right: 6px; color: #000; font-size: 9px; font-weight: bold;">✓</span>$1</li>');
+  html = html.replace(/^\s*[\-\*]\s+\[ \]\s+(.*$)/gim, '<li style="margin-left: 18px; margin-bottom: 1.5px; line-height: 1.42; list-style-type: none;"><span style="display: inline-block; width: 12px; height: 12px; border: 1.5px solid var(--text-muted); border-radius: 3px; vertical-align: middle; margin-right: 6px;"></span>$1</li>');
+  html = html.replace(/^\s*[\-\*]\s+\[x\]\s+(.*$)/gim, '<li style="margin-left: 18px; margin-bottom: 1.5px; line-height: 1.42; list-style-type: none;"><span style="display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 12px; background: var(--accent); border-radius: 3px; vertical-align: middle; margin-right: 6px; color: #000; font-size: 9px; font-weight: bold;">✓</span>$1</li>');
 
-  // 7. Regular Unordered & Ordered lists
-  html = html.replace(/^\s*[\-\*]\s+(.*$)/gim, '<li style="margin-left: 20px; list-style-type: disc;">$1</li>');
-  html = html.replace(/^\s*(\d+)\.\s+(.*$)/gim, '<li style="margin-left: 20px; list-style-type: decimal;">$2</li>');
+  // 7. Regular Unordered & Ordered lists (Compact & Natural line-height)
+  html = html.replace(/^\s*[\-\*]\s+(.*$)/gim, '<li style="margin-left: 18px; margin-bottom: 1.5px; line-height: 1.42; list-style-type: disc;">$1</li>');
+  html = html.replace(/^\s*(\d+)\.\s+(.*$)/gim, '<li style="margin-left: 18px; margin-bottom: 1.5px; line-height: 1.42; list-style-type: decimal;">$2</li>');
 
-  // 8. Inline code (Refined Clean Ice-Blue High-Contrast Accent)
-  html = html.replace(/`([^`]+)`/g, '<code style="background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.2); padding: 1.5px 5.5px; border-radius: 4px; font-family: var(--font-mono); font-size: 12px; color: #38BDF8;">$1</code>');
+  // 7.5. Markdown Links ([label](url-or-path))
+  html = html.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_match, label, href) => {
+    const unescapedHref = href.replace(/&amp;/g, '&');
+    const isHttp = isLikelyHttpUrl(unescapedHref);
+    const isFile = isLikelyFilePath(unescapedHref);
+    const tip = isHttp
+      ? t('inspector.clickToOpenLink', { url: unescapedHref })
+      : t('inspector.clickToPreview', { file: unescapedHref });
+
+    if (isHttp || isFile) {
+      return `<a class="tool-file-link content-interactive-link" data-preview-file="${escapeHtml(unescapedHref)}" ${
+        isHttp ? `data-preview-url="${escapeHtml(unescapedHref)}"` : ''
+      } href="${escapeHtml(unescapedHref)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(tip)}" style="color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; display: inline-flex; align-items: baseline; gap: 3px;"><span>${label}</span><span style="font-size: 9px; opacity: 0.65;">↗</span></a>`;
+    }
+    return `<a href="${escapeHtml(unescapedHref)}" target="_blank" rel="noopener noreferrer" style="color: var(--accent); text-decoration: underline; text-underline-offset: 2px;">${label}</a>`;
+  });
+
+  // 8. Inline code & Smart Interactive File / URL Capsules
+  html = html.replace(/`([^`]+)`/g, (_match, codeContent) => formatInlineCodeOrLink(codeContent));
 
   // 9. Bold, Italic & Strikethrough
   html = html.replace(/\*\*([^*]+)\*\*/g, '<strong style="color: var(--text-main); font-weight: 600;">$1</strong>');
@@ -1305,7 +1450,7 @@ export function renderMarkdown(md: string): string {
   html = html.replace(/~~([^~]+)~~/g, '<del style="color: var(--text-muted);">$1</del>');
 
   // 10. Horizontal Rule
-  html = html.replace(/^---$/gim, '<hr style="border: none; border-top: 1px solid var(--border-subtle); margin: 18px 0;" />');
+  html = html.replace(/^---$/gim, '<hr style="border: none; border-top: 1px solid var(--border-subtle); margin: 10px 0;" />');
 
   // 11. Paragraphs & Line Breaks on non-block content (OpenChamber Compact Rhythm)
   const rawParagraphs = html.split('\n\n').filter((p) => p.trim().length > 0);
@@ -1313,12 +1458,12 @@ export function renderMarkdown(md: string): string {
 
   if (rawParagraphs.length <= 1) {
     const withBreaks = html.replace(/\n/g, '<br/>');
-    renderedResult = `<div style="margin: 0; line-height: 1.58;">${withBreaks}</div>`;
+    renderedResult = `<div style="margin: 0; line-height: 1.42;">${withBreaks}</div>`;
   } else {
     renderedResult = rawParagraphs
       .map((p) => {
         const withBreaks = p.replace(/\n/g, '<br/>');
-        return `<div style="margin-bottom: 6px; line-height: 1.58;">${withBreaks}</div>`;
+        return `<div style="margin-bottom: 3px; line-height: 1.42;">${withBreaks}</div>`;
       })
       .join('');
   }
@@ -1357,13 +1502,13 @@ export function highlightCodeSyntax(code: string): string {
     const [fullMatch, comment, stringLit, keyword, numberLit] = match;
 
     if (comment) {
-      output += `<span style="color: #6272A4; font-style: italic;">${escapeHtml(comment)}</span>`;
+      output += `<span style="color: var(--hl-comment, var(--text-muted)); font-style: italic;">${escapeHtml(comment)}</span>`;
     } else if (stringLit) {
-      output += `<span style="color: #F1FA8C;">${escapeHtml(stringLit)}</span>`;
+      output += `<span style="color: var(--hl-string, var(--accent));">${escapeHtml(stringLit)}</span>`;
     } else if (keyword) {
-      output += `<span style="color: #FF79C6; font-weight: 600;">${escapeHtml(keyword)}</span>`;
+      output += `<span style="color: var(--hl-keyword, var(--accent-dim)); font-weight: 600;">${escapeHtml(keyword)}</span>`;
     } else if (numberLit) {
-      output += `<span style="color: #BD93F9;">${escapeHtml(numberLit)}</span>`;
+      output += `<span style="color: var(--hl-number, var(--text-secondary));">${escapeHtml(numberLit)}</span>`;
     }
 
     lastIndex = tokenRegex.lastIndex;
@@ -1379,7 +1524,7 @@ export function highlightCodeSyntax(code: string): string {
 /** Helper to format inline markdown within table cells safely */
 function formatCellInlineMarkdown(rawCell: string): string {
   let cell = escapeHtml(rawCell.trim());
-  cell = cell.replace(/`([^`]+)`/g, '<code style="background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.2); padding: 1px 4px; border-radius: 3px; font-family: var(--font-mono); font-size: 11px; color: #38BDF8;">$1</code>');
+  cell = cell.replace(/`([^`]+)`/g, (_match, codeContent) => formatInlineCodeOrLink(codeContent));
   cell = cell.replace(/\*\*([^*]+)\*\*/g, '<strong style="color: var(--text-main); font-weight: 600;">$1</strong>');
   cell = cell.replace(/\*([^*]+)\*/g, '<em style="color: var(--text-secondary);">$1</em>');
   return cell;

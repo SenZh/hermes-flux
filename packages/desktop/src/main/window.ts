@@ -3,7 +3,7 @@
  * Handles platform-specific window styling, Windows 11 Mica/Acrylic, and frameless titlebar.
  */
 
-import { BrowserWindow, app } from 'electron';
+import { BrowserWindow, Menu, MenuItem, app } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -72,6 +72,25 @@ export function createMainWindow(): BrowserWindow {
 
   win.on('unmaximize', () => {
     win.webContents.send('window:state-changed', { isMaximized: false });
+  });
+
+  // Native desktop context menu: enable standard Copy/Cut/Paste/SelectAll across the app
+  win.webContents.on('context-menu', (_event, params) => {
+    const menu = new Menu();
+
+    if (params.selectionText && params.selectionText.trim().length > 0) {
+      menu.append(new MenuItem({ label: '复制 (Copy)', role: 'copy' }));
+      menu.append(new MenuItem({ type: 'separator' }));
+      menu.append(new MenuItem({ label: '全选 (Select All)', role: 'selectAll' }));
+      menu.popup({ window: win });
+    } else if (params.isEditable) {
+      menu.append(new MenuItem({ label: '剪切 (Cut)', role: 'cut' }));
+      menu.append(new MenuItem({ label: '复制 (Copy)', role: 'copy' }));
+      menu.append(new MenuItem({ label: '粘贴 (Paste)', role: 'paste' }));
+      menu.append(new MenuItem({ type: 'separator' }));
+      menu.append(new MenuItem({ label: '全选 (Select All)', role: 'selectAll' }));
+      menu.popup({ window: win });
+    }
   });
 
   return win;

@@ -99,7 +99,6 @@ export function renderInspectionPod(props: InspectionPodProps): string {
       background: var(--bg-panel);
       display: flex;
       flex-direction: row;
-      user-select: none;
       overflow: hidden;
     `
     : `
@@ -111,7 +110,6 @@ export function renderInspectionPod(props: InspectionPodProps): string {
       border-left: 1px solid var(--border-subtle);
       display: flex;
       flex-direction: row;
-      user-select: none;
       transition: width 0.15s cubic-bezier(0.16, 1, 0.3, 1);
       overflow: hidden;
       position: relative;
@@ -570,29 +568,30 @@ function renderFileTab(file: OpenFileItem, isActive: boolean): string {
 /** OpenChamber style colored file type badge icon using design tokens */
 function getFileIconBadge(fileName: string): string {
   const ext = (fileName.split('.').pop() || '').toLowerCase();
+  const baseStyle = 'display: inline-flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 4px; font-family: var(--font-mono); line-height: 1.1; flex-shrink: 0;';
 
   switch (ext) {
     case 'ts':
     case 'tsx':
-      return `<span style="background: #3178C6; color: #fff; font-size: 9px; font-weight: 700; padding: 1px 3px; border-radius: 3px; font-family: var(--font-mono); line-height: 1;">TS</span>`;
+      return `<span style="${baseStyle} background: var(--badge-ts-bg, var(--accent-subtle)); color: var(--badge-ts-text, var(--accent)); border: 1px solid var(--badge-ts-border, var(--border-subtle));">TS</span>`;
     case 'js':
     case 'jsx':
     case 'mjs':
-      return `<span style="background: #F7DF1E; color: #000; font-size: 9px; font-weight: 700; padding: 1px 3px; border-radius: 3px; font-family: var(--font-mono); line-height: 1;">JS</span>`;
+      return `<span style="${baseStyle} background: var(--badge-js-bg, var(--accent-subtle)); color: var(--badge-js-text, var(--accent)); border: 1px solid var(--badge-js-border, var(--border-subtle));">JS</span>`;
     case 'json':
-      return `<span style="color: var(--accent); font-size: 11px; font-weight: 700; font-family: var(--font-mono); line-height: 1;">{}</span>`;
+      return `<span style="${baseStyle} background: rgba(255, 255, 255, 0.06); color: var(--text-secondary); border: 1px solid var(--border-subtle);">{}</span>`;
     case 'css':
     case 'scss':
     case 'less':
-      return `<span style="background: #7C3AED; color: #fff; font-size: 8.5px; font-weight: 700; padding: 1px 3px; border-radius: 3px; font-family: var(--font-mono); line-height: 1;">CSS</span>`;
+      return `<span style="${baseStyle} background: var(--badge-css-bg, var(--accent-subtle)); color: var(--badge-css-text, var(--accent)); border: 1px solid var(--badge-css-border, var(--border-subtle));">CSS</span>`;
     case 'md':
     case 'markdown':
-      return `<span style="color: #38BDF8; font-size: 10px; font-weight: 700; font-family: var(--font-mono); line-height: 1; display: inline-flex; align-items: center; gap: 1px;">M<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg></span>`;
+      return `<span style="${baseStyle} background: rgba(255, 255, 255, 0.06); color: var(--text-secondary); border: 1px solid var(--border-subtle);">MD</span>`;
     case 'py':
-      return `<span style="background: #3776AB; color: #FFD43B; font-size: 9px; font-weight: 700; padding: 1px 3px; border-radius: 3px; font-family: var(--font-mono); line-height: 1;">PY</span>`;
+      return `<span style="${baseStyle} background: var(--badge-py-bg, var(--accent-subtle)); color: var(--badge-py-text, var(--accent)); border: 1px solid var(--badge-py-border, var(--border-subtle));">PY</span>`;
     case 'html':
     case 'htm':
-      return `<span style="background: #E34F26; color: #fff; font-size: 8.5px; font-weight: 700; padding: 1px 3px; border-radius: 3px; font-family: var(--font-mono); line-height: 1;">HTML</span>`;
+      return `<span style="${baseStyle} background: var(--badge-html-bg, var(--accent-subtle)); color: var(--badge-html-text, var(--accent)); border: 1px solid var(--badge-html-border, var(--border-subtle));">HTML</span>`;
     case 'svg':
     case 'png':
     case 'jpg':
@@ -614,11 +613,28 @@ function renderFileContent(
   const isMarkdown = ext === 'md' || ext === 'markdown';
   const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext);
 
-  // 1. Image Viewer
+  // 1. Image Viewer (with iOS-grade offline graceful fallback)
   if (isImage) {
+    const isReadyData = file.content.startsWith('data:') || file.content.startsWith('http://') || file.content.startsWith('https://');
+    const imageSrc = isReadyData ? file.content : '';
+
+    if (!imageSrc) {
+      // 离线占位态：优雅的中性卡片，无破损裂图
+      return `
+        <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--bg-card); border: 1px solid var(--border-medium); border-radius: 8px; padding: 32px 20px; overflow: auto; text-align: center;">
+          <div style="width: 44px; height: 44px; border-radius: 12px; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: center; margin-bottom: 12px; color: var(--accent);">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          </div>
+          <div style="font-size: 13px; font-weight: 600; color: var(--text-main); margin-bottom: 6px;">${t('inspector.imageLoadError')}</div>
+          <div style="font-size: 11.5px; color: var(--text-muted); max-width: 320px; line-height: 1.5; margin-bottom: 16px;">${t('inspector.imageLoadErrorSub')}</div>
+          <div style="font-size: 11px; color: var(--text-faint); font-family: var(--font-mono); background: var(--bg-input); padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border-subtle); max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(file.path)}</div>
+        </div>
+      `;
+    }
+
     return `
       <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--bg-card); border: 1px solid var(--border-medium); border-radius: 8px; padding: 20px; overflow: auto;">
-        <img src="${escapeHtml(file.content.startsWith('data:') || file.content.startsWith('http') ? file.content : file.path)}" alt="${escapeHtml(file.path)}" style="max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; box-shadow: var(--shadow-card);" />
+        <img src="${escapeHtml(imageSrc)}" alt="${escapeHtml(file.path)}" style="max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; box-shadow: var(--shadow-card);" onerror="this.parentElement.innerHTML='<div style=\\'padding: 30px; text-align: center; color: var(--text-muted); font-size: 12px;\\'>${t('inspector.imageLoadError')}</div>'" />
         <div style="margin-top: 12px; font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">${escapeHtml(file.path)}</div>
       </div>
     `;
@@ -637,6 +653,7 @@ function renderFileContent(
         font-size: 13px;
         line-height: 1.6;
         color: var(--text-main);
+        user-select: text;
       ">
         ${renderMarkdown(file.content)}
       </div>
@@ -748,6 +765,7 @@ function renderFileContent(
           font-size: 12px;
           line-height: 1.6;
           color: ${lineTextColor};
+          user-select: text;
         ">${formattedLine || ' '}</td>
       </tr>
     `;
@@ -762,6 +780,7 @@ function renderFileContent(
       border: 1px solid var(--border-medium);
       border-radius: 8px;
       overflow: hidden;
+      user-select: text;
     ">
       <div style="
         flex: 1;

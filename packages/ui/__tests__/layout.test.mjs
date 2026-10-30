@@ -96,6 +96,11 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     // Code line should not still contain " 10: " or "10| " in the code cell, it should be mapped to the line-number gutter
     assert.ok(html.includes('<td class="line-number"'), 'Must render line number cell');
     assert.ok(!html.includes('10:&nbsp;url') && !html.includes('10: url'), 'Code cell must not duplicate embedded line number prefix');
+    
+    // Invariant: Code cells must allow text selection for mouse copying, while line-numbers remain unselectable
+    assert.ok(html.includes('class="line-code" style="') && html.includes('user-select: text;'), 'Code cells must allow text selection for copy');
+    assert.ok(html.includes('class="line-number" style="') && html.includes('user-select: none;'), 'Line numbers must be unselectable so line numbers are not copied into clipboard');
+    assert.ok(!html.includes('id="flux-inspector-pod" class="flux-inspector-pod " style="\n      flex: 0 0 var(--rail-w-right, 420px);\n      width: var(--rail-w-right, 420px);\n      min-width: 280px;\n      height: 100%;\n      background: var(--bg-panel);\n      border-left: 1px solid var(--border-subtle);\n      display: flex;\n      flex-direction: row;\n      user-select: none;'), 'InspectionPod container must NOT lock out user selection');
   });
 
   await t.test('StatusBar must be extremely clean without HTTP2 or fake session ID', () => {
@@ -248,10 +253,10 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
             },
             {
               id: 'tool-r2',
-              name: 'grep',
+              name: 'read_file',
               status: 'completed',
-              args: '{"pattern":"import"}',
-              output: 'matches found',
+              args: '{"path":"src/config.ts"}',
+              output: 'export const cfg = {};',
             },
             {
               id: 'tool-e1',
@@ -267,6 +272,39 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
 
     assert.ok(html.includes('检索与阅读'), 'Must group consecutive read-only tools into an aggregated capsule');
     assert.ok(html.includes('app.ts'), 'Must display target file in tool capsule');
+  });
+
+  await t.test('Search Files must NOT be treated as readable file preview tool', async () => {
+    const { renderMiddlePod } = await import('../dist/components/MiddlePod/MiddlePod.js');
+    const html = renderMiddlePod({
+      gatewayConnected: true,
+      messages: [
+        {
+          id: 'ast-grep-test',
+          role: 'assistant',
+          content: 'Searching codebase for pattern',
+          timestamp: '12:05',
+          toolCalls: [
+            {
+              id: 'tool-grep-1',
+              name: 'grep',
+              status: 'completed',
+              args: '{"pattern":"StatusBar","include":"*.ts"}',
+              output: 'src/components/StatusBar.ts:10: export class StatusBar',
+            },
+          ],
+        },
+      ],
+    });
+
+    // 1. 必须展示为 Search Files 标题
+    assert.ok(html.includes('Search Files'), 'Must be titled Search Files');
+    // 2. 严禁把搜索的 pattern 或 include 变成 tool-file-link 文件预览链接
+    assert.ok(!html.includes('data-preview-file="StatusBar"'), 'Search pattern must NOT become a preview file link');
+    assert.ok(!html.includes('data-preview-file="*.ts"'), 'Search include must NOT become a preview file link');
+    // 3. 必须是可展开查看详情的 details 结构（而不是只读单行）
+    assert.ok(html.includes('<details class="timeline-row tool-row tool-capsule'), 'Must be expandable details for search results');
+    assert.ok(html.includes('StatusBar.ts:10'), 'Search output lines must be present in output container');
   });
 
   await t.test('MiddlePod tool categorization must never misclassify write tools or single read tools', async () => {
@@ -356,6 +394,49 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     const durationMs = performance.now() - startTime;
     assert.ok(durationMs < 50, `Giant log parsing must complete rapidly without regex backtracking, took ${durationMs}ms`);
     assert.ok(renderedLog.includes('AndroidRuntime'), 'Logcat content must be accurately preserved');
+  });
+
+  await t.test('renderMarkdown must turn file paths and HTTP links into interactive inspection capsules', async () => {
+    const { renderMarkdown, isLikelyFilePath, isLikelyHttpUrl } = await import('../dist/components/MiddlePod/MiddlePod.js');
+
+    // 1. Precise predicate verification
+    assert.equal(isLikelyFilePath('/opt/data/projects/hermes-flux/docs/prototypes/desktop-v4-workspace.html'), true, 'Unix path with html extension must be a file path');
+    assert.equal(isLikelyFilePath('/opt/data/projects/hermes-flux/docs/prototypes/desktop-v4-preview-chat-v2.png'), true, 'Unix path with png extension must be a file path');
+    assert.equal(isLikelyFilePath('C:\\Users\\workspace\\project\\index.ts'), true, 'Windows path must be a file path');
+    assert.equal(isLikelyFilePath('./src/components/Header.tsx'), true, 'Relative path must be a file path');
+    assert.equal(isLikelyFilePath('const totalCount = 42;'), false, 'Plain JS statement must NOT be a file path');
+    assert.equal(isLikelyFilePath('-rf'), false, 'Command flags must NOT be a file path');
+
+    assert.equal(isLikelyHttpUrl('https://example.com/api/test.png'), true, 'HTTPS url must be recognized');
+    assert.equal(isLikelyHttpUrl('http://127.0.0.1:9119'), true, 'HTTP url must be recognized');
+    assert.equal(isLikelyHttpUrl('not a url'), false, 'Non-url must not be recognized');
+
+    // 2. User exact screenshot scenario verification
+    const userMessageSample = `
+针对这套设计，已为您生成了高保真原型与渲染截图：
+- 源码文件: \`/opt/data/projects/hermes-flux/docs/prototypes/desktop-v4-workspace.html\`
+- 渲染截图 (群聊协同态): \`/opt/data/projects/hermes-flux/docs/prototypes/desktop-v4-preview-chat-v2.png\`
+- 渲染截图 (看板交付态): \`/opt/data/projects/hermes-flux/docs/prototypes/desktop-v4-preview-kanban.png\`
+`;
+    const rendered = renderMarkdown(userMessageSample);
+
+    assert.ok(rendered.includes('class="tool-file-link content-interactive-link"'), 'File path inline code must be augmented with interactive classes');
+    assert.ok(rendered.includes('data-preview-file="/opt/data/projects/hermes-flux/docs/prototypes/desktop-v4-workspace.html"'), 'HTML prototype path must be bound to data-preview-file');
+    assert.ok(rendered.includes('data-preview-file="/opt/data/projects/hermes-flux/docs/prototypes/desktop-v4-preview-chat-v2.png"'), 'PNG preview path must be bound to data-preview-file');
+    assert.ok(rendered.includes('cursor: pointer'), 'Interactive file capsule must have pointer cursor');
+    assert.ok(rendered.includes('title='), 'Interactive file capsule must have descriptive title for accessibility');
+
+    // 3. Markdown standard link verification
+    const mdLinkSample = '查看 [高保真原型文件](/opt/data/projects/hermes-flux/docs/prototypes/desktop-v4-workspace.html) 与 [在线文档](https://example.com/docs)';
+    const renderedMdLink = renderMarkdown(mdLinkSample);
+    assert.ok(renderedMdLink.includes('data-preview-file="/opt/data/projects/hermes-flux/docs/prototypes/desktop-v4-workspace.html"'), 'Markdown file link must have data-preview-file');
+    assert.ok(renderedMdLink.includes('data-preview-url="https://example.com/docs"'), 'Markdown http link must have data-preview-url');
+
+    // 4. Negative mutation check: plain variable names and simple code must NOT be turned into tool-file-link
+    const plainCode = '变量名是 `userProfileState`，方法是 `calculateTax()`';
+    const renderedPlain = renderMarkdown(plainCode);
+    assert.ok(!renderedPlain.includes('data-preview-file="userProfileState"'), 'Plain variable must not have data-preview-file');
+    assert.ok(!renderedPlain.includes('tool-file-link'), 'Plain variable code must not have tool-file-link class');
   });
 
   await t.test('Gate 4e: MiddlePod long session performance benchmark (5000 synthetic messages)', async () => {
