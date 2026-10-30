@@ -137,7 +137,7 @@ test('OpenChamber File Bar - Live Headless Browser CDP Test', async (t) => {
     assert.equal(tabs[3].isActive, true, 'SKILL.md should be active initially');
   });
 
-  await t.test('CDP verify OpenChamber 10 toolbar buttons presence', async () => {
+  await t.test('CDP verify OpenChamber streamlined toolbar buttons presence', async () => {
     const res = await cdpCall('Runtime.evaluate', {
       expression: `
         (() => {
@@ -145,9 +145,6 @@ test('OpenChamber File Bar - Live Headless Browser CDP Test', async (t) => {
             'btn-file-toggle-mode',
             'btn-file-search',
             'btn-file-toggle-lineno',
-            'btn-file-prettify',
-            'btn-file-toggle-wrap',
-            'btn-file-quote-chat',
             'btn-file-open-external',
             'btn-file-copy-content',
             'btn-file-copy-path',
@@ -159,7 +156,7 @@ test('OpenChamber File Bar - Live Headless Browser CDP Test', async (t) => {
       returnByValue: true
     });
 
-    assert.equal(res.result.value, true, 'All 10 OpenChamber toolbar buttons must be mounted in DOM');
+    assert.equal(res.result.value, true, 'All streamlined OpenChamber toolbar buttons must be mounted in DOM');
   });
 
   await t.test('CDP verify Tab switching interaction', async () => {

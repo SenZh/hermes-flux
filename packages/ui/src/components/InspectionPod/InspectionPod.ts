@@ -5,7 +5,7 @@
  * and high-density productivity toolbar matching OpenChamber aesthetics.
  */
 
-import { renderMarkdown } from '../MiddlePod/MiddlePod.js';
+import { renderMarkdown, highlightCodeSyntax } from '../MiddlePod/MiddlePod.js';
 
 export type InspectorTab = 'artifacts' | 'browser' | 'git' | 'memory' | 'preview';
 export type FileViewMode = 'rendered' | 'raw';
@@ -281,52 +281,7 @@ export function renderInspectionPod(props: InspectionPodProps): string {
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg>
           </button>
 
-          <!-- 4. [{}] Format / Prettify Code -->
-          <button id="btn-file-prettify" class="icon-btn" title="美化/格式化代码 (Format JSON/Code)" style="
-            background: transparent;
-            color: var(--text-muted);
-            border: 1px solid transparent;
-            border-radius: 4px;
-            padding: 4px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-          ">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7c0-1.5 1-2 2-2h1c1 0 1.5-.5 1.5-1.5S8 2 7 2H6C3.8 2 2 3.8 2 6v2c0 1.5-.5 2-1.5 2h-.5v2h.5c1 0 1.5.5 1.5 2v2c0 2.2 1.8 4 4 4h1c1 0 1.5-.5 1.5-1.5S8 21 7 21H6c-1 0-2-.5-2-2v-1"/><path d="M20 7c0-1.5-1-2-2-2h-1c-1 0-1.5-.5-1.5-1.5S16 2 17 2h1c2.2 0 4 3.8 4 6v2c0 1.5.5 2 1.5 2h.5v2h-.5c-1 0-1.5.5-1.5 2v2c0 2.2-1.8 4-4 4h-1c-1 0-1.5-.5-1.5-1.5S16 21 17 21h1c1 0 2-.5 2-2v-1"/></svg>
-          </button>
-
-          <!-- 5. [↩] Toggle Word Wrap -->
-          <button id="btn-file-toggle-wrap" class="icon-btn ${wordWrap ? 'active-tool-btn' : ''}" title="${wordWrap ? '禁用自动换行' : '开启自动换行'}" style="
-            background: ${wordWrap ? 'var(--accent-subtle, rgba(245,158,11,0.12))' : 'transparent'};
-            color: ${wordWrap ? 'var(--accent, #F59E0B)' : 'var(--text-muted)'};
-            border: 1px solid ${wordWrap ? 'var(--accent-border, rgba(245,158,11,0.3))' : 'transparent'};
-            border-radius: 4px;
-            padding: 4px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-          ">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg>
-          </button>
-
-          <!-- 6. [💬] Quote to Chat / Ask Agent -->
-          <button id="btn-file-quote-chat" class="icon-btn" title="在对话中引用此文件向 Agent 提问" style="
-            background: transparent;
-            color: var(--text-muted);
-            border: 1px solid transparent;
-            border-radius: 4px;
-            padding: 4px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-          ">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-          </button>
-
-          <!-- 7. [↗] Open Externally in Editor -->
+          <!-- 4. [↗] Open Externally in Editor -->
           <button id="btn-file-open-external" class="icon-btn" title="在本地默认外部编辑器打开" style="
             background: transparent;
             color: var(--text-muted);
@@ -341,7 +296,7 @@ export function renderInspectionPod(props: InspectionPodProps): string {
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
           </button>
 
-          <!-- 8. [📋] Copy Full Content -->
+          <!-- 5. [📋] Copy Full Content -->
           <button id="btn-file-copy-content" class="icon-btn" title="复制文件全部内容" style="
             background: transparent;
             color: var(--text-muted);
@@ -581,6 +536,13 @@ function renderFileContent(
     let lineBg = 'transparent';
     let lineTextColor = 'var(--text-main)';
 
+    // Notice line special styling: (该文件位于远程网关工作区...)
+    const isNoticeLine = line.includes('网关未开放') || line.includes('正在从工作区加载');
+    if (isNoticeLine) {
+      lineTextColor = 'var(--text-muted)';
+      lineBg = 'rgba(245, 158, 11, 0.05)';
+    }
+
     if (isDiff) {
       if (line.startsWith('+') && !line.startsWith('+++')) {
         lineBg = 'rgba(34, 197, 94, 0.12)';
@@ -594,7 +556,14 @@ function renderFileContent(
       }
     }
 
-    let formattedLine = escapeHtml(line);
+    // High quality syntax highlighting for code lines (unless Diff line or notice line)
+    let formattedLine = isDiff || isNoticeLine ? escapeHtml(line) : highlightCodeSyntax(line);
+
+    // If notice line, add subtle warning badge icon
+    if (isNoticeLine) {
+      formattedLine = `<span style="display: inline-flex; align-items: center; gap: 6px; color: #F59E0B; font-style: italic;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink: 0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>${formattedLine}</span>`;
+    }
+
     // Highlight in-file search query if provided
     if (opts.searchQuery && opts.searchQuery.trim()) {
       const q = escapeHtml(opts.searchQuery.trim());

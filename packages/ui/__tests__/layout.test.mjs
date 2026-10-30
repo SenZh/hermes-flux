@@ -13,7 +13,7 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     });
 
     assert.ok(html.includes('src/main.ts'), 'Must display preview file path');
-    assert.ok(html.includes('console.log(&quot;hello&quot;);'), 'Must display preview file content');
+    assert.ok(html.includes('console.log') && html.includes('hello'), 'Must display preview file content with syntax highlight');
     assert.ok(html.includes('id="toggle-inspector-close-btn"'), 'Must have close/collapse button');
     // OpenChamber tabs & toolbar buttons assertions
     assert.ok(html.includes('inspector-tabs-bar'), 'Must render tabs bar');
@@ -21,9 +21,6 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     assert.ok(html.includes('btn-file-toggle-mode'), 'Must have Raw/Render view mode toggle button');
     assert.ok(html.includes('btn-file-search'), 'Must have in-file search button');
     assert.ok(html.includes('btn-file-toggle-lineno'), 'Must have line number toggle button');
-    assert.ok(html.includes('btn-file-prettify'), 'Must have prettify button');
-    assert.ok(html.includes('btn-file-toggle-wrap'), 'Must have word wrap toggle button');
-    assert.ok(html.includes('btn-file-quote-chat'), 'Must have quote to chat button');
     assert.ok(html.includes('btn-file-open-external'), 'Must have open external button');
     assert.ok(html.includes('btn-file-copy-content'), 'Must have copy content button');
     assert.ok(html.includes('btn-file-copy-path'), 'Must have copy path button');

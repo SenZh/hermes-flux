@@ -3,6 +3,8 @@
  */
 
 import { ipcMain, BrowserWindow, shell, dialog, app } from 'electron';
+import fs from 'node:fs';
+import path from 'node:path';
 
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   let activeGatewayCookies = '';
@@ -238,5 +240,42 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       properties: ['openFile', 'multiSelections'],
     });
     return result.filePaths;
+  });
+
+  // Local File System Read for Inspection Pod
+  ipcMain.handle('fs:read-file', async (_event, targetPath: string) => {
+    if (!targetPath || typeof targetPath !== 'string') return null;
+    try {
+      // 1. Direct path check
+      if (fs.existsSync(targetPath) && fs.statSync(targetPath).isFile()) {
+        return fs.readFileSync(targetPath, 'utf8');
+      }
+
+      // 2. Normalize separators
+      const normalized = targetPath.replace(/\\/g, '/');
+      if (fs.existsSync(normalized) && fs.statSync(normalized).isFile()) {
+        return fs.readFileSync(normalized, 'utf8');
+      }
+
+      // 3. Search relative to current working directory or known workspace root
+      const cwd = process.cwd();
+      const relPath = path.resolve(cwd, targetPath);
+      if (fs.existsSync(relPath) && fs.statSync(relPath).isFile()) {
+        return fs.readFileSync(relPath, 'utf8');
+      }
+
+      // 4. Relative to targetPath stripped of remote prefixes (e.g. /opt/data/projects/hermes-flux/)
+      const matchProject = normalized.match(/hermes-flux\/(.+)$/);
+      if (matchProject) {
+        const subPath = path.resolve(cwd, matchProject[1]);
+        if (fs.existsSync(subPath) && fs.statSync(subPath).isFile()) {
+          return fs.readFileSync(subPath, 'utf8');
+        }
+      }
+
+      return null;
+    } catch {
+      return null;
+    }
   });
 }

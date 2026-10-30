@@ -1332,7 +1332,7 @@ export function renderMarkdown(md: string): string {
 }
 
 /** Single-pass lexical tokenizer for code syntax highlighting that never corrupts HTML attributes */
-function highlightCodeSyntax(code: string): string {
+export function highlightCodeSyntax(code: string): string {
   if (!code) return '';
 
   // Token definition regex: Comments, Strings, Keywords, Numbers

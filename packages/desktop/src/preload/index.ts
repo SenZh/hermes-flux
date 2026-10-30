@@ -48,6 +48,7 @@ export interface HermesDesktopBridge {
   }) => Promise<any>;
   openExternal: (url: string) => Promise<void>;
   openFileDialog: () => Promise<string[] | null>;
+  readFile: (path: string) => Promise<string | null>;
 }
 
 const bridge: HermesDesktopBridge = {
@@ -69,6 +70,7 @@ const bridge: HermesDesktopBridge = {
   httpProxy: (options) => ipcRenderer.invoke('gateway:http-proxy', options),
   openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url),
   openFileDialog: () => ipcRenderer.invoke('dialog:open-file'),
+  readFile: (filePath: string) => ipcRenderer.invoke('fs:read-file', filePath),
 };
 
 contextBridge.exposeInMainWorld('hermesDesktop', bridge);

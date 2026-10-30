@@ -2692,51 +2692,7 @@ function bindEvents(): void {
     };
   }
 
-  // 6. Toolbar: Prettify JSON / Code
-  const btnPrettify = document.getElementById('btn-file-prettify');
-  if (btnPrettify) {
-    btnPrettify.onclick = () => {
-      const activeFile = state.openFiles.find((f) => f.path === state.activeFilePath) || state.openFiles[0];
-      if (activeFile && activeFile.content) {
-        try {
-          const parsed = JSON.parse(activeFile.content);
-          activeFile.content = JSON.stringify(parsed, null, 2);
-          render();
-        } catch {
-          // If not json, do basic line trim
-          activeFile.content = activeFile.content.split('\n').map((l) => l.trimEnd()).join('\n');
-          render();
-        }
-      }
-    };
-  }
-
-  // 7. Toolbar: Toggle Word Wrap
-  const btnToggleWrap = document.getElementById('btn-file-toggle-wrap');
-  if (btnToggleWrap) {
-    btnToggleWrap.onclick = () => {
-      state.fileWordWrap = !state.fileWordWrap;
-      render();
-    };
-  }
-
-  // 8. Toolbar: Quote to Chat
-  const btnQuoteChat = document.getElementById('btn-file-quote-chat');
-  if (btnQuoteChat) {
-    btnQuoteChat.onclick = () => {
-      const activeFile = state.openFiles.find((f) => f.path === state.activeFilePath) || state.openFiles[0];
-      if (activeFile) {
-        const composer = document.getElementById('prompt-composer-input') as HTMLTextAreaElement | null;
-        if (composer) {
-          const quoteText = `请查看并分析文件 \`${activeFile.path}\`:\n\`\`\`${activeFile.language || ''}\n${activeFile.content.slice(0, 1000)}${activeFile.content.length > 1000 ? '\n// ...(截断)' : ''}\n\`\`\`\n`;
-          composer.value = composer.value ? `${composer.value}\n${quoteText}` : quoteText;
-          composer.focus();
-        }
-      }
-    };
-  }
-
-  // 9. Toolbar: Open Externally
+  // 6. Toolbar: Open Externally
   const btnOpenExternal = document.getElementById('btn-file-open-external');
   if (btnOpenExternal) {
     btnOpenExternal.onclick = () => {
@@ -2754,7 +2710,7 @@ function bindEvents(): void {
     };
   }
 
-  // 10. Toolbar: Copy Full Content
+  // 7. Toolbar: Copy Full Content
   const btnCopyContent = document.getElementById('btn-file-copy-content');
   if (btnCopyContent) {
     btnCopyContent.onclick = () => {
@@ -3334,8 +3290,21 @@ function bindEvents(): void {
       }
       render();
 
-      // Async fetch file content if available via gateway REST or RPC
+      // Async fetch file content if available via local desktop bridge, gateway REST or RPC
       const fetchFileContent = async () => {
+        // Attempt 0: Local Desktop File System Bridge (instant local file access)
+        if (desktopApi?.readFile) {
+          try {
+            const localContent = await desktopApi.readFile(filePath);
+            if (typeof localContent === 'string' && localContent.length > 0) {
+              if (existing) existing.preview = localContent;
+              if (existingOpenFile) existingOpenFile.content = localContent;
+              render();
+              return;
+            }
+          } catch {}
+        }
+
         // Attempt 1: Standard OpenChamber /api/fs/read REST endpoint via desktop bridge
         if (desktopApi?.httpProxy) {
           try {
