@@ -51,7 +51,7 @@
     },
 
     "flux-style-reviewer": {
-      "description": "样式改动强制审查：换肤 Token 完整性、i18n 零硬编码、渲染性能红线。只读，结论 Binding",
+      "description": "样式与体验审查：换肤 Token、i18n、渲染性能与 iOS 级简约纯粹美学。只读，结论 Binding",
       "mode": "subagent",
       "steps": 30,
       "permissions": [
@@ -78,6 +78,17 @@
       "description": "仅修复门禁阻断项的最小改动执行者，禁止顺手重构",
       "mode": "subagent",
       "steps": 20,
+    },
+
+    "flux-simplifier": {
+      "description": "极简主义专员：在严格保持行为不变的前提下，消除过度抽象、多层嵌套与冗余胶水代码",
+      "mode": "subagent",
+      "steps": 25,
+      "permissions": [
+        { "action": "shell", "resource": "git push *", "effect": "deny" },
+        { "action": "shell", "resource": "git reset --hard *", "effect": "deny" },
+        { "action": "subagent", "resource": "*", "effect": "deny" },
+      ],
     },
 
     // 禁止内置子 Agent 再派生孙 Agent，避免审查链自我循环与责任下推

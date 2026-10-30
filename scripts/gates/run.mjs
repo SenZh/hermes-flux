@@ -136,7 +136,8 @@ function run() {
   for (const file of targets) {
     let ctx;
     try {
-      const parsed = readSource(file);
+      // 当处于 --staged 模式时，强制通过 Git Index (git show :<file>) 流式抽取暂存快照
+      const parsed = readSource(file, { fromIndex: flags.staged });
       // warnings 通道用于「必须可见但不阻断」的已登记偏差
       ctx = { ...parsed, warnings: [] };
     } catch (err) {

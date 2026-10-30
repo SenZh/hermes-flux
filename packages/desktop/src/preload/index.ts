@@ -4,33 +4,11 @@
  */
 
 import { contextBridge, ipcRenderer } from 'electron';
+import type { IPlatformBridge, SystemInfo, GatewayAuthResult, WindowControlState } from '@hermes-flux/core';
 
-export interface SystemInfo {
-  platform: 'windows' | 'macos' | 'linux';
-  arch: string;
-  osVersion: string;
-  appVersion: string;
-  isDesktop: boolean;
-  isMobile: boolean;
-  isWeb: boolean;
-}
+export type { SystemInfo, GatewayAuthResult };
 
-export interface GatewayAuthResult {
-  ok: boolean;
-  message: string;
-  latency: number;
-  ticket?: string;
-  version?: string;
-}
-
-export interface HermesDesktopBridge {
-  getSystemInfo: () => Promise<SystemInfo>;
-  minimize: () => Promise<void>;
-  maximize: () => Promise<boolean>;
-  unmaximize: () => Promise<void>;
-  close: () => Promise<void>;
-  isMaximized: () => Promise<boolean>;
-  onWindowStateChange: (callback: (state: { isMaximized: boolean }) => void) => () => void;
+export interface HermesDesktopBridge extends IPlatformBridge {
   getDefaultGatewayConfig: () => Promise<{ url: string; key: string; profile: string }>;
   authenticateGateway: (options: {
     url: string;
@@ -46,7 +24,6 @@ export interface HermesDesktopBridge {
     body?: any;
     params?: any;
   }) => Promise<any>;
-  openExternal: (url: string, content?: string) => Promise<void>;
   openFileDialog: () => Promise<string[] | null>;
   readFile: (path: string) => Promise<string | null>;
 }

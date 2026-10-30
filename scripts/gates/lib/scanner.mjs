@@ -21,6 +21,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -428,11 +429,31 @@ export function traceLineStates(src) {
 
 /**
  * 读取并解析单个源文件。
+ * 支持从磁盘读取或从 Git 暂存区 (git show :<file>) 流式抽取，以防御 partial staging 漏洞。
+ *
  * @param {string} relPath 仓库相对路径
+ * @param {{ fromIndex?: boolean }} [opts] 是否强制从 Git Index 读取
  */
-export function readSource(relPath) {
+export function readSource(relPath, opts = {}) {
   const abs = path.join(REPO_ROOT, relPath);
-  const src = fs.readFileSync(abs, 'utf8');
+  let src = '';
+  if (opts.fromIndex) {
+    try {
+      // 关键防御：使用同步子进程读取 Git 暂存区中的精确快照，
+      // 彻底杜绝 git add -p 部分暂存时，读工作区磁盘导致漏检或误判的漏洞。
+      src = execFileSync('git', ['show', `:${relPath}`], {
+        cwd: REPO_ROOT,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        maxBuffer: 32 * 1024 * 1024,
+      });
+    } catch {
+      // 若读取暂存区失败（如未跟踪文件或 git 不可用），优雅降级到工作区磁盘读取
+      src = fs.readFileSync(abs, 'utf8');
+    }
+  } else {
+    src = fs.readFileSync(abs, 'utf8');
+  }
   const parsed = stripComments(src);
   return { relPath, absPath: abs, src, ...parsed };
 }

@@ -1,10 +1,18 @@
 #!/bin/sh
 # Hermes Flux pre-commit 钩子入口（跨平台 shim）
 #
-# 这里只做一件事：把控制权交给 Node 实现。
-# 原因：bash 在这些场景下都不可靠——
-#   1. Windows + PowerShell 执行策略会拒绝 .ps1，且 npm 不保证可见；
-#   2. Git Bash / WSL / MSYS 的路径转换会破坏绝对路径；
-#   3. 各平台 node 位置不一致，必须交给 PATH 解析。
-# 因此唯一稳定可移植的解释器是 `node`。
-exec node "$(dirname "$0")/pre-commit.mjs"
+# 防范的历史坑：
+#   Windows 下部分 GUI Git 工具（SourceTree、TortoiseGit、VS Code Git 扩展）
+#   在启动进程时环境变量中可能缺失用户自定义的 PATH，导致找不到 `node` 报 command not found。
+#   因此优先探测 PATH 中的 node，其次探测 Windows 标准安装路径兜底。
+
+NODE_BIN="node"
+if ! command -v node >/dev/null 2>&1; then
+  if [ -x "/c/Program Files/nodejs/node.exe" ]; then
+    NODE_BIN="/c/Program Files/nodejs/node.exe"
+  elif [ -x "C:\\Program Files\\nodejs\\node.exe" ]; then
+    NODE_BIN="C:\\Program Files\\nodejs\\node.exe"
+  fi
+fi
+
+exec "$NODE_BIN" "$(dirname "$0")/pre-commit.mjs"

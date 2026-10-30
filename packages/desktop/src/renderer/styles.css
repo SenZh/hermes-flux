@@ -344,3 +344,44 @@ button {
   color: var(--text-main);
 }
 
+/* ==========================================================================
+   Mobile & Responsive Layout Adaptations (iOS / Android / Web)
+   ========================================================================== */
+
+@media (max-width: 768px) {
+  /* 移动端视口安全区全局注入 */
+  body {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* 移动端左侧会话轨默认收纳为滑出抽屉，避免挤压对话流 */
+  .left-rail {
+    position: fixed !important;
+    left: 0;
+    top: calc(42px + env(safe-area-inset-top, 0px));
+    bottom: 0;
+    z-index: 100;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.6);
+  }
+
+  /* 移动端右侧检查舱收敛为全屏 Sheet */
+  .inspection-pod {
+    position: fixed !important;
+    right: 0;
+    top: calc(42px + env(safe-area-inset-top, 0px));
+    bottom: 0;
+    width: 100% !important;
+    z-index: 100;
+  }
+
+  /* 输入舱贴合移动端视口宽度 */
+  .input-dock {
+    max-width: calc(100vw - 24px) !important;
+    left: 12px !important;
+    right: 12px !important;
+    transform: none !important;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
+

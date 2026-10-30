@@ -57,7 +57,7 @@ declare global {
 }
 
 interface AppState {
-  platform: 'windows' | 'macos' | 'linux';
+  platform: 'windows' | 'macos' | 'linux' | 'ios' | 'android' | 'web';
   theme: 'obsidian-gold' | 'suet-jade' | 'jade-white';
   lang: 'zh' | 'en';
   isMaximized: boolean;
@@ -2544,7 +2544,8 @@ function bindEvents(): void {
   if (maxBtn) {
     maxBtn.onclick = async () => {
       if (desktopApi) {
-        state.isMaximized = await desktopApi.maximize();
+        const res = await desktopApi.maximize();
+        state.isMaximized = typeof res === 'boolean' ? res : await desktopApi.isMaximized();
         render();
       }
     };
@@ -2560,7 +2561,8 @@ function bindEvents(): void {
   if (macMax) {
     macMax.onclick = async () => {
       if (desktopApi) {
-        state.isMaximized = await desktopApi.maximize();
+        const res = await desktopApi.maximize();
+        state.isMaximized = typeof res === 'boolean' ? res : await desktopApi.isMaximized();
         render();
       }
     };

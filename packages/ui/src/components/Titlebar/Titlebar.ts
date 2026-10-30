@@ -6,7 +6,7 @@
  */
 
 export interface TitlebarProps {
-  platform: 'windows' | 'macos' | 'linux';
+  platform: 'windows' | 'macos' | 'linux' | 'ios' | 'android' | 'web';
   title: string;
   isMaximized: boolean;
   gatewayConnected: boolean;
@@ -23,6 +23,9 @@ export interface TitlebarProps {
 
 export function renderTitlebar(props: TitlebarProps): string {
   const isWin = props.platform === 'windows';
+  const isMac = props.platform === 'macos';
+  const isMobile = props.platform === 'ios' || props.platform === 'android';
+  const isWeb = props.platform === 'web';
 
   const macControls = `
     <div class="mac-traffic-lights" style="-webkit-app-region: no-drag; display: flex; gap: 7px; align-items: center; padding-left: 12px;">
@@ -61,21 +64,25 @@ export function renderTitlebar(props: TitlebarProps): string {
 
   return `
     <header class="flux-titlebar" style="
-      height: 42px;
+      height: calc(42px + env(safe-area-inset-top, 0px));
       min-height: 42px;
+      padding-top: env(safe-area-inset-top, 0px);
+      padding-left: env(safe-area-inset-left, 0px);
+      padding-right: env(safe-area-inset-right, 0px);
+      box-sizing: border-box;
       display: flex;
       align-items: center;
       justify-content: space-between;
       border-bottom: 1px solid var(--border-subtle);
       background: var(--bg-rail);
       user-select: none;
-      -webkit-app-region: drag;
+      -webkit-app-region: ${isMobile || isWeb ? 'no-drag' : 'drag'};
       position: relative;
       z-index: 50;
     ">
       <!-- Left Wing: Agent Profiles Align Left & Collapser -->
       <div class="titlebar-left" style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;">
-        ${!isWin ? macControls : ''}
+        ${isMac ? macControls : ''}
         <button id="toggle-left-rail-btn" class="icon-btn" title="折叠/展开侧栏 (Ctrl+B)" style="
           -webkit-app-region: no-drag;
           margin-left: ${isWin ? '12px' : '6px'};
@@ -173,7 +180,7 @@ export function renderTitlebar(props: TitlebarProps): string {
       </div>
 
       <!-- Right Global Auxiliary Area (250px) -->
-      <div class="titlebar-right" style="display: flex; align-items: center; justify-content: flex-end; width: 250px; min-width: 250px; gap: 8px; height: 100%;">
+      <div class="titlebar-right" style="display: flex; align-items: center; justify-content: flex-end; ${isMobile ? 'width: auto; min-width: 0;' : 'width: 250px; min-width: 250px;'} gap: 8px; height: 100%;">
         <div style="-webkit-app-region: no-drag; display: flex; align-items: center; gap: 6px; margin-right: 8px;">
           <!-- Settings gear icon button -->
           <button id="btn-open-settings" class="icon-btn" title="网关与系统设置" style="

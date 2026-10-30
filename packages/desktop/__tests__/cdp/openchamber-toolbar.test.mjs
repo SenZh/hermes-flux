@@ -265,7 +265,7 @@ test('OpenChamber File Bar - Live Headless Browser CDP Test', async (t) => {
       returnByValue: true
     });
 
-    assert.equal(res.result.value.openedPath, 'SKILL.md', 'Clicking open-external must target current active file');
+    assert.equal(res.result.value.openedPath, 'package.json', 'Clicking open-external must target current active file (switched in earlier test)');
     assert.equal(res.result.value.feedbackColor, 'var(--accent)', 'Button must apply visual accent feedback upon click');
   });
 

@@ -100,6 +100,24 @@ const architectureRules = {
       });
     }
 
+    // 跨端宿主隔离规则：packages/core 与 packages/ui 禁止直接导入 Node 原生模块
+    if ((file.startsWith('packages/core/src/') || file.startsWith('packages/ui/src/')) && !file.includes('/__tests__/')) {
+      codeLines.forEach((line, i) => {
+        // 匹配针对 Node 核心模块的静态引用（electron 由 layer-direction 规则专门管控）
+        const m = /(?:from|import)\s*\(?\s*['"](?:node:)?(child_process|fs|fs\/promises|os)['"]/.exec(line);
+        if (!m) return;
+        if (hasInlineAllowance(rawLines, i, 'arch')) return;
+        out.push({
+          file,
+          line: i + 1,
+          lineIdx: i,
+          ruleId: 'arch/no-host-leak',
+          message: `跨端宿主隔离违规：禁止在通用包直接导入宿主专有模块 "${m[1]}"，必须经由 PAL 接口注入`,
+          snippet: line.trim().slice(0, 110),
+        });
+      });
+    }
+
     // 类型逃逸：as any / as unknown as / <any>
     // 注意：门禁脚本自身的「检测模式」就是这些字面量（如 /as\s+any/），
     // 那是规则定义而非真实类型断言，必须排除，否则门禁会举报自己。
@@ -257,6 +275,13 @@ const perfRules = {
         re: /scroll-behavior\s*:\s*smooth/i,
         ruleId: 'perf/smooth-scroll',
         message: '禁止 scroll-behavior: smooth，平滑滚动会与滚动补偿叠加成抖动',
+      },
+      {
+        // 移动端 WebKit 避坑铁律：长列表滚动容器及其直接包装层严禁使用 CSS transform
+        // transform 会破坏 WebKit GPU 滚动图层，导致软键盘弹出时发生 3~5 秒严重假死卡顿
+        re: /(?:\.chat-scroll|#conversation-stream|\[data-scroll-container\])[\s\S]{0,120}?transform\s*:/i,
+        ruleId: 'perf/no-transform-scroll',
+        message: 'WebKit 移动端避坑红线：会话滚动容器严禁使用 CSS transform，必须改为 padding-bottom 动态视口避让',
       },
       {
         re: /content-visibility|contain-intrinsic-size/i,

@@ -357,5 +357,13 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     assert.ok(durationMs < 50, `Giant log parsing must complete rapidly without regex backtracking, took ${durationMs}ms`);
     assert.ok(renderedLog.includes('AndroidRuntime'), 'Logcat content must be accurately preserved');
   });
+
+  await t.test('Gate 4e: MiddlePod long session performance benchmark (5000 synthetic messages)', async () => {
+    const { runLongSessionPerfBenchmark } = await import('../../../scripts/gates/perf-benchmark.mjs');
+    const result = await runLongSessionPerfBenchmark();
+    assert.equal(result.passed, true, '5000 messages performance budget benchmark must pass completely');
+    assert.ok(result.budgets.initialWindowRender.ms <= 15, 'Initial window render must be <= 15ms');
+    assert.ok(result.budgets.prependPaging.avgMs <= 25, 'Prepend batch paging must be <= 25ms');
+  });
 });
 

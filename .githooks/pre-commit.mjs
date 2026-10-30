@@ -19,6 +19,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -57,9 +58,19 @@ function run(label, command, args) {
 }
 
 function main() {
+  // 防范历史坑：在交互式 rebase 或正在解决合并冲突时，Git 暂存区处于非稳态，
+  // 此时执行全量门禁不仅极慢，还容易引发幽灵冲突打断变基流程。
+  const gitDir = path.join(REPO_ROOT, '.git');
+  const isRebasing = fs.existsSync(path.join(gitDir, 'rebase-merge')) || fs.existsSync(path.join(gitDir, 'rebase-apply'));
+  const isMerging = fs.existsSync(path.join(gitDir, 'MERGE_HEAD'));
+  if (isRebasing || isMerging) {
+    console.log(`${C.dim}检测到正在执行 Git Rebase / Merge，自动放行 pre-commit 门禁${C.reset}`);
+    process.exit(0);
+  }
+
   console.log(`${C.bold}══════════════════════════════════════════════════${C.reset}`);
   console.log(`${C.bold}🛡️  Hermes Flux Gatekeeper · pre-commit${C.reset}`);
-  console.log(`${C.dim}   静态门禁走改动集 · 类型与测试走全量${C.reset}`);
+  console.log(`${C.dim}   静态门禁走暂存区快照 (git show) · 类型与测试走全量${C.reset}`);
   console.log(`${C.bold}══════════════════════════════════════════════════${C.reset}`);
 
   const gates = [
