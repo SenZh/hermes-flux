@@ -40,23 +40,33 @@ export function renderInputDock(props: InputDockProps): string {
       <div class="agent-activity-pill" style="
         display: inline-flex;
         align-items: center;
-        gap: 7px;
-        background: var(--bg-card);
+        gap: 6px;
+        background: var(--bg-backdrop);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
         border: 1px solid var(--border-medium);
-        border-radius: 20px;
-        padding: 4px 14px;
-        font-size: 12px;
+        border-radius: 9999px;
+        padding: 3px 12px;
+        font-size: 11px;
         color: var(--text-main);
         margin-bottom: 8px;
         pointer-events: auto;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25), var(--specular-line);
         user-select: none;
-        animation: fadeIn 0.2s ease;
+        animation: flux-fade-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
       ">
-        <span style="color: var(--accent); font-size: 13px; display: inline-flex; align-items: center; animation: pulse 2s infinite;">✨</span>
-        <span style="font-weight: 500;">${escapeHtml(modelLabel)}</span>
-        <span style="color: var(--text-muted);">·</span>
-        <span style="color: var(--text-secondary);">${escapeHtml(activityStatus)}</span>
+        <span class="activity-status-dot" style="
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: #10B981;
+          box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+          display: inline-block;
+          animation: flux-pulse 2s infinite ease-in-out;
+        "></span>
+        <span style="font-weight: 500; letter-spacing: -0.01em;">${escapeHtml(modelLabel)}</span>
+        <span style="color: var(--text-muted); opacity: 0.5;">·</span>
+        <span style="color: var(--text-secondary); font-family: var(--font-mono, monospace); font-size: 10.5px;">${escapeHtml(activityStatus)}</span>
       </div>
     `
     : '';
@@ -127,17 +137,26 @@ export function renderInputDock(props: InputDockProps): string {
           notice
             ? `<div id="dock-notice" role="status" style="
           display: flex;
-          align-items: flex-start;
-          gap: 6px;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
           font-size: 11px;
-          line-height: 1.45;
-          color: #F87171;
-          background: rgba(239, 68, 68, 0.08);
-          border: 1px solid rgba(239, 68, 68, 0.28);
-          border-radius: 6px;
-          padding: 6px 8px;
+          line-height: 1.4;
+          color: var(--text-secondary);
+          background: var(--bg-surface-2, rgba(255, 255, 255, 0.04));
+          border: 1px solid var(--border-medium);
+          border-radius: 8px;
+          padding: 6px 10px;
           word-break: break-word;
-        "><span>⚠</span><span>${escapeHtml(notice)}</span></div>`
+          backdrop-filter: blur(12px);
+          animation: flux-fade-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        ">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span style="color: var(--accent); font-size: 12px;">ℹ</span>
+            <span>${escapeHtml(notice)}</span>
+          </div>
+          <span id="dock-notice-close" style="cursor: pointer; opacity: 0.6; padding: 2px 4px; font-size: 13px;" title="关闭提示">×</span>
+        </div>`
             : ''
         }
 
@@ -197,11 +216,11 @@ export function renderInputDock(props: InputDockProps): string {
                     <span id="btn-refresh-models" style="font-size: 11px; color: var(--text-muted); cursor: pointer;" title="刷新列表">刷新 ↻</span>
                   </div>
                   <div style="position: relative; display: flex; align-items: center;">
-                    <span style="position: absolute; left: 8px; color: var(--text-muted); font-size: 11.5px;">🔍</span>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position: absolute; left: 9px; color: var(--text-muted);"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                     <input id="dock-model-search-input" type="text" placeholder="搜索模型" value="${escapeHtml(props.modelSearchQuery || '')}" style="
                       width: 100%;
                       height: 28px;
-                      padding: 0 10px 0 26px;
+                      padding: 0 10px 0 28px;
                       border-radius: 6px;
                       border: 1px solid var(--border-medium);
                       background: var(--bg-panel);
@@ -360,25 +379,25 @@ export function renderInputDock(props: InputDockProps): string {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
             </button>
 
-            <!-- Send Action Button: Refined Clean Ice-Blue Pill -->
+            <!-- Send Action Button: Refined OpenChamber Rounded Square + Arrow Pill -->
             <button id="dock-send-btn" class="send-action-btn" title="${isStreaming ? '中断本轮生成' : '发送 (Enter)'}" ${props.disabled ? 'disabled' : ''} style="
-              height: 24px;
+              height: 28px;
               width: 28px;
-              border-radius: 6px;
-              background: ${isStreaming ? 'rgba(239, 68, 68, 0.15)' : 'rgba(56, 189, 248, 0.12)'};
-              border: 1px solid ${isStreaming ? '#EF4444' : 'rgba(56, 189, 248, 0.35)'};
-              color: ${isStreaming ? '#EF4444' : '#38BDF8'};
+              border-radius: 7px;
+              background: ${isStreaming ? 'rgba(239, 68, 68, 0.14)' : 'rgba(56, 189, 248, 0.12)'};
+              border: 1px solid ${isStreaming ? '#EF4444' : 'rgba(56, 189, 248, 0.38)'};
+              color: ${isStreaming ? '#EF4444' : '#0284C7'};
               display: flex;
               align-items: center;
               justify-content: center;
               cursor: ${props.disabled ? 'not-allowed' : 'pointer'};
-              box-shadow: 0 0 8px ${isStreaming ? 'rgba(239, 68, 68, 0.2)' : 'rgba(56, 189, 248, 0.15)'};
+              box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
               transition: all 0.15s ease;
             ">
               ${
                 isStreaming
                   ? `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>`
-                  : `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>`
+                  : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>`
               }
             </button>
           </div>

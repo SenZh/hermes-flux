@@ -145,7 +145,18 @@ export function renderLeftRail(props: LeftRailProps): string {
           </div>
         `
             : `
-          <div style="font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; padding: 6px 8px 4px;">对话列表 (${props.sessions.length})</div>
+          <div style="
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 8px 4px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            letter-spacing: -0.01em;
+          ">
+            <span>对话列表 (${props.sessions.length})</span>
+          </div>
           
           <div style="display: flex; flex-direction: column; gap: 4px;">
             ${activeSessions

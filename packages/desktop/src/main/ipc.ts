@@ -219,7 +219,11 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}: ${res.statusText}`);
     }
-    return await res.json();
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      return await res.json();
+    }
+    return await res.text();
   });
 
   // Shell & Dialogs

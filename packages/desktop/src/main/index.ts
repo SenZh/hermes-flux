@@ -95,6 +95,9 @@ if (!gotTheLock) {
       : win.loadFile(indexPath));
   };
 
+  // Enable Remote Debugging Port for CDP testing & automation
+  app.commandLine.appendSwitch('remote-debugging-port', '9222');
+
   app.whenReady().then(() => {
     // Create main window
     const win = createMainWindow();

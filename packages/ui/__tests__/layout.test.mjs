@@ -147,6 +147,80 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     assert.ok(html.includes('Core'), 'Table must contain cell data');
   });
 
+  await t.test('MiddlePod must aggregate multiple read-only tools', async () => {
+    const { renderMiddlePod } = await import('../dist/components/MiddlePod/MiddlePod.js');
+    const html = renderMiddlePod({
+      gatewayConnected: true,
+      messages: [
+        {
+          id: 'ast-103',
+          role: 'assistant',
+          content: 'Files inspected and modified.',
+          timestamp: '12:03',
+          toolCalls: [
+            {
+              id: 'tool-r1',
+              name: 'read_file',
+              status: 'completed',
+              args: '{"path":"src/app.ts"}',
+              output: 'const x = 1;',
+            },
+            {
+              id: 'tool-r2',
+              name: 'grep',
+              status: 'completed',
+              args: '{"pattern":"import"}',
+              output: 'matches found',
+            },
+            {
+              id: 'tool-e1',
+              name: 'edit',
+              status: 'completed',
+              args: '{"path":"src/app.ts"}',
+              output: '--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1,2 @@\n+const y = 2;',
+            },
+          ],
+        },
+      ],
+    });
+
+    assert.ok(html.includes('检索与阅读'), 'Must group consecutive read-only tools into an aggregated capsule');
+    assert.ok(html.includes('app.ts'), 'Must display target file in tool capsule');
+  });
+
+  await t.test('MiddlePod tool categorization must never misclassify write tools or single read tools', async () => {
+    const { renderMiddlePod } = await import('../dist/components/MiddlePod/MiddlePod.js');
+    const html = renderMiddlePod({
+      gatewayConnected: true,
+      messages: [
+        {
+          id: 'ast-104',
+          role: 'assistant',
+          content: 'File written successfully',
+          timestamp: '12:04',
+          toolCalls: [
+            {
+              id: 'tool-w1',
+              name: 'write_file',
+              status: 'completed',
+              args: '{"path":"dist/bundle.js","content":"console.log(1);"}'
+            },
+            {
+              id: 'tool-r-single',
+              name: 'read_file',
+              status: 'completed',
+              args: '{"path":"README.md"}'
+            }
+          ],
+        },
+      ],
+    });
+
+    assert.ok(html.includes('Write File'), 'write_file must be accurately classified as Write File');
+    assert.ok(!html.includes('检索与阅读'), 'Single read-only tool followed by write must not trigger multi-item group');
+    assert.ok(html.includes('Read File'), 'Single read_file must render as individual Read File capsule');
+  });
+
   await t.test('MiddlePod and renderMarkdown must handle edge cases without crash or corruption', async () => {
     const { renderMiddlePod, renderMarkdown } = await import('../dist/components/MiddlePod/MiddlePod.js');
 

@@ -65,7 +65,8 @@ buildProcess.on('close', (code) => {
       const zipScript = path.join(rootDir, 'scripts/make-zip.py');
 
       try {
-        execSync(`python3 "${zipScript}" "${unpackedDir}" "${zipOutput}"`, { stdio: 'inherit' });
+        const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+        execSync(`"${pythonCmd}" "${zipScript}" "${unpackedDir}" "${zipOutput}"`, { stdio: 'inherit' });
       } catch (err) {
         console.warn('Zip creation failed:', err);
       }

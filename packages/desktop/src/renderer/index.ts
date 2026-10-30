@@ -108,6 +108,7 @@ interface AppState {
   gitDiffs: Array<{ file: string; additions: number; deletions: number; patch?: string }>;
   memories: Array<{ category: string; content: string; updated?: string }>;
   agentActivityStatus?: string;
+  inspectorFullscreen?: boolean;
 }
 
 const desktopApi: HermesDesktopBridge | undefined = window.hermesDesktop;
@@ -133,29 +134,6 @@ function resolveInitialLogLevel(): LogLevel {
 
 setLogLevel(resolveInitialLogLevel());
 
-window.__fluxLog = {
-  get level() {
-    return getLogLevel();
-  },
-  setLevel(next: string) {
-    const level = parseLogLevel(next, getLogLevel());
-    setLogLevel(level);
-    window.localStorage.setItem(LOG_LEVEL_STORAGE_KEY, level);
-    return level;
-  },
-};
-
-const logApp = createLogger('app');
-const logRender = createLogger('render');
-const logSession = createLogger('session');
-const logStream = createLogger('stream');
-const logScroll = createLogger('scroll');
-
-/**
- * Storage keys are `hermes_flux_*`; every read also falls back to the legacy
- * `hermes_aura_*` key so profiles created before the rename keep their theme,
- * language, gateway credentials and rail widths.
- */
 const state: AppState = {
   platform: 'windows',
   theme: (localStorage.getItem('hermes_flux_theme') || localStorage.getItem('hermes_aura_theme') as any) || 'obsidian-gold',
@@ -201,9 +179,34 @@ const state: AppState = {
   memories: [],
 };
 
+window.__fluxLog = {
+  get level() {
+    return getLogLevel();
+  },
+  setLevel(next: string) {
+    const level = parseLogLevel(next, getLogLevel());
+    setLogLevel(level);
+    window.localStorage.setItem(LOG_LEVEL_STORAGE_KEY, level);
+    return level;
+  },
+};
+
+const logApp = createLogger('app');
+const logRender = createLogger('render');
+const logSession = createLogger('session');
+const logStream = createLogger('stream');
+const logScroll = createLogger('scroll');
+
+(window as any).__fluxState = state;
+(window as any).__fluxConnect = connect;
+
 let gatewayClient: HermesGatewayClient | null = null;
 let currentTicket: string | undefined = undefined;
 let activeStreamingMessageId: string | null = null;
+let activeStreamingStoredSessionId: string | null = null;
+let activeStreamingLiveId: string | null = null;
+const sessionDraftMap = new Map<string, string>();
+let dockNoticeDismissTimer: ReturnType<typeof setTimeout> | null = null;
 let sessionsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let turnWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -311,11 +314,46 @@ const tokenCoalescer = new TokenCoalescer((flushedMap) => {
   let renderedChars = 0;
 
   for (const [msgId, entry] of flushedMap.entries()) {
-    const targetMsg = state.messages.find((m) => m.id === msgId);
+    // Session Isolation: Tokens belong only to the session that initiated the turn
+    const isCurrentSessionActive = activeStreamingStoredSessionId === state.activeSessionId;
+    let targetMsg: MessageViewModel | undefined;
+
+    // Always keep background session cache updated with incoming chunks
+    if (activeStreamingStoredSessionId) {
+      let cached = sessionMessagesCache.get(activeStreamingStoredSessionId);
+      if (!cached) {
+        cached = [];
+        sessionMessagesCache.set(activeStreamingStoredSessionId, cached);
+      }
+      let cachedTarget = cached.find((m) => m.id === msgId);
+      if (!cachedTarget) {
+        cachedTarget = {
+          id: msgId,
+          role: 'assistant',
+          content: '',
+          thought: '',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        };
+        cached.push(cachedTarget);
+      }
+      if (entry.content) cachedTarget.content += entry.content;
+      if (entry.thought) cachedTarget.thought = (cachedTarget.thought || '') + entry.thought;
+    }
+
+    if (isCurrentSessionActive) {
+      targetMsg = state.messages.find((m) => m.id === msgId);
+      if (!targetMsg && activeStreamingStoredSessionId) {
+        const cached = sessionMessagesCache.get(activeStreamingStoredSessionId);
+        targetMsg = cached?.find((m) => m.id === msgId);
+        if (targetMsg && !state.messages.some((m) => m.id === msgId)) {
+          state.messages.push(targetMsg);
+        }
+      }
+    }
+
     if (!targetMsg || targetMsg.role !== 'assistant') continue;
 
-    if (entry.content) {
-      targetMsg.content += entry.content;
+    if (entry.content && isCurrentSessionActive) {
       renderedChars += entry.content.length;
       const contentEl = document.getElementById(`msg-content-${targetMsg.id}`);
       if (contentEl) {
@@ -327,25 +365,21 @@ const tokenCoalescer = new TokenCoalescer((flushedMap) => {
           contentEl.style.flexDirection = 'column';
         }
         const rendered = renderMarkdown(targetMsg.content);
-        const cursorHtml = state.isStreaming
-          ? `<span class="flux-typing-cursor" style="display: inline-block; width: 6px; height: 13px; background: var(--accent); margin-left: 2px; vertical-align: -1px; border-radius: 1px; animation: flux-cursor-blink 0.9s infinite;"></span>`
-          : '';
-        contentEl.innerHTML = `${rendered}${cursorHtml}`;
+        contentEl.innerHTML = rendered;
       }
     }
 
-    if (entry.thought) {
-      targetMsg.thought = (targetMsg.thought || '') + entry.thought;
+    if (entry.thought && isCurrentSessionActive) {
       const thoughtEl = document.getElementById(`msg-thought-${targetMsg.id}`);
       if (thoughtEl) {
-        thoughtEl.innerText = targetMsg.thought;
+        thoughtEl.innerText = targetMsg.thought || '';
         const fold = thoughtEl.closest('details');
         if (fold) {
           fold.style.display = 'block';
           if (!fold.open) fold.open = true;
           const summaryEl = fold.querySelector('summary span:last-child') as HTMLElement | null;
           if (summaryEl) {
-            summaryEl.innerText = getCleanReasoningSummary(targetMsg.thought);
+            summaryEl.innerText = getCleanReasoningSummary(targetMsg.thought || '');
           }
         }
       }
@@ -602,13 +636,36 @@ function parseRawMessages(list: any[]): MessageViewModel[] {
       ? m.tool_use
       : [];
 
-    const toolCalls = rawToolCalls.map((tc: any, tIdx: number) => ({
-      id: tc.id || `tc-${idx}-${tIdx}`,
-      name: tc.name || tc.function?.name || 'tool',
-      status: (tc.status || 'completed') as any,
-      args: typeof tc.args === 'string' ? tc.args : typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.args || tc.arguments || tc.input || {}),
-      output: tc.output ? String(tc.output) : tc.result ? String(tc.result) : undefined,
-    }));
+    const toolCalls = rawToolCalls.map((tc: any, tIdx: number) => {
+      const toolName = tc.name || tc.function?.name || tc.tool || 'tool';
+      let rawArgs = tc.args ?? tc.arguments ?? tc.function?.arguments ?? tc.input ?? tc.parameters ?? {};
+      if (typeof rawArgs === 'string') {
+        const trimmed = rawArgs.trim();
+        if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+          try {
+            rawArgs = JSON.parse(trimmed);
+          } catch {}
+        }
+      }
+
+      // Deeply extract command or target file path so the title line never shows empty
+      let cleanArg = '';
+      if (typeof rawArgs === 'object' && rawArgs !== null) {
+        cleanArg = rawArgs.command || rawArgs.cmd || rawArgs.path || rawArgs.file || rawArgs.filePath || rawArgs.file_path || rawArgs.resolved_path || rawArgs.query || rawArgs.pattern || rawArgs.description || rawArgs.prompt || '';
+      } else if (typeof rawArgs === 'string') {
+        cleanArg = rawArgs;
+      }
+
+      const argsStr = typeof rawArgs === 'string' ? rawArgs : JSON.stringify(rawArgs);
+
+      return {
+        id: tc.id || tc.tool_call_id || `tc-${idx}-${tIdx}`,
+        name: toolName,
+        status: (tc.status || 'completed') as any,
+        args: cleanArg ? cleanArg : argsStr,
+        output: tc.output ? String(tc.output) : tc.result ? String(tc.result) : tc.stdout ? String(tc.stdout) : undefined,
+      };
+    });
 
     let isToolPayload = rawRole === 'tool' || rawRole === 'function';
     let synthesizedToolCall: any = null;
@@ -619,17 +676,32 @@ function parseRawMessages(list: any[]): MessageViewModel[] {
         if (
           parsed &&
           typeof parsed === 'object' &&
-          ('success' in parsed || 'diff' in parsed || 'files_modified' in parsed || 'stdout' in parsed || 'exitCode' in parsed)
+          ('output' in parsed || 'stdout' in parsed || 'exit_code' in parsed || 'exitCode' in parsed || 'diff' in parsed || 'files_modified' in parsed || 'total_count' in parsed || 'matches_text' in parsed || 'content' in parsed)
         ) {
           isToolPayload = true;
-          const toolName = ('diff' in parsed || 'files_modified' in parsed) ? 'edit' : 'tool';
-          const targetArg = parsed.resolved_path || (parsed.files_modified ? parsed.files_modified[0] : '') || '';
+          let toolName = 'tool';
+          let targetArg = '';
+
+          if ('matches_text' in parsed || 'total_count' in parsed) {
+            toolName = 'grep';
+          } else if ('diff' in parsed || 'files_modified' in parsed) {
+            toolName = 'edit';
+            targetArg = parsed.resolved_path || (parsed.files_modified ? parsed.files_modified[0] : '') || '';
+          } else if ('output' in parsed || 'stdout' in parsed) {
+            toolName = 'shell';
+          }
+
+          let formattedOutput = parsed.output ?? parsed.stdout ?? parsed.diff ?? parsed.matches_text ?? rawText;
+          if (typeof formattedOutput !== 'string') {
+            formattedOutput = JSON.stringify(formattedOutput, null, 2);
+          }
+
           synthesizedToolCall = {
             id: m.tool_call_id || `tc-synth-${idx}`,
             name: toolName,
             status: 'completed',
             args: targetArg,
-            output: parsed.diff || rawText,
+            output: formattedOutput,
           };
         }
       } catch {
@@ -650,14 +722,19 @@ function parseRawMessages(list: any[]): MessageViewModel[] {
         const validToolOutput = rawText || m.output || (m.result && Object.keys(m.result).length > 0 ? JSON.stringify(m.result) : undefined);
 
         if (prev.toolCalls.length > 0) {
-          prev.toolCalls[prev.toolCalls.length - 1].output = validToolOutput;
+          const lastTool = prev.toolCalls[prev.toolCalls.length - 1];
+          lastTool.output = validToolOutput;
+          // If the last tool was missing arguments or targetArg, try extracting from the result
+          if (!lastTool.args && synthesizedToolCall?.args) {
+            lastTool.args = synthesizedToolCall.args;
+          }
           continue;
         } else {
           prev.toolCalls.push({
             id: m.tool_call_id || `tc-${idx}`,
-            name: m.name || 'tool',
+            name: synthesizedToolCall?.name || m.name || 'tool',
             status: 'completed',
-            args: '',
+            args: synthesizedToolCall?.args || '',
             output: validToolOutput,
           });
           continue;
@@ -788,9 +865,20 @@ async function loadMessages(sessionId: string): Promise<void> {
       mounted: state.messages.length,
       ms: Math.round((performance.now() - loadStartedAt) * 10) / 10,
     });
+  } else {
+    // Session has no cache: clear messages immediately so old session's messages don't persist
+    state.messages = [];
+    state.hasOlderMessages = false;
+    render();
   }
 
-  // 2. High-speed REST pagination: 50 items latest-first (<50ms vs 6500ms WS dump)
+  // 2. If this session is currently actively streaming, DO NOT overwrite with stale REST history!
+  if (activeStreamingStoredSessionId === sessionId) {
+    logSession.info('session is actively streaming, preserving live state', { sessionId });
+    return;
+  }
+
+  // 3. High-speed REST pagination: 50 items latest-first (<50ms vs 6500ms WS dump)
   let fastLoaded = false;
   try {
     const outcome = await gatewayClient.fetchSessionMessages(sessionId, {
@@ -910,9 +998,15 @@ async function ensureLiveSessionId(): Promise<string> {
 
 async function createNewSession(): Promise<void> {
   if (!gatewayClient) {
-    state.dockNotice = '未连接网关，无法新建会话';
+    setTimedDockNotice('未连接网关，无法新建会话');
     render();
     return;
+  }
+
+  // Preserve draft for current session before creating new
+  const currentInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
+  if (state.activeSessionId && currentInput) {
+    sessionDraftMap.set(state.activeSessionId, currentInput.value);
   }
 
   try {
@@ -933,7 +1027,7 @@ async function createNewSession(): Promise<void> {
 
     const handles = readSessionHandles(res);
     if (!handles) {
-      state.dockNotice = '网关没有返回新会话的标识，无法开始对话';
+      setTimedDockNotice('网关没有返回新会话的标识，无法开始对话');
       render();
       return;
     }
@@ -941,8 +1035,14 @@ async function createNewSession(): Promise<void> {
     state.activeSessionId = handles.storedId;
     state.activeLiveSessionId = handles.liveId;
     state.messages = [];
+    sessionMessagesCache.set(handles.storedId, []);
     state.dockNotice = '';
     state.modelMenuOpen = false;
+
+    // Reset streaming indicators for the newly focused session
+    state.isStreaming = activeStreamingStoredSessionId === handles.storedId;
+    state.agentActivityStatus = isStreamingActiveForCurrentSession() ? state.agentActivityStatus : undefined;
+    updateActivityPill(state.agentActivityStatus);
 
     // session.list does not expose a brand-new session until its first turn is
     // persisted, so the rail gets an optimistic entry right away.
@@ -951,7 +1051,15 @@ async function createNewSession(): Promise<void> {
     }
     state.sessions = upsertSession(state.sessions, toPendingSession(handles, '新任务'));
 
+    pendingScrollToBottom = true;
     render();
+
+    // Clear input for the new clean session
+    const newInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
+    if (newInput) {
+      newInput.value = '';
+      newInput.focus();
+    }
 
     // Apply the model the user picked before the session existed.
     if (state.selectedModel) {
@@ -959,7 +1067,7 @@ async function createNewSession(): Promise<void> {
     }
   } catch (e) {
     console.error('[Hermes Gateway] Create session failed:', e);
-    state.dockNotice = `新建会话失败: ${describeRpcError(e)}`;
+    setTimedDockNotice(`新建会话失败: ${describeRpcError(e)}`);
     render();
   }
 }
@@ -1110,10 +1218,31 @@ async function selectSession(id: string): Promise<void> {
   if (!id) return;
   if (state.activeSessionId === id && state.activeLiveSessionId && state.messages.length > 0) return;
 
+  // Preserve draft for outgoing session
+  const currentInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
+  if (state.activeSessionId && currentInput) {
+    sessionDraftMap.set(state.activeSessionId, currentInput.value);
+  }
+
   state.activeSessionId = id;
   state.activeLiveSessionId = ''; // must be re-resolved through session.resume
   state.modelMenuOpen = false;
+
+  // Sync isStreaming and agentActivityStatus with the target session
+  state.isStreaming = activeStreamingStoredSessionId === id;
+  state.agentActivityStatus = isStreamingActiveForCurrentSession() ? state.agentActivityStatus : undefined;
+  updateActivityPill(state.agentActivityStatus);
+
+  // Force reset messages snapshot to re-bind reactive DOM for streaming
+  lastMessagesSnapshot = null;
+
   await loadMessages(id);
+
+  // Restore draft for incoming session
+  const restoredInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
+  if (restoredInput) {
+    restoredInput.value = sessionDraftMap.get(id) || '';
+  }
 }
 
 /**
@@ -1301,24 +1430,77 @@ function disarmTurnWatchdog(): void {
   }
 }
 
+function isStreamingActiveForCurrentSession(): boolean {
+  return Boolean(
+    activeStreamingStoredSessionId &&
+    activeStreamingStoredSessionId === state.activeSessionId &&
+    state.isStreaming
+  );
+}
+
+function setTimedDockNotice(msg: string, durationMs = 4000): void {
+  state.dockNotice = msg;
+  if (dockNoticeDismissTimer) {
+    clearTimeout(dockNoticeDismissTimer);
+    dockNoticeDismissTimer = null;
+  }
+  if (msg && durationMs > 0) {
+    dockNoticeDismissTimer = setTimeout(() => {
+      dockNoticeDismissTimer = null;
+      if (state.dockNotice === msg) {
+        state.dockNotice = '';
+        render();
+      }
+    }, durationMs);
+  }
+}
+
 /** Asks the gateway to stop the running turn (the composer turns into a stop button). */
 async function interruptTurn(): Promise<void> {
-  if (!gatewayClient) return;
+  const targetLiveId = activeStreamingLiveId || state.activeLiveSessionId;
+  const targetStoredId = activeStreamingStoredSessionId || state.activeSessionId;
 
-  const liveId = await ensureLiveSessionId();
-  if (!liveId) {
-    state.dockNotice = '当前会话没有可中断的实时通道';
-    render();
-    return;
+  // 1. Immediately force client-side cancellation & flush
+  tokenCoalescer.flush();
+  disarmTurnWatchdog();
+
+  const isCurrent = activeStreamingStoredSessionId === state.activeSessionId;
+  if (isCurrent && activeStreamingMessageId) {
+    const target = state.messages.find((m) => m.id === activeStreamingMessageId);
+    if (target) {
+      if (!target.content) {
+        target.content = '*(已中断本轮生成)*';
+      } else {
+        target.content += ' *(已中断)*';
+      }
+      setMessageContent(activeStreamingMessageId, target.content);
+    }
+  } else if (targetStoredId && activeStreamingMessageId) {
+    const cached = sessionMessagesCache.get(targetStoredId);
+    const target = cached?.find((m) => m.id === activeStreamingMessageId);
+    if (target) {
+      target.content = target.content ? target.content + ' *(已中断)*' : '*(已中断本轮生成)*';
+    }
   }
 
-  try {
-    await gatewayClient.call('session.interrupt', { session_id: liveId });
-    state.dockNotice = '已请求中断本轮生成';
-  } catch (e) {
-    state.dockNotice = `中断失败: ${describeRpcError(e)}`;
-  }
+  state.isStreaming = false;
+  state.agentActivityStatus = undefined;
+  updateActivityPill(undefined);
+  activeStreamingMessageId = null;
+  activeStreamingStoredSessionId = null;
+  activeStreamingLiveId = null;
+
+  setTimedDockNotice('本轮生成已中断');
   render();
+
+  // 2. Notify remote gateway
+  if (gatewayClient && targetLiveId) {
+    try {
+      await gatewayClient.call('session.interrupt', { session_id: targetLiveId });
+    } catch (e) {
+      console.warn('[Hermes Gateway] Remote interrupt notification ignored:', e);
+    }
+  }
 }
 
 async function sendMessage(text: string): Promise<void> {
@@ -1326,14 +1508,14 @@ async function sendMessage(text: string): Promise<void> {
   if (!trimmed) return;
 
   if (!gatewayClient) {
-    state.dockNotice = '未连接网关，无法发送消息';
+    setTimedDockNotice('未连接网关，无法发送消息');
     render();
     return;
   }
 
   // A latched busy flag used to swallow every later message without feedback.
   if (state.isStreaming) {
-    state.dockNotice = '当前回合仍在生成中，请等待完成或稍后重试';
+    setTimedDockNotice('当前回合仍在生成中，请等待完成或稍后重试');
     render();
     return;
   }
@@ -1344,7 +1526,7 @@ async function sendMessage(text: string): Promise<void> {
 
   const liveId = await ensureLiveSessionId();
   if (!liveId) {
-    state.dockNotice = '当前会话没有可用的实时通道，请重新选择会话后再发送';
+    setTimedDockNotice('当前会话没有可用的实时通道，请重新选择会话后再发送');
     render();
     return;
   }
@@ -1361,6 +1543,9 @@ async function sendMessage(text: string): Promise<void> {
 
   const assistantMsgId = `ast-${Date.now()}`;
   activeStreamingMessageId = assistantMsgId;
+  activeStreamingStoredSessionId = state.activeSessionId;
+  activeStreamingLiveId = liveId;
+
   const assistantMsg: MessageViewModel = {
     id: assistantMsgId,
     role: 'assistant',
@@ -1369,6 +1554,9 @@ async function sendMessage(text: string): Promise<void> {
     timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
   };
   state.messages.push(assistantMsg);
+
+  // Sync session cache
+  sessionMessagesCache.set(state.activeSessionId, [...state.messages]);
 
   state.isStreaming = true;
   state.agentActivityStatus = 'thinking';
@@ -1395,6 +1583,8 @@ async function sendMessage(text: string): Promise<void> {
       state.agentActivityStatus = undefined;
       updateActivityPill(undefined);
       activeStreamingMessageId = null;
+      activeStreamingStoredSessionId = null;
+      activeStreamingLiveId = null;
       disarmTurnWatchdog();
       render();
     }
@@ -1405,6 +1595,8 @@ async function sendMessage(text: string): Promise<void> {
     state.agentActivityStatus = undefined;
     updateActivityPill(undefined);
     activeStreamingMessageId = null;
+    activeStreamingStoredSessionId = null;
+    activeStreamingLiveId = null;
     disarmTurnWatchdog();
     render();
   }
@@ -1423,7 +1615,10 @@ function updateActivityPill(statusText?: string): void {
   if (!container) return;
   const existingPill = container.querySelector('.agent-activity-pill') as HTMLElement | null;
 
-  if (!statusText) {
+  // Only display pill if the focused session is the active streaming session
+  const shouldShow = Boolean(statusText && isStreamingActiveForCurrentSession());
+
+  if (!shouldShow) {
     if (existingPill) existingPill.remove();
     return;
   }
@@ -1433,29 +1628,39 @@ function updateActivityPill(statusText?: string): void {
 
   if (existingPill) {
     const textSpan = existingPill.querySelector('span:last-child');
-    if (textSpan) textSpan.textContent = statusText;
+    if (textSpan) textSpan.textContent = statusText || '';
   } else {
     const pillHtml = `
       <div class="agent-activity-pill" style="
         display: inline-flex;
         align-items: center;
-        gap: 7px;
-        background: var(--bg-card);
+        gap: 6px;
+        background: var(--bg-backdrop);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
         border: 1px solid var(--border-medium);
-        border-radius: 20px;
-        padding: 4px 14px;
-        font-size: 12px;
+        border-radius: 9999px;
+        padding: 3px 12px;
+        font-size: 11px;
         color: var(--text-main);
         margin-bottom: 8px;
         pointer-events: auto;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25), var(--specular-line);
         user-select: none;
-        animation: fadeIn 0.2s ease;
+        animation: flux-fade-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
       ">
-        <span style="color: var(--accent); font-size: 13px; display: inline-flex; align-items: center; animation: pulse 2s infinite;">✨</span>
-        <span style="font-weight: 500;">${escapeHtml(modelLabel)}</span>
-        <span style="color: var(--text-muted);">·</span>
-        <span style="color: var(--text-secondary);">${escapeHtml(statusText)}</span>
+        <span class="activity-status-dot" style="
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: #10B981;
+          box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+          display: inline-block;
+          animation: flux-pulse 2s infinite ease-in-out;
+        "></span>
+        <span style="font-weight: 500; letter-spacing: -0.01em;">${escapeHtml(modelLabel)}</span>
+        <span style="color: var(--text-muted); opacity: 0.5;">·</span>
+        <span style="color: var(--text-secondary); font-family: var(--font-mono, monospace); font-size: 10.5px;">${escapeHtml(statusText || '')}</span>
       </div>
     `;
     container.insertAdjacentHTML('afterbegin', pillHtml);
@@ -1523,6 +1728,7 @@ function applyTurnActions(actions: TurnAction[]): void {
         state.agentActivityStatus = status;
         updateActivityPill(status);
 
+        const now = Date.now();
         const target = state.messages.find((m) => m.id === action.messageId);
         if (target) {
           if (!target.toolCalls) target.toolCalls = [];
@@ -1531,8 +1737,26 @@ function applyTurnActions(actions: TurnAction[]): void {
             name: action.toolCall.name,
             status: 'running',
             args: action.toolCall.args,
+            startTime: now,
           });
           needsRender = true;
+        }
+        // Also update background cache if not focused
+        if (activeStreamingStoredSessionId) {
+          const cached = sessionMessagesCache.get(activeStreamingStoredSessionId);
+          const cachedTarget = cached?.find((m) => m.id === action.messageId);
+          if (cachedTarget) {
+            if (!cachedTarget.toolCalls) cachedTarget.toolCalls = [];
+            if (!cachedTarget.toolCalls.some((t) => t.id === action.toolCall.id)) {
+              cachedTarget.toolCalls.push({
+                id: action.toolCall.id,
+                name: action.toolCall.name,
+                status: 'running',
+                args: action.toolCall.args,
+                startTime: now,
+              });
+            }
+          }
         }
         break;
       }
@@ -1541,14 +1765,26 @@ function applyTurnActions(actions: TurnAction[]): void {
         state.agentActivityStatus = 'thinking';
         updateActivityPill('thinking');
 
-        const target = state.messages.find((m) => m.id === action.messageId);
-        if (target && target.toolCalls) {
-          const tc = target.toolCalls.find((t) => !action.toolCallId || t.id === action.toolCallId);
-          if (tc) {
-            tc.status = 'completed';
-            if (action.output) tc.output = action.output;
-            needsRender = true;
+        const now = Date.now();
+        const updateTc = (target?: MessageViewModel) => {
+          if (target && target.toolCalls) {
+            const tc = target.toolCalls.find((t) => !action.toolCallId || t.id === action.toolCallId);
+            if (tc) {
+              tc.status = 'completed';
+              if (action.output) tc.output = action.output;
+              if (tc.startTime) tc.durationMs = Math.max(100, now - tc.startTime);
+            }
           }
+        };
+
+        const target = state.messages.find((m) => m.id === action.messageId);
+        if (target) {
+          updateTc(target);
+          needsRender = true;
+        }
+        if (activeStreamingStoredSessionId) {
+          const cached = sessionMessagesCache.get(activeStreamingStoredSessionId);
+          updateTc(cached?.find((m) => m.id === action.messageId));
         }
         break;
       }
@@ -1561,11 +1797,22 @@ function applyTurnActions(actions: TurnAction[]): void {
 
       case 'turn-completed':
         tokenCoalescer.flush();
-        if (finalReplace) setMessageContent(finalReplace.messageId, finalReplace.text);
+        if (finalReplace) {
+          const replacement = finalReplace;
+          setMessageContent(replacement.messageId, replacement.text);
+          // Sync cache if completed in background
+          if (activeStreamingStoredSessionId) {
+            const cached = sessionMessagesCache.get(activeStreamingStoredSessionId);
+            const target = cached?.find((m) => m.id === replacement.messageId);
+            if (target) target.content = replacement.text;
+          }
+        }
         state.isStreaming = false;
         state.agentActivityStatus = undefined;
         updateActivityPill(undefined);
         activeStreamingMessageId = null;
+        activeStreamingStoredSessionId = null;
+        activeStreamingLiveId = null;
         disarmTurnWatchdog();
         needsRender = true;
         break;
@@ -1582,7 +1829,9 @@ function applyTurnActions(actions: TurnAction[]): void {
         state.agentActivityStatus = undefined;
         updateActivityPill(undefined);
         activeStreamingMessageId = null;
-        state.dockNotice = action.message;
+        activeStreamingStoredSessionId = null;
+        activeStreamingLiveId = null;
+        setTimedDockNotice(action.message);
         disarmTurnWatchdog();
         needsRender = true;
         break;
@@ -1709,10 +1958,15 @@ async function connect(): Promise<void> {
 
     // Register event listeners for streaming
     gatewayClient.onNotification('event', (params: unknown) => {
+      const activeIds = [
+        state.activeLiveSessionId,
+        state.activeSessionId,
+        activeStreamingLiveId,
+        activeStreamingStoredSessionId,
+      ].filter((id): id is string => Boolean(id));
+
       const actions = reduceGatewayEvent(params, {
-        activeSessionIds: [state.activeLiveSessionId, state.activeSessionId].filter(
-          (id): id is string => Boolean(id)
-        ),
+        activeSessionIds: Array.from(new Set(activeIds)),
         activeStreamingMessageId,
       });
       if (actions.length > 0) applyTurnActions(actions);
@@ -1720,40 +1974,28 @@ async function connect(): Promise<void> {
       handleInspectorEvent(params);
     });
 
-    // Check ready state
-    const rawWs = gatewayClient.getRawWebSocket();
-    if (rawWs) {
-      if (rawWs.readyState === WebSocket.OPEN) {
-        state.gatewayConnected = true;
-        state.gatewayConnecting = false;
+    // Subscribe to FSM transitions (CONNECTING, CONNECTED, DISCONNECTED)
+    gatewayClient.getFsm().onStateChange((fsmState) => {
+      const isConnected = fsmState === 'CONNECTED' || fsmState === 'HANDSHAKING';
+      const isConnecting = fsmState === 'CONNECTING';
+
+      if (state.gatewayConnected !== isConnected || state.gatewayConnecting !== isConnecting) {
+        state.gatewayConnected = isConnected;
+        state.gatewayConnecting = isConnecting;
         render();
-        Promise.allSettled([fetchSessions(), fetchModelOptions(), fetchProfiles()]);
-      } else {
-        rawWs.addEventListener('open', () => {
-          state.gatewayConnected = true;
-          state.gatewayConnecting = false;
-          render();
+
+        if (isConnected) {
           Promise.allSettled([fetchSessions(), fetchModelOptions(), fetchProfiles()]);
-        });
+        }
       }
+    });
 
-      rawWs.addEventListener('close', () => {
-        state.gatewayConnected = false;
-        state.gatewayConnecting = false;
-        render();
-      });
-
-      rawWs.addEventListener('error', (err) => {
-        console.warn('[Flux WS] Socket error:', err);
-        state.gatewayConnected = false;
-        state.gatewayConnecting = false;
-        render();
-      });
-    } else {
+    // Initial check
+    if (gatewayClient.getState() === 'CONNECTED') {
       state.gatewayConnected = true;
       state.gatewayConnecting = false;
       render();
-      await Promise.allSettled([fetchSessions(), fetchModelOptions(), fetchProfiles()]);
+      Promise.allSettled([fetchSessions(), fetchModelOptions(), fetchProfiles()]);
     }
   } catch (err: any) {
     console.error('[Flux Connect] Connection failed:', err);
@@ -1776,6 +2018,9 @@ function disconnect(): void {
   }
   tokenCoalescer.clear();
   disarmTurnWatchdog();
+  activeStreamingMessageId = null;
+  activeStreamingStoredSessionId = null;
+  activeStreamingLiveId = null;
   if (sessionsRefreshTimer) {
     clearTimeout(sessionsRefreshTimer);
     sessionsRefreshTimer = null;
@@ -1898,35 +2143,43 @@ function renderContextMenuHtml(ctx?: AppState['sessionContextMenu']): string {
       top: ${ctx.y}px;
       background: var(--bg-card);
       border: 1px solid var(--border-strong);
-      border-radius: 8px;
+      border-radius: 9px;
       box-shadow: var(--shadow-window);
-      padding: 5px;
-      min-width: 170px;
+      padding: 4px;
+      min-width: 160px;
       z-index: 2000;
       display: flex;
       flex-direction: column;
-      gap: 2px;
+      gap: 1px;
       font-size: 12px;
       user-select: none;
+      backdrop-filter: blur(20px);
+      animation: flux-fade-in 0.15s cubic-bezier(0.16, 1, 0.3, 1);
     ">
-      <button type="button" class="ctx-item" data-action="rename" style="padding: 6px 10px; border-radius: 5px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;">
-        <span>✏️</span><span>重命名</span>
+      <button type="button" class="ctx-item" data-action="rename" style="padding: 6px 9px; border-radius: 6px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 9px; cursor: pointer; text-align: left; font-size: 12px;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-secondary); flex-shrink: 0;"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+        <span>重命名</span>
       </button>
-      <button type="button" class="ctx-item" data-action="copy-id" style="padding: 6px 10px; border-radius: 5px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;">
-        <span>📋</span><span>复制会话 ID</span>
+      <button type="button" class="ctx-item" data-action="copy-id" style="padding: 6px 9px; border-radius: 6px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 9px; cursor: pointer; text-align: left; font-size: 12px;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-secondary); flex-shrink: 0;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        <span>复制会话 ID</span>
       </button>
-      <button type="button" class="ctx-item" data-action="pin" style="padding: 6px 10px; border-radius: 5px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;">
-        <span>📌</span><span>置顶会话</span>
+      <button type="button" class="ctx-item" data-action="pin" style="padding: 6px 9px; border-radius: 6px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 9px; cursor: pointer; text-align: left; font-size: 12px;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-secondary); flex-shrink: 0;"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+        <span>置顶会话</span>
       </button>
-      <button type="button" class="ctx-item" data-action="export" style="padding: 6px 10px; border-radius: 5px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;">
-        <span>📥</span><span>导出 Markdown</span>
+      <button type="button" class="ctx-item" data-action="export" style="padding: 6px 9px; border-radius: 6px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 9px; cursor: pointer; text-align: left; font-size: 12px;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-secondary); flex-shrink: 0;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <span>导出 Markdown</span>
       </button>
       <div style="height: 1px; background: var(--border-subtle); margin: 3px 0;"></div>
-      <button type="button" class="ctx-item" data-action="archive" style="padding: 6px 10px; border-radius: 5px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;">
-        <span>🗄️</span><span>归档</span>
+      <button type="button" class="ctx-item" data-action="archive" style="padding: 6px 9px; border-radius: 6px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 9px; cursor: pointer; text-align: left; font-size: 12px;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-secondary); flex-shrink: 0;"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+        <span>归档</span>
       </button>
-      <button type="button" class="ctx-item" data-action="delete" style="padding: 6px 10px; border-radius: 5px; border: none; background: transparent; color: #EF4444; display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;">
-        <span>🗑️</span><span>删除</span>
+      <button type="button" class="ctx-item" data-action="delete" style="padding: 6px 9px; border-radius: 6px; border: none; background: transparent; color: #EF4444; display: flex; align-items: center; gap: 9px; cursor: pointer; text-align: left; font-size: 12px;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: #EF4444; flex-shrink: 0;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+        <span>删除</span>
       </button>
     </div>
   `;
@@ -2037,11 +2290,11 @@ function render(): void {
                 modelSearchQuery: state.modelSearchQuery,
                 reasoningLevel: state.reasoningLevel,
                 approvalMode: state.approvalMode,
-                isStreaming: state.isStreaming,
+                isStreaming: isStreamingActiveForCurrentSession(),
                 disabled: !state.gatewayConnected,
                 modelMenuOpen: state.modelMenuOpen,
                 notice: state.dockNotice,
-                activityStatus: state.agentActivityStatus,
+                activityStatus: isStreamingActiveForCurrentSession() ? state.agentActivityStatus : undefined,
               })
             : '',
         })}
@@ -2050,6 +2303,7 @@ function render(): void {
           collapsed: state.inspectorCollapsed,
           activeTab: state.activeInspectorTab,
           gatewayConnected: state.gatewayConnected,
+          isFullscreen: state.inspectorFullscreen,
           artifacts: state.artifacts,
           browserFrame: state.browserFrame,
           gitDiffs: state.gitDiffs,
@@ -2116,6 +2370,7 @@ function render(): void {
         collapsed: state.inspectorCollapsed,
         activeTab: state.activeInspectorTab,
         gatewayConnected: state.gatewayConnected,
+        isFullscreen: state.inspectorFullscreen,
         artifacts: state.artifacts,
         browserFrame: state.browserFrame,
         gitDiffs: state.gitDiffs,
@@ -2143,11 +2398,11 @@ function render(): void {
           modelSearchQuery: state.modelSearchQuery,
           reasoningLevel: state.reasoningLevel,
           approvalMode: state.approvalMode,
-          isStreaming: state.isStreaming,
+          isStreaming: isStreamingActiveForCurrentSession(),
           disabled: !state.gatewayConnected,
           modelMenuOpen: state.modelMenuOpen,
           notice: state.dockNotice,
-          activityStatus: state.agentActivityStatus,
+          activityStatus: isStreamingActiveForCurrentSession() ? state.agentActivityStatus : undefined,
         })
       : '';
     if (existingDock) {
@@ -2290,6 +2545,7 @@ function bindEvents(): void {
 
   const toggleInspector = document.getElementById('toggle-inspector-btn');
   const toggleInspectorClose = document.getElementById('toggle-inspector-close-btn');
+  const toggleInspectorFullscreen = document.getElementById('toggle-inspector-fullscreen-btn');
   if (toggleInspector) {
     toggleInspector.onclick = () => {
       state.inspectorCollapsed = !state.inspectorCollapsed;
@@ -2299,6 +2555,13 @@ function bindEvents(): void {
   if (toggleInspectorClose) {
     toggleInspectorClose.onclick = () => {
       state.inspectorCollapsed = true;
+      state.inspectorFullscreen = false;
+      render();
+    };
+  }
+  if (toggleInspectorFullscreen) {
+    toggleInspectorFullscreen.onclick = () => {
+      state.inspectorFullscreen = !state.inspectorFullscreen;
       render();
     };
   }
@@ -2654,6 +2917,19 @@ function bindEvents(): void {
     });
   }
 
+  // Notice close button
+  const noticeCloseBtn = document.getElementById('dock-notice-close');
+  if (noticeCloseBtn) {
+    noticeCloseBtn.onclick = () => {
+      state.dockNotice = '';
+      if (dockNoticeDismissTimer) {
+        clearTimeout(dockNoticeDismissTimer);
+        dockNoticeDismissTimer = null;
+      }
+      render();
+    };
+  }
+
   // Send message & IME Composition defense
   const sendBtn = document.getElementById('dock-send-btn');
   const inputEl = document.getElementById('dock-prompt-input') as HTMLTextAreaElement;
@@ -2701,17 +2977,229 @@ function bindEvents(): void {
     };
   }
 
+  // Tool file link click -> Inspect file in right Inspection Pod
+  document.querySelectorAll<HTMLElement>('.tool-file-link').forEach((link) => {
+    link.onclick = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const filePath = link.dataset.previewFile;
+      if (!filePath) return;
+
+      // Try extracting existing content from messages toolCalls if already present in session
+      let existingContent = '';
+      for (const m of state.messages) {
+        if (!m.toolCalls) continue;
+        for (const tc of m.toolCalls) {
+          const rawName = String(tc.name || '').toLowerCase();
+          let tcPath = '';
+          let tcArgsObj: any = null;
+          if (typeof tc.args === 'string') {
+            const trimmed = tc.args.trim();
+            if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+              try { tcArgsObj = JSON.parse(trimmed); } catch {}
+              tcPath = tcArgsObj?.path || tcArgsObj?.file || tcArgsObj?.filePath || tcArgsObj?.file_path || tcArgsObj?.resolved_path || '';
+            } else {
+              tcPath = trimmed;
+            }
+          } else if (tc.args && typeof tc.args === 'object') {
+            tcArgsObj = tc.args;
+            tcPath = tcArgsObj?.path || tcArgsObj?.file || tcArgsObj?.filePath || tcArgsObj?.file_path || tcArgsObj?.resolved_path || '';
+          }
+
+          const isMatch = tcPath && (
+            tcPath === filePath ||
+            tcPath.endsWith(filePath) ||
+            filePath.endsWith(tcPath) ||
+            tcPath.split('/').pop() === filePath.split('/').pop()
+          );
+
+          // 1. If write tool and has input.content
+          if (isMatch && (rawName.includes('write') || rawName.includes('create'))) {
+            if (tcArgsObj && typeof tcArgsObj.content === 'string') {
+              existingContent = tcArgsObj.content;
+              break;
+            }
+          }
+
+          // 2. If edit/patch tool and output has diff
+          if (isMatch && (rawName.includes('edit') || rawName.includes('patch'))) {
+            let outStr = typeof tc.output === 'string' ? tc.output : tc.output ? JSON.stringify(tc.output) : '';
+            if (outStr.startsWith('{') && outStr.endsWith('}')) {
+              try {
+                const parsed = JSON.parse(outStr);
+                if (typeof parsed.diff === 'string') outStr = parsed.diff;
+                else if (typeof parsed.content === 'string') outStr = parsed.content;
+              } catch {}
+            }
+            if (!outStr && tcArgsObj && typeof tcArgsObj.diff === 'string') {
+              outStr = tcArgsObj.diff;
+            }
+            if (!outStr && tcArgsObj && typeof tcArgsObj.patch === 'string') {
+              outStr = tcArgsObj.patch;
+            }
+            if (outStr) {
+              existingContent = outStr;
+              break;
+            }
+          }
+
+          // 3. If read_file output matches target file
+          if (isMatch && (rawName.includes('read') || rawName === 'file')) {
+            let outStr = typeof tc.output === 'string' ? tc.output : tc.output ? JSON.stringify(tc.output) : '';
+            if (outStr.startsWith('{') && outStr.endsWith('}')) {
+              try {
+                const parsed = JSON.parse(outStr);
+                if (typeof parsed.content === 'string') outStr = parsed.content;
+                else if (typeof parsed.text === 'string') outStr = parsed.text;
+                else if (typeof parsed.output === 'string') outStr = parsed.output;
+              } catch {}
+            }
+            if (!outStr && tcArgsObj && typeof tcArgsObj.content === 'string') {
+              outStr = tcArgsObj.content;
+            }
+            if (outStr) {
+              existingContent = outStr;
+              break;
+            }
+          }
+        }
+        if (existingContent) break;
+      }
+
+      state.inspectorCollapsed = false;
+      // Find or push artifact
+      let existing = state.artifacts.find((a) => a.name === filePath);
+      if (!existing) {
+        existing = {
+          id: `art-${Date.now()}`,
+          name: filePath,
+          type: 'FILE',
+          size: '',
+          preview: existingContent ? existingContent : `// ${filePath}\n\n正在从工作区加载最新版本内容...`,
+        };
+        state.artifacts.unshift(existing);
+      } else {
+        if (existingContent && (!existing.preview || existing.preview.includes('正在从工作区加载'))) {
+          existing.preview = existingContent;
+        }
+        // Bring existing to the top so InspectionPod prioritizes viewing it
+        state.artifacts = [existing, ...state.artifacts.filter((a) => a.name !== filePath)];
+      }
+      render();
+
+      // Async fetch file content if available via gateway REST or RPC
+      const fetchFileContent = async () => {
+        // Attempt 1: Standard OpenChamber /api/fs/read REST endpoint via desktop bridge
+        if (desktopApi?.httpProxy) {
+          try {
+            const res = await desktopApi.httpProxy({
+              baseUrl: state.gatewayUrl || 'http://127.0.0.1:9119',
+              path: `/api/fs/read?path=${encodeURIComponent(filePath)}&optional=true`,
+              method: 'GET',
+            });
+            const text = typeof res === 'string' ? res : typeof res?.content === 'string' ? res.content : '';
+            if (text && existing) {
+              existing.preview = text;
+              render();
+              return;
+            }
+          } catch {}
+        }
+
+        // Attempt 2: RPC workspace.readFile
+        if (gatewayClient) {
+          try {
+            const res = await gatewayClient.call<any>('workspace.readFile', { path: filePath });
+            const content = typeof res?.content === 'string' ? res.content : typeof res === 'string' ? res : '';
+            if (content && existing) {
+              existing.preview = content;
+              render();
+              return;
+            }
+          } catch {}
+        }
+
+        // Attempt 3: RPC file.read
+        if (gatewayClient) {
+          try {
+            const res = await gatewayClient.call<any>('file.read', { path: filePath });
+            const content = typeof res?.content === 'string' ? res.content : typeof res === 'string' ? res : '';
+            if (content && existing) {
+              existing.preview = content;
+              render();
+              return;
+            }
+          } catch {}
+        }
+
+        // If not fetchable from remote gateway backend but we have local session content, KEEP existingContent!
+        if (existing && existingContent) {
+          existing.preview = existingContent;
+          render();
+          return;
+        }
+
+        if (existing && (!existing.preview || existing.preview.includes('正在从工作区加载'))) {
+          existing.preview = `// ${filePath}\n\n（该文件位于远程网关工作区，网关未开放直接文件读取通道）`;
+          render();
+        }
+      };
+
+      void fetchFileContent();
+    };
+  });
+
+  // Dynamic live duration ticker for running tools (100ms interval for fluid stopwatch)
+  updateRunningToolTimers();
+
   // Bind Draggable Rails
   bindRailResizeEvents();
+}
+
+let runningToolTimerHandle: number | undefined;
+
+function updateRunningToolTimers(): void {
+  const activeBadges = document.querySelectorAll<HTMLElement>('.tool-duration-badge[data-start-time]');
+  if (activeBadges.length === 0) {
+    if (runningToolTimerHandle !== undefined) {
+      clearInterval(runningToolTimerHandle);
+      runningToolTimerHandle = undefined;
+    }
+    return;
+  }
+
+  const tick = () => {
+    const badges = document.querySelectorAll<HTMLElement>('.tool-duration-badge[data-start-time]');
+    if (badges.length === 0) {
+      if (runningToolTimerHandle !== undefined) {
+        clearInterval(runningToolTimerHandle);
+        runningToolTimerHandle = undefined;
+      }
+      return;
+    }
+    const now = Date.now();
+    badges.forEach((b) => {
+      const startTime = Number(b.dataset.startTime);
+      if (startTime && !isNaN(startTime)) {
+        const elapsedSec = Math.max(0.1, (now - startTime) / 1000);
+        b.textContent = `${elapsedSec.toFixed(1)}s`;
+      }
+    });
+  };
+
+  tick();
+  if (runningToolTimerHandle === undefined) {
+    runningToolTimerHandle = window.setInterval(tick, 100);
+  }
 }
 
 function bindRailResizeEvents(): void {
   document.querySelectorAll<HTMLElement>('.rail-resize-handle').forEach((handle) => {
     const isLeft = handle.dataset.railHandle === 'left';
     const cssVar = isLeft ? '--rail-w-left' : '--rail-w-right';
-    const minW = isLeft ? 200 : 300;
-    const maxW = isLeft ? 450 : 600;
-    const defaultW = isLeft ? 260 : 380;
+    const minW = isLeft ? 200 : 260;
+    const maxW = isLeft ? 500 : Math.round(window.innerWidth * 0.85);
+    const defaultW = isLeft ? 260 : 420;
     const storageKey = isLeft ? 'hermes_flux_rail_w_left' : 'hermes_flux_rail_w_right';
 
     handle.ondblclick = (e) => {

@@ -33,6 +33,9 @@
 | `session.interrupt` 接受 live id，返回 `{status:'interrupted'}`，随后会补一个 `message.complete` | 探针实测 |
 | `session.history` 不接受 `limit`（`4000`），无参则报会话不存在；历史只能走 `session.resume` | 探针实测 |
 | `session.delete` 对仍在运行的会话报 `4023 cannot delete an active session` | 探针实测 |
+| 多会话并行流式必须以 `storedId` 严格隔离缓存与 UI 挂载 | 2026-10-30 会话串台排查实测 |
+| Tool 耗时与状态必须按 message/toolId 独立计时，文件读写联动 InspectionPod | 对标 OpenChamber 交互体验 |
+| 空消息与工具调用下方严禁孤立渲染打字光标（避免绿色小块闪烁） | UI 视觉 Bug 实测修复 |
 
 ---
 
