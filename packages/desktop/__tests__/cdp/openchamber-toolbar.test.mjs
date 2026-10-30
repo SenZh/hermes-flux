@@ -192,7 +192,7 @@ test('OpenChamber File Bar - Live Headless Browser CDP Test', async (t) => {
     assert.notEqual(prevMode, nextMode, 'ViewMode must toggle on button click');
   });
 
-  await t.test('CDP verify True Fullscreen overlay styling and exit', async () => {
+  await t.test('CDP verify Workspace Fullscreen overlay preserves Titlebar header', async () => {
     const res = await cdpCall('Runtime.evaluate', {
       expression: `
         (() => {
@@ -200,20 +200,36 @@ test('OpenChamber File Bar - Live Headless Browser CDP Test', async (t) => {
           fsBtn.click();
           const pod = document.getElementById('flux-inspector-pod');
           const style = window.getComputedStyle(pod);
-          const isFixed = style.position === 'fixed';
+          const isAbsolute = style.position === 'absolute';
           const top = style.top;
-          const zIndex = style.zIndex;
+          const width = style.width;
 
           // Toggle back
           fsBtn.click();
-          return { isFixed, top, zIndex };
+          return { isAbsolute, top, width };
         })()
       `,
       returnByValue: true
     });
 
-    assert.equal(res.result.value.isFixed, true, 'Fullscreen must apply position: fixed');
-    assert.equal(res.result.value.top, '0px', 'Fullscreen top must be 0px without upper stream residue');
+    assert.equal(res.result.value.isAbsolute, true, 'Fullscreen within body container must apply position: absolute');
+    assert.equal(res.result.value.top, '0px', 'Top within body container must be 0px without covering Titlebar');
+  });
+
+  await t.test('CDP verify Far-Right Vertical Scene Rail buttons', async () => {
+    const res = await cdpCall('Runtime.evaluate', {
+      expression: `
+        (() => {
+          const rail = document.querySelector('.inspector-vertical-rail');
+          const tabItems = Array.from(document.querySelectorAll('.inspector-vertical-rail .vertical-tab-item')).map(btn => btn.dataset.tab);
+          return { hasRail: Boolean(rail), tabs: tabItems };
+        })()
+      `,
+      returnByValue: true
+    });
+
+    assert.equal(res.result.value.hasRail, true, 'Far-right vertical rail must be mounted');
+    assert.deepEqual(res.result.value.tabs, ['preview', 'git', 'browser', 'memory'], 'Vertical rail must list all 4 extensible functional tabs');
   });
 
   await t.test('CDP verify Silent clipboard copy button without dockNotice pollution', async () => {

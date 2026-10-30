@@ -39,6 +39,24 @@ test('i18n standard dictionary parity and placeholder interpolation', async (t) 
 
     setLocale('zh-CN');
   });
+
+  await t.test('Strict Zero-Hardcoded-Text Gate: InspectionPod source code must not contain hardcoded Chinese text literals', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const inspectionPodSrcPath = path.resolve('packages/ui/src/components/InspectionPod/InspectionPod.ts');
+    const code = fs.readFileSync(inspectionPodSrcPath, 'utf8');
+
+    // Remove comments
+    const codeWithoutComments = code.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, '');
+
+    // Match any Chinese character inside code logic or HTML templates
+    const chineseMatches = codeWithoutComments.match(/[\u4e00-\u9fa5]/g);
+    assert.equal(
+      chineseMatches,
+      null,
+      `InspectionPod.ts must NOT contain any hardcoded Chinese text literals! Found: ${chineseMatches ? chineseMatches.slice(0, 10).join(', ') : ''}. All UI strings must strictly go through t('...')!`
+    );
+  });
 });
 
 test('Theme System standard skin definition validation', async (t) => {

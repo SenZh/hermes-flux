@@ -47,7 +47,7 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     assert.ok(html.includes('inspector-rendered-markdown'), 'Must use markdown container when rendered mode');
   });
 
-  await t.test('InspectionPod True Fullscreen must cover 100vw and 100vh completely without stream leak', () => {
+  await t.test('InspectionPod True Fullscreen must cover conversation body completely while preserving Titlebar', () => {
     const htmlFullscreen = renderInspectionPod({
       collapsed: false,
       gatewayConnected: true,
@@ -56,10 +56,11 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
       activeFilePath: 'test.ts',
     });
 
-    // Invariant: True Fullscreen must be fixed at top: 0, left: 0, bottom: 0, z-index >= 1000
-    assert.ok(htmlFullscreen.includes('position: fixed'), 'Must use position: fixed for true fullscreen');
+    // Invariant: Fullscreen inside flux-body-container must be absolute top:0 left:0 right:0 bottom:0 width:100% height:100%
+    assert.ok(htmlFullscreen.includes('position: absolute'), 'Must use position: absolute for body container fullscreen');
     assert.ok(htmlFullscreen.includes('top: 0'), 'Must align top: 0');
-    assert.ok(htmlFullscreen.includes('z-index: 1000'), 'Must have top z-index: 1000 to cover titlebar & stream');
+    assert.ok(htmlFullscreen.includes('width: 100%'), 'Must span 100% width');
+    assert.ok(htmlFullscreen.includes('height: 100%'), 'Must span 100% height');
     assert.ok(htmlFullscreen.includes('inspector-fullscreen'), 'Must apply inspector-fullscreen class');
 
     const htmlNormal = renderInspectionPod({
@@ -71,7 +72,9 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     });
     // Invariant: Normal right rail must be bounded width, not taking fullscreen
     assert.ok(htmlNormal.includes('flex: 0 0 var(--rail-w-right, 420px)'), 'Default right rail must have bounded width');
-    assert.ok(!htmlNormal.includes('position: fixed'), 'Normal mode must never be fixed overlay');
+    assert.ok(htmlNormal.includes('class="flux-inspector-pod "'), 'Normal mode must not have inspector-fullscreen class');
+    // Invariant: Far-right vertical scene rail must be present
+    assert.ok(htmlNormal.includes('inspector-vertical-rail'), 'Must have far-right vertical scene rail');
   });
 
   await t.test('InspectionPod auto-cleans CLI line prefix without duplicate line numbers', () => {
