@@ -192,5 +192,47 @@ test('OpenChamber File Bar - Live Headless Browser CDP Test', async (t) => {
     assert.notEqual(prevMode, nextMode, 'ViewMode must toggle on button click');
   });
 
+  await t.test('CDP verify True Fullscreen overlay styling and exit', async () => {
+    const res = await cdpCall('Runtime.evaluate', {
+      expression: `
+        (() => {
+          const fsBtn = document.getElementById('toggle-inspector-fullscreen-btn');
+          fsBtn.click();
+          const pod = document.getElementById('flux-inspector-pod');
+          const style = window.getComputedStyle(pod);
+          const isFixed = style.position === 'fixed';
+          const top = style.top;
+          const zIndex = style.zIndex;
+
+          // Toggle back
+          fsBtn.click();
+          return { isFixed, top, zIndex };
+        })()
+      `,
+      returnByValue: true
+    });
+
+    assert.equal(res.result.value.isFixed, true, 'Fullscreen must apply position: fixed');
+    assert.equal(res.result.value.top, '0px', 'Fullscreen top must be 0px without upper stream residue');
+  });
+
+  await t.test('CDP verify Silent clipboard copy button without dockNotice pollution', async () => {
+    const res = await cdpCall('Runtime.evaluate', {
+      expression: `
+        (() => {
+          const copyBtn = document.getElementById('btn-file-copy-content');
+          copyBtn.click();
+          return {
+            hasDockNotice: Boolean(document.querySelector('.dock-notice-bar')),
+            btnColor: copyBtn.style.color
+          };
+        })()
+      `,
+      returnByValue: true
+    });
+
+    assert.equal(res.result.value.hasDockNotice, false, 'Copying file content must NOT trigger dock notice');
+  });
+
   ws.close();
 });

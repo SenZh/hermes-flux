@@ -609,7 +609,7 @@ function renderFileContent(
     `;
   }
 
-  // 2. Markdown Rich Rendered Mode
+  // 2. Markdown Rich Rendered Mode (or non-code plain text when rendered mode is selected)
   if (isMarkdown && opts.viewMode === 'rendered') {
     return `
       <div class="inspector-rendered-markdown" style="
@@ -628,12 +628,44 @@ function renderFileContent(
     `;
   }
 
+  // If viewMode === 'rendered' but not markdown, allow rendered mode to display rendered HTML for html files, or code layout for code files
+  if (opts.viewMode === 'rendered' && (ext === 'html' || ext === 'htm')) {
+    return `
+      <div style="flex: 1; display: flex; flex-direction: column; background: var(--bg-card); border: 1px solid var(--border-medium); border-radius: 8px; overflow: hidden;">
+        <iframe srcdoc="${escapeHtml(file.content)}" sandbox="allow-scripts" style="flex: 1; border: none; width: 100%; height: 100%; background: #ffffff;"></iframe>
+      </div>
+    `;
+  }
+
   // 3. Diff View or Code View (Raw Mode or Code Files)
   const isDiff = Boolean(file.isDiff || file.content.startsWith('---') || file.content.includes('\n@@ '));
   const rawLines = file.content.split('\n');
 
-  const linesHtml = rawLines.map((line, idx) => {
-    const lineNum = idx + 1;
+  // OpenCode CLI tool output cleans line numbers like: " 1: const x = 1;" or "10| url: string;"
+  // If the raw content already embedded line prefix numbers from CLI inspection tools, strip them so we never duplicate line numbers!
+  const prefixRegex = /^\s*(\d+)[:|]\s?(.*)$/;
+  let hasEmbeddedLineNums = rawLines.length > 3;
+  if (hasEmbeddedLineNums) {
+    let matchCount = 0;
+    for (let i = 0; i < Math.min(rawLines.length, 10); i++) {
+      if (prefixRegex.test(rawLines[i])) matchCount++;
+    }
+    hasEmbeddedLineNums = matchCount >= 3;
+  }
+
+  const linesHtml = rawLines.map((rawLine, idx) => {
+    let line = rawLine;
+    let customLineNum = idx + 1;
+
+    if (hasEmbeddedLineNums) {
+      const m = prefixRegex.exec(rawLine);
+      if (m) {
+        customLineNum = parseInt(m[1], 10);
+        line = m[2];
+      }
+    }
+
+    const lineNum = customLineNum;
     let lineBg = 'transparent';
     let lineTextColor = 'var(--text-main)';
 

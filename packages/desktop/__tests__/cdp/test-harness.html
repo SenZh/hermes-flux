@@ -138,6 +138,14 @@
           window.updateInspectionPod();
         };
       }
+
+      const btnFs = document.getElementById('toggle-inspector-fullscreen-btn');
+      if (btnFs) {
+        btnFs.onclick = () => {
+          window.testState.isFullscreen = !window.testState.isFullscreen;
+          window.updateInspectionPod();
+        };
+      }
     }
 
     window.updateInspectionPod();

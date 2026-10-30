@@ -2692,33 +2692,33 @@ function bindEvents(): void {
     };
   }
 
-  // 6. Toolbar: Open Externally
+  // 6. Toolbar: Open Externally (System Default Viewer/Editor)
   const btnOpenExternal = document.getElementById('btn-file-open-external');
   if (btnOpenExternal) {
     btnOpenExternal.onclick = () => {
       const activeFile = state.openFiles.find((f) => f.path === state.activeFilePath) || state.openFiles[0];
       if (activeFile) {
-        // Try opening with desktop shell if available
         if (desktopApi?.openExternal) {
           void desktopApi.openExternal(activeFile.path);
         } else {
           void navigator.clipboard.writeText(activeFile.path);
-          state.dockNotice = `已复制文件绝对路径: ${activeFile.path}`;
-          render();
         }
       }
     };
   }
 
-  // 7. Toolbar: Copy Full Content
+  // 7. Toolbar: Copy Full Content (Silent Clipboard Copy, no dockNotice pollution)
   const btnCopyContent = document.getElementById('btn-file-copy-content');
   if (btnCopyContent) {
     btnCopyContent.onclick = () => {
       const activeFile = state.openFiles.find((f) => f.path === state.activeFilePath) || state.openFiles[0];
       if (activeFile) {
         void navigator.clipboard.writeText(activeFile.content);
-        state.dockNotice = `已将 ${activeFile.path.split(/[/\\]/).pop()} 的内容复制到剪贴板`;
-        render();
+        // Visual button feedback instead of polluting dockNotice
+        btnCopyContent.style.color = 'var(--accent)';
+        setTimeout(() => {
+          btnCopyContent.style.color = '';
+        }, 1200);
       }
     };
   }
@@ -2730,8 +2730,10 @@ function bindEvents(): void {
       const activeFile = state.openFiles.find((f) => f.path === state.activeFilePath) || state.openFiles[0];
       if (activeFile) {
         void navigator.clipboard.writeText(activeFile.path);
-        state.dockNotice = `已复制路径: ${activeFile.path}`;
-        render();
+        btnCopyPath.style.color = 'var(--accent)';
+        setTimeout(() => {
+          btnCopyPath.style.color = '';
+        }, 1200);
       }
     };
   }

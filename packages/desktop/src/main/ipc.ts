@@ -229,9 +229,37 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   });
 
   // Shell & Dialogs
-  ipcMain.handle('shell:open-external', async (_event, url: string) => {
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-      await shell.openExternal(url);
+  ipcMain.handle('shell:open-external', async (_event, target: string) => {
+    if (!target || typeof target !== 'string') return;
+    if (target.startsWith('http://') || target.startsWith('https://')) {
+      await shell.openExternal(target);
+      return;
+    }
+
+    // If local file path, open using system default application
+    try {
+      if (fs.existsSync(target)) {
+        await shell.openPath(path.resolve(target));
+        return;
+      }
+      // Check relative to cwd
+      const relPath = path.resolve(process.cwd(), target);
+      if (fs.existsSync(relPath)) {
+        await shell.openPath(relPath);
+        return;
+      }
+      // Check remote project prefix stripped
+      const normalized = target.replace(/\\/g, '/');
+      const matchProject = normalized.match(/hermes-flux\/(.+)$/);
+      if (matchProject) {
+        const subPath = path.resolve(process.cwd(), matchProject[1]);
+        if (fs.existsSync(subPath)) {
+          await shell.openPath(subPath);
+          return;
+        }
+      }
+    } catch {
+      // Fallback
     }
   });
 

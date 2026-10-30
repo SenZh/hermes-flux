@@ -74,6 +74,27 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     assert.ok(!htmlNormal.includes('position: fixed'), 'Normal mode must never be fixed overlay');
   });
 
+  await t.test('InspectionPod auto-cleans CLI line prefix without duplicate line numbers', () => {
+    const rawCliOutput = `
+ 10:   url: string;
+ 11:   timeoutMs?: number;
+ 12:   autoConnect?: boolean;
+ 13: };
+    `.trim();
+
+    const html = renderInspectionPod({
+      collapsed: false,
+      gatewayConnected: true,
+      openFiles: [{ path: 'test.ts', content: rawCliOutput }],
+      activeFilePath: 'test.ts',
+      showLineNumbers: true,
+    });
+
+    // Code line should not still contain " 10: " or "10| " in the code cell, it should be mapped to the line-number gutter
+    assert.ok(html.includes('<td class="line-number"'), 'Must render line number cell');
+    assert.ok(!html.includes('10:&nbsp;url') && !html.includes('10: url'), 'Code cell must not duplicate embedded line number prefix');
+  });
+
   await t.test('StatusBar must be extremely clean without HTTP2 or fake session ID', () => {
     const html = renderStatusBar({
       connectionStatus: 'connected',
