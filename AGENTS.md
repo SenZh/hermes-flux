@@ -28,6 +28,7 @@
 | **协议基线** | [`docs/architecture/gateway-api-and-features-matrix.md`](docs/architecture/gateway-api-and-features-matrix.md) | **Hermes Agent 官方协议权威基线**：252 个 RPC 方法、77 个下行推送事件、13 个服务端反向干预请求契约全景，官方 REST `/api/*` 辅助通道规范。 |
 | **桌面工程** | [`docs/architecture/desktop-windows-delivery-and-cross-platform-guide.md`](docs/architecture/desktop-windows-delivery-and-cross-platform-guide.md) | **桌面端 Windows 交付与跨平台打包指南**：无边框窗口、Frameless 标题栏穿透、Cookie 跨域宿主代理、Windows 11 Mica 规避与单实例守护。 |
 | **工作台重构**| [`docs/architecture/v4-redesign-spec.md`](docs/architecture/v4-redesign-spec.md) | **v4.0 极客美学通栏流式工作台规范**：全宽顶满流式对话舱、740px 黄金居中悬浮输入舱、双列自适应场景检查舱、22px 纯净翡翠状态栏。 |
+| **终极三舱架构**| [`docs/architecture/ultimate-tri-rail-architecture-spec.md`](docs/architecture/ultimate-tri-rail-architecture-spec.md) | **v4.5 终极多智能体协同与三舱工程规范**：实体定义(Folder/Workspace/Project/Bot/Group/Session)、左侧双轨主线(48px微轨+212px抽屉)、右侧工具舱(看板/终端/Diff)与四阶拉群工程管道。 |
 | **多端流转** | [`docs/architecture/multi-device-shared-session-handover.md`](docs/architecture/multi-device-shared-session-handover.md) | **多设备共享会话与接力流转设计**：跨端会话握手、状态迁移、局域网直连探测与离线同步机制。 |
 | **主题引擎** | [`docs/architecture/theme-engine-spec.md`](docs/architecture/theme-engine-spec.md) | **标准化可插拔主题注册表规范**：CSS 变量注入系统、暗黑极夜金/白玉翡翠皮肤、动态 Token 运行时切换。 |
 | **问题档案** | [`docs/architecture/known-issues-and-backlog.md`](docs/architecture/known-issues-and-backlog.md) | **已知架构缺陷与演进 Backlog**：技术债务登记簿、时序竞态历史陷阱与中长程规划。 |

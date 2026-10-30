@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hermes Flux 终极桌面架构交互原型 (v4.5 Dual-Rail + Multi-Tool)</title>
+  <style>
+    :root {
+      --bg-dock: #07080A;
+      --bg-subrail: #0E1015;
+      --bg-canvas: #090A0D;
+      --bg-panel: #11141B;
+      --bg-card: #161A23;
+      --bg-terminal: #040507;
+
+      --border-subtle: rgba(255, 255, 255, 0.07);
+      --border-focus: rgba(245, 158, 11, 0.45);
+      --border-accent: rgba(16, 185, 129, 0.4);
+
+      --text-main: #F3F4F6;
+      --text-muted: #9CA3AF;
+      --text-dim: #525966;
+
+      --accent-jade: #10B981;
+      --accent-amber: #F59E0B;
+      --accent-indigo: #6366F1;
+      --accent-pink: #EC4899;
+      --accent-cyan: #06B6D4;
+
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
+      --font-mono: "JetBrains Mono", Consolas, Menlo, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg-canvas);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      user-select: none;
+    }
+
+    /* 42px 顶栏 (Titlebar) */
+    .titlebar {
+      height: 42px;
+      min-height: 42px;
+      background: var(--bg-dock);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      font-size: 11.5px;
+      z-index: 100;
+    }
+    .win-controls { display: flex; gap: 8px; align-items: center; }
+    .win-btn { width: 12px; height: 12px; border-radius: 50%; }
+    .btn-close { background: #EF4444; }
+    .btn-min { background: #F59E0B; }
+    .btn-max { background: #10B981; }
+
+    .title-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      padding: 3px 12px;
+      border-radius: 16px;
+      font-size: 11px;
+    }
+    .pulse-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent-jade);
+      box-shadow: 0 0 8px var(--accent-jade);
+    }
+
+    /* 三舱主布局 */
+    .tri-rail-workspace {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* ── 1. 左侧双轨中枢 (48px Station + 212px Drawer = 260px) ── */
+    .station-rail {
+      width: 48px;
+      min-width: 48px;
+      background: var(--bg-dock);
+      border-right: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 10px 0;
+      gap: 12px;
+      z-index: 50;
+      overflow-y: auto;
+      scrollbar-width: none;
+    }
+    .station-rail::-webkit-scrollbar { display: none; }
+
+    .station-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      position: relative;
+      transition: all 0.15s ease;
+      color: #FFF;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+    }
+    .station-avatar:hover {
+      transform: scale(1.08);
+    }
+    .station-avatar.active {
+      box-shadow: 0 0 0 2px var(--accent-jade);
+    }
+    .station-avatar.active::before {
+      content: "";
+      position: absolute;
+      left: -8px;
+      top: 6px;
+      bottom: 6px;
+      width: 3px;
+      border-radius: 0 2px 2px 0;
+      background: var(--accent-jade);
+    }
+    .station-sep {
+      width: 24px;
+      height: 1px;
+      background: var(--border-subtle);
+      margin: 2px 0;
+    }
+    .station-pulse-badge {
+      position: absolute;
+      right: -2px;
+      bottom: -2px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent-jade);
+      border: 1.5px solid var(--bg-dock);
+    }
+    .station-busy-badge {
+      position: absolute;
+      right: -2px;
+      bottom: -2px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent-amber);
+      border: 1.5px solid var(--bg-dock);
+    }
+
+    /* 212px 动态抽屉 (Context Drawer) */
+    .context-drawer {
+      width: 212px;
+      min-width: 212px;
+      background: var(--bg-subrail);
+      border-right: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+    .drawer-header {
+      padding: 12px 14px 6px 14px;
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-dim);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .drawer-item {
+      padding: 7px 10px;
+      margin: 2px 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text-muted);
+      transition: all 0.12s ease;
+      border-left: 2px solid transparent;
+    }
+    .drawer-item:hover {
+      background: var(--bg-card);
+      color: var(--text-main);
+    }
+    .drawer-item.active {
+      background: #1B212E;
+      color: var(--text-main);
+      font-weight: 500;
+      border-left: 2px solid var(--accent-jade);
+    }
+    .project-folder-title {
+      padding: 6px 10px;
+      margin: 4px 8px 0 8px;
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    .project-folder-title:hover {
+      background: rgba(255,255,255,0.04);
+    }
+
+    /* ── 2. 中间主对话流舱 (MiddlePod) ── */
+    .middle-pod {
+      flex: 1;
+      background: var(--bg-canvas);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+    }
+    .pod-topbar {
+      height: 38px;
+      border-bottom: 1px solid var(--border-subtle);
+      background: var(--bg-panel);
+      padding: 0 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+    }
+    .chat-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 32px 110px 32px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .chat-inner {
+      width: 100%;
+      max-width: 720px;
+    }
+    .chat-row {
+      display: flex;
+      gap: 14px;
+      margin-bottom: 22px;
+      align-items: flex-start;
+    }
+    .msg-avatar-sq {
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+      color: #FFF;
+      flex-shrink: 0;
+    }
+    .msg-body {
+      flex: 1;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-size: 13.5px;
+      line-height: 1.6;
+    }
+    .msg-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+      font-size: 11.5px;
+    }
+    .worker-task-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-focus);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    .card-btn {
+      background: rgba(245, 158, 11, 0.15);
+      color: var(--accent-amber);
+      border: 1px solid rgba(245, 158, 11, 0.4);
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .card-btn:hover {
+      background: var(--accent-amber);
+      color: #000;
+    }
+
+    /* 720px 居中悬浮输入舱 */
+    .input-dock-anchor {
+      position: absolute;
+      bottom: 20px;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: center;
+      pointer-events: none;
+      z-index: 40;
+    }
+    .input-dock {
+      width: 720px;
+      max-width: calc(100% - 48px);
+      background: rgba(18, 21, 28, 0.94);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 12px;
+      padding: 10px 14px;
+      box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.8);
+      pointer-events: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .input-dock:focus-within {
+      border-color: var(--accent-jade);
+    }
+    .input-textarea {
+      width: 100%;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      font-size: 13.5px;
+      resize: none;
+      min-height: 38px;
+      line-height: 1.5;
+    }
+    .input-dock-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    /* ── 3. 右侧工具舱 (RightPod / 380px) ── */
+    .right-pod {
+      width: 380px;
+      min-width: 380px;
+      background: var(--bg-panel);
+      border-left: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      transition: width 0.2s ease;
+    }
+    .tool-tabs-bar {
+      height: 38px;
+      border-bottom: 1px solid var(--border-subtle);
+      background: var(--bg-card);
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+      gap: 4px;
+    }
+    .tool-tab-btn {
+      padding: 5px 12px;
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-radius: 5px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+    .tool-tab-btn:hover {
+      background: rgba(255,255,255,0.04);
+      color: var(--text-main);
+    }
+    .tool-tab-btn.active {
+      background: var(--bg-panel);
+      color: var(--text-main);
+      font-weight: 600;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    }
+
+    .tool-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      padding: 14px;
+    }
+
+    /* 看板卡片容器 */
+    .kanban-view-content { display: flex; flex-direction: column; gap: 12px; }
+    .k-col {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 10px;
+    }
+    .k-col-head {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+    }
+    .k-card-item {
+      background: #1C212D;
+      border: 1px solid var(--border-subtle);
+      border-radius: 5px;
+      padding: 8px 10px;
+      font-size: 12px;
+      margin-bottom: 6px;
+      cursor: pointer;
+    }
+    .k-card-item:hover { border-color: var(--accent-jade); }
+
+    /* 终端视图容器 */
+    .terminal-view-content { display: none; flex-direction: column; height: 100%; }
+    .term-box {
+      flex: 1;
+      background: var(--bg-terminal);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 12px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      line-height: 1.55;
+      color: #94A3B8;
+      overflow-y: auto;
+    }
+
+    /* Diff 视图容器 */
+    .diff-view-content { display: none; flex-direction: column; height: 100%; }
+    .diff-box {
+      flex: 1;
+      background: var(--bg-terminal);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 10px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      line-height: 1.5;
+      overflow-y: auto;
+    }
+
+    /* 22px 底部状态栏 */
+    .statusbar {
+      height: 22px;
+      min-height: 22px;
+      background: var(--bg-dock);
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px;
+      font-size: 10.5px;
+      color: var(--text-dim);
+      font-family: var(--font-mono);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 1. 42px 顶栏 (Titlebar) -->
+  <header class="titlebar">
+    <div class="win-controls">
+      <div class="win-btn btn-close"></div>
+      <div class="win-btn btn-min"></div>
+      <div class="win-btn btn-max"></div>
+    </div>
+    <div class="title-pill">
+      <span class="pulse-dot"></span>
+      <span>Hermes Flux · 旗舰极客工作台</span>
+      <span style="color: var(--text-dim);">[main@v4.5]</span>
+    </div>
+    <div style="font-size: 11px; color: var(--text-muted);">
+      工作区物理基准: <span style="color: var(--text-main); font-family: var(--font-mono);">/opt/data/workspace</span>
+    </div>
+  </header>
+
+  <!-- 2. 主三舱工作区 -->
+  <main class="tri-rail-workspace">
+
+    <!-- ── 左侧 48px 纵向微轨 (Station Rail) ── -->
+    <nav class="station-rail">
+      <!-- 个人主助理 (Default Soul - 置顶金翡) -->
+      <div class="station-avatar active" style="background: linear-gradient(135deg, #10B981, #059669);" title="个人主助理 (Default HQ)" onclick="selectStation('soul', this)">
+        ✦
+        <span class="station-pulse-badge"></span>
+      </div>
+
+      <div class="station-sep"></div>
+
+      <!-- 专职数字员工 (Bots) -->
+      <div class="station-avatar" style="background: var(--accent-indigo);" title="架构师 · 老王 (Claude 3.7)" onclick="selectStation('arch', this)">
+        A
+        <span class="station-busy-badge" title="Worker 正在执行..."></span>
+      </div>
+
+      <div class="station-avatar" style="background: var(--accent-pink);" title="前端开发 · 小张 (DeepSeek-V3)" onclick="selectStation('fe', this)">
+        F
+      </div>
+
+      <div class="station-avatar" style="background: var(--accent-amber);" title="代码审查员 (Qwen-2.5)" onclick="selectStation('rev', this)">
+        R
+      </div>
+
+      <div class="station-sep"></div>
+
+      <!-- 协同群组 (Group Chat) -->
+      <div class="station-avatar" style="background: #1F2937; color: var(--accent-cyan); border: 1px dashed var(--accent-cyan);" title="多 Agent 会议室: # 登录重构群" onclick="selectStation('group', this)">
+        👥
+      </div>
+
+      <!-- 加号与设置 -->
+      <div style="margin-top: auto;" class="station-avatar" style="background: transparent; border: 1px dashed var(--border-subtle); color: var(--text-dim);" title="新建 Bot / 加入群聊">
+        +
+      </div>
+      <div class="station-avatar" style="background: transparent; color: var(--text-dim);" title="系统设置">
+        ⚙️
+      </div>
+    </nav>
+
+    <!-- ── 212px 动态上下文抽屉 (Context Drawer) ── -->
+    <aside class="context-drawer" id="context-drawer">
+      <!-- 顶部操作条 -->
+      <div style="padding: 10px 10px 6px 10px;">
+        <button style="width: 100%; background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 6px; font-size: 11.5px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;">
+          <span>+</span> 新建旁聊
+        </button>
+      </div>
+
+      <!-- 分组 1: 专家专属旁聊 (走默认 Workspace) -->
+      <div class="drawer-header">
+        <span>专家专属旁聊 (SESSIONS)</span>
+      </div>
+      <div id="drawer-side-items">
+        <div class="drawer-item active" onclick="switchSession('default-main')">
+          <span style="color: var(--accent-jade);">✦</span>
+          <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">主线：全局中枢调度</span>
+        </div>
+        <div class="drawer-item" onclick="switchSession('side-vps')">
+          <span style="color: var(--text-dim);">⑂</span>
+          <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">[助理] 盐湖城网络排查</span>
+        </div>
+        <div class="drawer-item" onclick="switchSession('side-css')">
+          <span style="color: var(--text-dim);">⑂</span>
+          <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">[小张] 状态栏阴影修复</span>
+        </div>
+      </div>
+
+      <!-- 分组 2: 归属项目 (每个项目拥有独立物理目录) -->
+      <div class="drawer-header" style="margin-top: 10px;">
+        <span>归属工程项目 (PROJECTS)</span>
+      </div>
+
+      <!-- 项目 A: Hermes Flux -->
+      <div class="project-folder-title" onclick="toggleProjectFolder('proj-flux-items')">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="font-size: 10px;">▼</span>
+          <span style="color: var(--accent-amber);">📁 hermes-flux</span>
+        </div>
+        <span style="font-size: 9.5px; color: var(--text-dim); background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px;">主工程</span>
+      </div>
+      <div id="proj-flux-items">
+        <div class="drawer-item" style="padding-left: 24px;" onclick="switchSession('proj-flux-auth')">
+          <span style="color: var(--accent-amber);">⑂</span>
+          <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">OAuth 回调监听 (wt-1)</span>
+        </div>
+        <div class="drawer-item" style="padding-left: 24px;" onclick="switchSession('proj-flux-status')">
+          <span style="color: var(--accent-amber);">⑂</span>
+          <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">StatusBar 呼吸灯</span>
+        </div>
+      </div>
+
+      <!-- 项目 B: mp-langchao -->
+      <div class="project-folder-title" onclick="toggleProjectFolder('proj-lc-items')">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="font-size: 10px;">▶</span>
+          <span>📁 mp-langchao</span>
+        </div>
+      </div>
+      <div id="proj-lc-items" style="display: none;">
+        <div class="drawer-item" style="padding-left: 24px;">
+          <span>⑂ 10月AI趋势技术长文</span>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- ── 中间主对话流舱 (MiddlePod) ── -->
+    <section class="middle-pod">
+      <!-- 舱顶信息栏 -->
+      <div class="pod-topbar">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span id="current-entity-name" style="font-weight: 600; color: #FFF;">👑 个人主助理 (Default HQ)</span>
+          <span style="color: var(--border-subtle);">|</span>
+          <span style="color: var(--text-dim); font-size: 11px;">工作区: /opt/data/workspace</span>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <button style="background: rgba(6,182,212,0.12); color: var(--accent-cyan); border: 1px solid rgba(6,182,212,0.3); border-radius: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer;" onclick="promoteToGroup()">
+            👥 原地拉群
+          </button>
+          <button style="background: transparent; color: var(--text-dim); border: none; cursor: pointer;" onclick="toggleRightPod()" title="展开/收起右侧工具舱">
+            ◫ 工具舱
+          </button>
+        </div>
+      </div>
+
+      <!-- 消息流 (720px 居中流式容器) -->
+      <div class="chat-scroll">
+        <div class="chat-inner">
+
+          <!-- 消息 1: 人类用户 -->
+          <div class="chat-row">
+            <div class="msg-avatar-sq" style="background: #374151;">ME</div>
+            <div class="msg-body">
+              <div class="msg-meta">
+                <span style="font-weight: 600; color: #FFF;">You</span>
+                <span style="color: var(--text-dim);">14:30</span>
+              </div>
+              <div>老王，把 Hermes Flux 桌面端的 OAuth 回调机制重构一下，派生任务去项目目录执行。</div>
+            </div>
+          </div>
+
+          <!-- 消息 2: 架构师老王回复 + 派生任务卡片 -->
+          <div class="chat-row">
+            <div class="msg-avatar-sq" style="background: var(--accent-indigo);">A</div>
+            <div class="msg-body">
+              <div class="msg-meta">
+                <span style="font-weight: 600; color: #818CF8;">架构师 · 老王 <span style="font-size: 10px; background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 4px; margin-left: 6px;">Claude 3.7</span></span>
+                <span style="color: var(--text-dim);">14:31</span>
+              </div>
+              <div>
+                方案已确定。已在 <code>hermes-flux</code> 项目根目录下建立独立 Git Worktree 隔离分支。<br>
+                后台 Worker 正在独立沙箱运行测试中：
+
+                <!-- 核心：派生执行进度卡片（可直接穿透右侧） -->
+                <div class="worker-task-card">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <div style="font-weight: 600; color: var(--accent-amber); font-size: 12px;">
+                      ⚡ TASK-104: [Core] 实现 Loopback OAuth 回调监听
+                    </div>
+                    <span style="font-size: 10px; color: var(--accent-jade);">🟢 运行中 (PID 4801)</span>
+                  </div>
+                  <div style="font-size: 11.5px; color: var(--text-muted); margin-bottom: 10px;">
+                    目录: <code>/opt/data/projects/hermes-flux/.worktrees/wt-104</code><br>
+                    当前动作: <code>npm test -- packages/core/__tests__/auth.test.mjs</code>
+                  </div>
+                  <div style="display: flex; gap: 8px;">
+                    <button class="card-btn" onclick="openRightTab('terminal')">⚡ 穿透查看实时终端 ➔</button>
+                    <button class="card-btn" style="color: var(--accent-cyan); border-color: rgba(6,182,212,0.4); background: rgba(6,182,212,0.1);" onclick="openRightTab('diff')">🔍 审查代码变更</button>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- 720px 黄金居中悬浮输入舱 -->
+      <div class="input-dock-anchor">
+        <div class="input-dock">
+          <textarea class="input-textarea" placeholder="发消息... 输入 @ 呼叫专家外援，输入 /task 派发工程工单..."></textarea>
+          <div class="input-dock-footer">
+            <div style="display: flex; gap: 12px; align-items: center;">
+              <span style="color: var(--accent-jade); cursor: pointer;" onclick="alert('输入 @ 可唤醒老王、小张等专职数字员工')">@ 呼叫专家</span>
+              <span style="cursor: pointer;" onclick="openRightTab('kanban')">/ 看板任务</span>
+              <span style="cursor: pointer;"># 引用代码</span>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <span>Shift+Enter 换行</span>
+              <button style="background: var(--accent-jade); color: #000; border: none; padding: 4px 12px; border-radius: 4px; font-weight: 700; cursor: pointer;">发送</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── 3. 右侧多模态工具舱 (RightPod / 380px) ── -->
+    <aside class="right-pod" id="right-pod">
+      <!-- 顶部分段 Tab 切换条 -->
+      <div class="tool-tabs-bar">
+        <div class="tool-tab-btn active" id="tab-btn-kanban" onclick="switchRightTab('kanban')">
+          <span>📋</span> 看板 (Kanban)
+        </div>
+        <div class="tool-tab-btn" id="tab-btn-terminal" onclick="switchRightTab('terminal')">
+          <span>⚡</span> 穿透终端 <span style="font-size: 9px; background: rgba(245,158,11,0.2); color: var(--accent-amber); padding: 0 4px; border-radius: 10px;">LIVE</span>
+        </div>
+        <div class="tool-tab-btn" id="tab-btn-diff" onclick="switchRightTab('diff')">
+          <span>🔍</span> 审查 (Diff)
+        </div>
+      </div>
+
+      <!-- 工具舱内容区 -->
+      <div class="tool-content">
+
+        <!-- 模态 1: 看板视图 (Kanban) -->
+        <div class="kanban-view-content" id="view-kanban">
+          <div style="font-size: 11.5px; font-weight: 600; color: var(--text-dim); margin-bottom: 4px;">
+            PROJECT: hermes-flux 交付看板
+          </div>
+          <!-- 待办 -->
+          <div class="k-col">
+            <div class="k-col-head"><span>待办 (Todo · 2)</span></div>
+            <div class="k-card-item">[UI] 状态栏 22px 翡翠呼吸灯适配</div>
+            <div class="k-card-item">[Core] FSM 5态退避抖动算法</div>
+          </div>
+          <!-- 进行中 -->
+          <div class="k-col">
+            <div class="k-col-head" style="color: var(--accent-amber);"><span>执行中 (Doing · 1)</span></div>
+            <div class="k-card-item" style="border-left: 3px solid var(--accent-amber);" onclick="switchRightTab('terminal')">
+              <div style="font-weight: 600;">TASK-104: OAuth 回调重构</div>
+              <div style="font-size: 10.5px; color: var(--accent-amber); margin-top: 4px;">Worker PID 4801 (点击穿透终端)</div>
+            </div>
+          </div>
+          <!-- 审查/完成 -->
+          <div class="k-col">
+            <div class="k-col-head" style="color: var(--accent-jade);"><span>已完成 (Done · 4)</span></div>
+            <div class="k-card-item" style="opacity: 0.6;">Titlebar 42px 原生按键适配</div>
+          </div>
+        </div>
+
+        <!-- 模态 2: 后台 Worker 穿透终端 (Terminal) -->
+        <div class="terminal-view-content" id="view-terminal">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span style="font-size: 11px; font-weight: 600; color: var(--text-main);">Worker 4801 控制台输出:</span>
+            <span style="font-size: 10px; color: var(--accent-jade);">● 120 FPS 流式捕获</span>
+          </div>
+          <div class="term-box">
+            <span style="color: #64748B;">[14:31:02]</span> Spawning worker in /worktrees/wt-104<br>
+            <span style="color: #64748B;">[14:31:03]</span> $ git checkout -b feat/loopback-auth<br>
+            <span style="color: #64748B;">[14:31:05]</span> $ vitest run auth.test.mjs<br>
+            <span style="color: var(--accent-jade);">PASS  packages/core/__tests__/auth.test.mjs</span><br>
+            <span style="color: var(--accent-jade);">✓ 8 tests passed (12ms)</span><br>
+            <span style="color: #64748B;">[14:31:08]</span> $ tsc --noEmit<br>
+            <span style="color: var(--accent-jade);">✔ TypeScript 0 errors</span><br>
+            <span style="color: var(--accent-amber);">[14:31:09] Ready for Review. Emitting diff...</span>
+          </div>
+          <div style="margin-top: 10px; display: flex; gap: 8px;">
+            <button style="flex: 1; background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-subtle); padding: 5px; font-size: 11px; border-radius: 4px; cursor: pointer;" onclick="switchRightTab('diff')">
+              前往代码 Diff 审查 ➔
+            </button>
+          </div>
+        </div>
+
+        <!-- 模态 3: 代码审查与硬门禁 (Diff & Gates) -->
+        <div class="diff-view-content" id="view-diff">
+          <div style="font-size: 11px; font-weight: 600; color: var(--text-main); margin-bottom: 6px;">
+            审查变更: packages/core/src/auth/loopback.ts (+42, -6)
+          </div>
+          <div class="diff-box">
+            <span style="color: #64748B;">@@ -12,6 +12,12 @@</span><br>
+            <span style="color: #EF4444;">- const server = http.createServer();</span><br>
+            <span style="color: var(--accent-jade);">+ // 绑定 Loopback 规避公网泄露</span><br>
+            <span style="color: var(--accent-jade);">+ const server = http.createServer((req, res) => {</span><br>
+            <span style="color: var(--accent-jade);">+   const token = parseCallback(req.url);</span><br>
+            <span style="color: var(--accent-jade);">+   this.emit('auth', token);</span><br>
+            <span style="color: var(--accent-jade);">+ });</span>
+          </div>
+          <div style="margin-top: 10px; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 10px; font-size: 11px;">
+            <div style="font-weight: 600; margin-bottom: 6px;">6 大工业级硬门禁检查:</div>
+            <div style="color: var(--accent-jade);">✔ Gate 0: 架构分层规范合规</div>
+            <div style="color: var(--accent-jade);">✔ Gate 1: tsc --noEmit 零报错</div>
+            <div style="color: var(--accent-jade);">✔ Gate 2: 单测零 Mock 纯真检验</div>
+            <div style="color: var(--accent-jade);">✔ Gate 5: 全量构建 100% 绿灯</div>
+          </div>
+          <button style="margin-top: 10px; background: var(--accent-jade); color: #000; border: none; padding: 7px; border-radius: 4px; font-weight: 700; font-size: 12px; cursor: pointer;" onclick="alert('✔ 代码已自动合入 main 分支，临时 Worktree 已清理归档！')">
+            ✔ 批准并合入主干 (Approve & Merge)
+          </button>
+        </div>
+
+      </div>
+    </aside>
+
+  </main>
+
+  <!-- 3. 22px 底部状态栏 -->
+  <footer class="statusbar">
+    <div style="display: flex; gap: 12px; align-items: center;">
+      <span class="pulse-dot"></span>
+      <span>Gateway: OPEN</span>
+      <span style="color: var(--text-muted);">127.0.0.1:9119 (ws)</span>
+    </div>
+    <div style="display: flex; gap: 14px;">
+      <span>Active Workers: 1</span>
+      <span style="color: var(--accent-amber);">Kanban: 3 Tasks</span>
+      <span style="color: var(--text-dim);">Cmd+\ 切换右舱</span>
+    </div>
+  </footer>
+
+  <script>
+    // 1. Station Rail 选择
+    function selectStation(type, el) {
+      const isAlreadyActive = el.classList.contains('active');
+      document.querySelectorAll('.station-avatar').forEach(a => a.classList.remove('active'));
+      el.classList.add('active');
+
+      const nameLabel = document.getElementById('current-entity-name');
+      const drawerSide = document.getElementById('drawer-side-items');
+
+      // 通道二：若已处于激活态再次点击头像，直接重置回主工位！
+      if (type === 'arch') {
+        nameLabel.innerHTML = isAlreadyActive 
+          ? '🤖 架构师 · 老王 (Claude 3.7 - 核心主工位)' 
+          : '🤖 架构师 · 老王 (Claude 3.7 - Forever Chat)';
+        if (drawerSide) {
+          drawerSide.innerHTML = `
+            <div class="drawer-item active" style="font-weight: 700; color: #FFF;" onclick="switchSession('arch-main')">
+              <span style="color: var(--accent-amber);">👑</span>
+              <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">核心主工位 (Forever)</span>
+            </div>
+            <div class="drawer-item" onclick="switchSession('side-lock')">
+              <span style="color: var(--text-dim);">⑂</span>
+              <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">[老王] 锁冲突排查</span>
+            </div>
+            <div class="drawer-item" onclick="switchSession('side-idempotent')">
+              <span style="color: var(--text-dim);">⑂</span>
+              <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">[老王] 接口幂等论证</span>
+            </div>
+          `;
+        }
+      } else if (type === 'soul') {
+        nameLabel.innerHTML = '👑 个人主助理 (Default HQ)';
+        if (drawerSide) {
+          drawerSide.innerHTML = `
+            <div class="drawer-item active" onclick="switchSession('default-main')">
+              <span style="color: var(--accent-jade);">✦</span>
+              <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">主线：全局中枢调度</span>
+            </div>
+            <div class="drawer-item" onclick="switchSession('side-vps')">
+              <span style="color: var(--text-dim);">⑂</span>
+              <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">[助理] 盐湖城网络排查</span>
+            </div>
+          `;
+        }
+      } else if (type === 'fe') {
+        nameLabel.innerHTML = '🎨 前端开发 · 小张 (DeepSeek-V3 - 核心主工位)';
+        if (drawerSide) {
+          drawerSide.innerHTML = `
+            <div class="drawer-item active" style="font-weight: 700; color: #FFF;" onclick="switchSession('fe-main')">
+              <span style="color: var(--accent-pink);">👑</span>
+              <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">核心主工位 (Forever)</span>
+            </div>
+            <div class="drawer-item" onclick="switchSession('side-css')">
+              <span style="color: var(--text-dim);">⑂</span>
+              <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">[小张] 状态栏阴影修复</span>
+            </div>
+          `;
+        }
+      } else if (type === 'rev') {
+        nameLabel.innerHTML = '🛡️ 代码审查员 (Qwen-2.5 - 核心主工位)';
+      } else if (type === 'group') {
+        nameLabel.innerHTML = '👥 协同研讨室: # 登录重构专项群 (3位专家在线)';
+      }
+    }
+
+    // 2. 右侧工具舱 Tab 切换
+    function switchRightTab(tabName) {
+      document.querySelectorAll('.tool-tab-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('tab-btn-' + tabName).classList.add('active');
+
+      document.getElementById('view-kanban').style.display = (tabName === 'kanban') ? 'flex' : 'none';
+      document.getElementById('view-terminal').style.display = (tabName === 'terminal') ? 'flex' : 'none';
+      document.getElementById('view-diff').style.display = (tabName === 'diff') ? 'flex' : 'none';
+    }
+
+    function openRightTab(tabName) {
+      const rightPod = document.getElementById('right-pod');
+      rightPod.style.display = 'flex';
+      switchRightTab(tabName);
+    }
+
+    function toggleRightPod() {
+      const rightPod = document.getElementById('right-pod');
+      rightPod.style.display = (rightPod.style.display === 'none') ? 'flex' : 'none';
+    }
+
+    function toggleProjectFolder(id) {
+      const el = document.getElementById(id);
+      el.style.display = (el.style.display === 'none') ? 'block' : 'none';
+    }
+
+    function switchSession(sessId) {
+      document.querySelectorAll('.drawer-item').forEach(i => i.classList.remove('active'));
+      event.currentTarget.classList.add('active');
+    }
+
+    function promoteToGroup() {
+      alert('⚡ 已执行四阶管道：\n1. 提取当前单聊前序背景\n2. groups.create 创建研讨群\n3. 注入种子简报\n4. 视口平滑迁移至多智能体研讨室！');
+      selectStation('group', document.querySelectorAll('.station-avatar')[4]);
+    }
+  </script>
+</body>
+</html>
