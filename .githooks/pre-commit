@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -e
+
+echo "=================================================="
+echo "🛡️  [Hermes Flux Gatekeeper] Running pre-commit gates"
+echo "=================================================="
+
+# Gate 1: Strict TypeScript Type Checking
+echo "▶ [Gate 1/2] Checking TypeScript compilation & strict types..."
+npm run typecheck
+
+# Gate 2: Automated Unit & Invariant Test Suite
+echo "▶ [Gate 2/2] Running automated regression test suite..."
+npm test
+
+echo "=================================================="
+echo "✔ All quality gates passed! Ready to commit."
+echo "=================================================="

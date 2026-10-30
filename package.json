@@ -16,7 +16,8 @@
     "test": "node --test packages/core/__tests__/**/*.test.mjs packages/ui/__tests__/**/*.test.mjs",
     "test:gateway": "node --test packages/core/__tests__/rpc/gateway-e2e.test.mjs",
     "lint": "echo 'Checking monorepo lint...'",
-    "typecheck": "tsc --build packages/core/tsconfig.json packages/ui/tsconfig.json && tsc --project packages/desktop/tsconfig.json --noEmit"
+    "typecheck": "tsc --build packages/core/tsconfig.json packages/ui/tsconfig.json && tsc --project packages/desktop/tsconfig.json --noEmit",
+    "prepare": "git config core.hooksPath .githooks 2>/dev/null || true"
   },
   "devDependencies": {
     "electron": "34.2.0",

@@ -12,7 +12,14 @@ export interface RpcClientOptions {
   autoConnect?: boolean;
 }
 
-export type RestFallbackHandler = (path: string, options?: any) => Promise<any>;
+export interface RestFallbackOptions {
+  method?: string;
+  params?: Record<string, unknown>;
+  body?: unknown;
+  headers?: Record<string, string>;
+}
+
+export type RestFallbackHandler = (path: string, options?: RestFallbackOptions) => Promise<unknown>;
 
 /** Result of a session listing attempt, including why it failed when it did. */
 export interface SessionListOutcome {
@@ -291,10 +298,11 @@ export class HermesGatewayClient {
         }
       );
 
-      const messages = Array.isArray(res?.messages) ? res.messages : [];
+      const resObj = res && typeof res === 'object' ? (res as Record<string, unknown>) : null;
+      const messages = Array.isArray(resObj?.messages) ? resObj.messages : [];
       return {
         messages,
-        pagination: res?.pagination,
+        pagination: resObj?.pagination,
         ok: true,
       };
     } catch (err) {
@@ -315,7 +323,7 @@ export class HermesGatewayClient {
 
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       try {
-        const res = await this.call<any>('model.options', { profile });
+        const res = await this.call<Record<string, unknown>>('model.options', { profile });
         const models = extractAvailableModels(res, []);
         const details = extractModelDetails(res);
         if (models.length > 0) {
@@ -344,12 +352,13 @@ export class HermesGatewayClient {
         });
         const models = extractAvailableModels(restResult, []);
         const details = extractModelDetails(restResult);
+        const restObj = restResult && typeof restResult === 'object' ? (restResult as Record<string, unknown>) : null;
         if (models.length > 0) {
           return {
             models,
             details,
-            currentModel: typeof restResult?.model === 'string' ? restResult.model : '',
-            currentProvider: typeof restResult?.provider === 'string' ? restResult.provider : '',
+            currentModel: typeof restObj?.model === 'string' ? restObj.model : '',
+            currentProvider: typeof restObj?.provider === 'string' ? restObj.provider : '',
             ok: true,
           };
         }
@@ -384,16 +393,23 @@ export class HermesGatewayClient {
    */
   public async listProfiles(): Promise<AgentProfile[]> {
     try {
-      const res = await this.call<any>('profiles.list', {});
-      const list = Array.isArray(res) ? res : Array.isArray(res?.profiles) ? res.profiles : [];
-      return list.map((item: any) => ({
-        name: String(item.name || item.id || 'default'),
-        displayName: String(item.display_name || item.title || item.name || '默认 Agent'),
-        description: typeof item.description === 'string' ? item.description : '',
-        avatar: typeof item.avatar === 'string' ? item.avatar : '',
-        model: typeof item.model === 'string' ? item.model : '',
-        isDefault: Boolean(item.is_default || item.name === 'default'),
-      }));
+      const res = await this.call<Record<string, unknown> | unknown[]>('profiles.list', {});
+      const list = Array.isArray(res)
+        ? res
+        : Array.isArray((res as Record<string, unknown>)?.profiles)
+          ? ((res as Record<string, unknown>).profiles as unknown[])
+          : [];
+      return list.map((item: unknown) => {
+        const obj = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+        return {
+          name: String(obj.name || obj.id || 'default'),
+          displayName: String(obj.display_name || obj.title || obj.name || '默认 Agent'),
+          description: typeof obj.description === 'string' ? obj.description : '',
+          avatar: typeof obj.avatar === 'string' ? obj.avatar : '',
+          model: typeof obj.model === 'string' ? obj.model : '',
+          isDefault: Boolean(obj.is_default || obj.name === 'default'),
+        };
+      });
     } catch (e) {
       console.warn('[HermesGatewayClient] profiles.list failed, returning default profile:', e);
       return [
