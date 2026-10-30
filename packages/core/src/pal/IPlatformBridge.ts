@@ -49,7 +49,7 @@ export interface IPlatformBridge {
   setTheme(theme: 'obsidian-gold' | 'jade-white' | 'system'): Promise<void>;
   
   // Native Shell & Dialogs
-  openExternal(url: string): Promise<void>;
+  openExternal(url: string, content?: string): Promise<void>;
   showSaveDialog?(options: { title?: string; defaultPath?: string; filters?: { name: string; extensions: string[] }[] }): Promise<string | null>;
   showOpenDialog?(options: { title?: string; properties?: string[]; filters?: { name: string; extensions: string[] }[] }): Promise<string[] | null>;
 }

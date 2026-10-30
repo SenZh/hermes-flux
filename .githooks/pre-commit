@@ -1,18 +1,10 @@
-#!/usr/bin/env bash
-set -e
-
-echo "=================================================="
-echo "🛡️  [Hermes Flux Gatekeeper] Running pre-commit gates"
-echo "=================================================="
-
-# Gate 1: Strict TypeScript Type Checking
-echo "▶ [Gate 1/2] Checking TypeScript compilation & strict types..."
-npm run typecheck
-
-# Gate 2: Automated Unit & Invariant Test Suite
-echo "▶ [Gate 2/2] Running automated regression test suite..."
-npm test
-
-echo "=================================================="
-echo "✔ All quality gates passed! Ready to commit."
-echo "=================================================="
+#!/bin/sh
+# Hermes Flux pre-commit 钩子入口（跨平台 shim）
+#
+# 这里只做一件事：把控制权交给 Node 实现。
+# 原因：bash 在这些场景下都不可靠——
+#   1. Windows + PowerShell 执行策略会拒绝 .ps1，且 npm 不保证可见；
+#   2. Git Bash / WSL / MSYS 的路径转换会破坏绝对路径；
+#   3. 各平台 node 位置不一致，必须交给 PATH 解析。
+# 因此唯一稳定可移植的解释器是 `node`。
+exec node "$(dirname "$0")/pre-commit.mjs"

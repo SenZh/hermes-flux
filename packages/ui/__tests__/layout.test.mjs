@@ -348,6 +348,14 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     assert.ok(renderedTsv.includes('全能自治'), 'Cell text in TSV must be present');
     assert.ok(renderedTsv.includes('<h4'), 'H4 header must be compiled to h4 tag');
     assert.ok(renderedTsv.includes('它适不适合？'), 'H4 header text must be compiled');
+
+    // 5. Giant plain log output (>25KB or logcat format) must bypass expensive regex syntax highlighting
+    const giantLogText = '```logcat\n' + '10-30 16:00:01.123 1234 5678 D AndroidRuntime: Shutting down VM\n'.repeat(500) + '```';
+    const startTime = performance.now();
+    const renderedLog = renderMarkdown(giantLogText);
+    const durationMs = performance.now() - startTime;
+    assert.ok(durationMs < 50, `Giant log parsing must complete rapidly without regex backtracking, took ${durationMs}ms`);
+    assert.ok(renderedLog.includes('AndroidRuntime'), 'Logcat content must be accurately preserved');
   });
 });
 

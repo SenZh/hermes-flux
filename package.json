@@ -17,6 +17,14 @@
     "test:gateway": "node --test packages/core/__tests__/rpc/gateway-e2e.test.mjs",
     "lint": "echo 'Checking monorepo lint...'",
     "typecheck": "tsc --build packages/core/tsconfig.json packages/ui/tsconfig.json && tsc --project packages/desktop/tsconfig.json --noEmit",
+    "gates": "node scripts/gates/run.mjs",
+    "gates:changed": "node scripts/gates/run.mjs --changed",
+    "gates:strict": "node scripts/gates/run.mjs --strict",
+    "gates:json": "node scripts/gates/run.mjs --json",
+    "gates:freeze": "node scripts/gates/run.mjs --update-baseline",
+    "gates:mutation": "node scripts/gates/mutation-check.mjs",
+    "gates:config": "node scripts/gates/verify-config.mjs",
+    "verify": "npm run gates && npm run typecheck && npm test",
     "prepare": "git config core.hooksPath .githooks 2>/dev/null || true"
   },
   "devDependencies": {

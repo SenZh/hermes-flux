@@ -46,8 +46,10 @@ test('i18n standard dictionary parity and placeholder interpolation', async (t) 
     const inspectionPodSrcPath = path.resolve('packages/ui/src/components/InspectionPod/InspectionPod.ts');
     const code = fs.readFileSync(inspectionPodSrcPath, 'utf8');
 
-    // Remove comments
-    const codeWithoutComments = code.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, '');
+    // Remove JS comments and template HTML comments (<!-- ... -->)
+    const codeWithoutComments = code
+      .replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, '')
+      .replace(/<!--[\s\S]*?-->/g, '');
 
     // Match any Chinese character inside code logic or HTML templates
     const chineseMatches = codeWithoutComments.match(/[\u4e00-\u9fa5]/g);

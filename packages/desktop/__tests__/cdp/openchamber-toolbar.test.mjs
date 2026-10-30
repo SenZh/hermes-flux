@@ -250,5 +250,39 @@ test('OpenChamber File Bar - Live Headless Browser CDP Test', async (t) => {
     assert.equal(res.result.value.hasDockNotice, false, 'Copying file content must NOT trigger dock notice');
   });
 
+  await t.test('CDP verify Open in Default App interaction', async () => {
+    const res = await cdpCall('Runtime.evaluate', {
+      expression: `
+        (() => {
+          const openExtBtn = document.getElementById('btn-file-open-external');
+          openExtBtn.click();
+          return {
+            openedPath: window.testState.lastOpenedExternal,
+            feedbackColor: openExtBtn.style.color,
+          };
+        })()
+      `,
+      returnByValue: true
+    });
+
+    assert.equal(res.result.value.openedPath, 'SKILL.md', 'Clicking open-external must target current active file');
+    assert.equal(res.result.value.feedbackColor, 'var(--accent)', 'Button must apply visual accent feedback upon click');
+  });
+
+  await t.test('CDP verify heavy conversation load without runningToolTimers leak', async () => {
+    const res = await cdpCall('Runtime.evaluate', {
+      expression: `
+        (() => {
+          // Verify that with non-streaming conversation, no runaway timers exist
+          const badges = document.querySelectorAll('.tool-duration-badge[data-start-time]');
+          return badges.length;
+        })()
+      `,
+      returnByValue: true
+    });
+
+    assert.equal(res.result.value, 0, 'Completed or historical sessions must not leak active data-start-time polling badges');
+  });
+
   ws.close();
 });

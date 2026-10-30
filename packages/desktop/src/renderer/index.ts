@@ -1813,6 +1813,7 @@ function applyTurnActions(actions: TurnAction[]): void {
 
       case 'turn-completed':
         tokenCoalescer.flush();
+        stopRunningToolTimers();
         if (finalReplace) {
           const replacement = finalReplace;
           setMessageContent(replacement.messageId, replacement.text);
@@ -1835,6 +1836,7 @@ function applyTurnActions(actions: TurnAction[]): void {
 
       case 'turn-failed': {
         tokenCoalescer.flush();
+        stopRunningToolTimers();
         const pendingMsg = activeStreamingMessageId
           ? state.messages.find((m) => m.id === activeStreamingMessageId)
           : undefined;
@@ -2692,14 +2694,18 @@ function bindEvents(): void {
     };
   }
 
-  // 6. Toolbar: Open Externally (System Default Viewer/Editor)
+  // 6. Toolbar: Open in Default App (System Default Viewer/Editor with fallback)
   const btnOpenExternal = document.getElementById('btn-file-open-external');
   if (btnOpenExternal) {
     btnOpenExternal.onclick = () => {
       const activeFile = state.openFiles.find((f) => f.path === state.activeFilePath) || state.openFiles[0];
       if (activeFile) {
         if (desktopApi?.openExternal) {
-          void desktopApi.openExternal(activeFile.path);
+          void desktopApi.openExternal(activeFile.path, activeFile.content);
+          btnOpenExternal.style.color = 'var(--accent)';
+          setTimeout(() => {
+            btnOpenExternal.style.color = '';
+          }, 1000);
         } else {
           void navigator.clipboard.writeText(activeFile.path);
         }
@@ -3158,12 +3164,25 @@ function bindEvents(): void {
     };
   }
 
-  // Scroll stream: Auto-load older messages on top reach
+  // Scroll stream: Auto-load older messages on top reach with requestAnimationFrame & cooldown lock
   const streamEl = document.getElementById('conversation-stream');
+  let scrollCooldown = false;
   if (streamEl) {
     streamEl.onscroll = () => {
-      if (streamEl.scrollTop < 120 && state.hasOlderMessages && !state.isLoadingOlder) {
-        void loadOlderMessages();
+      if (scrollCooldown || state.isLoadingOlder || !state.hasOlderMessages) return;
+
+      if (streamEl.scrollTop < 120) {
+        scrollCooldown = true;
+        requestAnimationFrame(async () => {
+          try {
+            await loadOlderMessages();
+          } finally {
+            // Cool-down delay (150ms) to absorb momentum scroll bounce & prevent cascading re-entrancy
+            setTimeout(() => {
+              scrollCooldown = false;
+            }, 150);
+          }
+        });
       }
     };
   }
@@ -3382,29 +3401,46 @@ function bindEvents(): void {
 
 let runningToolTimerHandle: number | undefined;
 
+function stopRunningToolTimers(): void {
+  if (runningToolTimerHandle !== undefined) {
+    clearInterval(runningToolTimerHandle);
+    runningToolTimerHandle = undefined;
+  }
+}
+
 function updateRunningToolTimers(): void {
+  // Only run active stopwatch if current session is actively streaming or busy!
+  if (!isStreamingActiveForCurrentSession()) {
+    stopRunningToolTimers();
+    return;
+  }
+
   const activeBadges = document.querySelectorAll<HTMLElement>('.tool-duration-badge[data-start-time]');
   if (activeBadges.length === 0) {
-    if (runningToolTimerHandle !== undefined) {
-      clearInterval(runningToolTimerHandle);
-      runningToolTimerHandle = undefined;
-    }
+    stopRunningToolTimers();
     return;
   }
 
   const tick = () => {
+    if (!isStreamingActiveForCurrentSession()) {
+      stopRunningToolTimers();
+      return;
+    }
+
     const badges = document.querySelectorAll<HTMLElement>('.tool-duration-badge[data-start-time]');
     if (badges.length === 0) {
-      if (runningToolTimerHandle !== undefined) {
-        clearInterval(runningToolTimerHandle);
-        runningToolTimerHandle = undefined;
-      }
+      stopRunningToolTimers();
       return;
     }
     const now = Date.now();
     badges.forEach((b) => {
       const startTime = Number(b.dataset.startTime);
       if (startTime && !isNaN(startTime)) {
+        // Upper bound safety: if tool has been running over 10 minutes, stop polling it
+        if (now - startTime > 10 * 60 * 1000) {
+          b.removeAttribute('data-start-time');
+          return;
+        }
         const elapsedSec = Math.max(0.1, (now - startTime) / 1000);
         b.textContent = `${elapsedSec.toFixed(1)}s`;
       }
@@ -3413,7 +3449,8 @@ function updateRunningToolTimers(): void {
 
   tick();
   if (runningToolTimerHandle === undefined) {
-    runningToolTimerHandle = window.setInterval(tick, 100);
+    // 200ms interval saves 50% micro-task interrupts while keeping smooth 0.1s stopwatch precision
+    runningToolTimerHandle = window.setInterval(tick, 200);
   }
 }
 

@@ -5,6 +5,7 @@
 import { ipcMain, BrowserWindow, shell, dialog, app } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   let activeGatewayCookies = '';
@@ -229,37 +230,67 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   });
 
   // Shell & Dialogs
-  ipcMain.handle('shell:open-external', async (_event, target: string) => {
+  ipcMain.handle('shell:open-external', async (_event, target: string, content?: string) => {
     if (!target || typeof target !== 'string') return;
     if (target.startsWith('http://') || target.startsWith('https://')) {
       await shell.openExternal(target);
       return;
     }
 
-    // If local file path, open using system default application
     try {
-      if (fs.existsSync(target)) {
+      // 1. Direct local physical file check
+      if (fs.existsSync(target) && fs.statSync(target).isFile()) {
         await shell.openPath(path.resolve(target));
         return;
       }
-      // Check relative to cwd
+      // 2. Relative to process cwd
       const relPath = path.resolve(process.cwd(), target);
-      if (fs.existsSync(relPath)) {
+      if (fs.existsSync(relPath) && fs.statSync(relPath).isFile()) {
         await shell.openPath(relPath);
         return;
       }
-      // Check remote project prefix stripped
+      // 3. Project prefix stripped (e.g. /opt/data/projects/hermes-flux/...)
       const normalized = target.replace(/\\/g, '/');
       const matchProject = normalized.match(/hermes-flux\/(.+)$/);
       if (matchProject) {
         const subPath = path.resolve(process.cwd(), matchProject[1]);
-        if (fs.existsSync(subPath)) {
+        if (fs.existsSync(subPath) && fs.statSync(subPath).isFile()) {
           await shell.openPath(subPath);
           return;
         }
       }
-    } catch {
-      // Fallback
+
+      // 4. Remote workspace file fallback: hash-isolated read-only snapshot in temp directory
+      if (typeof content === 'string' && content.length > 0) {
+        const contentBuffer = Buffer.from(content, 'utf-8');
+        // Protection: 20MB upper limit
+        if (contentBuffer.length > 20 * 1024 * 1024) {
+          throw new Error('File exceeds maximum preview limit (20MB)');
+        }
+
+        // Safe filename stripping path traversal
+        const rawBase = path.basename(target.replace(/\\/g, '/')) || 'preview.txt';
+        const safeBaseName = rawBase.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const ext = path.extname(safeBaseName).toLowerCase();
+
+        // Security rule: Prohibit directly launching executable scripts
+        if (['.exe', '.bat', '.cmd', '.sh', '.ps1', '.vbs', '.msi'].includes(ext)) {
+          throw new Error('Opening executable scripts externally is prohibited for security');
+        }
+
+        // Hash isolation to prevent collision & Windows EBUSY locks
+        const pathHash = crypto.createHash('md5').update(target).digest('hex').slice(0, 8);
+        const tempDir = path.join(app.getPath('temp'), 'hermes-preview', pathHash);
+        fs.mkdirSync(tempDir, { recursive: true });
+
+        const tempFilePath = path.join(tempDir, safeBaseName);
+        // Write as read-only snapshot
+        fs.writeFileSync(tempFilePath, contentBuffer);
+        await shell.openPath(tempFilePath);
+        return;
+      }
+    } catch (err) {
+      console.warn('[IPC shell:open-external] Failed to open path:', err);
     }
   });
 

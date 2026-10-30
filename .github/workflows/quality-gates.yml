@@ -1,0 +1,79 @@
+name: Quality Gates
+
+# 设计意图：
+#   本地 pre-commit 可被 --no-verify 绕过，CI 是不可绕过的最终裁决层。
+#   两者执行同一套门禁实现（scripts/gates），避免「本地绿、CI 红」的口径分裂。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: gates-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    name: Gate 0-5
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # 跨平台矩阵是刻意的：本项目历史上出现过「bash 钩子在 PowerShell 下完全失效」
+        # 的隐性问题，只在单一 OS 上验证会让这类缺陷长期潜伏。
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 门禁需要与基线比对，且棘轮依赖完整历史才能算改动集
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Gate 0/4 · 静态门禁（架构 / 换肤 / i18n / 性能）
+        run: node scripts/gates/run.mjs
+        # 默认棘轮模式：新增违规一律阻断，存量债务（314 条）放行。
+        # 刻意不在 CI 用 --strict：若 CI 因历史债务常红，它必然被忽略，
+        # 门禁随即名存实亡。存量清偿进度由下方独立的非阻断任务观测。
+
+      - name: Gate 1 · 全栈严格类型
+        run: npm run typecheck
+
+      - name: Gate 2 · 单元测试与不变量
+        run: npm test
+
+      - name: Gate 2b · 门禁自身变异检验
+        run: npm run gates:mutation
+        # 防止门禁退化为永远绿灯的空壳：故意破坏 scanner/rules，
+        # 对应测试必须变红。存活任何变异体即判定测试无效。
+
+      - name: Gate 2c · Agent 编排一致性
+        run: npm run gates:config
+
+      - name: Gate 5 · 全量构建
+        run: npm run build
+
+  debt-progress:
+    # 存量债务清偿进度观测。刻意设为非阻断：
+    # 它的产出是「还欠多少」的信息，而不是「这次提交能不能进」的裁决。
+    name: 存量债务进度
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - name: 全量严格扫描（预期失败，用于量化剩余债务）
+        run: node scripts/gates/run.mjs --strict

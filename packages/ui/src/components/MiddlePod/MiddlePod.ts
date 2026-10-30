@@ -587,6 +587,7 @@ interface ParsedToolItem {
   displayName: string;
   iconSvg: string;
   status: 'running' | 'completed' | 'failed';
+  startTime?: number;
   cleanArgs: string;
   targetPath: string;
   fileBadge: string;
@@ -742,6 +743,7 @@ function parseToolItem(tc: NonNullable<MessageViewModel['toolCalls']>[0]): Parse
     displayName,
     iconSvg,
     status: tc.status,
+    startTime: tc.startTime,
     cleanArgs,
     targetPath,
     fileBadge,
@@ -821,7 +823,7 @@ function renderSingleToolCapsule(parsed: ParsedToolItem): string {
         <span style="font-weight: 500; color: var(--text-main); flex-shrink: 0;">${displayName}</span>
         ${
           durationStr
-            ? `<span class="tool-duration-badge" ${parsed.status === 'running' && parsed.status ? `data-start-time="${Date.now()}"` : ''} style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); flex-shrink: 0; opacity: 0.75;">${escapeHtml(durationStr)}</span>`
+            ? `<span class="tool-duration-badge" ${parsed.status === 'running' && parsed.status && parsed.startTime ? `data-start-time="${parsed.startTime}"` : ''} style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); flex-shrink: 0; opacity: 0.75;">${escapeHtml(durationStr)}</span>`
             : ''
         }
         ${fileBadge}
@@ -845,7 +847,7 @@ function renderSingleToolCapsule(parsed: ParsedToolItem): string {
   }
 
   const durationBadge = durationStr
-    ? `<span class="tool-duration-badge" ${parsed.status === 'running' ? `data-start-time="${Date.now()}"` : ''} style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); flex-shrink: 0; opacity: 0.75;">${escapeHtml(durationStr)}</span>`
+    ? `<span class="tool-duration-badge" ${parsed.status === 'running' && parsed.startTime ? `data-start-time="${parsed.startTime}"` : ''} style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); flex-shrink: 0; opacity: 0.75;">${escapeHtml(durationStr)}</span>`
     : '';
 
   return `
@@ -1214,7 +1216,11 @@ export function renderMarkdown(md: string): string {
   // 1. Extract and protect code blocks
   let processed = md.replace(/```([a-zA-Z0-9_-]+)?\n([\s\S]*?)```/g, (_match, lang, code) => {
     const key = `__AURA_CODE_${blockCounter++}__`;
-    const highlighted = highlightCodeSyntax(code);
+    const cleanLang = (lang || '').toLowerCase().trim();
+    // Fast-path bypass for plain logs or oversized text (prevents catastrophic regex backtracking on giant Android Logcat)
+    const isPlainLog = ['log', 'txt', 'text', 'logcat', 'output'].includes(cleanLang);
+    const isOversized = code.length > 25000;
+    const highlighted = (isPlainLog || isOversized) ? escapeHtml(code) : highlightCodeSyntax(code);
 
     const blockHtml = `
       <div class="code-block-wrapper" style="

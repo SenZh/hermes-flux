@@ -139,6 +139,14 @@
         };
       }
 
+      const btnOpenExt = document.getElementById('btn-file-open-external');
+      if (btnOpenExt) {
+        btnOpenExt.onclick = () => {
+          window.testState.lastOpenedExternal = window.testState.activeFilePath;
+          btnOpenExt.style.color = 'var(--accent)';
+        };
+      }
+
       const btnFs = document.getElementById('toggle-inspector-fullscreen-btn');
       if (btnFs) {
         btnFs.onclick = () => {

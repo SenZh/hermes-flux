@@ -647,6 +647,9 @@ function renderFileContent(
   if (opts.viewMode === 'rendered' && (ext === 'html' || ext === 'htm')) {
     return `
       <div style="flex: 1; display: flex; flex-direction: column; background: var(--bg-card); border: 1px solid var(--border-medium); border-radius: 8px; overflow: hidden;">
+        <!-- iframe 内是待预览的用户 HTML 文档，其文档根必须为不透明白纸底，
+             否则深色皮肤下白底文档会透出暗色背景导致文字不可读；该白色属于「被预览内容」而非应用主题面 -->
+        <!-- gate-theme-allow: 白色属于被预览的用户文档底色，不属于应用主题面 -->
         <iframe srcdoc="${escapeHtml(file.content)}" sandbox="allow-scripts" style="flex: 1; border: none; width: 100%; height: 100%; background: #ffffff;"></iframe>
       </div>
     `;
