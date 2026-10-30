@@ -23,6 +23,22 @@ test('i18n standard dictionary parity and placeholder interpolation', async (t) 
     setLocale('zh-CN');
     assert.equal(getLocale(), 'zh-CN');
   });
+
+  await t.test('All InspectorPod i18n keys must resolve properly in zh and en', () => {
+    setLocale('zh-CN');
+    assert.ok(translate('inspector.tabFiles').length > 0);
+    assert.ok(translate('inspector.tabGit').length > 0);
+    assert.ok(translate('inspector.enterFullscreen').length > 0);
+    assert.ok(translate('inspector.exitFullscreen').length > 0);
+
+    setLocale('en-US');
+    assert.equal(translate('inspector.tabFiles'), 'Files');
+    assert.equal(translate('inspector.tabGit'), 'Changes');
+    assert.equal(translate('inspector.enterFullscreen'), 'Fullscreen preview');
+    assert.equal(translate('inspector.exitFullscreen'), 'Exit fullscreen (Esc)');
+
+    setLocale('zh-CN');
+  });
 });
 
 test('Theme System standard skin definition validation', async (t) => {

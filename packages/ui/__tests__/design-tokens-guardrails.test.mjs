@@ -110,4 +110,24 @@ test('Design System Tokens & Architectural Invariant Guardrails (Gate 4)', async
     // Light skin window background should be light hex
     assert.match(lightSkin.colors.bgWindow, /^#(F|E)/i, 'Light skin bgWindow must be light paper color');
   });
+
+  await t.test('InspectionPod must strictly adhere to Design Tokens (zero hardcoded theme colors)', async () => {
+    const { renderInspectionPod } = await import('../dist/components/InspectionPod/InspectionPod.js');
+    const html = renderInspectionPod({
+      collapsed: false,
+      gatewayConnected: true,
+      openFiles: [{ path: 'test.ts', content: 'const a = 1;' }],
+      activeFilePath: 'test.ts',
+    });
+
+    // Prohibit hardcoded legacy panel backgrounds and borders
+    assert.ok(!html.includes('background: #090A0F'), 'Must use var(--bg-rail) or var(--bg-panel), not hardcoded #090A0F');
+    assert.ok(!html.includes('background: #111318'), 'Must use CSS variables, not hardcoded #111318');
+    assert.ok(!html.includes('background: #151720'), 'Must use var(--bg-card), not hardcoded #151720');
+    assert.ok(!html.includes('background: #12141A'), 'Must use var(--bg-input), not hardcoded #12141A');
+    assert.ok(!html.includes('background: #0A0B10'), 'Must use var(--bg-code), not hardcoded #0A0B10');
+    assert.ok(html.includes('var(--bg-panel)'), 'Must apply var(--bg-panel)');
+    assert.ok(html.includes('var(--bg-card)'), 'Must apply var(--bg-card)');
+    assert.ok(html.includes('var(--bg-code)'), 'Must apply var(--bg-code)');
+  });
 });
