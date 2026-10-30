@@ -15,6 +15,39 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     assert.ok(html.includes('src/main.ts'), 'Must display preview file path');
     assert.ok(html.includes('console.log(&quot;hello&quot;);'), 'Must display preview file content');
     assert.ok(html.includes('id="toggle-inspector-close-btn"'), 'Must have close/collapse button');
+    // OpenChamber tabs & toolbar buttons assertions
+    assert.ok(html.includes('inspector-tabs-bar'), 'Must render tabs bar');
+    assert.ok(html.includes('inspector-action-toolbar'), 'Must render OpenChamber secondary action toolbar');
+    assert.ok(html.includes('btn-file-toggle-mode'), 'Must have Raw/Render view mode toggle button');
+    assert.ok(html.includes('btn-file-search'), 'Must have in-file search button');
+    assert.ok(html.includes('btn-file-toggle-lineno'), 'Must have line number toggle button');
+    assert.ok(html.includes('btn-file-prettify'), 'Must have prettify button');
+    assert.ok(html.includes('btn-file-toggle-wrap'), 'Must have word wrap toggle button');
+    assert.ok(html.includes('btn-file-quote-chat'), 'Must have quote to chat button');
+    assert.ok(html.includes('btn-file-open-external'), 'Must have open external button');
+    assert.ok(html.includes('btn-file-copy-content'), 'Must have copy content button');
+    assert.ok(html.includes('btn-file-copy-path'), 'Must have copy path button');
+    assert.ok(html.includes('btn-file-download'), 'Must have download button');
+  });
+
+  await t.test('InspectionPod multi-tab and rich markdown rendering', () => {
+    const html = renderInspectionPod({
+      collapsed: false,
+      gatewayConnected: true,
+      openFiles: [
+        { path: 'MiddlePod.ts', content: 'export const a = 1;' },
+        { path: 'package.json', content: '{"name": "test"}' },
+        { path: 'SKILL.md', content: '# Welcome to Skill\n\n- [x] Item 1' },
+      ],
+      activeFilePath: 'SKILL.md',
+      viewMode: 'rendered',
+    });
+
+    assert.ok(html.includes('MiddlePod.ts'), 'Must list first tab');
+    assert.ok(html.includes('package.json'), 'Must list second tab');
+    assert.ok(html.includes('SKILL.md'), 'Must list third tab');
+    assert.ok(html.includes('Welcome to Skill'), 'Must render markdown content');
+    assert.ok(html.includes('inspector-rendered-markdown'), 'Must use markdown container when rendered mode');
   });
 
   await t.test('StatusBar must be extremely clean without HTTP2 or fake session ID', () => {

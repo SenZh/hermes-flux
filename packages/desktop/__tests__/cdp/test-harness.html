@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="obsidian-gold">
+<head>
+  <meta charset="UTF-8">
+  <title>OpenChamber File Bar CDP Test Harness</title>
+  <link rel="stylesheet" href="../../dist/renderer/styles.css">
+  <style>
+    :root {
+      --bg-window: #090A0F;
+      --bg-rail: #0E1015;
+      --bg-panel: #111318;
+      --bg-card: #151720;
+      --bg-card-hover: #1B1E29;
+      --bg-card-active: #222634;
+      --bg-elevated: #1F2230;
+      --bg-input: #12141A;
+      --bg-code: #0A0B10;
+      --accent: #00E5FF;
+      --accent-hover: #33EBFF;
+      --accent-subtle: rgba(0, 229, 255, 0.12);
+      --accent-border: rgba(0, 229, 255, 0.35);
+      --text-main: #F8FAFC;
+      --text-secondary: #94A3B8;
+      --text-muted: #64748B;
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --border-medium: rgba(255, 255, 255, 0.14);
+      --font-sans: system-ui, -apple-system, sans-serif;
+      --font-mono: "JetBrains Mono", monospace;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      background: var(--bg-window);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      overflow: hidden;
+    }
+    #test-viewport {
+      flex: 1;
+      display: flex;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="test-viewport"></div>
+
+  <script type="module">
+    import { renderInspectionPod } from '/packages/ui/dist/components/InspectionPod/InspectionPod.js';
+
+    window.testState = {
+      collapsed: false,
+      gatewayConnected: true,
+      openFiles: [
+        { path: 'MiddlePod.ts', content: 'export function renderMiddlePod() {\n  return "<div>MiddlePod</div>";\n}' },
+        { path: 'package.json', content: '{\n  "name": "hermes-flux",\n  "version": "4.0.0"\n}' },
+        { path: 'styles.css', content: 'body {\n  margin: 0;\n  background: #090A0F;\n}' },
+        { path: 'SKILL.md', content: '# Git Commit Workflow\n\n- [x] Step 1: Pre-pull\n- [ ] Step 2: Conventional Commits' }
+      ],
+      activeFilePath: 'SKILL.md',
+      viewMode: 'rendered',
+      showLineNumbers: true,
+      wordWrap: false,
+      searchOpen: false,
+      searchQuery: '',
+      isFullscreen: false,
+    };
+
+    window.updateInspectionPod = function() {
+      const container = document.getElementById('test-viewport');
+      container.innerHTML = renderInspectionPod({
+        collapsed: window.testState.collapsed,
+        gatewayConnected: window.testState.gatewayConnected,
+        isFullscreen: window.testState.isFullscreen,
+        openFiles: window.testState.openFiles,
+        activeFilePath: window.testState.activeFilePath,
+        viewMode: window.testState.viewMode,
+        showLineNumbers: window.testState.showLineNumbers,
+        wordWrap: window.testState.wordWrap,
+        searchOpen: window.testState.searchOpen,
+        searchQuery: window.testState.searchQuery,
+      });
+      bindEvents();
+    };
+
+    function bindEvents() {
+      document.querySelectorAll('.inspector-file-tab').forEach(tab => {
+        tab.onclick = (e) => {
+          if (e.target.closest('.btn-close-file-tab')) return;
+          window.testState.activeFilePath = tab.dataset.fileTab;
+          window.updateInspectionPod();
+        };
+      });
+
+      document.querySelectorAll('.btn-close-file-tab').forEach(btn => {
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          const p = btn.dataset.closeTab;
+          window.testState.openFiles = window.testState.openFiles.filter(f => f.path !== p);
+          if (window.testState.activeFilePath === p) {
+            window.testState.activeFilePath = window.testState.openFiles[0]?.path || '';
+          }
+          window.updateInspectionPod();
+        };
+      });
+
+      const btnToggleMode = document.getElementById('btn-file-toggle-mode');
+      if (btnToggleMode) {
+        btnToggleMode.onclick = () => {
+          window.testState.viewMode = window.testState.viewMode === 'rendered' ? 'raw' : 'rendered';
+          window.updateInspectionPod();
+        };
+      }
+
+      const btnToggleWrap = document.getElementById('btn-file-toggle-wrap');
+      if (btnToggleWrap) {
+        btnToggleWrap.onclick = () => {
+          window.testState.wordWrap = !window.testState.wordWrap;
+          window.updateInspectionPod();
+        };
+      }
+
+      const btnToggleLineNo = document.getElementById('btn-file-toggle-lineno');
+      if (btnToggleLineNo) {
+        btnToggleLineNo.onclick = () => {
+          window.testState.showLineNumbers = !window.testState.showLineNumbers;
+          window.updateInspectionPod();
+        };
+      }
+
+      const btnSearch = document.getElementById('btn-file-search');
+      if (btnSearch) {
+        btnSearch.onclick = () => {
+          window.testState.searchOpen = !window.testState.searchOpen;
+          window.updateInspectionPod();
+        };
+      }
+    }
+
+    window.updateInspectionPod();
+  </script>
+</body>
+</html>

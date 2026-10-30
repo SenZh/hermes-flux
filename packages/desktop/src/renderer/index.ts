@@ -109,6 +109,14 @@ interface AppState {
   memories: Array<{ category: string; content: string; updated?: string }>;
   agentActivityStatus?: string;
   inspectorFullscreen?: boolean;
+  // Multi-tab file viewer & OpenChamber toolbar states
+  openFiles: Array<{ id?: string; path: string; content: string; language?: string; isDiff?: boolean }>;
+  activeFilePath: string;
+  fileViewMode: 'rendered' | 'raw';
+  fileShowLineNumbers: boolean;
+  fileWordWrap: boolean;
+  fileSearchOpen: boolean;
+  fileSearchQuery: string;
 }
 
 const desktopApi: HermesDesktopBridge | undefined = window.hermesDesktop;
@@ -172,6 +180,14 @@ const state: AppState = {
   messages: [],
   hasOlderMessages: false,
   isLoadingOlder: false,
+  inspectorFullscreen: false,
+  openFiles: [],
+  activeFilePath: '',
+  fileViewMode: 'rendered',
+  fileShowLineNumbers: true,
+  fileWordWrap: false,
+  fileSearchOpen: false,
+  fileSearchQuery: '',
   testStatus: undefined,
   artifacts: [],
   browserFrame: undefined,
@@ -2304,6 +2320,13 @@ function render(): void {
           activeTab: state.activeInspectorTab,
           gatewayConnected: state.gatewayConnected,
           isFullscreen: state.inspectorFullscreen,
+          openFiles: state.openFiles,
+          activeFilePath: state.activeFilePath,
+          viewMode: state.fileViewMode,
+          showLineNumbers: state.fileShowLineNumbers,
+          wordWrap: state.fileWordWrap,
+          searchOpen: state.fileSearchOpen,
+          searchQuery: state.fileSearchQuery,
           artifacts: state.artifacts,
           browserFrame: state.browserFrame,
           gitDiffs: state.gitDiffs,
@@ -2371,6 +2394,13 @@ function render(): void {
         activeTab: state.activeInspectorTab,
         gatewayConnected: state.gatewayConnected,
         isFullscreen: state.inspectorFullscreen,
+        openFiles: state.openFiles,
+        activeFilePath: state.activeFilePath,
+        viewMode: state.fileViewMode,
+        showLineNumbers: state.fileShowLineNumbers,
+        wordWrap: state.fileWordWrap,
+        searchOpen: state.fileSearchOpen,
+        searchQuery: state.fileSearchQuery,
         artifacts: state.artifacts,
         browserFrame: state.browserFrame,
         gitDiffs: state.gitDiffs,
@@ -2563,6 +2593,209 @@ function bindEvents(): void {
     toggleInspectorFullscreen.onclick = () => {
       state.inspectorFullscreen = !state.inspectorFullscreen;
       render();
+    };
+  }
+
+  // --- OpenChamber Style Inspector Tabs & Toolbar Event Bindings ---
+  // 1. File Tab Switch
+  document.querySelectorAll<HTMLElement>('.inspector-file-tab').forEach((tabEl) => {
+    tabEl.onclick = (e) => {
+      // Ignore if clicking close button
+      if ((e.target as HTMLElement).closest('.btn-close-file-tab')) return;
+      const targetPath = tabEl.dataset.fileTab;
+      if (targetPath && targetPath !== state.activeFilePath) {
+        state.activeFilePath = targetPath;
+        render();
+      }
+    };
+  });
+
+  // 2. File Tab Close
+  document.querySelectorAll<HTMLElement>('.btn-close-file-tab').forEach((btnEl) => {
+    btnEl.onclick = (e) => {
+      e.stopPropagation();
+      const targetPath = btnEl.dataset.closeTab;
+      if (!targetPath) return;
+
+      const idx = state.openFiles.findIndex((f) => f.path === targetPath);
+      if (idx !== -1) {
+        state.openFiles.splice(idx, 1);
+        // Also remove from artifacts if matching
+        state.artifacts = state.artifacts.filter((a) => a.name !== targetPath);
+        if (state.activeFilePath === targetPath) {
+          state.activeFilePath = state.openFiles[0]?.path || '';
+        }
+        if (state.openFiles.length === 0) {
+          state.inspectorCollapsed = true;
+          state.inspectorFullscreen = false;
+        }
+        render();
+      }
+    };
+  });
+
+  // 3. Toolbar: View Mode Toggle (Raw Code vs Rich Rendered)
+  const btnToggleMode = document.getElementById('btn-file-toggle-mode');
+  if (btnToggleMode) {
+    btnToggleMode.onclick = () => {
+      state.fileViewMode = state.fileViewMode === 'rendered' ? 'raw' : 'rendered';
+      render();
+    };
+  }
+
+  // 4. Toolbar: Search Toggle
+  const btnSearch = document.getElementById('btn-file-search');
+  if (btnSearch) {
+    btnSearch.onclick = () => {
+      state.fileSearchOpen = !state.fileSearchOpen;
+      if (!state.fileSearchOpen) {
+        state.fileSearchQuery = '';
+      }
+      render();
+      if (state.fileSearchOpen) {
+        setTimeout(() => {
+          document.getElementById('inspector-search-input')?.focus();
+        }, 50);
+      }
+    };
+  }
+
+  const btnCloseSearch = document.getElementById('btn-close-search');
+  if (btnCloseSearch) {
+    btnCloseSearch.onclick = () => {
+      state.fileSearchOpen = false;
+      state.fileSearchQuery = '';
+      render();
+    };
+  }
+
+  const inspectorSearchInput = document.getElementById('inspector-search-input') as HTMLInputElement | null;
+  if (inspectorSearchInput) {
+    inspectorSearchInput.oninput = () => {
+      state.fileSearchQuery = inspectorSearchInput.value;
+      render();
+      // Keep focus on input after render
+      const freshInput = document.getElementById('inspector-search-input') as HTMLInputElement | null;
+      if (freshInput) {
+        freshInput.focus();
+        freshInput.selectionStart = freshInput.selectionEnd = freshInput.value.length;
+      }
+    };
+  }
+
+  // 5. Toolbar: Line Numbers Toggle
+  const btnToggleLineNo = document.getElementById('btn-file-toggle-lineno');
+  if (btnToggleLineNo) {
+    btnToggleLineNo.onclick = () => {
+      state.fileShowLineNumbers = !state.fileShowLineNumbers;
+      render();
+    };
+  }
+
+  // 6. Toolbar: Prettify JSON / Code
+  const btnPrettify = document.getElementById('btn-file-prettify');
+  if (btnPrettify) {
+    btnPrettify.onclick = () => {
+      const activeFile = state.openFiles.find((f) => f.path === state.activeFilePath) || state.openFiles[0];
+      if (activeFile && activeFile.content) {
+        try {
+          const parsed = JSON.parse(activeFile.content);
+          activeFile.content = JSON.stringify(parsed, null, 2);
+          render();
+        } catch {
+          // If not json, do basic line trim
+          activeFile.content = activeFile.content.split('\n').map((l) => l.trimEnd()).join('\n');
+          render();
+        }
+      }
+    };
+  }
+
+  // 7. Toolbar: Toggle Word Wrap
+  const btnToggleWrap = document.getElementById('btn-file-toggle-wrap');
+  if (btnToggleWrap) {
+    btnToggleWrap.onclick = () => {
+      state.fileWordWrap = !state.fileWordWrap;
+      render();
+    };
+  }
+
+  // 8. Toolbar: Quote to Chat
+  const btnQuoteChat = document.getElementById('btn-file-quote-chat');
+  if (btnQuoteChat) {
+    btnQuoteChat.onclick = () => {
+      const activeFile = state.openFiles.find((f) => f.path === state.activeFilePath) || state.openFiles[0];
+      if (activeFile) {
+        const composer = document.getElementById('prompt-composer-input') as HTMLTextAreaElement | null;
+        if (composer) {
+          const quoteText = `请查看并分析文件 \`${activeFile.path}\`:\n\`\`\`${activeFile.language || ''}\n${activeFile.content.slice(0, 1000)}${activeFile.content.length > 1000 ? '\n// ...(截断)' : ''}\n\`\`\`\n`;
+          composer.value = composer.value ? `${composer.value}\n${quoteText}` : quoteText;
+          composer.focus();
+        }
+      }
+    };
+  }
+
+  // 9. Toolbar: Open Externally
+  const btnOpenExternal = document.getElementById('btn-file-open-external');
+  if (btnOpenExternal) {
+    btnOpenExternal.onclick = () => {
+      const activeFile = state.openFiles.find((f) => f.path === state.activeFilePath) || state.openFiles[0];
+      if (activeFile) {
+        // Try opening with desktop shell if available
+        if (desktopApi?.openExternal) {
+          void desktopApi.openExternal(activeFile.path);
+        } else {
+          void navigator.clipboard.writeText(activeFile.path);
+          state.dockNotice = `已复制文件绝对路径: ${activeFile.path}`;
+          render();
+        }
+      }
+    };
+  }
+
+  // 10. Toolbar: Copy Full Content
+  const btnCopyContent = document.getElementById('btn-file-copy-content');
+  if (btnCopyContent) {
+    btnCopyContent.onclick = () => {
+      const activeFile = state.openFiles.find((f) => f.path === state.activeFilePath) || state.openFiles[0];
+      if (activeFile) {
+        void navigator.clipboard.writeText(activeFile.content);
+        state.dockNotice = `已将 ${activeFile.path.split(/[/\\]/).pop()} 的内容复制到剪贴板`;
+        render();
+      }
+    };
+  }
+
+  // 11. Toolbar: Copy Path
+  const btnCopyPath = document.getElementById('btn-file-copy-path');
+  if (btnCopyPath) {
+    btnCopyPath.onclick = () => {
+      const activeFile = state.openFiles.find((f) => f.path === state.activeFilePath) || state.openFiles[0];
+      if (activeFile) {
+        void navigator.clipboard.writeText(activeFile.path);
+        state.dockNotice = `已复制路径: ${activeFile.path}`;
+        render();
+      }
+    };
+  }
+
+  // 12. Toolbar: Download File
+  const btnDownload = document.getElementById('btn-file-download');
+  if (btnDownload) {
+    btnDownload.onclick = () => {
+      const activeFile = state.openFiles.find((f) => f.path === state.activeFilePath) || state.openFiles[0];
+      if (activeFile) {
+        const blob = new Blob([activeFile.content], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = activeFile.path.split(/[/\\]/).pop() || 'download.txt';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
     };
   }
 
@@ -3067,6 +3300,20 @@ function bindEvents(): void {
       }
 
       state.inspectorCollapsed = false;
+      state.activeFilePath = filePath;
+      // Sync into openFiles
+      let existingOpenFile = state.openFiles.find((f) => f.path === filePath);
+      if (!existingOpenFile) {
+        existingOpenFile = {
+          id: `file-${Date.now()}`,
+          path: filePath,
+          content: existingContent || `// ${filePath}\n\n正在从工作区加载最新版本内容...`,
+        };
+        state.openFiles.push(existingOpenFile);
+      } else if (existingContent) {
+        existingOpenFile.content = existingContent;
+      }
+
       // Find or push artifact
       let existing = state.artifacts.find((a) => a.name === filePath);
       if (!existing) {
@@ -3098,8 +3345,9 @@ function bindEvents(): void {
               method: 'GET',
             });
             const text = typeof res === 'string' ? res : typeof res?.content === 'string' ? res.content : '';
-            if (text && existing) {
-              existing.preview = text;
+            if (text) {
+              if (existing) existing.preview = text;
+              if (existingOpenFile) existingOpenFile.content = text;
               render();
               return;
             }
@@ -3111,8 +3359,9 @@ function bindEvents(): void {
           try {
             const res = await gatewayClient.call<any>('workspace.readFile', { path: filePath });
             const content = typeof res?.content === 'string' ? res.content : typeof res === 'string' ? res : '';
-            if (content && existing) {
-              existing.preview = content;
+            if (content) {
+              if (existing) existing.preview = content;
+              if (existingOpenFile) existingOpenFile.content = content;
               render();
               return;
             }
@@ -3124,8 +3373,9 @@ function bindEvents(): void {
           try {
             const res = await gatewayClient.call<any>('file.read', { path: filePath });
             const content = typeof res?.content === 'string' ? res.content : typeof res === 'string' ? res : '';
-            if (content && existing) {
-              existing.preview = content;
+            if (content) {
+              if (existing) existing.preview = content;
+              if (existingOpenFile) existingOpenFile.content = content;
               render();
               return;
             }
@@ -3133,14 +3383,17 @@ function bindEvents(): void {
         }
 
         // If not fetchable from remote gateway backend but we have local session content, KEEP existingContent!
-        if (existing && existingContent) {
-          existing.preview = existingContent;
+        if (existingContent) {
+          if (existing) existing.preview = existingContent;
+          if (existingOpenFile) existingOpenFile.content = existingContent;
           render();
           return;
         }
 
         if (existing && (!existing.preview || existing.preview.includes('正在从工作区加载'))) {
-          existing.preview = `// ${filePath}\n\n（该文件位于远程网关工作区，网关未开放直接文件读取通道）`;
+          const fallbackText = `// ${filePath}\n\n（该文件位于远程网关工作区，网关未开放直接文件读取通道）`;
+          existing.preview = fallbackText;
+          if (existingOpenFile) existingOpenFile.content = fallbackText;
           render();
         }
       };
