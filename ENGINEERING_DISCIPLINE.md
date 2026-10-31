@@ -186,6 +186,24 @@
 ### 6. 跨端 Parity 等价性断言
 * 多端（Web ↔ Desktop ↔ Mobile ↔ VS Code）共享逻辑必须编写 Parity 测试，直接将各端输出做 `assert.deepEqual` 断言，确保行为绝对一致。
 
+### 7. 全量真实网关 RPC 自动化联调与物理契约门禁 (Live Gateway RPC Integration Mandate)
+* **严禁纯 Mock 自证与假数据降级**：
+  凡新增或修改 `packages/core` 中与 Hermes Gateway 通信的基础组件、接口抽象或服务层，**绝对禁止**仅靠单元测试内部的 fake mock 对象蒙混过关。
+* **真实子进程物理通信**：
+  必须建立真实的端到端集成测试（如 `packages/core/__tests__/rpc/live-gateway-real.test.mjs`），使用 `child_process.spawn` 真实启动本地 Python Gateway（`tui_gateway/entry.py`），通过 `stdin`/`stdout` JSON-RPC 2.0 管道进行真实进程级通信。
+* **100% 接口覆盖与 Pydantic 契约排他性断言**：
+  涉及的公开 RPC 方法必须全量覆盖（包括专职 Bot 调度、项目工程文件树、多智能体群聊、代码时光机快照、子代理委派控制与会话接力），严禁传未声明的冗余字段（严防服务端 `code 4000: Extra inputs are not permitted` 拦截），并穷尽正向、边界与真实业务守卫错误码（如 `4000` 格式非法、`4001` 会话未激活、`4008` 空会话分支拦截、`4123` 执行器未拉起、`5032` 未配置模型提供商、`5063` 项目路径归属冲突）。
+* **全生命周期清理守护**：
+  测试套件必须在 `t.after()` 钩子中强制退出并清理 Python 子进程树，释放底层端口与 SQLite 事务锁，严防僵尸进程与句柄泄漏。
+
+### 8. 真实无头浏览器 CDP 物理交互与几何验证门禁 (Headless Browser CDP Physical Verification)
+* **真实 Blink 物理渲染引擎驱动**：
+  凡新增或修改可复用 UI 表现层组件（如卡片、输入舱、独立对话框、弹窗浮层），在单测之外**必须编写并通过真实无头浏览器（Edge / Chrome）的 CDP 端到端物理测试**（如 `packages/desktop/__tests__/cdp/advanced-systems-cdp.test.mjs`），通过 CDP 协议指令驱动真实的物理 `click()`、输入框内容赋值与真实 DOM 增删，严禁在 HTML harness 内自造假函数。
+* **移动端视口仿真与触控热区硬红线**：
+  必须通过 CDP `Emulation.setDeviceMetricsOverride` 模拟 Pixel 8（390×844，DPR=3）移动端视口，物理测量可点击控件触控热区（严格断言 $\ge 44\text{pt} / 48\text{dp}$，双向 `offsetWidth >= 44 && offsetHeight >= 44`）；读取 `env(safe-area-inset-bottom)` 计算样式断言底部安全区避让（`computedPaddingBottom >= 12px`）；物理点击半透明背景遮罩（Overlay）断言弹窗完全销毁。
+* **动态端口与跨平台临时环境隔离**：
+  静态 HTTP 测试服务必须使用 `server.listen(0, '127.0.0.1')` 由操作系统内核动态分配空闲端口，严禁硬编码端口号引发冲突；浏览器缓存与用户数据目录必须使用 `os.tmpdir()` 动态生成隔离路径，严禁硬编码包含个人私有工号或特定机器路径；退出钩子必须发送 CDP `Browser.close` 安全退出进程解开 Windows 文件锁，严禁静默吞掉 `EBUSY / EPERM` 异常。
+
 ---
 
 ## 四、开发、审查与交付排障管道 (Pipeline & Delivery Protocol)
@@ -214,7 +232,7 @@
 * **"Needs your hands" 极窄门禁准则**：
   只有当人工核验直接阻断一次不可逆操作（如真实数据清空、自动升级重启流、核心鉴权变更）时，才允许向人类维护者提出手动检查请求。普通视觉或低风险变动严禁向维护者抛出模糊的“抽空帮我测一下”清单。
 
-### 阶段 3：交付前强制门禁清单 (12 项全景 Check-List)
+### 阶段 3：交付前强制门禁清单 (14 项全景 Check-List)
 
 发起 PR 或完成最终交付前，必须逐条自检并提供客观依据：
 
@@ -232,3 +250,12 @@
 | **10. 物理入口可达性证明** | 从物理入口（如 `desktop/src/main.ts` 或 `mobile/App.tsx`）自顶向下追踪挂载 | 共享包写了逻辑，但在目标平台未挂载（死路径） |
 | **11. 真实硬件运行声明** | 必须在 PR/汇报中说明：在哪个具体 Runtime、哪个 OS 硬件上完成了唤起复现 | 仅凭“测试跑通”而无物理运行声明者不得交付 |
 | **12. 极简沟通与纯净提交** | 汇报与文案剔除 AI 八股套话；检查 Git 提交中严禁包含截图/录屏等大文件 | 提交中包含测试媒体文件、汇报出现“X 而不是 Y”或虚浮叙事一律打回 |
+| **13. 真实网关全量 RPC 联调** | `npm run test:live-gateway`（真实拉起 Python 网关进程，覆盖 100% 涉及接口） | 仅靠 Mock 糊弄、遗漏任何公开接口、参数触发 Pydantic `Extra inputs` 阻断 |
+| **14. 真实浏览器 CDP 物理交互** | `npm run test:cdp`（真实无头 Edge/Chrome 驱动，物理点击与安全区度量） | 触控热区 $<44\text{pt}$、移动端视口产生横向溢出、遮罩背景点击无法关闭 |
+
+### 强制交付验证三位一体闭环 (Mandatory Delivery Triad Pipeline)
+任何代码功能新增、抽象引入或缺陷修复，在声明完成或合并之前，必须在本地依次执行以下三条指令并实现 **100% 绿灯无报错通过**：
+1. `npm run verify`：静态质量门禁 (gates) + TypeScript 全栈严格类型 (typecheck) + 全量单元测试 (test)；
+2. `npm run test:live-gateway`：本地真实 Python Gateway 进程拉起与 22 个 RPC 接口集成联调测试（穷尽出入参契约与状态流转）；
+3. `npm run test:cdp`：本地真实 Blink 内核无头浏览器（Edge/Chrome）启动与 CDP 物理交互、触控热区、安全区避让及视口仿真测试。
+三者缺一不可，任何一项缺失或失败，一票否决禁止交付。

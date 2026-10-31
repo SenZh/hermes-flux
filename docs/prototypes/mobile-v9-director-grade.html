@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Hermes Flux Mobile v9.0 —— 电影级暗黑纯净工作台</title>
+<style>
+:root {
+  /* 电影级极夜暗黑基底 (Cinema Pure Slate) */
+  --bg-surface-0: #060709;
+  --bg-surface-1: #0D0F14;
+  --bg-surface-2: #141720;
+  --bg-surface-3: #1B1F2B;
+  
+  /* 双层微光物理受光边框 */
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --border-highlight: rgba(255, 255, 255, 0.14);
+  
+  /* 文本对比度阶梯 */
+  --text-primary: #F5F5F7;
+  --text-secondary: #9CA3AF;
+  --text-muted: #4B5565;
+  
+  /* 克制微距品牌光晕 */
+  --aura-jade: #10B981;
+  --aura-amber: #F59E0B;
+  --aura-indigo: #6366F1;
+  --aura-pink: #EC4899;
+  --aura-cyan: #06B6D4;
+  
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "PingFang SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html, body {
+  background: var(--bg-surface-0);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mobile-viewport {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-surface-0);
+}
+
+/* ═════════════════════════════════════════════════
+   主舞台：承载 3 个主 Tab (留出底部 54px TabBar)
+   ═════════════════════════════════════════════════ */
+.stage-scaffold {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 54px;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.28s ease;
+}
+.stage-scaffold.pushed {
+  transform: translateX(-20%);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* 顶栏：天顶微高光 + 48dp 触控标准 */
+.native-topbar {
+  height: 48px;
+  padding: 0 16px;
+  background: rgba(13, 15, 20, 0.85);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border-bottom: 1px solid var(--border-subtle);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.02);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  z-index: 10;
+}
+.brand-slot {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.emerald-core {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--aura-jade);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.85);
+}
+.touch-icon-btn {
+  min-width: 44px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: transform 0.12s cubic-bezier(0.16, 1, 0.3, 1), color 0.15s;
+}
+.touch-icon-btn:active {
+  transform: scale(0.92);
+  color: var(--text-primary);
+}
+
+.pane-scrollable {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 分组小标：整数 11px，字距严格舒展 */
+.section-header-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 14px 16px 6px 16px;
+}
+
+/* ─────────────────────────────────────────────
+   Tab 1: 会话行 (物理弹性 + 矢量子像素头像)
+   ───────────────────────────────────────────── */
+.chat-row-card {
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  transition: transform 0.12s cubic-bezier(0.16, 1, 0.3, 1), background 0.15s;
+}
+.chat-row-card:active {
+  transform: scale(0.985);
+  background: rgba(255, 255, 255, 0.025);
+}
+.chat-row-card.pinned-row {
+  background: rgba(255, 255, 255, 0.012);
+}
+
+/* 矢量微距头像：深 Slate 基底 + 1px 天顶高光 + 微暗影 */
+.vector-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 11px;
+  background: linear-gradient(180deg, #181C26 0%, #10131B 100%);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: 
+    inset 0 1px 0 rgba(255, 255, 255, 0.15),
+    0 2px 6px rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  flex-shrink: 0;
+  color: var(--text-primary);
+}
+.avatar-accent-pin {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1.5px solid var(--bg-surface-0);
+}
+
+/* 群聊头像叠落 */
+.avatar-stack-trio {
+  width: 42px;
+  height: 42px;
+  position: relative;
+  flex-shrink: 0;
+}
+.trio-dot {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--bg-surface-0);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+}
+
+/* 标题区：15px 严谨主标题 + 13px 次标题 */
+.chat-meta-payload {
+  flex: 1;
+  min-width: 0;
+}
+.meta-top-flex {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 3px;
+}
+.title-major {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.time-footnote {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  margin-left: 8px;
+}
+.summary-minor {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─────────────────────────────────────────────
+   Tab 2: 项目矩阵 (零 JS FLIP CSS Grid 物理平滑展开)
+   ───────────────────────────────────────────── */
+.project-card-scaffold {
+  margin: 10px 16px;
+  background: linear-gradient(180deg, #13161F 0%, #0D0F16 100%);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  box-shadow: 
+    inset 0 1px 0 rgba(255, 255, 255, 0.10),
+    0 2px 8px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+.project-card-scaffold.open {
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.project-card-trigger {
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+.project-card-trigger:active {
+  background: rgba(255, 255, 255, 0.03);
+}
+.proj-main-name {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.proj-path-tag {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  margin-top: 3px;
+}
+.chevron-icon {
+  color: var(--text-muted);
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.project-card-scaffold.open .chevron-icon {
+  transform: rotate(90deg);
+  color: var(--aura-jade);
+}
+
+/* 物理平滑高度展开 (CSS Grid 0fr -> 1fr) */
+.project-accordion-grid {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 260ms cubic-bezier(0.16, 1, 0.3, 1);
+  border-top: 1px solid transparent;
+}
+.project-card-scaffold.open .project-accordion-grid {
+  grid-template-rows: 1fr;
+  border-top-color: var(--border-subtle);
+}
+.accordion-inner-box {
+  overflow: hidden;
+  background: #090B0F;
+}
+
+.nested-session-row {
+  padding: 11px 16px 11px 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  font-size: 13px;
+  transition: background 0.15s;
+}
+.nested-session-row:last-child {
+  border-bottom: none;
+}
+.nested-session-row:active {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* ─────────────────────────────────────────────
+   Tab 3: 设置 (纯净卡片)
+   ───────────────────────────────────────────── */
+.settings-inset-group {
+  margin: 10px 16px;
+  background: linear-gradient(180deg, #13161F 0%, #0D0F16 100%);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.settings-cell-row {
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.15s;
+}
+.settings-cell-row:last-child {
+  border-bottom: none;
+}
+.settings-cell-row:active {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* ═════════════════════════════════════════════════
+   微信经典底部 3-Tab 导航栏 (54px 极致通透毛玻璃)
+   ═════════════════════════════════════════════════ */
+.ios-tabbar-footer {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 54px;
+  background: rgba(13, 15, 20, 0.88);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border-top: 1px solid var(--border-subtle);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  z-index: 50;
+  user-select: none;
+}
+.tab-action-target {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s, transform 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.tab-action-target:active {
+  transform: scale(0.94);
+}
+.tab-action-target.active {
+  color: var(--aura-jade);
+}
+.tab-caption-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* ═════════════════════════════════════════════════
+   推入层: 纯净全屏对话主舱 (Push View)
+   ═════════════════════════════════════════════════ */
+.fullscreen-chat-deck {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: var(--bg-surface-0);
+  display: flex;
+  flex-direction: column;
+  z-index: 60;
+  transform: translateX(100%);
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.fullscreen-chat-deck.active {
+  transform: translateX(0);
+}
+
+.chat-stage-header {
+  height: 48px;
+  padding: 0 10px;
+  background: rgba(13, 15, 20, 0.88);
+  backdrop-filter: blur(28px);
+  border-bottom: 1px solid var(--border-subtle);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.02);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.nav-back-button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--aura-jade);
+  font-size: 14px;
+  font-weight: 600;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 6px 8px;
+  min-height: 44px;
+}
+.nav-back-button:active {
+  opacity: 0.75;
+}
+.chat-center-focal {
+  text-align: center;
+  max-width: 220px;
+}
+.focal-main-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.focal-sub-badge {
+  font-size: 10px;
+  color: var(--aura-jade);
+  letter-spacing: 0.02em;
+}
+
+.message-stream-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 16px 90px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  -webkit-overflow-scrolling: touch;
+}
+.bubble-exchange-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.bubble-exchange-row.user {
+  flex-direction: row-reverse;
+}
+.exchange-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: #181C26;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #FFF;
+  flex-shrink: 0;
+}
+.bubble-scaffold {
+  max-width: 84%;
+  background: linear-gradient(180deg, #151822 0%, #10121A 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 11px 14px;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.bubble-exchange-row.user .bubble-scaffold {
+  background: linear-gradient(180deg, #1E222C 0%, #171A22 100%);
+  border-color: rgba(255, 255, 255, 0.12);
+  border-top-right-radius: 4px;
+}
+.bubble-exchange-row.bot .bubble-scaffold {
+  border-top-left-radius: 4px;
+}
+
+/* 740px 黄金毛玻璃输入舱 (移动端通栏自适应) */
+.dock-composer-island {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  background: rgba(13, 15, 20, 0.92);
+  backdrop-filter: blur(28px) saturate(180%);
+  border-top: 1px solid var(--border-subtle);
+  padding: 8px 14px 18px 14px;
+  z-index: 40;
+}
+.dock-layout-flex {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.composer-native-textarea {
+  flex: 1;
+  background: #151821;
+  border: 1px solid var(--border-subtle);
+  border-radius: 18px;
+  padding: 9px 14px;
+  outline: none;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: var(--font-sans);
+  resize: none;
+  min-height: 38px;
+  max-height: 100px;
+  line-height: 1.4;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.3);
+}
+.composer-native-textarea:focus {
+  border-color: var(--aura-jade);
+}
+.send-round-trigger {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--aura-jade);
+  color: #060709;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.send-round-trigger:active {
+  transform: scale(0.92);
+}
+</style>
+</head>
+<body>
+
+<div class="mobile-viewport">
+
+  <div class="stage-scaffold" id="scaffold">
+    
+    <header class="native-topbar">
+      <div class="brand-slot">
+        <div class="emerald-core"></div>
+        <span id="page-title">Hermes Flux</span>
+      </div>
+      <button class="touch-icon-btn" onclick="alert('+ 新建单聊 / 原地拉群')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+      </button>
+    </header>
+
+    <!-- Tab 1: 会话大盘 (Bot 默认置顶 + 旁聊 + 群聊) -->
+    <main class="pane-scrollable" id="pane-chats">
+      <div class="section-header-tag">置顶数字员工 (Bots)</div>
+
+      <!-- HQ -->
+      <div class="chat-row-card pinned-row" onclick="openChat('个人主助理 (HQ)', '✦', 'var(--aura-jade)', 'Chief of Staff · 全局调度')">
+        <div class="vector-avatar">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--aura-jade)" stroke-width="2" stroke-linecap="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+          <div class="avatar-accent-pin" style="background:var(--aura-jade);"></div>
+        </div>
+        <div class="chat-meta-payload">
+          <div class="meta-top-flex">
+            <span class="title-major">个人主助理 (HQ)</span>
+            <span class="time-footnote">15:10</span>
+          </div>
+          <div class="summary-minor">全局中枢调度 · 2 个任务执行中，1 个 PR 待审</div>
+        </div>
+      </div>
+
+      <!-- 老王 -->
+      <div class="chat-row-card pinned-row" onclick="openChat('架构师 · 老王', '🤖', 'var(--aura-indigo)', 'Claude 3.7 · 终生核心主工位')">
+        <div class="vector-avatar">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--aura-indigo)" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="10" rx="2"></rect><circle cx="12" cy="5" r="2"></circle><path d="M12 7v4"></path><line x1="8" y1="16" x2="8" y2="16"></line><line x1="16" y1="16" x2="16" y2="16"></line></svg>
+          <div class="avatar-accent-pin" style="background:var(--aura-indigo);"></div>
+        </div>
+        <div class="chat-meta-payload">
+          <div class="meta-top-flex">
+            <span class="title-major">架构师 · 老王</span>
+            <span class="time-footnote">14:31</span>
+          </div>
+          <div class="summary-minor">老王: 方案已敲定，单测全绿 (PASS 8/8)</div>
+        </div>
+      </div>
+
+      <!-- 小张 -->
+      <div class="chat-row-card pinned-row" onclick="openChat('前端开发 · 小张', '🎨', 'var(--aura-pink)', 'DeepSeek-V3 · 样式总监')">
+        <div class="vector-avatar">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--aura-pink)" stroke-width="2" stroke-linecap="round"><circle cx="13.5" cy="6.5" r=".5"></circle><circle cx="17.5" cy="10.5" r=".5"></circle><circle cx="8.5" cy="7.5" r=".5"></circle><circle cx="6.5" cy="12.5" r=".5"></circle><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"></path></svg>
+          <div class="avatar-accent-pin" style="background:var(--aura-pink);"></div>
+        </div>
+        <div class="chat-meta-payload">
+          <div class="meta-top-flex">
+            <span class="title-major">前端开发 · 小张</span>
+            <span class="time-footnote">昨天</span>
+          </div>
+          <div class="summary-minor">小张: 44px 触控规范与物理弹性动效已就绪</div>
+        </div>
+      </div>
+
+      <div class="section-header-tag">群聊与独立旁聊</div>
+
+      <!-- 群聊 -->
+      <div class="chat-row-card" onclick="openChat('OAuth 方案联合评审', '👥', 'var(--aura-amber)', '老王 · 小张 · 审查员 (3人参会)')">
+        <div class="avatar-stack-trio">
+          <div class="trio-dot" style="left:0; top:0; background:#1C1F2B; color:var(--aura-indigo);">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="10" rx="2"></rect></svg>
+          </div>
+          <div class="trio-dot" style="right:0; top:0; background:#221C26; color:var(--aura-pink);">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="8"></circle></svg>
+          </div>
+          <div class="trio-dot" style="left:9px; bottom:0; background:#142226; color:var(--aura-cyan);">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon></svg>
+          </div>
+        </div>
+        <div class="chat-meta-payload">
+          <div class="meta-top-flex">
+            <span class="title-major">OAuth 方案联合评审 (3人)</span>
+            <span class="time-footnote">15:02</span>
+          </div>
+          <div class="summary-minor"><span style="color:var(--aura-pink);">小张</span>: redirect URI 已更新完毕</div>
+        </div>
+      </div>
+
+      <!-- 旁聊 -->
+      <div class="chat-row-card" onclick="openChat('老王 · 锁冲突排查', '⑂', 'var(--aura-amber)', '老王名下独立旁聊')">
+        <div class="vector-avatar" style="border-style:dashed; border-color:rgba(245,158,11,0.4);">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--aura-amber)" stroke-width="2" stroke-linecap="round"><line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
+        </div>
+        <div class="chat-meta-payload">
+          <div class="meta-top-flex">
+            <span class="title-major">老王 · 锁冲突排查</span>
+            <span class="time-footnote">11:20</span>
+          </div>
+          <div class="summary-minor">并发 CAS 重试机制存在饥饿隐患</div>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- Tab 2: 项目矩阵 (手风琴平滑展开) -->
+    <main class="pane-scrollable" id="pane-projects" style="display: none; padding-top: 6px;">
+      
+      <!-- 项目 1 -->
+      <div class="project-card-scaffold open" id="proj-card-1">
+        <div class="project-card-trigger" onclick="toggleProj('proj-card-1')">
+          <div>
+            <div class="proj-main-name">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--aura-amber)" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+              <span>hermes-flux</span>
+            </div>
+            <div class="proj-path-tag">/projects/hermes-flux · branch: main</div>
+          </div>
+          <div class="chevron-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          </div>
+        </div>
+
+        <div class="project-accordion-grid">
+          <div class="accordion-inner-box">
+            <div class="nested-session-row" onclick="openChat('TASK-104: OAuth 回调', '⚡', 'var(--aura-amber)', 'wt-104 · 正在跑单测')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--aura-amber)" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+              <div style="flex:1;">
+                <div style="font-weight:600;">TASK-104: OAuth 回调重构 (老王)</div>
+                <div style="font-size:11px; color:var(--text-muted);">PID: 4801 · 运行中</div>
+              </div>
+              <span style="font-size:11px; color:var(--aura-jade); font-family:var(--font-mono);">PASS 8/8</span>
+            </div>
+
+            <div class="nested-session-row" onclick="openChat('老王 · 锁冲突排查', '⑂', 'var(--aura-amber)', '老王名下独立旁聊')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
+              <div style="flex:1;">
+                <div style="font-weight:600;">锁冲突排查 (老王)</div>
+                <div style="font-size:11px; color:var(--text-muted);">20分钟前</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 项目 2 -->
+      <div class="project-card-scaffold" id="proj-card-2">
+        <div class="project-card-trigger" onclick="toggleProj('proj-card-2')">
+          <div>
+            <div class="proj-main-name">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+              <span>mp-langchao</span>
+            </div>
+            <div class="proj-path-tag">/projects/mp-langchao · branch: dev</div>
+          </div>
+          <div class="chevron-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          </div>
+        </div>
+
+        <div class="project-accordion-grid">
+          <div class="accordion-inner-box">
+            <div class="nested-session-row" onclick="openChat('登录态持久化排查', '📁', 'var(--text-primary)', '小程序会话')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+              <div style="flex:1;">
+                <div style="font-weight:600;">登录态持久化排查 (小张)</div>
+                <div style="font-size:11px; color:var(--text-muted);">2天前 · 已完成</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- Tab 3: 设置 -->
+    <main class="pane-scrollable" id="pane-settings" style="display: none; padding-top: 6px;">
+      <div class="section-header-tag">网关与连接</div>
+      <div class="settings-inset-group">
+        <div class="settings-cell-row" onclick="alert('进入网关配置')">
+          <span>网关端点 (Gateway Endpoint)</span>
+          <span style="color:var(--aura-jade); font-size:12px; font-family:var(--font-mono);">127.0.0.1:9119 🟢</span>
+        </div>
+      </div>
+
+      <div class="section-header-tag">数字团队与供应商</div>
+      <div class="settings-inset-group">
+        <div class="settings-cell-row" onclick="alert('进入 Bot 管理')">
+          <span>专职 Bot 团队 (3位)</span>
+          <span style="color:var(--text-muted); font-size:12px;">管理 ›</span>
+        </div>
+        <div class="settings-cell-row" onclick="alert('进入模型提供商')">
+          <span>模型提供商 (Providers)</span>
+          <span style="color:var(--text-muted); font-size:12px;">Anthropic, DeepSeek ›</span>
+        </div>
+      </div>
+    </main>
+
+  </div>
+
+  <!-- 底部 3-Tab 导航 -->
+  <nav class="ios-tabbar-footer">
+    <div class="tab-action-target active" id="tab-1" onclick="switchTab(1)">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+      <div class="tab-caption-label">会话</div>
+    </div>
+    <div class="tab-action-target" id="tab-2" onclick="switchTab(2)">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+      <div class="tab-caption-label">项目</div>
+    </div>
+    <div class="tab-action-target" id="tab-3" onclick="switchTab(3)">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+      <div class="tab-caption-label">设置</div>
+    </div>
+  </nav>
+
+  <!-- 推入对话主舱 -->
+  <div class="fullscreen-chat-deck" id="chat-deck">
+    <header class="chat-stage-header">
+      <button class="nav-back-button" onclick="closeChat()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+        <span>返回</span>
+      </button>
+      <div class="chat-center-focal">
+        <div class="focal-main-title" id="chat-header-title">架构师 · 老王</div>
+        <div class="focal-sub-badge" id="chat-header-desc">Claude 3.7 · 终生核心主工位</div>
+      </div>
+      <div style="width:44px;"></div>
+    </header>
+
+    <main class="message-stream-scroll" id="msg-stream">
+      <div class="bubble-exchange-row user">
+        <div class="exchange-avatar" style="background:#222634;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+        </div>
+        <div class="bubble-scaffold">老王，去 hermes-flux 项目把 OAuth 回调监听重构一下，在 Worktree 跑。</div>
+      </div>
+
+      <div class="bubble-exchange-row bot">
+        <div class="exchange-avatar">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--aura-indigo)" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"></rect></svg>
+        </div>
+        <div class="bubble-scaffold">
+          方案已敲定，已在 <code>/projects/hermes-flux</code> 自动挂载独立执行分支。<br>
+          单测与门禁已 100% 绿灯 (PASS 8/8)，等待提交 PR。
+        </div>
+      </div>
+    </main>
+
+    <div class="dock-composer-island">
+      <div class="dock-layout-flex">
+        <textarea class="composer-native-textarea" id="chat-input" rows="1" placeholder="发消息..."></textarea>
+        <button class="send-round-trigger" onclick="sendBubble()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  function switchTab(idx) {
+    document.querySelectorAll('.tab-action-target').forEach((b, i) => {
+      b.classList.toggle('active', i + 1 === idx);
+    });
+
+    const paneChats = document.getElementById('pane-chats');
+    const paneProjects = document.getElementById('pane-projects');
+    const paneSettings = document.getElementById('pane-settings');
+    const pageTitle = document.getElementById('page-title');
+
+    paneChats.style.display = idx === 1 ? 'block' : 'none';
+    paneProjects.style.display = idx === 2 ? 'block' : 'none';
+    paneSettings.style.display = idx === 3 ? 'block' : 'none';
+
+    if (idx === 1) pageTitle.textContent = 'Hermes Flux';
+    if (idx === 2) pageTitle.textContent = '项目矩阵';
+    if (idx === 3) pageTitle.textContent = '系统设置';
+  }
+
+  function toggleProj(id) {
+    document.getElementById(id).classList.toggle('open');
+  }
+
+  const scaffold = document.getElementById('scaffold');
+  const chatDeck = document.getElementById('chat-deck');
+
+  function openChat(title, icon, color, desc) {
+    document.getElementById('chat-header-title').textContent = title;
+    document.getElementById('chat-header-desc').textContent = desc;
+
+    scaffold.classList.add('pushed');
+    chatDeck.classList.add('active');
+  }
+
+  function closeChat() {
+    chatDeck.classList.remove('active');
+    scaffold.classList.remove('pushed');
+  }
+
+  function sendBubble() {
+    const input = document.getElementById('chat-input');
+    const text = input.value.trim();
+    if (!text) return;
+
+    const stream = document.getElementById('msg-stream');
+    const row = document.createElement('div');
+    row.className = 'bubble-exchange-row user';
+    row.innerHTML = `
+      <div class="exchange-avatar" style="background:#222634;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+      </div>
+      <div class="bubble-scaffold">${escapeHtml(text)}</div>
+    `;
+    stream.appendChild(row);
+    input.value = '';
+    stream.scrollTop = stream.scrollHeight;
+  }
+
+  function escapeHtml(str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+</script>
+
+</body>
+</html>

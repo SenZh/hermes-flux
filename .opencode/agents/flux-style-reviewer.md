@@ -53,10 +53,20 @@ permissions:
 - 是否用了一个 Token 但只在新皮肤定义、旧皮肤没定义？（这会导致切皮肤后颜色塌陷为 undefined）。
 - 中性遮蔽色（`rgba(0,0,0,x)` / `rgba(255,255,255,x)`）是唯一合法的硬编码例外，其余带色相色值一律 P0。
 
-### 3. 跨端多平台响应式与视口安全区 (Cross-Platform Responsive)
+### 3. 跨端多平台响应式与视口安全区 (Cross-Platform Responsive · 遵守 AGENTS.md 第十六节)
 
-- **移动端视口安全区**：顶部是否避让 `env(safe-area-inset-top)`（防止与刘海/灵动岛重叠）？底部是否避让 `env(safe-area-inset-bottom)`（防止与 Home Bar 贴死）？
-- **小屏与断点自适应**：在移动端或窄屏（$\le 768px$）下，260px 左轨与 410px 检查舱是否降级为抽屉或全屏覆盖，而不是横向撑爆视口？
+- **CSS 媒体查询选择器实名一致性（死选择器一票否决）**：
+  - 样式文件（`styles.css` 等）中 `@media (max-width: 768px)` 内部书写的所有类名选择器，**必须 100% 存在于 `packages/ui` 组件实际生成的 DOM 结构中**；
+  - 严禁书写与真实 DOM 脱节的死类名（如写 `.left-rail` 冒充 `.flux-left-rail`、写 `.input-dock` 冒充 `.input-dock-container` 或 `.composer-dock`）。
+- **48×48 dp 触控热区硬红线**：
+  - 移动端或小屏（$\le 768px$）下，所有可点击控件（按钮、图标、Chip、Tab 项）物理热区**严格不得小于 48×48 dp（iOS 44×44 pt）**；
+  - 严禁 28px 小图标不带透明 padding 裸奔。
+- **桌面端专属窗口控件物理剥离**：
+  - 处于移动视口或 `isMobile = true` 时，**必须从 DOM 树中彻底移除 Windows 标题栏三键（最小化/最大化/关闭）与 macOS 红绿灯**，严禁在手机竖屏顶栏渲染无效的桌面窗口缩放按钮。
+- **移动端视口安全区与防撑爆**：
+  - 顶部是否避让 `env(safe-area-inset-top)`（防止与刘海/灵动岛重叠）？底部是否避让 `env(safe-area-inset-bottom)`（防止与 Home Bar 贴死）？
+  - 在移动端或窄屏（$\le 768px$）下，260px 左轨与 410px 检查舱必须自动折叠或降级为全屏抽屉覆盖；
+  - 中央对话流在 390px 视口下有效渲染宽度不得低于 90%，全文档严禁产生横向滚动条（`document.documentElement.scrollWidth <= window.innerWidth`）。
 
 ### 4. 100% i18n 国际化完整性
 

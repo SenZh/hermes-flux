@@ -8,8 +8,18 @@ import { normalizeSessionsResult, extractAvailableModels, extractModelDetails } 
 
 export interface RpcClientOptions {
   url: string;
+  /** 候选连接地址池，直连失败或重连时支持按优先级自动轮转（如 [LAN直连, Relay中继]） */
+  candidateUrls?: string[];
   timeoutMs?: number;
   autoConnect?: boolean;
+  /** 是否启用周期性心跳探测看门狗（默认开启） */
+  enableHeartbeat?: boolean;
+  /** 心跳探测周期（毫秒，默认 15000ms） */
+  heartbeatIntervalMs?: number;
+  /** 心跳超时判定阈值（毫秒，默认 5000ms） */
+  heartbeatTimeoutMs?: number;
+  /** 是否监听移动端/浏览器前后台可见性与网络状态实现即刻唤醒自愈（默认开启） */
+  enableLifecycleWake?: boolean;
 }
 
 export interface RestFallbackOptions {
@@ -53,6 +63,8 @@ function describeError(error: unknown): string {
 
 export class HermesGatewayClient {
   private url: string;
+  private candidateUrls: string[] = [];
+  private currentCandidateIndex = 0;
   private timeoutMs: number;
   private ws: WebSocket | null = null;
   private nextId = 1;
@@ -70,10 +82,35 @@ export class HermesGatewayClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionalClose = false;
 
+  // 心跳看门狗状态
+  private enableHeartbeat: boolean;
+  private heartbeatIntervalMs: number;
+  private heartbeatTimeoutMs: number;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private heartbeatTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
+
+  // 移动端/跨端前后台生命周期唤醒
+  private enableLifecycleWake: boolean;
+  private visibilityListener: (() => void) | null = null;
+  private onlineListener: (() => void) | null = null;
+
   constructor(options: RpcClientOptions) {
     this.url = options.url;
+    this.candidateUrls = options.candidateUrls && options.candidateUrls.length > 0
+      ? [...options.candidateUrls]
+      : [options.url];
     this.timeoutMs = options.timeoutMs ?? 15000;
-    this.fsm = new WebSocketFsm();
+    this.enableHeartbeat = options.enableHeartbeat ?? true;
+    this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? 15000;
+    this.heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? 5000;
+    this.enableLifecycleWake = options.enableLifecycleWake ?? true;
+
+    this.fsm = new WebSocketFsm({
+      heartbeatIntervalMs: this.heartbeatIntervalMs,
+      heartbeatTimeoutMs: this.heartbeatTimeoutMs,
+    });
+
+    this.setupLifecycleListeners();
 
     if (options.autoConnect) {
       this.connect();
@@ -88,13 +125,165 @@ export class HermesGatewayClient {
     return this.ws;
   }
 
-
   public getFsm(): WebSocketFsm {
     return this.fsm;
   }
 
   public getState(): FsmState {
     return this.fsm.getState();
+  }
+
+  public getActiveUrl(): string {
+    return this.url;
+  }
+
+  public getCandidateUrls(): string[] {
+    return [...this.candidateUrls];
+  }
+
+  /**
+   * 设计意图 (Why):
+   *   在移动端或弱网环境下，长连接容易因网络抖动发生直连超时，
+   *   通过在重连阶段轮换候选地址（如 [LAN直连, Relay中继]），提供多级网络冗余兜底。
+   *
+   * 防范的历史坑 (Pitfall):
+   *   若单一死守失效的 LAN IP（如离开了工位 Wi-Fi），重连只会死循环超时直至用户手动重启。
+   *
+   * 约束与规则 (Rules):
+   *   - 仅在配置了多于 1 个候选地址时进行循环轮转；
+   *   - 轮换后立即更新 this.url 为当前候选。
+   */
+  public rotateCandidate(): string {
+    if (this.candidateUrls.length <= 1) return this.url;
+    this.currentCandidateIndex = (this.currentCandidateIndex + 1) % this.candidateUrls.length;
+    this.url = this.candidateUrls[this.currentCandidateIndex];
+    return this.url;
+  }
+
+  /**
+   * 设计意图 (Why):
+   *   注册移动端/Web 浏览器生命周期事件监听（visibilitychange 和 online）。
+   *   当 App 从后台切到前台或网络断开恢复时，触发毫秒级即刻唤醒重连。
+   *
+   * 防范的历史坑 (Pitfall):
+   *   移动操作系统（iOS/Android）在 App 切后台或锁屏时会强行冻结或掐断 WebSocket 连接。
+   *   若依赖原生 Exponential Backoff，用户重新打开 App 经常需要干等 10~30 秒才能恢复连接。
+   *
+   * 约束与规则 (Rules):
+   *   - 兼容非 DOM/Node.js 运行环境（安全校验 typeof document !== 'undefined'）；
+   *   - 必须保存 listener 引用以便在 disconnect() 时彻底解绑，防止内存泄漏。
+   */
+  private setupLifecycleListeners(): void {
+    if (!this.enableLifecycleWake) return;
+
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      this.visibilityListener = () => {
+        if (document.visibilityState === 'visible') {
+          this.wakeImmediately('visibilitychange:visible');
+        }
+      };
+      document.addEventListener('visibilitychange', this.visibilityListener);
+    }
+
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      this.onlineListener = () => {
+        this.wakeImmediately('network:online');
+      };
+      window.addEventListener('online', this.onlineListener);
+    }
+  }
+
+  private teardownLifecycleListeners(): void {
+    if (this.visibilityListener && typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+      document.removeEventListener('visibilitychange', this.visibilityListener);
+      this.visibilityListener = null;
+    }
+    if (this.onlineListener && typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
+      window.removeEventListener('online', this.onlineListener);
+      this.onlineListener = null;
+    }
+  }
+
+  /**
+   * 设计意图 (Why):
+   *   前台唤醒或网络恢复触发时，主动打破指数退避休眠，以 0ms 延迟立即发起重连。
+   *
+   * 防范的历史坑 (Pitfall):
+   *   若正在连接或已经处于握手态，盲目重连会导致重复创建 WebSocket 形成脑裂；
+   *   若不重置退避计数器（resetAttempts），后续正常断线依然会被污染残留的高延迟。
+   *
+   * 约束与规则 (Rules):
+   *   - 已处于 CONNECTED 或 HANDSHAKING 时无操作直接返回；
+   *   - 必须清理已调度的 reconnectTimer 定时器；
+   *   - 必须调用 fsm.resetAttempts() 清空退避累积。
+   */
+  public wakeImmediately(reason = 'manual'): void {
+    if (this.intentionalClose) return;
+    const current = this.fsm.getState();
+    if (current === 'CONNECTED' || current === 'HANDSHAKING') {
+      return;
+    }
+
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    this.fsm.resetAttempts();
+    this.connect();
+  }
+
+  /**
+   * 设计意图 (Why):
+   *   在长连接成功建立后启动周期性应用层心跳看门狗（system.ping）。
+   *
+   * 防范的历史坑 (Pitfall):
+   *   移动网络与 NAT 路由存在短生存期的半开连接陷阱（客户端认为连接正常但网关已死）。
+   *   若无周期性心跳应答超时检测，客户端将永久挂在假在线状态无法感知断网。
+   *
+   * 约束与规则 (Rules):
+   *   - 仅在 CONNECTED 状态下运行；
+   *   - 发起 ping 后必须设置超时看门狗，超时未应答直接主动 close() 销毁死连接触发重连自愈；
+   *   - 收到任何合法响应必须立即清理本次超时看门狗。
+   */
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    if (!this.enableHeartbeat) return;
+
+    this.heartbeatTimer = setInterval(() => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN || this.fsm.getState() !== 'CONNECTED') {
+        return;
+      }
+
+      this.heartbeatTimeoutHandle = setTimeout(() => {
+        console.warn('[HermesGatewayClient] Heartbeat watchdog timeout, terminating half-open connection');
+        if (this.ws) {
+          try {
+            this.ws.close();
+          } catch {}
+        }
+      }, this.heartbeatTimeoutMs);
+
+      this.call('system.ping', { timestamp: Date.now() })
+        .catch(() => {})
+        .finally(() => {
+          if (this.heartbeatTimeoutHandle) {
+            clearTimeout(this.heartbeatTimeoutHandle);
+            this.heartbeatTimeoutHandle = null;
+          }
+        });
+    }, this.heartbeatIntervalMs);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+    if (this.heartbeatTimeoutHandle) {
+      clearTimeout(this.heartbeatTimeoutHandle);
+      this.heartbeatTimeoutHandle = null;
+    }
   }
 
   public connect(): void {
@@ -119,10 +308,12 @@ export class HermesGatewayClient {
         this.call('system.ping', { timestamp: Date.now() })
           .then(() => {
             this.fsm.transitionTo('CONNECTED');
+            this.startHeartbeat();
           })
           .catch(() => {
             // Even if ping is not directly supported, connection opened
             this.fsm.transitionTo('CONNECTED');
+            this.startHeartbeat();
           });
       };
 
@@ -135,6 +326,7 @@ export class HermesGatewayClient {
       };
 
       this.ws.onclose = () => {
+        this.stopHeartbeat();
         this.ws = null;
         if (!this.intentionalClose) {
           this.scheduleReconnect();
@@ -144,12 +336,24 @@ export class HermesGatewayClient {
       };
     } catch (err) {
       console.error('[HermesGatewayClient] Failed to instantiate WebSocket:', err);
+      this.stopHeartbeat();
       this.scheduleReconnect();
     }
   }
 
+  private clearPendingRequests(reason = 'Connection closed'): void {
+    for (const [, req] of this.pendingRequests.entries()) {
+      clearTimeout(req.timer);
+      req.reject(new Error(reason));
+    }
+    this.pendingRequests.clear();
+  }
+
   public disconnect(): void {
     this.intentionalClose = true;
+    this.stopHeartbeat();
+    this.teardownLifecycleListeners();
+    this.clearPendingRequests('Client disconnected');
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -162,7 +366,14 @@ export class HermesGatewayClient {
   }
 
   private scheduleReconnect(): void {
+    this.stopHeartbeat();
     this.fsm.transitionTo('RECONNECTING');
+
+    // 轮换至下一个候选地址（若配置了多候选）
+    if (this.candidateUrls.length > 1) {
+      this.rotateCandidate();
+    }
+
     const delay = this.fsm.getNextBackoffMs();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = setTimeout(() => {

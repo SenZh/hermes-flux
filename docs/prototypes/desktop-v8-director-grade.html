@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Hermes Flux Desktop v8.0 —— 设计总监级暗黑工作台</title>
+<style>
+:root {
+  --bg-surface-0: #060709;
+  --bg-surface-1: #0D0F14;
+  --bg-surface-2: #141720;
+  --bg-surface-3: #1B1F2B;
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --border-highlight: rgba(255, 255, 255, 0.12);
+  --text-primary: #F5F5F7;
+  --text-secondary: #9CA3AF;
+  --text-muted: #4B5565;
+  --aura-jade: #10B981;
+  --aura-amber: #F59E0B;
+  --aura-indigo: #6366F1;
+  --aura-pink: #EC4899;
+  --aura-cyan: #06B6D4;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "PingFang SC", sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg-surface-0);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 1. 顶栏 (42px) */
+.desktop-titlebar {
+  height: 42px;
+  background: var(--bg-surface-0);
+  border-bottom: 1px solid var(--border-subtle);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.02);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  user-select: none;
+  flex-shrink: 0;
+}
+.traffic-cluster { display: flex; gap: 8px; }
+.t-dot { width: 12px; height: 12px; border-radius: 50%; }
+.dot-red { background: #EF4444; }
+.dot-yellow { background: #F59E0B; }
+.dot-green { background: #10B981; }
+
+.title-center-hub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.emerald-light-bead {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--aura-jade);
+  box-shadow: 0 0 6px rgba(16,185,129,0.9);
+}
+
+/* 2. 工作台主干 */
+.workbench-viewport {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* 2.1 左舱 (270px) */
+.left-rail-panel {
+  width: 270px;
+  background: var(--bg-surface-1);
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+  overflow: hidden;
+}
+.rail-action-header {
+  padding: 10px 12px 6px 12px;
+}
+.btn-create-session {
+  width: 100%;
+  height: 32px;
+  background: linear-gradient(180deg, #181C26 0%, #12151D 100%);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-create-session:hover {
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+.rail-scroll-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 8px 12px 8px;
+}
+
+.category-tag-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 10px 8px 4px 8px;
+}
+
+/* 会话行条目：矢量子像素图标 + 严谨三要素排版 */
+.session-row-unit {
+  padding: 7px 8px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  margin-bottom: 2px;
+  transition: background 0.12s;
+  position: relative;
+}
+.session-row-unit:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.session-row-unit.active {
+  background: rgba(16, 185, 129, 0.08);
+}
+.session-row-unit.active::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 6px; bottom: 6px; width: 3px;
+  background: var(--aura-jade);
+  border-radius: 0 2px 2px 0;
+}
+
+.unit-avatar-glyph {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #181C26 0%, #10131B 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-primary);
+}
+
+.unit-info-payload {
+  flex: 1;
+  min-width: 0;
+}
+.unit-line-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2px;
+}
+.unit-main-name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.unit-clock-tag {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: 6px;
+  font-family: var(--font-mono);
+}
+.unit-sub-snippet {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 项目手风琴容器 */
+.project-folder-card {
+  background: var(--bg-surface-0);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  margin-bottom: 6px;
+  overflow: hidden;
+}
+.folder-card-header {
+  padding: 9px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.12s;
+}
+.folder-card-header:hover {
+  background: var(--bg-surface-2);
+}
+.folder-chevron {
+  color: var(--text-muted);
+  transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.project-folder-card.open .folder-chevron {
+  transform: rotate(90deg);
+  color: var(--aura-jade);
+}
+
+/* 物理平滑高度展开 (Grid 0fr -> 1fr) */
+.folder-expand-grid {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  border-top: 1px solid transparent;
+}
+.project-folder-card.open .folder-expand-grid {
+  grid-template-rows: 1fr;
+  border-top-color: var(--border-subtle);
+}
+.folder-inner-list {
+  overflow: hidden;
+  background: #080A0E;
+}
+
+/* 左侧栏最下方并排切换 Table: [ 💬 会话 ] [ 📁 项目 ] */
+.rail-bottom-switch-strip {
+  height: 36px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-surface-0);
+  display: flex;
+  flex-shrink: 0;
+}
+.switch-tab-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  border-bottom: 2px solid transparent;
+}
+.switch-tab-btn:hover {
+  color: var(--text-primary);
+}
+.switch-tab-btn.active {
+  color: var(--aura-jade);
+  border-bottom-color: var(--aura-jade);
+  background: var(--bg-surface-1);
+}
+
+/* 2.2 中舱 (MiddlePod: 100% 通栏顶满，两侧呼吸留白) */
+.desktop-middle-canvas {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: var(--bg-surface-0);
+}
+.middle-status-banner {
+  height: 48px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.conversation-stream-flow {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 32px 140px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 860px;
+  margin: 0 auto;
+  width: 100%;
+}
+.exchange-row-item {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.exchange-row-item.user {
+  flex-direction: row-reverse;
+}
+.speaker-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #181C26;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #FFF;
+  flex-shrink: 0;
+}
+.speech-bubble-payload {
+  max-width: 80%;
+  background: linear-gradient(180deg, #13161F 0%, #0D0F16 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 2px 6px rgba(0, 0, 0, 0.35);
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+.exchange-row-item.user .speech-bubble-payload {
+  background: linear-gradient(180deg, #1C202C 0%, #151822 100%);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+/* 740px 黄金居中悬浮输入舱 */
+.floating-dock-anchorage {
+  position: absolute;
+  bottom: 20px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  padding: 0 24px;
+  pointer-events: none;
+}
+.dock-glass-capsule {
+  width: 100%;
+  max-width: 740px;
+  background: rgba(18, 18, 22, 0.85);
+  backdrop-filter: blur(32px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 18px;
+  box-shadow: 
+    inset 0 1px 0 rgba(255, 255, 255, 0.15),
+    0 4px 12px rgba(0, 0, 0, 0.35),
+    0 24px 48px -12px rgba(0, 0, 0, 0.75);
+  padding: 10px 16px;
+  pointer-events: auto;
+}
+
+/* 3. 极简状态栏 (22px) */
+.desktop-statusbar-line {
+  height: 22px;
+  background: var(--bg-surface-0);
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  user-select: none;
+  flex-shrink: 0;
+}
+</style>
+</head>
+<body>
+
+  <!-- 1. 顶栏 42px -->
+  <header class="desktop-titlebar">
+    <div class="traffic-cluster">
+      <div class="t-dot dot-red"></div>
+      <div class="t-dot dot-yellow"></div>
+      <div class="t-dot dot-green"></div>
+    </div>
+    <div class="title-center-hub">
+      <div class="emerald-light-bead"></div>
+      <span>Hermes Flux · 架构师 · 老王 (Claude 3.7)</span>
+    </div>
+    <div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">127.0.0.1:9119 🟢</div>
+  </header>
+
+  <!-- 2. 工作台主干 -->
+  <div class="workbench-viewport">
+    
+    <!-- 左舱：270px 树状手风琴与底部并排切换 Table -->
+    <aside class="left-rail-panel">
+      <div class="rail-action-header">
+        <button class="btn-create-session">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          <span>新建会话</span>
+        </button>
+      </div>
+
+      <!-- 视图 A: 全部会话 (Bot 默认置顶 + 平铺会话) -->
+      <div class="rail-scroll-body" id="view-pane-chats">
+        
+        <div class="category-tag-title">置顶数字员工 (Bots)</div>
+
+        <!-- HQ -->
+        <div class="session-row-unit" onclick="selectSession('个人主助理 HQ')">
+          <div class="unit-avatar-glyph">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--aura-jade)" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+          </div>
+          <div class="unit-info-payload">
+            <div class="unit-line-top">
+              <span class="unit-main-name">总中枢 HQ</span>
+              <span class="unit-clock-tag">15:10</span>
+            </div>
+            <div class="unit-sub-snippet">跨领域调度 · 2 个任务运行中</div>
+          </div>
+        </div>
+
+        <!-- 老王 -->
+        <div class="session-row-unit active" onclick="selectSession('架构师 · 老王')">
+          <div class="unit-avatar-glyph">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--aura-indigo)" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"></rect></svg>
+          </div>
+          <div class="unit-info-payload">
+            <div class="unit-line-top">
+              <span class="unit-main-name">架构师 · 老王</span>
+              <span class="unit-clock-tag">14:31</span>
+            </div>
+            <div class="unit-sub-snippet">老王: 方案已敲定，单测全绿 (PASS 8/8)</div>
+          </div>
+        </div>
+
+        <!-- 小张 -->
+        <div class="session-row-unit" onclick="selectSession('前端开发 · 小张')">
+          <div class="unit-avatar-glyph">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--aura-pink)" stroke-width="2"><circle cx="12" cy="12" r="8"></circle></svg>
+          </div>
+          <div class="unit-info-payload">
+            <div class="unit-line-top">
+              <span class="unit-main-name">前端开发 · 小张</span>
+              <span class="unit-clock-tag">昨天</span>
+            </div>
+            <div class="unit-sub-snippet">小张: 触控规范已全部对齐</div>
+          </div>
+        </div>
+
+        <div class="category-tag-title" style="margin-top:6px;">全部会话与群聊</div>
+
+        <!-- 群聊 -->
+        <div class="session-row-unit" onclick="selectSession('OAuth 方案联合评审')">
+          <div class="unit-avatar-glyph">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--aura-amber)" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path></svg>
+          </div>
+          <div class="unit-info-payload">
+            <div class="unit-line-top">
+              <span class="unit-main-name">OAuth 方案评审 (3人)</span>
+              <span class="unit-clock-tag">14:02</span>
+            </div>
+            <div class="unit-sub-snippet">小张: redirect URI 已更新完毕</div>
+          </div>
+        </div>
+
+        <!-- 旁聊 -->
+        <div class="session-row-unit" onclick="selectSession('锁冲突排查')">
+          <div class="unit-avatar-glyph" style="border-style:dashed; border-color:rgba(245,158,11,0.4);">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--aura-amber)" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
+          </div>
+          <div class="unit-info-payload">
+            <div class="unit-line-top">
+              <span class="unit-main-name">老王 · 锁冲突排查</span>
+              <span class="unit-clock-tag">11:20</span>
+            </div>
+            <div class="unit-sub-snippet">并发 CAS 重试存在排队饥饿</div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 视图 B: 项目手风琴列表 (平滑展开专属会话) -->
+      <div class="rail-scroll-body" id="view-pane-projects" style="display: none;">
+        
+        <div class="category-tag-title">项目基地 (点击展开专属会话)</div>
+
+        <!-- 项目 1: hermes-flux (默认展开) -->
+        <div class="project-folder-card open" id="fold-proj-1">
+          <div class="folder-card-header" onclick="toggleFolder('fold-proj-1')">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--aura-amber)" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+              <span>hermes-flux</span>
+            </div>
+            <div class="folder-chevron">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            </div>
+          </div>
+
+          <div class="folder-expand-grid">
+            <div class="folder-inner-list">
+              <div class="session-row-unit" onclick="selectSession('TASK-104: OAuth 回调')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--aura-amber)" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                <div class="unit-info-payload">
+                  <div class="unit-main-name">TASK-104: OAuth 回调 (老王)</div>
+                  <div class="unit-sub-snippet">wt-104 · 正在跑单测</div>
+                </div>
+              </div>
+
+              <div class="session-row-unit" onclick="selectSession('锁冲突排查')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
+                <div class="unit-info-payload">
+                  <div class="unit-main-name">锁冲突排查 (老王)</div>
+                  <div class="unit-sub-snippet">20分钟前</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 项目 2: mp-langchao -->
+        <div class="project-folder-card" id="fold-proj-2">
+          <div class="folder-card-header" onclick="toggleFolder('fold-proj-2')">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+              <span>mp-langchao</span>
+            </div>
+            <div class="folder-chevron">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            </div>
+          </div>
+
+          <div class="folder-expand-grid">
+            <div class="folder-inner-list">
+              <div class="session-row-unit" onclick="selectSession('登录态持久化')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                <div class="unit-info-payload">
+                  <div class="unit-main-name">登录态持久化排查</div>
+                  <div class="unit-sub-snippet">2天前 · 已完成</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 左侧栏底部两个并排切换 Table -->
+      <div class="rail-bottom-switch-strip">
+        <div class="switch-tab-btn active" id="tab-btn-chats" onclick="switchLeftRail('chats')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+          <span>会话</span>
+        </div>
+        <div class="switch-tab-btn" id="tab-btn-projects" onclick="switchLeftRail('projects')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+          <span>项目</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 中舱 -->
+    <main class="desktop-middle-canvas">
+      <header class="middle-status-banner">
+        <span style="font-size:14px; font-weight:600; letter-spacing:-0.015em;" id="cur-headline">架构师 · 老王 (Claude 3.7)</span>
+        <span style="font-size:11px; color:var(--aura-jade); letter-spacing:0.02em;">● 执行沙箱已就绪</span>
+      </header>
+
+      <div class="conversation-stream-flow">
+        <div class="exchange-row-item user">
+          <div class="speaker-avatar">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+          </div>
+          <div class="speech-bubble-payload">老王，去 hermes-flux 项目把 OAuth 监听重构一下，在 Worktree 执行。</div>
+        </div>
+
+        <div class="exchange-row-item bot">
+          <div class="speaker-avatar">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--aura-indigo)" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"></rect></svg>
+          </div>
+          <div class="speech-bubble-payload">
+            已在 <code>wt-104</code> 独立环境编写并跑通 8 个单元测试。<br>
+            左侧栏已完全对齐总监级暗黑物理微高光与手风琴平滑展开规范。
+          </div>
+        </div>
+      </div>
+
+      <!-- 740px 黄金居中悬浮输入舱 -->
+      <div class="floating-dock-anchorage">
+        <div class="dock-glass-capsule">
+          <input type="text" style="width:100%; background:transparent; border:none; outline:none; color:var(--text-primary); font-size:14px;" placeholder="输入消息... @ 呼叫专家 /task 派活" />
+        </div>
+      </div>
+    </main>
+
+  </div>
+
+  <!-- 3. 极简状态栏 (22px) -->
+  <footer class="desktop-statusbar-line">
+    <div>● 127.0.0.1:9119 在线</div>
+    <div>Hermes Flux Desktop v8.0 · Director Grade</div>
+  </footer>
+
+  <script>
+    function switchLeftRail(mode) {
+      const isChats = mode === 'chats';
+      document.getElementById('tab-btn-chats').classList.toggle('active', isChats);
+      document.getElementById('tab-btn-projects').classList.toggle('active', !isChats);
+      document.getElementById('view-pane-chats').style.display = isChats ? 'block' : 'none';
+      document.getElementById('view-pane-projects').style.display = isChats ? 'none' : 'block';
+    }
+
+    function toggleFolder(id) {
+      document.getElementById(id).classList.toggle('open');
+    }
+
+    function selectSession(title) {
+      document.getElementById('cur-headline').textContent = title;
+      document.querySelectorAll('.session-row-unit').forEach(i => i.classList.remove('active'));
+      event.currentTarget.classList.add('active');
+    }
+  </script>
+</body>
+</html>

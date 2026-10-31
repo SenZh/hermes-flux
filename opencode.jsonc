@@ -99,4 +99,21 @@
       "permissions": [{ "action": "subagent", "resource": "*", "effect": "deny" }],
     },
   },
+
+  /*
+   * Pixso 远程 MCP（Streamable HTTP）。
+   * 设计意图：让 Agent 直接读取/回写 Pixso 设计稿图层，避免人工抄写设计参数。
+   * 认证：走 OAuth 2.1 自动流程，首次使用前需执行 `opencode mcp auth pixso` 完成浏览器授权；
+   * token 由 OpenCode 存于用户数据目录，严禁写入本配置文件，防止密钥入库。
+   * 约束：账号需全功能/研发席位，且图层链接必须带 item-id 才能定位；只读需查看权限，改画布需编辑权限。
+   */
+  "mcp": {
+    "servers": {
+      "pixso": {
+        "type": "remote",
+        "url": "https://pixso.cn/mcp",
+        "timeout": { "startup": 45000, "catalog": 45000 },
+      },
+    },
+  },
 }

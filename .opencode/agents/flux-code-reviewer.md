@@ -103,6 +103,15 @@ permissions:
 - **持久化格式**：是否有迁移、乱序写入、回滚测试？
 - **Electron 平台运行时**：静态检查无效，是否提供了真实 Runtime 运行证明？
 
+### 7. 移动端与跨端质量门禁（Gate 0-Mobile · 遵守 AGENTS.md 第十六节硬红线）
+
+若本次改动触碰网络通信、生命周期、跨端共享层或移动端配置，必须强制核验：
+- **薄壳不变量（Thin Shell）**：`packages/desktop`、`packages/mobile` 内部是否新增了应用级状态机（AppState）、事件调度或 RPC 编排？壳工程内只能存在入口与 Bridge 注入，违背分层直接打回；
+- **前台自愈与生命周期唤醒**：客户端通信是否注册了 `visibilitychange` 与 `online`？切回前台（`visible`）时是否无条件调用 `fsm.resetAttempts()` 并即刻发起重连？严禁在切回前台后继续等待最长 30s 的退避冷却；
+- **心跳看门狗真实消费**：`fsm.ts` 中定义的 `heartbeatIntervalMs` 是否由真实 `setInterval` 消费并在超时后主动关闭死连接？严禁声明虚假死配置；
+- **CORS 与网络接管**：移动端 REST 请求是否通过原生网络栈（`CapacitorHttp.enabled = true`）接管？严禁在 WebView 中发起直连无跨域处理的裸 fetch；
+- **纯客户端定位**：严禁尝试在移动端自建 Python Gateway、本地 HTTP 守护进程或监听端口，手机端必须保持为只出不进的客户端模型。
+
 ## 输出格式（严格遵守）
 
 ```

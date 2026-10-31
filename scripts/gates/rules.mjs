@@ -412,16 +412,33 @@ const layoutRules = {
 
     // 已登记偏差：实际值与规范不符时进 warnings（不阻断，但不隐身）
     for (const d of KNOWN_LAYOUT_DEVIATIONS) {
-      if (!file.endsWith(d.file.replace('packages/ui/src/components/', ''))) continue;
+      const targetSuffix = d.file.startsWith('packages/ui/src/components/')
+        ? d.file.replace('packages/ui/src/components/', '')
+        : d.file;
+      if (!file.endsWith(targetSuffix)) continue;
       const m = d.actualPattern.exec(joined);
       if (!m) continue;
-      const actual = Number(m[1]);
-      if (actual === d.spec) continue;
+
+      if (typeof d.spec === 'number') {
+        const actual = Number(m[1]);
+        if (!Number.isNaN(actual)) {
+          if (actual === d.spec) continue;
+          ctx.warnings.push({
+            file,
+            line: 1,
+            ruleId: `layout/${d.id}`,
+            message: `实现 ${actual}px 与规范 ${d.spec}px 不一致（${d.reason}）`,
+          });
+          continue;
+        }
+      }
+
+      // 非数字匹配类偏差（如无效死选择器）
       ctx.warnings.push({
         file,
         line: 1,
         ruleId: `layout/${d.id}`,
-        message: `实现 ${actual}px 与规范 ${d.spec}px 不一致（${d.reason}）`,
+        message: d.reason,
       });
     }
 

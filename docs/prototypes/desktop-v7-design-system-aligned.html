@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Hermes Flux Desktop v7.0 —— 设计系统完全对齐版</title>
+<style>
+:root {
+  --bg-surface-0: #080808;
+  --bg-surface-1: #121212;
+  --bg-surface-2: #1A1A1A;
+  --bg-surface-3: #222222;
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-medium: rgba(255, 255, 255, 0.14);
+  --text-primary: #F5F5F7;
+  --text-secondary: #A1A1AA;
+  --text-muted: #52525B;
+  --aura-amber: #FFBF00;
+  --aura-cyan: #00E5FF;
+  --aura-violet: #A855F7;
+  --aura-jade: #10B981;
+  --aura-pink: #EC4899;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "PingFang SC", sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg-surface-0);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 1. 顶栏 (42px) */
+.desktop-titlebar {
+  height: 42px;
+  background: var(--bg-surface-0);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  user-select: none;
+  flex-shrink: 0;
+}
+.traffic-dots { display: flex; gap: 8px; }
+.t-dot { width: 12px; height: 12px; border-radius: 50%; }
+.td-r { background: #EF4444; } .td-y { background: #F59E0B; } .td-g { background: #10B981; }
+
+.title-center {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.emerald-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--aura-jade);
+  box-shadow: 0 0 6px rgba(16,185,129,0.8);
+}
+
+/* 2. 工作台主干 */
+.desktop-workbench {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* 2.1 左舱 (270px) */
+.desktop-left-rail {
+  width: 270px;
+  background: var(--bg-surface-1);
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+  overflow: hidden;
+}
+.rail-top-btn-bar {
+  padding: 10px 12px 6px 12px;
+}
+.new-session-btn {
+  width: 100%;
+  height: 32px;
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.new-session-btn:hover {
+  border-color: var(--aura-jade);
+}
+
+/* 列表主体滚动区 */
+.rail-scroll-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 8px 12px 8px;
+}
+
+/* 分组标题 */
+.category-header {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  padding: 10px 8px 4px 8px;
+}
+
+/* 会话行条目 (头像 + 大标题 + 小标题/摘要 + 时间) */
+.session-entry-item {
+  padding: 8px 8px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  margin-bottom: 2px;
+  transition: background 0.12s;
+  position: relative;
+}
+.session-entry-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.session-entry-item.active {
+  background: rgba(16, 185, 129, 0.08);
+}
+.session-entry-item.active::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 6px; bottom: 6px; width: 3px;
+  background: var(--aura-jade);
+  border-radius: 0 2px 2px 0;
+}
+
+/* 头像三要素 */
+.entry-av {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.entry-meta {
+  flex: 1;
+  min-width: 0;
+}
+.entry-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2px;
+}
+.entry-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.entry-time {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  margin-left: 6px;
+  font-family: var(--font-mono);
+}
+.entry-sub {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 步进展开按钮 */
+.btn-more-step {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 11.5px;
+  color: var(--aura-jade);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: center;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+.btn-more-step:hover {
+  background: rgba(16, 185, 129, 0.08);
+}
+
+/* 项目卡片手风琴 */
+.proj-accordion-box {
+  background: var(--bg-surface-0);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  margin-bottom: 6px;
+  overflow: hidden;
+}
+.proj-acc-header {
+  padding: 10px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.proj-acc-header:hover {
+  background: var(--bg-surface-2);
+}
+.proj-acc-body {
+  display: none;
+  border-top: 1px solid var(--border-subtle);
+  padding: 4px 0;
+}
+.proj-accordion-box.open .proj-acc-body {
+  display: block;
+}
+
+/* 左侧栏最下方并排两个切换 Table: [ 💬 会话 ] [ 📁 项目 ] */
+.left-rail-bottom-tables {
+  height: 38px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-surface-0);
+  display: flex;
+  flex-shrink: 0;
+}
+.rail-bottom-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  border-bottom: 2px solid transparent;
+}
+.rail-bottom-tab:hover {
+  color: var(--text-primary);
+}
+.rail-bottom-tab.active {
+  color: var(--aura-jade);
+  border-bottom-color: var(--aura-jade);
+  background: var(--bg-surface-1);
+}
+
+/* 2.2 中舱 (MiddlePod: 通栏) */
+.desktop-middle-pod {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: var(--bg-surface-0);
+}
+.middle-title-strip {
+  height: 48px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.middle-stream-viewport {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 32px 140px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 860px;
+  margin: 0 auto;
+  width: 100%;
+}
+.m-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.m-row.user {
+  flex-direction: row-reverse;
+}
+.m-av {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: #FFF;
+  flex-shrink: 0;
+}
+.m-bubble {
+  max-width: 80%;
+  background: var(--bg-surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.m-row.user .m-bubble {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.28);
+}
+
+/* 740px 黄金悬浮输入舱 */
+.floating-composer-dock {
+  position: absolute;
+  bottom: 20px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  padding: 0 24px;
+  pointer-events: none;
+}
+.composer-dock-box {
+  width: 100%;
+  max-width: 740px;
+  background: rgba(18, 18, 18, 0.94);
+  backdrop-filter: blur(24px);
+  border: 1px solid var(--border-subtle);
+  border-radius: 16px;
+  padding: 10px 16px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+  pointer-events: auto;
+}
+
+/* 3. 状态栏 (22px) */
+.desktop-statusbar {
+  height: 22px;
+  background: var(--bg-surface-0);
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  user-select: none;
+  flex-shrink: 0;
+}
+</style>
+</head>
+<body>
+
+  <!-- 1. 顶栏 42px -->
+  <header class="desktop-titlebar">
+    <div class="traffic-dots">
+      <div class="t-dot td-r"></div>
+      <div class="t-dot td-y"></div>
+      <div class="t-dot td-g"></div>
+    </div>
+    <div class="title-center">
+      <div class="emerald-dot"></div>
+      <span>Hermes Flux · 架构师 · 老王 (Claude 3.7)</span>
+    </div>
+    <div style="font-size:11.5px; color:var(--text-muted); font-family:var(--font-mono);">127.0.0.1:9119 🟢</div>
+  </header>
+
+  <!-- 2. 工作台主干 -->
+  <div class="desktop-workbench">
+    
+    <!-- 左舱：270px，底部承载 [ 💬 会话 ] [ 📁 项目 ] 两个 Table -->
+    <aside class="desktop-left-rail">
+      <div class="rail-top-btn-bar">
+        <button class="new-session-btn">+ 新建会话</button>
+      </div>
+
+      <!-- 视图 A: 会话列表 (Bot 默认全部置顶 + 平铺会话 + 步进展开) -->
+      <div class="rail-scroll-content" id="rail-view-chats">
+        
+        <!-- Bot 默认置顶区 -->
+        <div class="category-header">📌 Bot 置顶核心工位</div>
+
+        <!-- Bot 1: 主助理 HQ -->
+        <div class="session-entry-item" onclick="selectSessionItem('个人主助理 HQ')">
+          <div class="entry-av" style="background:rgba(16,185,129,0.15); color:var(--aura-jade);">✦</div>
+          <div class="entry-meta">
+            <div class="entry-title-row">
+              <span class="entry-name">总中枢 HQ</span>
+              <span class="entry-time">15:10</span>
+            </div>
+            <div class="entry-sub">跨领域调度 · 2 个工单运行中</div>
+          </div>
+        </div>
+
+        <!-- Bot 2: 架构师老王 -->
+        <div class="session-entry-item active" onclick="selectSessionItem('架构师 · 老王')">
+          <div class="entry-av" style="background:var(--aura-violet); color:#FFF;">🤖</div>
+          <div class="entry-meta">
+            <div class="entry-title-row">
+              <span class="entry-name">架构师 · 老王</span>
+              <span class="entry-time">14:31</span>
+            </div>
+            <div class="entry-sub">老王: 方案已敲定，单测全绿 (PASS 8/8)</div>
+          </div>
+        </div>
+
+        <!-- Bot 3: 前端小张 -->
+        <div class="session-entry-item" onclick="selectSessionItem('前端开发 · 小张')">
+          <div class="entry-av" style="background:var(--aura-pink); color:#FFF;">🎨</div>
+          <div class="entry-meta">
+            <div class="entry-title-row">
+              <span class="entry-name">前端开发 · 小张</span>
+              <span class="entry-time">昨天</span>
+            </div>
+            <div class="entry-sub">小张: 触控规范已全部对齐</div>
+          </div>
+        </div>
+
+        <!-- 常规会话与群聊 (按时间倒序) -->
+        <div class="category-header" style="margin-top:6px;">💬 全部会话</div>
+
+        <!-- 会话 1 (群聊) -->
+        <div class="session-entry-item" onclick="selectSessionItem('OAuth 方案联合评审')">
+          <div class="entry-av" style="background:var(--bg-surface-2); color:var(--aura-amber);">👥</div>
+          <div class="entry-meta">
+            <div class="entry-title-row">
+              <span class="entry-name">👥 OAuth 方案评审 (3人)</span>
+              <span class="entry-time">14:02</span>
+            </div>
+            <div class="entry-sub">小张: redirect URI 已更新完毕</div>
+          </div>
+        </div>
+
+        <!-- 会话 2 (老王旁聊) -->
+        <div class="session-entry-item" onclick="selectSessionItem('锁冲突排查')">
+          <div class="entry-av" style="background:var(--bg-surface-2); color:var(--aura-amber); border:1px dashed var(--aura-amber);">⑂</div>
+          <div class="entry-meta">
+            <div class="entry-title-row">
+              <span class="entry-name">⑂ 老王 · 锁冲突排查</span>
+              <span class="entry-time">11:20</span>
+            </div>
+            <div class="entry-sub">并发 CAS 重试存在排队饥饿</div>
+          </div>
+        </div>
+
+        <!-- 步进式展开折叠区 -->
+        <div id="desktop-step-hidden" style="display: none;">
+          <div class="session-entry-item" onclick="selectSessionItem('代码审查员')">
+            <div class="entry-av" style="background:var(--aura-cyan); color:#000;">🛡️</div>
+            <div class="entry-meta">
+              <div class="entry-title-row">
+                <span class="entry-name">代码审查员</span>
+                <span class="entry-time">周四</span>
+              </div>
+              <div class="entry-sub">Gate 0~5 静态门禁全部通过</div>
+            </div>
+          </div>
+        </div>
+
+        <button class="btn-more-step" id="btn-desktop-more" onclick="expandDesktopStep()">
+          <span>展示更多 (还有 2 条) ▾</span>
+        </button>
+
+      </div>
+
+      <!-- 视图 B: 项目手风琴列表 (默认折叠，点开即展开项目专属会话) -->
+      <div class="rail-scroll-content" id="rail-view-projects" style="display: none;">
+        
+        <div class="category-header">📁 项目基地 (点击展开会话)</div>
+
+        <!-- 项目 1: hermes-flux (默认展开) -->
+        <div class="proj-accordion-box open" id="d-proj-1">
+          <div class="proj-acc-header" onclick="toggleDesktopProject('d-proj-1')">
+            <span style="color:var(--aura-amber);">📁 hermes-flux (1 运行)</span>
+            <span style="font-size:10px;">›</span>
+          </div>
+          <div class="proj-acc-body">
+            <div class="session-entry-item" onclick="selectSessionItem('TASK-104: OAuth 回调')">
+              <span style="color:var(--aura-amber);">⚡</span>
+              <div class="entry-meta" style="margin-left:4px;">
+                <div class="entry-name">TASK-104: OAuth 回调 (老王)</div>
+                <div class="entry-sub">wt-104 · 正在跑单测</div>
+              </div>
+            </div>
+            <div class="session-entry-item" onclick="selectSessionItem('锁冲突排查')">
+              <span style="color:var(--aura-amber);">⑂</span>
+              <div class="entry-meta" style="margin-left:4px;">
+                <div class="entry-name">锁冲突排查 (老王)</div>
+                <div class="entry-sub">20分钟前</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 项目 2: mp-langchao (折叠) -->
+        <div class="proj-accordion-box" id="d-proj-2">
+          <div class="proj-acc-header" onclick="toggleDesktopProject('d-proj-2')">
+            <span>📁 mp-langchao (空闲)</span>
+            <span style="font-size:10px;">›</span>
+          </div>
+          <div class="proj-acc-body">
+            <div class="session-entry-item" onclick="selectSessionItem('登录态持久化')">
+              <span>📁</span>
+              <div class="entry-meta" style="margin-left:4px;">
+                <div class="entry-name">登录态持久化排查</div>
+                <div class="entry-sub">2天前 · 已完成</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 左侧栏最下方并排两个切换 Table: [ 💬 会话 ] [ 📁 项目 ] -->
+      <div class="left-rail-bottom-tables">
+        <div class="rail-bottom-tab active" id="tab-btn-chats" onclick="switchRailTable('chats')">
+          <span>💬 会话</span>
+        </div>
+        <div class="rail-bottom-tab" id="tab-btn-projects" onclick="switchRailTable('projects')">
+          <span>📁 项目</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 中舱 (MiddlePod) -->
+    <main class="desktop-middle-pod">
+      <header class="middle-title-strip">
+        <span style="font-size:14px; font-weight:700;" id="cur-chat-headline">架构师 · 老王 (Claude 3.7)</span>
+        <span style="font-size:11px; color:var(--aura-jade);">● 执行沙箱已就绪</span>
+      </header>
+
+      <div class="middle-stream-viewport">
+        <div class="m-row user">
+          <div class="m-av" style="background:#374151;">ME</div>
+          <div class="m-bubble">老王，去 hermes-flux 项目把 OAuth 监听重构一下，在 Worktree 跑。</div>
+        </div>
+        <div class="m-row bot">
+          <div class="m-av" style="background:var(--aura-violet);">🤖</div>
+          <div class="m-bubble">
+            已在 <code>wt-104</code> 独立环境编写并跑通 8 个单元测试。<br>
+            左侧栏已对齐设计系统暗黑 Token 与三要素排版。
+          </div>
+        </div>
+      </div>
+
+      <!-- 740px 悬浮输入舱 -->
+      <div class="floating-composer-dock">
+        <div class="composer-dock-box">
+          <input type="text" style="width:100%; background:transparent; border:none; outline:none; color:#FFF; font-size:14px;" placeholder="输入消息... @ 呼叫专家 /task 派活" />
+        </div>
+      </div>
+    </main>
+
+  </div>
+
+  <!-- 3. 极简状态栏 (22px) -->
+  <footer class="desktop-statusbar">
+    <div>● 127.0.0.1:9119 在线</div>
+    <div>Hermes Flux Desktop v7.0 · Design System Aligned</div>
+  </footer>
+
+  <script>
+    // 切换左侧栏底部的两个 Table [ 会话 | 项目 ]
+    function switchRailTable(type) {
+      const isChats = type === 'chats';
+      document.getElementById('tab-btn-chats').classList.toggle('active', isChats);
+      document.getElementById('tab-btn-projects').classList.toggle('active', !isChats);
+      document.getElementById('rail-view-chats').style.display = isChats ? 'block' : 'none';
+      document.getElementById('rail-view-projects').style.display = isChats ? 'none' : 'block';
+    }
+
+    // 项目手风琴折叠展开
+    function toggleDesktopProject(id) {
+      document.getElementById(id).classList.toggle('open');
+    }
+
+    // 步进式展示更多
+    function expandDesktopStep() {
+      document.getElementById('desktop-step-hidden').style.display = 'block';
+      document.getElementById('btn-desktop-more').style.display = 'none';
+    }
+
+    function selectSessionItem(title) {
+      document.getElementById('cur-chat-headline').textContent = title;
+      document.querySelectorAll('.session-entry-item').forEach(i => i.classList.remove('active'));
+      event.currentTarget.classList.add('active');
+    }
+  </script>
+</body>
+</html>

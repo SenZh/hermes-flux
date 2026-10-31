@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Hermes Flux Desktop v6.0 —— IDE 手风琴与步进式会话管理原型</title>
+<style>
+:root {
+  --bg-canvas: #080A0E;
+  --bg-rail: #0D1017;
+  --bg-card: #121620;
+  --bg-surface: #171C28;
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --border-focus: rgba(16, 185, 129, 0.45);
+  --text-main: #F3F4F6;
+  --text-muted: #9CA3AF;
+  --text-dim: #525A6B;
+  --accent-jade: #10B981;
+  --accent-amber: #F59E0B;
+  --accent-indigo: #6366F1;
+  --accent-pink: #EC4899;
+  --accent-cyan: #06B6D4;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "PingFang SC", sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg-canvas);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 1. 顶栏 (42px) */
+.desktop-topbar {
+  height: 42px;
+  background: #090B10;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  user-select: none;
+  flex-shrink: 0;
+}
+.traffic-dots { display: flex; gap: 8px; }
+.dot { width: 12px; height: 12px; border-radius: 50%; }
+.dot-r { background: #EF4444; } .dot-y { background: #F59E0B; } .dot-g { background: #10B981; }
+
+/* 2. 工作台主干 */
+.workbench-core {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* 2.1 左舱：IDE 级手风琴管理单元 (270px) */
+.ide-left-rail {
+  width: 270px;
+  background: var(--bg-rail);
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+  overflow: hidden;
+}
+.rail-top-action {
+  padding: 12px 14px 8px 14px;
+  display: flex;
+  gap: 8px;
+}
+.btn-new {
+  flex: 1;
+  height: 34px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  color: var(--text-main);
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-new:hover {
+  border-color: var(--accent-jade);
+  background: var(--bg-surface);
+}
+
+/* 手风琴滚动区域 */
+.accordion-scroll-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 8px 16px 8px;
+}
+
+/* 手风琴单元卡片 (Accordion Unit) */
+.accordion-unit {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  margin-bottom: 4px;
+}
+.unit-header-bar {
+  padding: 8px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.12s;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.unit-header-bar:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-main);
+}
+.unit-chevron {
+  font-size: 10px;
+  transition: transform 0.2s ease;
+}
+.accordion-unit.open .unit-chevron {
+  transform: rotate(90deg);
+}
+
+/* 单元内的会话列表容器 */
+.unit-body-list {
+  display: none;
+  padding: 2px 0 6px 0;
+}
+.accordion-unit.open .unit-body-list {
+  display: block;
+}
+
+/* 会话行（头像 + 大标题 + 小标题/摘要） */
+.session-entry-row {
+  padding: 8px 8px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  margin-bottom: 2px;
+  transition: background 0.12s;
+  position: relative;
+}
+.session-entry-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.session-entry-row.active {
+  background: rgba(16, 185, 129, 0.09);
+}
+.session-entry-row.active::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 6px; bottom: 6px; width: 3px;
+  background: var(--accent-jade);
+  border-radius: 0 2px 2px 0;
+}
+
+/* 头像三要素 */
+.entry-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.entry-content-box {
+  flex: 1;
+  min-width: 0;
+}
+.entry-title-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2px;
+}
+.entry-big-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.entry-time {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  margin-left: 6px;
+  flex-shrink: 0;
+}
+.entry-sub-preview {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 步进式展开更多按钮 */
+.btn-show-more-sessions {
+  width: 100%;
+  padding: 7px 8px;
+  font-size: 11.5px;
+  color: var(--accent-jade);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: center;
+  border-radius: 6px;
+  transition: background 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+.btn-show-more-sessions:hover {
+  background: rgba(16, 185, 129, 0.08);
+}
+
+/* 2.2 中舱：通栏流式对话 */
+.middle-chat-flow {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: var(--bg-canvas);
+}
+.chat-stream-pad {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 32px 140px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 860px;
+  margin: 0 auto;
+  width: 100%;
+}
+.stream-msg-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.stream-msg-row.user {
+  flex-direction: row-reverse;
+}
+.stream-av {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 700;
+  color: #FFF;
+  flex-shrink: 0;
+}
+.stream-bubble {
+  max-width: 80%;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.stream-msg-row.user .stream-bubble {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+/* 740px 黄金居中悬浮输入舱 */
+.floating-input-bar {
+  position: absolute;
+  bottom: 20px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  padding: 0 24px;
+  pointer-events: none;
+}
+.input-dock-shell {
+  width: 100%;
+  max-width: 740px;
+  background: rgba(16, 20, 29, 0.94);
+  backdrop-filter: blur(24px);
+  border: 1px solid var(--border-subtle);
+  border-radius: 16px;
+  padding: 10px 16px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+  pointer-events: auto;
+}
+
+/* 3. 极简翡翠状态栏 (22px) */
+.desktop-footer {
+  height: 22px;
+  background: #07090C;
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  user-select: none;
+  flex-shrink: 0;
+}
+</style>
+</head>
+<body>
+
+  <!-- 1. 顶栏 (42px) -->
+  <header class="desktop-topbar">
+    <div class="traffic-dots">
+      <div class="dot dot-r"></div>
+      <div class="dot dot-y"></div>
+      <div class="dot dot-g"></div>
+    </div>
+    <div style="font-size:13px; font-weight:600;">Hermes Flux Desktop · 架构师 · 老王 (IDE 手风琴版)</div>
+    <div style="font-size:11.5px; color:var(--text-dim);">127.0.0.1:9119 🟢</div>
+  </header>
+
+  <!-- 2. 工作台主干 -->
+  <div class="workbench-core">
+    
+    <!-- 左舱：IDE 风格树状手风琴管理单元 (270px) -->
+    <aside class="ide-left-rail">
+      <div class="rail-top-action">
+        <button class="btn-new">+ 新建会话</button>
+      </div>
+
+      <div class="accordion-scroll-container">
+        
+        <!-- 单元 1: 个人助理 (默认常开) -->
+        <div class="accordion-unit open" id="unit-hq">
+          <div class="unit-header-bar" onclick="toggleUnit('unit-hq')">
+            <span>✦ 个人助理 (HQ)</span>
+            <span class="unit-chevron">›</span>
+          </div>
+          <div class="unit-body-list">
+            <div class="session-entry-row" onclick="selectSession('个人主助理 HQ')">
+              <div class="entry-avatar" style="background:rgba(16,185,129,0.15); color:var(--accent-jade);">✦</div>
+              <div class="entry-content-box">
+                <div class="entry-title-line">
+                  <span class="entry-big-title">总中枢 HQ</span>
+                  <span class="entry-time">15:10</span>
+                </div>
+                <div class="entry-sub-preview">跨领域调度 · 2 个任务执行中</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 单元 2: 普通会话 (默认展开，最新排在上面，带步进展开更多) -->
+        <div class="accordion-unit open" id="unit-sessions">
+          <div class="unit-header-bar" onclick="toggleUnit('unit-sessions')">
+            <span>💬 全部会话 (Sessions)</span>
+            <span class="unit-chevron">›</span>
+          </div>
+          <div class="unit-body-list" id="sessions-list-container">
+            
+            <!-- 会话 1 -->
+            <div class="session-entry-row active" onclick="selectSession('架构师 · 老王')">
+              <div class="entry-avatar" style="background:var(--accent-indigo);">🤖</div>
+              <div class="entry-content-box">
+                <div class="entry-title-line">
+                  <span class="entry-big-title">架构师 · 老王</span>
+                  <span class="entry-time">14:31</span>
+                </div>
+                <div class="entry-sub-preview">老王: 方案已敲定，单测全绿 (PASS 8/8)</div>
+              </div>
+            </div>
+
+            <!-- 会话 2 (群聊) -->
+            <div class="session-entry-row" onclick="selectSession('OAuth 方案联合评审')">
+              <div class="entry-avatar" style="background:rgba(245,158,11,0.15); color:var(--accent-amber);">👥</div>
+              <div class="entry-content-box">
+                <div class="entry-title-line">
+                  <span class="entry-big-title">👥 OAuth 方案评审 (3人)</span>
+                  <span class="entry-time">14:02</span>
+                </div>
+                <div class="entry-sub-preview">小张: redirect URI 已更新完毕</div>
+              </div>
+            </div>
+
+            <!-- 会话 3 -->
+            <div class="session-entry-row" onclick="selectSession('前端开发 · 小张')">
+              <div class="entry-avatar" style="background:var(--accent-pink);">🎨</div>
+              <div class="entry-content-box">
+                <div class="entry-title-line">
+                  <span class="entry-big-title">前端开发 · 小张</span>
+                  <span class="entry-time">昨天</span>
+                </div>
+                <div class="entry-sub-preview">小张: 触控热区 44px 规范已通过</div>
+              </div>
+            </div>
+
+            <!-- 动态隐藏的更多会话 (受步进展开控制) -->
+            <div id="hidden-sessions-block" style="display: none;">
+              <div class="session-entry-row" onclick="selectSession('代码审查员')">
+                <div class="entry-avatar" style="background:var(--accent-cyan);">🛡️</div>
+                <div class="entry-content-box">
+                  <div class="entry-title-line">
+                    <span class="entry-big-title">代码审查员</span>
+                    <span class="entry-time">周四</span>
+                  </div>
+                  <div class="entry-sub-preview">Gate 0~5 静态门禁全部通过</div>
+                </div>
+              </div>
+              <div class="session-entry-row" onclick="selectSession('重构方案复盘')">
+                <div class="entry-avatar" style="background:#374151;">📁</div>
+                <div class="entry-content-box">
+                  <div class="entry-title-line">
+                    <span class="entry-big-title">重构方案周度复盘</span>
+                    <span class="entry-time">上周</span>
+                  </div>
+                  <div class="entry-sub-preview">已归档至 docs/learnings.md</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 步进式展开按钮 -->
+            <button class="btn-show-more-sessions" id="btn-more-sessions" onclick="expandMoreSessions()">
+              <span>展示更多 (还有 2 条) ▾</span>
+            </button>
+
+          </div>
+        </div>
+
+        <!-- 单元 3: 项目 1 (默认折叠，点开即展开项目内会话，其他收起) -->
+        <div class="accordion-unit" id="unit-proj-1">
+          <div class="unit-header-bar" onclick="selectAndOpenProject('unit-proj-1')">
+            <span style="color:var(--accent-amber);">📁 hermes-flux (1 运行)</span>
+            <span class="unit-chevron">›</span>
+          </div>
+          <div class="unit-body-list">
+            <!-- 归属于该项目的会话 -->
+            <div class="session-entry-row" onclick="selectSession('TASK-104: OAuth 回调')">
+              <div class="entry-avatar" style="background:rgba(245,158,11,0.15); color:var(--accent-amber);">⚡</div>
+              <div class="entry-content-box">
+                <div class="entry-title-line">
+                  <span class="entry-big-title">TASK-104: OAuth 回调</span>
+                  <span class="entry-time">运行中</span>
+                </div>
+                <div class="entry-sub-preview">wt-104 · 正在跑回归单测</div>
+              </div>
+            </div>
+            <div class="session-entry-row" onclick="selectSession('锁冲突排查')">
+              <div class="entry-avatar" style="background:var(--accent-indigo);">🤖</div>
+              <div class="entry-content-box">
+                <div class="entry-title-line">
+                  <span class="entry-big-title">⑂ 锁冲突排查 (老王)</span>
+                  <span class="entry-time">11:20</span>
+                </div>
+                <div class="entry-sub-preview">并发 CAS 重试存在排队饥饿</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 单元 4: 项目 2 (默认折叠) -->
+        <div class="accordion-unit" id="unit-proj-2">
+          <div class="unit-header-bar" onclick="selectAndOpenProject('unit-proj-2')">
+            <span>📁 mp-langchao (空闲)</span>
+            <span class="unit-chevron">›</span>
+          </div>
+          <div class="unit-body-list">
+            <div class="session-entry-row" onclick="selectSession('mp-langchao 登录排查')">
+              <div class="entry-avatar" style="background:#374151;">📁</div>
+              <div class="entry-content-box">
+                <div class="entry-title-line">
+                  <span class="entry-big-title">登录态持久化排查</span>
+                  <span class="entry-time">2天前</span>
+                </div>
+                <div class="entry-sub-preview">已修复 Storage 丢失问题</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </aside>
+
+    <!-- 中舱：通栏主对话 -->
+    <main class="middle-chat-flow">
+      <div class="chat-stream-pad">
+        <div class="stream-msg-row user">
+          <div class="stream-av" style="background:#374151;">ME</div>
+          <div class="stream-bubble">老王，去 hermes-flux 项目把 OAuth 监听重构一下，在 Worktree 执行。</div>
+        </div>
+        <div class="stream-msg-row bot">
+          <div class="stream-av" style="background:var(--accent-indigo);">🤖</div>
+          <div class="stream-bubble">
+            已在 <code>wt-104</code> 独立环境编写并跑通 8 个单元测试。<br>
+            左侧项目手风琴单元已自动高亮当前活跃分支。
+          </div>
+        </div>
+      </div>
+
+      <!-- 740px 黄金悬浮输入舱 -->
+      <div class="floating-input-bar">
+        <div class="input-dock-shell">
+          <input type="text" style="width:100%; background:transparent; border:none; outline:none; color:#FFF; font-size:14px;" placeholder="输入消息... @ 呼叫专家 /task 派活" />
+        </div>
+      </div>
+    </main>
+
+  </div>
+
+  <!-- 3. 极简翡翠状态栏 (22px) -->
+  <footer class="desktop-footer">
+    <div>● 127.0.0.1:9119 在线</div>
+    <div>v6.0 IDE Accordion Production</div>
+  </footer>
+
+  <script>
+    // 手风琴折叠展开
+    function toggleUnit(unitId) {
+      const el = document.getElementById(unitId);
+      el.classList.toggle('open');
+    }
+
+    // 选中项目时：展开该项目，收起其他项目
+    function selectAndOpenProject(targetId) {
+      const projects = ['unit-proj-1', 'unit-proj-2'];
+      projects.forEach(id => {
+        const p = document.getElementById(id);
+        if (id === targetId) {
+          p.classList.add('open');
+        } else {
+          p.classList.remove('open');
+        }
+      });
+    }
+
+    // 步进展开更多会话
+    function expandMoreSessions() {
+      const hiddenBlock = document.getElementById('hidden-sessions-block');
+      const btn = document.getElementById('btn-more-sessions');
+      hiddenBlock.style.display = 'block';
+      btn.style.display = 'none'; // 展开后隐藏按钮
+    }
+
+    function selectSession(title) {
+      document.querySelectorAll('.session-entry-row').forEach(r => r.classList.remove('active'));
+      event.currentTarget.classList.add('active');
+    }
+  </script>
+</body>
+</html>

@@ -4,10 +4,10 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 
 const EDGE_PATH = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
-const CDP_PORT = 9333;
-const HTTP_PORT = 8999;
+const CDP_PORT = 9335;
 
 test('OpenChamber File Bar - Live Headless Browser CDP Test', async (t) => {
   if (!fs.existsSync(EDGE_PATH)) {
@@ -40,16 +40,17 @@ test('OpenChamber File Bar - Live Headless Browser CDP Test', async (t) => {
     fs.createReadStream(filePath).pipe(res);
   });
 
-  await new Promise(r => server.listen(HTTP_PORT, '127.0.0.1', r));
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const serverPort = server.address().port;
 
   // 2. Launch Edge in headless mode with remote debugging port
-  const tmpUserDataDir = path.resolve(process.env.TEMP || 'C:\\Users\\470785\\AppData\\Local\\Temp', `edge-cdp-${Date.now()}`);
+  const tmpUserDataDir = path.resolve(os.tmpdir(), `edge-cdp-tb-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
   const browserProc = spawn(EDGE_PATH, [
     `--remote-debugging-port=${CDP_PORT}`,
     '--headless=new',
     '--disable-gpu',
     `--user-data-dir=${tmpUserDataDir}`,
-    `http://127.0.0.1:${HTTP_PORT}/packages/desktop/__tests__/cdp/test-harness.html`
+    `http://127.0.0.1:${serverPort}/packages/desktop/__tests__/cdp/test-harness.html`
   ], { stdio: 'ignore' });
 
   // Cleanup on exit
@@ -75,7 +76,8 @@ test('OpenChamber File Bar - Live Headless Browser CDP Test', async (t) => {
   }
 
   assert.ok(targets.length > 0, 'Browser must respond on CDP port and provide page target');
-  const pageTarget = targets.find((t) => t.type === 'page' && t.url.includes('test-harness.html')) || targets[0];
+  const pageTarget = targets.find((t) => t.type === 'page' && t.url.includes('test-harness.html'));
+  assert.ok(pageTarget, 'Must find exact test-harness.html page target');
   const wsUrl = pageTarget.webSocketDebuggerUrl;
   assert.ok(wsUrl, 'CDP WebSocket URL must be valid');
 
@@ -114,21 +116,23 @@ test('OpenChamber File Bar - Live Headless Browser CDP Test', async (t) => {
   }
 
   await t.test('CDP verify 4 file tabs with exact OpenChamber icons & styling', async () => {
-    const res = await cdpCall('Runtime.evaluate', {
+    const rawVal = await cdpCall('Runtime.evaluate', {
       expression: `
         (() => {
           const tabs = Array.from(document.querySelectorAll('.inspector-file-tab')).map(t => ({
             path: t.dataset.fileTab,
             text: t.querySelector('.file-tab-label')?.textContent,
+            className: t.className,
+            classList: Array.from(t.classList),
             isActive: t.classList.contains('tab-active')
           }));
-          return JSON.stringify(tabs);
+          return JSON.stringify({ tabs, activeFilePath: window.testState?.activeFilePath });
         })()
       `,
       returnByValue: true
     });
 
-    const tabs = JSON.parse(res.result.value);
+    const { tabs } = JSON.parse(rawVal.result.value);
     assert.equal(tabs.length, 4, 'Must have 4 open file tabs');
     assert.equal(tabs[0].text, 'MiddlePod.ts');
     assert.equal(tabs[1].text, 'package.json');

@@ -27,6 +27,41 @@ export type TurnAction =
   | { type: 'replace-content'; messageId: string; text: string }
   | { type: 'tool-start'; messageId: string; toolCall: { id: string; name: string; args: string } }
   | { type: 'tool-complete'; messageId: string; toolCallId: string; output?: string }
+  | {
+      type: 'subagent-spawn';
+      subagentId: string;
+      profile: string;
+      title: string;
+      parentSessionId: string;
+      messageId?: string;
+    }
+  | {
+      type: 'subagent-progress';
+      subagentId: string;
+      progressPercent: number;
+      actionText: string;
+    }
+  | {
+      type: 'subagent-log';
+      subagentId: string;
+      entry: {
+        seq: number;
+        timestamp: number;
+        kind: 'stdout' | 'stderr' | 'thought' | 'tool_call' | 'tool_result' | 'status_change';
+        text: string;
+      };
+    }
+  | {
+      type: 'subagent-complete';
+      subagentId: string;
+      summary?: string;
+      output?: string;
+    }
+  | {
+      type: 'subagent-failed';
+      subagentId: string;
+      error: string;
+    }
   | { type: 'refresh-sessions' }
   | { type: 'session-title'; sessionId: string; title: string };
 
@@ -93,9 +128,73 @@ export function reduceGatewayEvent(params: unknown, ctx: TurnEventContext): Turn
       return [{ type: 'append-thought', messageId, text }];
     }
 
+    case 'subagent.spawn_requested':
+    case 'subagent.start': {
+      const subagentId = asText(payload.subagent_id) || asText(payload.id);
+      if (!subagentId) return [];
+      const profile = asText(payload.profile) || asText(payload.target_profile) || 'default';
+      const title = asText(payload.title) || asText(payload.task_title) || '子代理任务';
+      return [{
+        type: 'subagent-spawn',
+        subagentId,
+        profile,
+        title,
+        parentSessionId: frameSessionId || asText(payload.parent_session_id),
+        messageId: messageId || undefined,
+      }];
+    }
+
+    case 'subagent.progress': {
+      const subagentId = asText(payload.subagent_id) || asText(payload.id);
+      if (!subagentId) return [];
+      const progressPercent = typeof payload.progress === 'number'
+        ? payload.progress
+        : typeof payload.percent === 'number'
+        ? payload.percent
+        : 0;
+      const actionText = asText(payload.action) || asText(payload.text) || asText(payload.current_action);
+      return [{
+        type: 'subagent-progress',
+        subagentId,
+        progressPercent,
+        actionText,
+      }];
+    }
+
+    case 'subagent.log':
+    case 'subagent.stdout':
+    case 'subagent.stderr': {
+      const subagentId = asText(payload.subagent_id) || asText(payload.id);
+      if (!subagentId) return [];
+      const text = asText(payload.text) || asText(payload.line) || asText(payload.content);
+      const kind = type === 'subagent.stderr' ? 'stderr' : 'stdout';
+      return [{
+        type: 'subagent-log',
+        subagentId,
+        entry: {
+          seq: typeof payload.seq === 'number' ? payload.seq : Date.now(),
+          timestamp: typeof payload.timestamp === 'number' ? payload.timestamp : Date.now(),
+          kind,
+          text,
+        },
+      }];
+    }
+
+    case 'subagent.failed': {
+      const subagentId = asText(payload.subagent_id) || asText(payload.id);
+      if (!subagentId) return [];
+      const error = asText(payload.error) || asText(payload.message) || '子代理执行异常';
+      return [{
+        type: 'subagent-failed',
+        subagentId,
+        error,
+      }];
+    }
+
     case 'tool.start':
     case 'subagent.tool': {
-      if (!messageId) return [];
+      const actions: TurnAction[] = [];
+      const subagentId = asText(payload.subagent_id);
       const toolId = asText(payload.id) || asText(payload.tool_call_id) || `tool-${Date.now()}`;
       const name = asText(payload.name) || asText(payload.tool) || '工具执行';
       const args = typeof payload.args === 'string'
@@ -103,12 +202,31 @@ export function reduceGatewayEvent(params: unknown, ctx: TurnEventContext): Turn
         : typeof payload.arguments === 'string'
         ? payload.arguments
         : JSON.stringify(payload.args || payload.parameters || payload.input || {});
-      return [{ type: 'tool-start', messageId, toolCall: { id: toolId, name, args } }];
+
+      // 若为子代理工具调用，产出专职 subagent-log 保证独立执行流完整
+      if (subagentId) {
+        actions.push({
+          type: 'subagent-log',
+          subagentId,
+          entry: {
+            seq: Date.now(),
+            timestamp: Date.now(),
+            kind: 'tool_call',
+            text: `[执行工具]: ${name}(${args})`,
+          },
+        });
+      }
+
+      if (messageId) {
+        actions.push({ type: 'tool-start', messageId, toolCall: { id: toolId, name, args } });
+      }
+      return actions;
     }
 
     case 'tool.complete':
     case 'subagent.complete': {
-      if (!messageId) return [];
+      const actions: TurnAction[] = [];
+      const subagentId = asText(payload.subagent_id);
       const toolCallId = asText(payload.id) || asText(payload.tool_call_id) || '';
       const output = payload.output
         ? String(payload.output)
@@ -117,7 +235,31 @@ export function reduceGatewayEvent(params: unknown, ctx: TurnEventContext): Turn
         : payload.text
         ? String(payload.text)
         : undefined;
-      return [{ type: 'tool-complete', messageId, toolCallId, output }];
+
+      // 若携带 subagentId，产出专职 subagent-complete 驱动子代理状态机完成
+      if (subagentId) {
+        actions.push({
+          type: 'subagent-complete',
+          subagentId,
+          summary: output,
+          output,
+        });
+        actions.push({
+          type: 'subagent-log',
+          subagentId,
+          entry: {
+            seq: Date.now(),
+            timestamp: Date.now(),
+            kind: 'tool_result',
+            text: `[工具返回]: ${output ? output.slice(0, 300) : '完成'}`,
+          },
+        });
+      }
+
+      if (messageId) {
+        actions.push({ type: 'tool-complete', messageId, toolCallId, output });
+      }
+      return actions;
     }
 
     case 'message.complete': {

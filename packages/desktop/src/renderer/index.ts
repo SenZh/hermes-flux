@@ -184,12 +184,41 @@ async function safeCopyText(text: string): Promise<boolean> {
 
 window.__fluxCopyText = safeCopyText;
 
+/**
+ * 设计意图 (Why):
+ *   跨端自适应探测当前宿主运行时平台（Windows / macOS / Linux / iOS / Android / Web）。
+ *   当运行在移动端（手机浏览器或 Capacitor 容器）或小屏环境时，
+ *   使 Titlebar 能精准剥离桌面专用的 Windows 三键或 Mac 红绿灯控件，并使左侧栏默认折叠收纳。
+ *
+ * 防范的历史坑 (Pitfall):
+ *   历史硬编码 `platform: 'windows'` 导致在 Android/iOS WebView 中渲染了无效的桌面关闭与缩放按键，
+ *   且初始在 390px 视口下强行展开 260px 左侧栏，挤扁对话流。
+ *
+ * 约束与规则 (Rules):
+ *   - 当 window.hermesDesktop 存在时，首屏保持桌面推导，后续由 desktopApi.getSystemInfo() 确认；
+ *   - 当 window.hermesDesktop 不存在且处于小屏时，自动推导为移动端（android / ios）。
+ */
+function detectInitialPlatform(): 'windows' | 'macos' | 'linux' | 'ios' | 'android' | 'web' {
+  if (typeof navigator !== 'undefined') {
+    const ua = navigator.userAgent.toLowerCase();
+    if (/android/.test(ua)) return 'android';
+    if (/iphone|ipad|ipod/.test(ua)) return 'ios';
+    if (!desktopApi && typeof window !== 'undefined' && window.innerWidth <= 768) {
+      return /macintosh|mac os x/.test(ua) ? 'ios' : 'android';
+    }
+    if (/macintosh|mac os x/.test(ua)) return 'macos';
+    if (/linux/.test(ua)) return 'linux';
+    if (/windows/.test(ua)) return 'windows';
+  }
+  return desktopApi ? 'windows' : 'web';
+}
+
 const state: AppState = {
-  platform: 'windows',
+  platform: detectInitialPlatform(),
   theme: (localStorage.getItem('hermes_flux_theme') || localStorage.getItem('hermes_aura_theme') as any) || 'obsidian-gold',
   lang: (localStorage.getItem('hermes_flux_lang') || localStorage.getItem('hermes_aura_lang') as any) || 'zh',
   isMaximized: false,
-  leftRailCollapsed: false,
+  leftRailCollapsed: typeof window !== 'undefined' && window.innerWidth <= 768,
   inspectorCollapsed: true,
   activeInspectorTab: 'artifacts',
   activeSessionId: '',

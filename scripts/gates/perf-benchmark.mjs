@@ -124,6 +124,9 @@ export async function runLongSessionPerfBenchmark() {
   // 2. 窗口化首屏挂载基准测试（Initial Window: 仅挂载最新 50 条）
   // 核心架构约束：严禁直接全量 render 5000 条 DOM！必须首屏只渲染最新 50 条！
   const initialWindowSlice = messages.slice(-50);
+  // 执行预热避免首调用 JIT 编译抖动
+  renderMiddlePod({ gatewayConnected: true, messages: initialWindowSlice.slice(0, 5), isLoadingOlder: false });
+
   const tWindowStart = performance.now();
   const initialHtml = renderMiddlePod({
     gatewayConnected: true,

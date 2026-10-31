@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Hermes Flux Mobile v7.0 —— 微信 3-Tab 架构</title>
+<style>
+:root {
+  --bg-canvas: #07090E;
+  --bg-card: #10131B;
+  --bg-surface: #161A24;
+  --bg-tabbar: #0B0E16;
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --text-main: #F3F4F6;
+  --text-muted: #9CA3AF;
+  --text-dim: #525B6C;
+  --accent-jade: #10B981;
+  --accent-amber: #F59E0B;
+  --accent-indigo: #6366F1;
+  --accent-pink: #EC4899;
+  --accent-cyan: #06B6D4;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html, body {
+  background: var(--bg-canvas);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+.mobile-root-shell {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-canvas);
+}
+
+/* ═════════════════════════════════════════════════
+   主容器 (承载 3-Tab 切换)
+   ═════════════════════════════════════════════════ */
+.main-stage-container {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 56px; /* 留出底部 TabBar */
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.28s ease;
+}
+.main-stage-container.pushed {
+  transform: translateX(-20%);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* 顶栏 (通用于三个 Tab) */
+.wechat-topbar {
+  height: 52px;
+  padding: 0 16px;
+  background: rgba(11, 14, 22, 0.96);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.topbar-page-title {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.topbar-action-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.topbar-action-btn:active {
+  transform: scale(0.92);
+}
+
+/* 页面滚动流 */
+.tab-content-scroll {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 微信式会话列表条目 */
+.session-item {
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  transition: background 0.15s;
+}
+.session-item:active {
+  background: rgba(255, 255, 255, 0.05);
+}
+.session-item.pinned-bg {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* 头像徽章 */
+.av-box {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 700;
+  position: relative;
+  flex-shrink: 0;
+}
+.av-pin-tag {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 8.5px;
+  font-weight: 700;
+  background: var(--accent-jade);
+  color: #000;
+  border: 1px solid var(--bg-canvas);
+}
+
+/* 群聊头像四宫格 */
+.quad-grid {
+  width: 48px;
+  height: 48px;
+  padding: 3px;
+  gap: 2px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  background: #181C28;
+  border-radius: 12px;
+  flex-shrink: 0;
+}
+.quad-cell {
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #FFF;
+}
+
+/* 会话信息区：大标题 + 小标题 */
+.session-mid-info {
+  flex: 1;
+  min-width: 0;
+}
+.line-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.s-big-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.s-time-str {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  margin-left: 8px;
+}
+.line-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 微信式底部经典 TabBar (56px) */
+.wechat-tabbar {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 56px;
+  background: var(--bg-tabbar);
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  z-index: 50;
+  user-select: none;
+}
+.tab-unit {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.tab-unit.active {
+  color: var(--accent-jade);
+}
+.tab-icon {
+  font-size: 20px;
+}
+.tab-text {
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+/* ═════════════════════════════════════════════════
+   推入层: 纯净全屏对话主舱 (Push View)
+   ═════════════════════════════════════════════════ */
+.push-chat-page {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: var(--bg-canvas);
+  display: flex;
+  flex-direction: column;
+  z-index: 60;
+  transform: translateX(100%);
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.push-chat-page.active {
+  transform: translateX(0);
+}
+.chat-page-topbar {
+  height: 52px;
+  padding: 0 10px;
+  background: rgba(11, 14, 22, 0.96);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.chat-back-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent-jade);
+  font-size: 15px;
+  font-weight: 600;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 8px 6px;
+  min-height: 44px;
+}
+.chat-center-title {
+  text-align: center;
+  max-width: 200px;
+}
+.chat-title-big {
+  font-size: 14.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-status-sub {
+  font-size: 10.5px;
+  color: var(--accent-jade);
+}
+
+.chat-message-stream {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 16px 100px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  -webkit-overflow-scrolling: touch;
+}
+.chat-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.chat-row.user {
+  flex-direction: row-reverse;
+}
+.chat-row-av {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 700;
+  color: #FFF;
+  flex-shrink: 0;
+}
+.chat-row-bubble {
+  max-width: 84%;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 16px;
+  padding: 12px 16px;
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+.chat-row.user .chat-row-bubble {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.3);
+  border-top-right-radius: 4px;
+}
+
+/* 底部毛玻璃输入栏 */
+.chat-input-bar {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  background: rgba(11, 14, 22, 0.96);
+  backdrop-filter: blur(24px);
+  border-top: 1px solid var(--border-subtle);
+  padding: 10px 16px 20px 16px;
+  z-index: 40;
+}
+.chat-bar-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+.chat-bar-input {
+  flex: 1;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 20px;
+  padding: 10px 16px;
+  outline: none;
+  color: var(--text-main);
+  font-size: 14.5px;
+  font-family: var(--font-sans);
+  resize: none;
+  min-height: 42px;
+  max-height: 120px;
+  line-height: 1.4;
+}
+.chat-bar-send {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--accent-jade);
+  color: #000;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* ═════════════════════════════════════════════════
+   推入层: 项目专属工作舱 (Project Push Screen)
+   ═════════════════════════════════════════════════ */
+.push-project-page {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: var(--bg-canvas);
+  display: flex;
+  flex-direction: column;
+  z-index: 65;
+  transform: translateX(100%);
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.push-project-page.active {
+  transform: translateX(0);
+}
+.proj-hero-banner {
+  padding: 18px 16px;
+  background: #0E121B;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.proj-hero-title {
+  font-size: 18px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.proj-hero-dir {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  margin-top: 4px;
+}
+
+/* 设置 Tab 卡片分组 */
+.settings-group-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  margin: 12px 16px;
+  overflow: hidden;
+}
+.settings-unit-row {
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  font-size: 14.5px;
+}
+.settings-unit-row:last-child {
+  border-bottom: none;
+}
+.settings-unit-row:active {
+  background: rgba(255, 255, 255, 0.05);
+}
+</style>
+</head>
+<body>
+
+<div class="mobile-root-shell">
+
+  <!-- ═════════════════════════════════════════════════
+       主容器：承载 3 个主 Tab (会话 / 项目 / 设置)
+       ═════════════════════════════════════════════════ -->
+  <div class="main-stage-container" id="main-container">
+    
+    <!-- 顶栏 -->
+    <header class="wechat-topbar">
+      <div class="topbar-page-title" id="page-title-text">
+        <span>Hermes Flux</span>
+      </div>
+      <button class="topbar-action-btn" onclick="alert('+ 新建会话 / 原地拉群')">+</button>
+    </header>
+
+    <!-- Tab 1 内容区：会话 (全景列表) -->
+    <main class="tab-content-scroll" id="pane-chats">
+      
+      <!-- 置顶 1: 主中枢 HQ -->
+      <div class="session-item pinned-bg" onclick="openChatPush('个人主助理 (HQ)', '✦', '#10B981', 'Chief of Staff · 全局调度')">
+        <div class="av-box" style="background: rgba(16,185,129,0.15); color: var(--accent-jade);">
+          ✦
+          <div class="av-pin-tag">置顶</div>
+        </div>
+        <div class="session-mid-info">
+          <div class="line-main">
+            <span class="s-big-title">个人主助理 (HQ)</span>
+            <span class="s-time-str">15:10</span>
+          </div>
+          <div class="line-sub">跨领域调度 · 2 个工单执行中，1 个 PR 等待审查</div>
+        </div>
+      </div>
+
+      <!-- 置顶 2: 群聊会议室 -->
+      <div class="session-item pinned-bg" onclick="openChatPush('👥 OAuth 方案联合评审', '👥', '#F59E0B', '老王 · 小张 · 审查员 (3人参会)')">
+        <div class="quad-grid">
+          <div class="quad-cell" style="background: var(--accent-indigo);">王</div>
+          <div class="quad-cell" style="background: var(--accent-pink);">张</div>
+          <div class="quad-cell" style="background: var(--accent-cyan);">审</div>
+          <div class="quad-cell" style="background: #374151;">+1</div>
+        </div>
+        <div class="session-mid-info">
+          <div class="line-main">
+            <span class="s-big-title">👥 OAuth 方案联合评审 (3人)</span>
+            <span class="s-time-str">15:02</span>
+          </div>
+          <div class="line-sub"><span style="color:var(--accent-pink);">小张</span>: redirect URI 已更新完毕</div>
+        </div>
+      </div>
+
+      <!-- 普通会话 1: 老王核心工位 -->
+      <div class="session-item" onclick="openChatPush('架构师 · 老王', '🤖', '#6366F1', 'Claude 3.7 · 终生核心主工位')">
+        <div class="av-box" style="background: var(--accent-indigo);">🤖</div>
+        <div class="session-mid-info">
+          <div class="line-main">
+            <span class="s-big-title">架构师 · 老王</span>
+            <span class="s-time-str">14:31</span>
+          </div>
+          <div class="line-sub">方案已敲定，单测全绿 (PASS 8/8)</div>
+        </div>
+      </div>
+
+      <!-- 普通会话 2: 老王独立旁聊 -->
+      <div class="session-item" onclick="openChatPush('⑂ 老王 · 锁冲突排查', '⑂', '#6366F1', '老王名下独立旁聊')">
+        <div class="av-box" style="background: #181D2A; color: var(--accent-amber); border: 1px dashed var(--accent-amber);">⑂</div>
+        <div class="session-mid-info">
+          <div class="line-main">
+            <span class="s-big-title">⑂ 老王 · 锁冲突排查</span>
+            <span class="s-time-str">11:20</span>
+          </div>
+          <div class="line-sub">发现并发 CAS 重试机制存在饥饿隐患</div>
+        </div>
+      </div>
+
+      <!-- 普通会话 3: 小张 -->
+      <div class="session-item" onclick="openChatPush('前端开发 · 小张', '🎨', '#EC4899', 'DeepSeek-V3 · 样式总监')">
+        <div class="av-box" style="background: var(--accent-pink);">🎨</div>
+        <div class="session-mid-info">
+          <div class="line-main">
+            <span class="s-big-title">前端开发 · 小张</span>
+            <span class="s-time-str">昨天</span>
+          </div>
+          <div class="line-sub">移动端 44px 触控热区规范已通过自动化回归</div>
+        </div>
+      </div>
+
+      <!-- 普通会话 4: 审查员 -->
+      <div class="session-item" onclick="openChatPush('代码审查员', '🛡️', '#06B6D4', 'Qwen-2.5 · 门禁守卫')">
+        <div class="av-box" style="background: var(--accent-cyan);">🛡️</div>
+        <div class="session-mid-info">
+          <div class="line-main">
+            <span class="s-big-title">代码审查员</span>
+            <span class="s-time-str">周四</span>
+          </div>
+          <div class="line-sub">Gate 0~5 静态门禁全部通过，结论 PASS</div>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- Tab 2 内容区：项目 (按工程归类) -->
+    <main class="tab-content-scroll" id="pane-projects" style="display: none; padding: 12px 16px;">
+      
+      <!-- 项目卡片 1 -->
+      <div style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:14px; padding:16px; margin-bottom:12px; cursor:pointer;" onclick="openProjectPush('hermes-flux', '/projects/hermes-flux')">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="font-size:16px; font-weight:700; display:flex; align-items:center; gap:8px;">
+            <span style="color:var(--accent-amber);">📁</span>
+            <span>hermes-flux</span>
+          </div>
+          <span style="font-size:12px; color:var(--accent-jade); font-weight:600;">进项目 →</span>
+        </div>
+        <div style="font-size:11.5px; color:var(--text-dim); font-family:var(--font-mono); margin-top:4px;">
+          /projects/hermes-flux · branch: main
+        </div>
+        <div style="display:flex; gap:14px; margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.05); font-size:12px;">
+          <span style="color:var(--accent-amber);">● 1 执行中</span>
+          <span style="color:var(--text-dim);">○ 2 待办</span>
+          <span style="color:var(--accent-jade);">✔ 4 已合并</span>
+        </div>
+      </div>
+
+      <!-- 项目卡片 2 -->
+      <div style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:14px; padding:16px; cursor:pointer;" onclick="openProjectPush('mp-langchao', '/projects/mp-langchao')">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="font-size:16px; font-weight:700; display:flex; align-items:center; gap:8px;">
+            <span>📁</span>
+            <span>mp-langchao</span>
+          </div>
+          <span style="font-size:12px; color:var(--text-dim);">空闲 →</span>
+        </div>
+        <div style="font-size:11.5px; color:var(--text-dim); font-family:var(--font-mono); margin-top:4px;">
+          /projects/mp-langchao · branch: dev
+        </div>
+        <div style="display:flex; gap:14px; margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.05); font-size:12px;">
+          <span style="color:var(--text-dim);">○ 0 执行中</span>
+          <span style="color:var(--accent-jade);">✔ 12 已完成</span>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- Tab 3 内容区：设置 -->
+    <main class="tab-content-scroll" id="pane-settings" style="display: none; padding-top: 6px;">
+      
+      <div style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; padding:12px 16px 4px 16px;">
+        网络与网关
+      </div>
+      <div class="settings-group-card">
+        <div class="settings-unit-row" onclick="alert('进入网关连接配置')">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span>🌐</span>
+            <span>网关连接 (Gateway)</span>
+          </div>
+          <span style="color:var(--accent-jade); font-size:12px;">127.0.0.1 在线 ›</span>
+        </div>
+        <div class="settings-unit-row" onclick="alert('进入认证 Token 设置')">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span>🔑</span>
+            <span>认证秘钥 (Auth Secret)</span>
+          </div>
+          <span style="color:var(--text-dim); font-size:12px;">已配置 ›</span>
+        </div>
+      </div>
+
+      <div style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; padding:12px 16px 4px 16px;">
+        数字员工与模型
+      </div>
+      <div class="settings-group-card">
+        <div class="settings-unit-row" onclick="alert('进入专职 Bot 列表管理')">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span>🤖</span>
+            <span>专职 Bot 团队 (Profiles)</span>
+          </div>
+          <span style="color:var(--text-dim); font-size:12px;">3 位员工 ›</span>
+        </div>
+        <div class="settings-unit-row" onclick="alert('进入模型提供商与 API Key 管理')">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span>⚡</span>
+            <span>模型供应商 (Providers)</span>
+          </div>
+          <span style="color:var(--text-dim); font-size:12px;">Claude, DeepSeek ›</span>
+        </div>
+      </div>
+
+      <div style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; padding:12px 16px 4px 16px;">
+        外观与关于
+      </div>
+      <div class="settings-group-card">
+        <div class="settings-unit-row" onclick="alert('进入外观主题切换')">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span>🎨</span>
+            <span>外观主题 (Theme)</span>
+          </div>
+          <span style="color:var(--text-dim); font-size:12px;">暗黑极夜金 ›</span>
+        </div>
+        <div class="settings-unit-row">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span>ℹ️</span>
+            <span>关于 Hermes Flux</span>
+          </div>
+          <span style="color:var(--text-dim); font-size:11px;">v4.5 Production</span>
+        </div>
+      </div>
+
+    </main>
+
+  </div>
+
+  <!-- ═════════════════════════════════════════════════
+       底部经典 3-Tab 导航栏 (微信式规范)
+       ═════════════════════════════════════════════════ -->
+  <nav class="wechat-tabbar">
+    <div class="tab-unit active" id="tab-btn-1" onclick="switchBottomTab(1)">
+      <div class="tab-icon">💬</div>
+      <div class="tab-text">会话</div>
+    </div>
+    <div class="tab-unit" id="tab-btn-2" onclick="switchBottomTab(2)">
+      <div class="tab-icon">📁</div>
+      <div class="tab-text">项目</div>
+    </div>
+    <div class="tab-unit" id="tab-btn-3" onclick="switchBottomTab(3)">
+      <div class="tab-icon">⚙️</div>
+      <div class="tab-text">设置</div>
+    </div>
+  </nav>
+
+  <!-- ═════════════════════════════════════════════════
+       推入层: 纯净全屏对话主舱 (Push View)
+       ═════════════════════════════════════════════════ -->
+  <div class="push-chat-page" id="chat-page">
+    <header class="chat-page-topbar">
+      <button class="chat-back-btn" onclick="closeChatPush()">‹ 返回</button>
+      <div class="chat-center-title">
+        <div class="chat-title-big" id="push-chat-title">架构师 · 老王</div>
+        <div class="chat-status-sub" id="push-chat-desc">Claude 3.7 · 终生主工位</div>
+      </div>
+      <div style="width:40px;"></div>
+    </header>
+
+    <main class="chat-message-stream" id="chat-stream">
+      <div class="chat-row user">
+        <div class="chat-row-av" style="background:#374151;">ME</div>
+        <div class="chat-row-bubble">老王，去 hermes-flux 项目把 OAuth 回调监听重构一下，在 Worktree 跑。</div>
+      </div>
+
+      <div class="chat-row bot">
+        <div class="chat-row-av" id="push-bot-av" style="background:var(--accent-indigo);">🤖</div>
+        <div class="chat-row-bubble">
+          方案已敲定，已在 <code>/projects/hermes-flux</code> 自动挂载独立执行分支。<br>
+          单测与门禁已 100% 绿灯 (PASS 8/8)，等待提交 PR。
+        </div>
+      </div>
+    </main>
+
+    <div class="chat-input-bar">
+      <div class="chat-bar-row">
+        <textarea class="chat-bar-input" id="msg-input" rows="1" placeholder="发消息..."></textarea>
+        <button class="chat-bar-send" onclick="sendMsg()">↑</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═════════════════════════════════════════════════
+       推入层: 项目专属详情舱 (Project Push Screen)
+       ═════════════════════════════════════════════════ -->
+  <div class="push-project-page" id="project-page">
+    <header class="chat-page-topbar">
+      <button class="chat-back-btn" onclick="closeProjectPush()">‹ 返回项目</button>
+      <span style="font-size:15px; font-weight:700;" id="push-proj-title">hermes-flux</span>
+      <div style="width:40px;"></div>
+    </header>
+
+    <div style="flex:1; overflow-y:auto;">
+      <div class="proj-hero-banner">
+        <div class="proj-hero-title">
+          <span>📁</span>
+          <span id="push-proj-hero-name">hermes-flux</span>
+        </div>
+        <div class="proj-hero-dir" id="push-proj-hero-dir">/projects/hermes-flux · branch: main</div>
+      </div>
+
+      <div style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; padding:14px 16px 6px 16px;">
+        该项目名下的专属会话与任务
+      </div>
+
+      <!-- 项目名下专属会话列表 -->
+      <div class="settings-group-card" style="margin:0 16px;">
+        <div class="settings-unit-row" onclick="openChatPush('TASK-104: OAuth 回调', '⚡', '#F59E0B', 'wt-104 · 正在跑单测')">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span style="color:var(--accent-amber);">⚡</span>
+            <span>TASK-104: OAuth 回调重构 (老王)</span>
+          </div>
+          <span style="color:var(--accent-amber); font-size:12px;">运行中 ›</span>
+        </div>
+        <div class="settings-unit-row" onclick="openChatPush('⑂ 老王 · 锁冲突排查', '⑂', '#6366F1', '老王名下独立旁聊')">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span style="color:var(--accent-indigo);">⑂</span>
+            <span>锁冲突排查 (老王)</span>
+          </div>
+          <span style="color:var(--text-dim); font-size:12px;">20m 前 ›</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // 1. 微信 3-Tab 底部切换
+  function switchBottomTab(index) {
+    document.querySelectorAll('.tab-unit').forEach((btn, idx) => {
+      btn.classList.toggle('active', idx + 1 === index);
+    });
+
+    const paneChats = document.getElementById('pane-chats');
+    const paneProjects = document.getElementById('pane-projects');
+    const paneSettings = document.getElementById('pane-settings');
+    const titleText = document.getElementById('page-title-text');
+
+    paneChats.style.display = index === 1 ? 'block' : 'none';
+    paneProjects.style.display = index === 2 ? 'block' : 'none';
+    paneSettings.style.display = index === 3 ? 'block' : 'none';
+
+    if (index === 1) titleText.textContent = 'Hermes Flux';
+    if (index === 2) titleText.textContent = '项目矩阵';
+    if (index === 3) titleText.textContent = '系统设置';
+  }
+
+  // 2. 推入对话
+  const mainContainer = document.getElementById('main-container');
+  const chatPage = document.getElementById('chat-page');
+
+  function openChatPush(title, av, color, desc) {
+    document.getElementById('push-chat-title').textContent = title;
+    document.getElementById('push-chat-desc').textContent = desc;
+    document.getElementById('push-bot-av').textContent = av;
+    document.getElementById('push-bot-av').style.background = color;
+
+    mainContainer.classList.add('pushed');
+    chatPage.classList.add('active');
+  }
+
+  function closeChatPush() {
+    chatPage.classList.remove('active');
+    mainContainer.classList.remove('pushed');
+  }
+
+  // 3. 推入项目专属页面
+  const projectPage = document.getElementById('project-page');
+  function openProjectPush(name, dir) {
+    document.getElementById('push-proj-title').textContent = name;
+    document.getElementById('push-proj-hero-name').textContent = name;
+    document.getElementById('push-proj-hero-dir').textContent = dir + ' · branch: main';
+
+    mainContainer.classList.add('pushed');
+    projectPage.classList.add('active');
+  }
+
+  function closeProjectPush() {
+    projectPage.classList.remove('active');
+    mainContainer.classList.remove('pushed');
+  }
+
+  // 4. 发送消息
+  function sendMsg() {
+    const input = document.getElementById('msg-input');
+    const text = input.value.trim();
+    if (!text) return;
+
+    const stream = document.getElementById('chat-stream');
+    const row = document.createElement('div');
+    row.className = 'chat-row user';
+    row.innerHTML = `
+      <div class="chat-row-av" style="background:#374151;">ME</div>
+      <div class="chat-row-bubble">${escapeHtml(text)}</div>
+    `;
+    stream.appendChild(row);
+    input.value = '';
+    stream.scrollTop = stream.scrollHeight;
+  }
+
+  function escapeHtml(str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+</script>
+
+</body>
+</html>

@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Hermes Flux Mobile v8.0 —— 设计系统完全对齐版</title>
+<style>
+/* 严格映射 docs/design-system 与 packages/desktop 生产色板 */
+:root {
+  --bg-surface-0: #080808;
+  --bg-surface-1: #121212;
+  --bg-surface-2: #1A1A1A;
+  --bg-surface-3: #222222;
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-medium: rgba(255, 255, 255, 0.14);
+  --text-primary: #F5F5F7;
+  --text-secondary: #A1A1AA;
+  --text-muted: #52525B;
+  --aura-amber: #FFBF00;
+  --aura-cyan: #00E5FF;
+  --aura-violet: #A855F7;
+  --aura-jade: #10B981;
+  --aura-pink: #EC4899;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "PingFang SC", sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html, body {
+  background: var(--bg-surface-0);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+.mobile-app-root {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-surface-0);
+}
+
+/* ═════════════════════════════════════════════════
+   主舞台：承载 3 个主 Tab (下方留出 54px TabBar)
+   ═════════════════════════════════════════════════ */
+.tab-viewport-body {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 54px;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.26s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.26s ease;
+}
+.tab-viewport-body.pushed {
+  transform: translateX(-20%);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* 移动端顶栏 (46px，电影级暗黑) */
+.mobile-header {
+  height: 46px;
+  padding: 0 16px;
+  background: rgba(18, 18, 18, 0.95);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.brand-title {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.emerald-light {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--aura-jade);
+  box-shadow: 0 0 8px rgba(16,185,129,0.8);
+}
+.header-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.header-btn:active {
+  background: var(--bg-surface-2);
+}
+
+.scroll-pane {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 区域分组小标题 */
+.group-tag-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  padding: 12px 16px 4px 16px;
+}
+
+/* ─────────────────────────────────────────────
+   Tab 1: 会话列表项 (头像 + 大标题 + 小标题 + 时间)
+   ───────────────────────────────────────────── */
+.chat-item-row {
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  transition: background 0.15s;
+}
+.chat-item-row:active {
+  background: var(--bg-surface-1);
+}
+.chat-item-row.pinned {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* 头像：完全基于设计系统 Token 程序化渲染 */
+.avatar-cell {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 700;
+  position: relative;
+  flex-shrink: 0;
+}
+.av-badge {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 8px;
+  font-weight: 700;
+  border: 1px solid var(--bg-surface-0);
+}
+.badge-pin { background: var(--aura-jade); color: #000; }
+.badge-side { background: var(--aura-amber); color: #000; }
+
+/* 群聊头像四宫格/叠落 */
+.group-av-box {
+  width: 44px;
+  height: 44px;
+  padding: 3px;
+  gap: 2px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  background: var(--bg-surface-2);
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+.g-av-dot {
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  color: #FFF;
+}
+
+/* 大标题与小标题信息 */
+.chat-meta-box {
+  flex: 1;
+  min-width: 0;
+}
+.meta-line-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 3px;
+}
+.big-title {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.clock-text {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 8px;
+  font-family: var(--font-mono);
+}
+.meta-line-sub {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─────────────────────────────────────────────
+   Tab 2: 项目矩阵 (手风琴卡片，原地展开专属会话)
+   ───────────────────────────────────────────── */
+.project-accordion-card {
+  margin: 10px 16px;
+  background: var(--bg-surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+.project-accordion-card.open {
+  border-color: var(--border-medium);
+}
+
+.project-card-header {
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+}
+.project-card-header:active {
+  background: var(--bg-surface-2);
+}
+.proj-title-txt {
+  font-size: 15px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.proj-dir-txt {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  margin-top: 3px;
+}
+.proj-toggle-arrow {
+  font-size: 11px;
+  color: var(--text-muted);
+  transition: transform 0.25s ease;
+}
+.project-accordion-card.open .proj-toggle-arrow {
+  transform: rotate(90deg);
+  color: var(--aura-jade);
+}
+
+/* 项目卡片展开后的内部会话列表 (原地展开，不跳页！) */
+.project-nested-sessions {
+  display: none;
+  background: var(--bg-surface-0);
+  border-top: 1px solid var(--border-subtle);
+  padding: 4px 0;
+}
+.project-accordion-card.open .project-nested-sessions {
+  display: block;
+}
+
+.nested-item-row {
+  padding: 10px 16px 10px 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  font-size: 13px;
+}
+.nested-item-row:last-child {
+  border-bottom: none;
+}
+.nested-item-row:active {
+  background: var(--bg-surface-1);
+}
+
+/* ─────────────────────────────────────────────
+   Tab 3: 设置 (分组卡片)
+   ───────────────────────────────────────────── */
+.settings-box-card {
+  margin: 10px 16px;
+  background: var(--bg-surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.settings-row {
+  padding: 13px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  font-size: 14px;
+}
+.settings-row:last-child {
+  border-bottom: none;
+}
+.settings-row:active {
+  background: var(--bg-surface-2);
+}
+
+/* ═════════════════════════════════════════════════
+   微信经典底部 3-Tab 导航栏 (54px)
+   ═════════════════════════════════════════════════ */
+.bottom-tabbar {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 54px;
+  background: rgba(18, 18, 18, 0.96);
+  backdrop-filter: blur(20px);
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  z-index: 50;
+  user-select: none;
+}
+.tab-btn {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.tab-btn.active {
+  color: var(--aura-jade);
+}
+.tab-btn-icon {
+  font-size: 19px;
+}
+.tab-btn-label {
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+/* ═════════════════════════════════════════════════
+   推入层: 纯净全屏对话主舱 (Push View)
+   ═════════════════════════════════════════════════ */
+.push-chat-viewport {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: var(--bg-surface-0);
+  display: flex;
+  flex-direction: column;
+  z-index: 60;
+  transform: translateX(100%);
+  transition: transform 0.26s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.push-chat-viewport.active {
+  transform: translateX(0);
+}
+
+.chat-nav-bar {
+  height: 48px;
+  padding: 0 10px;
+  background: rgba(18, 18, 18, 0.95);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.back-nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--aura-jade);
+  font-size: 14.5px;
+  font-weight: 600;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 6px 8px;
+  min-height: 40px;
+}
+.chat-center-info {
+  text-align: center;
+  max-width: 220px;
+}
+.chat-name-txt {
+  font-size: 14.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-desc-txt {
+  font-size: 10px;
+  color: var(--aura-jade);
+}
+
+.chat-message-pad {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 16px 90px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  -webkit-overflow-scrolling: touch;
+}
+.msg-bubble-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.msg-bubble-row.user {
+  flex-direction: row-reverse;
+}
+.row-av {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: #FFF;
+  flex-shrink: 0;
+}
+.bubble-body {
+  max-width: 84%;
+  background: var(--bg-surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.msg-bubble-row.user .bubble-body {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.28);
+  border-top-right-radius: 4px;
+}
+.msg-bubble-row.bot .bubble-body {
+  border-top-left-radius: 4px;
+}
+
+/* 底部输入舱 */
+.chat-bottom-dock {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  background: rgba(18, 18, 18, 0.96);
+  backdrop-filter: blur(24px);
+  border-top: 1px solid var(--border-subtle);
+  padding: 8px 14px 18px 14px;
+  z-index: 40;
+}
+.dock-input-flex {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.composer-input-field {
+  flex: 1;
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: 18px;
+  padding: 8px 14px;
+  outline: none;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: var(--font-sans);
+  resize: none;
+  min-height: 38px;
+  max-height: 100px;
+  line-height: 1.4;
+}
+.composer-send-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--aura-jade);
+  color: #000;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+</style>
+</head>
+<body>
+
+<div class="mobile-app-root">
+
+  <!-- ═════════════════════════════════════════════════
+       主视口舞台 (包含 3 个 Tab)
+       ═════════════════════════════════════════════════ -->
+  <div class="tab-viewport-body" id="viewport-stage">
+    
+    <header class="mobile-header">
+      <div class="brand-title">
+        <div class="emerald-light"></div>
+        <span id="header-brand-title">Hermes Flux</span>
+      </div>
+      <button class="header-btn" onclick="alert('+ 新建会话 / 原地拉群')">+</button>
+    </header>
+
+    <!-- ─────────────────────────────────────────────
+         Tab 1: 会话大盘 (Bot 默认置顶 + 旁聊 + 群聊)
+         ───────────────────────────────────────────── -->
+    <main class="scroll-pane" id="pane-chats">
+      
+      <!-- 置顶专区 (Bot 主工位默认全部置顶) -->
+      <div class="group-tag-title">📌 置顶 Bot 核心工位</div>
+
+      <!-- 置顶 1: 主助理 HQ -->
+      <div class="chat-item-row pinned" onclick="openChatScreen('个人主助理 (HQ)', '✦', 'rgba(16,185,129,0.15)', 'var(--aura-jade)', 'Chief of Staff · 全局调度')">
+        <div class="avatar-cell" style="background: rgba(16,185,129,0.15); color: var(--aura-jade);">
+          ✦
+          <div class="av-badge badge-pin">HQ</div>
+        </div>
+        <div class="chat-meta-box">
+          <div class="meta-line-top">
+            <span class="big-title">个人主助理 (HQ)</span>
+            <span class="clock-text">15:10</span>
+          </div>
+          <div class="meta-line-sub">跨领域调度 · 2 个工单执行中，1 个 PR 待审</div>
+        </div>
+      </div>
+
+      <!-- 置顶 2: 老王核心主工位 -->
+      <div class="chat-item-row pinned" onclick="openChatScreen('架构师 · 老王', '🤖', 'var(--aura-violet)', '#FFF', 'Claude 3.7 · 终生核心主工位')">
+        <div class="avatar-cell" style="background: var(--aura-violet); color: #FFF;">
+          🤖
+          <div class="av-badge badge-pin">Bot</div>
+        </div>
+        <div class="chat-meta-box">
+          <div class="meta-line-top">
+            <span class="big-title">架构师 · 老王</span>
+            <span class="clock-text">14:31</span>
+          </div>
+          <div class="meta-line-sub">老王: 方案已敲定，单测全绿 (PASS 8/8)</div>
+        </div>
+      </div>
+
+      <!-- 置顶 3: 小张核心主工位 -->
+      <div class="chat-item-row pinned" onclick="openChatScreen('前端开发 · 小张', '🎨', 'var(--aura-pink)', '#FFF', 'DeepSeek-V3 · 样式总监')">
+        <div class="avatar-cell" style="background: var(--aura-pink); color: #FFF;">
+          🎨
+          <div class="av-badge badge-pin">Bot</div>
+        </div>
+        <div class="chat-meta-box">
+          <div class="meta-line-top">
+            <span class="big-title">前端开发 · 小张</span>
+            <span class="clock-text">昨天</span>
+          </div>
+          <div class="meta-line-sub">小张: 44px 触控规范已全部对齐</div>
+        </div>
+      </div>
+
+      <!-- 普通会话 (群聊与独立旁聊) -->
+      <div class="group-tag-title">💬 协同群聊与旁聊</div>
+
+      <!-- 群聊 1 -->
+      <div class="chat-item-row" onclick="openChatScreen('👥 OAuth 方案联合评审', '👥', '#1E2433', 'var(--aura-amber)', '老王 · 小张 · 审查员 (3人参会)')">
+        <div class="group-av-box">
+          <div class="g-av-dot" style="background: var(--aura-violet);">王</div>
+          <div class="g-av-dot" style="background: var(--aura-pink);">张</div>
+          <div class="g-av-dot" style="background: var(--aura-cyan);">审</div>
+          <div class="g-av-dot" style="background: var(--bg-surface-3);">+1</div>
+        </div>
+        <div class="chat-meta-box">
+          <div class="meta-line-top">
+            <span class="big-title">👥 OAuth 方案联合评审 (3人)</span>
+            <span class="clock-text">15:02</span>
+          </div>
+          <div class="meta-line-sub"><span style="color:var(--aura-pink);">小张</span>: redirect URI 已更新完毕</div>
+        </div>
+      </div>
+
+      <!-- 独立旁聊 1: 锁冲突排查 -->
+      <div class="chat-item-row" onclick="openChatScreen('⑂ 老王 · 锁冲突排查', '⑂', 'var(--bg-surface-2)', 'var(--aura-amber)', '老王名下独立旁聊')">
+        <div class="avatar-cell" style="background: var(--bg-surface-2); color: var(--aura-amber); border: 1px dashed var(--aura-amber);">
+          ⑂
+          <div class="av-badge badge-side">旁聊</div>
+        </div>
+        <div class="chat-meta-box">
+          <div class="meta-line-top">
+            <span class="big-title">⑂ 老王 · 锁冲突排查</span>
+            <span class="clock-text">11:20</span>
+          </div>
+          <div class="meta-line-sub">发现并发 CAS 重试机制存在饥饿隐患</div>
+        </div>
+      </div>
+
+      <!-- 独立会话: 代码审查员 -->
+      <div class="chat-item-row" onclick="openChatScreen('代码审查员', '🛡️', 'var(--aura-cyan)', '#000', 'Qwen-2.5 · 门禁守卫')">
+        <div class="avatar-cell" style="background: var(--aura-cyan); color: #000;">🛡️</div>
+        <div class="chat-meta-box">
+          <div class="meta-line-top">
+            <span class="big-title">代码审查员</span>
+            <span class="clock-text">周四</span>
+          </div>
+          <div class="meta-line-sub">Gate 0~5 静态门禁全部通过，结论 PASS</div>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- ─────────────────────────────────────────────
+         Tab 2: 项目矩阵 (手风琴卡片，原地展开专属会话)
+         ───────────────────────────────────────────── -->
+    <main class="scroll-pane" id="pane-projects" style="display: none; padding-top: 6px;">
+      
+      <!-- 项目卡片 1: hermes-flux (默认展开) -->
+      <div class="project-accordion-card open" id="proj-card-1">
+        <div class="project-card-header" onclick="toggleProjectAccordion('proj-card-1')">
+          <div>
+            <div class="proj-title-txt">
+              <span style="color:var(--aura-amber);">📁</span>
+              <span>hermes-flux (1 运行中)</span>
+            </div>
+            <div class="proj-dir-txt">/projects/hermes-flux · branch: main</div>
+          </div>
+          <span class="proj-toggle-arrow">›</span>
+        </div>
+
+        <!-- 原地展开该项目名下的专属会话 -->
+        <div class="project-nested-sessions">
+          <div class="nested-item-row" onclick="openChatScreen('TASK-104: OAuth 回调', '⚡', 'var(--bg-surface-2)', 'var(--aura-amber)', 'wt-104 · 正在跑单测')">
+            <span style="color:var(--aura-amber);">⚡</span>
+            <div style="flex:1;">
+              <div style="font-weight:600;">TASK-104: OAuth 回调重构 (老王)</div>
+              <div style="font-size:11px; color:var(--text-muted);">PID: 4801 · 运行中</div>
+            </div>
+            <span style="font-size:11px; color:var(--aura-jade);">PASS 8/8</span>
+          </div>
+
+          <div class="nested-item-row" onclick="openChatScreen('⑂ 老王 · 锁冲突排查', '⑂', 'var(--bg-surface-2)', 'var(--aura-amber)', '老王名下独立旁聊')">
+            <span style="color:var(--aura-amber);">⑂</span>
+            <div style="flex:1;">
+              <div style="font-weight:600;">锁冲突排查 (老王)</div>
+              <div style="font-size:11px; color:var(--text-muted);">20分钟前</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 项目卡片 2: mp-langchao (默认折叠) -->
+      <div class="project-accordion-card" id="proj-card-2">
+        <div class="project-card-header" onclick="toggleProjectAccordion('proj-card-2')">
+          <div>
+            <div class="proj-title-txt">
+              <span>📁</span>
+              <span>mp-langchao (空闲)</span>
+            </div>
+            <div class="proj-dir-txt">/projects/mp-langchao · branch: dev</div>
+          </div>
+          <span class="proj-toggle-arrow">›</span>
+        </div>
+
+        <div class="project-nested-sessions">
+          <div class="nested-item-row" onclick="openChatScreen('登录态持久化排查', '📁', 'var(--bg-surface-2)', 'var(--text-primary)', '小程序会话')">
+            <span>📁</span>
+            <div style="flex:1;">
+              <div style="font-weight:600;">登录态持久化排查 (小张)</div>
+              <div style="font-size:11px; color:var(--text-muted);">2天前 · 已完成</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- ─────────────────────────────────────────────
+         Tab 3: 设置
+         ───────────────────────────────────────────── -->
+    <main class="scroll-pane" id="pane-settings" style="display: none; padding-top: 6px;">
+      
+      <div class="group-tag-title">网关网络</div>
+      <div class="settings-box-card">
+        <div class="settings-row" onclick="alert('进入网关连接配置')">
+          <span>🌐 网关连接 (Gateway)</span>
+          <span style="color:var(--aura-jade); font-size:12px;">127.0.0.1:9119 在线 ›</span>
+        </div>
+      </div>
+
+      <div class="group-tag-title">生态与模型</div>
+      <div class="settings-box-card">
+        <div class="settings-row" onclick="alert('进入专职 Bot 管理')">
+          <span>🤖 专职 Bot 团队 (3位)</span>
+          <span style="color:var(--text-muted); font-size:12px;">管理 ›</span>
+        </div>
+        <div class="settings-row" onclick="alert('进入模型供应商设置')">
+          <span>⚡ 模型供应商 (Providers)</span>
+          <span style="color:var(--text-muted); font-size:12px;">Claude, DeepSeek ›</span>
+        </div>
+      </div>
+
+    </main>
+
+  </div>
+
+  <!-- ═════════════════════════════════════════════════
+       微信经典底部 3-Tab 导航栏 (54px)
+       ═════════════════════════════════════════════════ -->
+  <nav class="bottom-tabbar">
+    <div class="tab-btn active" id="tab-1" onclick="switchTab(1)">
+      <div class="tab-btn-icon">💬</div>
+      <div class="tab-btn-label">会话</div>
+    </div>
+    <div class="tab-btn" id="tab-2" onclick="switchTab(2)">
+      <div class="tab-btn-icon">📁</div>
+      <div class="tab-btn-label">项目</div>
+    </div>
+    <div class="tab-btn" id="tab-3" onclick="switchTab(3)">
+      <div class="tab-btn-icon">⚙️</div>
+      <div class="tab-btn-label">设置</div>
+    </div>
+  </nav>
+
+  <!-- ═════════════════════════════════════════════════
+       推入层: 纯净全屏对话主舱 (Push View)
+       ═════════════════════════════════════════════════ -->
+  <div class="push-chat-viewport" id="chat-viewport">
+    <header class="chat-nav-bar">
+      <button class="back-nav-btn" onclick="closeChatScreen()">‹ 返回</button>
+      <div class="chat-center-info">
+        <div class="chat-name-txt" id="push-chat-title">架构师 · 老王</div>
+        <div class="chat-desc-txt" id="push-chat-desc">Claude 3.7 · 终生核心主工位</div>
+      </div>
+      <div style="width:40px;"></div>
+    </header>
+
+    <main class="chat-message-pad" id="chat-stream-box">
+      <div class="msg-bubble-row user">
+        <div class="row-av" style="background:#374151;">ME</div>
+        <div class="bubble-body">老王，去 hermes-flux 项目把 OAuth 回调监听重构一下，在 Worktree 跑。</div>
+      </div>
+
+      <div class="msg-bubble-row bot">
+        <div class="row-av" id="push-avatar-cell" style="background:var(--aura-violet);">🤖</div>
+        <div class="bubble-body">
+          方案已敲定，已在 <code>/projects/hermes-flux</code> 自动挂载独立执行分支。<br>
+          单测与门禁已 100% 绿灯 (PASS 8/8)，等待提交 PR。
+        </div>
+      </div>
+    </main>
+
+    <div class="chat-bottom-dock">
+      <div class="dock-input-flex">
+        <textarea class="composer-input-field" id="text-input" rows="1" placeholder="发消息..."></textarea>
+        <button class="composer-send-btn" onclick="sendChatMessage()">↑</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // 1. 微信 3-Tab 切换
+  function switchTab(idx) {
+    document.querySelectorAll('.tab-btn').forEach((b, i) => {
+      b.classList.toggle('active', i + 1 === idx);
+    });
+
+    const paneChats = document.getElementById('pane-chats');
+    const paneProjects = document.getElementById('pane-projects');
+    const paneSettings = document.getElementById('pane-settings');
+    const titleText = document.getElementById('header-brand-title');
+
+    paneChats.style.display = idx === 1 ? 'block' : 'none';
+    paneProjects.style.display = idx === 2 ? 'block' : 'none';
+    paneSettings.style.display = idx === 3 ? 'block' : 'none';
+
+    if (idx === 1) titleText.textContent = 'Hermes Flux';
+    if (idx === 2) titleText.textContent = '项目矩阵';
+    if (idx === 3) titleText.textContent = '系统设置';
+  }
+
+  // 2. 项目手风琴折叠展开 (原地展开专属会话)
+  function toggleProjectAccordion(cardId) {
+    const card = document.getElementById(cardId);
+    card.classList.toggle('open');
+  }
+
+  // 3. 推入对话主舱
+  const stage = document.getElementById('viewport-stage');
+  const chatView = document.getElementById('chat-viewport');
+
+  function openChatScreen(title, avText, bg, color, desc) {
+    document.getElementById('push-chat-title').textContent = title;
+    document.getElementById('push-chat-desc').textContent = desc;
+    
+    const avCell = document.getElementById('push-avatar-cell');
+    avCell.textContent = avText;
+    avCell.style.background = bg;
+    avCell.style.color = color;
+
+    stage.classList.add('pushed');
+    chatView.classList.add('active');
+  }
+
+  function closeChatScreen() {
+    chatView.classList.remove('active');
+    stage.classList.remove('pushed');
+  }
+
+  // 4. 发送消息
+  function sendChatMessage() {
+    const input = document.getElementById('text-input');
+    const text = input.value.trim();
+    if (!text) return;
+
+    const stream = document.getElementById('chat-stream-box');
+    const row = document.createElement('div');
+    row.className = 'msg-bubble-row user';
+    row.innerHTML = `
+      <div class="row-av" style="background:#374151;">ME</div>
+      <div class="bubble-body">${escapeHtml(text)}</div>
+    `;
+    stream.appendChild(row);
+    input.value = '';
+    stream.scrollTop = stream.scrollHeight;
+  }
+
+  function escapeHtml(str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+</script>
+
+</body>
+</html>

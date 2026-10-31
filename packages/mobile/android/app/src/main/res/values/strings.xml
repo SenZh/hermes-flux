@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Hermes Flux</string>
+    <string name="title_activity_main">Hermes Flux</string>
+    <string name="package_name">com.hermesflux.app</string>
+    <string name="custom_url_scheme">com.hermesflux.app</string>
+</resources>

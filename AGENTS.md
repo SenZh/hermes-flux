@@ -32,6 +32,7 @@
 | **多端流转** | [`docs/architecture/multi-device-shared-session-handover.md`](docs/architecture/multi-device-shared-session-handover.md) | **多设备共享会话与接力流转设计**：跨端会话握手、状态迁移、局域网直连探测与离线同步机制。 |
 | **主题引擎** | [`docs/architecture/theme-engine-spec.md`](docs/architecture/theme-engine-spec.md) | **标准化可插拔主题注册表规范**：CSS 变量注入系统、暗黑极夜金/白玉翡翠皮肤、动态 Token 运行时切换。 |
 | **问题档案** | [`docs/architecture/known-issues-and-backlog.md`](docs/architecture/known-issues-and-backlog.md) | **已知架构缺陷与演进 Backlog**：技术债务登记簿、时序竞态历史陷阱与中长程规划。 |
+| **移动端桥** | [`docs/architecture/capacitor-mobile-bridge-spec.md`](docs/architecture/capacitor-mobile-bridge-spec.md) | **Capacitor 移动端 PlatformBridge 规范**：Android/iOS 原生 8 插件映射、同构双桥注入、16 个方法 100% 契约对齐、三层自动化验证流水线。 |
 | **设计系统 1**| [`docs/design-system/01-classic-books-and-theories.md`](docs/design-system/01-classic-books-and-theories.md) | **经典设计书籍与排版理论基石**：网格系统、微距阅读律动、字体阶梯与对比度科学。 |
 | **设计系统 2**| [`docs/design-system/02-aesthetic-philosophy-and-standards.md`](docs/design-system/02-aesthetic-philosophy-and-standards.md) | **美学哲学与电影级暗黑质感标准**：微距物理受光、双层边框高光、极黑纯净空间与翡翠微光点。 |
 | **设计系统 3**| [`docs/design-system/03-director-design-workflow.md`](docs/design-system/03-director-design-workflow.md) | **设计总监级评审与审查工作流**：视觉对齐检查清单、不可妥协的工程排版细节。 |
@@ -592,5 +593,202 @@ UI 全局 Store、会话缓存与 IPC 桩在同一个 Node 进程中顺序执行
 │ 4. MERGE        │ 直接合入：零瑕疵，闭环证伪，门禁与单测 100% 绿灯      │
 └─────────────────┴──────────────────────────────────────────────────────┘
 ```
+
+---
+
+## 十六、移动端与跨端质量门禁与工程规范 (Mobile & Cross-Platform Ironclad Gates)
+
+针对全平台端到端交付（Desktop macOS/Windows/Linux、Mobile Android/iOS、Web），为杜绝“桌面端正常、移动端瘫痪”与“借跨端之名多头重构”，任何涉及移动端、跨端共享层或样式断点的改动，**必须无条件执行本章规约，并通过一票否决自动化门禁**：
+
+```text
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                               Hermes Flux 移动端全景质量门禁与不变量流水线                                │
+├──────────────────────────┬──────────────────────────┬──────────────────────────┬─────────────────────────┤
+│ 1. 薄壳与共享架构门禁    │ 2. 前台唤醒与心跳看门狗  │ 3. 跨域接管与协议安全    │ 4. 移动视口与 48dp 热区 │
+│ (Thin-Shell Invariant)   │ (Lifecycle & Watchdog)   │ (CapacitorHttp & WSS)    │ (Mobile Geometry & MQ)  │
+│ 壳内零状态逻辑，全量复用 │ 切前台即刻重连，心跳必消费│ 原生接管 fetch，禁手机跑Svr│ 选择器实名对齐，剥离桌三键│
+└──────────────────────────┴──────────────────────────┴──────────────────────────┴─────────────────────────┘
+```
+
+### 1. 移动端技术选型与 Monorepo 拓扑不变量 (Architecture & Monorepo Topology)
+
+1. **框架裁决：统一 Capacitor 8（Web Bundle 复用）**：
+   - 移动端（iOS / Android）正式裁定采用 **Capacitor 8** 容器体系，直接复用 Web 单页应用构建产物（`webDir: "dist"`）；
+   - **彻底废弃历史文档中未经验证的 Expo / React Native 选型**：现有 UI 表现层为纯 DOM 模板体系，采用 React Native 意味着必须推翻重写 7 个核心组件与全部样式，违背“美学即生产力”与“最大能力复用”原则。
+2. **薄壳不变量（Thin Shell Invariant - 一票否决）**：
+   - `packages/desktop` 与 `packages/mobile` 必须严格保持为**轻量壳容器（Thin Shells）**；
+   - **绝对禁止将任何应用级状态机（AppState）、事件总线、RPC 编排路由、持久化存储逻辑直接写在壳工程内**；
+   - 壳工程的代码行数必须收敛在最低限度：仅允许包含原生入口（`main.ts` / `MainActivity.java` / `AppDelegate.swift`）、平台特定能力桥接（Bridge Adapter）与配置文件（`capacitor.config.json` / `electron-builder.json`）。
+3. **单向依赖拓扑**：
+   $$\text{packages/desktop} \mid \text{packages/mobile} \mid \text{packages/web} \longrightarrow \text{packages/ui (或共享应用层)} \longrightarrow \text{packages/core}$$
+   任何反向依赖、或壳工程之间的跨包横向私相调用直接一票否决。
+
+---
+
+### 2. 移动端网络通信、生命周期与心跳看门狗门禁 (Networking & Lifecycle Watchdog)
+
+移动设备受操作系统电源管理机制（Doze 模式、后台冻结）支配，网络连接极易出现“静默半开”与“切后台直接掐死”，必须实现以下三大不变量：
+
+1. **前后台生命周期自愈与即刻唤醒 (Foreground Auto-Wake Invariant)**：
+   - 客户端必须强制注册生命周期与网络监听：`document.addEventListener('visibilitychange', ...)`、`window.addEventListener('online', ...)`；
+   - 当应用从后台切回前台（`document.visibilityState === 'visible'`）或网络从离线转为在线时，**必须无条件重置指数退避计数器（`fsm.resetAttempts()`）并立即发起即时重连**；
+   - 严禁在回到前台时继续等待长达 30 秒的退避冷却定时器，杜绝用户回到界面看到的长时间“假死与未连接”。
+2. **心跳探测看门狗真实消费 (Heartbeat Watchdog Enforcement)**：
+   - `fsm.ts` 中定义的 `heartbeatIntervalMs`（默认 15s）与 `heartbeatTimeoutMs`（默认 5s）**必须在客户端存在真实运行的周期性定时器（`setInterval`）进行消费与探测**；
+   - 严禁“只在配置类声明心跳参数、实际传输层零消费”的虚假门禁；在未收到心跳应答且超时后，看门狗必须主动销毁死连接（`ws.close()`）并推进状态机进入断线自愈。
+3. **候选连接池与梯队降级 (Candidate Address Failover)**：
+   - 客户端连接必须支持候选地址池：`[LAN 直连 IP (如 192.168.x.x:9119) ➔ Relay 中继公网 (wss://relay...) ➔ 离线退避]`；
+   - 严禁在代码中把单一 `this.url` 硬编码写死导致脱离局域网时连接彻底报废。
+
+---
+
+### 3. 移动端跨域、安全与运行时边界不变量 (CORS, Security & Runtime Boundary)
+
+1. **原生网络接管解决 WebView CORS 阻断**：
+   - 移动端原生容器（`capacitor.config.json`）必须配置 `plugins.CapacitorHttp.enabled = true`；
+   - 通过原生网络栈接管全局 `fetch` 与 `XMLHttpRequest`，从物理层杜绝 WebView 跨源发起 REST 请求（如 `/api/status`、`/auth/password-login`）时因 `Origin: https://localhost` 导致的 `Failed to fetch` CORS 拦截；
+   - WebSocket 虽不受浏览器同源策略限制，但移动端通信必须支持 WSS 安全传输，避免触发 Android 9+ 的明文流量安全限制（`usesCleartextTraffic`）。
+2. **移动端纯客户端角色界定（严禁手机自建常驻后台服务）**：
+   - 手机端仅作为**只出不进（Outbound Only）的远程控制终端**，负责连接已有桌面端或远程服务器上的 Hermes Gateway；
+   - **绝对禁止尝试在移动端自建 Python Gateway、本地 HTTP 反代守护进程或常驻后台监听端口**（iOS 30 秒后台即强杀，违反系统沙箱红线且严重消耗手机电量）。
+
+---
+
+### 4. 移动端视口、触控几何与样式断点门禁 (Mobile Viewport & Touch Geometry)
+
+1. **CSS 媒体查询选择器实名一致性（死选择器一票否决）**：
+   - 样式文件（`styles.css` 等）中 `@media (max-width: 768px)` 内部书写的所有类名选择器，**必须 100% 存在于 `packages/ui` 组件实际生成的 DOM 结构中**；
+   - 严禁使用与真实 DOM 不匹配的失效类名（如写 `.left-rail` 冒充 `.flux-left-rail`、写 `.input-dock` 冒充 `.input-dock-container` 或 `.composer-dock`）；自动化门禁探针发现死选择器直接阻断构建。
+2. **触控热区 $\ge 48\times 48\text{dp}$ 硬红线**：
+   - 在移动端或小屏（$\le 768\text{px}$）下，所有可点击控件（按钮、图标、Chip、下拉项）的物理热区**严格不得小于 $48\times 48\text{dp}$（iOS $44\times 44\text{pt}$）**；
+   - 视觉图标偏小（如 20px）时，必须通过透明内边距（`padding`）或外层容器撑开物理点击热区，严禁出现 28px 小按钮在移动端难以触碰。
+3. **桌面端专属窗口控件物理剥离**：
+   - 当处于移动端视口或 `isMobile = true` 时，**必须从 DOM 树中彻底剥离桌面端特有的标题栏窗口控制按钮**（Windows 的最小化/最大化/关闭三键，macOS 的红绿灯交通灯）；
+   - 严禁在手机竖屏顶栏渲染无效的桌面窗口缩放按钮，状态栏与标题栏必须针对移动端做沉浸式排版收敛。
+4. **小屏视口通栏与防挤压不变量**：
+   - 在手机竖屏（如 390px / 412px 视口）下：
+     - 左侧会话轨与右侧检查舱必须默认收缩为 0 或转为全屏抽屉（Sheet）覆盖，严禁在页面排版中以固定 260px 宽度横向挤占主内容区；
+     - 中央对话流（Conversation Stream）在小屏下的有效渲染宽度**不得低于屏幕宽度的 90%**（严禁出现被挤压至 130px 导致的竖排折字惨剧）；
+     - 全文档严禁产生横向滚动条（`document.documentElement.scrollWidth <= window.innerWidth`）。
+5. **全端物理安全区避让（Safe Area Insets）**：
+   - 顶部必须强制加上 `env(safe-area-inset-top)` 避让灵动岛与刘海屏；
+   - 底部必须强制加上 `env(safe-area-inset-bottom)` 避让系统手势条（Home Indicator）。
+
+---
+
+### 5. 移动端同构双桥注入规范 (Isomorphic Double-Bridge Injection Contract)
+
+为了在不侵入、不污染桌面端渲染层（`packages/desktop/src/renderer`）的前提下实现 100% 能力复用，移动端必须遵守以下**同构双桥规范**：
+
+1. **同构双挂载不变量**：
+   - `packages/mobile/src/capacitor-bridge.ts` 编译为 `dist/capacitor-bridge.js`，在 `index.html` 的 `<head>` 中作为最先执行的同步脚本载入；
+   - 桥脚本必须同时向全局挂载两个引用：
+     ```typescript
+     window.hermesMobile = mobileBridge;
+     if (!window.hermesDesktop) {
+       window.hermesDesktop = mobileBridge; // 保证桌面端代码一行不改即可平滑调用！
+     }
+     ```
+   - 接口契约必须 100% 对齐 `HermesDesktopBridge` 全部 16 个方法，不多不少；
+2. **8 大原生插件职责映射表**：
+   - `@capacitor/app`：前后台生命周期监听，切回前台时派发 `hermes-mobile-resume` 触发即刻重连；
+   - `@capacitor/keyboard`：软键盘弹起/收起监听，动态维护 CSS 变量 `--keyboard-height`，输入舱平滑避让；
+   - `@capacitor/browser`：`openExternal` 在 Chrome Custom Tab 或 SFSafariViewController 安全展示网页；
+   - `@capacitor/filesystem` + `@capacitor/share`：文件落地到 Documents 目录后调起系统分享面板导出，杜绝桌面"另存为"假弹窗；
+   - `@capacitor/clipboard`：原生剪贴板接管，附带 DOM textarea 与内存三级降级保底；
+   - `@capacitor/status-bar`：沉浸式系统状态栏避让；
+   - `@capacitor/haptics`：按钮微距轻击震动反馈；
+   - `CapacitorHttp`（内置）：原生网络栈接管 WebView 全局 `fetch`，自动规避 CORS 并维护原生 CookieJar。
+
+---
+
+### 6. 三层递进自动化验证流水线与命令字典 (Three-Tier Automated Verification Pipeline)
+
+任何涉及移动端、Capacitor 插件或跨端桥接的修改，必须依次跑通以下**三层物理闭环验证**，缺一不可：
+
+| 验证层级 | 验证目标与执行方式 | 判定通过红线 |
+|---|---|---|
+| **第一层：无头 CDP 真实网络闭环** | `node packages/mobile/scripts/prepare-assets.mjs`<br>`node --test packages/mobile/__tests__/cdp-mobile-bridge.test.mjs` | 本地拉起真实 Mock Gateway，在 Pixel 8 (390×844) 真实完成 `/auth/password-login` 认证、拿到 ticket、拉取会话、测试剪贴板，14 项断言全绿，**PageErrors 严格为 0** |
+| **第二层：Gradle 真实 APK 编译** | `cd packages/mobile/android && .\gradlew.bat assembleDebug` | 334 个原生编译任务全部成功，8 个插件的 Java/Kotlin 模块零报错，物理产出 `packages/mobile/release/Hermes-Flux-0.1.0-debug.apk` |
+| **第三层：Android 模拟器 ADB 真跑** | `node packages/mobile/__tests__/adb-mobile-runner.mjs` | 本地拉起 AVD 无头模拟器，真实执行 `adb install` 安装 APK，成功启动 Activity，**进程稳定存活（PID > 0）**，Logcat 确认 8 插件与 bridge 被拦截加载，**物理截屏 `mobile-emulator-screen.png` 真实落盘** |
+
+---
+
+## 十七、全量真实网关 RPC 自动化联调与物理验证军规 (Live Gateway RPC Verification Mandate)
+
+为了彻底杜绝“只写前端抽象代码、仅靠单测 Mock 自欺欺人，上线后与真实网关参数畸变脱节”的恶劣隐患，凡涉及 `packages/core` 中与 Hermes Gateway 通信的接口，**必须无条件执行本章规约，并通过真实的自动化集成测试**：
+
+```text
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                               Hermes Flux 真实网关全量 RPC 自动化验证流水线                               │
+├──────────────────────────┬──────────────────────────┬──────────────────────────┬─────────────────────────┤
+│ 1. 真实子进程双向通信    │ 2. 覆盖全量 RPC 接口方法 │ 3. 严格出入参契约断言    │ 4. 真实异常与错误码证伪 │
+│ (Real Stdio Subprocess)  │ (100% RPC Method Coverage│ (Pydantic Schema Parity) │ (Explicit Failure Codes)│
+│ 真实拉起 Python Gateway  │ 严禁仅测 2~3 个偷工减料  │ 严禁传未声明多余输入参数 │ 4000/4001/4008/5032/5063│
+└──────────────────────────┴──────────────────────────┴──────────────────────────┴─────────────────────────┘
+```
+
+### 1. 真实网关子进程运行不变量 (Real Gateway Process Invariant)
+- **严禁纯 Mock 自证**：涉及网络/RPC 客户端（如 `packages/core` 的 `ProfileService`、`ProjectService`、`GroupRoomStore`、`HandoffService`、`SubagentStore`）的联调，**绝对禁止**仅使用手写的 fake mock 对象假装跑通；
+- **真实拉起 Python 实例**：集成测试（如 `packages/core/__tests__/rpc/live-gateway-real.test.mjs`）必须使用 Node.js `child_process.spawn` 真实启动本地 Python Gateway（`tui_gateway/entry.py`），通过 `stdin`/`stdout` JSON-RPC 2.0 管道进行真实物理通信；
+- **全生命周期清理守护**：测试开始等待 `gateway.ready` 广播信号，测试结束后必须在 `t.after()` 中强制杀掉 Python 进程树，释放端口与 SQLite 句柄，杜绝僵尸进程常驻。
+
+### 2. 全量接口覆盖度要求 (Full Method Coverage)
+- 本次抽象引入或修改的每一个公开 RPC 调用方法，**必须 100% 具备对应的真实网关执行测试用例**，严禁只挑 2~3 个方法冒烟：
+  1. **专职 Bot 调度**：`profiles.list`、`profiles.describe`、`profiles.create`、`profiles.configure`、`getOrCreateForeverChat`（含 `Bot Chat` 终身主工位探测与 `hidden=1` 保护）；
+  2. **项目工程管理**：`projects.list`、`projects.create`、`projects.get`、`projects.update`、`projects.set_active`、`projects.add_folder`、`projects.remove_folder`、`projects.tree`、`projects.delete`；
+  3. **多 Agent 群聊房间**：`groups.list`、`groups.create`、`groups.state`、`groups.send`、`groups.log`、`groups.rename`、`groups.disband`；
+  4. **代码时光机 (Rollback)**：`rollback.list`、`rollback.diff`、`rollback.restore`；
+  5. **子代理委派控制**：`subagent.list`、`subagent.steer`、`subagent.interrupt`、`subagent.tail`；
+  6. **会话接力移交**：`session.create`、`session.branch_whole`。
+
+### 3. Pydantic 契约严格对齐（防范 Extra inputs are not permitted）
+- 网关采用严格的 Pydantic 模型解析，任何未声明的冗余字段均会触发 `code 4000: Extra inputs are not permitted`：
+  - `projects.create` 必须传 `folders: list[str]` 与 `primary_path: str`（客户端服务层负责将通用 `path` 适配，且动态生成隔离目录防范 `code 5063` 冲突）；
+  - `projects.get / update / delete / add_folder / remove_folder` 必须统一使用 `id: str` 传参；
+  - `session.branch_whole` 必须对齐官方 `{ session_id, name }` 签名；
+  - `groups.list` 必须兼容网关原生 `{ rooms: [...] }` 响应结构。
+
+### 4. 真实异常与错误码证伪能力（Failure Is Not Empty）
+- 测试用例必须针对真实网关的业务守卫错误码进行确定性排他断言，证明网关逻辑真实生效：
+  - `4000`：参数格式或多余输入非法拦截；
+  - `4001`：会话未找到或非当前通道持有（未激活）；
+  - `4008`：空白会话执行 `session.branch_whole` 时网关坚决拦截（`nothing to branch — send a message first`）；
+  - `4123`：后台群聊执行器未拉起时抛出的 `Group Chat worker is unavailable`；
+  - `5032`：未配置 AI Provider 时网关守护拦截（`Hermes is not connected to any AI provider yet`）；
+  - `5063`：创建项目时路径与已有项目冲突时拦截（`folder already belongs to project`）。
+
+---
+
+## 十八、真实无头浏览器 CDP 物理交互与几何验证军规 (Headless Browser CDP Verification Mandate)
+
+凡新增可复用的 UI 表现层组件（如卡片、输入舱、独立对话框、弹窗浮层），在单测之外**必须通过真实无头浏览器（Edge / Chrome）的 CDP 端到端物理交互验证**：
+
+### 1. 真实物理渲染与事件触发 (Real Physical DOM & CDP Engine)
+- 测试容器（如 `packages/desktop/__tests__/cdp/advanced-systems-harness.html`）必须真实载入 Monorepo 打包产物，严禁在 HTML 内部硬编码 fake 函数；
+- 必须通过 CDP 协议指令驱动真实的物理 `click()`、输入框内容赋值与事件分发，直接在 Blink 引擎真实合成树上度量状态转移与 DOM 增删。
+
+### 2. 移动端视口与触控热区硬红线 (Touch Heatmaps & Mobile Viewport)
+- **触控热区 $\ge 44\text{pt}/48\text{dp}$ 物理度量**：所有按钮、输入框、关闭控件的计算样式高度必须断言 `offsetHeight >= 44`，移动端专属关闭按钮断言双向 `offsetWidth >= 44 && offsetHeight >= 44`；
+- **移动端视口仿真**：必须通过 CDP `Emulation.setDeviceMetricsOverride` 模拟 Pixel 8（390×844，DPR=3），断言视口无横向溢出滚动（`document.documentElement.scrollWidth <= window.innerWidth`）；
+- **安全区内边距物理读取**：读取包含 `env(safe-area-inset-bottom)` 的底部输入舱计算样式，断言 `computedPaddingBottom >= 12px`，证明有效避让系统手势条；
+- **遮罩物理关闭分支全覆盖**：模态弹窗必须同时测试：① 点击半透明背景遮罩（Overlay）物理销毁；② 点击“取消”按钮物理销毁；③ 点击“确认”按钮提交并销毁。
+
+### 3. 运行隔离与资源无泄漏
+- **动态空闲端口分配**：静态测试 HTTP 服务必须绑定到 `server.listen(0, '127.0.0.1')`，由内核随机分配端口，杜绝硬编码固定端口引发的 `EADDRINUSE` 冲突；
+- **跨平台临时目录**：浏览器 `user-data-dir` 必须通过标准 `os.tmpdir()` 动态创建，严禁硬编码包含个人工号或特定机器的绝对路径；
+- **优雅退出与文件锁解耦**：测试退出钩子必须先发送 CDP `Browser.close` 协议指令让浏览器主进程安全退出并释放 Windows 文件锁，随后关闭 WebSocket 并清理临时目录，严禁静默吞掉 `EBUSY / EPERM` 异常。
+
+### 4. 强制交付命令闭环
+每次修改后，交付给维护者或汇报前，必须在本地依次跑通：
+```bash
+npm run verify           # 静态门禁 (gates) + 类型推导 (typecheck) + 全量单测 (test)
+npm run test:live-gateway# 针对真实 Python Gateway 进程的 22 个 RPC 接口自动化集成联调测试
+npm run test:cdp         # 针对真实无头 Edge/Chrome 浏览器的 CDP 物理渲染与交互测试
+```
+三个命令全部 100% 绿灯通过，方可视为具备交付依据。
+
+
+
 
 

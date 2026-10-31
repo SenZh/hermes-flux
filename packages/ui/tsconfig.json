@@ -13,7 +13,7 @@
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
     "paths": {
-      "@hermes-flux/core": ["../core/src/index.ts"]
+      "@hermes-flux/core": ["../core/dist/index.d.ts"]
     }
   },
   "include": ["src/**/*"]

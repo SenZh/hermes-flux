@@ -106,6 +106,52 @@ export const zhDict = {
   // Common Feedback
   'common.copy': '复制',
   'common.copied': '已复制',
+
+  // Subagent Delegation & Live Terminal
+  'subagent.cardTitle': '子代理委派任务',
+  'subagent.statusRunning': '运行中',
+  'subagent.statusThinking': '推理中',
+  'subagent.statusCompleted': '已完成',
+  'subagent.statusInterrupted': '已终止',
+  'subagent.statusFailed': '失败',
+  'subagent.viewStream': '⚡ 穿透查看执行流',
+  'subagent.interrupt': '⏹ 中止',
+  'subagent.steerPlaceholder': '输入实时干预指令 (Enter 发送)...',
+  'subagent.steerSend': '干预',
+  'subagent.emptyLogs': '正在等待子代理执行流推流...',
+  'subagent.tabTitle': '⚡ 子代理穿透终端',
+  'subagent.closeSheet': '关闭',
+  'subagent.logCount': '{count} 行',
+
+  // Bot Management & Forever Chat
+  'bot.foreverChat': '终身专属工位',
+  'bot.enterWorkspace': '进入主工位',
+  'bot.toolsCount': '{count} 个专属工具',
+  'bot.memoryLocked': '长效记忆物理隔离中',
+
+  // Multi-Agent Group & Promotion
+  'group.roomTitle': '多 Agent 协同研讨室',
+  'group.members': '{count} 位专家研讨',
+  'group.seedMemoTitle': '会议种子背景备忘录',
+  'group.promoteBtn': '👥 升级为研讨群聊',
+  'group.dialogTitle': '发起多智能体研讨会议',
+  'group.dialogTopic': '研讨议题',
+  'group.dialogSelectMembers': '选择参会专家 (至少 2 位)',
+  'group.dialogConfirm': '立即发起会议',
+  'group.dialogCancel': '取消',
+  'group.emptyFeed': '研讨会议室已就绪，等待发言...',
+  'group.placeholder': '向群聊会议室发言... (Enter 发送)',
+  'group.send': '发言',
+
+  // Project & Workspace Tree
+  'project.treeTitle': '工作区文件目录树',
+  'project.emptyTree': '暂无目录树数据',
+  'project.primaryFolder': '主工作区根目录',
+
+  // BTW Isolated Capsule
+  'btw.capsuleTitle': '外援咨询胶囊',
+  'btw.isolatedNotice': '只读外援 · 零上下文污染',
+  'btw.copyAnswer': '引用至输入框',
 } as const;
 
 export type I18nKey = keyof typeof zhDict;
@@ -206,6 +252,52 @@ export const enDict: Record<I18nKey, string> = {
 
   'common.copy': 'Copy',
   'common.copied': 'Copied',
+
+  // Subagent Delegation & Live Terminal
+  'subagent.cardTitle': 'Subagent Task',
+  'subagent.statusRunning': 'Running',
+  'subagent.statusThinking': 'Thinking',
+  'subagent.statusCompleted': 'Completed',
+  'subagent.statusInterrupted': 'Interrupted',
+  'subagent.statusFailed': 'Failed',
+  'subagent.viewStream': '⚡ Inspect Live Stream',
+  'subagent.interrupt': '⏹ Interrupt',
+  'subagent.steerPlaceholder': 'Type steering instruction (Enter to send)...',
+  'subagent.steerSend': 'Steer',
+  'subagent.emptyLogs': 'Waiting for subagent execution stream...',
+  'subagent.tabTitle': '⚡ Subagent Live Terminal',
+  'subagent.closeSheet': 'Close',
+  'subagent.logCount': '{count} lines',
+
+  // Bot Management & Forever Chat
+  'bot.foreverChat': 'Forever Chat',
+  'bot.enterWorkspace': 'Enter Workplace',
+  'bot.toolsCount': '{count} tools',
+  'bot.memoryLocked': 'Long-term Memory Isolated',
+
+  // Multi-Agent Group & Promotion
+  'group.roomTitle': 'Multi-Agent Room',
+  'group.members': '{count} specialists',
+  'group.seedMemoTitle': 'Seed Briefing Memo',
+  'group.promoteBtn': '👥 Promote to Group',
+  'group.dialogTitle': 'Initiate Swarm Meeting',
+  'group.dialogTopic': 'Meeting Topic',
+  'group.dialogSelectMembers': 'Select Specialists (min 2)',
+  'group.dialogConfirm': 'Start Meeting',
+  'group.dialogCancel': 'Cancel',
+  'group.emptyFeed': 'Group room ready, waiting for discussion...',
+  'group.placeholder': 'Speak in meeting room... (Enter to send)',
+  'group.send': 'Send',
+
+  // Project & Workspace Tree
+  'project.treeTitle': 'Workspace File Tree',
+  'project.emptyTree': 'No file tree data',
+  'project.primaryFolder': 'Primary Root Folder',
+
+  // BTW Isolated Capsule
+  'btw.capsuleTitle': 'Specialist Advice',
+  'btw.isolatedNotice': 'Read-only · Zero Context Pollution',
+  'btw.copyAnswer': 'Quote to Input',
 };
 
 export type Locale = 'zh-CN' | 'en-US';

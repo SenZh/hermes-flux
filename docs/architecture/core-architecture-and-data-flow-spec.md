@@ -229,15 +229,18 @@ export function useDurationTicker(freq: TickerFrequency = 'pulse'): number {
 
 ---
 
-### 2.5 `packages/mobile`：Capacitor vs Expo 选型与 C++ 零内存流式继承
+### 2.5 `packages/mobile`：Capacitor 8 选型与 Web 产物最大化复用架构
 
-#### 1. 框架选型深度权衡与决议
+#### 1. 框架选型最终裁决与深度权衡
 
-| 维度 | Capacitor 方案 | Expo SDK 52+ (React Native) 方案 | 架构裁决与理由 |
+根据对 12,000+ Stars 标杆工程（OpenChamber）的源码级实测取证与本仓库 DOM 模板技术现状，移动端正式裁定采用 **Capacitor 8** 容器体系，彻底废弃已证伪的 Expo / React Native 方案：
+
+| 维度 | Capacitor 8 方案（最终裁决选定） | Expo SDK 52+ (React Native) 方案 | 架构裁决与终审理由 |
 |---|---|---|---|
-| **渲染层本质** | 系统原生 WebKit (WKWebView / WebView) | 原生控件树映射 (Fabric 原生组件) 或混合宿主 | **选定 Expo SDK 52+** 作为核心移动基础架构。 |
-| **滚动与键盘动效** | iOS WebKit 在键盘升起时有严重的滚动重绘死锁与惯性滑动丢帧风险。 | 原生 iOS/Android 键盘联动与滚动视图由底层驱动，物理跟手性与 120Hz 刷新率无懈可击。 | 移动端极致美学要求触控必须具备物理级阻尼与弹性，原生驱动不可替代。 |
-| **成熟资产复用** | 无法直接复用已验证的原生 Java/Kotlin 插件。 | **可 100% 继承并无缝衔接 `hermes-android` 已验证的所有原生插件与工程纪律**。 | 规避二次踩坑，直接复用既有模块。 |
+| **工程代码复用率** | **$\ge 85\%$**（直接复用 Web 单页应用的 HTML/CSS/JS 静态产物，`prepare-web-assets` 零逻辑分叉） | $\le 15\%$（仅能复用 Core 协议，UI 层 7 大组件必须推翻重写为 RN 控件树） | **选定 Capacitor 8**：Monorepo 最高元原则是“美学即生产力”与“零重复造轮子”，坚决避免维护两套割裂的 UI 体系。 |
+| **滚动与键盘治理** | 通过 `Keyboard.resize: "none"`、动态 Safe Area 避让与自研 `OpenChamberWebView` 解决键盘联动，物理阻尼由 CSS 视口平移吸收。 | 原生 iOS/Android 键盘联动由底层驱动。 | Capacitor 方案在工程成熟度与主流 AI 客户端（OpenChamber 生产级验证）中已完全闭环，键盘死锁已有现成防御解法。 |
+| **通信与 CORS 处理** | 启用 `CapacitorHttp.enabled = true` 原生接管全局 `fetch`，彻底规避 WebView 跨域拦截；WebSocket 原生支持 WSS 直通。 | 需通过 fetch 原生 Pollyfill 与独立 WebSocket 模块驱动。 | Capacitor 官方原生 HTTP 插件可一键解决跨源 REST 调用，与桌面主进程 IPC 代理能力完全对等。 |
+| **原生能力边界** | 作为轻量容器，手机 App 严格定位为“远程客户端”，通过插件调用原生相册、触觉微振、通知与钥匙串，严禁手机自建常驻后台服务。 | 原生插件开发门槛高，Native Bridge 维护成本重。 | 规避过度工程化，聚焦最快可交付且能与 Web/桌面 100% 体验对齐的薄壳形态。 |
 
 #### 2. 深度继承：底层 C++ / 原生零内存流式下载与分享架构
 在移动端处理大文件、代码仓库归档（ZIP）或大附件时，若将二进制流先读取到 JS 堆（如 `base64` 编码字符串），iOS/Android 会发生瞬时 $2\sim4\times$ 内存膨胀，瞬间触发系统级 `OOM (OutOfMemory)` 强杀。

@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Hermes Flux Desktop v5.0 —— 三舱与全端一致性架构原型</title>
+<style>
+:root {
+  --bg-canvas: #080A0E;
+  --bg-rail: #0D1017;
+  --bg-card: #121620;
+  --bg-surface: #171C28;
+  --bg-terminal: #040507;
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --border-focus: rgba(16, 185, 129, 0.45);
+  --text-main: #F3F4F6;
+  --text-muted: #9CA3AF;
+  --text-dim: #525A6B;
+  --accent-jade: #10B981;
+  --accent-amber: #F59E0B;
+  --accent-indigo: #6366F1;
+  --accent-pink: #EC4899;
+  --accent-cyan: #06B6D4;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "PingFang SC", sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg-canvas);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 1. 顶栏 (Titlebar 42px) */
+.desktop-titlebar {
+  height: 42px;
+  background: #090B10;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  user-select: none;
+  flex-shrink: 0;
+}
+.traffic-lights {
+  display: flex;
+  gap: 8px;
+}
+.traffic-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+.dot-red { background: #EF4444; }
+.dot-yellow { background: #F59E0B; }
+.dot-green { background: #10B981; }
+
+.title-center {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.status-pill {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-jade);
+  box-shadow: 0 0 6px rgba(16,185,129,0.8);
+}
+
+/* 2. 工作台核心主干 (三舱结构) */
+.workbench-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* 2.1 左舱：升级为三段式收纳 (LeftRail: 260px) */
+.left-rail {
+  width: 260px;
+  background: var(--bg-rail);
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+}
+.rail-actions {
+  padding: 12px 14px;
+  display: flex;
+  gap: 8px;
+}
+.btn-new-chat {
+  flex: 1;
+  height: 34px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  color: var(--text-main);
+  font-size: 12.5px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-new-chat:hover {
+  border-color: var(--accent-jade);
+  background: var(--bg-surface);
+}
+
+.rail-scroll-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 8px 16px 8px;
+}
+
+/* 手风琴分组标题 */
+.group-header {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 12px 8px 4px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* 列表行通用 */
+.rail-row {
+  padding: 8px 10px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  margin-bottom: 2px;
+  transition: background 0.12s;
+  font-size: 13px;
+}
+.rail-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.rail-row.active {
+  background: rgba(16, 185, 129, 0.1);
+  color: var(--accent-jade);
+}
+.rail-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.rail-title {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+/* 2.2 中舱：通栏流式对话 (MiddlePod) */
+.middle-pod {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: var(--bg-canvas);
+}
+.middle-header {
+  height: 48px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.chat-stream-viewport {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 32px 140px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 860px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.m-row {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+.m-row.user {
+  flex-direction: row-reverse;
+}
+.m-av {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: #FFF;
+  flex-shrink: 0;
+}
+.m-bubble {
+  max-width: 80%;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.m-row.user .m-bubble {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+/* 740px 黄金居中悬浮输入舱 */
+.dock-floating-container {
+  position: absolute;
+  bottom: 20px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  padding: 0 24px;
+  pointer-events: none;
+}
+.composer-dock-card {
+  width: 100%;
+  max-width: 740px;
+  background: rgba(16, 20, 29, 0.94);
+  backdrop-filter: blur(24px);
+  border: 1px solid var(--border-subtle);
+  border-radius: 16px;
+  padding: 10px 14px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+  pointer-events: auto;
+}
+.dock-text-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-main);
+  font-size: 14px;
+  font-family: var(--font-sans);
+  resize: none;
+  min-height: 40px;
+}
+
+/* 2.3 右舱：多模态工具舱 (InspectionPod: 380px) */
+.inspection-pod {
+  width: 380px;
+  background: #0B0E15;
+  border-left: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+}
+.pod-tabs-header {
+  height: 48px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pod-tab {
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.pod-tab.active {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-main);
+  border-color: var(--border-subtle);
+}
+.pod-content-area {
+  flex: 1;
+  overflow-y: auto;
+}
+
+/* 3. 极简翡翠状态栏 (StatusBar 22px) */
+.desktop-statusbar {
+  height: 22px;
+  background: #07090C;
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  user-select: none;
+  flex-shrink: 0;
+}
+</style>
+</head>
+<body>
+
+  <!-- 1. 顶栏 42px -->
+  <header class="desktop-titlebar">
+    <div class="traffic-lights">
+      <div class="traffic-dot dot-red"></div>
+      <div class="traffic-dot dot-yellow"></div>
+      <div class="traffic-dot dot-green"></div>
+    </div>
+
+    <div class="title-center">
+      <div class="status-pill"></div>
+      <span>Hermes Flux · 架构师 · 老王 (Claude 3.7)</span>
+    </div>
+
+    <div style="font-size:12px; color:var(--text-dim);">UTF-8 · branch: main</div>
+  </header>
+
+  <!-- 2. 工作台主干 -->
+  <div class="workbench-body">
+    
+    <!-- 左舱：三段式结构 (Pinned / Projects / Sessions) -->
+    <aside class="left-rail">
+      <div class="rail-actions">
+        <button class="btn-new-chat">+ 新建会话</button>
+        <button class="btn-new-chat" style="flex:0 0 34px;">👥</button>
+      </div>
+
+      <div class="rail-scroll-list">
+        
+        <!-- 段落 1: 置顶专区 (全端同步 Pinned) -->
+        <div class="group-header">
+          <span>📌 全端置顶 (Pinned)</span>
+          <span style="font-size:10px;">2</span>
+        </div>
+        <div class="rail-row" onclick="switchDesktopChat('HQ')">
+          <div class="rail-icon" style="background:rgba(16,185,129,0.15); color:var(--accent-jade);">✦</div>
+          <div class="rail-title">个人主助理 (HQ)</div>
+        </div>
+        <div class="rail-row" onclick="switchDesktopChat('OAuth 群聊')">
+          <div class="rail-icon" style="background:rgba(245,158,11,0.15); color:var(--accent-amber);">👥</div>
+          <div class="rail-title">OAuth 方案联合评审</div>
+        </div>
+
+        <!-- 段落 2: 项目基地 (Projects) -->
+        <div class="group-header" style="margin-top:8px;">
+          <span>📁 项目基地 (Projects)</span>
+        </div>
+        <div class="rail-row active" onclick="switchDesktopChat('hermes-flux')">
+          <div class="rail-icon" style="background:rgba(255,255,255,0.06); color:var(--accent-amber);">📁</div>
+          <div class="rail-title">hermes-flux</div>
+          <span style="font-size:10px; color:var(--accent-amber);">1 跑</span>
+        </div>
+        <!-- 项目名下的专属派生会话 -->
+        <div class="rail-row" style="padding-left:36px; font-size:12px; color:var(--text-muted);" onclick="switchDesktopChat('TASK-104')">
+          <span>⚡</span>
+          <span class="rail-title">TASK-104: OAuth 回调</span>
+        </div>
+        <div class="rail-row" style="padding-left:36px; font-size:12px; color:var(--text-muted);" onclick="switchDesktopChat('锁排查')">
+          <span>⑂</span>
+          <span class="rail-title">锁冲突排查</span>
+        </div>
+
+        <div class="rail-row">
+          <div class="rail-icon" style="background:rgba(255,255,255,0.06); color:var(--text-dim);">📁</div>
+          <div class="rail-title">mp-langchao</div>
+        </div>
+
+        <!-- 段落 3: 独立专职数字员工 -->
+        <div class="group-header" style="margin-top:8px;">
+          <span>🤖 专职数字员工</span>
+        </div>
+        <div class="rail-row" onclick="switchDesktopChat('老王')">
+          <div class="rail-icon" style="background:var(--accent-indigo);">🤖</div>
+          <div class="rail-title">架构师 · 老王</div>
+        </div>
+        <div class="rail-row" onclick="switchDesktopChat('小张')">
+          <div class="rail-icon" style="background:var(--accent-pink);">🎨</div>
+          <div class="rail-title">前端开发 · 小张</div>
+        </div>
+        <div class="rail-row" onclick="switchDesktopChat('审查员')">
+          <div class="rail-icon" style="background:var(--accent-cyan);">🛡️</div>
+          <div class="rail-title">代码审查员</div>
+        </div>
+
+      </div>
+    </aside>
+
+    <!-- 中舱：通栏流式对话 + 740px 输入舱 -->
+    <main class="middle-pod">
+      <header class="middle-header">
+        <span style="font-size:14px; font-weight:700;" id="cur-chat-name">hermes-flux ➔ TASK-104: OAuth 回调重构</span>
+        <button style="background:none; border:none; color:var(--text-muted); cursor:pointer;">⚙️ 偏好</button>
+      </header>
+
+      <div class="chat-stream-viewport">
+        
+        <div class="m-row user">
+          <div class="m-av" style="background:#374151;">ME</div>
+          <div class="m-bubble">老王，去 hermes-flux 项目把 OAuth 监听重构一下，在 Worktree 跑。</div>
+        </div>
+
+        <div class="m-row bot">
+          <div class="m-av" style="background:var(--accent-indigo);">🤖</div>
+          <div class="m-bubble">
+            已在 <code>wt-104</code> 独立分支执行单测与实现。<br>
+            右侧工具舱已实时穿透挂载当前 Worker (PID: 4801) 的运行流水。
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 740px 悬浮输入舱 -->
+      <div class="dock-floating-container">
+        <div class="composer-dock-card">
+          <textarea class="dock-text-input" placeholder="输入消息... @ 叫人 /task 派活"></textarea>
+        </div>
+      </div>
+    </main>
+
+    <!-- 右舱：多模态工具舱 380px -->
+    <aside class="inspection-pod">
+      <div class="pod-tabs-header">
+        <div class="pod-tab active" id="tab-term" onclick="switchPodMode('term')">⚡ 穿透终端 (LIVE)</div>
+        <div class="pod-tab" id="tab-kanban" onclick="switchPodMode('kanban')">📋 看板 (3)</div>
+        <div class="pod-tab" id="tab-diff" onclick="switchPodMode('diff')">🔍 Diff 审查</div>
+      </div>
+
+      <div class="pod-content-area" id="pod-content">
+        <!-- 终端实时输出 -->
+        <div style="background:#040507; padding:16px; font-family:var(--font-mono); font-size:11.5px; line-height:1.6; color:#94A3B8; min-height:100%;">
+          <div style="color:#64748B;">[14:31:02] Worktree ready: /projects/hermes-flux/.worktrees/wt-104</div>
+          <div style="color:#64748B;">[14:31:04] $ vitest run auth.test.mjs</div>
+          <div style="color:var(--accent-jade);">PASS packages/core/__tests__/auth.test.mjs</div>
+          <div style="color:var(--accent-jade);">✓ 8 tests passed (12ms)</div>
+          <div style="color:#64748B;">[14:31:07] $ tsc --noEmit</div>
+          <div style="color:var(--accent-jade);">✔ TypeScript 0 errors</div>
+          <div style="color:var(--accent-amber); margin-top:8px;">测试全绿！已满足 Gate 0~5 交付准入要求。</div>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- 3. 极简翡翠状态栏 22px -->
+  <footer class="desktop-statusbar">
+    <div style="display:flex; align-items:center; gap:8px;">
+      <span style="color:var(--accent-jade);">●</span>
+      <span>Gateway Connected: 127.0.0.1:9119</span>
+    </div>
+    <div>v5.0 Tri-Rail · Pinned Synced</div>
+  </footer>
+
+  <script>
+    function switchDesktopChat(name) {
+      document.getElementById('cur-chat-name').textContent = name;
+    }
+
+    function switchPodMode(mode) {
+      document.getElementById('tab-term').classList.toggle('active', mode === 'term');
+      document.getElementById('tab-kanban').classList.toggle('active', mode === 'kanban');
+      document.getElementById('tab-diff').classList.toggle('active', mode === 'diff');
+
+      const content = document.getElementById('pod-content');
+      if (mode === 'kanban') {
+        content.innerHTML = `
+          <div style="padding:16px;">
+            <div style="font-size:11.5px; font-weight:700; color:var(--text-dim); margin-bottom:8px;">进行中 (1)</div>
+            <div style="background:var(--bg-card); border-left:3px solid var(--accent-amber); padding:10px 12px; border-radius:6px; font-size:13px; margin-bottom:12px;">
+              TASK-104: OAuth 回调重构 (老王)
+            </div>
+            <div style="font-size:11.5px; font-weight:700; color:var(--text-dim); margin-bottom:8px;">待办 (2)</div>
+            <div style="background:var(--bg-card); padding:10px 12px; border-radius:6px; font-size:13px; margin-bottom:6px;">
+              [UI] 状态栏翡翠呼吸灯 (小张)
+            </div>
+          </div>
+        `;
+      } else if (mode === 'term') {
+        content.innerHTML = `
+          <div style="background:#040507; padding:16px; font-family:var(--font-mono); font-size:11.5px; line-height:1.6; color:#94A3B8; min-height:100%;">
+            <div style="color:var(--accent-jade);">✓ 8 tests passed (12ms)</div>
+            <div style="color:var(--accent-jade);">✔ TypeScript 0 errors</div>
+          </div>
+        `;
+      } else {
+        content.innerHTML = `
+          <div style="padding:16px; font-family:var(--font-mono); font-size:12px;">
+            <div style="color:var(--accent-jade);">+ packages/core/src/auth/listener.ts (47 lines)</div>
+            <div style="color:#EF4444;">- packages/core/src/auth/legacy.ts (21 lines)</div>
+          </div>
+        `;
+      }
+    }
+  </script>
+</body>
+</html>

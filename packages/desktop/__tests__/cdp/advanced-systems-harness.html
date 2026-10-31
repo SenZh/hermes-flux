@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="obsidian-gold">
+<head>
+  <meta charset="UTF-8">
+  <title>Hermes Flux Advanced Systems CDP Test Harness</title>
+  <style>
+    :root {
+      --bg-window: #090A0F;
+      --bg-rail: #0E1015;
+      --bg-panel: #111318;
+      --bg-card: #151720;
+      --bg-card-hover: #1B1E29;
+      --bg-card-active: #222634;
+      --bg-elevated: #1F2230;
+      --bg-input: #12141A;
+      --bg-code: #0A0B10;
+      --bg-backdrop: rgba(18, 20, 27, 0.88);
+      --accent: #F59E0B;
+      --accent-hover: #FBBF24;
+      --accent-dim: #D97706;
+      --accent-glow: rgba(245, 158, 11, 0.25);
+      --accent-subtle: rgba(245, 158, 11, 0.09);
+      --accent-border: rgba(245, 158, 11, 0.35);
+      --accent-text: #FEF3C7;
+      --text-main: #F8FAFC;
+      --text-secondary: #94A3B8;
+      --text-muted: #64748B;
+      --text-faint: #334155;
+      --border-subtle: rgba(255, 255, 255, 0.06);
+      --border-medium: rgba(255, 255, 255, 0.09);
+      --border-strong: rgba(255, 255, 255, 0.16);
+      --specular-line: inset 0 1px 0 0 rgba(255, 255, 255, 0.10);
+      --shadow-window: 0 24px 70px -12px rgba(0, 0, 0, 0.85);
+      --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.45);
+      --shadow-dock: 0 20px 48px -10px rgba(0, 0, 0, 0.75);
+      --jade-pulse: #10B981;
+      --jade-glow: rgba(16, 185, 129, 0.45);
+      --font-sans: system-ui, -apple-system, sans-serif;
+      --font-mono: "JetBrains Mono", monospace;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
+      background: var(--bg-window);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .section-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--accent);
+      border-bottom: 1px solid var(--border-subtle);
+      padding-bottom: 6px;
+    }
+    .test-box {
+      border: 1px dashed var(--border-medium);
+      padding: 12px;
+      border-radius: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="section-title">1. Subagent Delegation Card & Terminal View</div>
+    <div id="subagent-card-slot" class="test-box"></div>
+    <div id="subagent-terminal-slot" class="test-box" style="height: 320px;"></div>
+    <div id="subagent-mobile-sheet-slot" class="test-box" style="display: none; height: 360px;"></div>
+
+    <div class="section-title">2. Bot Profile & Forever Chat Card</div>
+    <div id="bot-card-slot" class="test-box"></div>
+
+    <div class="section-title">3. Multi-Agent Group Room View</div>
+    <div id="group-room-slot" class="test-box" style="height: 340px;"></div>
+
+    <div class="section-title">4. Project Workspace Tree Viewer</div>
+    <div id="project-tree-slot" class="test-box" style="height: 260px;"></div>
+
+    <div class="section-title">5. BTW Isolated Capsule</div>
+    <div id="btw-capsule-slot" class="test-box"></div>
+
+    <!-- Group Promotion Dialog Slot (Modal Overlay) -->
+    <div id="group-dialog-slot"></div>
+  </div>
+
+  <script type="module">
+    import {
+      renderWorkerDelegationCard,
+      renderSubagentTerminalView,
+      renderBotProfileCard,
+      renderGroupRoomView,
+      renderGroupPromotionDialog,
+      renderProjectTreeViewer,
+      renderBtwCapsule,
+      setLocale
+    } from '/packages/ui/dist/index.js';
+
+    import {
+      SubagentStore,
+      ProfileService,
+      GroupRoomStore,
+      ProjectService,
+      HandoffService,
+      resolveMentionRoute
+    } from '/packages/core/dist/index.js';
+
+    setLocale('zh-CN');
+
+    // Mount Mock Core Services in Window for CDP probe
+    window.subagentStore = new SubagentStore(100);
+    window.profileService = new ProfileService();
+    window.groupRoomStore = new GroupRoomStore();
+    window.projectService = new ProjectService();
+    window.handoffService = new HandoffService();
+    window.resolveMentionRoute = resolveMentionRoute;
+
+    // Test Harness State
+    window.cdpState = {
+      subagentTask: {
+        subagentId: 'sub-cdp-007',
+        parentSessionId: 'sess-parent-cdp',
+        targetProfile: 'arch-wang',
+        taskTitle: 'CDP实时死锁分析任务',
+        status: 'running',
+        progressPercent: 75,
+        currentActionText: '正在执行AST死锁路径排查',
+        startedAt: Date.now() - 5000,
+        updatedAt: Date.now()
+      },
+      subagentLogs: [
+        { seq: 1, timestamp: Date.now() - 4000, kind: 'thought', text: '提取 AST 调用链路...' },
+        { seq: 2, timestamp: Date.now() - 3000, kind: 'tool_call', text: 'exec("cargo test --deadlock")' },
+        { seq: 3, timestamp: Date.now() - 2000, kind: 'tool_result', text: '0 deadlocks detected.' },
+        { seq: 4, timestamp: Date.now() - 1000, kind: 'stdout', text: 'Verification finished.' }
+      ],
+      botProfile: {
+        name: 'arch-wang',
+        displayName: '架构老王',
+        description: '系统核心架构师，掌管分层与高并发不变量',
+        tools: ['bash', 'read_file', 'edit_file']
+      },
+      foreverChatId: 'sess-bot-forever-chat',
+      groupRoom: {
+        roomId: 'grp-cdp-room-1',
+        name: '系统死锁攻坚会议室',
+        members: ['arch-wang', 'fe-zhang', 'sec-auditor'],
+        createdAt: Date.now() - 10000,
+        updatedAt: Date.now()
+      },
+      groupEntries: [
+        { messageId: 'seed-1', seq: 1, senderProfile: 'system', timestamp: Date.now() - 8000, text: '会议种子背景摘要：针对死锁问题召集研讨。', isSeed: true },
+        { messageId: 'm-2', seq: 2, senderProfile: 'arch-wang', timestamp: Date.now() - 5000, text: '我已验证读写锁时序，问题在重入死锁。' }
+      ],
+      projectTree: [
+        {
+          name: 'packages',
+          path: '/packages',
+          isDirectory: true,
+          children: [
+            { name: 'core', path: '/packages/core', isDirectory: true, children: [] },
+            { name: 'ui', path: '/packages/ui', isDirectory: true, children: [] },
+            { name: 'desktop', path: '/packages/desktop', isDirectory: true, children: [] }
+          ]
+        },
+        { name: 'package.json', path: '/package.json', isDirectory: false, size: 2480 }
+      ],
+      btwData: {
+        targetProfile: 'arch-wang',
+        response: '建议在写锁获取前增加超时断路器，防止线程池饥饿。',
+        tokenCount: 36
+      },
+      lastEvents: []
+    };
+
+    // Render Function
+    window.renderAll = function() {
+      // 1. Subagent Card & Terminal
+      document.getElementById('subagent-card-slot').innerHTML =
+        renderWorkerDelegationCard(window.cdpState.subagentTask);
+      document.getElementById('subagent-terminal-slot').innerHTML =
+        renderSubagentTerminalView({
+          task: window.cdpState.subagentTask,
+          logs: window.cdpState.subagentLogs,
+          isMobileSheet: false
+        });
+      document.getElementById('subagent-mobile-sheet-slot').innerHTML =
+        renderSubagentTerminalView({
+          task: window.cdpState.subagentTask,
+          logs: window.cdpState.subagentLogs,
+          isMobileSheet: true
+        });
+
+      // 2. Bot Profile Card
+      document.getElementById('bot-card-slot').innerHTML =
+        renderBotProfileCard({
+          profile: window.cdpState.botProfile,
+          foreverChatSessionId: window.cdpState.foreverChatId
+        });
+
+      // 3. Group Room
+      document.getElementById('group-room-slot').innerHTML =
+        renderGroupRoomView({
+          room: window.cdpState.groupRoom,
+          entries: window.cdpState.groupEntries
+        });
+
+      // 4. Project Tree
+      document.getElementById('project-tree-slot').innerHTML =
+        renderProjectTreeViewer({
+          tree: window.cdpState.projectTree,
+          primaryPath: '/opt/hermes-flux'
+        });
+
+      // 5. BTW Capsule
+      document.getElementById('btw-capsule-slot').innerHTML =
+        renderBtwCapsule(window.cdpState.btwData);
+
+      bindInteractions();
+    };
+
+    function bindInteractions() {
+      // Subagent Interrupt Button
+      const btnInterrupt = document.querySelector('.subagent-btn-interrupt');
+      if (btnInterrupt) {
+        btnInterrupt.onclick = () => {
+          window.cdpState.subagentTask.status = 'interrupted';
+          window.cdpState.lastEvents.push('subagent_interrupted');
+          window.renderAll();
+        };
+      }
+
+      // Subagent Inspect Stream Button
+      const btnInspect = document.querySelector('.subagent-btn-inspect');
+      if (btnInspect) {
+        btnInspect.onclick = () => {
+          window.cdpState.lastEvents.push('subagent_inspected');
+        };
+      }
+
+      // Subagent Steer Send Button
+      const btnSteer = document.querySelector('.subagent-btn-steer');
+      const inputSteer = document.querySelector('.subagent-steer-input');
+      if (btnSteer && inputSteer) {
+        btnSteer.onclick = () => {
+          const val = inputSteer.value.trim();
+          if (val) {
+            window.cdpState.subagentLogs.push({
+              seq: window.cdpState.subagentLogs.length + 1,
+              timestamp: Date.now(),
+              kind: 'status_change',
+              text: '[用户实时干预指令]: ' + val
+            });
+            window.cdpState.lastEvents.push('subagent_steered:' + val);
+            inputSteer.value = '';
+            window.renderAll();
+          }
+        };
+      }
+
+      // Bot Forever Chat Enter Button
+      const btnEnterBot = document.querySelector('.bot-btn-enter-forever-chat');
+      if (btnEnterBot) {
+        btnEnterBot.onclick = () => {
+          window.cdpState.lastEvents.push('entered_forever_chat:' + btnEnterBot.dataset.sessionId);
+        };
+      }
+
+      // Group Send Button
+      const btnGroupSend = document.querySelector('.group-btn-send');
+      const inputGroup = document.querySelector('.group-chat-input');
+      if (btnGroupSend && inputGroup) {
+        btnGroupSend.onclick = () => {
+          const val = inputGroup.value.trim();
+          if (val) {
+            window.cdpState.groupEntries.push({
+              messageId: 'm-' + Date.now(),
+              seq: window.cdpState.groupEntries.length + 1,
+              senderProfile: 'user',
+              timestamp: Date.now(),
+              text: val
+            });
+            window.cdpState.lastEvents.push('group_sent:' + val);
+            inputGroup.value = '';
+            window.renderAll();
+          }
+        };
+      }
+
+      // BTW Quote Button
+      const btnQuote = document.querySelector('.btw-btn-quote');
+      if (btnQuote) {
+        btnQuote.onclick = () => {
+          window.cdpState.lastEvents.push('btw_quoted:' + btnQuote.dataset.quoteText);
+        };
+      }
+    }
+
+    // Modal Promotion Dialog helper for test trigger
+    window.openPromotionDialog = function() {
+      const dialogSlot = document.getElementById('group-dialog-slot');
+      dialogSlot.innerHTML = renderGroupPromotionDialog({
+        parentSessionId: 'sess-parent-cdp',
+        defaultTopic: 'OAuth死锁协同研讨群',
+        availableProfiles: [
+          { name: 'default', displayName: '主助理' },
+          { name: 'arch-wang', displayName: '架构老王' },
+          { name: 'fe-zhang', displayName: '前端小张' }
+        ]
+      });
+
+      const btnConfirm = dialogSlot.querySelector('.group-dialog-btn-confirm');
+      const btnCancel = dialogSlot.querySelector('.group-dialog-btn-cancel');
+      const overlay = dialogSlot.querySelector('.group-promotion-dialog-overlay');
+
+      if (overlay) {
+        overlay.onclick = (e) => {
+          if (e.target === overlay) {
+            window.cdpState.lastEvents.push('promotion_cancelled_via_overlay');
+            dialogSlot.innerHTML = '';
+          }
+        };
+      }
+
+      if (btnConfirm) {
+        btnConfirm.onclick = () => {
+          const checked = Array.from(dialogSlot.querySelectorAll('.group-member-checkbox:checked')).map(cb => cb.value);
+          window.cdpState.lastEvents.push('promoted_to_group:' + checked.join(','));
+          dialogSlot.innerHTML = '';
+        };
+      }
+      if (btnCancel) {
+        btnCancel.onclick = () => {
+          window.cdpState.lastEvents.push('promotion_cancelled');
+          dialogSlot.innerHTML = '';
+        };
+      }
+    };
+
+    window.renderAll();
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

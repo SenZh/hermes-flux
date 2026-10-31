@@ -167,3 +167,98 @@ test('Gateway event reducer - negative and boundary inputs', async (t) => {
     assert.deepEqual(reduceGatewayEvent(legacy, CTX), [{ type: 'append-thought', messageId: 'ast-1', text: '思考' }]);
   });
 });
+
+test('Gateway event reducer - subagent delegation events', async (t) => {
+  const CTX = {
+    activeSessionIds: ['live-42'],
+    activeStreamingMessageId: 'ast-1',
+  };
+
+  await t.test('subagent.spawn_requested produces structured subagent-spawn action', () => {
+    const frame = {
+      type: 'subagent.spawn_requested',
+      session_id: 'live-42',
+      payload: {
+        subagent_id: 'sub-888',
+        target_profile: 'arch-wang',
+        task_title: '推演架构死锁',
+      },
+    };
+
+    const actions = reduceGatewayEvent(frame, CTX);
+    assert.equal(actions.length, 1);
+    assert.deepEqual(actions[0], {
+      type: 'subagent-spawn',
+      subagentId: 'sub-888',
+      profile: 'arch-wang',
+      title: '推演架构死锁',
+      parentSessionId: 'live-42',
+      messageId: 'ast-1',
+    });
+  });
+
+  await t.test('subagent.progress produces percentage and actionText update', () => {
+    const frame = {
+      type: 'subagent.progress',
+      session_id: 'live-42',
+      payload: {
+        subagent_id: 'sub-888',
+        progress: 45,
+        action: '正在分析 call stack',
+      },
+    };
+
+    const actions = reduceGatewayEvent(frame, CTX);
+    assert.equal(actions.length, 1);
+    assert.deepEqual(actions[0], {
+      type: 'subagent-progress',
+      subagentId: 'sub-888',
+      progressPercent: 45,
+      actionText: '正在分析 call stack',
+    });
+  });
+
+  await t.test('subagent.log carries stdout and stderr with seq', () => {
+    const frame = {
+      type: 'subagent.log',
+      session_id: 'live-42',
+      payload: {
+        subagent_id: 'sub-888',
+        seq: 10,
+        timestamp: 1000,
+        text: 'build completed with 0 errors',
+      },
+    };
+
+    const actions = reduceGatewayEvent(frame, CTX);
+    assert.equal(actions.length, 1);
+    assert.deepEqual(actions[0], {
+      type: 'subagent-log',
+      subagentId: 'sub-888',
+      entry: {
+        seq: 10,
+        timestamp: 1000,
+        kind: 'stdout',
+        text: 'build completed with 0 errors',
+      },
+    });
+  });
+
+  await t.test('subagent.complete terminates subagent task and legacy tool-complete simultaneously', () => {
+    const frame = {
+      type: 'subagent.complete',
+      session_id: 'live-42',
+      payload: {
+        subagent_id: 'sub-888',
+        tool_call_id: 'call-1',
+        output: '方案无死锁风险',
+      },
+    };
+
+    const actions = reduceGatewayEvent(frame, CTX);
+    // 既包含独立的 subagent-complete 与 subagent-log，也包含向后兼容的 tool-complete
+    assert.ok(actions.some((a) => a.type === 'subagent-complete' && a.subagentId === 'sub-888'));
+    assert.ok(actions.some((a) => a.type === 'tool-complete' && a.messageId === 'ast-1'));
+  });
+});
+

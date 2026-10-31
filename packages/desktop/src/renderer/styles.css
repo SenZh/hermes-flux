@@ -403,6 +403,17 @@ button {
 
 /* ==========================================================================
    Mobile & Responsive Layout Adaptations (iOS / Android / Web)
+   设计意图 (Why):
+     在手机竖屏（<= 768px）等移动触控设备上，将桌面三栏刚性布局自适应收敛为
+     「顶栏 + 单列通栏会话主场 + 底部悬浮输入舱 + 浮动抽屉侧栏」，确保移动端开箱即用。
+   防范的历史坑 (Pitfall):
+     1. 历史死选择器（如 .left-rail、.input-dock）因未匹配 DOM 真实类名（.flux-left-rail、.composer-dock）
+        导致移动端媒体查询全部失效，左轨在 390px 视口下横向硬挤 260px，中央对话流被压缩至 130px 竖排折字；
+     2. Onboarding 卡片固定 max-width: 600px 导致在手机视口下右溢 95px 被切断；
+     3. 触控热区若小于 44px（如 28px 小图标），移动端手指误触率极高，违反设计规范门禁。
+   约束与规则 (Rules):
+     - 必须使用真实 DOM 类名与 ID 组合，严禁书写失效死选择器；
+     - 移动端会话主场宽度必须自适应撑满，严禁全文档产生横向滚动溢出。
    ========================================================================== */
 
 @media (max-width: 768px) {
@@ -411,33 +422,75 @@ button {
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
-  /* 移动端左侧会话轨默认收纳为滑出抽屉，避免挤压对话流 */
-  .left-rail {
+  /* 移动端左侧会话轨默认收纳为滑出抽屉悬浮覆盖，严禁在常规流中横向挤压对话流 */
+  #flux-left-rail,
+  .flux-left-rail {
     position: fixed !important;
     left: 0;
     top: calc(42px + env(safe-area-inset-top, 0px));
     bottom: 0;
+    width: min(300px, 80vw) !important;
+    min-width: 0 !important;
+    max-width: 80vw !important;
     z-index: 100;
     box-shadow: 4px 0 24px rgba(0, 0, 0, 0.6);
   }
 
-  /* 移动端右侧检查舱收敛为全屏 Sheet */
-  .inspection-pod {
+  /* 折叠态彻底隐藏 */
+  #flux-left-rail.rail-collapsed,
+  .flux-left-rail.rail-collapsed {
+    display: none !important;
+    width: 0 !important;
+  }
+
+  /* 移动端主内容流与对话流撑满全部屏幕宽度 */
+  #conversation-stream {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+    box-sizing: border-box !important;
+  }
+
+  /* 移动端右侧检查舱收敛为全屏浮动 Sheet，贴合顶栏与安全区 */
+  #flux-inspection-pod,
+  .flux-inspection-pod {
     position: fixed !important;
-    right: 0;
+    left: 0 !important;
+    right: 0 !important;
     top: calc(42px + env(safe-area-inset-top, 0px));
     bottom: 0;
     width: 100% !important;
-    z-index: 100;
+    max-width: 100% !important;
+    z-index: 110;
   }
 
-  /* 输入舱贴合移动端视口宽度 */
-  .input-dock {
+  /* 输入舱贴合移动端视口宽度与底部安全区避让 */
+  .input-dock-container,
+  .composer-dock {
     max-width: calc(100vw - 24px) !important;
+    width: calc(100vw - 24px) !important;
     left: 12px !important;
     right: 12px !important;
     transform: none !important;
     bottom: calc(12px + env(safe-area-inset-bottom, 0px)) !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Onboarding 网关引导卡片小屏自适应防右溢 */
+  .gateway-onboarding-card {
+    max-width: calc(100vw - 24px) !important;
+    width: calc(100vw - 24px) !important;
+    margin: 16px auto !important;
+    padding: 20px 16px !important;
+    box-sizing: border-box !important;
+  }
+
+  /* 移动端交互控件最小触控热区保护 (>= 44x44px) */
+  .icon-btn {
+    min-width: 44px !important;
+    min-height: 44px !important;
   }
 }
 
