@@ -16,7 +16,9 @@ execSync(`node "${path.join(mobileRoot, 'scripts/prepare-assets.mjs')}"`, { stdi
 
 // 2. Sync Capacitor
 console.log('  2. Syncing Capacitor assets & plugins to Android native project...');
-const capBin = path.join(mobileRoot, 'node_modules/.bin/cap.cmd');
+const capExe = path.join(mobileRoot, 'node_modules/.bin/cap.exe');
+const capCmd = path.join(mobileRoot, 'node_modules/.bin/cap.cmd');
+const capBin = fs.existsSync(capExe) ? capExe : fs.existsSync(capCmd) ? capCmd : 'npx cap';
 execSync(`"${capBin}" sync android`, { cwd: mobileRoot, stdio: 'inherit' });
 
 // 3. Assemble Debug APK with Gradle
