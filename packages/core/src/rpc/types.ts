@@ -114,7 +114,51 @@ export interface AgentProfile {
   description?: string;
   avatar?: string;
   model?: string;
+  lastMessage?: string;
+  lastTime?: string;
   isDefault?: boolean;
+  /** 网关是否已为该 Bot 上传头像资产（profiles.list 的 has_avatar） */
+  hasAvatar?: boolean;
+  /**
+   * 网关侧的 UI 元数据透传（原样保留，禁止在归一化层裁剪）。
+   *
+   * 【设计意图 (Why)】
+   * 官方桌面端把"多 Agent 研讨群聊房间"持久化在 profile 的
+   * `ui_meta['hermes-bots-groups'].rooms` 中，而不是 hosted room 服务里。
+   *
+   * 【防范的历史坑 (Pitfall)】
+   * 归一化曾只挑 name/displayName/avatar 等少数字段，把 ui_meta 整体丢弃，
+   * 导致旧群聊房间与其历史发言永远查不到（groups.log 对这类房间返回 4112）。
+   *
+   * 【规则 (Rules)】
+   * 该字段必须原样透传，任何层都不得裁剪或重命名其内部键。
+   */
+  uiMeta?: ProfileUiMeta;
+}
+
+/** profile.ui_meta 的已知子结构（保留未知键，网关可能扩展） */
+export interface ProfileUiMeta {
+  'hermes-bots-groups'?: {
+    rooms?: Record<string, HermesBotsGroupRoom>;
+  };
+  [key: string]: unknown;
+}
+
+/** 官方桌面端持久化在 ui_meta 中的群聊房间（含完整本地发言日志） */
+export interface HermesBotsGroupRoom {
+  roomId?: string;
+  name?: string;
+  members?: Array<string | { name?: string; handle?: string; profile?: string }>;
+  log?: Array<{
+    id?: string;
+    from?: { kind?: string; name?: string };
+    text?: string;
+    at?: number;
+    thread?: string;
+  }>;
+  createdAt?: number;
+  updatedAt?: number;
+  [key: string]: unknown;
 }
 
 export interface NormalizedSession {
@@ -125,6 +169,15 @@ export interface NormalizedSession {
   preview: string;
   isArchived: boolean;
   timestamp: number;
+  botName?: string;
+  botDisplayName?: string;
+  botAvatar?: string;
+  projectId?: string;
+  projectName?: string;
+  cwd?: string;
+  parentSessionId?: string;
+  source?: string;
+  isSubagent?: boolean;
 }
 
 /**
@@ -334,11 +387,16 @@ export interface ProfilesConfigureResult {
 
 export interface ProfilesGetAssetParams {
   name: string;
-  key: string;
+  key?: string;
+  asset?: string;
 }
 
 export interface ProfilesGetAssetResult {
+  found?: boolean;
+  data?: string;
+  mime?: string;
   asset_base64?: string;
+  avatar?: string;
 }
 
 export interface ProfilesSetAssetParams {
@@ -371,6 +429,10 @@ export interface GroupMessageEntry {
   timestamp: number;
   text: string;
   isSeed?: boolean;
+  /** 官方 payload.thread_id，用于把同一轮研讨归组 */
+  threadId?: string;
+  /** actor.kind：user 表示人类发言，member 表示 Agent 发言 */
+  actorKind?: 'user' | 'member' | 'system' | string;
 }
 
 export interface GroupsListResult {
@@ -387,8 +449,9 @@ export interface GroupsListResult {
 }
 
 export interface GroupsCreateParams {
+  room_id?: string;
   name: string;
-  members: string[];
+  members: Array<string | { member_id: string; profile: string; handle: string; display_name?: string }>;
 }
 
 export interface GroupsCreateResult {
@@ -409,16 +472,49 @@ export interface GroupsStateResult {
   active_speaker?: string;
 }
 
+/**
+ * 官方 groups.send 契约（源码 gateway/hosted_room_discussion.py::validate_user_payload）
+ *
+ * 【设计意图 (Why)】
+ * 网关对 payload 执行"精确字段"校验（_USER_PAYLOAD_FIELDS = {text, thread_id}），
+ * 任何多余或缺失字段都会被拒。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ * 曾把 text / sender_profile / is_seed 平铺在顶层，网关返回
+ * `4000 text: Extra inputs are not permitted`；
+ * 只传 payload:{text} 又返回 `5112 user payload is missing fields: thread_id`；
+ * 不传 event_id 返回 `4111 event_id must be a string`。
+ *
+ * 【规则 (Rules)】
+ * - 顶层只允许 room_id / event_id / payload（profile 可选）；
+ * - payload 精确为 { text, thread_id }，thread_id 由客户端 mint（`t<base36>-<5位>`）。
+ */
 export interface GroupsSendParams {
   room_id: string;
-  text: string;
-  sender_profile?: string;
-  is_seed?: boolean;
+  event_id: string;
+  payload: {
+    text: string;
+    thread_id: string;
+  };
 }
 
+/** 官方 groups.send 返回：{ event, client_event_id, accepted, driver_started } */
 export interface GroupsSendResult {
-  message_id: string;
-  seq: number;
+  event?: {
+    room_id?: string;
+    seq?: number;
+    event_id?: string;
+    kind?: string;
+    actor?: { kind?: string; id?: string; profile?: string; display_name?: string };
+    payload?: { text?: string; thread_id?: string; [key: string]: unknown };
+    created_at?: number;
+  };
+  client_event_id?: string | null;
+  accepted?: boolean;
+  driver_started?: boolean;
+  /** 兼容旧字段（网关早期版本或本地回放） */
+  message_id?: string;
+  seq?: number;
 }
 
 export interface GroupsLogParams {
@@ -428,9 +524,20 @@ export interface GroupsLogParams {
 }
 
 export interface GroupsLogResult {
-  room_id: string;
-  entries: GroupMessageEntry[];
-  latest_seq: number;
+  room_id?: string;
+  entries?: GroupMessageEntry[];
+  events?: Array<{
+    room_id?: string;
+    seq?: number;
+    event_id?: string;
+    kind?: string;
+    actor?: { kind?: string; name?: string; profile?: string };
+    payload?: { text?: string; [key: string]: unknown };
+    created_at?: number;
+  }>;
+  latest_seq?: number;
+  cursor?: number;
+  has_more?: boolean;
 }
 
 export interface GroupsDisbandParams {

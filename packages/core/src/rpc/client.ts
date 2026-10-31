@@ -411,6 +411,13 @@ export class HermesGatewayClient {
     });
   }
 
+  /**
+   * IRpcCaller adaptation for direct plug-in compatibility with ProfileService, ProjectService and GroupRoomStore
+   */
+  public request<TResult = unknown, TParams = unknown>(method: string, params?: TParams): Promise<TResult> {
+    return this.call<TResult>(method, params);
+  }
+
   public onNotification<T = unknown>(method: string, handler: (params: T) => void): () => void {
     if (!this.notificationHandlers.has(method)) {
       this.notificationHandlers.set(method, new Set());
@@ -613,13 +620,28 @@ export class HermesGatewayClient {
           : [];
       return list.map((item: unknown) => {
         const obj = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+        const rawAvatar = typeof obj.avatar === 'string' && obj.avatar
+          ? obj.avatar
+          : typeof obj.avatar_url === 'string' && obj.avatar_url
+          ? obj.avatar_url
+          : typeof obj.icon === 'string' && obj.icon
+          ? obj.icon
+          : typeof obj.image === 'string' && obj.image
+          ? obj.image
+          : '';
+        // ui_meta 必须原样透传：旧群聊房间与其历史发言只存在于这里
+        const uiMeta = obj.ui_meta && typeof obj.ui_meta === 'object'
+          ? (obj.ui_meta as AgentProfile['uiMeta'])
+          : undefined;
         return {
           name: String(obj.name || obj.id || 'default'),
           displayName: String(obj.display_name || obj.title || obj.name || '默认 Agent'),
           description: typeof obj.description === 'string' ? obj.description : '',
-          avatar: typeof obj.avatar === 'string' ? obj.avatar : '',
+          avatar: rawAvatar,
           model: typeof obj.model === 'string' ? obj.model : '',
           isDefault: Boolean(obj.is_default || obj.name === 'default'),
+          hasAvatar: obj.has_avatar === true,
+          uiMeta,
         };
       });
     } catch (e) {

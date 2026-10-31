@@ -8,6 +8,7 @@ export * from './coalesce/tokenCoalescer.js';
 export * from './models/types.js';
 export * from './session/eventReducer.js';
 export * from './session/sessionRegistry.js';
+export * from './session/sessionMerge.js';
 export * from './session/sessionStore.js';
 export * from './session/agentRouter.js';
 export * from './session/handoffService.js';

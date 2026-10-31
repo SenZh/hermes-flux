@@ -92,7 +92,26 @@ test('GroupRoomStore - 多 Agent 群聊房间与四阶拉群升级管线', async
     const mockBridge = {
       async request(method, params) {
         if (method === 'groups.send') {
-          return { message_id: 'msg-1', seq: 10 };
+          // 官方契约断言：顶层只允许 room_id / event_id / payload
+          assert.equal(typeof params.room_id, 'string');
+          assert.equal(typeof params.event_id, 'string', 'event_id 必须是字符串（否则网关 4111）');
+          assert.ok(params.event_id.length > 0);
+          assert.equal(params.text, undefined, 'text 严禁平铺在顶层（网关 4000 Extra inputs）');
+          assert.equal(typeof params.payload?.text, 'string');
+          assert.equal(typeof params.payload?.thread_id, 'string', 'payload 必须含 thread_id（否则网关 5112）');
+          return {
+            event: {
+              room_id: params.room_id,
+              seq: 10,
+              event_id: 'user:msg-1',
+              kind: 'message.user',
+              actor: { kind: 'user', id: 'desktop' },
+              payload: { text: params.payload.text, thread_id: params.payload.thread_id },
+              created_at: 1793456811.2291908,
+            },
+            client_event_id: params.event_id,
+            accepted: true,
+          };
         }
         if (method === 'groups.log') {
           return {
@@ -112,6 +131,8 @@ test('GroupRoomStore - 多 Agent 群聊房间与四阶拉群升级管线', async
     assert.equal(receivedEntries.length, 1);
     assert.equal(receivedEntries[0].text, '大家好，开始讨论');
     assert.equal(receivedEntries[0].seq, 10);
+    assert.equal(receivedEntries[0].actorKind, 'user');
+    assert.ok(receivedEntries[0].threadId, '发送后必须回填 thread_id');
 
     // 负向：sendMessage 空参数拦截
     await assert.rejects(() => store.sendMessage('', '内容', 'user', mockBridge), /Room ID and text are mandatory/);
@@ -168,9 +189,21 @@ test('GroupRoomStore - 多 Agent 群聊房间与四阶拉群升级管线', async
           return { room_id: 'grp-promoted-888', name: params.name, members: params.members };
         }
         if (method === 'groups.send') {
-          seedText = params.text;
-          seedFlag = params.is_seed;
-          return { message_id: 'msg-seed-1', seq: 1 };
+          // 官方契约：种子正文必须落在 payload.text，线程 ID 必须存在
+          seedText = params.payload?.text || '';
+          seedFlag = typeof params.payload?.thread_id === 'string' && params.payload.thread_id.length > 0;
+          return {
+            event: {
+              room_id: params.room_id,
+              seq: 1,
+              event_id: 'user:seed-1',
+              kind: 'message.user',
+              actor: { kind: 'user', id: 'desktop' },
+              payload: { text: seedText, thread_id: params.payload.thread_id },
+              created_at: 1793456811.2291908,
+            },
+            accepted: true,
+          };
         }
         throw new Error(`Unexpected method: ${method}`);
       },

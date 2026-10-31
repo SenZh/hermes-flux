@@ -59,6 +59,27 @@ export interface PromoteSessionToGroupResult {
 
 export type GroupLogListener = (entry: GroupMessageEntry) => void;
 
+/**
+ * 铸造群聊线程 ID（与官方桌面端 1:1 对齐）
+ *
+ * 【设计意图 (Why)】
+ * 网关要求 payload.thread_id 必须存在，且用它把同一轮研讨的多次发言归组。
+ * 官方实现为 `t${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`。
+ *
+ * 【规则 (Rules)】
+ * 前缀必须是字母 t，整体长度可控，禁止携带非法字符（网关 _identifier 会校验）。
+ */
+export function mintGroupThreadId(): string {
+  return `t${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+/** 铸造群聊事件 ID（幂等键，官方为 UUID） */
+export function mintGroupEventId(): string {
+  const cryptoObj = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (cryptoObj?.randomUUID) return cryptoObj.randomUUID();
+  return `evt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export class GroupRoomStore {
   /**
    * 房间信息缓存：roomId -> GroupRoomSummary
@@ -122,8 +143,9 @@ export class GroupRoomStore {
    */
   public async createRoom(
     name: string,
-    members: string[],
-    bridge: IRpcCaller
+    members: Array<string | { member_id?: string; profile?: string; handle?: string; display_name?: string; name?: string }>,
+    bridge: IRpcCaller,
+    roomId?: string
   ): Promise<GroupsCreateResult> {
     if (!name || typeof name !== 'string') {
       throw new Error('Group name cannot be empty');
@@ -132,50 +154,100 @@ export class GroupRoomStore {
       throw new Error('Group room requires at least 2 members');
     }
 
+    const assignedRoomId = roomId || `r${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+
+    // 官方网关要求 member 必须是对象: { member_id, profile, handle, display_name }
+    const formattedMembers: Array<{ member_id: string; profile: string; handle: string; display_name?: string }> = members.map((m, idx) => {
+      if (typeof m === 'object' && m !== null) {
+        const prof = m.profile || m.name || 'default';
+        return {
+          member_id: m.member_id || `m_${prof}_${idx}`,
+          profile: prof,
+          handle: m.handle || prof,
+          display_name: m.display_name || prof,
+        };
+      }
+      const prof = String(m);
+      return {
+        member_id: `m_${prof}_${idx}`,
+        profile: prof,
+        handle: prof,
+        display_name: prof,
+      };
+    });
+
     const res = await bridge.request<GroupsCreateResult, GroupsCreateParams>('groups.create', {
+      room_id: assignedRoomId,
       name,
-      members,
+      members: formattedMembers,
     });
 
     const summary: GroupRoomSummary = {
-      roomId: res.room_id,
+      roomId: res.room_id || assignedRoomId,
       name: res.name || name,
-      members: res.members || members,
+      members: Array.isArray(res.members)
+        ? res.members.map((m) => {
+            if (typeof m === 'string') return m;
+            const obj = m as Record<string, unknown>;
+            return String(obj.profile || obj.handle || obj.display_name || 'member');
+          })
+        : formattedMembers.map((m) => m.profile),
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
-    this.rooms.set(res.room_id, summary);
+    this.rooms.set(summary.roomId, summary);
     return res;
   }
 
   /**
-   * 向指定群聊房间发送消息
+   * 向指定群聊房间发送一条人类消息
+   *
+   * 【设计意图 (Why)】
+   * 官方 groups.send 只接受 `{ room_id, event_id, payload: { text, thread_id } }`。
+   * thread_id 由客户端铸造，用于把同一轮研讨的多次发言归入同一线程。
+   *
+   * 【防范的历史坑 (Pitfall)】
+   * 1. 把 text 平铺到顶层 → 网关 4000 Extra inputs are not permitted；
+   * 2. 只传 payload.text → 5112 user payload is missing fields: thread_id；
+   * 3. 不传 event_id → 4111 event_id must be a string。
+   *    以上三种都会被上层误读成"群聊发不出去"，实际是契约不符。
+   *
+   * 【规则 (Rules)】
+   * - 本方法只负责写房间日志，不负责触发成员回合（由网关 driver 决定）；
+   * - 返回值优先取官方 `event.seq`，无则退回本地序号。
    */
   public async sendMessage(
     roomId: string,
     text: string,
     senderProfile: string,
     bridge: IRpcCaller,
-    isSeed = false
+    options: { threadId?: string; isSeed?: boolean } = {}
   ): Promise<GroupsSendResult> {
-    if (!roomId || !text) {
+    const trimmed = (text || '').trim();
+    if (!roomId || !trimmed) {
       throw new Error('Room ID and text are mandatory for sendMessage');
     }
 
+    const threadId = options.threadId || mintGroupThreadId();
+    const eventId = mintGroupEventId();
+
     const res = await bridge.request<GroupsSendResult, GroupsSendParams>('groups.send', {
       room_id: roomId,
-      text,
-      sender_profile: senderProfile || 'user',
-      is_seed: isSeed,
+      event_id: eventId,
+      payload: { text: trimmed, thread_id: threadId },
     });
 
     const entry: GroupMessageEntry = {
-      messageId: res.message_id || `msg-${Date.now()}`,
-      seq: res.seq || Date.now(),
+      messageId: res.event?.event_id || res.message_id || eventId,
+      seq: Number(res.event?.seq ?? res.seq ?? 0),
       senderProfile: senderProfile || 'user',
-      timestamp: Date.now(),
-      text,
-      isSeed,
+      timestamp: typeof res.event?.created_at === 'number'
+        ? (res.event.created_at > 1e11 ? res.event.created_at : res.event.created_at * 1000)
+        : Date.now(),
+      text: trimmed,
+      isSeed: Boolean(options.isSeed),
+      threadId,
+      actorKind: 'user',
     };
 
     this.appendEntry(roomId, entry);
@@ -199,10 +271,45 @@ export class GroupRoomStore {
       limit,
     });
 
-    if (res && Array.isArray(res.entries)) {
-      for (const entry of res.entries) {
-        this.appendEntry(roomId, entry);
-      }
+    // 官方网关返回 { events: [...], cursor, latest_seq }，客户端本地结构支持 entries
+    const rawEvents = Array.isArray(res?.events)
+      ? res.events
+      : Array.isArray(res?.entries)
+      ? res.entries
+      : [];
+
+    for (const raw of rawEvents) {
+      const r = raw as Record<string, unknown>;
+      const actor = (r.actor && typeof r.actor === 'object' ? r.actor : {}) as Record<string, unknown>;
+      const payload = (r.payload && typeof r.payload === 'object' ? r.payload : {}) as Record<string, unknown>;
+      const text = String(payload.text || r.text || '');
+      const kind = String(r.kind || '');
+      // 过滤非消息类系统纯控制事件（room.created / room.activity 等没有正文的事件）
+      if (!text && kind.startsWith('room.')) continue;
+      if (!text) continue;
+
+      // 官方 actor 形如 { kind: 'user'|'member', id, profile?, display_name? }，没有 name 字段
+      const actorKind = String(actor.kind || '');
+      const senderProfile = String(
+        actor.display_name || actor.profile || actor.id || r.senderProfile || (actorKind === 'user' ? 'user' : 'Agent')
+      );
+      const timestamp = typeof r.created_at === 'number'
+        ? (r.created_at > 1e11 ? r.created_at : r.created_at * 1000)
+        : typeof r.timestamp === 'number'
+        ? r.timestamp
+        : Date.now();
+
+      const entry: GroupMessageEntry = {
+        messageId: String(r.event_id || r.messageId || `msg_${r.seq || Date.now()}`),
+        seq: Number(r.seq || 0),
+        senderProfile,
+        timestamp,
+        text,
+        isSeed: Boolean(payload.is_seed || r.isSeed),
+        threadId: typeof payload.thread_id === 'string' ? payload.thread_id : undefined,
+        actorKind: actorKind || undefined,
+      };
+      this.appendEntry(roomId, entry);
     }
 
     return this.getLogs(roomId);
@@ -334,7 +441,7 @@ export class GroupRoomStore {
     const roomId = createRes.room_id;
 
     // 将 Briefing Memo 作为 Room 0 种子备忘录注入
-    await this.sendMessage(roomId, briefingMemo, 'system', bridge, true);
+    await this.sendMessage(roomId, briefingMemo, 'system', bridge, { isSeed: true });
 
     // 阶段四：构造原单聊末尾的不可变跳转锚点卡片
     const anchorCardText = `📌 本会话已升级为多Agent研讨群聊: [进入会议室 ➔] (room: ${roomId})`;

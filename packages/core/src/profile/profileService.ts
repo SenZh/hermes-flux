@@ -147,14 +147,31 @@ export class ProfileService {
   }
 
   /**
-   * 获取 Bot 头像/资产
+   * 获取 Bot 头像/资产 (profiles.get_asset)
+   *
+   * 【设计意图 (Why)】
+   * 网关对入参执行 Pydantic 严格模式（extra='forbid'），只接受 `{ name, asset }` 两个字段。
+   *
+   * 【防范的历史坑 (Pitfall)】
+   * 曾同时传 `asset` 与 `key`，网关直接返回
+   * `4000 invalid params: key: Extra inputs are not permitted`；
+   * 而下方 catch 又静默返回 null，导致所有 Bot 头像永远拉不到、界面退回几何图腾，
+   * 表现为"头像一直是老的"。此类契约错误绝不允许被吞成"无数据"。
+   *
+   * 【规则 (Rules)】
+   * - 请求体只允许 `{ name, asset }`；
+   * - 仅在网关明确 `found === false`（确实未上传资产）时返回 null；
+   * - 任何 RPC 异常必须向上抛出，由调用方决定降级策略，严禁伪造成空。
    */
   public async getAsset(name: string, key: string, bridge: IRpcCaller): Promise<string | null> {
+    if (!name) return null;
     const res = await bridge.request<ProfilesGetAssetResult, ProfilesGetAssetParams>(
       'profiles.get_asset',
-      { name, key }
+      { name, asset: key || 'avatar' }
     );
-    return res.asset_base64 || null;
+    if (!res) return null;
+    if (res.found === false) return null;
+    return res.data || res.asset_base64 || res.avatar || null;
   }
 
   /**

@@ -112,14 +112,22 @@ test('ProfileService - 专职 Bot 管理与 Forever Chat 终身主工位状态�
     const service = new ProfileService();
     let setKey = '';
     let setBase64 = '';
+    const seenGetParams = [];
 
     const mockBridge = {
       async request(method, params) {
         if (method === 'profiles.get_asset') {
-          if (params.key === 'avatar.png') {
-            return { asset_base64: 'data:image/png;base64,AAAA' };
+          seenGetParams.push(params);
+          // 契约守卫：网关 Pydantic extra='forbid'，只允许 name + asset
+          assert.deepEqual(
+            Object.keys(params).sort(),
+            ['asset', 'name'],
+            'profiles.get_asset 只允许 { name, asset }，多传 key 会被网关 4000 拒绝'
+          );
+          if (params.asset === 'avatar') {
+            return { found: true, mime: 'image/jpeg', data: 'data:image/jpeg;base64,AAAA' };
           }
-          return {};
+          return { found: false };
         }
         if (method === 'profiles.set_asset') {
           setKey = params.key;
@@ -131,12 +139,27 @@ test('ProfileService - 专职 Bot 管理与 Forever Chat 终身主工位状态�
     };
 
     // 获取存在的资产
-    const asset = await service.getAsset('arch-wang', 'avatar.png', mockBridge);
-    assert.equal(asset, 'data:image/png;base64,AAAA');
+    const asset = await service.getAsset('arch-wang', 'avatar', mockBridge);
+    assert.equal(asset, 'data:image/jpeg;base64,AAAA');
+    assert.equal(seenGetParams.length, 1);
 
-    // 获取不存在的资产（返回 null，非异常）
-    const missing = await service.getAsset('arch-wang', 'non-existent.png', mockBridge);
+    // 网关明确 found=false 时返回 null（确实没有资产）
+    const missing = await service.getAsset('arch-wang', 'missing.png', mockBridge);
     assert.equal(missing, null);
+
+    // 契约错误必须显式抛出，严禁被吞成"没有头像"
+    const failingBridge = {
+      async request() {
+        const err = new Error('invalid params: key: Extra inputs are not permitted');
+        err.code = 4000;
+        throw err;
+      },
+    };
+    await assert.rejects(
+      () => service.getAsset('arch-wang', 'avatar', failingBridge),
+      /Extra inputs are not permitted/,
+      'RPC 失败必须向上抛出，不能被伪装成无资产'
+    );
 
     // 设置资产
     const ok = await service.setAsset('arch-wang', 'avatar.png', 'data:image/png;base64,BBBB', mockBridge);
