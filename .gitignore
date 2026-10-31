@@ -35,4 +35,5 @@ ui/icon1.jpg
 
 tmp-*.mjs
 *.log
+.playwright-mcp/
 

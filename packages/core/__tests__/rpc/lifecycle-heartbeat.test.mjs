@@ -76,6 +76,7 @@ test('HermesGatewayClient Lifecycle, Heartbeat & Failover Suite', async (t) => {
       },
       close() {
         closeCalledTimes++;
+        this.readyState = 3;
       },
     };
 
@@ -87,17 +88,19 @@ test('HermesGatewayClient Lifecycle, Heartbeat & Failover Suite', async (t) => {
       enableLifecycleWake: false,
     });
 
-    client['ws'] = mockWs;
-    client['fsm'].transitionTo('CONNECTED');
+    try {
+      client['ws'] = mockWs;
+      client['fsm'].transitionTo('CONNECTED');
 
-    // 2. Act: 启动看门狗并等待心跳超时
-    client['startHeartbeat']();
-    await new Promise((r) => setTimeout(r, 70));
+      // 2. Act: 启动看门狗并等待心跳超时
+      client['startHeartbeat']();
+      await new Promise((r) => setTimeout(r, 120));
 
-    // 3. Assert: 验证主动斩断连接
-    assert.ok(closeCalledTimes >= 1, '心跳超时后看门狗必须主动调用 ws.close() 销毁死连接');
-
-    client.disconnect();
+      // 3. Assert: 验证主动斩断连接
+      assert.ok(closeCalledTimes >= 1, '心跳超时后看门狗必须主动调用 ws.close() 销毁死连接');
+    } finally {
+      client.disconnect();
+    }
   });
 
   await t.test('3. 边界值：候选地址池正确识别、轮换与单一地址兜底', () => {

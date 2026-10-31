@@ -257,6 +257,7 @@ export class HermesGatewayClient {
 
       this.heartbeatTimeoutHandle = setTimeout(() => {
         console.warn('[HermesGatewayClient] Heartbeat watchdog timeout, terminating half-open connection');
+        this.stopHeartbeat();
         if (this.ws) {
           try {
             this.ws.close();
