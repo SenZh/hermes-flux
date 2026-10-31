@@ -21,6 +21,10 @@ import {
   escapeHtml,
   MessageViewModel,
   InspectorTab,
+  type LeftRailProject,
+  type LeftRailGroupRoom,
+  type LeftRailActiveFocus,
+  renderNewTaskModal,
   t,
 } from '@hermes-flux/ui';
 
@@ -42,6 +46,9 @@ import {
   type NormalizedSession,
   type ModelDetail,
   type AgentProfile,
+  ProfileService,
+  GroupRoomStore,
+  dedupeSessionsByProfile,
   resolveFileContent,
 } from '@hermes-flux/core';
 
@@ -63,6 +70,7 @@ declare global {
 interface AppState {
   platform: 'windows' | 'macos' | 'linux' | 'ios' | 'android' | 'web';
   theme: 'obsidian-gold' | 'suet-jade' | 'jade-white';
+  activeRailTab: 'chats' | 'projects';
   lang: 'zh' | 'en';
   isMaximized: boolean;
   leftRailCollapsed: boolean;
@@ -78,6 +86,15 @@ interface AppState {
   currentProvider: string;
   profiles: AgentProfile[];
   profileName: string;
+  projects: LeftRailProject[];
+  groupRooms: LeftRailGroupRoom[];
+  activeFocus: LeftRailActiveFocus;
+  sessionSearchQuery: string;
+  isSessionsGroupExpanded: boolean;
+  isGroupsGroupExpanded: boolean;
+  isMoreSessionsExpanded: boolean;
+  isNewTaskModalOpen: boolean;
+  selectedNewTaskProjectId?: string;
   /** Model menu visibility lives in state so a re-render cannot swallow it. */
   modelMenuOpen: boolean;
   /** Context menu for session item */
@@ -213,9 +230,13 @@ function detectInitialPlatform(): 'windows' | 'macos' | 'linux' | 'ios' | 'andro
   return desktopApi ? 'windows' : 'web';
 }
 
+const profileService = new ProfileService();
+const groupRoomStore = new GroupRoomStore();
+
 const state: AppState = {
   platform: detectInitialPlatform(),
   theme: (localStorage.getItem('hermes_flux_theme') || localStorage.getItem('hermes_aura_theme') as any) || 'obsidian-gold',
+  activeRailTab: 'chats',
   lang: (localStorage.getItem('hermes_flux_lang') || localStorage.getItem('hermes_aura_lang') as any) || 'zh',
   isMaximized: false,
   leftRailCollapsed: typeof window !== 'undefined' && window.innerWidth <= 768,
@@ -228,6 +249,14 @@ const state: AppState = {
   modelDetails: [],
   currentProvider: '',
   profiles: [],
+  projects: [],
+  groupRooms: [],
+  activeFocus: { type: 'bot', botName: localStorage.getItem('hermes_flux_profile') || 'default' },
+  sessionSearchQuery: '',
+  isSessionsGroupExpanded: true,
+  isGroupsGroupExpanded: true,
+  isMoreSessionsExpanded: false,
+  isNewTaskModalOpen: false,
   profileName: localStorage.getItem('hermes_flux_profile') || localStorage.getItem('hermes_aura_profile') || 'default',
   modelMenuOpen: false,
   dockNotice: '',
@@ -589,29 +618,149 @@ function scheduleSessionsRefresh(delayMs = 180): void {
   }, delayMs);
 }
 
+/**
+ * 纯算术安全日期时间格式化 (遵守 Gate 4c: 零 Intl 污染热路径)
+ * 当天: "19:15"
+ * 昨天: "昨天 16:20"
+ * 前天: "前天 14:10"
+ * 当年其他: "10/28 16:20"
+ * 跨年: "2025/10/28"
+ */
+function formatSessionTime(timestamp: number): string {
+  if (!timestamp || timestamp <= 0) return '';
+  const now = new Date();
+  const target = new Date(timestamp);
+
+  const pad = (n: number) => (n < 10 ? `0${n}` : String(n));
+  const timeStr = `${pad(target.getHours())}:${pad(target.getMinutes())}`;
+
+  const isSameDay =
+    now.getFullYear() === target.getFullYear() &&
+    now.getMonth() === target.getMonth() &&
+    now.getDate() === target.getDate();
+  if (isSameDay) return timeStr;
+
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  const isYesterday =
+    yesterday.getFullYear() === target.getFullYear() &&
+    yesterday.getMonth() === target.getMonth() &&
+    yesterday.getDate() === target.getDate();
+  if (isYesterday) return `${t('time.yesterday')} ${timeStr}`;
+
+  const dayBefore = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 2);
+  const isDayBefore =
+    dayBefore.getFullYear() === target.getFullYear() &&
+    dayBefore.getMonth() === target.getMonth() &&
+    dayBefore.getDate() === target.getDate();
+  if (isDayBefore) return `${t('time.dayBefore')} ${timeStr}`;
+
+  const month = target.getMonth() + 1;
+  const date = target.getDate();
+  if (now.getFullYear() === target.getFullYear()) {
+    return `${month}/${date} ${timeStr}`;
+  }
+
+  return `${target.getFullYear()}/${month}/${date}`;
+}
+
+// gate-i18n-allow: 用于过滤子代理派生日期流水线标题
+const isSubagentDatePattern = (t: string) => /^会话\s*\d{8}$/i.test(t);
+
+let activeFetchSessionsGeneration = 0;
+
 async function fetchSessions(): Promise<void> {
-  if (!gatewayClient) return;
+  const client = gatewayClient;
+  if (!client) return;
 
-  const outcome = await gatewayClient.listSessions(state.profileName || 'default', 50);
+  const currentGen = ++activeFetchSessionsGeneration;
 
-  if (!outcome.ok) {
-    // Failure is not empty: tell the user why the rail is not refreshing.
-    state.sessionListError = outcome.error || '会话列表拉取失败';
-    render();
-    return;
+  // 1. 若 profiles 尚未拉取，先动态拉取全量网关 Profile 列表
+  if (state.profiles.length === 0) {
+    try {
+      state.profiles = await client.listProfiles();
+    } catch {}
+  }
+
+  // 纯动态提取当前网关所有真实存在的 Profile 集合（零硬编码，通用支持任意网关部署）
+  const targetProfiles = new Set<string>(['default']);
+  if (state.profileName) targetProfiles.add(state.profileName);
+  for (const p of state.profiles) {
+    if (p.name) targetProfiles.add(p.name);
+  }
+
+  const profileMap = new Map<string, AgentProfile>();
+  for (const p of state.profiles) {
+    profileMap.set(p.name, p);
+  }
+
+  // 2. 并发向网关拉取所有当前已注册 Agent 的会话列表
+  const results = await Promise.allSettled(
+    Array.from(targetProfiles).map(async (profName) => {
+      const outcome = await client.listSessions(profName, 100);
+      if (!outcome.ok || !outcome.sessions) return [];
+      const prof = profileMap.get(profName);
+      return outcome.sessions.map((s) => {
+        const botName = s.botName || profName;
+        const matchingProfile = profileMap.get(botName) || prof;
+        const timeWithDate = formatSessionTime(s.timestamp) || s.time;
+        return {
+          ...s,
+          time: timeWithDate,
+          botName,
+          botDisplayName: matchingProfile?.displayName || botName,
+          botAvatar: matchingProfile?.avatar || '',
+        };
+      });
+    })
+  );
+
+  // 竞态守卫：如果本轮拉取期间已有更新的请求发出，放弃当前结果
+  if (currentGen !== activeFetchSessionsGeneration) return;
+
+  // 跨 Profile 会话 ID 会碰撞（同一时间戳前缀 + 短随机后缀，不同 Bot 库各自独立生成），
+  // 去重必须使用 `profile::sessionId` 复合键，否则真实会话会被同名空白会话顶掉。
+  const allMerged = dedupeSessionsByProfile(
+    results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
+  );
+  const seenKeys = new Set(allMerged.map((s) => `${s.botName || 'default'}::${s.id}`));
+
+  // 过滤纯子代理与无意图空白占位会话，确保用户真正的交互会话置顶平铺展示
+  const userDirectSessions = allMerged.filter((s) => {
+    if (s.isSubagent || s.source === 'subagent') return false;
+    if (isSubagentDatePattern(s.title)) return false;
+    // 过滤既无标题又无消息内容的空白临时占位会话
+    if (!s.title.trim()) return false;
+    return true;
+  });
+
+  // 保留尚未持久化落盘的本地临时新建会话
+  const isSeen = (s: NormalizedSession) => seenKeys.has(`${s.botName || state.profileName || 'default'}::${s.id}`);
+  const stillPending = state.sessions.filter(
+    (s) => state.pendingSessionIds.includes(s.id) && !isSeen(s)
+  );
+  state.pendingSessionIds = state.pendingSessionIds.filter((id) => !seenKeys.has(`${state.profileName || 'default'}::${id}`));
+
+  // 合并保全：如果本地已有的老列表中存在未在本次返回中的正常用户会话，予以保留，防范闪烁
+  const existingValidSessions = state.sessions.filter(
+    (s) => !isSeen(s) && !s.isSubagent && s.source !== 'subagent' && s.title && !isSubagentDatePattern(s.title)
+  );
+
+  state.sessions = [...stillPending, ...userDirectSessions];
+  if (existingValidSessions.length > 0) {
+    for (const oldS of existingValidSessions) {
+      if (!state.sessions.some((cur) => cur.id === oldS.id && cur.botName === oldS.botName)) {
+        state.sessions.push(oldS);
+      }
+    }
+    state.sessions.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
   }
 
   state.sessionListError = '';
 
-  // Keep conversations that were created locally but are not persisted yet; the
-  // gateway only lists a session once its first turn has been stored.
-  const serverIds = new Set(outcome.sessions.map((s) => s.id));
-  const stillPending = state.sessions.filter(
-    (s) => state.pendingSessionIds.includes(s.id) && !serverIds.has(s.id)
-  );
-  state.pendingSessionIds = state.pendingSessionIds.filter((id) => !serverIds.has(id));
-
-  state.sessions = [...stillPending, ...outcome.sessions];
+  // 4. 同步刷新工程项目的关联会话
+  if (state.projects.length > 0) {
+    syncProjectSessions();
+  }
 
   if (!state.activeSessionId && state.sessions.length > 0) {
     await selectSession(state.sessions[0].id);
@@ -619,6 +768,292 @@ async function fetchSessions(): Promise<void> {
   }
 
   render();
+}
+
+interface ProjectRawRecord {
+  id?: string;
+  projectId?: string;
+  name?: string;
+  primary_path?: string;
+  primaryPath?: string;
+  path?: string;
+}
+
+interface ProjectsListResponse {
+  projects?: ProjectRawRecord[];
+  data?: ProjectRawRecord[];
+}
+
+/** 真实拉取网关工程项目列表 (all-profiles fan-out) 并自动关联所属会话 */
+async function fetchProjects(): Promise<void> {
+  const client = gatewayClient;
+  if (!client) return;
+  try {
+    const targetProfiles = new Set<string>();
+    targetProfiles.add('default');
+    if (state.profileName) targetProfiles.add(state.profileName);
+    for (const p of state.profiles) {
+      if (p.name) targetProfiles.add(p.name);
+    }
+
+    // 并发拉取默认与各个 Profile 数据库中的 projects.list 并集
+    const profileCalls = Array.from(targetProfiles).map((prof) =>
+      client.call<ProjectsListResponse>('projects.list', { profile: prof }).catch(() => null)
+    );
+    profileCalls.push(client.call<ProjectsListResponse>('projects.list', {}).catch(() => null));
+
+    const results = await Promise.all(profileCalls);
+    const seenProjIds = new Set<string>();
+    const mergedProjects: LeftRailProject[] = [];
+
+    for (const res of results) {
+      const rawList: ProjectRawRecord[] = Array.isArray(res?.projects)
+        ? res.projects
+        : Array.isArray(res?.data)
+        ? res.data
+        : [];
+
+      for (const p of rawList) {
+        const id = String(p.id || p.projectId || '');
+        if (!id || seenProjIds.has(id)) continue;
+        seenProjIds.add(id);
+        const name = String(p.name || id);
+        const primaryPath = String(p.primary_path || p.primaryPath || p.path || '');
+        mergedProjects.push({
+          id,
+          name,
+          path: primaryPath,
+          sessions: [],
+        });
+      }
+    }
+
+    state.projects = mergedProjects;
+    syncProjectSessions();
+    render();
+  } catch (e) {
+    console.warn('[Flux] fetchProjects failed:', e);
+    state.projects = [];
+    render();
+  }
+}
+
+/** 会话与项目归属动态映射：按 projectId 或工作目录前缀聚合 */
+function syncProjectSessions(): void {
+  for (const proj of state.projects) {
+    proj.sessions = state.sessions.filter((s: NormalizedSession) => {
+      if (s.projectId && s.projectId === proj.id) return true;
+      if (s.projectName && s.projectName === proj.name) return true;
+      if (proj.path && s.cwd && s.cwd.startsWith(proj.path)) return true;
+      return false;
+    });
+  }
+}
+
+interface UiMetaRoomMember {
+  name?: string;
+  profile?: string;
+}
+
+interface UiMetaRoomRecord {
+  name?: string;
+  roomId?: string;
+  members?: Array<string | UiMetaRoomMember>;
+  log?: Array<{ from?: { name?: string; kind?: string }; text?: string; at?: number; thread?: string }>;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+/** 内存缓存 ui_meta 群聊日志: roomId -> log[] */
+const uiMetaGroupLogsCache = new Map<string, Array<{ from?: { name?: string; kind?: string }; text?: string; at?: number; thread?: string }>>();
+
+/** 网关托管房间 ID 集合：只有这些房间支持 groups.send / groups.log */
+const hostedRoomIds = new Set<string>();
+
+/** 从 profile.uiMeta 中提取官方桌面端持久化的旧群聊房间（含完整本地发言日志） */
+function collectUiMetaRooms(profiles: AgentProfile[]): LeftRailGroupRoom[] {
+  const rooms: LeftRailGroupRoom[] = [];
+  for (const p of profiles) {
+    const meta = p.uiMeta?.['hermes-bots-groups'];
+    const rawRooms = meta?.rooms;
+    if (!rawRooms || typeof rawRooms !== 'object') continue;
+    for (const [key, r] of Object.entries(rawRooms)) {
+      if (!r || typeof r !== 'object') continue;
+      // 官方 ui_meta 的键是 `id:<roomId>`，真实 roomId 在 r.roomId 上
+      const roomId = String(r.roomId || key.replace(/^id:/, ''));
+      const members = Array.isArray(r.members)
+        ? r.members.map((m) => (typeof m === 'string' ? m : m.name || m.profile || 'member'))
+        : [];
+      if (Array.isArray(r.log) && r.log.length > 0) {
+        uiMetaGroupLogsCache.set(roomId, r.log);
+        uiMetaGroupLogsCache.set(key, r.log);
+      }
+      rooms.push({
+        roomId,
+        name: r.name || t('rail.groups'),
+        members,
+        createdAt: r.createdAt || Date.now(),
+        updatedAt: r.updatedAt || Date.now(),
+      });
+    }
+  }
+  return rooms;
+}
+
+/** 真实拉取网关多 Agent 群聊房间列表 (groups.list 托管房间 + profile.uiMeta 历史房间并集) */
+async function fetchGroupRooms(): Promise<void> {
+  const client = gatewayClient;
+  if (!client) return;
+  try {
+    // profiles 未就绪时必须先补齐，否则 uiMeta 历史房间会被整轮覆盖丢掉
+    if (state.profiles.length === 0) {
+      try {
+        state.profiles = await client.listProfiles();
+      } catch (e) {
+        console.warn('[Flux] listProfiles failed before fetchGroupRooms:', e);
+      }
+    }
+
+    const mergedRoomsMap = new Map<string, LeftRailGroupRoom>();
+
+    // 1. 网关托管房间（支持 groups.send / groups.log）
+    hostedRoomIds.clear();
+    try {
+      const rpcRooms = await groupRoomStore.listRooms(client);
+      for (const r of rpcRooms) {
+        hostedRoomIds.add(r.roomId);
+        mergedRoomsMap.set(r.roomId, {
+          roomId: r.roomId,
+          name: r.name,
+          members: r.members,
+          createdAt: r.createdAt,
+          updatedAt: r.updatedAt,
+        });
+      }
+    } catch (e) {
+      console.warn('[Flux] groups.list failed:', e);
+    }
+
+    // 2. profile.uiMeta 中官方桌面端持久化的历史房间（只读，发言日志在本地 ui_meta 内）
+    for (const r of collectUiMetaRooms(state.profiles)) {
+      if (!mergedRoomsMap.has(r.roomId)) mergedRoomsMap.set(r.roomId, r);
+    }
+
+    state.groupRooms = Array.from(mergedRoomsMap.values());
+    render();
+  } catch (e) {
+    console.warn('[Flux] fetchGroupRooms failed:', e);
+    state.groupRooms = [];
+    render();
+  }
+}
+
+/** 进入指定多 Agent 研讨会议室并载入研讨记录 */
+async function openGroupRoom(roomId: string): Promise<void> {
+  if (!roomId || !gatewayClient) return;
+  state.activeFocus = { type: 'group', roomId };
+  const targetRoom = state.groupRooms.find((r) => r.roomId === roomId);
+
+  state.activeSessionId = roomId;
+  state.activeLiveSessionId = roomId;
+
+  // 切换房间时重置线程上下文，避免跨房间误用同一 thread_id
+  activeGroupThreadId = null;
+  activeGroupThreadAt = 0;
+
+  // 1. ui_meta 历史房间：网关未托管（groups.log 返回 4112），发言流只能取自本地 ui_meta 日志
+  const cachedLog = uiMetaGroupLogsCache.get(roomId);
+  if (cachedLog && cachedLog.length > 0) {
+    state.messages = cachedLog.map((entry, idx) => ({
+      id: `g_msg_${idx}`,
+      role: entry.from?.kind === 'user' ? 'user' : 'assistant',
+      content: entry.text || '',
+      sender: entry.from?.name || (entry.from?.kind === 'user' ? 'user' : 'Agent'),
+      timestamp: formatTimestamp(entry.at || Date.now()),
+    }));
+  } else {
+    // 2. 托管房间：从 groups.log 拉取官方事件流
+    try {
+      const logs = await groupRoomStore.fetchLogs(roomId, gatewayClient);
+      if (logs && logs.length > 0) {
+        state.messages = logs.map((entry, idx) => ({
+          id: entry.messageId || `g_msg_${idx}`,
+          role: entry.actorKind === 'user' || entry.senderProfile === 'user' ? 'user' : 'assistant',
+          content: entry.text,
+          sender: entry.senderProfile || 'Agent',
+          timestamp: formatTimestamp(entry.timestamp || Date.now()),
+        }));
+      } else {
+        const roomName = targetRoom?.name || t('group.defaultRoomName');
+        const membersText = targetRoom?.members?.join('、') || '';
+        state.messages = [
+          {
+            id: 'group_seed_notice',
+            role: 'system',
+            content: t('group.welcomeInit', { name: roomName, members: membersText }),
+            timestamp: formatTimestamp(Date.now()),
+          },
+        ];
+      }
+    } catch {
+      const roomName = targetRoom?.name || t('group.defaultRoomName');
+      const membersText = targetRoom?.members?.join('、') || '';
+      state.messages = [
+        {
+          id: 'group_seed_notice',
+          role: 'system',
+          content: t('group.welcomeReady', { name: roomName, members: membersText }),
+          timestamp: formatTimestamp(Date.now()),
+        },
+      ];
+    }
+  }
+
+  pendingScrollToBottom = true;
+  render();
+}
+
+/** Bot 终身主工位内存秒开缓存 (消除串行 RPC 延迟，实现 0ms 瞬间切换) */
+const botForeverChatCache = new Map<string, string>();
+
+/** 点击指定 Bot 项直接进入该专职 Bot 的主工位对话界面 (Forever Chat 专属接口) */
+async function openBotChat(botProfile: string): Promise<void> {
+  const client = gatewayClient;
+  if (!botProfile || !client) return;
+
+  state.profileName = botProfile;
+  state.activeFocus = { type: 'bot', botName: botProfile };
+  localStorage.setItem('hermes_flux_profile', botProfile);
+  localStorage.setItem('hermes_aura_profile', botProfile);
+
+  // 1. 若内存缓存已持有该 Bot 的 Forever Chat ID，0ms 瞬间秒开切入！
+  const cachedSessionId = botForeverChatCache.get(botProfile);
+  if (cachedSessionId) {
+    void selectSession(cachedSessionId, { preserveFocus: true });
+    void fetchModelOptions({ clearNotice: true });
+    render();
+    return;
+  }
+
+  render();
+
+  try {
+    // 2. 首次探查并建立缓存
+    const foreverChat = await profileService.getOrCreateForeverChat(botProfile, client);
+    botForeverChatCache.set(botProfile, foreverChat.sessionId);
+
+    state.activeFocus = { type: 'bot', botName: botProfile };
+    await selectSession(foreverChat.sessionId, { preserveFocus: true });
+    state.activeFocus = { type: 'bot', botName: botProfile };
+    render();
+  } catch (err) {
+    console.error('[Flux] Failed to resolve Forever Chat for bot:', botProfile, err);
+    state.dockNotice = t('dock.enterBotChatFailed', { name: botProfile, error: describeRpcError(err) });
+    render();
+    return;
+  }
+
+  void fetchModelOptions({ clearNotice: true });
 }
 
 async function fetchModelOptions(options: { clearNotice?: boolean } = {}): Promise<void> {
@@ -652,11 +1087,69 @@ async function fetchModelOptions(options: { clearNotice?: boolean } = {}): Promi
 }
 
 async function fetchProfiles(): Promise<void> {
-  if (!gatewayClient) return;
+  const client = gatewayClient;
+  if (!client) return;
   try {
-    const list = await gatewayClient.listProfiles();
+    const list = await client.listProfiles();
     state.profiles = list;
     render();
+
+    // 1. 从 profiles 的 uiMeta['hermes-bots-groups'] 中即时同步官方历史群聊（含完整发言日志）
+    for (const r of collectUiMetaRooms(list)) {
+      if (!state.groupRooms.some((existing) => existing.roomId === r.roomId)) {
+        state.groupRooms.push(r);
+      }
+    }
+    if (state.groupRooms.length > 0) render();
+
+    // 2. 并发向网关拉取 Bot 真实高清头像资产 (profiles.get_asset)
+    void Promise.allSettled(
+      list.map(async (p) => {
+        try {
+          const assetBase64 = await profileService.getAsset(p.name, 'avatar', client);
+          if (assetBase64) {
+            p.avatar = assetBase64.startsWith('data:')
+              ? assetBase64
+              : `data:image/png;base64,${assetBase64}`;
+
+            // 同步将真实头像回填到会话列表中对应 Bot 的所有会话项，彻底消除占位图腾
+            for (const s of state.sessions) {
+              if (s.botName === p.name) {
+                s.botAvatar = p.avatar;
+              }
+            }
+            render();
+          }
+        } catch (e) {
+          // 显式记录失败原因：头像拉取异常不得伪装成"没有头像"
+          console.warn(`[Flux] profiles.get_asset failed for ${p.name}:`, e);
+        }
+
+        // 3. 异步尝试探查该 Bot 的终生主工位最新一条消息摘要与时间 (order: 'latest' 确保拉取真正最新，而不是第1条老消息)
+        try {
+          const forever = await profileService.getOrCreateForeverChat(p.name, client);
+          if (forever && forever.sessionId) {
+            const histRes = await client.fetchSessionMessages(forever.sessionId, { limit: 1, offset: 0, order: 'latest' });
+            if (histRes.ok && histRes.messages && histRes.messages.length > 0) {
+              const last = histRes.messages[0];
+              const parts = Array.isArray(last.parts) ? (last.parts as Array<{ type?: string; text?: string }>) : [];
+              const textPart = parts.find((pt) => pt.type === 'text');
+              const previewText = textPart?.text || (typeof last.content === 'string' ? last.content : '');
+              if (previewText) p.lastMessage = previewText.replace(/\s+/g, ' ').trim();
+              const ts = last.created_at || last.timestamp;
+              if (ts) {
+                const numTs = typeof ts === 'number' ? (ts > 1e11 ? ts : ts * 1000) : Date.parse(ts) || Date.now();
+                const diffMin = Math.max(1, Math.round((Date.now() - numTs) / 60000));
+                p.lastTime = diffMin < 60 ? t('time.minutesAgo', { count: String(diffMin) }) : diffMin < 1440 ? t('time.hoursAgo', { count: String(Math.round(diffMin / 60)) }) : t('time.daysAgo', { count: String(Math.round(diffMin / 1440)) });
+              }
+              render();
+            }
+          }
+        } catch {
+          // 容错放行
+        }
+      })
+    );
   } catch (e) {
     console.warn('[Flux] fetchProfiles failed:', e);
   }
@@ -1083,11 +1576,21 @@ async function ensureLiveSessionId(): Promise<string> {
   return '';
 }
 
-async function createNewSession(): Promise<void> {
+async function createNewSession(options?: { profile?: string; projectId?: string; title?: string }): Promise<void> {
   if (!gatewayClient) {
     setTimedDockNotice('未连接网关，无法新建会话');
     render();
     return;
+  }
+
+  const targetProfile = options?.profile || state.profileName || 'default';
+  const targetTitle = options?.title || t('chat.defaultTaskTitle');
+  const targetProjectId = options?.projectId;
+
+  let targetCwd: string | undefined;
+  if (targetProjectId) {
+    const proj = state.projects.find((p) => p.id === targetProjectId);
+    if (proj?.path) targetCwd = proj.path;
   }
 
   // Preserve draft for current session before creating new
@@ -1097,16 +1600,20 @@ async function createNewSession(): Promise<void> {
   }
 
   try {
-    let res: any;
+    const createPayload: Record<string, unknown> = {
+      title: targetTitle,
+      profile: targetProfile,
+    };
+    if (targetProjectId) createPayload.project_id = targetProjectId;
+    if (targetCwd) createPayload.cwd = targetCwd;
+
+    let res: Record<string, unknown> | null = null;
     try {
-      res = await gatewayClient.call<any>('session.create', {
-        title: '新任务',
-        profile: state.profileName || 'default',
-      });
+      res = await gatewayClient.call<Record<string, unknown>>('session.create', createPayload);
     } catch (firstErr) {
       if (isExtraInputsError(firstErr)) {
         console.warn('[Flux] Gateway rejected extra params on session.create, retrying minimal');
-        res = await gatewayClient.call<any>('session.create', {});
+        res = await gatewayClient.call<Record<string, unknown>>('session.create', { title: targetTitle, profile: targetProfile });
       } else {
         throw firstErr;
       }
@@ -1119,8 +1626,10 @@ async function createNewSession(): Promise<void> {
       return;
     }
 
+    state.profileName = targetProfile;
     state.activeSessionId = handles.storedId;
     state.activeLiveSessionId = handles.liveId;
+    state.activeFocus = { type: 'session', sessionId: handles.storedId };
     state.messages = [];
     sessionMessagesCache.set(handles.storedId, []);
     state.dockNotice = '';
@@ -1131,12 +1640,20 @@ async function createNewSession(): Promise<void> {
     state.agentActivityStatus = isStreamingActiveForCurrentSession() ? state.agentActivityStatus : undefined;
     updateActivityPill(state.agentActivityStatus);
 
-    // session.list does not expose a brand-new session until its first turn is
-    // persisted, so the rail gets an optimistic entry right away.
+    // session.list does not expose a brand-new session until its first turn is persisted
     if (!state.pendingSessionIds.includes(handles.storedId)) {
       state.pendingSessionIds = [handles.storedId, ...state.pendingSessionIds];
     }
-    state.sessions = upsertSession(state.sessions, toPendingSession(handles, '新任务'));
+    const matchingProfile = state.profiles.find((p) => p.name === targetProfile);
+    const newSessionEntry: NormalizedSession = {
+      ...toPendingSession(handles, targetTitle),
+      botName: targetProfile,
+      botDisplayName: matchingProfile?.displayName || targetProfile,
+      botAvatar: matchingProfile?.avatar || '',
+      projectId: targetProjectId,
+      cwd: targetCwd,
+    };
+    state.sessions = upsertSession(state.sessions, newSessionEntry);
 
     pendingScrollToBottom = true;
     render();
@@ -1162,8 +1679,17 @@ async function createNewSession(): Promise<void> {
 async function deleteSession(id: string): Promise<void> {
   if (!gatewayClient || !id) return;
 
+  const targetSession = state.sessions.find((s) => s.id === id);
+  const targetProfiles = new Set<string>();
+  if (targetSession?.botName) targetProfiles.add(targetSession.botName);
+  if (state.profileName) targetProfiles.add(state.profileName);
+  targetProfiles.add('default');
+  for (const p of state.profiles) {
+    if (p.name) targetProfiles.add(p.name);
+  }
+
   try {
-    // 1. If session is active/running, close/interrupt it first
+    // 1. 先关闭与中断可能处于活跃状态的句柄
     try {
       await gatewayClient.call('session.close', { session_id: id });
     } catch {}
@@ -1171,33 +1697,31 @@ async function deleteSession(id: string): Promise<void> {
       await gatewayClient.call('session.interrupt', { session_id: id });
     } catch {}
 
-    // 2. Perform delete
-    let deleted = false;
-    try {
-      await gatewayClient.call('session.delete', { session_id: id });
-      deleted = true;
-    } catch (delErr: any) {
-      const delMsg = describeRpcError(delErr);
-      // If 4023 cannot delete an active session, try session.set_hidden or REST
-      if (delMsg.includes('4023') || delMsg.includes('active session')) {
-        try {
-          await gatewayClient.call('session.set_hidden', { session_id: id, hidden: true });
-          deleted = true;
-        } catch {
-          // Try REST delete proxy
-          if (desktopApi?.httpProxy) {
-            const baseUrl = getEffectiveUrl(state.gatewayUrl);
-            await desktopApi.httpProxy({
-              baseUrl,
-              path: `/api/sessions/${encodeURIComponent(id)}`,
-              method: 'DELETE',
-              ticket: currentTicket,
-            }).catch(() => null);
-            deleted = true;
-          }
+    // 2. 遍历可能归属的 Profile 库物理执行真实 session.delete
+    let deleteSucceeded = false;
+    for (const prof of targetProfiles) {
+      try {
+        await gatewayClient.call('session.delete', { session_id: id, profile: prof });
+        deleteSucceeded = true;
+      } catch (delErr: unknown) {
+        const delMsg = describeRpcError(delErr);
+        if (delMsg.includes('4023') || delMsg.includes('active session')) {
+          try {
+            await gatewayClient.call('session.set_hidden', { session_id: id, hidden: true, profile: prof });
+            deleteSucceeded = true;
+          } catch {}
         }
-      } else {
-        throw delErr;
+      }
+
+      // REST 通道同步执行删除
+      if (desktopApi?.httpProxy) {
+        const baseUrl = getEffectiveUrl(state.gatewayUrl);
+        await desktopApi.httpProxy({
+          baseUrl,
+          path: `/api/sessions/${encodeURIComponent(id)}?profile=${encodeURIComponent(prof)}`,
+          method: 'DELETE',
+          ticket: currentTicket,
+        }).catch(() => null);
       }
     }
 
@@ -1216,7 +1740,7 @@ async function deleteSession(id: string): Promise<void> {
     } else {
       render();
     }
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error('[Hermes Gateway] Delete session failed:', e);
     const msg = describeRpcError(e);
     if (msg.includes('4007') || msg.includes('not found')) {
@@ -1301,7 +1825,7 @@ async function archiveSession(id: string): Promise<void> {
   render();
 }
 
-async function selectSession(id: string): Promise<void> {
+async function selectSession(id: string, options?: { preserveFocus?: boolean }): Promise<void> {
   if (!id) return;
   if (state.activeSessionId === id && state.activeLiveSessionId && state.messages.length > 0) return;
 
@@ -1314,6 +1838,11 @@ async function selectSession(id: string): Promise<void> {
   state.activeSessionId = id;
   state.activeLiveSessionId = ''; // must be re-resolved through session.resume
   state.modelMenuOpen = false;
+
+  // 严格更新互斥单焦点：仅当未要求保持焦点时，更新为普通会话焦点
+  if (!options?.preserveFocus) {
+    state.activeFocus = { type: 'session', sessionId: id };
+  }
 
   // Sync isStreaming and agentActivityStatus with the target session
   state.isStreaming = activeStreamingStoredSessionId === id;
@@ -1590,6 +2119,112 @@ async function interruptTurn(): Promise<void> {
   }
 }
 
+/**
+ * 当前群聊线程上下文：15 分钟内的连续发言复用同一 thread_id（与官方桌面端分组规则一致）
+ */
+let activeGroupThreadId: string | null = null;
+let activeGroupThreadAt = 0;
+const GROUP_THREAD_GAP_MS = 15 * 60 * 1000;
+
+/** 向托管群聊房间发送一条人类消息（官方 groups.send 契约） */
+async function sendGroupMessage(roomId: string, text: string): Promise<void> {
+  const client = gatewayClient;
+  if (!client) return;
+
+  // ui_meta 历史房间网关未托管，groups.send 会返回 4111/4112，这里显式提示而不是抛 4001
+  if (!hostedRoomIds.has(roomId)) {
+    setTimedDockNotice(t('group.legacyReadOnly'));
+    render();
+    return;
+  }
+
+  const now = Date.now();
+  const threadId = activeGroupThreadId && now - activeGroupThreadAt < GROUP_THREAD_GAP_MS
+    ? activeGroupThreadId
+    : undefined;
+
+  const userMsgId = `grp-usr-${now}`;
+  state.messages.push({
+    id: userMsgId,
+    role: 'user',
+    content: text,
+    timestamp: formatTimestamp(now),
+  });
+  pendingScrollToBottom = true;
+  render();
+  scrollStreamToBottom('group message sent');
+
+  try {
+    const res = await groupRoomStore.sendMessage(roomId, text, 'user', client, { threadId });
+    activeGroupThreadId = res.event?.payload?.thread_id || threadId || null;
+    activeGroupThreadAt = now;
+
+    // 发送成功后回读房间日志，并有限轮询等待成员回合的回复落盘
+    void refreshGroupRoomLog(roomId);
+    void pollGroupRoomLog(roomId);
+  } catch (err) {
+    console.error('[Flux] groups.send failed:', err);
+    setTimedDockNotice(t('group.sendFailed', { error: describeRpcError(err) }));
+    render();
+  }
+}
+
+/** 回读群聊房间日志并增量刷新中间对话舱 */
+async function refreshGroupRoomLog(roomId: string): Promise<number> {
+  const client = gatewayClient;
+  if (!client || state.activeFocus.type !== 'group' || state.activeFocus.roomId !== roomId) return 0;
+  try {
+    const logs = await groupRoomStore.fetchLogs(roomId, client);
+    if (!logs || logs.length === 0) return 0;
+    if (state.activeFocus.type !== 'group' || state.activeFocus.roomId !== roomId) return 0;
+    state.messages = logs.map((entry, idx) => ({
+      id: entry.messageId || `g_msg_${idx}`,
+      role: entry.actorKind === 'user' || entry.senderProfile === 'user' ? 'user' : 'assistant',
+      content: entry.text,
+      sender: entry.senderProfile || 'Agent',
+      timestamp: formatTimestamp(entry.timestamp || Date.now()),
+    }));
+    pendingScrollToBottom = true;
+    render();
+    return logs.length;
+  } catch (e) {
+    console.warn('[Flux] refreshGroupRoomLog failed:', e);
+    return 0;
+  }
+}
+
+/**
+ * 有限轮询群聊日志，等待成员回合的回复落盘
+ *
+ * 【设计意图 (Why)】
+ * groups.send 只是把人类消息写进房间日志（driver_started=true），
+ * 成员的回复由网关 driver 异步产出，必须回读 groups.log 才能上屏。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ * 只读一次会永远看不到回复；用 setInterval 常驻轮询又会造成定时器泄漏与空转。
+ * 这里采用有界轮询（最多 8 轮 × 2.5s），连续两轮无新增即提前结束。
+ *
+ * 【规则 (Rules)】
+ * - 轮次与间隔必须硬编码上限，禁止无界等待；
+ * - 房间切换后立即停止，不得把 A 房间的日志写进 B 房间。
+ */
+async function pollGroupRoomLog(roomId: string, rounds = 8, intervalMs = 2500): Promise<void> {
+  let lastCount = -1;
+  let stagnant = 0;
+  for (let i = 0; i < rounds; i++) {
+    await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
+    if (state.activeFocus.type !== 'group' || state.activeFocus.roomId !== roomId) return;
+    const count = await refreshGroupRoomLog(roomId);
+    if (count <= lastCount) {
+      stagnant++;
+      if (stagnant >= 2) return;
+    } else {
+      stagnant = 0;
+      lastCount = count;
+    }
+  }
+}
+
 async function sendMessage(text: string): Promise<void> {
   const trimmed = text.trim();
   if (!trimmed) return;
@@ -1597,6 +2232,16 @@ async function sendMessage(text: string): Promise<void> {
   if (!gatewayClient) {
     setTimedDockNotice('未连接网关，无法发送消息');
     render();
+    return;
+  }
+
+  // 群聊房间必须走官方 groups.send
+  //
+  // 【防范的历史坑 (Pitfall)】
+  // 群聊的 roomId 不是 session_id。若沿用普通会话的 prompt.submit 通道，
+  // 网关会把它当成会话去查，直接返回 `[4001] session not found`。
+  if (state.activeFocus.type === 'group') {
+    await sendGroupMessage(state.activeFocus.roomId, trimmed);
     return;
   }
 
@@ -1644,6 +2289,17 @@ async function sendMessage(text: string): Promise<void> {
 
   // Sync session cache
   sessionMessagesCache.set(state.activeSessionId, [...state.messages]);
+
+  // 即时更新 Bot 工位的最新消息与时间
+  const currentFocus = state.activeFocus;
+  if (currentFocus.type === 'bot') {
+    const focusBotName = currentFocus.botName;
+    const currentBot = state.profiles.find((p) => p.name === focusBotName);
+    if (currentBot) {
+      currentBot.lastMessage = trimmed.replace(/\s+/g, ' ').trim();
+      currentBot.lastTime = t('time.minutesAgo', { count: '1' });
+    }
+  }
 
   state.isStreaming = true;
   state.agentActivityStatus = 'thinking';
@@ -2074,7 +2730,7 @@ async function connect(): Promise<void> {
         render();
 
         if (isConnected) {
-          Promise.allSettled([fetchSessions(), fetchModelOptions(), fetchProfiles()]);
+          Promise.allSettled([fetchProfiles().then(() => Promise.allSettled([fetchSessions(), fetchGroupRooms()])), fetchModelOptions(), fetchProjects()]);
         }
       }
     });
@@ -2084,7 +2740,7 @@ async function connect(): Promise<void> {
       state.gatewayConnected = true;
       state.gatewayConnecting = false;
       render();
-      Promise.allSettled([fetchSessions(), fetchModelOptions(), fetchProfiles()]);
+      Promise.allSettled([fetchProfiles().then(() => Promise.allSettled([fetchSessions(), fetchGroupRooms()])), fetchModelOptions(), fetchProjects()]);
     }
   } catch (err: any) {
     console.error('[Flux Connect] Connection failed:', err);
@@ -2297,7 +2953,8 @@ function render(): void {
   document.documentElement.dataset.maximized = state.isMaximized ? 'true' : 'false';
 
   const activeSession = state.sessions.find((s) => s.id === state.activeSessionId);
-  const currentTitle = activeSession ? activeSession.title : (state.gatewayConnected ? 'Hermes Flux — 请选择或新建会话' : '未连接网关');
+  const rawTitle = activeSession ? activeSession.title : (state.gatewayConnected ? t('titlebar.defaultTitle') : t('titlebar.notConnected'));
+  const currentTitle = rawTitle === 'Bot Chat' ? `🤖 ${state.profileName} (Forever Chat)` : rawTitle;
 
   const currentLastMsg = state.messages.length > 0 ? state.messages[state.messages.length - 1] : null;
   const currentMessagesSnapshot: RenderMessagesSnapshot = {
@@ -2342,6 +2999,8 @@ function render(): void {
         title: currentTitle,
         isMaximized: state.isMaximized,
         gatewayConnected: state.gatewayConnected,
+        gatewayLatencyMs: state.gatewayLatencyMs,
+        theme: state.theme,
         profileName: state.profileName,
         profiles: state.profiles,
       })}
@@ -2350,11 +3009,19 @@ function render(): void {
         ${renderLeftRail({
           collapsed: state.leftRailCollapsed,
           activeSessionId: state.activeSessionId,
+          activeFocus: state.activeFocus,
           sessions: state.sessions,
           profileName: state.profileName,
           profiles: state.profiles,
+          groups: state.groupRooms,
+          projects: state.projects,
+          activeRailTab: state.activeRailTab,
           gatewayOnline: state.gatewayConnected,
           gatewayLatencyMs: state.gatewayLatencyMs,
+          searchQuery: state.sessionSearchQuery,
+          isSessionsGroupExpanded: state.isSessionsGroupExpanded,
+          isGroupsGroupExpanded: state.isGroupsGroupExpanded,
+          isMoreSessionsExpanded: state.isMoreSessionsExpanded,
           error: state.sessionListError,
         })}
 
@@ -2426,6 +3093,14 @@ function render(): void {
         testStatus: state.testStatus,
       })}
 
+      ${renderNewTaskModal({
+        isOpen: state.isNewTaskModalOpen,
+        profiles: state.profiles,
+        projects: state.projects,
+        selectedProfile: state.profileName || 'default',
+        selectedProjectId: state.selectedNewTaskProjectId,
+      })}
+
       ${renderContextMenuHtml(state.sessionContextMenu)}
     `;
 
@@ -2441,6 +3116,8 @@ function render(): void {
         title: currentTitle,
         isMaximized: state.isMaximized,
         gatewayConnected: state.gatewayConnected,
+        gatewayLatencyMs: state.gatewayLatencyMs,
+        theme: state.theme,
         profileName: state.profileName,
         profiles: state.profiles,
       });
@@ -2451,11 +3128,19 @@ function render(): void {
       railEl.outerHTML = renderLeftRail({
         collapsed: state.leftRailCollapsed,
         activeSessionId: state.activeSessionId,
+        activeFocus: state.activeFocus,
         sessions: state.sessions,
         profileName: state.profileName,
         profiles: state.profiles,
+        groups: state.groupRooms,
+        projects: state.projects,
+        activeRailTab: state.activeRailTab,
         gatewayOnline: state.gatewayConnected,
         gatewayLatencyMs: state.gatewayLatencyMs,
+        searchQuery: state.sessionSearchQuery,
+        isSessionsGroupExpanded: state.isSessionsGroupExpanded,
+        isGroupsGroupExpanded: state.isGroupsGroupExpanded,
+        isMoreSessionsExpanded: state.isMoreSessionsExpanded,
         error: state.sessionListError,
       });
     }
@@ -2538,6 +3223,25 @@ function render(): void {
       modalRoot.outerHTML = nextModalHtml;
     } else {
       root.insertAdjacentHTML('beforeend', nextModalHtml);
+    }
+
+    // New Task & Group Modal
+    const taskModalRoot = document.getElementById('new-task-modal-overlay');
+    const nextTaskModalHtml = renderNewTaskModal({
+      isOpen: state.isNewTaskModalOpen,
+      profiles: state.profiles,
+      projects: state.projects,
+      selectedProfile: state.profileName || 'default',
+      selectedProjectId: state.selectedNewTaskProjectId,
+    });
+    if (taskModalRoot) {
+      if (nextTaskModalHtml) {
+        taskModalRoot.outerHTML = nextTaskModalHtml;
+      } else {
+        taskModalRoot.remove();
+      }
+    } else if (nextTaskModalHtml) {
+      root.insertAdjacentHTML('beforeend', nextTaskModalHtml);
     }
 
     // Context Menu
@@ -3103,14 +3807,29 @@ function bindEvents(): void {
     };
   }
 
-  // Session search filter
+  // Session, Bot & Group instant search filter
   const searchInput = document.getElementById('session-search-input') as HTMLInputElement | null;
   if (searchInput) {
     searchInput.oninput = () => {
+      state.sessionSearchQuery = searchInput.value;
       const query = searchInput.value.toLowerCase().trim();
       document.querySelectorAll('.session-item').forEach((item) => {
-        const title = item.querySelector('span')?.textContent?.toLowerCase() || '';
-        (item as HTMLElement).style.display = title.includes(query) ? 'flex' : 'none';
+        const title = (item.getAttribute('data-title') || '').toLowerCase();
+        const bot = (item.getAttribute('data-bot') || '').toLowerCase();
+        const text = item.textContent?.toLowerCase() || '';
+        const match = !query || title.includes(query) || bot.includes(query) || text.includes(query);
+        (item as HTMLElement).style.display = match ? 'flex' : 'none';
+      });
+      document.querySelectorAll('.rail-pinned-bot-row').forEach((row) => {
+        const prof = (row.getAttribute('data-profile') || '').toLowerCase();
+        const text = row.textContent?.toLowerCase() || '';
+        const match = !query || prof.includes(query) || text.includes(query);
+        (row as HTMLElement).style.display = match ? 'flex' : 'none';
+      });
+      document.querySelectorAll('.rail-group-item').forEach((row) => {
+        const text = row.textContent?.toLowerCase() || '';
+        const match = !query || text.includes(query);
+        (row as HTMLElement).style.display = match ? 'flex' : 'none';
       });
     };
   }
@@ -3182,7 +3901,199 @@ function bindEvents(): void {
 
   // Session items & Context Menu
   const newChatBtn = document.getElementById('new-chat-btn');
-  if (newChatBtn) newChatBtn.onclick = () => createNewSession();
+  if (newChatBtn) {
+    newChatBtn.onclick = () => {
+      void fetchProjects();
+      state.isNewTaskModalOpen = true;
+      render();
+    };
+  }
+
+  // New Task & Group Modal Events
+  const closeTaskModalBtn = document.getElementById('btn-close-task-modal');
+  const cancelTaskModalBtn = document.getElementById('btn-cancel-task-modal');
+  if (closeTaskModalBtn) closeTaskModalBtn.onclick = () => { state.isNewTaskModalOpen = false; render(); };
+  if (cancelTaskModalBtn) cancelTaskModalBtn.onclick = () => { state.isNewTaskModalOpen = false; render(); };
+
+  let activeModalType: 'solo' | 'group' = 'solo';
+  const modalTabSolo = document.getElementById('modal-tab-solo');
+  const modalTabGroup = document.getElementById('modal-tab-group');
+  const secSolo = document.getElementById('modal-section-solo-agent');
+  const secGroup = document.getElementById('modal-section-group-members');
+
+  if (modalTabSolo && modalTabGroup) {
+    modalTabSolo.onclick = () => {
+      activeModalType = 'solo';
+      modalTabSolo.classList.add('active');
+      modalTabSolo.style.background = 'var(--bg-card)';
+      modalTabSolo.style.borderColor = 'var(--border-medium)';
+      modalTabSolo.style.color = 'var(--text-main)';
+      modalTabGroup.classList.remove('active');
+      modalTabGroup.style.background = 'transparent';
+      modalTabGroup.style.borderColor = 'transparent';
+      modalTabGroup.style.color = 'var(--text-muted)';
+      if (secSolo) secSolo.style.display = 'flex';
+      if (secGroup) secGroup.style.display = 'none';
+    };
+    modalTabGroup.onclick = () => {
+      activeModalType = 'group';
+      modalTabGroup.classList.add('active');
+      modalTabGroup.style.background = 'var(--bg-card)';
+      modalTabGroup.style.borderColor = 'var(--border-medium)';
+      modalTabGroup.style.color = 'var(--text-main)';
+      modalTabSolo.classList.remove('active');
+      modalTabSolo.style.background = 'transparent';
+      modalTabSolo.style.borderColor = 'transparent';
+      modalTabSolo.style.color = 'var(--text-muted)';
+      if (secSolo) secSolo.style.display = 'none';
+      if (secGroup) secGroup.style.display = 'flex';
+    };
+  }
+
+  let selectedModalAgent = state.profileName || 'default';
+  document.querySelectorAll('.modal-agent-option').forEach((opt) => {
+    (opt as HTMLElement).onclick = () => {
+      document.querySelectorAll('.modal-agent-option').forEach((o) => {
+        (o as HTMLElement).classList.remove('selected');
+        (o as HTMLElement).style.borderColor = 'var(--border-subtle)';
+        (o as HTMLElement).style.background = 'var(--bg-panel)';
+      });
+      (opt as HTMLElement).classList.add('selected');
+      (opt as HTMLElement).style.borderColor = 'var(--accent)';
+      (opt as HTMLElement).style.background = 'var(--accent-subtle)';
+      selectedModalAgent = (opt as HTMLElement).dataset.profile || 'default';
+    };
+  });
+
+  const submitTaskModalBtn = document.getElementById('btn-submit-task-modal');
+  if (submitTaskModalBtn) {
+    submitTaskModalBtn.onclick = async () => {
+      const titleInput = (document.getElementById('modal-task-title-input') as HTMLInputElement)?.value.trim();
+      const projSelect = (document.getElementById('modal-project-select') as HTMLSelectElement)?.value;
+      state.isNewTaskModalOpen = false;
+
+      if (activeModalType === 'solo') {
+        await createNewSession({
+          profile: selectedModalAgent,
+          projectId: projSelect || undefined,
+          title: titleInput || t('chat.defaultTaskTitle'),
+        });
+      } else {
+        const checkedMembers: string[] = [];
+        document.querySelectorAll('.modal-group-member-checkbox:checked').forEach((cb) => {
+          checkedMembers.push((cb as HTMLInputElement).value);
+        });
+        const members = checkedMembers.length >= 2 ? checkedMembers : [selectedModalAgent, 'default'];
+        try {
+          const room = await groupRoomStore.createRoom(titleInput || t('chat.defaultGroupTitle'), members, gatewayClient!);
+          await fetchGroupRooms();
+          const roomId = room.room_id || '';
+          if (roomId) await openGroupRoom(roomId);
+        } catch (err) {
+          state.dockNotice = t('dock.createGroupFailed', { error: describeRpcError(err) });
+          render();
+        }
+      }
+    };
+  }
+
+  // Quick theme toggle from Titlebar (Linear Dark <-> Linear Light)
+  const themeToggleBtn = document.getElementById('titlebar-theme-toggle-btn');
+  if (themeToggleBtn) {
+    themeToggleBtn.onclick = () => {
+      const nextTheme = state.theme === 'obsidian-gold' ? 'jade-white' : 'obsidian-gold';
+      state.theme = nextTheme;
+      localStorage.setItem('hermes_flux_theme', nextTheme);
+      localStorage.setItem('hermes_aura_theme', nextTheme);
+      document.documentElement.setAttribute('data-theme', nextTheme);
+      render();
+    };
+  }
+
+  // Left rail switcher tabs [ 会话 | 项目 ]
+  const tabBtnChats = document.getElementById('tab-btn-rail-chats');
+  const tabBtnProjects = document.getElementById('tab-btn-rail-projects');
+  if (tabBtnChats) {
+    tabBtnChats.onclick = () => {
+      state.activeRailTab = 'chats';
+      render();
+    };
+  }
+  if (tabBtnProjects) {
+    tabBtnProjects.onclick = () => {
+      state.activeRailTab = 'projects';
+      void fetchProjects();
+      render();
+    };
+  }
+
+  // Left rail progressive disclosure "展示更多"
+  const btnMoreSessions = document.getElementById('btn-rail-more-sessions');
+  if (btnMoreSessions) {
+    btnMoreSessions.onclick = () => {
+      state.isMoreSessionsExpanded = true;
+      render();
+    };
+  }
+
+  // Left rail sessions accordion toggle
+  const sessionsTrigger = document.getElementById('rail-sessions-accordion-trigger');
+  if (sessionsTrigger) {
+    sessionsTrigger.onclick = () => {
+      state.isSessionsGroupExpanded = !state.isSessionsGroupExpanded;
+      render();
+    };
+  }
+
+  // Left rail groups accordion toggle
+  const groupsTrigger = document.getElementById('rail-groups-accordion-trigger');
+  if (groupsTrigger) {
+    groupsTrigger.onclick = () => {
+      state.isGroupsGroupExpanded = !state.isGroupsGroupExpanded;
+      render();
+    };
+  }
+
+  // Project accordion click in Left Rail
+  document.querySelectorAll('.project-accordion-trigger').forEach((trigger) => {
+    (trigger as HTMLElement).onclick = (e) => {
+      const parent = (trigger as HTMLElement).closest('.project-accordion-unit');
+      if (parent) {
+        const isOpen = parent.classList.contains('open');
+        const nested = parent.querySelector('.project-accordion-nested') as HTMLElement | null;
+        const chevron = parent.querySelector('.proj-chevron-icon') as HTMLElement | null;
+        if (isOpen) {
+          parent.classList.remove('open');
+          if (nested) nested.style.display = 'none';
+          if (chevron) chevron.style.transform = 'rotate(0deg)';
+        } else {
+          parent.classList.add('open');
+          if (nested) nested.style.display = 'flex';
+          if (chevron) chevron.style.transform = 'rotate(90deg)';
+        }
+      }
+    };
+  });
+
+  // Pinned Bot Row click in Left Rail: 直接进入该 Bot 的对话界面
+  document.querySelectorAll('.rail-pinned-bot-row').forEach((row) => {
+    (row as HTMLElement).onclick = (e) => {
+      const profile = (row as HTMLElement).dataset.profile;
+      if (profile) {
+        void openBotChat(profile);
+      }
+    };
+  });
+
+  // Multi-Agent Group Room item click
+  document.querySelectorAll('.rail-group-item').forEach((row) => {
+    (row as HTMLElement).onclick = (e) => {
+      const roomId = (row as HTMLElement).dataset.roomId;
+      if (roomId) {
+        void openGroupRoom(roomId);
+      }
+    };
+  });
 
   document.querySelectorAll('.session-item').forEach((item) => {
     (item as HTMLElement).onclick = (e) => {
