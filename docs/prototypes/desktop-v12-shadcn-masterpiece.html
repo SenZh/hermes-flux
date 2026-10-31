@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hermes Flux Desktop —— 极简纯净生产级工作台</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: ["class"],
+    theme: {
+      extend: {
+        colors: {
+          border: "hsl(var(--border))",
+          background: "hsl(var(--background))",
+          foreground: "hsl(var(--foreground))",
+          muted: {
+            DEFAULT: "hsl(var(--muted))",
+            foreground: "hsl(var(--muted-foreground))",
+          },
+          accent: {
+            DEFAULT: "hsl(var(--accent))",
+            foreground: "hsl(var(--accent-foreground))",
+          },
+          card: {
+            DEFAULT: "hsl(var(--card))",
+            foreground: "hsl(var(--card-foreground))",
+          },
+        },
+        fontFamily: {
+          sans: ["Inter", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "PingFang SC", "sans-serif"],
+          mono: ["JetBrains Mono", "SF Mono", "Consolas", "monospace"],
+        }
+      },
+    },
+  }
+</script>
+<style>
+/* 严格收敛为 Linear / GitHub 纯净母版色板：零花里胡哨、零彩虹糖 */
+:root {
+  --background: 210 20% 98%;        /* #F6F8FA 温润浅冷灰 */
+  --foreground: 220 20% 12%;        /* #111827 高反差深灰黑 */
+  --card: 0 0% 100%;                 /* #FFFFFF 纯白卡片 */
+  --card-foreground: 220 20% 12%;
+  --muted: 210 20% 94%;              /* #EAEFF4 次级微灰 */
+  --muted-foreground: 215 15% 45%;   /* #64748B 次要信息 */
+  --accent: 210 20% 92%;
+  --accent-foreground: 220 20% 12%;
+  --border: 215 18% 88%;             /* #D8DEE6 极细冷灰微边框 */
+  --sidebar: 210 20% 96%;            /* #F1F4F8 侧栏 */
+}
+
+.dark {
+  --background: 220 20% 6%;          /* #0B0E14 深邃纯黑 */
+  --foreground: 210 20% 96%;        /* #F1F5F9 */
+  --card: 220 18% 10%;               /* #141822 卡片深灰 */
+  --card-foreground: 210 20% 96%;
+  --muted: 220 16% 14%;
+  --muted-foreground: 215 14% 60%;
+  --accent: 220 16% 16%;
+  --accent-foreground: 210 20% 96%;
+  --border: 220 14% 18%;             /* #222836 极克制夜间细边 */
+  --sidebar: 220 18% 8%;             /* #0F131C 侧栏深黑 */
+}
+
+* { box-sizing: border-box; }
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--font-sans);
+  height: 100vh;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-thumb { background: hsl(var(--muted-foreground) / 0.25); border-radius: 4px; }
+</style>
+</head>
+<body class="flex flex-col h-screen select-none">
+
+  <!-- ═════════════════════════════════════════════════
+       1. Titlebar (44px 极简顶栏 · 拔除所有花哨高光)
+       ═════════════════════════════════════════════════ -->
+  <header class="h-11 border-b border-border bg-card/80 px-4 flex items-center justify-between shrink-0 z-50">
+    <div class="flex items-center gap-3">
+      <!-- 极简窗口点 -->
+      <div class="flex items-center gap-1.5 mr-1">
+        <span class="w-3 h-3 rounded-full bg-slate-300 dark:bg-slate-700 hover:bg-red-500 transition-colors cursor-pointer"></span>
+        <span class="w-3 h-3 rounded-full bg-slate-300 dark:bg-slate-700 hover:bg-amber-500 transition-colors cursor-pointer"></span>
+        <span class="w-3 h-3 rounded-full bg-slate-300 dark:bg-slate-700 hover:bg-emerald-500 transition-colors cursor-pointer"></span>
+      </div>
+
+      <button onclick="toggleSidebar()" class="h-7 w-7 rounded border border-border hover:bg-accent text-muted-foreground hover:text-foreground flex items-center justify-center transition-colors" title="折叠/展开侧栏 (Ctrl+B)">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+      </button>
+
+      <!-- 品牌：单色极简 -->
+      <div class="flex items-center gap-2">
+        <span class="h-5 w-5 rounded bg-foreground text-background font-black text-[11px] flex items-center justify-center tracking-tighter">H</span>
+        <span class="font-semibold text-xs tracking-tight">Hermes Flux</span>
+      </div>
+
+      <!-- ⌘K 极简灰色搜索框 -->
+      <div class="relative ml-2 hidden sm:block">
+        <div class="flex items-center gap-2 bg-muted/60 hover:bg-muted border border-border/60 rounded px-2.5 py-1 text-xs text-muted-foreground w-52 cursor-pointer transition-colors" onclick="alert('呼出 ⌘K 搜索面板')">
+          <svg class="w-3.5 h-3.5 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <span class="truncate">搜索...</span>
+          <kbd class="ml-auto pointer-events-none inline-flex h-4 items-center rounded border border-border bg-card px-1 font-mono text-[9px] text-muted-foreground">⌘K</kbd>
+        </div>
+      </div>
+    </div>
+
+    <!-- 中间：当前会话与状态微点 (单色克制) -->
+    <div class="flex items-center gap-2 text-xs font-medium">
+      <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+      <span id="topbar-session-title" class="font-semibold truncate max-w-xs">架构师 · 老王</span>
+      <span class="text-[10px] text-muted-foreground font-mono hidden md:inline">127.0.0.1:9119</span>
+    </div>
+
+    <!-- 右侧：浅色/深色切换 + 右栏折叠 + 新建按钮 -->
+    <div class="flex items-center gap-2">
+      <button onclick="document.documentElement.classList.toggle('dark')" class="h-7 w-7 rounded border border-border hover:bg-accent text-muted-foreground hover:text-foreground flex items-center justify-center transition-colors" title="切换浅色/深色">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+      </button>
+
+      <button onclick="toggleInspector()" class="h-7 w-7 rounded border border-border hover:bg-accent text-muted-foreground hover:text-foreground flex items-center justify-center transition-colors" title="折叠/展开右侧面板 (Cmd+\)">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+      </button>
+
+      <!-- 纯黑/纯白小角标新建按钮 -->
+      <button onclick="alert('+ 新建独立会话')" class="h-7 w-7 rounded bg-foreground text-background hover:opacity-90 flex items-center justify-center shadow-sm transition-transform active:scale-95" title="新建会话 (+)">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ═════════════════════════════════════════════════
+       2. 工作台三舱
+       ═════════════════════════════════════════════════ -->
+  <div class="flex-1 flex overflow-hidden">
+    
+    <!-- 左舱：260px 纯黑白灰结构 -->
+    <aside id="left-rail" class="w-[260px] bg-[hsl(var(--sidebar))] border-r border-border flex flex-col shrink-0 transition-[width] duration-200 overflow-hidden">
+      
+      <!-- 会话大盘视图 -->
+      <div id="rail-pane-chats" class="flex-1 overflow-y-auto px-2 py-3 space-y-4">
+        
+        <!-- Bot 专区 (全部默认置顶) -->
+        <div class="space-y-1">
+          <div class="px-2 pb-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+            置顶数字员工 (Bots)
+          </div>
+
+          <!-- HQ -->
+          <div class="session-card-item flex items-center gap-2.5 p-2 rounded-lg hover:bg-muted/70 cursor-pointer transition-colors" onclick="selectSession('个人主助理 (HQ)', 'Chief of Staff · 全局调度', 'HQ')">
+            <span class="flex h-7 w-7 rounded-full border border-border bg-card text-foreground font-bold text-[10px] items-center justify-center shrink-0">
+              HQ
+            </span>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold truncate">总中枢 HQ</span>
+                <span class="text-[10px] font-mono text-muted-foreground">15:10</span>
+              </div>
+              <p class="text-[11px] text-muted-foreground truncate">全局调度 · 2 个工单运行中</p>
+            </div>
+          </div>
+
+          <!-- 老王 (激活) -->
+          <div class="session-card-item active-session flex items-center gap-2.5 p-2 rounded-lg bg-card border border-border shadow-sm cursor-pointer transition-colors" onclick="selectSession('架构师 · 老王', 'Claude 3.7 · 核心主工位', 'AW')">
+            <span class="flex h-7 w-7 rounded-full border border-border bg-foreground text-background font-bold text-[10px] items-center justify-center shrink-0">
+              AW
+            </span>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold truncate">架构师 · 老王</span>
+                <span class="text-[10px] font-mono text-muted-foreground">14:31</span>
+              </div>
+              <p class="text-[11px] text-muted-foreground truncate">老王: 方案已敲定，单测全绿</p>
+            </div>
+          </div>
+
+          <!-- 小张 -->
+          <div class="session-card-item flex items-center gap-2.5 p-2 rounded-lg hover:bg-muted/70 cursor-pointer transition-colors" onclick="selectSession('前端开发 · 小张', 'DeepSeek-V3 · 样式总监', 'XZ')">
+            <span class="flex h-7 w-7 rounded-full border border-border bg-card text-foreground font-bold text-[10px] items-center justify-center shrink-0">
+              XZ
+            </span>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold truncate">前端开发 · 小张</span>
+                <span class="text-[10px] font-mono text-muted-foreground">昨天</span>
+              </div>
+              <p class="text-[11px] text-muted-foreground truncate">小张: 纯黑白灰冷调母版已对齐</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 常规会话与群聊 (按时间倒序) -->
+        <div class="space-y-1">
+          <div class="px-2 pb-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+            全部会话
+          </div>
+
+          <!-- 群聊 (纯双字母无 Emoji) -->
+          <div class="session-card-item flex items-center gap-2.5 p-2 rounded-lg hover:bg-muted/70 cursor-pointer transition-colors" onclick="selectSession('OAuth 方案联合评审', '老王 · 小张 · 审查员 (3人参会)', 'GP')">
+            <span class="flex h-7 w-7 rounded-full border border-border bg-card text-foreground font-bold text-[10px] items-center justify-center shrink-0">
+              <svg class="w-3.5 h-3.5 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            </span>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold truncate">OAuth 方案评审 (3人)</span>
+                <span class="text-[10px] font-mono text-muted-foreground">14:02</span>
+              </div>
+              <p class="text-[11px] text-muted-foreground truncate">小张: redirect URI 已对齐</p>
+            </div>
+          </div>
+
+          <!-- 旁聊 (纯细线分支图标) -->
+          <div class="session-card-item flex items-center gap-2.5 p-2 rounded-lg hover:bg-muted/70 cursor-pointer transition-colors" onclick="selectSession('老王 · 锁冲突排查', '老王专属旁聊', 'BR')">
+            <span class="flex h-7 w-7 rounded-full border border-dashed border-border bg-card text-muted-foreground font-mono font-bold text-[10px] items-center justify-center shrink-0">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+            </span>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold truncate">老王 · 锁冲突排查</span>
+                <span class="text-[10px] font-mono text-muted-foreground">11:20</span>
+              </div>
+              <p class="text-[11px] text-muted-foreground truncate">并发 CAS 重试存在排队饥饿</p>
+            </div>
+          </div>
+
+          <!-- 步进展开折叠区域 -->
+          <div id="desktop-more-sessions-fold" class="hidden space-y-1">
+            <div class="session-card-item flex items-center gap-2.5 p-2 rounded-lg hover:bg-muted/70 cursor-pointer transition-colors" onclick="selectSession('代码审查员', 'Qwen-2.5 · 门禁守卫', 'CR')">
+              <span class="flex h-7 w-7 rounded-full border border-border bg-card text-foreground font-bold text-[10px] items-center justify-center shrink-0">
+                CR
+              </span>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs font-semibold truncate">代码审查员</span>
+                  <span class="text-[10px] font-mono text-muted-foreground">周四</span>
+                </div>
+                <p class="text-[11px] text-muted-foreground truncate">Gate 0~5 静态门禁全部通过</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- 步进展开按钮 -->
+          <button id="btn-show-more-sessions" onclick="expandMoreSessionsDesktop()" class="w-full text-center py-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors flex items-center justify-center gap-1">
+            <span>展示更多 (还有 2 条)</span>
+            <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+        </div>
+
+      </div>
+
+      <!-- 项目手风琴视图 -->
+      <div id="rail-pane-projects" class="hidden flex-1 overflow-y-auto px-2 py-3 space-y-3">
+        <div class="px-2 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+          工程项目矩阵 (Projects)
+        </div>
+
+        <!-- 项目 1: hermes-flux (默认展开) -->
+        <div class="border border-border rounded-lg bg-card overflow-hidden shadow-sm" id="proj-unit-1">
+          <div onclick="toggleProjectUnit('proj-unit-1')" class="p-3 flex items-center justify-between hover:bg-muted/40 cursor-pointer transition-colors">
+            <div>
+              <div class="flex items-center gap-1.5 text-xs font-semibold">
+                <svg class="w-3.5 h-3.5 text-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                <span>hermes-flux</span>
+                <span class="inline-flex items-center rounded border border-border px-1.5 py-0.2 text-[10px] font-medium bg-muted text-foreground">1 运行</span>
+              </div>
+              <div class="text-[11px] font-mono text-muted-foreground mt-0.5">main · 4 个专属会话</div>
+            </div>
+            <svg class="w-3.5 h-3.5 text-muted-foreground transform rotate-180 transition-transform duration-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </div>
+          <!-- 展开内容：纯单色细线图标 -->
+          <div class="project-fold-content border-t border-border bg-muted/20 p-1.5 space-y-1 text-xs">
+            <div class="p-2 rounded hover:bg-muted/60 cursor-pointer flex items-center justify-between" onclick="selectSession('TASK-104: OAuth 回调', 'wt-104 · 正在跑回归单测', 'TK')">
+              <span class="font-medium text-xs flex items-center gap-1.5">
+                <svg class="w-3 h-3 text-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                <span>TASK-104: OAuth 回调</span>
+              </span>
+              <span class="text-[10px] font-mono text-muted-foreground font-semibold">PASS 8/8</span>
+            </div>
+            <div class="p-2 rounded hover:bg-muted/60 cursor-pointer flex items-center justify-between" onclick="selectSession('锁冲突排查', '老王专属旁聊', 'BR')">
+              <span class="text-xs text-muted-foreground flex items-center gap-1.5">
+                <svg class="w-3 h-3 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+                <span>锁冲突排查 (老王)</span>
+              </span>
+              <span class="text-[10px] font-mono text-muted-foreground">20m 前</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 左侧栏底部两个精致切换 Table: [ 💬 会话 ] [ 📁 项目 ] -->
+      <div class="h-9 border-t border-border bg-card/60 flex items-center p-1 gap-1 shrink-0">
+        <button id="btn-sub-chats" onclick="switchSidebarTab('chats')" class="flex-1 h-full text-xs font-semibold rounded flex items-center justify-center gap-1.5 bg-muted text-foreground transition-all">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span>会话</span>
+        </button>
+        <button id="btn-sub-projects" onclick="switchSidebarTab('projects')" class="flex-1 h-full text-xs font-semibold rounded flex items-center justify-center gap-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-all">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          <span>项目</span>
+        </button>
+      </div>
+
+      <!-- 用户信息卡片 (母版对齐) -->
+      <div class="p-2.5 border-t border-border flex items-center gap-2.5 bg-card/30">
+        <span class="flex h-7 w-7 rounded border border-border bg-muted text-foreground font-bold text-[10px] items-center justify-center shrink-0">
+          SA
+        </span>
+        <div class="flex-1 min-w-0">
+          <div class="text-xs font-semibold truncate leading-none">Sam</div>
+          <div class="text-[10px] text-muted-foreground font-mono truncate mt-1">Pro plan · 127.0.0.1</div>
+        </div>
+        <svg class="w-3.5 h-3.5 text-muted-foreground shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="7 15 12 20 17 15"/><polyline points="7 9 12 4 17 9"/></svg>
+      </div>
+    </aside>
+
+    <!-- 2.2 中舱 (MiddlePod: 通栏顶满，流式主对话) -->
+    <main class="flex-1 flex flex-col relative bg-background overflow-hidden">
+      
+      <div id="conversation-stream" class="flex-1 overflow-y-auto px-6 md:px-12 pt-6 pb-44 space-y-6 max-w-4xl mx-auto w-full">
+        
+        <!-- 用户气泡 (反高差对比：黑底白字卡片) -->
+        <div class="flex flex-row-reverse gap-3 items-start">
+          <span class="h-8 w-8 rounded-full bg-foreground text-background font-bold text-xs flex items-center justify-center shrink-0">
+            ME
+          </span>
+          <div class="max-w-[80%] rounded-xl px-4 py-3 text-sm bg-foreground text-background shadow-sm leading-relaxed">
+            老王，去 hermes-flux 项目把 OAuth 回调监听重构一下，在 Worktree 执行。
+          </div>
+        </div>
+
+        <!-- Bot 气泡 (纯净白底灰边框卡片) -->
+        <div class="flex gap-3 items-start">
+          <span class="h-8 w-8 rounded-full border border-border bg-card text-foreground font-bold text-xs flex items-center justify-center shrink-0">
+            AW
+          </span>
+          <div class="max-w-[85%] rounded-xl border border-border bg-card p-4 text-sm text-card-foreground shadow-sm space-y-3">
+            <div class="flex items-center justify-between text-xs pb-1 border-b border-border">
+              <span class="font-semibold text-foreground">架构师 · 老王</span>
+              <span class="text-muted-foreground font-mono text-[11px]">14:31</span>
+            </div>
+
+            <!-- 思维链折叠组件 (纯细线 SVG，彻底移除字符箭头) -->
+            <div class="border border-border rounded-lg overflow-hidden bg-muted/20">
+              <div onclick="toggleThinkingChain()" class="px-3 py-2 text-xs font-semibold text-foreground flex items-center justify-between hover:bg-muted/40 cursor-pointer">
+                <span class="flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  <span>深度架构推演 · 3.2s (PKCE Flow 严谨闭环)</span>
+                </span>
+                <svg id="thinking-arrow-svg" class="w-3.5 h-3.5 text-muted-foreground transform rotate-180 transition-transform duration-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+              </div>
+              <div id="thinking-chain-body" class="p-3 text-xs text-muted-foreground border-t border-border leading-relaxed font-mono">
+                1. 检索当前 AuthListener 端口绑定与 loopback 回退机制；<br>
+                2. 针对 Windows 平台端口占用添加自动回退测试用例；<br>
+                3. 在独立 Worktree <code class="text-foreground font-bold">wt-104</code> 环境执行隔离测试与实现。
+              </div>
+            </div>
+
+            <p class="leading-relaxed">
+              方案已敲定，已在 <code class="bg-muted px-1.5 py-0.5 rounded text-xs font-mono">/projects/hermes-flux</code> 自动挂载独立执行分支。
+            </p>
+
+            <!-- 任务执行卡片 (纯净冷调单色细线) -->
+            <div class="border border-border rounded-lg p-3 bg-muted/30 space-y-2">
+              <div class="flex items-center justify-between text-xs font-semibold">
+                <span class="flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5 text-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                  <span>TASK-104: OAuth 回调重构</span>
+                </span>
+                <span class="text-muted-foreground font-mono text-[11px] font-bold">● 单测通过 (8/8)</span>
+              </div>
+              <div class="text-[11px] font-mono text-muted-foreground">
+                分支: feat/auth-loopback · PID: 4801 (wt-104)
+              </div>
+              <button onclick="revealTerminalInPod()" class="w-full h-8 rounded bg-card border border-border hover:bg-muted/60 text-xs font-semibold flex items-center justify-between px-3 transition-colors shadow-sm">
+                <span class="flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                  <span>穿透查看实时终端流水 (PASS 8/8)</span>
+                </span>
+                <span class="text-muted-foreground flex items-center gap-1">
+                  <span>展开右舱</span>
+                  <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                </span>
+              </button>
+            </div>
+
+            <p class="text-xs text-muted-foreground">
+              单测与静态门禁已 100% 绿灯，是否立即提交 PR？
+            </p>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ═════════════════════════════════════════════════
+           740px 黄金居中纯白卡片输入舱 (InputDock)
+           ═════════════════════════════════════════════════ -->
+      <div class="absolute bottom-5 inset-x-0 flex justify-center px-4 pointer-events-none z-40">
+        <div class="pointer-events-auto w-full max-w-[740px] rounded-xl border border-border bg-card/95 backdrop-blur-xl shadow-lg p-3.5 space-y-2.5">
+          <textarea id="composer-input" rows="2" placeholder="给 Hermes 下达任务... (Enter 发送, Shift+Enter 换行)" class="w-full bg-transparent border-0 text-sm placeholder:text-muted-foreground focus:outline-none resize-none leading-relaxed"></textarea>
+
+          <!-- 28px 微控制条 (纯灰单色胶囊) -->
+          <div class="flex items-center justify-between pt-2 border-t border-border text-xs">
+            <div class="flex items-center gap-2">
+              <button class="inline-flex items-center gap-1.5 h-6 px-2 rounded bg-muted text-foreground hover:bg-muted/80 font-medium text-[11px] transition-colors">
+                <svg class="w-3 h-3 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                <span>Claude 3.7 Sonnet</span>
+                <svg class="w-3 h-3 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <button class="inline-flex items-center gap-1 h-6 px-2 rounded border border-border text-muted-foreground hover:text-foreground text-[11px] transition-colors">
+                <span>思考: 严谨</span>
+              </button>
+              <button class="inline-flex items-center gap-1 h-6 px-2 rounded border border-border text-muted-foreground hover:text-foreground text-[11px] transition-colors hidden sm:inline-flex">
+                <span>审批: 自动</span>
+              </button>
+            </div>
+
+            <button onclick="sendChatMessage()" class="h-7 w-7 rounded bg-foreground text-background hover:opacity-90 flex items-center justify-center transition-transform active:scale-95 shadow-sm">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"></polyline></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- 2.3 右舱 (InspectionPod 380px，支持原生折叠) -->
+    <aside id="right-inspector" class="w-[380px] bg-[hsl(var(--sidebar))] border-l border-border flex flex-col shrink-0 transition-[width] duration-200 overflow-hidden">
+      <div class="h-10 border-b border-border bg-card/80 px-3 flex items-center justify-between shrink-0">
+        <div class="flex items-center gap-1">
+          <button id="tab-term" onclick="switchInspectorTab('term')" class="px-2.5 py-1 text-xs font-semibold rounded bg-muted text-foreground transition-all flex items-center gap-1.5">
+            <svg class="w-3 h-3 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+            <span>穿透终端</span>
+          </button>
+          <button id="tab-kanban" onclick="switchInspectorTab('kanban')" class="px-2.5 py-1 text-xs font-semibold rounded text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-all flex items-center gap-1.5">
+            <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+            <span>项目看板</span>
+          </button>
+        </div>
+        <button onclick="toggleInspector()" class="h-6 w-6 rounded hover:bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center" title="收起检查舱">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+
+      <!-- 终端输出视图 (干净深黑 Slate 底色) -->
+      <div id="inspector-pane-term" class="flex-1 overflow-y-auto p-4 font-mono text-xs leading-relaxed space-y-1 bg-[#090C12] text-slate-300">
+        <div class="text-slate-500">[14:31:02] Worktree ready: /projects/hermes-flux/.worktrees/wt-104</div>
+        <div class="text-slate-500">[14:31:04] $ vitest run auth.test.mjs</div>
+        <div class="text-slate-200 font-bold">PASS packages/core/__tests__/auth.test.mjs</div>
+        <div class="text-slate-200">✓ 8 tests passed (12ms)</div>
+        <div class="text-slate-500">[14:31:07] $ tsc --noEmit</div>
+        <div class="text-slate-200">✔ TypeScript 0 errors</div>
+        <div class="text-slate-400 mt-2">测试全绿！已满足 Gate 0~5 交付准入要求。</div>
+        <div class="text-slate-500 mt-2">[14:31:12] $ git diff --stat</div>
+        <div class="text-slate-400"> packages/core/src/auth/listener.ts | 47 ++++++++-------</div>
+        <div class="text-slate-400"> packages/core/src/auth/pkce.ts     | 12 ++++</div>
+        <div class="text-slate-300 mt-3 font-bold">█ 等待人类审批落盘中...</div>
+      </div>
+
+      <!-- 看板视图 (去黄去绿，纯灰白卡片) -->
+      <div id="inspector-pane-kanban" class="hidden flex-1 overflow-y-auto p-4 space-y-4">
+        <div class="space-y-2">
+          <div class="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+            <span>●</span> 进行中 (DOING · 1)
+          </div>
+          <div class="border border-border rounded-lg p-3 bg-card shadow-sm space-y-1">
+            <div class="font-semibold text-xs text-foreground">TASK-104: OAuth 回调重构</div>
+            <div class="text-[11px] text-muted-foreground font-mono">PID 4801 · 架构老王</div>
+          </div>
+        </div>
+
+        <div class="space-y-2">
+          <div class="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+            ○ 待处理 (TODO · 2)
+          </div>
+          <div class="border border-border rounded-lg p-3 bg-card shadow-sm space-y-1">
+            <div class="font-semibold text-xs text-foreground">[UI] 状态栏翡翠呼吸灯适配</div>
+            <div class="text-[11px] text-muted-foreground">指派: 前端 · 小张</div>
+          </div>
+          <div class="border border-border rounded-lg p-3 bg-card shadow-sm space-y-1">
+            <div class="font-semibold text-xs text-foreground">[Core] FSM 5态抖动退避算法</div>
+            <div class="text-[11px] text-muted-foreground">指派: 后端 · 李雷</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+
+  <script>
+    function toggleSidebar() {
+      document.getElementById('left-rail').classList.toggle('w-0');
+      document.getElementById('left-rail').classList.toggle('w-[260px]');
+      document.getElementById('left-rail').classList.toggle('border-r');
+    }
+
+    function toggleInspector() {
+      document.getElementById('right-inspector').classList.toggle('w-0');
+      document.getElementById('right-inspector').classList.toggle('w-[380px]');
+      document.getElementById('right-inspector').classList.toggle('border-l');
+    }
+
+    function revealTerminalInPod() {
+      const inspector = document.getElementById('right-inspector');
+      if (inspector.classList.contains('w-0')) {
+        toggleInspector();
+      }
+      switchInspectorTab('term');
+    }
+
+    // 全局快捷键监听 (Ctrl+B / Cmd+B 与 Cmd+\ / Ctrl+\)
+    window.addEventListener('keydown', (e) => {
+      const isCmdOrCtrl = e.ctrlKey || e.metaKey;
+      if (isCmdOrCtrl && (e.key === 'b' || e.key === 'B')) {
+        e.preventDefault();
+        toggleSidebar();
+      } else if (isCmdOrCtrl && e.key === '\\') {
+        e.preventDefault();
+        toggleInspector();
+      }
+    });
+
+    function switchSidebarTab(tab) {
+      const isChats = tab === 'chats';
+      document.getElementById('rail-pane-chats').classList.toggle('hidden', !isChats);
+      document.getElementById('rail-pane-projects').classList.toggle('hidden', isChats);
+
+      const btnChats = document.getElementById('btn-sub-chats');
+      const btnProjects = document.getElementById('btn-sub-projects');
+
+      if (isChats) {
+        btnChats.className = "flex-1 h-full text-xs font-semibold rounded flex items-center justify-center gap-1.5 bg-muted text-foreground transition-all";
+        btnProjects.className = "flex-1 h-full text-xs font-semibold rounded flex items-center justify-center gap-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-all";
+      } else {
+        btnProjects.className = "flex-1 h-full text-xs font-semibold rounded flex items-center justify-center gap-1.5 bg-muted text-foreground transition-all";
+        btnChats.className = "flex-1 h-full text-xs font-semibold rounded flex items-center justify-center gap-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-all";
+      }
+    }
+
+    function toggleProjectUnit(unitId) {
+      const unit = document.getElementById(unitId);
+      const fold = unit.querySelector('.project-fold-content');
+      const arrow = unit.querySelector('svg:last-child');
+      
+      const isHidden = fold.classList.contains('hidden');
+      fold.classList.toggle('hidden', !isHidden);
+      arrow.classList.toggle('rotate-180', isHidden);
+    }
+
+    function expandMoreSessionsDesktop() {
+      document.getElementById('desktop-more-sessions-fold').classList.remove('hidden');
+      document.getElementById('btn-show-more-sessions').classList.add('hidden');
+    }
+
+    function toggleThinkingChain() {
+      const body = document.getElementById('thinking-chain-body');
+      const arrowSvg = document.getElementById('thinking-arrow-svg');
+      const isHidden = body.classList.contains('hidden');
+      body.classList.toggle('hidden', !isHidden);
+      arrowSvg.classList.toggle('rotate-180', !isHidden);
+    }
+
+    function switchInspectorTab(tab) {
+      const isTerm = tab === 'term';
+      document.getElementById('inspector-pane-term').classList.toggle('hidden', !isTerm);
+      document.getElementById('inspector-pane-kanban').classList.toggle('hidden', isTerm);
+
+      const tabTerm = document.getElementById('tab-term');
+      const tabKanban = document.getElementById('tab-kanban');
+
+      if (isTerm) {
+        tabTerm.className = "px-2.5 py-1 text-xs font-semibold rounded bg-muted text-foreground transition-all flex items-center gap-1.5";
+        tabKanban.className = "px-2.5 py-1 text-xs font-semibold rounded text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-all flex items-center gap-1.5";
+      } else {
+        tabKanban.className = "px-2.5 py-1 text-xs font-semibold rounded bg-muted text-foreground transition-all flex items-center gap-1.5";
+        tabTerm.className = "px-2.5 py-1 text-xs font-semibold rounded text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-all flex items-center gap-1.5";
+      }
+    }
+
+    function selectSession(title, subtitle, avText) {
+      document.getElementById('topbar-session-title').textContent = title;
+      document.querySelectorAll('.session-card-item').forEach(el => {
+        el.classList.remove('active-session', 'bg-card', 'border', 'border-border', 'shadow-sm');
+      });
+      event.currentTarget.classList.add('active-session', 'bg-card', 'border', 'border-border', 'shadow-sm');
+    }
+
+    function sendChatMessage() {
+      const input = document.getElementById('composer-input');
+      const text = input.value.trim();
+      if (!text) return;
+
+      const stream = document.getElementById('conversation-stream');
+      const userBubble = document.createElement('div');
+      userBubble.className = 'flex flex-row-reverse gap-3 items-start';
+      userBubble.innerHTML = `
+        <span class="h-8 w-8 rounded-full bg-foreground text-background font-bold text-xs flex items-center justify-center shrink-0">ME</span>
+        <div class="max-w-[80%] rounded-xl px-4 py-3 text-sm bg-foreground text-background shadow-sm leading-relaxed">${escapeHtml(text)}</div>
+      `;
+      stream.appendChild(userBubble);
+      input.value = '';
+      stream.scrollTop = stream.scrollHeight;
+
+      setTimeout(() => {
+        const botBubble = document.createElement('div');
+        botBubble.className = 'flex gap-3 items-start';
+        botBubble.innerHTML = `
+          <span class="h-8 w-8 rounded-full border border-border bg-card text-foreground font-bold text-xs flex items-center justify-center shrink-0">AW</span>
+          <div class="max-w-[85%] rounded-xl border border-border bg-card p-4 text-sm text-card-foreground shadow-sm">
+            收到指令：“${escapeHtml(text)}”。正在通过 RPC 分发处理。
+          </div>
+        `;
+        stream.appendChild(botBubble);
+        stream.scrollTop = stream.scrollHeight;
+      }, 500);
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+  </script>
+</body>
+</html>

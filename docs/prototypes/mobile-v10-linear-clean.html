@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Hermes Flux Mobile v10.0 —— Linear 级纯净美学版</title>
+<style>
+/* 严格映射 Linear / Vercel 现代极简设计规范 */
+:root {
+  --bg-page: #F9FAFB;
+  --bg-card: #FFFFFF;
+  --bg-subtle: #F3F4F6;
+  --bg-hover: #F1F2F4;
+  --border-card: #E5E7EB;
+  --border-light: #F3F4F6;
+  --text-main: #111827;
+  --text-sub: #4B5563;
+  --text-muted: #9CA3AF;
+  --green-badge: #10B981;
+  --green-bg: #ECFDF5;
+  --green-border: #A7F3D0;
+  --amber-badge: #F59E0B;
+  --amber-bg: #FFFBEB;
+  --amber-border: #FDE68A;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "PingFang SC", sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html, body {
+  background: var(--bg-page);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mobile-shell {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-page);
+}
+
+/* ═════════════════════════════════════════════════
+   主视口：留出底部 54px 经典 TabBar
+   ═════════════════════════════════════════════════ */
+.stage-deck {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 54px;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.26s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.26s ease;
+}
+.stage-deck.pushed {
+  transform: translateX(-20%);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* 顶栏 (48px 极简纯净) */
+.linear-topbar {
+  height: 48px;
+  padding: 0 16px;
+  background: #FFFFFF;
+  border-bottom: 1px solid var(--border-card);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  z-index: 10;
+}
+.brand-identity {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.brand-cube {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: #111827;
+  color: #FFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 800;
+}
+.icon-action-btn {
+  min-width: 40px;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-sub);
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+.icon-action-btn:active {
+  transform: scale(0.92);
+}
+
+.tab-scroll-canvas {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 分组标签：大写小标，像母版图中的 "Your Clouds" */
+.group-label-strip {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 16px 16px 6px 16px;
+}
+
+/* ─────────────────────────────────────────────
+   Tab 1: 会话列表 (像母版图中的 Clean 卡片行)
+   ───────────────────────────────────────────── */
+.chat-entry-item {
+  margin: 0 16px 8px 16px;
+  background: #FFFFFF;
+  border: 1px solid var(--border-card);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  transition: transform 0.12s ease, border-color 0.15s;
+}
+.chat-entry-item:active {
+  transform: scale(0.985);
+  border-color: #D1D5DB;
+}
+
+/* 母版风格圆形色彩指纹徽章 (MC, AS, N, LD) */
+.circle-brand-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #FFF;
+  flex-shrink: 0;
+}
+
+.chat-center-text {
+  flex: 1;
+  min-width: 0;
+}
+.meta-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2px;
+}
+.big-name-text {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text-main);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.time-dim-text {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  margin-left: 6px;
+}
+.sub-snippet-text {
+  font-size: 12.5px;
+  color: var(--text-sub);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 母版中精致的 ⊙ Running 状态胶囊 */
+.status-capsule-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.badge-running {
+  background: var(--green-bg);
+  color: #065F46;
+  border: 1px solid var(--green-border);
+}
+.badge-working {
+  background: var(--amber-bg);
+  color: #92400E;
+  border: 1px solid var(--amber-border);
+}
+
+/* ─────────────────────────────────────────────
+   Tab 2: 项目矩阵 (手风琴式原地展开，参考母版卡片)
+   ───────────────────────────────────────────── */
+.linear-project-card {
+  margin: 0 16px 10px 16px;
+  background: #FFFFFF;
+  border: 1px solid var(--border-card);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+.linear-project-card.open {
+  border-color: #9CA3AF;
+}
+
+.project-card-banner {
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+}
+.proj-text-group {
+  display: flex;
+  flex-direction: column;
+}
+.proj-headline {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.proj-subtitle {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  margin-top: 2px;
+}
+.proj-arrow-right {
+  color: var(--text-muted);
+  font-size: 13px;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.linear-project-card.open .proj-arrow-right {
+  transform: rotate(90deg);
+  color: var(--text-main);
+}
+
+/* 原地展开动画 */
+.project-nested-fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  border-top: 1px solid transparent;
+}
+.linear-project-card.open .project-nested-fold {
+  grid-template-rows: 1fr;
+  border-top-color: var(--border-light);
+}
+.nested-content-box {
+  overflow: hidden;
+  background: #FAFAFA;
+}
+
+.nested-item-line {
+  padding: 11px 16px 11px 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 13px;
+  transition: background 0.12s;
+}
+.nested-item-line:last-child {
+  border-bottom: none;
+}
+.nested-item-line:active {
+  background: #F3F4F6;
+}
+
+/* ─────────────────────────────────────────────
+   Tab 3: 设置 (母版 Account / Settings 极简风)
+   ───────────────────────────────────────────── */
+.settings-inset-card {
+  margin: 0 16px 12px 16px;
+  background: #FFFFFF;
+  border: 1px solid var(--border-card);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.settings-cell {
+  padding: 13px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-light);
+  cursor: pointer;
+  font-size: 14px;
+}
+.settings-cell:last-child {
+  border-bottom: none;
+}
+.settings-cell:active {
+  background: var(--bg-subtle);
+}
+
+/* ═════════════════════════════════════════════════
+   微信经典底部 3-Tab 导航栏 (54px 纯白工整微边框)
+   ═════════════════════════════════════════════════ */
+.linear-tabbar-footer {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 54px;
+  background: #FFFFFF;
+  border-top: 1px solid var(--border-card);
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  z-index: 50;
+  user-select: none;
+}
+.nav-tab-cell {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s, transform 0.1s;
+}
+.nav-tab-cell:active {
+  transform: scale(0.94);
+}
+.nav-tab-cell.active {
+  color: var(--text-main);
+}
+.nav-tab-label {
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+/* ═════════════════════════════════════════════════
+   推入层: 纯净全屏对话主舱 (Push View)
+   ═════════════════════════════════════════════════ */
+.push-chat-stage {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: #FFFFFF;
+  display: flex;
+  flex-direction: column;
+  z-index: 60;
+  transform: translateX(100%);
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.push-chat-stage.active {
+  transform: translateX(0);
+}
+
+.chat-stage-topbar {
+  height: 48px;
+  padding: 0 10px;
+  background: #FFFFFF;
+  border-bottom: 1px solid var(--border-card);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.btn-nav-return {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-main);
+  font-size: 14px;
+  font-weight: 600;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 6px 8px;
+  min-height: 44px;
+}
+.chat-center-headline {
+  text-align: center;
+  max-width: 220px;
+}
+.headline-title {
+  font-size: 14.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.headline-pill {
+  font-size: 10px;
+  color: var(--green-badge);
+}
+
+.chat-stream-viewport {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 16px 90px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  -webkit-overflow-scrolling: touch;
+  background: var(--bg-page);
+}
+.speech-bubble-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.speech-bubble-row.user {
+  flex-direction: row-reverse;
+}
+.speaker-avatar-circle {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #111827;
+  color: #FFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.speech-bubble-body {
+  max-width: 84%;
+  background: #FFFFFF;
+  border: 1px solid var(--border-card);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  border-radius: 12px;
+  padding: 11px 14px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-main);
+}
+.speech-bubble-row.user .speech-bubble-body {
+  background: #111827;
+  color: #FFFFFF;
+  border-color: #111827;
+  border-top-right-radius: 2px;
+}
+.speech-bubble-row.bot .speech-bubble-body {
+  border-top-left-radius: 2px;
+}
+
+/* 底部悬浮输入栏 (纯净白底 + 灰边框) */
+.dock-composer-bar {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(20px);
+  border-top: 1px solid var(--border-card);
+  padding: 8px 14px 18px 14px;
+  z-index: 40;
+}
+.dock-composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.native-composer-input {
+  flex: 1;
+  background: #F9FAFB;
+  border: 1px solid var(--border-card);
+  border-radius: 18px;
+  padding: 9px 14px;
+  outline: none;
+  color: var(--text-main);
+  font-size: 14px;
+  font-family: var(--font-sans);
+  resize: none;
+  min-height: 38px;
+  max-height: 100px;
+  line-height: 1.4;
+}
+.native-composer-input:focus {
+  border-color: #9CA3AF;
+  background: #FFFFFF;
+}
+.btn-round-send {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: #111827;
+  color: #FFF;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+</style>
+</head>
+<body>
+
+<div class="mobile-shell">
+
+  <!-- ═════════════════════════════════════════════════
+       主视口舞台 (包含 3 个 Tab)
+       ═════════════════════════════════════════════════ -->
+  <div class="stage-deck" id="stage-deck">
+    
+    <header class="linear-topbar">
+      <div class="brand-identity">
+        <div class="brand-cube">H</div>
+        <span id="page-headline">Hermes Flux</span>
+      </div>
+      <button class="icon-action-btn" onclick="alert('+ 新建会话 / 发起群聊')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+      </button>
+    </header>
+
+    <!-- ─────────────────────────────────────────────
+         Tab 1: 会话大盘 (Bot 默认置顶 + 旁聊 + 群聊)
+         ───────────────────────────────────────────── -->
+    <main class="tab-scroll-canvas" id="pane-chats">
+      
+      <div class="group-label-strip">置顶数字员工 (Bots)</div>
+
+      <!-- HQ -->
+      <div class="chat-entry-item" onclick="openChatView('个人主助理 (HQ)', 'HQ', '#10B981', 'Chief of Staff · 全局中枢调度')">
+        <div class="circle-brand-avatar" style="background:#10B981;">HQ</div>
+        <div class="chat-center-text">
+          <div class="meta-top-row">
+            <span class="big-name-text">个人主助理 (HQ)</span>
+            <span class="time-dim-text">15:10</span>
+          </div>
+          <div class="sub-snippet-text">全局中枢调度 · 2 个任务执行中，1 个 PR 待审</div>
+        </div>
+      </div>
+
+      <!-- 老王 -->
+      <div class="chat-entry-item" onclick="openChatView('架构师 · 老王', 'AW', '#6366F1', 'Claude 3.7 · 终生核心主工位')">
+        <div class="circle-brand-avatar" style="background:#6366F1;">AW</div>
+        <div class="chat-center-text">
+          <div class="meta-top-row">
+            <span class="big-name-text">架构师 · 老王</span>
+            <span class="time-dim-text">14:31</span>
+          </div>
+          <div class="sub-snippet-text">老王: 方案已敲定，单测全绿 (PASS 8/8)</div>
+        </div>
+      </div>
+
+      <!-- 小张 -->
+      <div class="chat-entry-item" onclick="openChatView('前端开发 · 小张', 'XZ', '#EC4899', 'DeepSeek-V3 · 样式总监')">
+        <div class="circle-brand-avatar" style="background:#EC4899;">XZ</div>
+        <div class="chat-center-text">
+          <div class="meta-top-row">
+            <span class="big-name-text">前端开发 · 小张</span>
+            <span class="time-dim-text">昨天</span>
+          </div>
+          <div class="sub-snippet-text">小张: Linear 级温润克制视觉规范已对齐</div>
+        </div>
+      </div>
+
+      <div class="group-label-strip">协同群聊与旁聊</div>
+
+      <!-- 群聊 -->
+      <div class="chat-entry-item" onclick="openChatView('OAuth 方案联合评审', 'GRP', '#F59E0B', '老王 · 小张 · 审查员 (3人参会)')">
+        <div class="circle-brand-avatar" style="background:#F59E0B;">👥</div>
+        <div class="chat-center-text">
+          <div class="meta-top-row">
+            <span class="big-name-text">OAuth 方案联合评审 (3人)</span>
+            <span class="time-dim-text">15:02</span>
+          </div>
+          <div class="sub-snippet-text"><span style="color:#EC4899; font-weight:600;">小张</span>: redirect URI 已更新完毕</div>
+        </div>
+      </div>
+
+      <!-- 旁聊 -->
+      <div class="chat-entry-item" onclick="openChatView('老王 · 锁冲突排查', '⑂', '#4B5563', '老王名下独立旁聊')">
+        <div class="circle-brand-avatar" style="background:#4B5563;">⑂</div>
+        <div class="chat-center-text">
+          <div class="meta-top-row">
+            <span class="big-name-text">老王 · 锁冲突排查</span>
+            <span class="time-dim-text">11:20</span>
+          </div>
+          <div class="sub-snippet-text">并发 CAS 重试机制存在饥饿隐患</div>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- ─────────────────────────────────────────────
+         Tab 2: 项目矩阵 (手风琴平滑原地展开，参考母版卡片)
+         ───────────────────────────────────────────── -->
+    <main class="tab-scroll-canvas" id="pane-projects" style="display: none; padding-top: 10px;">
+      
+      <!-- 项目 1 -->
+      <div class="linear-project-card open" id="proj-box-1">
+        <div class="project-card-banner" onclick="toggleLinearProj('proj-box-1')">
+          <div class="proj-text-group">
+            <div class="proj-headline">
+              <span class="status-capsule-badge badge-running">⊙ Running</span>
+              <span>hermes-flux</span>
+            </div>
+            <div class="proj-subtitle">/projects/hermes-flux · branch: main</div>
+          </div>
+          <span class="proj-arrow-right">›</span>
+        </div>
+
+        <div class="project-nested-fold">
+          <div class="nested-content-box">
+            <div class="nested-item-line" onclick="openChatView('TASK-104: OAuth 回调', '⚡', '#F59E0B', 'wt-104 · 正在跑单测')">
+              <span class="status-capsule-badge badge-working">⚡ PID 4801</span>
+              <div style="flex:1;">
+                <div style="font-weight:600;">TASK-104: OAuth 回调重构 (老王)</div>
+                <div style="font-size:11px; color:var(--text-muted);">单测通过 8/8</div>
+              </div>
+            </div>
+
+            <div class="nested-item-line" onclick="openChatView('老王 · 锁冲突排查', '⑂', '#4B5563', '老王名下独立旁聊')">
+              <span style="color:var(--text-muted);">⑂</span>
+              <div style="flex:1;">
+                <div style="font-weight:600;">锁冲突排查 (老王)</div>
+                <div style="font-size:11px; color:var(--text-muted);">20分钟前</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 项目 2 -->
+      <div class="linear-project-card" id="proj-box-2">
+        <div class="project-card-banner" onclick="toggleLinearProj('proj-box-2')">
+          <div class="proj-text-group">
+            <div class="proj-headline">
+              <span class="status-capsule-badge" style="background:#F3F4F6; color:#4B5563; border:1px solid #E5E7EB;">Idle</span>
+              <span>mp-langchao</span>
+            </div>
+            <div class="proj-subtitle">/projects/mp-langchao · branch: dev</div>
+          </div>
+          <span class="proj-arrow-right">›</span>
+        </div>
+
+        <div class="project-nested-fold">
+          <div class="nested-content-box">
+            <div class="nested-item-line" onclick="openChatView('登录态持久化排查', '📁', '#111827', '小程序会话')">
+              <span style="color:var(--text-muted);">📁</span>
+              <div style="flex:1;">
+                <div style="font-weight:600;">登录态持久化排查 (小张)</div>
+                <div style="font-size:11px; color:var(--text-muted);">2天前 · 已完成</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- ─────────────────────────────────────────────
+         Tab 3: 设置 (母版 Account / Settings 风格)
+         ───────────────────────────────────────────── -->
+    <main class="tab-scroll-canvas" id="pane-settings" style="display: none; padding-top: 10px;">
+      
+      <div class="group-label-strip">网络与网关</div>
+      <div class="settings-inset-card">
+        <div class="settings-cell" onclick="alert('进入网关配置')">
+          <span>网关连接 (Gateway Connection)</span>
+          <span class="status-capsule-badge badge-running">⊙ 127.0.0.1 在线</span>
+        </div>
+      </div>
+
+      <div class="group-label-strip">团队与模型</div>
+      <div class="settings-inset-card">
+        <div class="settings-cell" onclick="alert('进入专职 Bot 管理')">
+          <span>专职 Bot 团队 (3位)</span>
+          <span style="color:var(--text-muted); font-size:12px;">查看 ›</span>
+        </div>
+        <div class="settings-cell" onclick="alert('进入模型供应商')">
+          <span>模型提供商 (Providers)</span>
+          <span style="color:var(--text-muted); font-size:12px;">Anthropic, DeepSeek ›</span>
+        </div>
+      </div>
+
+    </main>
+
+  </div>
+
+  <!-- ═════════════════════════════════════════════════
+       微信经典底部 3-Tab 导航栏 (54px 纯白微边框)
+       ═════════════════════════════════════════════════ -->
+  <nav class="linear-tabbar-footer">
+    <div class="nav-tab-cell active" id="tab-btn-1" onclick="switchLinearTab(1)">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+      <div class="nav-tab-label">会话</div>
+    </div>
+    <div class="nav-tab-cell" id="tab-btn-2" onclick="switchLinearTab(2)">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+      <div class="nav-tab-label">项目</div>
+    </div>
+    <div class="nav-tab-cell" id="tab-btn-3" onclick="switchLinearTab(3)">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+      <div class="nav-tab-label">设置</div>
+    </div>
+  </nav>
+
+  <!-- ═════════════════════════════════════════════════
+       推入层: 纯净全屏对话主舱 (Push View)
+       ═════════════════════════════════════════════════ -->
+  <div class="push-chat-stage" id="chat-stage">
+    <header class="chat-stage-topbar">
+      <button class="btn-nav-return" onclick="closeChatView()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+        <span>返回</span>
+      </button>
+      <div class="chat-center-headline">
+        <div class="headline-title" id="chat-title-slot">架构师 · 老王</div>
+        <div class="headline-pill" id="chat-desc-slot">Claude 3.7 · 核心主工位</div>
+      </div>
+      <div style="width:44px;"></div>
+    </header>
+
+    <main class="chat-stream-viewport" id="chat-viewport">
+      <div class="speech-bubble-row user">
+        <div class="speaker-avatar-circle">ME</div>
+        <div class="speech-bubble-body">老王，去 hermes-flux 项目把 OAuth 回调监听重构一下，在 Worktree 跑。</div>
+      </div>
+
+      <div class="speech-bubble-row bot">
+        <div class="speaker-avatar-circle" id="chat-bot-avatar" style="background:#6366F1;">AW</div>
+        <div class="speech-bubble-body">
+          方案已敲定，已在 <code>/projects/hermes-flux</code> 自动挂载独立执行分支。<br>
+          单测与门禁已 100% 绿灯 (PASS 8/8)，等待提交 PR。
+        </div>
+      </div>
+    </main>
+
+    <div class="dock-composer-bar">
+      <div class="dock-composer-row">
+        <textarea class="native-composer-input" id="composer-text" rows="1" placeholder="发消息..."></textarea>
+        <button class="btn-round-send" onclick="submitMessage()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  function switchLinearTab(idx) {
+    document.querySelectorAll('.nav-tab-cell').forEach((b, i) => {
+      b.classList.toggle('active', i + 1 === idx);
+    });
+
+    const pChats = document.getElementById('pane-chats');
+    const pProjects = document.getElementById('pane-projects');
+    const pSettings = document.getElementById('pane-settings');
+    const headline = document.getElementById('page-headline');
+
+    pChats.style.display = idx === 1 ? 'block' : 'none';
+    pProjects.style.display = idx === 2 ? 'block' : 'none';
+    pSettings.style.display = idx === 3 ? 'block' : 'none';
+
+    if (idx === 1) headline.textContent = 'Hermes Flux';
+    if (idx === 2) headline.textContent = '项目矩阵';
+    if (idx === 3) headline.textContent = '系统设置';
+  }
+
+  function toggleLinearProj(cardId) {
+    document.getElementById(cardId).classList.toggle('open');
+  }
+
+  const stageDeck = document.getElementById('stage-deck');
+  const chatStage = document.getElementById('chat-stage');
+
+  function openChatView(title, avText, avBg, desc) {
+    document.getElementById('chat-title-slot').textContent = title;
+    document.getElementById('chat-desc-slot').textContent = desc;
+
+    const av = document.getElementById('chat-bot-avatar');
+    av.textContent = avText;
+    av.style.background = avBg;
+
+    stageDeck.classList.add('pushed');
+    chatStage.classList.add('active');
+  }
+
+  function closeChatView() {
+    chatStage.classList.remove('active');
+    stageDeck.classList.remove('pushed');
+  }
+
+  function submitMessage() {
+    const input = document.getElementById('composer-text');
+    const text = input.value.trim();
+    if (!text) return;
+
+    const stream = document.getElementById('chat-viewport');
+    const row = document.createElement('div');
+    row.className = 'speech-bubble-row user';
+    row.innerHTML = `
+      <div class="speaker-avatar-circle">ME</div>
+      <div class="speech-bubble-body">${escapeHtml(text)}</div>
+    `;
+    stream.appendChild(row);
+    input.value = '';
+    stream.scrollTop = stream.scrollHeight;
+  }
+
+  function escapeHtml(str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+</script>
+
+</body>
+</html>

@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Hermes Flux Desktop v9.0 —— Linear 级纯净美学版</title>
+<style>
+/* 完全基于母版图 MausBot Cloud / Linear 风格色板与排版标尺 */
+:root {
+  --bg-app: #F9FAFB;
+  --bg-sidebar: #F9FAFB;
+  --bg-card: #FFFFFF;
+  --bg-hover: #F3F4F6;
+  --border-subtle: #E5E7EB;
+  --border-light: #F3F4F6;
+  --text-primary: #111827;
+  --text-secondary: #4B5563;
+  --text-muted: #9CA3AF;
+  --green-pill: #10B981;
+  --green-bg: #ECFDF5;
+  --green-border: #A7F3D0;
+  --amber-pill: #F59E0B;
+  --amber-bg: #FFFBEB;
+  --amber-border: #FDE68A;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "PingFang SC", sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 1. 顶栏 (46px，纯白微边框，母版全局搜索风格) */
+.linear-desktop-topbar {
+  height: 46px;
+  background: #FFFFFF;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  user-select: none;
+  flex-shrink: 0;
+}
+.brand-slot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+}
+.brand-box {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: #111827;
+  color: #FFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 800;
+}
+.search-pill-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  width: 240px;
+}
+
+/* 2. 工作台主干 */
+.linear-workbench-canvas {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* 2.1 左侧栏 (260px，严格按母版还原) */
+.linear-sidebar {
+  width: 260px;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+  overflow: hidden;
+}
+
+.sidebar-scroll-deck {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 8px;
+}
+
+.category-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 12px 10px 4px 10px;
+}
+
+/* 母版条目：圆形色彩徽章 (MC, AS, N, LD) + 标题 + 右微箭头 */
+.nav-card-row {
+  padding: 8px 10px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  margin-bottom: 2px;
+  transition: background 0.12s;
+}
+.nav-card-row:hover {
+  background: var(--bg-hover);
+}
+.nav-card-row.active {
+  background: #FFFFFF;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  border: 1px solid var(--border-subtle);
+}
+
+.round-badge-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 800;
+  color: #FFF;
+  flex-shrink: 0;
+}
+
+.nav-row-text {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nav-row-arrow {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* 项目手风琴单元 (参考母版折叠) */
+.proj-accordion-unit {
+  margin-bottom: 4px;
+}
+.proj-acc-trigger {
+  padding: 8px 10px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+.proj-acc-trigger:hover {
+  background: var(--bg-hover);
+}
+.proj-acc-fold {
+  display: none;
+  padding: 2px 0 4px 28px;
+}
+.proj-accordion-unit.open .proj-acc-fold {
+  display: block;
+}
+
+/* 左侧栏最下方并排切换 Table: [ 💬 会话 ] [ 📁 项目 ] */
+.sidebar-bottom-switcher {
+  height: 38px;
+  border-top: 1px solid var(--border-subtle);
+  background: #FFFFFF;
+  display: flex;
+  flex-shrink: 0;
+}
+.switcher-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  border-bottom: 2px solid transparent;
+}
+.switcher-tab:hover {
+  color: var(--text-primary);
+}
+.switcher-tab.active {
+  color: var(--text-primary);
+  border-bottom-color: #111827;
+  background: var(--bg-app);
+}
+
+/* 左侧栏母版式用户 Footer */
+.sidebar-user-footer {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #FFFFFF;
+}
+.user-avatar-rect {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: #F3F4F6;
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.user-info-text {
+  flex: 1;
+  min-width: 0;
+}
+.user-name-line {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.user-plan-line {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+/* 2.2 中舱 (MiddlePod: 通栏白底，流式对话) */
+.middle-linear-canvas {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: #FFFFFF;
+}
+.middle-topbar-strip {
+  height: 48px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.middle-conversation-stream {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 32px 140px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 860px;
+  margin: 0 auto;
+  width: 100%;
+}
+.dialog-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.dialog-row.user {
+  flex-direction: row-reverse;
+}
+.speaker-round-av {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #111827;
+  color: #FFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.dialog-bubble {
+  max-width: 80%;
+  background: #F9FAFB;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+.dialog-row.user .dialog-bubble {
+  background: #111827;
+  color: #FFFFFF;
+  border-color: #111827;
+}
+
+/* 740px 居中悬浮输入舱 (白底微灰边框) */
+.floating-composer-island {
+  position: absolute;
+  bottom: 20px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  padding: 0 24px;
+  pointer-events: none;
+}
+.composer-white-card {
+  width: 100%;
+  max-width: 740px;
+  background: #FFFFFF;
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.08);
+  border-radius: 16px;
+  padding: 10px 16px;
+  pointer-events: auto;
+}
+
+/* 3. 状态栏 (22px) */
+.linear-footer-line {
+  height: 22px;
+  background: #FFFFFF;
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  user-select: none;
+  flex-shrink: 0;
+}
+</style>
+</head>
+<body>
+
+  <!-- 1. 顶栏 46px (母版全局微标与快捷键搜索) -->
+  <header class="linear-desktop-topbar">
+    <div class="brand-slot">
+      <div class="brand-box">H</div>
+      <span>Hermes Flux Workspace</span>
+    </div>
+
+    <div class="search-pill-box">
+      <span>🔍 Search session or command...</span>
+      <span style="font-family:var(--font-mono); font-size:10px; margin-left:auto; border:1px solid var(--border-subtle); padding:1px 4px; border-radius:4px;">⌘K</span>
+    </div>
+
+    <div style="font-size:12px; color:var(--text-secondary); display:flex; gap:16px; align-items:center;">
+      <span>📖 Docs</span>
+      <span style="display:flex; align-items:center; gap:4px; font-weight:600; color:#065F46; background:var(--green-bg); border:1px solid var(--green-border); padding:2px 8px; border-radius:12px; font-size:11px;">⊙ Pro plan</span>
+    </div>
+  </header>
+
+  <!-- 2. 工作台主干 -->
+  <div class="linear-workbench-canvas">
+    
+    <!-- 左侧栏 (260px，对齐母版) -->
+    <aside class="linear-sidebar">
+      <div class="sidebar-scroll-deck">
+        
+        <!-- 默认视图 A: 全部会话 (Bot 默认置顶) -->
+        <div id="deck-pane-chats">
+          <div class="category-label">置顶数字员工 (Bots)</div>
+
+          <!-- HQ -->
+          <div class="nav-card-row" onclick="selectItem('个人主助理 HQ')">
+            <div class="round-badge-avatar" style="background:#10B981;">HQ</div>
+            <span class="nav-row-text">个人主助理 (HQ)</span>
+            <span class="nav-row-arrow">›</span>
+          </div>
+
+          <!-- 老王 -->
+          <div class="nav-card-row active" onclick="selectItem('架构师 · 老王')">
+            <div class="round-badge-avatar" style="background:#6366F1;">AW</div>
+            <span class="nav-row-text">架构师 · 老王</span>
+            <span class="nav-row-arrow">›</span>
+          </div>
+
+          <!-- 小张 -->
+          <div class="nav-card-row" onclick="selectItem('前端开发 · 小张')">
+            <div class="round-badge-avatar" style="background:#EC4899;">XZ</div>
+            <span class="nav-row-text">前端开发 · 小张</span>
+            <span class="nav-row-arrow">›</span>
+          </div>
+
+          <div class="category-label" style="margin-top:6px;">全部会话与群聊</div>
+
+          <div class="nav-card-row" onclick="selectItem('OAuth 方案联合评审')">
+            <div class="round-badge-avatar" style="background:#F59E0B;">👥</div>
+            <span class="nav-row-text">OAuth 方案评审 (3人)</span>
+            <span class="nav-row-arrow">›</span>
+          </div>
+
+          <div class="nav-card-row" onclick="selectItem('锁冲突排查')">
+            <div class="round-badge-avatar" style="background:#4B5563;">⑂</div>
+            <span class="nav-row-text">老王 · 锁冲突排查</span>
+            <span class="nav-row-arrow">›</span>
+          </div>
+        </div>
+
+        <!-- 默认视图 B: 项目手风琴 (点击底部 Table 切换) -->
+        <div id="deck-pane-projects" style="display: none;">
+          <div class="category-label">工程项目矩阵 (Projects)</div>
+
+          <!-- 项目 1 -->
+          <div class="proj-accordion-unit open" id="proj-unit-1">
+            <div class="proj-acc-trigger" onclick="toggleUnitFold('proj-unit-1')">
+              <span style="font-weight:600;">📁 hermes-flux</span>
+              <span style="font-size:10px; color:var(--text-muted);">›</span>
+            </div>
+            <div class="proj-acc-fold">
+              <div class="nav-card-row" onclick="selectItem('TASK-104: OAuth 回调')">
+                <span style="color:var(--amber-pill);">⚡</span>
+                <span class="nav-row-text" style="font-size:12.5px;">TASK-104: OAuth 回调</span>
+              </div>
+              <div class="nav-card-row" onclick="selectItem('锁冲突排查')">
+                <span>⑂</span>
+                <span class="nav-row-text" style="font-size:12.5px;">锁冲突排查 (老王)</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 项目 2 -->
+          <div class="proj-accordion-unit" id="proj-unit-2">
+            <div class="proj-acc-trigger" onclick="toggleUnitFold('proj-unit-2')">
+              <span>📁 mp-langchao</span>
+              <span style="font-size:10px; color:var(--text-muted);">›</span>
+            </div>
+            <div class="proj-acc-fold">
+              <div class="nav-card-row" onclick="selectItem('登录态排查')">
+                <span>📁</span>
+                <span class="nav-row-text" style="font-size:12.5px;">登录态持久化排查</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 左侧栏底部两个切换 Table -->
+      <div class="sidebar-bottom-switcher">
+        <div class="switcher-tab active" id="btn-sw-chats" onclick="switchSidebarMode('chats')">
+          <span>💬 会话</span>
+        </div>
+        <div class="switcher-tab" id="btn-sw-projects" onclick="switchSidebarMode('projects')">
+          <span>📁 项目</span>
+        </div>
+      </div>
+
+      <!-- 母版常驻 User Footer -->
+      <div class="sidebar-user-footer">
+        <div class="user-avatar-rect">SA</div>
+        <div class="user-info-text">
+          <div class="user-name-line">Sam</div>
+          <div class="user-plan-line">Pro plan · sam@example.test</div>
+        </div>
+        <span style="color:var(--text-muted); font-size:11px;">↕</span>
+      </div>
+    </aside>
+
+    <!-- 中舱 (通栏流式，白底极简) -->
+    <main class="middle-linear-canvas">
+      <header class="middle-topbar-strip">
+        <span style="font-size:14px; font-weight:600;" id="chat-headline-txt">架构师 · 老王 (Claude 3.7)</span>
+        <span style="display:flex; align-items:center; gap:4px; font-size:11px; font-weight:600; color:#065F46; background:var(--green-bg); border:1px solid var(--green-border); padding:2px 8px; border-radius:12px;">⊙ Running (wt-104)</span>
+      </header>
+
+      <div class="middle-conversation-stream">
+        <div class="dialog-row user">
+          <div class="speaker-round-av">ME</div>
+          <div class="dialog-bubble">老王，去 hermes-flux 项目把 OAuth 监听重构一下，在 Worktree 执行。</div>
+        </div>
+
+        <div class="dialog-row bot">
+          <div class="speaker-round-av" style="background:#6366F1;">AW</div>
+          <div class="dialog-bubble">
+            已在 <code>wt-104</code> 独立环境编写并跑通 8 个单元测试。<br>
+            整体设计系统已严格对齐 Linear 级温润白底与卡片微边框规范。
+          </div>
+        </div>
+      </div>
+
+      <!-- 740px 黄金居中悬浮输入舱 -->
+      <div class="floating-composer-island">
+        <div class="composer-white-card">
+          <input type="text" style="width:100%; background:transparent; border:none; outline:none; color:var(--text-main); font-size:14px;" placeholder="输入消息... @ 呼叫专家 /task 派活" />
+        </div>
+      </div>
+    </main>
+
+  </div>
+
+  <!-- 3. 状态栏 (22px) -->
+  <footer class="linear-footer-line">
+    <div>● 127.0.0.1:9119 Gateway Connected</div>
+    <div>Hermes Flux Desktop v9.0 · Linear Clean Edition</div>
+  </footer>
+
+  <script>
+    function switchSidebarMode(mode) {
+      const isChats = mode === 'chats';
+      document.getElementById('btn-sw-chats').classList.toggle('active', isChats);
+      document.getElementById('btn-sw-projects').classList.toggle('active', !isChats);
+      document.getElementById('deck-pane-chats').style.display = isChats ? 'block' : 'none';
+      document.getElementById('deck-pane-projects').style.display = isChats ? 'none' : 'block';
+    }
+
+    function toggleUnitFold(id) {
+      document.getElementById(id).classList.toggle('open');
+    }
+
+    function selectItem(name) {
+      document.getElementById('chat-headline-txt').textContent = name;
+      document.querySelectorAll('.nav-card-row').forEach(r => r.classList.remove('active'));
+      event.currentTarget.classList.add('active');
+    }
+  </script>
+</body>
+</html>

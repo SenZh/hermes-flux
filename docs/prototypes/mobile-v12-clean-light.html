@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Hermes Flux Mobile v12.0 —— 纯净浅色版 (Clean Light)</title>
+<style>
+:root {
+  --bg-app: #F6F8FA;
+  --bg-card: #FFFFFF;
+  --bg-subtle: #EEF2F6;
+  --border-card: #E2E6ED;
+  --border-light: #F1F4F8;
+  
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --text-muted: #94A3B8;
+  
+  --accent-jade: #0F766E;
+  --accent-amber: #D97706;
+  
+  --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "PingFang SC", sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html, body {
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mobile-stage-shell {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-app);
+}
+
+/* ═════════════════════════════════════════════════
+   主视口：留出底部 54px 经典 TabBar
+   ═════════════════════════════════════════════════ */
+.stage-main-deck {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 54px;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.26s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.26s ease;
+}
+.stage-main-deck.pushed {
+  transform: translateX(-20%);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* 极简顶栏 (46px，顶部集中状态点与新建角标) */
+.clean-mobile-topbar {
+  height: 46px;
+  padding: 0 16px;
+  background: #FFFFFF;
+  border-bottom: 1px solid var(--border-card);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  z-index: 10;
+}
+.brand-identity-cluster {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.brand-cube-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: var(--text-primary);
+  color: #FFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 800;
+}
+.topbar-right-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.btn-top-square {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  background: var(--bg-app);
+  border: 1px solid var(--border-card);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.btn-top-square.primary {
+  background: var(--text-primary);
+  color: #FFFFFF;
+  border-color: var(--text-primary);
+}
+
+.pane-scroll-viewport {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.group-section-tag {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 14px 16px 6px 16px;
+}
+
+/* 会话行条目 (头像 + 大标题 + 小标题 + 时间) */
+.session-card-line {
+  margin: 0 16px 8px 16px;
+  background: #FFFFFF;
+  border: 1px solid var(--border-card);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  transition: transform 0.12s ease;
+}
+.session-card-line:active {
+  transform: scale(0.985);
+  background: #FAFAFA;
+}
+
+.avatar-round-badge {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #FFF;
+  flex-shrink: 0;
+}
+
+.session-mid-payload {
+  flex: 1;
+  min-width: 0;
+}
+.meta-row-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2px;
+}
+.main-title-txt {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.clock-txt {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  margin-left: 6px;
+}
+.sub-snippet-txt {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 项目手风琴卡片 (原地平滑展开) */
+.project-card-scaffold {
+  margin: 0 16px 10px 16px;
+  background: #FFFFFF;
+  border: 1px solid var(--border-card);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  overflow: hidden;
+}
+.project-card-header {
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+}
+.proj-title-txt {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.proj-dir-txt {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  margin-top: 2px;
+}
+.proj-arrow-icon {
+  color: var(--text-muted);
+  font-size: 13px;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.project-card-scaffold.open .proj-arrow-icon {
+  transform: rotate(90deg);
+  color: var(--text-primary);
+}
+
+.project-nested-fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  border-top: 1px solid transparent;
+}
+.project-card-scaffold.open .project-nested-fold {
+  grid-template-rows: 1fr;
+  border-top-color: var(--border-light);
+}
+.nested-content-inner {
+  overflow: hidden;
+  background: #FAFAFA;
+}
+.nested-item-line {
+  padding: 11px 16px 11px 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 13px;
+}
+.nested-item-line:last-child { border-bottom: none; }
+
+/* 微信经典 3-Tab 底部导航栏 */
+.clean-tabbar-footer {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 54px;
+  background: #FFFFFF;
+  border-top: 1px solid var(--border-card);
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  z-index: 50;
+  user-select: none;
+}
+.tab-action-cell {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.tab-action-cell.active { color: var(--text-primary); }
+.tab-caption { font-size: 10.5px; font-weight: 600; }
+
+/* ═════════════════════════════════════════════════
+   推入层: 纯净全屏对话主舱 (Push View)
+   ═════════════════════════════════════════════════ */
+.push-chat-deck {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: #FFFFFF;
+  display: flex;
+  flex-direction: column;
+  z-index: 60;
+  transform: translateX(100%);
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.push-chat-deck.active { transform: translateX(0); }
+
+.chat-stage-topbar {
+  height: 48px;
+  padding: 0 10px;
+  background: #FFFFFF;
+  border-bottom: 1px solid var(--border-card);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.btn-nav-back {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 6px 8px;
+  min-height: 44px;
+}
+.chat-center-status {
+  text-align: center;
+  max-width: 220px;
+}
+.headline-chat-title {
+  font-size: 14.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.headline-sub-pulse {
+  font-size: 10px;
+  color: var(--accent-jade);
+}
+
+.chat-stream-pad {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 16px 140px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  -webkit-overflow-scrolling: touch;
+  background: var(--bg-app);
+}
+.message-bubble-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.message-bubble-row.user { flex-direction: row-reverse; }
+.speaker-avatar-dot {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--text-primary);
+  color: #FFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.bubble-payload-card {
+  max-width: 84%;
+  background: #FFFFFF;
+  border: 1px solid var(--border-card);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  border-radius: 12px;
+  padding: 11px 14px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+.message-bubble-row.user .bubble-payload-card {
+  background: var(--text-primary);
+  color: #FFFFFF;
+  border-color: var(--text-primary);
+}
+
+/* ─────────────────────────────────────────────
+   生产级 InputDock 740px 黄金限宽与微控制条
+   ───────────────────────────────────────────── */
+.dock-composer-island {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(20px);
+  border-top: 1px solid var(--border-card);
+  padding: 8px 14px 18px 14px;
+  z-index: 40;
+}
+.dock-composer-card {
+  width: 100%;
+  max-width: 740px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.native-composer-textarea {
+  width: 100%;
+  background: var(--bg-app);
+  border: 1px solid var(--border-card);
+  border-radius: 12px;
+  padding: 9px 12px;
+  outline: none;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+  resize: none;
+  min-height: 38px;
+  max-height: 100px;
+  line-height: 1.4;
+}
+.dock-micro-control-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.micro-pill-capsule {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: var(--bg-app);
+  border: 1px solid var(--border-card);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.btn-round-send-cube {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: var(--text-primary);
+  color: #FFF;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+</style>
+</head>
+<body>
+
+<div class="mobile-stage-shell">
+
+  <div class="stage-main-deck" id="main-deck">
+    
+    <!-- 极简集成顶栏 46px (左标 + 状态点 + 新建角标) -->
+    <header class="clean-mobile-topbar">
+      <div class="brand-identity-cluster">
+        <div class="brand-cube-dot">H</div>
+        <span id="page-headline-title">Hermes Flux</span>
+      </div>
+
+      <div class="topbar-right-actions">
+        <button class="btn-top-square" onclick="alert('进入系统设置')" title="系统设置">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        </button>
+
+        <button class="btn-top-square primary" onclick="alert('+ 新建会话')" title="新建会话">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="8" y1="3" x2="8" y2="13"/><line x1="3" y1="8" x2="13" y2="8"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Tab 1: 会话 -->
+    <main class="pane-scroll-viewport" id="tab-pane-chats">
+      <div class="group-section-tag">置顶数字员工 (Bots)</div>
+
+      <!-- HQ -->
+      <div class="session-card-line" onclick="openChatView('个人主助理 (HQ)', 'HQ', '#0F766E', 'Chief of Staff · 全局中枢调度')">
+        <div class="avatar-round-badge" style="background:#0F766E;">HQ</div>
+        <div class="session-mid-payload">
+          <div class="meta-row-top">
+            <span class="main-title-txt">个人主助理 (HQ)</span>
+            <span class="clock-txt">15:10</span>
+          </div>
+          <div class="sub-snippet-txt">全局中枢调度 · 2 个任务执行中，1 个 PR 待审</div>
+        </div>
+      </div>
+
+      <!-- 老王 -->
+      <div class="session-card-line" onclick="openChatView('架构师 · 老王', 'AW', '#4F46E5', 'Claude 3.7 · 终生核心主工位')">
+        <div class="avatar-round-badge" style="background:#4F46E5;">AW</div>
+        <div class="session-mid-payload">
+          <div class="meta-row-top">
+            <span class="main-title-txt">架构师 · 老王</span>
+            <span class="clock-txt">14:31</span>
+          </div>
+          <div class="sub-snippet-txt">老王: 方案已敲定，单测全绿 (PASS 8/8)</div>
+        </div>
+      </div>
+
+      <!-- 小张 -->
+      <div class="session-card-line" onclick="openChatView('前端开发 · 小张', 'XZ', '#DB2777', 'DeepSeek-V3 · 样式总监')">
+        <div class="avatar-round-badge" style="background:#DB2777;">XZ</div>
+        <div class="session-mid-payload">
+          <div class="meta-row-top">
+            <span class="main-title-txt">前端开发 · 小张</span>
+            <span class="clock-txt">昨天</span>
+          </div>
+          <div class="sub-snippet-txt">小张: 顶栏小角标与纯净浅色已全部对齐</div>
+        </div>
+      </div>
+
+      <div class="group-section-tag">协同群聊与旁聊</div>
+
+      <!-- 群聊 -->
+      <div class="session-card-line" onclick="openChatView('OAuth 方案联合评审', '👥', '#D97706', '老王 · 小张 · 审查员 (3人参会)')">
+        <div class="avatar-round-badge" style="background:#D97706;">👥</div>
+        <div class="session-mid-payload">
+          <div class="meta-row-top">
+            <span class="main-title-txt">OAuth 方案联合评审 (3人)</span>
+            <span class="clock-txt">15:02</span>
+          </div>
+          <div class="sub-snippet-txt"><span style="color:#DB2777; font-weight:600;">小张</span>: redirect URI 已更新完毕</div>
+        </div>
+      </div>
+
+      <!-- 旁聊 -->
+      <div class="session-card-line" onclick="openChatView('老王 · 锁冲突排查', '⑂', '#475569', '老王名下独立旁聊')">
+        <div class="avatar-round-badge" style="background:#475569;">⑂</div>
+        <div class="session-mid-payload">
+          <div class="meta-row-top">
+            <span class="main-title-txt">老王 · 锁冲突排查</span>
+            <span class="clock-txt">11:20</span>
+          </div>
+          <div class="sub-snippet-txt">并发 CAS 重试机制存在饥饿隐患</div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Tab 2: 项目 -->
+    <main class="pane-scroll-viewport" id="tab-pane-projects" style="display: none; padding-top: 10px;">
+      
+      <div class="project-card-scaffold open" id="m-proj-scaffold-1">
+        <div class="project-card-header" onclick="toggleProjectFold('m-proj-scaffold-1')">
+          <div>
+            <div class="proj-title-txt">
+              <span style="display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:600; color:#065F46; background:#ECFDF5; border:1px solid #A7F3D0; padding:2px 6px; border-radius:10px;">⊙ Running</span>
+              <span>hermes-flux</span>
+            </div>
+            <div class="proj-dir-txt">/projects/hermes-flux · branch: main</div>
+          </div>
+          <span class="proj-arrow-icon">›</span>
+        </div>
+
+        <div class="project-nested-fold">
+          <div class="nested-content-inner">
+            <div class="nested-item-line" onclick="openChatView('TASK-104: OAuth 回调', '⚡', '#D97706', 'wt-104 · 正在跑单测')">
+              <span style="color:#065F46; font-weight:600;">⚡ PID 4801</span>
+              <div style="flex:1;">
+                <div style="font-weight:600;">TASK-104: OAuth 回调重构 (老王)</div>
+                <div style="font-size:11px; color:var(--text-muted);">单测通过 8/8</div>
+              </div>
+            </div>
+
+            <div class="nested-item-line" onclick="openChatView('老王 · 锁冲突排查', '⑂', '#475569', '老王名下独立旁聊')">
+              <span style="color:var(--text-muted);">⑂</span>
+              <div style="flex:1;">
+                <div style="font-weight:600;">锁冲突排查 (老王)</div>
+                <div style="font-size:11px; color:var(--text-muted);">20分钟前</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- Tab 3: 设置 -->
+    <main class="pane-scroll-viewport" id="tab-pane-settings" style="display: none; padding: 14px 16px;">
+      <div style="background:#FFF; border:1px solid var(--border-card); border-radius:12px; padding:14px; display:flex; justify-content:space-between; font-size:14px;">
+        <span>网关端点 (Gateway)</span>
+        <span style="color:#0F766E; font-family:var(--font-mono); font-weight:600;">127.0.0.1:9119 🟢</span>
+      </div>
+    </main>
+
+  </div>
+
+  <!-- 底部 3-Tab 导航 -->
+  <nav class="clean-tabbar-footer">
+    <div class="tab-action-cell active" id="tab-btn-1" onclick="switchTab(1)">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+      <div class="tab-caption">会话</div>
+    </div>
+    <div class="tab-action-cell" id="tab-btn-2" onclick="switchTab(2)">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+      <div class="tab-caption">项目</div>
+    </div>
+    <div class="tab-action-cell" id="tab-btn-3" onclick="switchTab(3)">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+      <div class="tab-caption">设置</div>
+    </div>
+  </nav>
+
+  <!-- 推入对话主舱 (配备豪华 InputDock 控制条) -->
+  <div class="push-chat-deck" id="chat-deck">
+    <header class="chat-stage-topbar">
+      <button class="btn-nav-back" onclick="closeChatDeck()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"></polyline></svg>
+        <span>返回</span>
+      </button>
+      <div class="chat-center-status">
+        <div class="headline-chat-title" id="chat-title-tag">架构师 · 老王</div>
+        <div class="headline-sub-pulse" id="chat-desc-tag">Claude 3.7 · 终生核心工位</div>
+      </div>
+      <div style="width:44px;"></div>
+    </header>
+
+    <main class="chat-stream-pad" id="stream-pad">
+      <div class="message-bubble-row user">
+        <div class="speaker-avatar-dot">ME</div>
+        <div class="bubble-payload-card">老王，去 hermes-flux 项目把 OAuth 回调监听重构一下，在 Worktree 跑。</div>
+      </div>
+
+      <div class="message-bubble-row bot">
+        <div class="speaker-avatar-dot" id="chat-avatar-disc" style="background:#4F46E5;">AW</div>
+        <div class="bubble-payload-card">
+          方案已敲定，已在 <code>/projects/hermes-flux</code> 自动挂载独立执行分支。<br>
+          单测与门禁已 100% 绿灯 (PASS 8/8)，等待提交 PR。
+        </div>
+      </div>
+    </main>
+
+    <!-- 生产级 InputDock (含 28px 控制条) -->
+    <div class="dock-composer-island">
+      <div class="dock-composer-card">
+        <textarea class="native-composer-textarea" id="msg-input" rows="2" placeholder="给 Hermes 下达任务... (Enter 发送)"></textarea>
+        
+        <div class="dock-micro-control-bar">
+          <div style="display:flex; align-items:center; gap:6px;">
+            <button class="micro-pill-capsule">
+              <span>⚡ Claude 3.7</span>
+              <span style="font-size:8px;">▼</span>
+            </button>
+            <button class="micro-pill-capsule" style="color:var(--text-muted);">
+              <span>思考: 严谨</span>
+            </button>
+          </div>
+
+          <button class="btn-round-send-cube" onclick="sendMsg()">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 8 8 3 13 8"/><line x1="8" y1="3" x2="8" y2="13"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  function switchTab(idx) {
+    document.querySelectorAll('.tab-action-cell').forEach((b, i) => {
+      b.classList.toggle('active', i + 1 === idx);
+    });
+
+    const pChats = document.getElementById('tab-pane-chats');
+    const pProjects = document.getElementById('tab-pane-projects');
+    const pSettings = document.getElementById('tab-pane-settings');
+    const titleText = document.getElementById('page-headline-title');
+
+    pChats.style.display = idx === 1 ? 'block' : 'none';
+    pProjects.style.display = idx === 2 ? 'block' : 'none';
+    pSettings.style.display = idx === 3 ? 'block' : 'none';
+
+    if (idx === 1) titleText.textContent = 'Hermes Flux';
+    if (idx === 2) titleText.textContent = '项目矩阵';
+    if (idx === 3) titleText.textContent = '系统设置';
+  }
+
+  function toggleProjectFold(id) {
+    document.getElementById(id).classList.toggle('open');
+  }
+
+  const mainDeck = document.getElementById('main-deck');
+  const chatDeck = document.getElementById('chat-deck');
+
+  function openChatView(title, avText, avBg, desc) {
+    document.getElementById('chat-title-tag').textContent = title;
+    document.getElementById('chat-desc-tag').textContent = desc;
+
+    const av = document.getElementById('chat-avatar-disc');
+    av.textContent = avText;
+    av.style.background = avBg;
+
+    mainDeck.classList.add('pushed');
+    chatDeck.classList.add('active');
+  }
+
+  function closeChatDeck() {
+    chatDeck.classList.remove('active');
+    mainDeck.classList.remove('pushed');
+  }
+
+  function sendMsg() {
+    const input = document.getElementById('msg-input');
+    const text = input.value.trim();
+    if (!text) return;
+
+    const stream = document.getElementById('stream-pad');
+    const row = document.createElement('div');
+    row.className = 'message-bubble-row user';
+    row.innerHTML = `
+      <div class="speaker-avatar-dot">ME</div>
+      <div class="bubble-payload-card">${escapeHtml(text)}</div>
+    `;
+    stream.appendChild(row);
+    input.value = '';
+    stream.scrollTop = stream.scrollHeight;
+  }
+
+  function escapeHtml(str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+</script>
+
+</body>
+</html>

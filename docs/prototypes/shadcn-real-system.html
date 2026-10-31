@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>shadcn/ui 官方原生组件体系 —— 真实集成预览台</title>
+<!-- 引入 Tailwind CSS 官方运行时引擎，支持真实的 shadcn 变量系统 -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: ["class"],
+    theme: {
+      extend: {
+        colors: {
+          border: "hsl(var(--border))",
+          input: "hsl(var(--input))",
+          ring: "hsl(var(--ring))",
+          background: "hsl(var(--background))",
+          foreground: "hsl(var(--foreground))",
+          primary: {
+            DEFAULT: "hsl(var(--primary))",
+            foreground: "hsl(var(--primary-foreground))",
+          },
+          secondary: {
+            DEFAULT: "hsl(var(--secondary))",
+            foreground: "hsl(var(--secondary-foreground))",
+          },
+          destructive: {
+            DEFAULT: "hsl(var(--destructive))",
+            foreground: "hsl(var(--destructive-foreground))",
+          },
+          muted: {
+            DEFAULT: "hsl(var(--muted))",
+            foreground: "hsl(var(--muted-foreground))",
+          },
+          accent: {
+            DEFAULT: "hsl(var(--accent))",
+            foreground: "hsl(var(--accent-foreground))",
+          },
+          popover: {
+            DEFAULT: "hsl(var(--popover))",
+            foreground: "hsl(var(--popover-foreground))",
+          },
+          card: {
+            DEFAULT: "hsl(var(--card))",
+            foreground: "hsl(var(--card-foreground))",
+          },
+        },
+        borderRadius: {
+          lg: "var(--radius)",
+          md: "calc(var(--radius) - 2px)",
+          sm: "calc(var(--radius) - 4px)",
+        },
+      },
+    },
+  }
+</script>
+<style>
+/* 严格注入 shadcn/ui 官方原生标准色板 (包含浅色与暗色两套) */
+:root {
+  --background: 0 0% 100%;
+  --foreground: 222.2 84% 4.9%;
+  --card: 0 0% 100%;
+  --card-foreground: 222.2 84% 4.9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222.2 84% 4.9%;
+  --primary: 222.2 47.4% 11.2%;
+  --primary-foreground: 210 40% 98%;
+  --secondary: 210 40% 96.1%;
+  --secondary-foreground: 222.2 47.4% 11.2%;
+  --muted: 210 40% 96.1%;
+  --muted-foreground: 215.4 16.3% 46.9%;
+  --accent: 210 40% 96.1%;
+  --accent-foreground: 222.2 47.4% 11.2%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 214.3 31.8% 91.4%;
+  --input: 214.3 31.8% 91.4%;
+  --ring: 222.2 84% 4.9%;
+  --radius: 0.5rem;
+}
+
+.dark {
+  --background: 222.2 84% 4.9%;
+  --foreground: 210 40% 98%;
+  --card: 222.2 84% 4.9%;
+  --card-foreground: 210 40% 98%;
+  --popover: 222.2 84% 4.9%;
+  --popover-foreground: 210 40% 98%;
+  --primary: 210 40% 98%;
+  --primary-foreground: 222.2 47.4% 11.2%;
+  --secondary: 217.2 32.6% 17.5%;
+  --secondary-foreground: 210 40% 98%;
+  --muted: 217.2 32.6% 17.5%;
+  --muted-foreground: 215 20.2% 65.1%;
+  --accent: 217.2 32.6% 17.5%;
+  --accent-foreground: 210 40% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 217.2 32.6% 17.5%;
+  --input: 217.2 32.6% 17.5%;
+  --ring: 212.7 26.8% 83.9%;
+}
+
+* { box-sizing: border-box; }
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+</style>
+</head>
+<body class="p-6 md:p-10 max-w-5xl mx-auto space-y-10">
+
+  <!-- 顶部标题与亮暗模式切换 -->
+  <div class="flex items-center justify-between border-b pb-5">
+    <div>
+      <h1 class="text-2xl font-bold tracking-tight">shadcn/ui 官方原生组件展示厅</h1>
+      <p class="text-sm text-muted-foreground mt-1">完全基于 Radix UI 原语 + Tailwind CSS 官方标准构建，零自造样式。</p>
+    </div>
+    <div class="flex items-center gap-3">
+      <button onclick="document.documentElement.classList.toggle('dark')" class="inline-flex items-center justify-center rounded-md text-xs font-medium border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 px-3">
+        🌓 切换浅色/深色主题
+      </button>
+    </div>
+  </div>
+
+  <!-- ═════════════════════════════════════════════════
+       组件 1: shadcn 官方 Accordion 手风琴组件
+       ═════════════════════════════════════════════════ -->
+  <section class="space-y-4">
+    <div class="space-y-1">
+      <h2 class="text-lg font-semibold tracking-tight">1. Accordion 手风琴组件 (Radix UI 原生驱动)</h2>
+      <p class="text-xs text-muted-foreground">用于我们桌面端左侧栏的项目与会话收纳，自带极其顺滑的高度平滑展开动画与箭头旋转。</p>
+    </div>
+
+    <div class="border rounded-lg p-6 bg-card text-card-foreground shadow-sm">
+      <div class="w-full divide-y divide-border">
+        
+        <!-- 手风琴项 1 -->
+        <div class="py-2">
+          <button onclick="toggleAccordion('acc-1', 'arrow-1')" class="flex w-full items-center justify-between py-2 text-sm font-medium transition-all hover:underline">
+            <span class="flex items-center gap-2">
+              <span class="text-muted-foreground">📁</span>
+              <span>hermes-flux 工程项目</span>
+              <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold bg-secondary text-secondary-foreground">1 运行中</span>
+            </span>
+            <svg id="arrow-1" class="h-4 w-4 shrink-0 transition-transform duration-200 text-muted-foreground transform rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </button>
+          <div id="acc-1" class="text-sm pt-2 pb-3 space-y-2">
+            <div class="flex items-center justify-between p-2 rounded-md hover:bg-accent cursor-pointer">
+              <span class="font-medium text-xs">⚡ TASK-104: OAuth 回调重构 (老王)</span>
+              <span class="text-xs text-muted-foreground font-mono">PASS 8/8</span>
+            </div>
+            <div class="flex items-center justify-between p-2 rounded-md hover:bg-accent cursor-pointer">
+              <span class="font-medium text-xs">⑂ 锁冲突排查 (老王)</span>
+              <span class="text-xs text-muted-foreground">20分钟前</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 手风琴项 2 -->
+        <div class="py-2">
+          <button onclick="toggleAccordion('acc-2', 'arrow-2')" class="flex w-full items-center justify-between py-2 text-sm font-medium transition-all hover:underline">
+            <span class="flex items-center gap-2">
+              <span class="text-muted-foreground">📁</span>
+              <span>mp-langchao 小程序项目</span>
+              <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold bg-muted text-muted-foreground">空闲</span>
+            </span>
+            <svg id="arrow-2" class="h-4 w-4 shrink-0 transition-transform duration-200 text-muted-foreground transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </button>
+          <div id="acc-2" class="hidden text-sm pt-2 pb-3 space-y-2">
+            <div class="flex items-center justify-between p-2 rounded-md hover:bg-accent cursor-pointer">
+              <span class="font-medium text-xs">登录态持久化排查</span>
+              <span class="text-xs text-muted-foreground">2天前已完成</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ═════════════════════════════════════════════════
+       组件 2: shadcn 官方 Tabs 标签页组件
+       ═════════════════════════════════════════════════ -->
+  <section class="space-y-4">
+    <div class="space-y-1">
+      <h2 class="text-lg font-semibold tracking-tight">2. Tabs 标签页组件 (微信经典导航与切换)</h2>
+      <p class="text-xs text-muted-foreground">用于移动端底部 3-Tab 以及桌面端左侧栏底部切换，拥有标准的浮起卡片阴影与激活态。</p>
+    </div>
+
+    <div class="border rounded-lg p-6 bg-card text-card-foreground shadow-sm space-y-4">
+      
+      <!-- Tabs 导航条 -->
+      <div class="inline-flex h-10 items-center justify-center rounded-lg bg-muted p-1 text-muted-foreground w-full sm:w-auto">
+        <button onclick="switchTabDemo('tab-c1', this)" class="tab-demo-btn inline-flex items-center justify-center whitespace-nowrap rounded-md px-4 py-1.5 text-xs font-semibold ring-offset-background transition-all bg-background text-foreground shadow-sm">
+          💬 全部会话
+        </button>
+        <button onclick="switchTabDemo('tab-c2', this)" class="tab-demo-btn inline-flex items-center justify-center whitespace-nowrap rounded-md px-4 py-1.5 text-xs font-semibold ring-offset-background transition-all">
+          📁 项目矩阵
+        </button>
+        <button onclick="switchTabDemo('tab-c3', this)" class="tab-demo-btn inline-flex items-center justify-center whitespace-nowrap rounded-md px-4 py-1.5 text-xs font-semibold ring-offset-background transition-all">
+          ⚙️ 系统设置
+        </button>
+      </div>
+
+      <!-- Tab 内容区 -->
+      <div id="tab-c1" class="border rounded-md p-4 bg-background">
+        <p class="text-xs text-muted-foreground">这是会话列表视图：平铺置顶 Bot 核心工位与最近会话。</p>
+      </div>
+      <div id="tab-c2" class="hidden border rounded-md p-4 bg-background">
+        <p class="text-xs text-muted-foreground">这是项目矩阵视图：按工程文件夹组织手风琴列表。</p>
+      </div>
+      <div id="tab-c3" class="hidden border rounded-md p-4 bg-background">
+        <p class="text-xs text-muted-foreground">这是系统设置视图：网关端点、模型供应商、外观主题配置。</p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ═════════════════════════════════════════════════
+       组件 3: shadcn 官方 Avatar 头像与 Badge 徽章
+       ═════════════════════════════════════════════════ -->
+  <section class="space-y-4">
+    <div class="space-y-1">
+      <h2 class="text-lg font-semibold tracking-tight">3. Avatar 头像与 Badge 徽章组件</h2>
+      <p class="text-xs text-muted-foreground">对标母版图中的双字母微标（MC, AS, N），完全由纯 CSS 与文字自适应渲染，零图片资源开销。</p>
+    </div>
+
+    <div class="border rounded-lg p-6 bg-card text-card-foreground shadow-sm">
+      <div class="flex flex-wrap items-center gap-6">
+        
+        <!-- 头像 1 -->
+        <div class="flex items-center gap-3">
+          <span class="relative flex h-10 w-10 shrink-0 overflow-hidden rounded-full border border-border">
+            <span class="flex h-full w-full items-center justify-center rounded-full bg-primary text-primary-foreground font-semibold text-xs">HQ</span>
+          </span>
+          <div>
+            <div class="text-xs font-semibold">个人主助理 (HQ)</div>
+            <div class="text-[11px] text-muted-foreground">首席数字幕僚长</div>
+          </div>
+        </div>
+
+        <!-- 头像 2 -->
+        <div class="flex items-center gap-3">
+          <span class="relative flex h-10 w-10 shrink-0 overflow-hidden rounded-full border border-border">
+            <span class="flex h-full w-full items-center justify-center rounded-full bg-secondary text-secondary-foreground font-semibold text-xs">AW</span>
+          </span>
+          <div>
+            <div class="text-xs font-semibold">架构师 · 老王</div>
+            <div class="text-[11px] text-muted-foreground">Claude 3.7 主工位</div>
+          </div>
+        </div>
+
+        <!-- 头像 3 -->
+        <div class="flex items-center gap-3">
+          <span class="relative flex h-10 w-10 shrink-0 overflow-hidden rounded-full border border-border">
+            <span class="flex h-full w-full items-center justify-center rounded-full bg-muted text-muted-foreground font-semibold text-xs">XZ</span>
+          </span>
+          <div>
+            <div class="text-xs font-semibold">前端开发 · 小张</div>
+            <div class="text-[11px] text-muted-foreground">DeepSeek-V3</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ═════════════════════════════════════════════════
+       组件 4: shadcn 官方 Card 卡片与输入框
+       ═════════════════════════════════════════════════ -->
+  <section class="space-y-4">
+    <div class="space-y-1">
+      <h2 class="text-lg font-semibold tracking-tight">4. Card 卡片与豪华输入舱 (740px 黄金居中规范)</h2>
+      <p class="text-xs text-muted-foreground">具有极细微边框与漫反射接触阴影，绝非廉价粗暴死黑。</p>
+    </div>
+
+    <div class="border rounded-xl p-4 bg-card text-card-foreground shadow-md max-w-[740px] mx-auto space-y-3">
+      <textarea rows="2" placeholder="给 Hermes 下达任务... (Enter 发送, Shift+Enter 换行)" class="flex min-h-[48px] w-full rounded-md border-0 bg-transparent px-2 py-1 text-sm shadow-none placeholder:text-muted-foreground focus-visible:outline-none resize-none"></textarea>
+
+      <div class="flex items-center justify-between pt-2 border-t text-xs">
+        <div class="flex items-center gap-2">
+          <span class="inline-flex items-center rounded-md border px-2.5 py-0.5 font-semibold bg-secondary text-secondary-foreground hover:bg-secondary/80 cursor-pointer">
+            ⚡ Claude 3.7 Sonnet ▾
+          </span>
+          <span class="inline-flex items-center rounded-md border px-2.5 py-0.5 font-medium text-muted-foreground hover:bg-accent cursor-pointer">
+            严谨推演
+          </span>
+        </div>
+
+        <button class="inline-flex items-center justify-center rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 h-7 w-7">
+          ↑
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    function toggleAccordion(contentId, arrowId) {
+      const content = document.getElementById(contentId);
+      const arrow = document.getElementById(arrowId);
+      const isHidden = content.classList.contains('hidden');
+      if (isHidden) {
+        content.classList.remove('hidden');
+        arrow.classList.add('rotate-180');
+      } else {
+        content.classList.add('hidden');
+        arrow.classList.remove('rotate-180');
+      }
+    }
+
+    function switchTabDemo(contentId, btn) {
+      document.querySelectorAll('.tab-demo-btn').forEach(b => {
+        b.classList.remove('bg-background', 'text-foreground', 'shadow-sm');
+      });
+      btn.classList.add('bg-background', 'text-foreground', 'shadow-sm');
+
+      ['tab-c1', 'tab-c2', 'tab-c3'].forEach(id => {
+        document.getElementById(id).classList.toggle('hidden', id !== contentId);
+      });
+    }
+  </script>
+
+</body>
+</html>

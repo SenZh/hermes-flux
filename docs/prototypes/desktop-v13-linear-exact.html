@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hermes Flux —— Linear 真实设计系统对齐版</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: ["class"],
+    theme: {
+      extend: {
+        colors: {
+          canvas: "var(--bg-canvas)",
+          sidebar: "var(--bg-sidebar)",
+          card: "var(--bg-card)",
+          cardHover: "var(--bg-card-hover)",
+          composer: "var(--bg-composer)",
+          subtle: "var(--border-subtle)",
+          borderHover: "var(--border-hover)",
+          fg: "var(--text-primary)",
+          fgSecondary: "var(--text-secondary)",
+          fgMuted: "var(--text-muted)",
+          amberAcc: "var(--accent-amber)",
+          greenAcc: "var(--accent-green)",
+          redAcc: "var(--accent-red)",
+        },
+        fontFamily: {
+          sans: ["Inter", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto", "sans-serif"],
+          mono: ["JetBrains Mono", "SF Mono", "Consolas", "monospace"],
+        }
+      },
+    },
+  }
+</script>
+<style>
+/* ═════════════════════════════════════════════════════════════════════
+   动态皮肤核心变量：严禁硬编码死色值，支持一键无感切换深浅皮肤
+   ═════════════════════════════════════════════════════════════════════ */
+:root {
+  /* 浅色皮肤 (Linear Light 规范) */
+  --bg-canvas: #FAFAFB;
+  --bg-sidebar: #F4F5F7;
+  --bg-card: #FFFFFF;
+  --bg-card-hover: #F0F1F4;
+  --bg-composer: #FFFFFF;
+  --border-subtle: rgba(0, 0, 0, 0.08);
+  --border-hover: rgba(0, 0, 0, 0.16);
+  --text-primary: #121316;
+  --text-secondary: #5E6470;
+  --text-muted: #8C92A0;
+  --accent-amber: #D97706;
+  --accent-green: #16A34A;
+  --accent-red: #DC2626;
+  --shadow-float: 0 12px 32px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.04);
+}
+
+.dark {
+  /* 深色皮肤 (图片原图 Linear Dark 1:1 像素级复刻) */
+  --bg-canvas: #0E0F12;
+  --bg-sidebar: #090A0D;
+  --bg-card: #14161C;
+  --bg-card-hover: #1A1D24;
+  --bg-composer: #171921;
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --border-hover: rgba(255, 255, 255, 0.14);
+  --text-primary: #F7F8F8;
+  --text-secondary: #8A8F98;
+  --text-muted: #5C6068;
+  --accent-amber: #F59E0B;
+  --accent-green: #22C55E;
+  --accent-red: #EF4444;
+  --shadow-float: 0 16px 40px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+* { box-sizing: border-box; }
+body {
+  background-color: var(--bg-canvas);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  height: 100vh;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-subtle); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-hover); }
+</style>
+</head>
+<body class="flex flex-col h-screen select-none">
+
+  <!-- ═════════════════════════════════════════════════════════════════
+       顶部微型顶栏 (Linear 极简 38px 顶栏，带动态换肤与控制)
+       ═════════════════════════════════════════════════════════════════ -->
+  <header class="h-[38px] border-b border-subtle bg-sidebar px-3 flex items-center justify-between shrink-0 z-40 text-xs">
+    <!-- 左侧：工作区切换 + 搜索 + 新建 -->
+    <div class="flex items-center gap-2">
+      <!-- 侧边栏折叠按钮 -->
+      <button onclick="toggleSidebar()" class="h-6 w-6 rounded hover:bg-cardHover flex items-center justify-center text-fgSecondary hover:text-fg transition-colors" title="折叠/展开侧栏 (Ctrl+B)">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+      </button>
+
+      <!-- Linear 工作区下拉胶囊 -->
+      <button class="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-cardHover font-medium text-fg text-xs transition-colors">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+        <span>Linear</span>
+        <svg class="w-3 h-3 text-fgMuted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+
+      <!-- 搜索按钮 -->
+      <button class="h-6 w-6 rounded hover:bg-cardHover flex items-center justify-center text-fgSecondary hover:text-fg transition-colors" title="搜索 (⌘K)">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      </button>
+
+      <!-- 新建按钮 -->
+      <button class="h-6 w-6 rounded hover:bg-cardHover flex items-center justify-center text-fgSecondary hover:text-fg transition-colors" title="新建任务 (C)">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      </button>
+    </div>
+
+    <!-- 中间：当前视图面包屑与状态指示 -->
+    <div class="flex items-center gap-2 text-fgSecondary text-xs">
+      <!-- 原图同款半黄圆点 (In Progress) -->
+      <svg class="w-3.5 h-3.5 text-amberAcc" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8v16z"/>
+      </svg>
+      <span class="font-medium text-fg">DRV-8852</span>
+      <span class="truncate max-w-[200px]">Faster app launch</span>
+      <svg class="w-3 h-3 text-fgMuted hover:text-amberAcc cursor-pointer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      <span class="text-fgMuted">···</span>
+    </div>
+
+    <!-- 右侧：皮肤无感切换 + 工具按钮 + 导航分页 -->
+    <div class="flex items-center gap-1.5 text-fgSecondary text-xs">
+      <!-- 动态换肤按钮 (支持全站 CSS 变量实时重绘) -->
+      <button onclick="toggleTheme()" class="flex items-center gap-1 px-2 py-0.5 rounded hover:bg-cardHover border border-subtle text-fg text-xs transition-colors" title="动态切换皮肤 (深色 / 浅色)">
+        <span id="theme-icon">🌙</span>
+        <span id="theme-label" class="text-[11px] font-mono">Dark</span>
+      </button>
+
+      <button class="h-6 w-6 rounded hover:bg-cardHover flex items-center justify-center text-fgMuted hover:text-fg" title="复制链接">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+      </button>
+
+      <span class="text-fgMuted font-mono text-[11px] mx-1">1 / 84</span>
+
+      <button class="h-6 w-6 rounded hover:bg-cardHover flex items-center justify-center text-fgMuted hover:text-fg">
+        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>
+      </button>
+      <button class="h-6 w-6 rounded hover:bg-cardHover flex items-center justify-center text-fgMuted hover:text-fg">
+        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ═════════════════════════════════════════════════════════════════
+       主体三舱 (左侧栏 + 中间任务时间轴 + 右侧 AI 伴随卡片)
+       ═════════════════════════════════════════════════ -->
+  <div class="flex-1 flex overflow-hidden">
+
+    <!-- ─────────────────────────────────────────────────────────────
+         左舱 (Sidebar 220px: 原图 1:1 导航层级)
+         ───────────────────────────────────────────────────────────── -->
+    <aside id="left-sidebar" class="w-[220px] bg-sidebar border-r border-subtle flex flex-col shrink-0 text-xs text-fgSecondary transition-[width] duration-200 overflow-hidden">
+      <div class="flex-1 overflow-y-auto px-2 py-3 space-y-4">
+        
+        <!-- 基础导航项 -->
+        <div class="space-y-0.5">
+          <div class="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-cardHover cursor-pointer text-fgSecondary hover:text-fg transition-colors">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            <span>Pulse</span>
+          </div>
+          <div class="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-cardHover cursor-pointer text-fgSecondary hover:text-fg transition-colors">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+            <span>Inbox</span>
+          </div>
+          <div class="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-cardHover cursor-pointer text-fgSecondary hover:text-fg transition-colors">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="4.93" y1="4.93" x2="9.17" y2="9.17"/><line x1="14.83" y1="14.83" x2="19.07" y2="19.07"/><line x1="14.83" y1="9.17" x2="19.07" y2="4.93"/><line x1="4.93" y1="19.07" x2="9.17" y2="14.83"/></svg>
+            <span>My issues</span>
+          </div>
+          <div class="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-cardHover cursor-pointer text-fgSecondary hover:text-fg transition-colors">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+            <span>Reviews</span>
+          </div>
+        </div>
+
+        <!-- 分组 1: Workspace -->
+        <div class="space-y-0.5">
+          <div class="flex items-center justify-between px-2 py-1 text-fgMuted text-[11px] font-medium tracking-wide">
+            <span>Workspace</span>
+            <svg class="w-3 h-3 text-fgMuted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </div>
+          <div class="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-cardHover cursor-pointer text-fgSecondary hover:text-fg transition-colors">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12a4 4 0 0 1 8 0"/></svg>
+            <span>Initiatives</span>
+          </div>
+          <div class="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-cardHover cursor-pointer text-fgSecondary hover:text-fg transition-colors">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+            <span>Projects</span>
+          </div>
+          <div class="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-cardHover cursor-pointer text-fgSecondary hover:text-fg transition-colors">
+            <span class="text-fgMuted">···</span>
+            <span>More</span>
+          </div>
+        </div>
+
+        <!-- 分组 2: Favorites (激活项) -->
+        <div class="space-y-0.5">
+          <div class="flex items-center justify-between px-2 py-1 text-fgMuted text-[11px] font-medium tracking-wide">
+            <span>Favorites</span>
+            <svg class="w-3 h-3 text-fgMuted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </div>
+          <!-- 当前激活任务 -->
+          <div class="flex items-center gap-2.5 px-2 py-1.5 rounded bg-card text-fg font-medium border border-subtle shadow-sm cursor-pointer">
+            <svg class="w-3.5 h-3.5 text-amberAcc shrink-0" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8v16z"/>
+            </svg>
+            <span class="truncate">Faster app launch</span>
+          </div>
+          <div class="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-cardHover cursor-pointer text-fgSecondary hover:text-fg transition-colors">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 12l2 2 4-4"/></svg>
+            <span>Agent tasks</span>
+          </div>
+          <div class="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-cardHover cursor-pointer text-fgSecondary hover:text-fg transition-colors">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+            <span>Agent Insights</span>
+          </div>
+          <div class="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-cardHover cursor-pointer text-fgSecondary hover:text-fg transition-colors">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+            <span>UI Refresh</span>
+          </div>
+        </div>
+
+      </div>
+    </aside>
+
+    <!-- ─────────────────────────────────────────────────────────────
+         中舱 (主工作流时间轴: 原图 1:1 排版与事件流)
+         ───────────────────────────────────────────────────────────── -->
+    <main class="flex-1 flex flex-col bg-canvas overflow-y-auto px-8 py-7 space-y-7">
+      
+      <!-- 任务核心主标题与需求描述 (原图 1:1) -->
+      <div class="space-y-3 max-w-2xl">
+        <h1 class="text-[22px] font-semibold text-fg tracking-tight">Faster app launch</h1>
+        <p class="text-sm text-fgSecondary leading-relaxed">
+          Render UI before <code class="px-1.5 py-0.5 rounded bg-card border border-subtle font-mono text-[13px] text-fg">vehicle_state</code> sync when minimum required state is present, instead of blocking on full refresh during iOS startup.
+        </p>
+      </div>
+
+      <!-- Activity 动态流 (原图 1:1 结构) -->
+      <div class="space-y-4 max-w-2xl pt-2">
+        <div class="text-xs font-semibold text-fg tracking-wide uppercase">Activity</div>
+
+        <div class="space-y-4 text-xs text-fgSecondary border-l border-subtle pl-4 ml-2">
+          
+          <!-- 事件 1: 创建 -->
+          <div class="relative flex items-center gap-2">
+            <span class="absolute -left-[21px] w-2.5 h-2.5 rounded-full bg-sidebar border border-subtle flex items-center justify-center">
+              <span class="w-1 h-1 rounded-full bg-fgMuted"></span>
+            </span>
+            <span class="font-medium text-fg">Linear</span>
+            <span>created the issue via Slack on behalf of Karri · <span class="text-fgMuted font-mono">2min ago</span></span>
+          </div>
+
+          <!-- 事件 2: 标签注入 -->
+          <div class="relative flex items-center gap-2">
+            <span class="absolute -left-[21px] w-2.5 h-2.5 rounded-full bg-sidebar border border-subtle flex items-center justify-center">
+              <span class="w-1 h-1 rounded-full bg-fgMuted"></span>
+            </span>
+            <span>Triage Intelligence added the labels <span class="px-1.5 py-0.5 rounded bg-card border border-subtle font-medium text-fg">Performance</span> and <span class="px-1.5 py-0.5 rounded bg-card border border-subtle font-medium text-fg">iOS</span> · <span class="text-fgMuted font-mono">2min ago</span></span>
+          </div>
+
+          <!-- 事件 3: 人类讨论 (karri) -->
+          <div class="relative space-y-1.5 pt-1">
+            <span class="absolute -left-[21px] top-2 w-2.5 h-2.5 rounded-full bg-sidebar border border-subtle flex items-center justify-center">
+              <span class="w-1 h-1 rounded-full bg-fgMuted"></span>
+            </span>
+            <div class="flex items-center gap-2">
+              <span class="w-4 h-4 rounded-full bg-card border border-subtle text-[9px] font-bold flex items-center justify-center text-fg">K</span>
+              <span class="font-medium text-fg">karri</span>
+              <span class="text-fgMuted font-mono text-[11px]">4 min ago</span>
+            </div>
+            <div class="text-fg text-xs pl-6 leading-relaxed">
+              Right now we show a spinner forever, which makes it look like the car disappeared...
+            </div>
+          </div>
+
+          <!-- 事件 4: 人类呼叫 Agent (jori) -->
+          <div class="relative space-y-1.5 pt-1">
+            <span class="absolute -left-[21px] top-2 w-2.5 h-2.5 rounded-full bg-sidebar border border-subtle flex items-center justify-center">
+              <span class="w-1 h-1 rounded-full bg-fgMuted"></span>
+            </span>
+            <div class="flex items-center gap-2">
+              <span class="w-4 h-4 rounded-full bg-card border border-subtle text-[9px] font-bold flex items-center justify-center text-fg">J</span>
+              <span class="font-medium text-fg">jori</span>
+              <span class="text-fgMuted font-mono text-[11px]">just now</span>
+            </div>
+            <div class="text-fg text-xs pl-6 leading-relaxed">
+              <span class="text-indigo-400 font-medium">@Linear</span> can you take a stab at this?
+            </div>
+          </div>
+
+          <!-- 事件 5: Agent 接入 -->
+          <div class="relative flex items-center gap-2 pt-1">
+            <span class="absolute -left-[21px] w-2.5 h-2.5 rounded-full bg-sidebar border border-subtle flex items-center justify-center">
+              <span class="w-1 h-1 rounded-full bg-indigo-500"></span>
+            </span>
+            <span class="font-medium text-fg">Linear</span>
+            <span>connected by Jori · <span class="text-fgMuted font-mono">2 min ago</span></span>
+          </div>
+
+          <!-- 事件 6: PR 生成通知 -->
+          <div class="relative flex items-center gap-2">
+            <span class="absolute -left-[21px] w-2.5 h-2.5 rounded-full bg-sidebar border border-subtle flex items-center justify-center">
+              <span class="w-1 h-1 rounded-full bg-emerald-500"></span>
+            </span>
+            <svg class="w-3.5 h-3.5 text-emeraldAcc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+            <span class="font-medium text-fg">Changed 2 files</span>
+            <span>Draft PR awaiting your review · <span class="text-fgMuted font-mono">2 min ago</span></span>
+          </div>
+
+          <!-- 事件 7: 状态机流转 -->
+          <div class="relative flex items-center gap-2">
+            <span class="absolute -left-[21px] w-2.5 h-2.5 rounded-full bg-sidebar border border-subtle flex items-center justify-center">
+              <span class="w-1 h-1 rounded-full bg-amberAcc"></span>
+            </span>
+            <svg class="w-3 h-3 text-amberAcc" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8v16z"/>
+            </svg>
+            <span>Linear moved from <span class="font-medium text-fg">Todo</span> to <span class="font-medium text-fg">In Progress</span> · <span class="text-fgMuted font-mono">just now</span></span>
+          </div>
+
+        </div>
+      </div>
+
+    </main>
+
+    <!-- ─────────────────────────────────────────────────────────────
+         右舱 (AI Agent 交互卡片: 原图右侧悬浮/贴边伴随面板 1:1 复刻)
+         ───────────────────────────────────────────────────────────── -->
+    <aside class="w-[380px] bg-canvas border-l border-subtle flex flex-col justify-end p-4 shrink-0 overflow-y-auto">
+      
+      <!-- 伴随面板顶部操作区 (原图 1:1) -->
+      <div class="flex items-center justify-between text-xs text-fgSecondary mb-3 px-1">
+        <span class="font-medium">Reviews</span>
+        <button class="flex items-center gap-1.5 px-2 py-1 rounded bg-card hover:bg-cardHover border border-subtle text-fg text-xs transition-colors">
+          <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+          <span>Revert</span>
+        </button>
+      </div>
+
+      <!-- Linear AI Agent 交互主卡片 (原图 1:1 视觉微距与结构) -->
+      <div class="rounded-xl border border-subtle bg-card shadow-[var(--shadow-float)] p-3.5 space-y-3 text-xs">
+        
+        <!-- 卡片顶栏: Linear Opus 5.5 + 窗控 -->
+        <div class="flex items-center justify-between pb-2 border-b border-subtle">
+          <div class="flex items-center gap-1.5 font-medium text-fg">
+            <span class="w-2 h-2 rounded-full bg-emeraldAcc"></span>
+            <span>Linear Opus 5.5</span>
+          </div>
+          <div class="flex items-center gap-2 text-fgMuted">
+            <button class="hover:text-fg"><svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+            <button class="hover:text-fg"><svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button>
+            <button class="hover:text-fg"><svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          </div>
+        </div>
+
+        <!-- 用户下发的气泡指令 (原图 1:1) -->
+        <div class="bg-cardHover/70 border border-subtle rounded-lg p-2.5 text-fg text-xs leading-relaxed">
+          Fix the dimmed ride rows that never reset and open a PR
+        </div>
+
+        <!-- 上下文关联胶囊 (原图 1:1) -->
+        <div class="flex items-center justify-end">
+          <div class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-sidebar border border-subtle text-[11px] text-fgMuted">
+            <svg class="w-3 h-3 text-amberAcc" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8v16z"/></svg>
+            <span>DRV-364 added to context</span>
+          </div>
+        </div>
+
+        <!-- 思考时长手风琴 (原图 1:1 "Worked for 10 sec ▸") -->
+        <div class="border border-subtle/80 rounded-md overflow-hidden bg-sidebar/50">
+          <button onclick="toggleAgentWork()" class="w-full flex items-center justify-between px-2.5 py-1.5 text-fgSecondary text-[11px] font-medium hover:bg-cardHover transition-colors">
+            <span>Worked for 10 sec</span>
+            <svg id="agent-work-arrow" class="w-3 h-3 text-fgMuted transition-transform duration-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+          <div id="agent-work-body" class="hidden px-2.5 py-2 border-t border-subtle text-[11px] font-mono text-fgMuted space-y-1">
+            <div>1. Searched `vehicle_state` in components/RideRow.tsx</div>
+            <div>2. Found stale state cache blocking iOS startup sync</div>
+            <div>3. Refactored `isItemDimmed` to read reactive store</div>
+          </div>
+        </div>
+
+        <!-- Agent 回答与执行摘要 (原图 1:1) -->
+        <p class="text-fg text-xs leading-relaxed">
+          Pushed and opened a draft PR. Removed dimmedIds — <code class="px-1 py-0.5 rounded bg-sidebar border border-subtle font-mono text-[11px] text-fg">isItemDimmed</code> now checks waitingStatusById directly.
+        </p>
+
+        <!-- 代码变更与 Diff 卡片 (原图 1:1) -->
+        <div class="space-y-1.5 pt-1">
+          <div class="flex items-center justify-between text-xs">
+            <div class="flex items-center gap-1.5 font-medium text-fg">
+              <span>Changed 2 files</span>
+              <span class="text-emeraldAcc font-mono font-semibold">+22</span>
+              <span class="text-redAcc font-mono font-semibold">-10</span>
+            </div>
+            <button class="flex items-center gap-1 px-2 py-0.5 rounded bg-sidebar hover:bg-cardHover border border-subtle text-fg text-[11px] font-medium transition-colors">
+              <svg class="w-3 h-3 text-fgSecondary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              <span>Preview</span>
+            </button>
+          </div>
+
+          <!-- PR 链接卡片 -->
+          <div class="p-2 rounded bg-sidebar/80 border border-subtle text-[11px] space-y-1">
+            <div class="flex items-center gap-1.5 font-medium text-fg">
+              <svg class="w-3 h-3 text-fgSecondary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+              <span class="text-fgMuted">Draft</span>
+              <span class="font-semibold text-fg truncate">Reset dimmed ride rows</span>
+            </div>
+            <div class="text-fgMuted font-mono text-[10px] pl-4">
+              master ← ride/drv-364-reset-dimmed-rows
+            </div>
+          </div>
+        </div>
+
+        <!-- 底部微输入舱 (原图 1:1 "Reply..." + Skills/Attach/At/Send) -->
+        <div class="pt-2 border-t border-subtle space-y-2">
+          <textarea rows="2" placeholder="Reply..." class="w-full bg-transparent border-0 text-xs text-fg placeholder:text-fgMuted focus:outline-none resize-none leading-relaxed"></textarea>
+          
+          <div class="flex items-center justify-between text-xs text-fgMuted">
+            <button class="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-cardHover text-[11px] text-fgSecondary hover:text-fg transition-colors">
+              <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              <span>Skills</span>
+              <svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+
+            <div class="flex items-center gap-2">
+              <button class="hover:text-fg" title="引用上下文"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg></button>
+              <button class="hover:text-fg" title="附件"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+              <button class="hover:text-fg" title="唤醒专家 (@)"><span class="text-xs font-mono font-bold">@</span></button>
+              <button class="h-6 w-6 rounded bg-cardHover hover:bg-fg hover:text-canvas flex items-center justify-center transition-colors text-fg" title="发送 (Enter)">
+                <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </aside>
+
+  </div>
+
+  <script>
+    // 1. 全局换肤状态机 (支持无感动态换肤，零硬编码死色)
+    function toggleTheme() {
+      const html = document.documentElement;
+      const isDark = html.classList.toggle('dark');
+      document.getElementById('theme-icon').textContent = isDark ? '🌙' : '☀️';
+      document.getElementById('theme-label').textContent = isDark ? 'Dark' : 'Light';
+    }
+
+    // 2. 侧边栏折叠/展开
+    function toggleSidebar() {
+      const sidebar = document.getElementById('left-sidebar');
+      sidebar.classList.toggle('w-[220px]');
+      sidebar.classList.toggle('w-0');
+      sidebar.classList.toggle('border-r');
+    }
+
+    // 3. AI 工作思考链展开
+    function toggleAgentWork() {
+      const body = document.getElementById('agent-work-body');
+      const arrow = document.getElementById('agent-work-arrow');
+      const isHidden = body.classList.contains('hidden');
+      body.classList.toggle('hidden', !isHidden);
+      arrow.classList.toggle('rotate-90', isHidden);
+    }
+
+    // 4. 全局快捷键监听 (Ctrl+B 折叠侧栏)
+    window.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'B')) {
+        e.preventDefault();
+        toggleSidebar();
+      }
+    });
+  </script>
+</body>
+</html>
