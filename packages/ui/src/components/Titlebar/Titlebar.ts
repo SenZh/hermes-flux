@@ -5,11 +5,15 @@
  * - Language and theme toggles moved inside Settings Modal.
  */
 
+import { t } from '../../i18n/index.js';
+
 export interface TitlebarProps {
   platform: 'windows' | 'macos' | 'linux' | 'ios' | 'android' | 'web';
   title: string;
   isMaximized: boolean;
   gatewayConnected: boolean;
+  gatewayLatencyMs?: number;
+  theme?: string;
   profileName?: string;
   profiles?: Array<{ name: string; displayName: string; avatar?: string; isDefault?: boolean }>;
   onToggleLeftRail?: () => void;
@@ -80,10 +84,10 @@ export function renderTitlebar(props: TitlebarProps): string {
       position: relative;
       z-index: 50;
     ">
-      <!-- Left Wing: Agent Profiles Align Left & Collapser -->
+      <!-- Left Wing: Collapser & Platform Controls -->
       <div class="titlebar-left" style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;">
         ${isMac ? macControls : ''}
-        <button id="toggle-left-rail-btn" class="icon-btn" title="折叠/展开侧栏 (Ctrl+B)" style="
+        <button id="toggle-left-rail-btn" class="icon-btn" title="${t('titlebar.toggleLeftRail')}" style="
           -webkit-app-region: no-drag;
           margin-left: ${isWin ? '12px' : '6px'};
           background: transparent;
@@ -103,61 +107,22 @@ export function renderTitlebar(props: TitlebarProps): string {
             <line x1="6" y1="2" x2="6" y2="14"/>
           </svg>
         </button>
-
-        <!-- Agent Profiles Switcher Pills Aligned Left -->
-        ${
-          props.profiles && props.profiles.length > 0
-            ? `
-          <div class="titlebar-agent-chips" style="-webkit-app-region: no-drag; display: flex; align-items: center; gap: 6px; background: var(--bg-card); padding: 3px 6px; border-radius: 20px; border: 1px solid var(--border-subtle); overflow-x: auto;">
-            ${props.profiles
-              .map((p) => {
-                const isSelected = (props.profileName || 'default') === p.name;
-                const avatarImg = p.avatar
-                  ? `<img src="${escapeHtml(p.avatar)}" style="width: 18px; height: 18px; border-radius: 50%; object-fit: cover;" />`
-                  : `<span style="
-                      width: 18px;
-                      height: 18px;
-                      border-radius: 50%;
-                      background: ${isSelected ? 'var(--accent)' : 'var(--border-medium)'};
-                      color: ${isSelected ? '#000' : 'var(--text-main)'};
-                      font-size: 10px;
-                      font-weight: 700;
-                      display: inline-flex;
-                      align-items: center;
-                      justify-content: center;
-                    ">${(p.displayName || p.name || 'A')[0].toUpperCase()}</span>`;
-
-                return `
-                <button type="button" class="btn-profile-chip ${isSelected ? 'active' : ''}" data-profile="${escapeHtml(p.name)}" style="
-                  height: 26px;
-                  padding: 0 10px 0 4px;
-                  border-radius: 13px;
-                  background: ${isSelected ? 'var(--accent-subtle)' : 'transparent'};
-                  border: 1px solid ${isSelected ? 'var(--accent)' : 'transparent'};
-                  color: ${isSelected ? 'var(--accent)' : 'var(--text-secondary)'};
-                  font-size: 11.5px;
-                  font-weight: ${isSelected ? '600' : '400'};
-                  display: flex;
-                  align-items: center;
-                  gap: 6px;
-                  cursor: pointer;
-                  white-space: nowrap;
-                  transition: all 0.15s ease;
-                " title="${escapeHtml(p.displayName || p.name)}">
-                  ${avatarImg}
-                  <span>${escapeHtml(p.displayName || p.name)}</span>
-                </button>
-              `;
-              })
-              .join('')}
-          </div>
-        `
-            : ''
-        }
       </div>
 
-      <!-- Center Title -->
-      <div class="titlebar-center" style="display: flex; align-items: center; justify-content: center; gap: 8px; flex-shrink: 0;">
+      <!-- Center Title (Strict Absolute Centering & Overflow Isolation) -->
+      <div class="titlebar-center" style="
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        max-width: calc(100% - 320px);
+        pointer-events: none;
+        z-index: 1;
+      ">
         <span class="session-live-pulse" title="${props.gatewayConnected ? '网关已连接' : '网关未连接'}" style="
           width: 7px;
           height: 7px;
@@ -175,15 +140,51 @@ export function renderTitlebar(props: TitlebarProps): string {
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
-          max-width: 300px;
+          max-width: 100%;
         ">${escapeHtml(displayTitle)}</span>
       </div>
 
-      <!-- Right Global Auxiliary Area (250px) -->
-      <div class="titlebar-right" style="display: flex; align-items: center; justify-content: flex-end; ${isMobile ? 'width: auto; min-width: 0;' : 'width: 250px; min-width: 250px;'} gap: 8px; height: 100%;">
+      <!-- Right Global Auxiliary Area -->
+      <div class="titlebar-right" style="display: flex; align-items: center; justify-content: flex-end; width: auto; min-width: 0; gap: 8px; height: 100%; flex-shrink: 0; z-index: 2;">
         <div style="-webkit-app-region: no-drag; display: flex; align-items: center; gap: 6px; margin-right: 8px;">
+          <!-- Gateway Latency Pill -->
+          <div class="titlebar-latency-pill" title="${t('titlebar.latency')}" style="
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            padding: 2px 7px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-family: var(--font-mono);
+            color: var(--text-secondary);
+          ">
+            <span style="width: 5px; height: 5px; border-radius: 50%; background: ${pulseColor}; display: inline-block;"></span>
+            <span>${props.gatewayLatencyMs ? `${props.gatewayLatencyMs}ms` : (props.gatewayConnected ? t('titlebar.online') : t('titlebar.offline'))}</span>
+          </div>
+
+          <!-- Quick Theme Switcher Button (Dynamic Skin Toggle) -->
+          <button id="titlebar-theme-toggle-btn" class="icon-btn" title="${t('titlebar.toggleTheme')}" style="
+            background: transparent;
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: color 0.15s ease, background 0.15s ease;
+          ">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+            </svg>
+          </button>
+
           <!-- Settings gear icon button -->
-          <button id="btn-open-settings" class="icon-btn" title="网关与系统设置" style="
+          <button id="btn-open-settings" class="icon-btn" title="${t('titlebar.settings')}" style="
             background: transparent;
             border: 1px solid var(--border-subtle);
             border-radius: 6px;
@@ -203,7 +204,7 @@ export function renderTitlebar(props: TitlebarProps): string {
           </button>
 
           <!-- Inspector toggle -->
-          <button id="toggle-inspector-btn" class="icon-btn" title="检查舱 (Cmd/Ctrl+\\)" style="
+          <button id="toggle-inspector-btn" class="icon-btn" title="${t('titlebar.toggleInspector')}" style="
             background: transparent;
             border: 1px solid var(--border-subtle);
             border-radius: 6px;

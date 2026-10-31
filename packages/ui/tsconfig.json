@@ -12,6 +12,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
+    "jsx": "react-jsx",
     "paths": {
       "@hermes-flux/core": ["../core/dist/index.d.ts"]
     }

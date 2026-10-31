@@ -37,18 +37,18 @@
   --duration-normal: 240ms;
 }
 
-/* THEME A: OBSIDIAN GOLD (黑曜琥珀) */
+/* THEME A: OBSIDIAN GOLD (黑曜琥珀 - 电影级深邃冷墨) */
 [data-theme="obsidian-gold"] {
-  --bg-window: #090A0F;
-  --bg-rail: #0E1015;
-  --bg-panel: #111318;
-  --bg-card: #151720;
-  --bg-card-hover: #1B1E29;
-  --bg-card-active: #222634;
-  --bg-elevated: #1F2230;
-  --bg-input: #12141A;
-  --bg-code: #0A0B10;
-  --bg-backdrop: rgba(18, 20, 27, 0.88);
+  --bg-window: #0E0F12;
+  --bg-rail: #090A0D;
+  --bg-panel: #111317;
+  --bg-card: #14161C;
+  --bg-card-hover: #1A1D24;
+  --bg-card-active: #20232B;
+  --bg-elevated: #161821;
+  --bg-input: #121419;
+  --bg-code: #090A0D;
+  --bg-backdrop: rgba(18, 20, 27, 0.90);
 
   --accent: #F59E0B;
   --accent-hover: #FBBF24;
@@ -57,16 +57,16 @@
   --accent-subtle: rgba(245, 158, 11, 0.09);
   --accent-border: rgba(245, 158, 11, 0.35);
   --accent-text: #FEF3C7;
-  --theme-thumb-color: #090A0F;
+  --theme-thumb-color: #0E0F12;
 
-  --text-main: #F8FAFC;
-  --text-secondary: #94A3B8;
-  --text-muted: #64748B;
-  --text-faint: #334155;
+  --text-main: #F7F8F8;
+  --text-secondary: #8A8F98;
+  --text-muted: #5C6068;
+  --text-faint: #3F434C;
 
-  --border-subtle: rgba(255, 255, 255, 0.06);
-  --border-medium: rgba(255, 255, 255, 0.09);
-  --border-strong: rgba(255, 255, 255, 0.16);
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --border-medium: rgba(255, 255, 255, 0.12);
+  --border-strong: rgba(255, 255, 255, 0.18);
   --specular-line: inset 0 1px 0 0 rgba(255, 255, 255, 0.10);
 
   --shadow-window: 0 24px 70px -12px rgba(0, 0, 0, 0.85);
@@ -100,18 +100,52 @@
   --badge-css-border: rgba(168, 85, 247, 0.35);
 }
 
-/* THEME B: SUET WHITE JADE (羊脂白玉) */
+/* THEME B: SUET WHITE JADE (羊脂白玉 - 温润冷云母浅色) */
 [data-theme="suet-jade"],
 [data-theme="jade-white"] {
-  --bg-window: #F4F6F9;
-  --bg-rail: #E9ECF2;
-  --bg-panel: #FAFAFC;
+  --bg-window: #F6F8FA;
+  --bg-rail: #F1F4F8;
+  --bg-panel: #EAEFF4;
   --bg-card: #FFFFFF;
-  --bg-card-hover: #F1F4F9;
-  --bg-card-active: #E5E9F2;
+  --bg-card-hover: #F0F2F6;
+  --bg-card-active: #E4E8EE;
   --bg-elevated: #FFFFFF;
   --bg-input: #FFFFFF;
-  --bg-code: #F4F6FA;
+  --bg-code: #F1F4F8;
+  --bg-backdrop: rgba(255, 255, 255, 0.92);
+
+  --accent: #0D7A5E;
+  --accent-hover: #0B6850;
+  --accent-dim: #095743;
+  --accent-glow: rgba(13, 122, 94, 0.20);
+  --accent-subtle: rgba(13, 122, 94, 0.08);
+  --accent-border: rgba(13, 122, 94, 0.32);
+  --accent-text: #08523F;
+  --theme-thumb-color: #FFFFFF;
+
+  --text-main: #111827;
+  --text-secondary: #475569;
+  --text-muted: #64748B;
+  --text-faint: #94A3B8;
+
+  --border-subtle: rgba(0, 0, 0, 0.07);
+  --border-medium: rgba(0, 0, 0, 0.12);
+  --border-strong: rgba(0, 0, 0, 0.20);
+  --specular-line: inset 0 1px 0 0 rgba(255, 255, 255, 0.90);
+
+  --shadow-window: 0 24px 60px -12px rgba(15, 23, 42, 0.18);
+  --shadow-card: 0 2px 12px rgba(15, 23, 42, 0.06);
+  --shadow-dock: 0 16px 40px -10px rgba(15, 23, 42, 0.14);
+
+  --jade-pulse: #059669;
+  --jade-glow: rgba(5, 150, 105, 0.40);
+}
+
+/* Consolidated Minimal Desktop Layout: Status consolidated in Titlebar */
+.flux-status-bar,
+#app-status-bar {
+  display: none !important;
+}
   --bg-backdrop: rgba(255, 255, 255, 0.90);
 
   --accent: #0D7A5E;

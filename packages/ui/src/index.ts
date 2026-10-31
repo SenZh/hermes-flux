@@ -16,3 +16,4 @@ export * from './components/Bot/BotProfileCard.js';
 export * from './components/Group/GroupRoomView.js';
 export * from './components/Group/GroupPromotionDialog.js';
 export * from './components/Project/ProjectTreeViewer.js';
+export * from './components/TaskModal/NewTaskModal.js';
