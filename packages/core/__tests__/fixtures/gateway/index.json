@@ -1249,6 +1249,36 @@
       "ok": true,
       "code": 4007,
       "message": "session not found"
+    },
+    {
+      "module": "session",
+      "method": "session.branch",
+      "skipped": true,
+      "reason": "会话分支派生需依赖包含历史消息的活跃会话，在离线离境探针下显式跳过，由自动化单测与契约表严格守护"
+    },
+    {
+      "module": "session",
+      "method": "session.undo",
+      "skipped": true,
+      "reason": "单步撤销需依赖刚刚产生交互的活跃回合，在离线探针下显式跳过，由领域单测严格守护"
+    },
+    {
+      "module": "session",
+      "method": "session.steer",
+      "skipped": true,
+      "reason": "运行时轻量纠偏仅在 Agent 处于执行在途态有效，在离线探针下显式跳过，由单测与契约表严格守护"
+    },
+    {
+      "module": "session",
+      "method": "session.usage",
+      "skipped": true,
+      "reason": "上下文用量统计依赖正在运行的模型上下文数据，离线探针显式跳过，由契约表严格守护"
+    },
+    {
+      "module": "system",
+      "method": "commands.catalog",
+      "skipped": true,
+      "reason": "动态命令目录由在线网关运行时按 profile 动态生成，离线探针显式跳过，由契约表严格守护"
     }
   ]
 }

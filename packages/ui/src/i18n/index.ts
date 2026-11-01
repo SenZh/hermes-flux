@@ -276,6 +276,30 @@ export const zhDict = {
   'btw.capsuleTitle': '外援咨询胶囊',
   'btw.isolatedNotice': '只读外援 · 零上下文污染',
   'btw.copyAnswer': '引用至输入框',
+
+  // Main Chat Stage & Collapsible Metrics
+  'chat.copy': '复制',
+  'chat.rollback': '回滚',
+  'chat.fork': 'Fork 分支',
+  'chat.regenerate': '重新生成',
+  'chat.thought': '推理',
+  'chat.thoughtSeconds': '已思考 {seconds} 秒',
+  'chat.tokens': 'Token 消耗',
+  'chat.tps': '生成速率',
+  'chat.inputTokens': '输入',
+  'chat.outputTokens': '输出',
+  'chat.cacheHit': '缓存命中',
+  'chat.contextGauge': '上下文水位',
+  'queue.title': '待发送队列',
+  'queue.interruptAndPush': '打断并发送',
+  'queue.cancel': '取消',
+  'queue.moveUp': '上移',
+  'queue.moveDown': '下移',
+  'queue.edit': '编辑',
+  'dock.attachTooltip': '附加文件 (支持多选、拖拽与剪贴板)',
+  'dock.slashHeader': '斜杠命令与技能',
+  'dock.mentionHeader': '智能引用与专家分身',
+  'common.remove': '移除',
 } as const;
 
 export type I18nKey = keyof typeof zhDict;
@@ -546,6 +570,30 @@ export const enDict: Record<I18nKey, string> = {
   'btw.capsuleTitle': 'Specialist Advice',
   'btw.isolatedNotice': 'Read-only · Zero Context Pollution',
   'btw.copyAnswer': 'Quote to Input',
+
+  // Main Chat Stage & Collapsible Metrics
+  'chat.copy': 'Copy',
+  'chat.rollback': 'Rollback',
+  'chat.fork': 'Fork Branch',
+  'chat.regenerate': 'Regenerate',
+  'chat.thought': 'Reasoning',
+  'chat.thoughtSeconds': 'Thought for {seconds}s',
+  'chat.tokens': 'Token Usage',
+  'chat.tps': 'Speed',
+  'chat.inputTokens': 'Input',
+  'chat.outputTokens': 'Output',
+  'chat.cacheHit': 'Cache Hit',
+  'chat.contextGauge': 'Context Window',
+  'queue.title': 'Pending Queue',
+  'queue.interruptAndPush': 'Interrupt & Push',
+  'queue.cancel': 'Cancel',
+  'queue.moveUp': 'Move Up',
+  'queue.moveDown': 'Move Down',
+  'queue.edit': 'Edit',
+  'dock.attachTooltip': 'Attach files (supports multi-select, drag & drop, paste)',
+  'dock.slashHeader': 'Slash Commands & Skills',
+  'dock.mentionHeader': 'Smart Mentions & Specialists',
+  'common.remove': 'Remove',
 };
 
 export type Locale = 'zh-CN' | 'en-US';

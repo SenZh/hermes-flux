@@ -22,3 +22,5 @@ export * from './profile/profileService.js';
 export * from './group/groupService.js';
 export * from './project/projectService.js';
 export * from './project/sessionProjectMatcher.js';
+export * from './queue/chatQueueStore.js';
+export * from './session/interactiveService.js';

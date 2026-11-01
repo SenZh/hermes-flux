@@ -12,14 +12,28 @@
 import { t } from '../../i18n/index.js';
 import { renderBotAvatar } from '../LeftRail/LeftRail.js';
 
+export interface MessageTokenMetrics {
+  total?: number;
+  input?: number;
+  output?: number;
+  tps?: number;
+  cacheHitPct?: number;
+  cacheRead?: number;
+}
+
 export interface MessageViewModel {
   id: string;
+  rowId?: number;
   role: 'user' | 'assistant' | 'system';
   content: string;
   sender?: string;
   senderAvatar?: string;
+  model?: string;
   thought?: string;
   thoughtDurationMs?: number;
+  durationMs?: number;
+  ttftMs?: number;
+  tokenMetrics?: MessageTokenMetrics;
   toolCalls?: {
     id: string;
     name: string;
@@ -30,6 +44,14 @@ export interface MessageViewModel {
     startTime?: number;
   }[];
   timestamp: string;
+  isGroupRoom?: boolean;
+  isBotRoom?: boolean;
+}
+
+export interface ContextGaugeUsage {
+  used: number;
+  max: number;
+  percent: number;
 }
 
 export interface MiddlePodProps {
@@ -44,13 +66,58 @@ export interface MiddlePodProps {
   dockHtml?: string;
   hasOlderMessages?: boolean;
   isLoadingOlder?: boolean;
+  contextUsage?: ContextGaugeUsage;
+}
+
+export function renderContextGauge(usage?: ContextGaugeUsage): string {
+  if (!usage || !usage.max || usage.max <= 0) return '';
+  const percent = Math.min(100, Math.max(0, Math.round(usage.percent ?? (usage.used / usage.max) * 100)));
+  const formatTokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(0)}k` : `${n}`);
+
+  // 色阶计算：<70% 暗银灰，70-90% 琥珀暖金，>90% 高对比高亮
+  let colorVar = 'var(--text-muted)';
+  let bgVar = 'var(--bg-panel)';
+  if (percent >= 90) {
+    colorVar = 'var(--text-main)';
+    bgVar = 'var(--bg-card-active)';
+  } else if (percent >= 70) {
+    colorVar = 'var(--accent)';
+    bgVar = 'var(--accent-subtle)';
+  }
+
+  return `
+    <div class="context-gauge-badge" title="${t('chat.contextGauge')}: ${usage.used} / ${usage.max} (${percent}%)" style="
+      position: absolute;
+      top: 10px;
+      right: 18px;
+      z-index: 10;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 9px;
+      background: ${bgVar};
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      font-size: 10.5px;
+      font-family: var(--font-mono);
+      color: ${colorVar};
+      user-select: none;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    ">
+      <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: ${colorVar};"></span>
+      <span>${formatTokens(usage.used)} / ${formatTokens(usage.max)}</span>
+      <span style="opacity: 0.8;">(${percent}%)</span>
+    </div>
+  `;
 }
 
 export function renderConversationCanvas(props: MiddlePodProps): string {
   const agentDisplayName = (props.profileName || 'default').toUpperCase();
 
   return `
-    <div class="content-fluid-canvas" style="width: 100%; max-width: 100%; margin: 0; display: flex; flex-direction: column; gap: 8px;">
+    <div class="content-fluid-canvas" style="width: 100%; max-width: 100%; margin: 0; display: flex; flex-direction: column; gap: 8px; position: relative;">
+      ${renderContextGauge(props.contextUsage)}
       ${
         props.gatewayConnecting
           ? `<div style="max-width: 480px; margin: 120px auto 0; text-align: center; color: var(--text-muted); font-size: 13px; display: flex; flex-direction: column; align-items: center; gap: 10px;">
@@ -365,6 +432,74 @@ function extractToolsFromContent(content: string): { cleanContent: string; extra
   return { cleanContent: content, extractedTools: [] };
 }
 
+export function renderTokenMetrics(metrics?: MessageTokenMetrics, modelName?: string): string {
+  if (!metrics || (!metrics.total && !metrics.input && !metrics.output)) {
+    return '';
+  }
+
+  const totalText = metrics.total ? `${metrics.total.toLocaleString()} tokens` : '';
+  const tpsText = metrics.tps ? `${metrics.tps.toFixed(1)} tps` : '';
+  const cacheHitText = metrics.cacheHitPct !== undefined && metrics.cacheHitPct !== null ? `${metrics.cacheHitPct}%` : '';
+
+  return `
+    <div class="collapsible-token-metrics" style="position: relative; display: inline-flex; align-items: center;">
+      <!-- 外层常驻胶囊 -->
+      <button class="token-metrics-pill" data-action="toggle-token-popover" style="
+        background: var(--bg-panel);
+        border: 1px solid var(--border-subtle);
+        border-radius: 10px;
+        padding: 1.5px 7px;
+        font-size: 10px;
+        font-family: var(--font-mono);
+        color: var(--text-muted);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        transition: border-color 0.12s ease, color 0.12s ease;
+      ">
+        <span style="color: var(--accent); font-size: 10px;">⚡</span>
+        <span>${escapeHtml(totalText || t('chat.tokens'))}</span>
+      </button>
+
+      <!-- Hover / 点击 Popover 详情面板 -->
+      <div class="token-metrics-popover" style="
+        display: none;
+        position: absolute;
+        bottom: calc(100% + 6px);
+        right: 0;
+        z-index: 50;
+        width: 210px;
+        background: var(--bg-card);
+        border: 1px solid var(--border-medium);
+        border-radius: 8px;
+        padding: 8px 10px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+        font-size: 11px;
+        font-family: var(--font-mono);
+        color: var(--text-main);
+        backdrop-filter: blur(12px);
+      ">
+        <div style="font-weight: 600; color: var(--text-main); margin-bottom: 6px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 4px;">
+          ${escapeHtml(modelName || t('chat.tokens'))}
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 3px; color: var(--text-secondary);">
+          <span>${t('chat.tps')}:</span>
+          <span style="color: var(--accent); font-weight: 500;">${tpsText || '—'}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 3px; color: var(--text-secondary);">
+          <span>${t('chat.inputTokens')} / ${t('chat.outputTokens')}:</span>
+          <span>${metrics.input ?? '—'} / ${metrics.output ?? '—'}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; color: var(--text-secondary);">
+          <span>${t('chat.cacheHit')}:</span>
+          <span>${cacheHitText ? `${cacheHitText} (${metrics.cacheRead ?? 0})` : '—'}</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 export function renderMessage(
   m: MessageViewModel,
   _agentDisplayName = 'HERMES AGENT',
@@ -373,15 +508,11 @@ export function renderMessage(
   const isUser = m.role === 'user';
   const isFirstInTurn = options.isFirstInTurn ?? true;
   const isLastInTurn = options.isLastInTurn ?? true;
+  const isOrdinarySession = !m.isGroupRoom && !m.isBotRoom;
 
   if (isUser) {
     return `
-      <div class="message-row user-row" data-msg-id="${m.id}" style="display: flex; flex-direction: column; align-items: flex-end; width: 100%; margin: 3px 0;">
-        ${
-          m.timestamp
-            ? `<span style="font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono); margin-bottom: 2px; padding-right: 4px;">${escapeHtml(m.timestamp)}</span>`
-            : ''
-        }
+      <div class="message-row user-row" data-msg-id="${m.id}" data-row-id="${m.rowId ?? ''}" style="display: flex; flex-direction: column; align-items: flex-end; width: 100%; margin: 4px 0;">
         <div class="user-bubble" style="
           max-width: 85%;
           background: var(--bg-card);
@@ -395,6 +526,70 @@ export function renderMessage(
           word-break: break-word;
         ">
           ${escapeHtml(m.content)}
+        </div>
+        <!-- User Row Micro Action Bar -->
+        <div class="user-action-bar" style="
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-top: 3px;
+          padding-right: 4px;
+          font-size: 10.5px;
+          font-family: var(--font-mono);
+          color: var(--text-muted);
+        ">
+          ${m.timestamp ? `<span class="msg-timestamp" style="opacity: 0.8;">${escapeHtml(m.timestamp)}</span>` : ''}
+          <button class="msg-action-btn" data-action="copy-msg" data-content="${escapeHtml(m.content)}" title="${t('chat.copy')}" style="
+            background: transparent;
+            border: none;
+            padding: 2px 4px;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 10.5px;
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            border-radius: 4px;
+          ">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+            <span>${t('chat.copy')}</span>
+          </button>
+          ${
+            isOrdinarySession
+              ? `
+            <button class="msg-action-btn" data-action="rollback-msg" data-row-id="${m.rowId ?? ''}" data-msg-id="${m.id}" data-content="${escapeHtml(m.content)}" title="${t('chat.rollback')}" style="
+              background: transparent;
+              border: none;
+              padding: 2px 4px;
+              color: var(--text-muted);
+              cursor: pointer;
+              font-size: 10.5px;
+              display: inline-flex;
+              align-items: center;
+              gap: 3px;
+              border-radius: 4px;
+            ">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+              <span>${t('chat.rollback')}</span>
+            </button>
+            <button class="msg-action-btn" data-action="fork-msg" data-msg-id="${m.id}" title="${t('chat.fork')}" style="
+              background: transparent;
+              border: none;
+              padding: 2px 4px;
+              color: var(--text-muted);
+              cursor: pointer;
+              font-size: 10.5px;
+              display: inline-flex;
+              align-items: center;
+              gap: 3px;
+              border-radius: 4px;
+            ">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+              <span>${t('chat.fork')}</span>
+            </button>
+          `
+              : ''
+          }
         </div>
       </div>
     `;
@@ -473,16 +668,78 @@ export function renderMessage(
       `
       }
 
-      <!-- Turn Footer -->
-      ${
-        !isFirstInTurn && isLastInTurn && m.timestamp && cleanContent && cleanContent.trim()
-          ? `
-        <div style="display: flex; justify-content: flex-end; margin-top: 2px;">
-          <span style="font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); opacity: 0.65;">${escapeHtml(m.timestamp)}</span>
+      <!-- Assistant Row Micro Action Bar & Collapsible Token Metrics -->
+      <div class="assistant-footer-bar" style="
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 4px;
+        padding-top: 2px;
+        font-size: 11px;
+        font-family: var(--font-mono);
+        color: var(--text-muted);
+      ">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button class="msg-action-btn" data-action="copy-msg" data-content="${escapeHtml(cleanContent)}" title="${t('chat.copy')}" style="
+            background: transparent;
+            border: none;
+            padding: 2px 4px;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 10.5px;
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            border-radius: 4px;
+          ">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+            <span>${t('chat.copy')}</span>
+          </button>
+          ${
+            isOrdinarySession
+              ? `
+            <button class="msg-action-btn" data-action="fork-msg" data-msg-id="${m.id}" title="${t('chat.fork')}" style="
+              background: transparent;
+              border: none;
+              padding: 2px 4px;
+              color: var(--text-muted);
+              cursor: pointer;
+              font-size: 10.5px;
+              display: inline-flex;
+              align-items: center;
+              gap: 3px;
+              border-radius: 4px;
+            ">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+              <span>${t('chat.fork')}</span>
+            </button>
+            <button class="msg-action-btn" data-action="regenerate-msg" data-msg-id="${m.id}" title="${t('chat.regenerate')}" style="
+              background: transparent;
+              border: none;
+              padding: 2px 4px;
+              color: var(--text-muted);
+              cursor: pointer;
+              font-size: 10.5px;
+              display: inline-flex;
+              align-items: center;
+              gap: 3px;
+              border-radius: 4px;
+            ">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+              <span>${t('chat.regenerate')}</span>
+            </button>
+          `
+              : ''
+          }
+          ${m.model ? `<span class="meta-tag model-tag" style="padding: 1px 6px; background: var(--bg-panel); border: 1px solid var(--border-subtle); border-radius: 10px; font-size: 10px;">${escapeHtml(m.model)}</span>` : ''}
+          ${m.durationMs ? `<span class="meta-tag duration-tag" style="opacity: 0.8; font-size: 10px;">${(m.durationMs / 1000).toFixed(1)}s</span>` : ''}
+          ${m.timestamp ? `<span class="meta-tag time-tag" style="opacity: 0.7; font-size: 10px;">${escapeHtml(m.timestamp)}</span>` : ''}
         </div>
-      `
-          : ''
-      }
+
+        <!-- Token Collapsible Metrics -->
+        ${renderTokenMetrics(m.tokenMetrics, m.model)}
+      </div>
     </div>
   `;
 }
@@ -507,15 +764,15 @@ function renderThinkingFold(m: MessageViewModel): string {
         font-size: 12.5px;
         line-height: 1.4;
       ">
-        <span style="color: #9CA3AF; display: inline-flex; align-items: center; flex-shrink: 0;">
+        <span style="color: var(--text-secondary); display: inline-flex; align-items: center; flex-shrink: 0;">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/>
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1Z"/>
           </svg>
         </span>
-        <span style="font-weight: 500; color: #D1D5DB; flex-shrink: 0;">推理</span>
+        <span style="font-weight: 500; color: var(--text-main); flex-shrink: 0;">${t('chat.thought')}</span>
         ${durationBadge}
-        <span style="color: #9CA3AF; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;">
+        <span style="color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;">
           ${escapeHtml(summary)}
         </span>
       </summary>
