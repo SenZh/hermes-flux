@@ -1176,12 +1176,14 @@ async function fetchGroupRooms(): Promise<void> {
             unreadGroupRoomIds.add(r.roomId);
           }
         }
+        const normUpdatedAt = typeof r.updatedAt === 'number' ? (r.updatedAt > 1e11 ? r.updatedAt : r.updatedAt * 1000) : Date.now();
+        const normCreatedAt = typeof r.createdAt === 'number' ? (r.createdAt > 1e11 ? r.createdAt : r.createdAt * 1000) : Date.now();
         mergedRoomsMap.set(r.roomId, {
           roomId: r.roomId,
           name: r.name,
           members: r.members,
-          createdAt: r.createdAt,
-          updatedAt: r.updatedAt,
+          createdAt: normCreatedAt,
+          updatedAt: normUpdatedAt,
         });
       }
     } catch (e) {
@@ -2262,10 +2264,15 @@ async function selectSession(id: string, options?: { preserveFocus?: boolean }):
   if (!id) return;
   if (state.activeSessionId === id && state.activeLiveSessionId && state.messages.length > 0) return;
 
-  // Preserve draft for outgoing session
+  // Preserve draft & message snapshot for outgoing session
   const currentInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
-  if (state.activeSessionId && currentInput) {
-    sessionDraftMap.set(state.activeSessionId, currentInput.value);
+  if (state.activeSessionId) {
+    if (currentInput) {
+      sessionDraftMap.set(state.activeSessionId, currentInput.value);
+    }
+    if (state.messages.length > 0) {
+      sessionMessagesCache.set(state.activeSessionId, [...state.messages]);
+    }
   }
 
   state.activeSessionId = id;
@@ -2622,7 +2629,8 @@ async function refreshGroupRoomLog(roomId: string): Promise<number> {
     const targetRoom = state.groupRooms.find((r) => r.roomId === roomId);
     if (targetRoom && lastEntry) {
       targetRoom.lastMessage = lastEntry.text;
-      targetRoom.updatedAt = lastEntry.timestamp || Date.now();
+      const rawEntryTs = lastEntry.timestamp || Date.now();
+      targetRoom.updatedAt = typeof rawEntryTs === 'number' ? (rawEntryTs > 1e11 ? rawEntryTs : rawEntryTs * 1000) : Date.now();
       state.groupRooms = [targetRoom, ...state.groupRooms.filter((r) => r.roomId !== roomId)];
     }
     if (state.activeFocus.type === 'group' && state.activeFocus.roomId === roomId) {
@@ -3119,11 +3127,16 @@ function applyTurnActions(actions: TurnAction[]): void {
           // 回合完成：退出 running；焦点不在该会话时置未读（显式传入焦点判定，禁止函数内从全局反推）
           const isFocused = activeStreamingStoredSessionId === state.activeSessionId;
           applyTurnCompleted(activeRunningSessionIds, unreadSessionIds, activeStreamingStoredSessionId, isFocused);
-          // 【核心固化】回合完成瞬间，将当前已累加完整的消息快照 100% 写入缓存，防止切走切回丢数据！
-          sessionMessagesCache.set(activeStreamingStoredSessionId, [...state.messages]);
+          // 【核心隔离固化】仅当当前焦点处于该会话时，state.messages 才属于该会话！
+          // 若用户已切到其他会话，绝不能拿当前会话的 state.messages 去覆盖后台会话的缓存！
+          if (isFocused) {
+            sessionMessagesCache.set(activeStreamingStoredSessionId, [...state.messages]);
+          }
           const completedSess = state.sessions.find((s) => s.id === activeStreamingStoredSessionId);
           if (completedSess) {
-            const finalMsg = state.messages.length > 0 ? state.messages[state.messages.length - 1] : null;
+            const finalMsg = isFocused
+              ? (state.messages.length > 0 ? state.messages[state.messages.length - 1] : null)
+              : (sessionMessagesCache.get(activeStreamingStoredSessionId)?.slice(-1)[0] || null);
             if (finalMsg?.content) {
               completedSess.preview = finalMsg.content;
             }
@@ -3135,15 +3148,17 @@ function applyTurnActions(actions: TurnAction[]): void {
         // 状态严格独立：用"回合发起时的 Bot"收尾，与当前焦点解耦。
         // 用户切走后仍能正确退出 running 并置未读；仍停在该 Bot 工位则直接已读。
         if (activeStreamingBotName) {
-          const finalMsg = state.messages.length > 0 ? state.messages[state.messages.length - 1] : null;
+          const isBotFocused = state.activeFocus.type === 'bot' && state.activeFocus.botName === activeStreamingBotName;
+          const finalMsg = isBotFocused
+            ? (state.messages.length > 0 ? state.messages[state.messages.length - 1] : null)
+            : (activeStreamingStoredSessionId ? sessionMessagesCache.get(activeStreamingStoredSessionId)?.slice(-1)[0] || null : null);
           if (finalMsg?.content) {
             botLatestActivityMap.set(activeStreamingBotName, {
               lastMessage: finalMsg.content.slice(0, 100).replace(/\s+/g, ' ').trim(),
               timestamp: Date.now(),
             });
           }
-          const stillOnThisBot = state.activeFocus.type === 'bot' && state.activeFocus.botName === activeStreamingBotName;
-          applyTurnCompleted(activeRunningBotNames, unreadBotNames, activeStreamingBotName, stillOnThisBot);
+          applyTurnCompleted(activeRunningBotNames, unreadBotNames, activeStreamingBotName, isBotFocused);
           activeStreamingBotName = null;
         }
         syncProfileLastMessages();

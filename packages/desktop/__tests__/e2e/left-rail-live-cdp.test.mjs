@@ -264,6 +264,7 @@ test('左侧栏真实数据流 - 对接真实网关 (静态对账 + 三类实体
 
         // (a3) 点击进入 -> 已读
         await clickSelector(app, `.session-item[data-id="${target}"]`);
+        await app.waitFor(`window.__fluxState.activeSessionId === '${target}' && document.querySelectorAll('.message-row').length >= 2`, { label: `session re-mounted r${round}`, timeoutMs: 25000 });
         await app.waitFor(`!document.querySelector('.session-item[data-id="${target}"] .activity-unread-badge')`, { label: `session read r${round}`, timeoutMs: 20000 });
 
         // (d) 绝不丢数据断言：切走再切回后，刚刚发出的提问与最新回复必须 100% 存在于屏幕与消息列表中！
@@ -317,9 +318,9 @@ test('左侧栏真实数据流 - 对接真实网关 (静态对账 + 三类实体
         })()`, { label: `group unread r${round}`, timeoutMs: 180000 });
         assert.equal(unread.pulse, false, `第${round}轮：群聊完成后运行态必须清除`);
 
-        // (b) 置顶复核（按真实 updatedAt 排序）
-        const order = await app.evaluate(`window.__fluxState.groupRooms.slice().sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0)).map(r => r.roomId)`);
-        assert.equal(order[0], room.roomId, `第${round}轮：群聊完成后必须为最新；实际=${JSON.stringify(order)}`);
+        // (b) 置顶复核（读取 DOM 真实顺序）
+        const domOrder = await app.evaluate(`Array.from(document.querySelectorAll('.rail-group-item')).map(r => r.dataset.roomId)`);
+        assert.equal(domOrder[0], room.roomId, `第${round}轮：群聊完成后在 DOM 树中必须排在最顶端；实际=${JSON.stringify(domOrder)}`);
 
         await clickSelector(app, `.rail-group-item[data-room-id="${room.roomId}"]`);
         await app.waitFor(`!document.querySelector('.rail-group-item[data-room-id="${room.roomId}"] .activity-unread-badge')`, { label: `group read r${round}`, timeoutMs: 25000 });
@@ -362,7 +363,9 @@ test('左侧栏真实数据流 - 对接真实网关 (静态对账 + 三类实体
         assert.equal(unread.pulse, false, `第${round}轮：Bot 完成后运行态必须清除`);
 
         await clickSelector(app, `.rail-pinned-bot-row[data-profile="${bot}"]`);
+        await app.waitFor(`window.__fluxState.activeFocus.type === 'bot' && window.__fluxState.activeFocus.botName === '${bot}'`, { label: `bot active r${round}`, timeoutMs: 25000 });
         await app.waitFor(`!document.querySelector('.rail-pinned-bot-row[data-profile="${bot}"] .activity-unread-badge')`, { label: `bot read r${round}`, timeoutMs: 30000 });
+        await app.waitFor(`Boolean(window.__fluxState.messages && window.__fluxState.messages.length >= 2)`, { label: `bot msgs mounted r${round}`, timeoutMs: 25000 });
 
         // (d) 绝不丢数据 + 时间非冷启动旧时间断言
         const botCheck = await app.evaluate(`(() => {
