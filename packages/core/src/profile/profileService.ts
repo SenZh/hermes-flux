@@ -152,6 +152,13 @@ export class ProfileService {
     if (patch.description !== undefined) params.description = patch.description;
     if (patch.soulContent !== undefined) params.soul = patch.soulContent;
     if (patch.model !== undefined) params.model = patch.model;
+    if (patch.displayName !== undefined) {
+      params.ui_meta = {
+        'hermes-bots': {
+          title: patch.displayName,
+        },
+      };
+    }
 
     const res = await bridge.request<ProfilesConfigureResult, ProfilesConfigureParams>(
       'profiles.configure',

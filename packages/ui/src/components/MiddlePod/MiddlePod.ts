@@ -10,11 +10,14 @@
  */
 
 import { t } from '../../i18n/index.js';
+import { renderBotAvatar } from '../LeftRail/LeftRail.js';
 
 export interface MessageViewModel {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
+  sender?: string;
+  senderAvatar?: string;
   thought?: string;
   thoughtDurationMs?: number;
   toolCalls?: {
@@ -70,8 +73,15 @@ export function renderConversationCanvas(props: MiddlePodProps): string {
               .map((m, idx, arr) => {
                 const prev = arr[idx - 1];
                 const next = arr[idx + 1];
-                const isFirstInTurn = !prev || prev.role !== m.role;
-                const isLastInTurn = !next || next.role !== m.role;
+                // 【设计意图 (Why)】
+                // 在单聊中同角色连续消息合并头像；但在多 Agent 群聊中，不同 Agent 即使都是 assistant，各自发言也必须呈现对应头像与名称徽章！
+                // 【防范的历史坑 (Pitfall)】
+                // 历史代码仅判断 prev.role !== m.role，导致群聊中第二位发言的 Agent 头像被错误判定为同回合而惨遭隐藏。
+                // 【规则 (Rules)】
+                // 当两者角色不同，或者两者发言人 sender 不同时，严格判定为回合起点 isFirstInTurn = true。
+                const isDifferentSender = Boolean(m.sender && prev?.sender && m.sender !== prev.sender);
+                const isFirstInTurn = !prev || prev.role !== m.role || isDifferentSender;
+                const isLastInTurn = !next || next.role !== m.role || Boolean(m.sender && next?.sender && m.sender !== next.sender);
                 return renderMessage(m, agentDisplayName, { isFirstInTurn, isLastInTurn });
               })
               .join('')}
@@ -403,12 +413,26 @@ export function renderMessage(
       width: 100%;
       margin: 1px 0;
     ">
-      <!-- Turn Header Time -->
+      <!-- Turn Header Time & Sender Badge -->
       ${
-        isFirstInTurn && m.timestamp
+        isFirstInTurn
           ? `
-        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 1px;">
-          <span style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); opacity: 0.85;">${escapeHtml(m.timestamp)}</span>
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 3px;">
+          ${
+            m.sender && m.sender !== 'user'
+              ? `
+            <div class="message-sender-badge" style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 7px 2px 3px; background: var(--bg-panel); border: 1px solid var(--border-subtle); border-radius: 12px;">
+              ${renderBotAvatar(m.sender, m.sender, m.senderAvatar, 18)}
+              <span style="font-size: 11.5px; font-weight: 600; color: var(--text-main); line-height: 1.2;">${escapeHtml(m.sender)}</span>
+            </div>
+          `
+              : ''
+          }
+          ${
+            m.timestamp
+              ? `<span style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); opacity: 0.85;">${escapeHtml(m.timestamp)}</span>`
+              : ''
+          }
         </div>
       `
           : ''
@@ -807,7 +831,7 @@ function renderPathLikeGitChanges(filePath: string, isToolLink = true): string {
 function renderSingleToolCapsule(parsed: ParsedToolItem): string {
   const { displayName, iconSvg, durationStr, fileBadge, cleanArgs, targetPath, diffStats, canExpand, isFileTool, isReadOnly, norm } = parsed;
 
-  const rawDisplay = cleanArgs && cleanArgs !== '{}' ? cleanArgs : '';
+  const rawDisplay = cleanArgs && cleanArgs !== '{}' && cleanArgs !== '[object Object]' ? cleanArgs : '';
   const firstLine = rawDisplay ? rawDisplay.split('\n')[0].trim() : '';
   const isCommand = !isFileTool && firstLine;
   // OpenChamber MAX_COMMAND_LENGTH = 100
@@ -1000,12 +1024,37 @@ function renderToolCapsules(m: MessageViewModel): string {
   if (!m.toolCalls || m.toolCalls.length === 0) return '';
 
   const parsedItems = m.toolCalls.map(parseToolItem);
-  const blocks: string[] = [];
+  const totalCount = parsedItems.length;
+  const runningCount = parsedItems.filter((it) => it.status === 'running').length;
+  const completedCount = parsedItems.filter((it) => it.status === 'completed').length;
+  const failedCount = parsedItems.filter((it) => it.status === 'failed').length;
 
+  // 1. 若工具只有 1 项，直接展示单工具胶囊，不冗余多层打包
+  if (totalCount === 1) {
+    return `
+      <div class="tool-capsules-group" style="display: flex; flex-direction: column; gap: 2px; margin: 2px 0;">
+        ${renderSingleToolCapsule(parsedItems[0])}
+      </div>
+    `;
+  }
+
+  // 2. 存在多项工具调用时，对标官方 Desktop：打包为一个常驻执行卡片（显示正在执行与已执行总揽，默认展开若有正在执行，支持点击折叠/展开）
+  const hasRunning = runningCount > 0;
+  const runningItem = parsedItems.find((it) => it.status === 'running');
+  const activeCommandOrPath = runningItem
+    ? runningItem.targetPath || runningItem.cleanArgs || runningItem.displayName
+    : '';
+
+  const statusSummaryText = hasRunning
+    ? t('tool.executingSummary', { running: String(runningCount), total: String(totalCount), completed: String(completedCount) })
+    : failedCount > 0
+    ? t('tool.completedWithFailed', { completed: String(completedCount), failed: String(failedCount) })
+    : t('tool.completedAll', { completed: String(completedCount) });
+
+  const blocks: string[] = [];
   let i = 0;
   while (i < parsedItems.length) {
     const item = parsedItems[i];
-    // If consecutive read-only items (read, grep, glob), aggregate them
     if (item.isReadOnly && i + 1 < parsedItems.length && parsedItems[i + 1].isReadOnly) {
       const readGroup: ParsedToolItem[] = [];
       while (i < parsedItems.length && parsedItems[i].isReadOnly) {
@@ -1020,8 +1069,74 @@ function renderToolCapsules(m: MessageViewModel): string {
   }
 
   return `
-    <div class="tool-capsules-group" style="display: flex; flex-direction: column; gap: 2px; margin: 2px 0;">
-      ${blocks.join('')}
+    <div class="tool-capsules-group" style="margin: 3px 0;">
+      <details class="tool-execution-package-card" ${hasRunning ? 'open' : ''} style="
+        border: 1px solid var(--border-medium);
+        border-radius: 8px;
+        background: var(--bg-card);
+        overflow: hidden;
+        box-shadow: var(--shadow-card);
+      ">
+        <summary style="
+          list-style: none;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 6px 10px;
+          background: var(--bg-panel);
+          cursor: pointer;
+          user-select: none;
+          font-size: 11.5px;
+          font-weight: 600;
+          color: var(--text-main);
+          border-bottom: 1px solid var(--border-subtle);
+        ">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="color: ${hasRunning ? 'var(--accent)' : 'var(--text-secondary)'}; display: inline-flex; align-items: center;">
+              ${
+                hasRunning
+                  // gate-perf-allow: 运行中工具旋转动画
+                  ? `<svg class="rotating-tool-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 1.5s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>`
+                  : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>`
+              }
+            </span>
+            <span>${t('tool.packageTitle', { count: String(totalCount) })}</span>
+            <span style="font-size: 11px; font-weight: normal; color: var(--text-secondary); opacity: 0.85;">${statusSummaryText}</span>
+            ${
+              hasRunning && activeCommandOrPath && activeCommandOrPath !== '[object Object]'
+                ? `
+              <span class="tool-active-cmd-badge" style="
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+                padding: 1px 6px;
+                border-radius: 4px;
+                background: var(--bg-card);
+                border: 1px solid var(--border-subtle);
+                font-family: var(--font-mono);
+                font-size: 10.5px;
+                color: var(--accent);
+                max-width: 300px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+              " title="${escapeHtml(activeCommandOrPath)}">
+                <span style="opacity: 0.6;">$</span>
+                <span>${escapeHtml(activeCommandOrPath)}</span>
+              </span>
+            `
+                : ''
+            }
+          </div>
+          <span class="tool-package-chevron" style="font-size: 10px; color: var(--text-muted); opacity: 0.7;">
+            ${hasRunning ? t('tool.collapse') : t('tool.expand')}
+          </span>
+        </summary>
+
+        <div class="tool-package-body" style="padding: 4px 6px; display: flex; flex-direction: column; gap: 3px; background: var(--bg-window);">
+          ${blocks.join('')}
+        </div>
+      </details>
     </div>
   `;
 }
@@ -1148,11 +1263,17 @@ function normalizeToolOutput(output: unknown, isWriteTool = false): { text: stri
       str = cand.trim();
     } else if (typeof rec.diff === 'string') {
       return { text: rec.diff.trim(), isEmpty: false, isDiff: true, extractedCommand, extractedPath };
+    } else if (cand !== undefined && cand !== null) {
+      str = typeof cand === 'object' ? JSON.stringify(cand, null, 2) : String(cand).trim();
     } else {
-      str = '';
+      str = JSON.stringify(rec, null, 2);
     }
   } else {
     str = String(output).trim();
+  }
+
+  if (str === '[object Object]') {
+    str = '';
   }
 
   const isDiff = str.includes('--- ') && str.includes('+++ ');

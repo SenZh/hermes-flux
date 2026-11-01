@@ -276,17 +276,24 @@ export function reduceGatewayEvent(params: unknown, ctx: TurnEventContext): Turn
     }
 
     case 'tool.complete':
+    case 'tool.end':
+    case 'tool.error':
     case 'subagent.complete': {
       const actions: TurnAction[] = [];
       const subagentId = asText(payload.subagent_id);
       const toolCallId = asText(payload.id) || asText(payload.tool_call_id) || '';
-      const output = payload.output
-        ? String(payload.output)
-        : payload.result
-        ? String(payload.result)
-        : payload.text
-        ? String(payload.text)
-        : undefined;
+      
+      const formatToolOutput = (val: unknown): string | undefined => {
+        if (val === null || val === undefined) return undefined;
+        if (typeof val === 'string') return val;
+        try {
+          return JSON.stringify(val, null, 2);
+        } catch {
+          return String(val);
+        }
+      };
+
+      const output = formatToolOutput(payload.output ?? payload.result ?? payload.text ?? payload.error);
 
       // 若携带 subagentId，产出专职 subagent-complete 驱动子代理状态机完成
       if (subagentId) {

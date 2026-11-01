@@ -260,6 +260,39 @@ test('Gateway event reducer - subagent delegation events', async (t) => {
     assert.ok(actions.some((a) => a.type === 'subagent-complete' && a.subagentId === 'sub-888'));
     assert.ok(actions.some((a) => a.type === 'tool-complete' && a.messageId === 'ast-1'));
   });
+
+  await t.test('tool.end, tool.error 与复杂对象 output 格式化', () => {
+    // 1. tool.end 支持且对象 output 自动 JSON.stringify 格式化
+    const endFrame = {
+      type: 'tool.end',
+      session_id: 'live-42',
+      payload: {
+        id: 'tc-end-1',
+        output: { status: 'success', linesModified: 42 },
+      },
+    };
+    const endActions = reduceGatewayEvent(endFrame, CTX);
+    assert.equal(endActions.length, 1);
+    assert.equal(endActions[0].type, 'tool-complete');
+    assert.equal(endActions[0].toolCallId, 'tc-end-1');
+    assert.ok(endActions[0].output?.includes('"status": "success"'));
+    assert.ok(endActions[0].output?.includes('"linesModified": 42'));
+
+    // 2. tool.error 支持且从 error 字段安全取值
+    const errFrame = {
+      type: 'tool.error',
+      session_id: 'live-42',
+      payload: {
+        id: 'tc-err-1',
+        error: { code: -32000, message: 'Command timed out' },
+      },
+    };
+    const errActions = reduceGatewayEvent(errFrame, CTX);
+    assert.equal(errActions.length, 1);
+    assert.equal(errActions[0].type, 'tool-complete');
+    assert.equal(errActions[0].toolCallId, 'tc-err-1');
+    assert.ok(errActions[0].output?.includes('Command timed out'));
+  });
 });
 
 test('Gateway event contract guard - 事件 payload 必须落在契约白名单内', async (t) => {

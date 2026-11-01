@@ -24,10 +24,12 @@
 
 | 文档分类 | 文档名称与绝对路径 | 核心规范与设计约束 |
 |---|---|---|
+| **全局看板** | [`docs/roadmap.md`](docs/roadmap.md) | **全局路线图与研发看板**：规划中功能、已落地功能、执行待办清单、已知 Bug 与待修缺陷跟踪表。 |
 | **核心架构** | [`docs/architecture/core-architecture-and-data-flow-spec.md`](docs/architecture/core-architecture-and-data-flow-spec.md) | **系统全景拓扑与双向数据流规范**：Monorepo 包职责划分、PAL (平台抽象层) 接口定义、WebSocket 5态 FSM、全抖动退避算法、120FPS Token 合流引擎、Zustand 双层 Store 拓扑。 |
 | **协议基线** | [`docs/architecture/gateway-api-and-features-matrix.md`](docs/architecture/gateway-api-and-features-matrix.md) | **Hermes Agent 官方协议权威基线**：252 个 RPC 方法、77 个下行推送事件、13 个服务端反向干预请求契约全景，官方 REST `/api/*` 辅助通道规范。 |
 | **桌面工程** | [`docs/architecture/desktop-windows-delivery-and-cross-platform-guide.md`](docs/architecture/desktop-windows-delivery-and-cross-platform-guide.md) | **桌面端 Windows 交付与跨平台打包指南**：无边框窗口、Frameless 标题栏穿透、Cookie 跨域宿主代理、Windows 11 Mica 规避与单实例守护。 |
 | **工作台重构**| [`docs/architecture/v4-redesign-spec.md`](docs/architecture/v4-redesign-spec.md) | **v4.0 极客美学通栏流式工作台规范**：全宽顶满流式对话舱、740px 黄金居中悬浮输入舱、双列自适应场景检查舱、22px 纯净翡翠状态栏。 |
+| **交互区设计**| [`docs/architecture/interactive-conversation-stage-spec.md`](docs/architecture/interactive-conversation-stage-spec.md) | **中间核心交互区与输入舱架构规范**：常驻微距操作栏、代码/会话回滚自动回填、Fork 分支、多消息排队/插队、Provider 折叠模型选择器与跨端适配。 |
 | **终极三舱架构**| [`docs/architecture/ultimate-tri-rail-architecture-spec.md`](docs/architecture/ultimate-tri-rail-architecture-spec.md) | **v4.5 终极多智能体协同与三舱工程规范**：实体定义(Folder/Workspace/Project/Bot/Group/Session)、左侧双轨主线(48px微轨+212px抽屉)、右侧工具舱(看板/终端/Diff)与四阶拉群工程管道。 |
 | **多端流转** | [`docs/architecture/multi-device-shared-session-handover.md`](docs/architecture/multi-device-shared-session-handover.md) | **多设备共享会话与接力流转设计**：跨端会话握手、状态迁移、局域网直连探测与离线同步机制。 |
 | **主题引擎** | [`docs/architecture/theme-engine-spec.md`](docs/architecture/theme-engine-spec.md) | **标准化可插拔主题注册表规范**：CSS 变量注入系统、暗黑极夜金/白玉翡翠皮肤、动态 Token 运行时切换。 |
@@ -789,6 +791,35 @@ npm run test:live-gateway# 针对真实 Python Gateway 进程的 22 个 RPC 接�
 npm run test:cdp         # 针对真实无头 Edge/Chrome 浏览器的 CDP 物理渲染与交互测试
 ```
 三个命令全部 100% 绿灯通过，方可视为具备交付依据。
+
+---
+
+## 十九、严禁静态快照假闭环：基于时序的状态机动态闭环验证军规 (Temporal State-Machine Closed-Loop Mandate - 一票否决)
+
+任何接手本项目的 Agent 必须无条件执行本条军规：**凡交付功能与自动化测试，严禁仅做静态数据喂入与模板 HTML 标签存在的浅层断言（静态假测试）**。所有自动化测试必须建立在真实的时序流转与状态迁移上：
+
+```text
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                           Hermes Flux 动态时序状态机全生命周期验证闭环                                    │
+├──────────────────────────┬──────────────────────────┬──────────────────────────┬─────────────────────────┤
+│ 1. 物理动作触发          │ 2. 真实调用与时钟推移    │ 3. 状态集合精确迁移      │ 4. 最终物理呈现与自愈清理│
+│ (User Action Trigger)    │ (In-Flight Dispatch)     │ (State Diff & Mutex)     │ (DOM Mutate & Teardown) │
+│ 点击/右键/按键输入真实派发│ 触发网络拉取/轮询生命周期│ running -> read 状态自愈 │ 动效即刻停表，绿点进房即消│
+└──────────────────────────┴──────────────────────────┴──────────────────────────┴─────────────────────────┘
+```
+
+### 1. 静态假测试的典型违规判定（出现直接打回）
+- ❌ **仅喂入就绪数据**：手动往组件塞一个 `{ activityState: 'running' }` 或预置好的静态数组，断言 DOM 字符串里包含 `activity-pulse-indicator`。这种测试完全无法证明用户真实操作时状态机能否自愈，属于自欺欺人的静态假测试，一票否决！
+- ❌ **无异步时序推进**：对涉及轮询、后台异步回复、定时器看门狗的逻辑，不推进真实时序，不验证收到回复后状态能否即时恢复；
+- ❌ **无异常切出与销毁自愈验证**：不验证用户在执行中途切换会话、切换房间或关闭弹窗时，常驻定时器与状态锁是否被清理。
+
+### 2. 动态时序闭环四大硬指标 (Four Dynamic Invariants)
+任何功能与对应单测/CDP 必须覆盖以下四个阶段的完整链路：
+1. **触发态（Trigger）**：通过 CDP `Input.dispatchMouseEvent` / `Input.dispatchKeyEvent` 驱动真实物理动作；
+2. **在途态（In-Flight）**：断言触发瞬间网络请求真实发出（如 `profiles.describe` 强制远端拉取），运行态集合注入 ID，呼吸脉冲动效激活；
+3. **完成态（Settled）**：模拟收到回复或服务端响应，断言运行态集合在首帧被**即刻清空**，严禁依靠数十秒的被动轮询超时空转；状态迁移为已完成未读态（翡翠绿点）；
+4. **消费态（Consumed）**：用户点击进入该条目，断言未读状态集合被移除，DOM 中绿点物理销毁；切出房间时断言所有临时轮询器与状态锁无泄漏自愈。
+
 
 
 

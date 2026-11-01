@@ -35,6 +35,7 @@
   --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
   --duration-fast: 140ms;
   --duration-normal: 240ms;
+  --danger-color: #EF4444;
 }
 
 /* THEME A: OBSIDIAN GOLD (黑曜琥珀 - 电影级深邃冷墨) */
@@ -50,13 +51,13 @@
   --bg-code: #090A0D;
   --bg-backdrop: rgba(18, 20, 27, 0.90);
 
-  --accent: #F59E0B;
-  --accent-hover: #FBBF24;
-  --accent-dim: #D97706;
-  --accent-glow: rgba(245, 158, 11, 0.25);
-  --accent-subtle: rgba(245, 158, 11, 0.09);
-  --accent-border: rgba(245, 158, 11, 0.35);
-  --accent-text: #FEF3C7;
+  --accent: #D97706;
+  --accent-hover: #E58A13;
+  --accent-dim: #B45309;
+  --accent-glow: rgba(217, 119, 6, 0.20);
+  --accent-subtle: rgba(217, 119, 6, 0.08);
+  --accent-border: rgba(217, 119, 6, 0.28);
+  --accent-text: #FDE68A;
   --theme-thumb-color: #0E0F12;
 
   --text-main: #F7F8F8;
@@ -100,45 +101,46 @@
   --badge-css-border: rgba(168, 85, 247, 0.35);
 }
 
-/* THEME B: SUET WHITE JADE (羊脂白玉 - 温润冷云母浅色) */
+/* THEME B: SUET WHITE JADE (温润浅金 / 澳门参谋暖纸质感浅色) */
 [data-theme="suet-jade"],
 [data-theme="jade-white"] {
-  --bg-window: #F6F8FA;
-  --bg-rail: #F1F4F8;
-  --bg-panel: #EAEFF4;
-  --bg-card: #FFFFFF;
-  --bg-card-hover: #F0F2F6;
-  --bg-card-active: #E4E8EE;
+  --bg-window: #FAF7F0;
+  --bg-rail: #F4EFE6;
+  --bg-panel: #EFE9DD;
+  --bg-card: #FCFAF5;
+  --bg-card-hover: #F7F2E8;
+  --bg-card-active: #EFE8DC;
   --bg-elevated: #FFFFFF;
-  --bg-input: #FFFFFF;
-  --bg-code: #F1F4F8;
-  --bg-backdrop: rgba(255, 255, 255, 0.92);
+  --bg-input: #FAF7F0;
+  --bg-code: #F4EFE6;
+  --bg-backdrop: rgba(250, 247, 240, 0.92);
 
-  --accent: #0D7A5E;
-  --accent-hover: #0B6850;
-  --accent-dim: #095743;
-  --accent-glow: rgba(13, 122, 94, 0.20);
-  --accent-subtle: rgba(13, 122, 94, 0.08);
-  --accent-border: rgba(13, 122, 94, 0.32);
-  --accent-text: #08523F;
-  --theme-thumb-color: #FFFFFF;
+  --accent: #B45309;
+  --accent-hover: #92400E;
+  --accent-dim: #78350F;
+  --accent-glow: rgba(180, 83, 9, 0.16);
+  --accent-subtle: rgba(180, 83, 9, 0.07);
+  --accent-border: rgba(180, 83, 9, 0.24);
+  --accent-text: #78350F;
+  --theme-thumb-color: #FAF7F0;
 
-  --text-main: #111827;
-  --text-secondary: #475569;
-  --text-muted: #64748B;
-  --text-faint: #94A3B8;
+  --text-main: #292524;
+  --text-secondary: #57534E;
+  --text-muted: #78716C;
+  --text-faint: #A8A29E;
 
-  --border-subtle: rgba(0, 0, 0, 0.07);
-  --border-medium: rgba(0, 0, 0, 0.12);
-  --border-strong: rgba(0, 0, 0, 0.20);
+  --border-subtle: rgba(41, 37, 36, 0.07);
+  --border-medium: rgba(41, 37, 36, 0.13);
+  --border-strong: rgba(41, 37, 36, 0.22);
   --specular-line: inset 0 1px 0 0 rgba(255, 255, 255, 0.90);
 
-  --shadow-window: 0 24px 60px -12px rgba(15, 23, 42, 0.18);
-  --shadow-card: 0 2px 12px rgba(15, 23, 42, 0.06);
-  --shadow-dock: 0 16px 40px -10px rgba(15, 23, 42, 0.14);
+  --shadow-window: 0 24px 60px -12px rgba(68, 64, 60, 0.14);
+  --shadow-card: 0 2px 12px rgba(68, 64, 60, 0.05);
+  --shadow-dock: 0 16px 40px -10px rgba(68, 64, 60, 0.12);
 
   --jade-pulse: #059669;
   --jade-glow: rgba(5, 150, 105, 0.40);
+  --danger-color: #DC2626;
 }
 
 /* Consolidated Minimal Desktop Layout: Status consolidated in Titlebar */
@@ -288,6 +290,17 @@ html[data-rail-resizing] * {
   background: rgba(148, 163, 184, 0.35);
 }
 
+/* Context Menu Micro-Interactions */
+.flux-context-menu .ctx-item {
+  transition: background-color 0.1s ease, color 0.1s ease;
+}
+.flux-context-menu .ctx-item:hover {
+  background: var(--bg-card-hover) !important;
+}
+.flux-context-menu .ctx-danger-item:hover {
+  background: rgba(239, 68, 68, 0.12) !important;
+}
+
 /* Animations */
 @keyframes flux-pulse {
   0%, 100% {
@@ -296,6 +309,17 @@ html[data-rail-resizing] * {
   }
   50% {
     transform: scale(1.3);
+    opacity: 1;
+  }
+}
+
+@keyframes jadePulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.35);
     opacity: 1;
   }
 }

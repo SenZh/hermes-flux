@@ -116,7 +116,15 @@ export interface AgentProfile {
   model?: string;
   lastMessage?: string;
   lastTime?: string;
+  timestamp?: number;
   isDefault?: boolean;
+  /** 网关原生返回的最新会话快照（用于副标题与活跃时间联动） */
+  last_session?: {
+    preview?: string;
+    title?: string;
+    last_active?: number;
+    started_at?: number;
+  };
   /** 网关是否已为该 Bot 上传头像资产（profiles.list 的 has_avatar） */
   hasAvatar?: boolean;
   /**
@@ -169,6 +177,16 @@ export interface NormalizedSession {
   preview: string;
   isArchived: boolean;
   timestamp: number;
+  /** 网关 hidden 标记（Bot 终身主工位等内部会话），不可进入用户时间线 */
+  hidden?: boolean;
+  /** 网关 unread 标记（持久化的未读态） */
+  unread?: boolean;
+  /** 网关 pinned 标记 */
+  pinned?: boolean;
+  /** timestamp 取自哪个字段：last_active / started_at / created_at / none */
+  timeSource?: string;
+  /** 网关权威时间戳（未被本地乐观置顶覆盖前的原值），供副标题缓存做失效键 */
+  authoritativeTimestamp?: number;
   botName?: string;
   botDisplayName?: string;
   botAvatar?: string;

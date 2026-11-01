@@ -62,13 +62,13 @@ export const BUILTIN_SKINS: Record<string, SkinDefinition> = {
       bgCode: '#090A0D',
       bgBackdrop: 'rgba(18, 20, 27, 0.90)',
 
-      accent: '#F59E0B',
-      accentHover: '#FBBF24',
-      accentDim: '#D97706',
-      accentGlow: 'rgba(245, 158, 11, 0.25)',
-      accentSubtle: 'rgba(245, 158, 11, 0.09)',
-      accentBorder: 'rgba(245, 158, 11, 0.35)',
-      accentText: '#FEF3C7',
+      accent: '#D97706',
+      accentHover: '#E58A13',
+      accentDim: '#B45309',
+      accentGlow: 'rgba(217, 119, 6, 0.20)',
+      accentSubtle: 'rgba(217, 119, 6, 0.08)',
+      accentBorder: 'rgba(217, 119, 6, 0.28)',
+      accentText: '#FDE68A',
 
       textMain: '#F7F8F8',
       textSecondary: '#8A8F98',
@@ -89,40 +89,40 @@ export const BUILTIN_SKINS: Record<string, SkinDefinition> = {
   },
   'jade-white': {
     id: 'jade-white',
-    name: '羊脂白玉',
+    name: '温润浅金',
     variant: 'light',
     colors: {
-      bgWindow: '#F6F8FA',
-      bgRail: '#F1F4F8',
-      bgPanel: '#EAEFF4',
-      bgCard: '#FFFFFF',
-      bgCardHover: '#F0F2F6',
-      bgCardActive: '#E4E8EE',
+      bgWindow: '#FAF7F0',
+      bgRail: '#F4EFE6',
+      bgPanel: '#EFE9DD',
+      bgCard: '#FCFAF5',
+      bgCardHover: '#F7F2E8',
+      bgCardActive: '#EFE8DC',
       bgElevated: '#FFFFFF',
-      bgInput: '#FFFFFF',
-      bgCode: '#F1F4F8',
-      bgBackdrop: 'rgba(255, 255, 255, 0.92)',
+      bgInput: '#FAF7F0',
+      bgCode: '#F4EFE6',
+      bgBackdrop: 'rgba(250, 247, 240, 0.92)',
 
-      accent: '#0D7A5E',
-      accentHover: '#0B6850',
-      accentDim: '#095743',
-      accentGlow: 'rgba(13, 122, 94, 0.20)',
-      accentSubtle: 'rgba(13, 122, 94, 0.08)',
-      accentBorder: 'rgba(13, 122, 94, 0.32)',
-      accentText: '#08523F',
+      accent: '#B45309',
+      accentHover: '#92400E',
+      accentDim: '#78350F',
+      accentGlow: 'rgba(180, 83, 9, 0.16)',
+      accentSubtle: 'rgba(180, 83, 9, 0.07)',
+      accentBorder: 'rgba(180, 83, 9, 0.24)',
+      accentText: '#78350F',
 
-      textMain: '#111827',
-      textSecondary: '#475569',
-      textMuted: '#64748B',
-      textFaint: '#94A3B8',
+      textMain: '#292524',
+      textSecondary: '#57534E',
+      textMuted: '#78716C',
+      textFaint: '#A8A29E',
 
-      borderSubtle: 'rgba(0, 0, 0, 0.07)',
-      borderMedium: 'rgba(0, 0, 0, 0.12)',
-      borderStrong: 'rgba(0, 0, 0, 0.20)',
+      borderSubtle: 'rgba(41, 37, 36, 0.07)',
+      borderMedium: 'rgba(41, 37, 36, 0.13)',
+      borderStrong: 'rgba(41, 37, 36, 0.22)',
 
-      shadowWindow: '0 24px 60px -12px rgba(15, 23, 42, 0.18)',
-      shadowCard: '0 2px 12px rgba(15, 23, 42, 0.06)',
-      shadowDock: '0 16px 40px -10px rgba(15, 23, 42, 0.14)',
+      shadowWindow: '0 24px 60px -12px rgba(68, 64, 60, 0.14)',
+      shadowCard: '0 2px 12px rgba(68, 64, 60, 0.05)',
+      shadowDock: '0 16px 40px -10px rgba(68, 64, 60, 0.12)',
 
       jadePulse: '#059669',
       jadeGlow: 'rgba(5, 150, 105, 0.40)',
@@ -225,6 +225,17 @@ export function applySkinToDom(skin: SkinDefinition): void {
     [data-theme="${skin.id}"],
     :root[data-theme="${skin.id}"] {
       ${generateSkinCssVariables(skin)}
+    }
+
+    @keyframes jadePulse {
+      0%, 100% {
+        transform: scale(1);
+        opacity: 0.85;
+      }
+      50% {
+        transform: scale(1.35);
+        opacity: 1;
+      }
     }
   `;
   document.documentElement.setAttribute('data-theme', skin.id);

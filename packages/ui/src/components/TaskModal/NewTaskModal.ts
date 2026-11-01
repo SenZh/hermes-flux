@@ -8,7 +8,7 @@
  */
 
 import { t } from '../../i18n/index.js';
-import type { LeftRailProject } from '../LeftRail/LeftRail.js';
+import { renderBotAvatar, type LeftRailProject } from '../LeftRail/LeftRail.js';
 
 export interface NewTaskModalProps {
   isOpen: boolean;
@@ -145,20 +145,7 @@ export function renderNewTaskModal(props: NewTaskModalProps): string {
                     gap: 8px;
                     transition: border-color 0.12s ease;
                   ">
-                    <span style="
-                      width: 20px;
-                      height: 20px;
-                      border-radius: 5px;
-                      background: var(--bg-card);
-                      border: 1px solid var(--border-subtle);
-                      color: var(--accent);
-                      font-size: 9px;
-                      font-weight: 700;
-                      display: inline-flex;
-                      align-items: center;
-                      justify-content: center;
-                      flex-shrink: 0;
-                    ">${(p.displayName || p.name).slice(0, 2).toUpperCase()}</span>
+                    ${renderBotAvatar(p.name, p.displayName, p.avatar, 24)}
                     <div style="flex: 1; min-width: 0;">
                       <div style="font-size: 12px; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                         ${escapeHtml(p.displayName || p.name)}
@@ -181,6 +168,7 @@ export function renderNewTaskModal(props: NewTaskModalProps): string {
                   return `
                   <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-main); cursor: pointer; padding: 4px 6px; border-radius: 5px;">
                     <input type="checkbox" class="modal-group-member-checkbox" value="${escapeHtml(p.name)}" ${isChecked ? 'checked' : ''} style="cursor: pointer;" />
+                    ${renderBotAvatar(p.name, p.displayName, p.avatar, 20)}
                     <span>${escapeHtml(p.displayName || p.name)}</span>
                     <span style="font-size: 11px; color: var(--text-muted); margin-left: auto;">${escapeHtml(p.model || 'Auto')}</span>
                   </label>
@@ -192,7 +180,7 @@ export function renderNewTaskModal(props: NewTaskModalProps): string {
 
           <!-- 3. Associated Project / Workspace CWD -->
           <div style="display: flex; flex-direction: column; gap: 6px;">
-            <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">${t('modal.selectProject')}</label>
+            <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">${t('modal.workspaceLabel')}</label>
             <select id="modal-project-select" style="
               width: 100%;
               height: 32px;
@@ -205,20 +193,23 @@ export function renderNewTaskModal(props: NewTaskModalProps): string {
               outline: none;
               cursor: pointer;
             ">
-              <option value="">${t('modal.noProject')}</option>
+              <option value="">${t('modal.defaultWorkspace')}</option>
               ${props.projects
                 .map((p) => {
                   const isSelected = p.id === props.selectedProjectId;
-                  return `<option value="${escapeHtml(p.id)}" ${isSelected ? 'selected' : ''}>${escapeHtml(p.name)} (${escapeHtml(p.path || 'Root')})</option>`;
+                  return `<option value="${escapeHtml(p.id)}" ${isSelected ? 'selected' : ''}>📁 ${escapeHtml(p.name)} (${escapeHtml(p.path || 'Root')})</option>`;
                 })
                 .join('')}
             </select>
           </div>
 
-          <!-- 4. Task Title / Goal Input -->
+          <!-- 4. Task Title / Goal Input (可选，留空则自动生成) -->
           <div style="display: flex; flex-direction: column; gap: 6px;">
-            <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">${t('modal.taskTitleLabel')}</label>
-            <input type="text" id="modal-task-title-input" placeholder="${t('modal.taskTitlePlaceholder')}" value="" style="
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">${t('modal.taskTitleLabel')}</label>
+              <span style="font-size: 10.5px; color: var(--text-muted);">${t('modal.titleAutoHint')}</span>
+            </div>
+            <input type="text" id="modal-task-title-input" placeholder="${t('modal.titleAutoPlaceholder')}" value="" style="
               width: 100%;
               height: 32px;
               background: var(--bg-panel);

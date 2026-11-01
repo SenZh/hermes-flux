@@ -14,6 +14,25 @@
 
 import { t } from '../../i18n/index.js';
 
+/**
+ * 格式化最新一条记录的副标题摘要：
+ * 1. 过滤 Markdown 代码块与标题符；
+ * 2. 压缩连续换行与空白；
+ * 3. 截断到指定字数（默认 36 字）并附加省略号。
+ */
+export function formatMessageSnippet(text?: string, maxLen = 36): string {
+  if (!text) return '';
+  const cleaned = text
+    .replace(/```[\s\S]*?```/g, t('common.codeBlock'))
+    .replace(/^#+\s+/gm, '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return '';
+  if (cleaned.length <= maxLen) return cleaned;
+  return cleaned.slice(0, maxLen) + '...';
+}
+
 export interface LeftRailSession {
   id: string;
   title: string;
@@ -31,6 +50,8 @@ export interface LeftRailSession {
   parentSessionId?: string;
   source?: string;
   isSubagent?: boolean;
+  /** 执行与阅读三态: 'running' 正在回答 | 'unread' 已回答未读 | 'read' 已读 */
+  activityState?: 'running' | 'unread' | 'read';
 }
 
 export interface LeftRailGroupRoom {
@@ -40,6 +61,8 @@ export interface LeftRailGroupRoom {
   createdAt?: number;
   updatedAt?: number;
   lastMessage?: string;
+  /** 执行与阅读三态: 'running' 正在回答 | 'unread' 已回答未读 | 'read' 已读 */
+  activityState?: 'running' | 'unread' | 'read';
 }
 
 export interface LeftRailProject {
@@ -68,7 +91,9 @@ export interface LeftRailProps {
     description?: string;
     lastMessage?: string;
     lastTime?: string;
+    timestamp?: number;
     isDefault?: boolean;
+    activityState?: 'running' | 'unread' | 'read';
   }>;
   groups?: LeftRailGroupRoom[];
   projects?: LeftRailProject[];
@@ -76,9 +101,11 @@ export interface LeftRailProps {
   gatewayOnline: boolean;
   gatewayLatencyMs: number;
   searchQuery?: string;
+  isBotsGroupExpanded?: boolean;
   isSessionsGroupExpanded?: boolean;
   isGroupsGroupExpanded?: boolean;
   isMoreSessionsExpanded?: boolean;
+  editingGroupRoomId?: string;
   /** Why the session list could not be loaded — an empty rail is not a failure. */
   error?: string;
   onNewChat?: () => void;
@@ -103,31 +130,35 @@ export function renderLeftRail(props: LeftRailProps): string {
   const realProjects = props.projects || [];
   const realGroups = props.groups || [];
 
-  // Filter sessions if search query is present
-  const activeSessions = query
+  // 1. Sessions: 严格按时间倒序排序（最新的排在前面）
+  const activeSessions = (query
     ? rawActiveSessions.filter((s) => {
         const titleMatch = s.title.toLowerCase().includes(query);
         const botMatch = (s.botDisplayName || s.botName || '').toLowerCase().includes(query);
         const prevMatch = (s.preview || '').toLowerCase().includes(query);
         return titleMatch || botMatch || prevMatch;
       })
-    : rawActiveSessions;
+    : [...rawActiveSessions]
+  ).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
-  // Filter bots if search query is present
-  const filteredProfiles = props.profiles
-    ? query
-      ? props.profiles.filter(
-          (p) =>
-            (p.displayName || p.name).toLowerCase().includes(query) ||
-            (p.description || '').toLowerCase().includes(query)
-        )
-      : props.profiles
-    : [];
+  // 2. Bots (Agents): 严格按最新活跃时间倒序排序（最新的排在前面）
+  const filteredProfiles = (props.profiles
+    ? (query
+        ? props.profiles.filter(
+            (p) =>
+              (p.displayName || p.name).toLowerCase().includes(query) ||
+              (p.description || '').toLowerCase().includes(query) ||
+              (p.lastMessage || '').toLowerCase().includes(query)
+          )
+        : [...props.profiles]
+      ).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+    : []);
 
-  // Filter groups if search query is present
-  const filteredGroups = query
-    ? realGroups.filter((g) => g.name.toLowerCase().includes(query))
-    : realGroups;
+  // 3. Groups: 严格按最新活跃时间倒序排序（最新的排在前面）
+  const filteredGroups = (query
+    ? realGroups.filter((g) => g.name.toLowerCase().includes(query) || (g.lastMessage || '').toLowerCase().includes(query))
+    : [...realGroups]
+  ).sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
 
   // Determine active focus strictly to eliminate dual-highlight bug
   const currentFocus: LeftRailActiveFocus = props.activeFocus || (
@@ -138,6 +169,7 @@ export function renderLeftRail(props: LeftRailProps): string {
 
   const isSessionsOpen = props.isSessionsGroupExpanded !== false;
   const isGroupsOpen = props.isGroupsGroupExpanded !== false;
+  const isBotsOpen = props.isBotsGroupExpanded !== false;
 
   return `
     <aside id="flux-left-rail" class="flux-left-rail" style="
@@ -241,51 +273,69 @@ export function renderLeftRail(props: LeftRailProps): string {
             : ''
         }
 
-        <!-- Pinned Dedicated Bots Section (Official Native Layout: Yellow Triangle for Xiaofawang, Photos for Aura/Hermes) -->
+        <!-- Collapsible Dedicated Agents Section (Flat Minimal Style, Always Present) -->
         ${
           filteredProfiles.length > 0 && !railError
             ? `
-          <div style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; padding: 6px 8px 4px;">
-            ${t('rail.pinnedBots')}
-          </div>
-          <div style="display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px;">
-            ${filteredProfiles
-              .map((p) => {
-                const isSelected = currentFocus.type === 'bot' && currentFocus.botName === p.name;
-                const avatarNode = renderBotAvatar(p.name, p.displayName, p.avatar, 36);
-                const snippet = p.lastMessage || p.description || p.model || t('rail.defaultBotSnippet');
-                const timeStr = p.lastTime || '';
+          <div class="bot-section-wrap" style="margin-bottom: 10px;">
+            <div id="rail-bots-accordion-trigger" style="display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; cursor: pointer; user-select: none;">
+              <div style="display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>
+                <span>${t('rail.pinnedBots')} (${filteredProfiles.length})</span>
+              </div>
+              <svg class="bot-chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--text-muted); transform: ${isBotsOpen ? 'rotate(90deg)' : 'rotate(0deg)'}; transition: transform 0.2s ease;"><polyline points="9 18 15 12 9 6"/></svg>
+            </div>
 
-                return `
-                <div class="rail-pinned-bot-row ${isSelected ? 'active' : ''}" data-profile="${escapeHtml(p.name)}" title="${t('rail.enterBotChat', { name: p.displayName || p.name })}" style="
-                  min-height: 48px;
-                  padding: 6px 8px;
-                  border-radius: 6px;
-                  display: flex;
-                  align-items: center;
-                  gap: 10px;
-                  cursor: pointer;
-                  background: ${isSelected ? 'var(--bg-card-active)' : 'transparent'};
-                  border: 1px solid ${isSelected ? 'var(--accent)' : 'transparent'};
-                  position: relative;
-                  transition: background 0.12s ease;
-                ">
-                  ${avatarNode}
-                  <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 2px;">
-                    <div style="display: flex; align-items: center; justify-content: space-between; line-height: 1.2;">
-                      <span style="font-size: 13px; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                        ${escapeHtml(p.displayName || p.name)}
-                      </span>
-                      ${timeStr ? `<span style="font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono); flex-shrink: 0; margin-left: 4px;">${escapeHtml(timeStr)}</span>` : ''}
+            <div id="rail-bots-nested-list" style="display: ${isBotsOpen ? 'flex' : 'none'}; flex-direction: column; gap: 2px; padding: 2px 0 4px;">
+              ${filteredProfiles
+                .map((p) => {
+                  const isSelected = currentFocus.type === 'bot' && currentFocus.botName === p.name;
+                  const avatarNode = renderBotAvatar(p.name, p.displayName, p.avatar, 36);
+                  const rawSnippet = p.lastMessage || p.description || p.model || t('rail.defaultBotSnippet');
+                  const snippet = formatMessageSnippet(rawSnippet, 36);
+                  const timeStr = p.lastTime || '';
+
+                  return `
+                  <div class="rail-pinned-bot-row ${isSelected ? 'active' : ''}" data-profile="${escapeHtml(p.name)}" title="${t('rail.enterBotChat', { name: p.displayName || p.name })}" style="
+                    min-height: 48px;
+                    padding: 6px 8px;
+                    border-radius: 6px;
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                    cursor: pointer;
+                    background: ${isSelected ? 'var(--bg-card-active)' : 'transparent'};
+                    border: 1px solid ${isSelected ? 'var(--accent)' : 'transparent'};
+                    position: relative;
+                    transition: background 0.12s ease;
+                  ">
+                    <div style="position: relative; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                      ${avatarNode}
+                      ${
+                        p.activityState === 'running'
+                          // gate-perf-allow: 智能体执行中呼吸指示器
+                          ? `<span class="activity-pulse-indicator" title="${t('rail.activityRunning')}" style="position: absolute; top: -1px; right: -1px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); animation: jadePulse 1.2s infinite; z-index: 2;"></span>`
+                          : p.activityState === 'unread'
+                          ? `<span class="activity-unread-badge" title="${t('rail.activityUnread')}" style="position: absolute; top: -1px; right: -1px; width: 7px; height: 7px; border-radius: 50%; background: var(--jade-pulse); box-shadow: 0 0 4px var(--jade-glow); z-index: 2;"></span>`
+                          : ''
+                      }
                     </div>
-                    <div style="font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3;">
-                      ${escapeHtml(snippet)}
+                    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 2px;">
+                      <div style="display: flex; align-items: center; justify-content: space-between; line-height: 1.2;">
+                        <span style="font-size: 13px; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                          ${escapeHtml(p.displayName || p.name)}
+                        </span>
+                        ${timeStr ? `<span style="font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono); flex-shrink: 0; margin-left: 4px;">${escapeHtml(timeStr)}</span>` : ''}
+                      </div>
+                      <div style="font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3;">
+                        ${escapeHtml(snippet)}
+                      </div>
                     </div>
                   </div>
-                </div>
-              `;
-              })
-              .join('')}
+                `;
+                })
+                .join('')}
+            </div>
           </div>
         `
             : ''
@@ -320,15 +370,97 @@ export function renderLeftRail(props: LeftRailProps): string {
                         background: ${isGroupActive ? 'var(--bg-card-active)' : 'transparent'};
                         border: 1px solid ${isGroupActive ? 'var(--accent)' : 'transparent'};
                         transition: background 0.12s ease;
+                        position: relative;
                       ">
-                        ${renderGroupCollageAvatar(g.members, props.profiles, 28)}
+                        <div style="position: relative; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                          ${renderGroupCollageAvatar(g.members, props.profiles, 28)}
+                          ${
+                            g.activityState === 'running'
+                              // gate-perf-allow: 群聊执行中指示器动画
+                              ? `<span class="activity-pulse-indicator" title="${t('rail.activityRunning')}" style="position: absolute; top: -1px; right: -1px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); animation: jadePulse 1.2s infinite; z-index: 2;"></span>`
+                              : g.activityState === 'unread'
+                              ? `<span class="activity-unread-badge" title="${t('rail.activityUnread')}" style="position: absolute; top: -1px; right: -1px; width: 7px; height: 7px; border-radius: 50%; background: var(--jade-pulse); box-shadow: 0 0 4px var(--jade-glow); z-index: 2;"></span>`
+                              : ''
+                          }
+                        </div>
                         <div style="flex: 1; min-width: 0;">
-                          <div style="font-size: 12px; font-weight: 500; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                            ${escapeHtml(g.name)}
-                          </div>
-                          <div style="font-size: 10.5px; color: var(--text-muted);">
-                            ${t('rail.groupsMembers', { count: String(g.members.length) })}
-                          </div>
+                          ${
+                            props.editingGroupRoomId === g.roomId
+                              ? `
+                            <div class="rail-group-inline-rename-wrap" style="display: flex; align-items: center; gap: 4px; width: 100%;">
+                              <input
+                                type="text"
+                                id="rail-group-rename-input-${g.roomId}"
+                                class="rail-group-rename-input"
+                                value="${escapeHtml(g.name)}"
+                                style="
+                                  flex: 1;
+                                  height: 22px;
+                                  padding: 0 5px;
+                                  font-size: 11.5px;
+                                  color: var(--text-main);
+                                  background: var(--bg-input);
+                                  border: 1px solid var(--accent);
+                                  border-radius: 4px;
+                                  outline: none;
+                                  min-width: 0;
+                                "
+                              />
+                              <button
+                                type="button"
+                                class="btn-confirm-group-rename"
+                                data-room-id="${g.roomId}"
+                                title="${t('common.confirm')}"
+                                style="
+                                  width: 20px;
+                                  height: 20px;
+                                  border: none;
+                                  border-radius: 3px;
+                                  background: var(--accent);
+                                  color: var(--text-main);
+                                  display: inline-flex;
+                                  align-items: center;
+                                  justify-content: center;
+                                  cursor: pointer;
+                                  flex-shrink: 0;
+                                "
+                              >
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                              </button>
+                              <button
+                                type="button"
+                                class="btn-cancel-group-rename"
+                                data-room-id="${g.roomId}"
+                                title="${t('common.cancel')}"
+                                style="
+                                  width: 20px;
+                                  height: 20px;
+                                  border: 1px solid var(--border-medium);
+                                  border-radius: 3px;
+                                  background: transparent;
+                                  color: var(--text-muted);
+                                  display: inline-flex;
+                                  align-items: center;
+                                  justify-content: center;
+                                  cursor: pointer;
+                                  flex-shrink: 0;
+                                "
+                              >
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                              </button>
+                            </div>
+                          `
+                              : `
+                            <div style="display: flex; align-items: center; justify-content: space-between;">
+                              <span style="font-size: 12px; font-weight: 500; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;">
+                                ${escapeHtml(g.name)}
+                              </span>
+                            </div>
+                            <div style="font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3;">
+                              ${escapeHtml(formatMessageSnippet(g.lastMessage, 36) || t('rail.groupsMembers', { count: String(g.members.length) }))}
+                            </div>
+                          `
+                          }
                         </div>
                       </div>
                     `;
@@ -547,8 +679,18 @@ function renderSessionRow(s: LeftRailSession, currentFocus: LeftRailActiveFocus,
     ">
       ${isActive ? '<div class="active-indicator" style="position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; background: var(--accent); border-radius: 0 2px 2px 0;"></div>' : ''}
       
-      <!-- Agent Avatar Badge -->
-      ${avatarNode}
+      <!-- Agent Avatar Badge with Status Dot -->
+      <div style="position: relative; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;">
+        ${avatarNode}
+        ${
+          s.activityState === 'running'
+            // gate-perf-allow: 会话执行态脉冲动画
+            ? `<span class="activity-pulse-indicator" title="${t('rail.activityRunning')}" style="position: absolute; top: -1px; right: -1px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); animation: jadePulse 1.2s infinite; z-index: 2;"></span>`
+            : s.activityState === 'unread'
+            ? `<span class="activity-unread-badge" title="${t('rail.activityUnread')}" style="position: absolute; top: -1px; right: -1px; width: 7px; height: 7px; border-radius: 50%; background: var(--jade-pulse); box-shadow: 0 0 4px var(--jade-glow); z-index: 2;"></span>`
+            : ''
+        }
+      </div>
 
       <!-- 3-Element Content Stack -->
       <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center;">
@@ -567,8 +709,10 @@ function renderSessionRow(s: LeftRailSession, currentFocus: LeftRailActiveFocus,
         ${
           !isCompact
             ? `
-          <div style="font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px;">
-            ${escapeHtml(s.preview || s.model || '')}
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 1px;">
+            <span style="font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;">
+              ${escapeHtml(formatMessageSnippet(s.preview, 36) || formatMessageSnippet(s.title, 36))}
+            </span>
           </div>
         `
             : ''
@@ -589,7 +733,7 @@ const BOT_PUPIL_BLACK = '#18181B';
  * 2. Xiaofawang -> Yellow Triangle with Two Eyes (Official Deterministic Triangle)
  * 3. Default Shape -> Name-derived geometric sigil with pupils
  */
-function renderBotAvatar(name: string, displayName?: string, avatarUrl?: string, size = 36): string {
+export function renderBotAvatar(name: string, displayName?: string, avatarUrl?: string, size = 36): string {
   if (avatarUrl) {
     return `<img src="${escapeHtml(avatarUrl)}" style="
       width: ${size}px;
@@ -640,13 +784,16 @@ function renderBotAvatar(name: string, displayName?: string, avatarUrl?: string,
 
 function renderGroupCollageAvatar(
   members: string[],
-  profiles?: Array<{ name: string; avatar?: string }>,
+  profiles?: Array<{ name: string; avatar?: string; displayName?: string }>,
   size = 28
 ): string {
   const profMap = new Map<string, string>();
   if (profiles) {
     for (const p of profiles) {
-      if (p.avatar) profMap.set(p.name.toLowerCase(), p.avatar);
+      if (p.avatar) {
+        profMap.set(p.name.toLowerCase(), p.avatar);
+        if (p.displayName) profMap.set(p.displayName.toLowerCase(), p.avatar);
+      }
     }
   }
 

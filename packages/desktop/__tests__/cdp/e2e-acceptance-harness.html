@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="obsidian-gold">
+<head>
+  <meta charset="UTF-8">
+  <title>Hermes Flux End-to-End CDP Acceptance Harness</title>
+  <link rel="stylesheet" href="../../dist/renderer/styles.css">
+  <style>
+    :root {
+      --bg-window: #090A0F;
+      --bg-rail: #0E1015;
+      --bg-panel: #111318;
+      --bg-card: #151720;
+      --bg-card-hover: #1B1E29;
+      --bg-card-active: #222634;
+      --bg-elevated: #1F2230;
+      --bg-input: #12141A;
+      --bg-code: #0A0B10;
+      --bg-backdrop: rgba(18, 20, 27, 0.88);
+      --accent: #F59E0B;
+      --accent-hover: #FBBF24;
+      --accent-dim: #D97706;
+      --accent-glow: rgba(245, 158, 11, 0.25);
+      --accent-subtle: rgba(245, 158, 11, 0.09);
+      --accent-border: rgba(245, 158, 11, 0.35);
+      --accent-text: #FEF3C7;
+      --text-main: #F8FAFC;
+      --text-secondary: #94A3B8;
+      --text-muted: #64748B;
+      --text-faint: #334155;
+      --border-subtle: rgba(255, 255, 255, 0.06);
+      --border-medium: rgba(255, 255, 255, 0.09);
+      --border-strong: rgba(255, 255, 255, 0.16);
+      --specular-line: inset 0 1px 0 0 rgba(255, 255, 255, 0.10);
+      --shadow-window: 0 24px 70px -12px rgba(0, 0, 0, 0.85);
+      --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.45);
+      --shadow-dock: 0 20px 48px -10px rgba(0, 0, 0, 0.75);
+      --jade-pulse: #10B981;
+      --jade-glow: rgba(16, 185, 129, 0.45);
+      --danger-color: #EF4444;
+      --font-sans: system-ui, -apple-system, sans-serif;
+      --font-mono: "JetBrains Mono", monospace;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
+      background: var(--bg-window);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      overflow: hidden;
+      display: flex;
+    }
+    #flux-app-root {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      height: 100%;
+      position: relative;
+    }
+    .flux-body-container {
+      flex: 1;
+      display: flex;
+      position: relative;
+      overflow: hidden;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="flux-app-root"></div>
+
+  <script type="module">
+    import {
+      renderTitlebar,
+      renderLeftRail,
+      renderMiddlePod,
+      renderInputDock,
+      renderContextMenu,
+      renderAgentProfileEditorModal
+    } from '/packages/ui/dist/index.js';
+
+    window.cdpApp = {
+      sessions: [
+        { id: 'sess-1', title: '电商支付重构方案', time: '14:20', botName: 'default', botDisplayName: '赫尔墨斯', activityState: 'read' },
+        { id: 'sess-2', title: '门禁规则不变量核验', time: '14:35', botName: 'arch-wang', botDisplayName: '架构王', activityState: 'unread' }
+      ],
+      profiles: [
+        { name: 'default', displayName: '赫尔墨斯', description: '全能助手', lastMessage: '已完成方案排版', lastTime: '10分钟前', activityState: 'read', isDefault: true },
+        { name: 'arch-wang', displayName: '架构王', description: '架构设计专家', lastMessage: '请核验门禁', lastTime: '1小时前', activityState: 'unread' }
+      ],
+      groupRooms: [
+        { roomId: 'room-1', name: '全链路微服务重构群', members: ['default', 'arch-wang'], activityState: 'running' }
+      ],
+      projects: [
+        { id: 'proj-1', name: '电商微服务工程', path: 'D:/workspace/shop', sessions: [] }
+      ],
+      activeSessionId: 'sess-1',
+      activeFocus: { type: 'session', sessionId: 'sess-1' },
+      isBotsGroupExpanded: true,
+      editingGroupRoomId: null,
+      contextMenu: null,
+      isAgentEditorOpen: false,
+      editingAgentProfileName: null,
+      messages: [
+        {
+          id: 'msg-1',
+          role: 'assistant',
+          content: '您好，当前架构已经通过门禁检验。',
+          toolCalls: [
+            { id: 'tc-1', name: 'read_file', status: 'completed', args: '{"path":"main.ts"}' },
+            { id: 'tc-2', name: 'execute_shell', status: 'running', args: '{"command":"npm test"}', output: 'Tests passing' }
+          ]
+        }
+      ],
+      lastActions: [],
+
+      render() {
+        const root = document.getElementById('flux-app-root');
+        const activeSess = this.sessions.find(s => s.id === this.activeSessionId);
+        const currentProject = activeSess ? this.projects[0] : null;
+
+        const html = `
+          ${renderTitlebar({
+            platform: 'windows',
+            title: activeSess ? activeSess.title : '赫尔墨斯',
+            projectName: currentProject?.name,
+            projectPath: currentProject?.path,
+            isMaximized: false,
+            gatewayConnected: true
+          })}
+          <div class="flux-body-container">
+            ${renderLeftRail({
+              collapsed: false,
+              activeSessionId: this.activeSessionId,
+              activeFocus: this.activeFocus,
+              sessions: this.sessions,
+              profileName: 'default',
+              profiles: this.profiles,
+              groups: this.groupRooms,
+              projects: this.projects,
+              activeRailTab: 'chats',
+              gatewayOnline: true,
+              gatewayLatencyMs: 12,
+              isBotsGroupExpanded: this.isBotsGroupExpanded,
+              editingGroupRoomId: this.editingGroupRoomId
+            })}
+            ${renderMiddlePod({
+              gatewayConnected: true,
+              messages: this.messages,
+              dockHtml: renderInputDock({
+                selectedModel: 'gpt-4o',
+                reasoningLevel: 'default',
+                approvalMode: 'auto',
+                isStreaming: false,
+                disabled: false
+              })
+            })}
+          </div>
+          ${renderContextMenu(this.contextMenu)}
+          ${renderAgentProfileEditorModal({
+            isOpen: this.isAgentEditorOpen,
+            profile: this.profiles.find(p => p.name === this.editingAgentProfileName),
+            availableModels: ['gpt-4o', 'deepseek-chat']
+          })}
+        `;
+        root.innerHTML = html;
+        this.bindEvents();
+      },
+
+      bindEvents() {
+        // Session context menu & click
+        document.querySelectorAll('.session-item').forEach(el => {
+          el.onclick = (e) => {
+            const id = el.dataset.id;
+            if (id) this.selectSession(id);
+          };
+          el.oncontextmenu = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const id = el.dataset.id;
+            const title = el.dataset.title;
+            this.contextMenu = {
+              x: e.clientX || 150,
+              y: e.clientY || 150,
+              targetType: 'session',
+              targetId: id,
+              targetName: title
+            };
+            this.render();
+          };
+        });
+
+        // Group room click
+        document.querySelectorAll('.rail-group-item').forEach(el => {
+          el.onclick = (e) => {
+            const roomId = el.dataset.roomId;
+            if (roomId) this.openGroupRoom(roomId);
+          };
+        });
+
+        // Bot context menu & click
+        document.querySelectorAll('.rail-pinned-bot-row').forEach(el => {
+          el.onclick = (e) => {
+            const profile = el.dataset.profile;
+            if (profile) this.openBotChat(profile);
+          };
+          el.oncontextmenu = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const profile = el.dataset.profile;
+            this.contextMenu = {
+              x: e.clientX || 150,
+              y: e.clientY || 150,
+              targetType: 'bot',
+              targetId: profile,
+              targetName: profile
+            };
+            this.render();
+          };
+        });
+
+        // Context menu items
+        document.querySelectorAll('#session-context-menu .ctx-item').forEach(btn => {
+          btn.onclick = (e) => {
+            e.stopPropagation();
+            const action = btn.dataset.action;
+            const ctx = this.contextMenu;
+            this.contextMenu = null;
+            this.render();
+
+            if (action === 'delete') {
+              this.deleteSession(ctx.targetId);
+            } else if (action === 'bot-edit') {
+              this.openAgentEditor(ctx.targetId);
+            }
+          };
+        });
+
+        // Group inline rename
+        document.querySelectorAll('.btn-confirm-group-rename').forEach(btn => {
+          btn.onclick = (e) => {
+            e.stopPropagation();
+            const roomId = btn.dataset.roomId;
+            const input = document.getElementById(`rail-group-rename-input-${roomId}`);
+            if (input && input.value.trim()) {
+              const grp = this.groupRooms.find(g => g.roomId === roomId);
+              if (grp) grp.name = input.value.trim();
+              this.editingGroupRoomId = null;
+              this.lastActions.push(`group_renamed:${grp.name}`);
+              this.render();
+            }
+          };
+        });
+
+        document.querySelectorAll('.btn-cancel-group-rename').forEach(btn => {
+          btn.onclick = (e) => {
+            e.stopPropagation();
+            this.editingGroupRoomId = null;
+            this.render();
+          };
+        });
+      },
+
+      deleteSession(id) {
+        this.sessions = this.sessions.filter(s => s.id !== id);
+        if (this.activeSessionId === id) {
+          this.activeSessionId = this.sessions[0]?.id || '';
+          if (this.activeSessionId) {
+            this.activeFocus = { type: 'session', sessionId: this.activeSessionId };
+          } else {
+            this.activeFocus = { type: 'bot', botName: 'default' };
+            this.messages = [];
+          }
+        }
+        this.render();
+        // Focus restore invariant
+        requestAnimationFrame(() => {
+          const input = document.getElementById('dock-prompt-input');
+          if (input) input.focus();
+        });
+      },
+
+      openAgentEditor(targetId) {
+        this.editingAgentProfileName = targetId;
+        this.isAgentEditorOpen = true;
+        this.lastActions.push(`editor_opened_local:${targetId}`);
+        this.render();
+
+        // 模拟真实网关远端异步拉取最新数据 (0ms~50ms 延迟)
+        setTimeout(() => {
+          const bot = this.profiles.find(p => p.name === targetId);
+          if (bot) {
+            bot.displayName = '大总管 (远端最新)';
+            bot.description = '网关远端实时最新配置';
+          }
+          this.lastActions.push(`editor_refreshed_remote:${targetId}`);
+          if (this.isAgentEditorOpen) {
+            this.render();
+          }
+        }, 50);
+      },
+
+      openBotChat(botProfile) {
+        this.activeFocus = { type: 'bot', botName: botProfile };
+        const target = this.profiles.find(p => p.name === botProfile);
+        if (target) {
+          target.activityState = 'read';
+        }
+        this.lastActions.push(`bot_entered_read:${botProfile}`);
+        this.render();
+      },
+
+      selectSession(sessionId) {
+        this.activeSessionId = sessionId;
+        this.activeFocus = { type: 'session', sessionId };
+        const sess = this.sessions.find(s => s.id === sessionId);
+        if (sess) {
+          sess.activityState = 'read';
+        }
+        this.lastActions.push(`session_entered_read:${sessionId}`);
+        this.render();
+      },
+
+      openGroupRoom(roomId) {
+        this.activeFocus = { type: 'group', roomId };
+        const target = this.groupRooms.find(g => g.roomId === roomId);
+        if (target) {
+          target.activityState = 'read';
+        }
+        this.lastActions.push(`group_entered_read:${roomId}`);
+        this.render();
+      },
+
+      simulateSessionTurn(sessionId, text) {
+        // 【已废弃】旧版在此手写 activityState 再断言 DOM，属于循环自证，已删除。
+        // 左侧栏三态与排序的真实数据流验证见 packages/desktop/__tests__/e2e/left-rail-live-cdp.test.mjs
+        throw new Error('simulateSessionTurn removed: use the live-gateway E2E suite instead');
+      },
+
+      simulateGroupChatTurn(roomId) {
+        throw new Error('simulateGroupChatTurn removed: use the live-gateway E2E suite instead');
+      },
+
+      simulateBotTurn(botName) {
+        throw new Error('simulateBotTurn removed: use the live-gateway E2E suite instead');
+      }
+    };
+
+    window.cdpApp.render();
+  </script>
+</body>
+</html>

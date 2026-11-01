@@ -576,37 +576,53 @@ export class HermesGatewayClient {
    * "No sessions" and "the gateway refused to list them" are different facts; the
    * rail must be able to tell them apart instead of rendering an empty list for
    * both.
+   *
+   * 【设计意图 (Why)】
+   *   左侧栏的排序依据是"会话最后一条消息时间"。经真实网关实测：
+   *   - WS `session.list` 只返回 `started_at`（会话创建时间），**没有 last_active**；
+   *   - REST `/api/sessions`（同一份数据的持久化视图）额外返回 `last_active`、`unread`、
+   *     `last_read_at`、`hidden`、`pinned`，且返回条数更全（实测 56 条 vs WS 54 条）。
+   *   因此 REST 是"顺序与时间正确"的权威通道，必须优先。
+   *
+   * 【防范的历史坑 (Pitfall)】
+   *   曾以 WS 为主通道：列表退化为"按创建时间排序"，前缀时间邻接的会话看起来顺序
+   *   与真实最后活跃不符（实测 local-ec166a 从末位跳到第二位），用户直觉就是"顺序不对"。
+   *
+   * 【约束与规则 (Rules)】
+   *   - 有 REST 通道时优先 REST；REST 失败或为空才回落 WS，保证弱网可用；
+   *   - 两条通道都失败时返回 ok:false 并带上错误原因（失败 ≠ 空）；
+   *   - REST limit 实测上限 100，超出返回 422，调用方传入的 limit 需收敛到 [1,100]。
    */
   public async listSessions(profile = 'default', limit = 50): Promise<SessionListOutcome> {
     let lastError: string | undefined;
-
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      try {
-        const wsResult = await this.call<unknown>('session.list', { profile, limit });
-        const sessions = normalizeSessionsResult(wsResult);
-        // An empty list is a legitimate answer when the gateway replied at all.
-        if (sessions.length > 0 || !this.restFallbackHandler) {
-          return { sessions, ok: true };
-        }
-      } catch (wsErr) {
-        lastError = describeError(wsErr);
-        console.warn('[HermesGatewayClient] WS session.list failed, trying REST fallback:', lastError);
-      }
-    } else {
-      lastError = `WebSocket 未连接 (当前状态: ${this.fsm.getState()})`;
-    }
+    const safeLimit = Math.max(1, Math.min(100, Math.floor(limit) || 50));
 
     if (this.restFallbackHandler) {
       try {
         const restResult = await this.restFallbackHandler('/api/sessions', {
           method: 'GET',
-          params: { profile, limit },
+          params: { profile, limit: safeLimit },
         });
-        return { sessions: normalizeSessionsResult(restResult), ok: true };
+        const sessions = normalizeSessionsResult(restResult);
+        // REST 是权威持久化视图：即便为空也代表"该 Profile 确实没有会话"
+        return { sessions, ok: true };
       } catch (restErr) {
         lastError = describeError(restErr);
-        console.warn('[HermesGatewayClient] REST session fallback also failed:', lastError);
+        console.warn('[HermesGatewayClient] REST session.list failed, trying WS fallback:', lastError);
       }
+    }
+
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      try {
+        const wsResult = await this.call<unknown>('session.list', { profile, limit: safeLimit });
+        const sessions = normalizeSessionsResult(wsResult);
+        return { sessions, ok: true };
+      } catch (wsErr) {
+        lastError = describeError(wsErr);
+        console.warn('[HermesGatewayClient] WS session.list also failed:', lastError);
+      }
+    } else if (!lastError) {
+      lastError = `WebSocket 未连接 (当前状态: ${this.fsm.getState()})`;
     }
 
     return { sessions: [], ok: false, error: lastError ?? '网关未返回会话列表' };
@@ -667,6 +683,49 @@ export class HermesGatewayClient {
     } catch (err) {
       const errorMsg = describeError(err);
       return { messages: [], ok: false, error: errorMsg };
+    }
+  }
+
+  /**
+   * 取某会话的"真实最后一条消息"。
+   *
+   * 【设计意图 (Why)】
+   *   左侧栏副标题必须对得上会话真实最后一条消息。网关 REST `/api/sessions` 的
+   *   `preview` 字段实测是"最后一条**用户**消息"，而最后一条通常是 AI 回复，
+   *   两者内容不同 —— 直接拿 preview 当副标题就会"对不上"。
+   *   真实最后一条必须从 `/api/sessions/:id/messages?limit=1&order=latest` 取。
+   *
+   * 【约束与规则 (Rules)】
+   *   - 只取 1 条，避免拉全量历史；
+   *   - 无 REST 通道或请求失败时返回 null，由调用方决定降级策略（失败 ≠ 空字符串）；
+   *   - 返回文本统一压平换行，便于直接做副标题。
+   */
+  public async fetchLastMessage(
+    sessionId: string
+  ): Promise<{ text: string; timestamp: number; role: string } | null> {
+    if (!this.restFallbackHandler || !sessionId) return null;
+    try {
+      const res = await this.restFallbackHandler(
+        `/api/sessions/${encodeURIComponent(sessionId)}/messages`,
+        { method: 'GET', params: { limit: 1, offset: 0, order: 'latest' } }
+      );
+      const resObj = res && typeof res === 'object' ? (res as Record<string, unknown>) : null;
+      const messages = Array.isArray(resObj?.messages) ? resObj!.messages as Array<Record<string, unknown>> : [];
+      const last = messages[0];
+      if (!last) return null;
+      const rawText = typeof last.content === 'string' ? last.content : typeof last.text === 'string' ? last.text : '';
+      const rawTs = typeof last.timestamp === 'number' ? last.timestamp : 0;
+      const ts = rawTs > 1e11 ? rawTs : rawTs > 0 ? rawTs * 1000 : 0;
+      return {
+        text: rawText.replace(/\s+/g, ' ').trim(),
+        timestamp: ts,
+        role: typeof last.role === 'string' ? last.role : '',
+      };
+    // gate-degrade: 单条消息取失败时降级为"保留既有副标题"，不阻断列表主流程
+    } catch (err) {
+      // 失败不可静默为"空消息"：返回 null 让调用方保留既有副标题
+      console.warn('[HermesGatewayClient] fetchLastMessage failed:', describeError(err), { sessionId });
+      return null;
     }
   }
 

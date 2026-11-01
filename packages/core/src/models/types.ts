@@ -47,6 +47,23 @@ export interface ArtifactItem {
 
 /**
  * Robust extraction and normalization helpers
+ *
+ * 【设计意图 (Why)】
+ *   网关有两条会话列表通道，字段完备度不同：
+ *   - WS `session.list` 只给 `started_at`（会话创建时间），没有 last_active / unread；
+ *   - REST `/api/sessions`（profileService.listSessions 走的就是它）额外给 `last_active`、
+ *     `unread`、`last_read_at`、`hidden`、`pinned`、`archived`。
+ *   "列表按最后活跃时间倒序"与"未读态"都依赖后者，因此归一化必须优先取 `last_active`，
+ *   并保留 hidden / unread 等字段，供上层做可见性与状态判定。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   曾把 `last_active ?? started_at` 写成同优先级、且丢弃 unread/hidden：
+ *   一旦上游只拿到 WS 结果，列表就退化成"按创建时间排序"，用户看到的顺序与真实最后消息时间不符。
+ *
+ * 【约束与规则 (Rules)】
+ *   - `timestamp` 语义固定为"最后活跃时间(ms)"，来源优先级 last_active > started_at > created_at；
+ *   - `hidden`/`unread`/`pinned` 原样透传，供上层过滤与三态判定，不在本层做业务决策；
+ *   - 纯函数，零 DOM / 零网络依赖。
  */
 export function normalizeSessionsResult(payload: any): Array<{
   id: string;
@@ -56,6 +73,18 @@ export function normalizeSessionsResult(payload: any): Array<{
   preview: string;
   isArchived: boolean;
   timestamp: number;
+  hidden: boolean;
+  unread: boolean;
+  pinned: boolean;
+  botName?: string;
+  projectId?: string;
+  projectName?: string;
+  cwd?: string;
+  parentSessionId?: string;
+  source?: string;
+  isSubagent?: boolean;
+  /** 时间戳取自哪个字段，便于诊断排序依据（last_active / started_at / created_at / none） */
+  timeSource: string;
 }> {
   if (!payload) return [];
   const rawList = Array.isArray(payload)
@@ -73,10 +102,15 @@ export function normalizeSessionsResult(payload: any): Array<{
       const rawTitle = (s.title || '').trim();
       const title = rawTitle || (id ? `会话 ${id.slice(0, 8)}` : '新对话');
       const model = String(s.model || '');
+      // 时间来源固定优先级：last_active 是"最后一条消息时间"，started_at/created_at 只是创建时间
+      const timeSource = typeof s.last_active === 'number' ? 'last_active'
+        : typeof s.started_at === 'number' ? 'started_at'
+        : typeof s.created_at === 'number' ? 'created_at'
+        : 'none';
       const rawTs = s.last_active ?? s.started_at ?? s.created_at ?? 0;
-      const numTs = typeof rawTs === 'number' ? (rawTs > 1e11 ? rawTs : rawTs * 1000) : Date.parse(rawTs) || Date.now();
-      
-      const timeStr = numTs > 0 
+      const numTs = typeof rawTs === 'number' ? (rawTs > 1e11 ? rawTs : rawTs * 1000) : Date.parse(rawTs) || 0;
+
+      const timeStr = numTs > 0
         ? new Date(numTs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         : '近期';
 
@@ -88,6 +122,10 @@ export function normalizeSessionsResult(payload: any): Array<{
         preview: String(s.preview || ''),
         isArchived: Boolean(s.archived || s.isArchived),
         timestamp: numTs,
+        timeSource,
+        hidden: Boolean(s.hidden || s.isHidden),
+        unread: Boolean(s.unread),
+        pinned: Boolean(s.pinned),
         botName: typeof s.profile === 'string' ? s.profile : typeof s.bot_name === 'string' ? s.bot_name : undefined,
         projectId: typeof s.project_id === 'string' ? s.project_id : typeof s.projectId === 'string' ? s.projectId : undefined,
         projectName: typeof s.project_name === 'string' ? s.project_name : typeof s.projectName === 'string' ? s.projectName : undefined,

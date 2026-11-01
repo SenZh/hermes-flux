@@ -142,9 +142,74 @@ export function isVisibleSession(session: NormalizedSession | null | undefined):
   if (!session || !session.id) return false;
   if (session.isSubagent || session.source === 'subagent') return false;
   if (session.isArchived) return false;
+  // 网关用 hidden 标记 Bot 终身主工位（Bot Chat）等内部会话，不得出现在用户时间线里
+  if (session.hidden) return false;
   if (!session.title || !session.title.trim()) return false;
   if (SUBAGENT_DATE_TITLE_PATTERN.test(session.title)) return false;
   return true;
+}
+
+/**
+ * 保护进行中会话的乐观时间戳不被过期列表覆盖。
+ *
+ * 【设计意图 (Why)】
+ *   用户刚发出消息时，客户端会立刻把该会话的时间戳推进到"现在"，让它顶到列表最上。
+ *   但网关的 REST `last_active` 是持久化值，流式过程中可能还是旧时间（实测刷新后
+ *   时间戳从"现在"回退到 20 天前，会话当场从顶部掉回原位）。
+ *   因此凡处于运行中的会话，其本地时间戳与副标题必须以本地为准，不能被权威列表覆盖。
+ *
+ * 【约束与规则 (Rules)】
+ *   - 只保护 `runningIds` 命中的会话；其余会话仍以权威结果为准；
+ *   - 纯函数，不修改入参；返回新数组。
+ */
+/**
+ * 保护活跃会话的乐观时间戳与最新副标题不被过期列表覆盖。
+ *
+ * 【设计意图 (Why)】
+ *   用户刚发出消息或 AI 刚完成回复时，客户端会立刻把该会话的时间戳推进到"现在"，让它顶到列表最上。
+ *   但网关持久化落盘存在数十到数百毫秒的异步延迟，随后收到的网关列表快照可能仍是旧时间/旧 preview。
+ *   若无条件采信网关快照，刚完成的会话就会在"最新内容"和"旧内容"之间往复跳变（闪一下闪回去）。
+ *   因此实行单调递增时序守卫：凡本地持有更新时间戳的会话，本地状态始终高于过期快照。
+ *
+ * 【约束与规则 (Rules)】
+ *   - 只要本地时间戳更晚（`local.timestamp > s.timestamp`）或处于 running 状态，保留本地最新状态；
+ *   - 纯函数，不修改入参；返回新数组。
+ */
+export function preserveRunningActivity<T extends NormalizedSession>(
+  sessions: T[],
+  previous: NormalizedSession[],
+  runningIds: ReadonlySet<string>
+): T[] {
+  if (previous.length === 0) return sessions;
+  const localById = new Map(previous.map((s) => [s.id, s]));
+  return sessions.map((s) => {
+    const local = localById.get(s.id);
+    if (!local) return s;
+    const isRunning = runningIds.has(s.id);
+    const isLocalNewer = (local.timestamp || 0) > (s.timestamp || 0);
+    const shouldOverrideTimestamp = isLocalNewer && isRunning;
+    const shouldRetainLocalText = isRunning || isLocalNewer;
+
+    if (shouldOverrideTimestamp) {
+      return {
+        ...s,
+        timestamp: local.timestamp,
+        preview: local.preview || s.preview,
+        time: local.time || s.time,
+        authoritativeTimestamp: s.timestamp,
+      };
+    }
+
+    if (shouldRetainLocalText && ((local.preview && !s.preview) || (local.time && !s.time))) {
+      return {
+        ...s,
+        preview: local.preview || s.preview,
+        time: local.time || s.time,
+      };
+    }
+
+    return s;
+  });
 }
 
 /** 会话列表对账入参 */

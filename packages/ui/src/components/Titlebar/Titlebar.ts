@@ -10,6 +10,8 @@ import { t } from '../../i18n/index.js';
 export interface TitlebarProps {
   platform: 'windows' | 'macos' | 'linux' | 'ios' | 'android' | 'web';
   title: string;
+  projectName?: string;
+  projectPath?: string;
   isMaximized: boolean;
   gatewayConnected: boolean;
   gatewayLatencyMs?: number;
@@ -142,6 +144,29 @@ export function renderTitlebar(props: TitlebarProps): string {
           text-overflow: ellipsis;
           max-width: 100%;
         ">${escapeHtml(displayTitle)}</span>
+        ${
+          props.projectName
+            ? `
+          <div class="session-workspace-badge" title="${escapeHtml(props.projectPath || props.projectName)}" style="
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 6px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 4px;
+            font-size: 11px;
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            flex-shrink: 0;
+            white-space: nowrap;
+          ">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--accent);"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            <span>${escapeHtml(props.projectName)}</span>
+          </div>
+        `
+            : ''
+        }
       </div>
 
       <!-- Right Global Auxiliary Area -->

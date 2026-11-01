@@ -25,6 +25,9 @@ import {
   type LeftRailGroupRoom,
   type LeftRailActiveFocus,
   renderNewTaskModal,
+  renderContextMenu,
+  type ContextMenuProps,
+  renderAgentProfileEditorModal,
   t,
 } from '@hermes-flux/ui';
 
@@ -47,10 +50,21 @@ import {
   type NormalizedSession,
   type ModelDetail,
   type AgentProfile,
+  type ProjectSummary,
   ProfileService,
   GroupRoomStore,
+  ProjectService,
   reconcileSessionList,
+  preserveRunningActivity,
+  settleTurnTermination,
   resolveFileContent,
+  doesSessionBelongToProject,
+  resolveActivityState,
+  applyTurnStarted,
+  applyTurnCompleted,
+  applyTurnFailed,
+  applyEnteredRead,
+  type ActivityState,
 } from '@hermes-flux/core';
 
 import type { HermesDesktopBridge } from '../preload/index.js';
@@ -91,15 +105,19 @@ interface AppState {
   groupRooms: LeftRailGroupRoom[];
   activeFocus: LeftRailActiveFocus;
   sessionSearchQuery: string;
+  isBotsGroupExpanded: boolean;
   isSessionsGroupExpanded: boolean;
   isGroupsGroupExpanded: boolean;
   isMoreSessionsExpanded: boolean;
   isNewTaskModalOpen: boolean;
   selectedNewTaskProjectId?: string;
+  isAgentEditorOpen: boolean;
+  editingAgentProfileName?: string;
+  editingGroupRoomId?: string;
   /** Model menu visibility lives in state so a re-render cannot swallow it. */
   modelMenuOpen: boolean;
-  /** Context menu for session item */
-  sessionContextMenu?: { x: number; y: number; sessionId: string; sessionTitle: string };
+  /** Context menu for session, bot or group room item */
+  sessionContextMenu?: ContextMenuProps;
   /** Inline failure line inside the dock (failure must never be silent). */
   dockNotice: string;
   /** Rail-level failure line, distinct from a legitimately empty session list. */
@@ -294,10 +312,14 @@ const state: AppState = {
   groupRooms: [],
   activeFocus: { type: 'bot', botName: localStorage.getItem('hermes_flux_profile') || 'default' },
   sessionSearchQuery: '',
+  isBotsGroupExpanded: true,
   isSessionsGroupExpanded: true,
   isGroupsGroupExpanded: true,
   isMoreSessionsExpanded: false,
   isNewTaskModalOpen: false,
+  isAgentEditorOpen: false,
+  editingAgentProfileName: undefined,
+  editingGroupRoomId: undefined,
   profileName: localStorage.getItem('hermes_flux_profile') || localStorage.getItem('hermes_aura_profile') || 'default',
   modelMenuOpen: false,
   dockNotice: '',
@@ -362,7 +384,53 @@ let currentTicket: string | undefined = undefined;
 let activeStreamingMessageId: string | null = null;
 let activeStreamingStoredSessionId: string | null = null;
 let activeStreamingLiveId: string | null = null;
+/**
+ * 本回合归属的 Bot 名（仅当在 Bot 工位发起时记录）。
+ *
+ * 【设计意图 (Why)】
+ *   Bot 的运行态必须在回合结束时收尾。若只在"当前焦点仍是该 Bot"时才收尾，
+ *   用户一旦切走到别的会话，Bot 就会永远停在"进行中"，并且永远不会变成未读。
+ *   因此把"发起方"记录在回合上，与焦点解耦。
+ */
+let activeStreamingBotName: string | null = null;
 const sessionDraftMap = new Map<string, string>();
+const unreadSessionIds = new Set<string>();
+const unreadGroupRoomIds = new Set<string>();
+const unreadBotNames = new Set<string>();
+const activeRunningGroupRoomIds = new Set<string>();
+const activeRunningSessionIds = new Set<string>();
+const activeRunningBotNames = new Set<string>();
+/** 全局头像资产缓存（name/displayName/id -> dataUrl），防重拉取与时序冲刷 */
+const profileAvatarCache = new Map<string, string>();
+
+/** 智能体本地最新活跃映射表（防止被网关冷启动时的旧快照 22:48 覆盖导致闪烁与时间错误） */
+const botLatestActivityMap = new Map<string, { lastMessage: string; timestamp: number }>();
+
+/** 强力恢复输入舱光标与焦点（解决删除会话或模态弹窗后 Chromium 焦点丢失导致无法输入的问题） */
+function restoreComposerFocus(): void {
+  const restore = () => {
+    const input = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
+    if (input) {
+      window.focus();
+      input.blur();
+      input.focus({ preventScroll: true });
+    }
+  };
+  requestAnimationFrame(restore);
+  setTimeout(restore, 40);
+  setTimeout(restore, 160);
+}
+
+/** 健壮的 Agent 头像解析器：按 ID、实名、显示名、别名双向穿透查找缓存，避免单聊/群聊匹配丢失 */
+function resolveAgentAvatar(nameOrDisplayName?: string): string {
+  if (!nameOrDisplayName) return '';
+  const clean = nameOrDisplayName.toLowerCase().trim();
+  const cached = profileAvatarCache.get(clean);
+  if (cached) return cached;
+  const match = state.profiles.find((p) => p.name.toLowerCase() === clean || (p.displayName && p.displayName.toLowerCase() === clean));
+  if (match?.avatar) return match.avatar;
+  return '';
+}
 let dockNoticeDismissTimer: ReturnType<typeof setTimeout> | null = null;
 let sessionsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let turnWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
@@ -494,7 +562,27 @@ const tokenCoalescer = new TokenCoalescer((flushedMap) => {
         };
         cached.push(cachedTarget);
       }
-      if (entry.content) cachedTarget.content += entry.content;
+      if (entry.content) {
+        cachedTarget.content += entry.content;
+        const sess = state.sessions.find((s) => s.id === activeStreamingStoredSessionId);
+        if (sess) {
+          sess.preview = cachedTarget.content;
+          sess.timestamp = Date.now();
+        }
+        const curFocus = state.activeFocus;
+        if (curFocus.type === 'bot') {
+          botLatestActivityMap.set(curFocus.botName, {
+            lastMessage: cachedTarget.content,
+            timestamp: Date.now(),
+          });
+          const currentBot = state.profiles.find((p) => p.name === curFocus.botName);
+          if (currentBot) {
+            currentBot.lastMessage = cachedTarget.content;
+            currentBot.timestamp = Date.now();
+            currentBot.lastTime = formatSessionTime(Date.now());
+          }
+        }
+      }
       if (entry.thought) cachedTarget.thought = (cachedTarget.thought || '') + entry.thought;
     }
 
@@ -512,6 +600,7 @@ const tokenCoalescer = new TokenCoalescer((flushedMap) => {
     if (!targetMsg || targetMsg.role !== 'assistant') continue;
 
     if (entry.content && isCurrentSessionActive) {
+      targetMsg.content = (targetMsg.content || '') + entry.content;
       renderedChars += entry.content.length;
       const contentEl = document.getElementById(`msg-content-${targetMsg.id}`);
       if (contentEl) {
@@ -528,6 +617,7 @@ const tokenCoalescer = new TokenCoalescer((flushedMap) => {
     }
 
     if (entry.thought && isCurrentSessionActive) {
+      targetMsg.thought = (targetMsg.thought || '') + entry.thought;
       const thoughtEl = document.getElementById(`msg-thought-${targetMsg.id}`);
       if (thoughtEl) {
         thoughtEl.innerText = targetMsg.thought || '';
@@ -709,6 +799,77 @@ function formatSessionTime(timestamp: number): string {
 
 let activeFetchSessionsGeneration = 0;
 
+/**
+ * 副标题缓存：sessionId -> { lastActive, text }。
+ *
+ * 【设计意图 (Why)】
+ *   左侧栏副标题必须是"真实最后一条消息"，而 REST 列表的 preview 只是最后一条用户消息。
+ *   真实最后一条要从 `/api/sessions/:id/messages?limit=1` 取，成本约 20ms/条，
+ *   全量 50+ 会话并发约 1.1s，不能每次刷新都重拉。
+ *   用 `sessionId::lastActive` 做失效键：会话没有新消息时直接命中缓存，零请求。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   曾经直接用 REST 的 preview 当副标题，AI 回复完仍是用户那句提问，用户看到"副标题没更新"。
+ */
+const sessionPreviewCache = new Map<string, { lastActive: number; text: string }>();
+let enrichPreviewGeneration = 0;
+
+/** 拉取所有可见会话的真实最后一条消息，回填副标题（带缓存与并发上限） */
+async function enrichSessionPreviews(): Promise<void> {
+  const client = gatewayClient;
+  if (!client) return;
+  const gen = ++enrichPreviewGeneration;
+  // 缓存键用"网关权威时间"（REST last_active），不能用会被乐观推进的本地 timestamp：
+  // 流式期间本地时间每秒在变，用它做键会让缓存必然全 miss（每轮刷新都重拉 60 条）。
+  const targets = state.sessions
+    .filter((s) => !s.isArchived && !s.hidden)
+    .slice(0, 60)
+    // 缓存键必须是网关权威时间。运行中会话的 timestamp 已被 preserveRunningActivity
+    // 替换为本地乐观值，必须取 authoritativeTimestamp，否则每轮刷新缓存全 miss。
+    .map((s) => ({ id: s.id, authoritativeTs: s.authoritativeTimestamp ?? s.timestamp }));
+  const CONCURRENCY = 8;
+  const updates = new Map<string, string>();
+
+  for (let i = 0; i < targets.length; i += CONCURRENCY) {
+    if (gen !== enrichPreviewGeneration) return; // 有更新的一轮，放弃本轮
+    const batch = targets.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(
+      batch.map(async (t) => {
+        const cached = sessionPreviewCache.get(t.id);
+        // 权威时间与缓存一致说明没有新消息，直接复用
+        if (cached && cached.lastActive === t.authoritativeTs) return { id: t.id, text: cached.text };
+        const last = await client.fetchLastMessage(t.id);
+        if (!last || !last.text) return { id: t.id, text: '' };
+        // 缓存键记"网关给的时间"，与下次刷新的 authoritativeTs 可比
+        sessionPreviewCache.set(t.id, { lastActive: t.authoritativeTs, text: last.text });
+        return { id: t.id, text: last.text };
+      })
+    );
+    for (const r of results) {
+      if (r.text) updates.set(r.id, r.text);
+    }
+  }
+
+  if (gen !== enrichPreviewGeneration || updates.size === 0) return;
+
+  // 【关键】必须按 id 写回"当前"state.sessions：对账会整体替换会话对象，
+  // 持有旧引用再赋值等于改了个孤儿对象，界面永远不更新（历史坑）。
+  let changed = false;
+  state.sessions = state.sessions.map((s) => {
+    const text = updates.get(s.id);
+    if (text && s.preview !== text) {
+      changed = true;
+      return { ...s, preview: text };
+    }
+    return s;
+  });
+
+  if (changed && gen === enrichPreviewGeneration) {
+    syncProfileLastMessages();
+    render();
+  }
+}
+
 // 空会话列表常量：避免在多处写 `[] as NormalizedSession[]` 类型断言（调用方只读，不会原地修改）
 const NO_SESSIONS: NormalizedSession[] = [];
 
@@ -752,12 +913,13 @@ async function fetchSessions(): Promise<void> {
         const botName = s.botName || profName;
         const matchingProfile = profileMap.get(botName) || prof;
         const timeWithDate = formatSessionTime(s.timestamp) || s.time;
+        const resolvedAvatar = matchingProfile?.avatar || resolveAgentAvatar(botName) || resolveAgentAvatar(profName) || '';
         return {
           ...s,
           time: timeWithDate,
           botName,
           botDisplayName: matchingProfile?.displayName || botName,
-          botAvatar: matchingProfile?.avatar || '',
+          botAvatar: resolvedAvatar,
         };
       });
       return { ok: true, profile: profName, error: '', sessions };
@@ -782,6 +944,7 @@ async function fetchSessions(): Promise<void> {
   }
 
   // 3. 对账：权威结果与本地列表合并（去重、可见性、临时会话、归档残影剔除全部在 core 纯函数里完成）
+  const previousSessions = state.sessions;
   const reconciled = reconcileSessionList({
     previous: state.sessions,
     fetched: settled.flatMap((r) => r.sessions),
@@ -791,6 +954,11 @@ async function fetchSessions(): Promise<void> {
   });
   state.sessions = reconciled.sessions;
   state.pendingSessionIds = reconciled.pendingIds;
+
+  // 运行中的会话以本地乐观时间戳为准，防止过期 last_active 把置顶冲掉
+  if (activeRunningSessionIds.size > 0) {
+    state.sessions = preserveRunningActivity(state.sessions, previousSessions, activeRunningSessionIds);
+  }
 
   // 对账：任何被丢弃的会话都必须留痕，避免"会话凭空消失"
   if (reconciled.dropped.length > 0) {
@@ -813,10 +981,13 @@ async function fetchSessions(): Promise<void> {
     state.sessionListError = t('rail.errorSub');
   }
 
-  // 4. 同步刷新工程项目的关联会话
+  // 4. 同步刷新工程项目的关联会话与智能体最新对话副标题
   if (state.projects.length > 0) {
     syncProjectSessions();
   }
+  // 副标题必须来自"真实最后一条消息"（REST 的 preview 只是最后一条用户消息）
+  void enrichSessionPreviews();
+  syncProfileLastMessages();
 
   if (!state.activeSessionId && state.sessions.length > 0) {
     await selectSession(state.sessions[0].id);
@@ -830,6 +1001,7 @@ interface ProjectRawRecord {
   id?: string;
   projectId?: string;
   name?: string;
+  slug?: string;
   primary_path?: string;
   primaryPath?: string;
   path?: string;
@@ -840,129 +1012,148 @@ interface ProjectsListResponse {
   data?: ProjectRawRecord[];
 }
 
-/** 真实拉取网关工程项目列表 (all-profiles fan-out) 并自动关联所属会话 */
+/** 智能体副标题与时间联动：优先扫描会话池提取最新真实对话记录，兜底提取网关原生 last_session */
+function syncProfileLastMessages(): void {
+  for (const p of state.profiles) {
+    // 1. 本地最新交互最高优先（解决 Bot 聊天时间卡死在冷启动旧快照 22:48 与闪烁回退的核心死穴）
+    const localAct = botLatestActivityMap.get(p.name);
+    if (localAct) {
+      p.lastMessage = localAct.lastMessage;
+      p.timestamp = localAct.timestamp;
+      p.lastTime = formatSessionTime(localAct.timestamp);
+      continue;
+    }
+
+    // 2. 探查专职 Bot 终身主工位（Forever Chat）缓存中的真实最新对话
+    const foreverChatId = botForeverChatCache.get(p.name);
+    if (foreverChatId) {
+      const cachedMsgs = sessionMessagesCache.get(foreverChatId);
+      if (cachedMsgs && cachedMsgs.length > 0) {
+        const lastMsg = cachedMsgs[cachedMsgs.length - 1];
+        if (lastMsg.content) {
+          p.lastMessage = lastMsg.content.slice(0, 100).replace(/\s+/g, ' ').trim();
+        }
+        if (lastMsg.timestamp) {
+          p.lastTime = lastMsg.timestamp;
+        }
+        continue;
+      }
+    }
+
+    // 3. 匹配本地会话池中归属于该 Bot 的最新普通会话与消息
+    const botSessions = state.sessions
+      .filter((s) => s.botName === p.name || (p.displayName && s.botDisplayName === p.displayName) || (!s.botName && p.isDefault))
+      .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+    if (botSessions.length > 0) {
+      const latest = botSessions[0];
+      if (latest.timestamp && (!p.timestamp || latest.timestamp > p.timestamp)) {
+        p.timestamp = latest.timestamp;
+      }
+      const cachedMsgs = sessionMessagesCache.get(latest.id);
+      if (cachedMsgs && cachedMsgs.length > 0) {
+        const lastMsg = cachedMsgs[cachedMsgs.length - 1];
+        if (lastMsg.content) {
+          p.lastMessage = lastMsg.content.slice(0, 100).replace(/\s+/g, ' ').trim();
+        }
+        if (lastMsg.timestamp) {
+          p.lastTime = lastMsg.timestamp;
+        }
+      } else {
+        const snippet = latest.preview || latest.title;
+        if (snippet) {
+          p.lastMessage = snippet.replace(/\s+/g, ' ').trim();
+        }
+        if (latest.time) {
+          p.lastTime = latest.time;
+        }
+      }
+      continue;
+    }
+
+    // 4. 冷启动兜底：从网关原始返回的 last_session 提取（严格换算为毫秒，杜绝秒级浮点数导致年份错乱）
+    const lastSess = p.last_session;
+    if (lastSess) {
+      const preview = lastSess.preview || lastSess.title || '';
+      if (preview) p.lastMessage = preview.replace(/\s+/g, ' ').trim();
+      const rawActive = typeof lastSess.last_active === 'number' ? lastSess.last_active : typeof lastSess.started_at === 'number' ? lastSess.started_at : 0;
+      const lastActiveMs = rawActive > 1e11 ? rawActive : rawActive > 0 ? rawActive * 1000 : 0;
+      if (lastActiveMs > 0) {
+        p.lastTime = formatSessionTime(lastActiveMs);
+        p.timestamp = lastActiveMs;
+      }
+    }
+  }
+
+  // 5. 智能体列表严格按照时间从新到旧倒序排序（最新的排在前面）
+  state.profiles = [...state.profiles].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+}
+
+const projectService = new ProjectService();
+
+/** 真实拉取网关工程项目列表 (使用官方 ProjectService 契约通道) 并自动关联所属会话 */
 async function fetchProjects(): Promise<void> {
   const client = gatewayClient;
   if (!client) return;
   try {
-    const targetProfiles = new Set<string>();
-    targetProfiles.add('default');
-    if (state.profileName) targetProfiles.add(state.profileName);
-    for (const p of state.profiles) {
-      if (p.name) targetProfiles.add(p.name);
-    }
+    let summaries: ProjectSummary[] = await projectService.listProjects(client, true).catch(() => []);
 
-    // 并发拉取默认与各个 Profile 数据库中的 projects.list 并集
-    const profileCalls = Array.from(targetProfiles).map((prof) =>
-      client.call<ProjectsListResponse>('projects.list', { profile: prof }).catch(() => null)
-    );
-    // gate-degrade: 解析历史消息的畸形条目时跳过该条，避免单条脏数据毁掉整页
-    profileCalls.push(client.call<ProjectsListResponse>('projects.list', {}).catch(() => null));
-
-    const results = await Promise.all(profileCalls);
-    const seenProjIds = new Set<string>();
-    const mergedProjects: LeftRailProject[] = [];
-
-    for (const res of results) {
-      const rawList: ProjectRawRecord[] = Array.isArray(res?.projects)
-        ? res.projects
-        : Array.isArray(res?.data)
-        ? res.data
+    // 容错兜底：若 Service 解析为空，尝试无参 raw 契约解析
+    if (summaries.length === 0) {
+      const rawRes = await client.call<ProjectsListResponse>('projects.list', {}).catch(() => null);
+      const rawList = Array.isArray(rawRes?.projects)
+        ? rawRes.projects
+        : Array.isArray(rawRes?.data)
+        ? rawRes.data
         : [];
-
-      for (const p of rawList) {
-        const id = String(p.id || p.projectId || '');
-        if (!id || seenProjIds.has(id)) continue;
-        seenProjIds.add(id);
-        const name = String(p.name || id);
-        const primaryPath = String(p.primary_path || p.primaryPath || p.path || '');
-        mergedProjects.push({
-          id,
-          name,
-          path: primaryPath,
-          sessions: [],
-        });
+      if (rawList.length > 0) {
+        summaries = rawList.map((p) => ({
+          projectId: String(p.id || p.projectId || ''),
+          name: String(p.name || p.id || 'Project'),
+          slug: String(p.slug || p.name || p.id || 'project'),
+          primaryPath: String(p.primary_path || p.primaryPath || p.path || ''),
+          additionalFolders: [],
+          isActive: false,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        }));
       }
     }
 
-    state.projects = mergedProjects;
+    state.projects = summaries.map((s) => ({
+      id: s.projectId,
+      name: s.name,
+      path: s.primaryPath,
+      sessions: [],
+    }));
+
     syncProjectSessions();
     render();
   } catch (e) {
+    // Failure Is Not Empty: 网络或网关故障时绝不可将 state.projects 抹杀为空数组伪装成没有项目
     console.warn('[Flux] fetchProjects failed:', e);
-    state.projects = [];
+    // 保留上一次已拉取到的项目列表或提示错误，严禁静默覆盖为权威空
     render();
   }
 }
 
-/** 会话与项目归属动态映射：按 projectId 或工作目录前缀聚合 */
+/** 会话与项目归属动态映射：委派 core 纯函数进行多维度路径与标识映射 */
 function syncProjectSessions(): void {
   for (const proj of state.projects) {
-    proj.sessions = state.sessions.filter((s: NormalizedSession) => {
-      if (s.projectId && s.projectId === proj.id) return true;
-      if (s.projectName && s.projectName === proj.name) return true;
-      if (proj.path && s.cwd && s.cwd.startsWith(proj.path)) return true;
-      return false;
-    });
+    proj.sessions = state.sessions.filter((s: NormalizedSession) =>
+      doesSessionBelongToProject(s, proj)
+    );
   }
 }
 
-interface UiMetaRoomMember {
-  name?: string;
-  profile?: string;
-}
-
-interface UiMetaRoomRecord {
-  name?: string;
-  roomId?: string;
-  members?: Array<string | UiMetaRoomMember>;
-  log?: Array<{ from?: { name?: string; kind?: string }; text?: string; at?: number; thread?: string }>;
-  createdAt?: number;
-  updatedAt?: number;
-}
-
-/** 内存缓存 ui_meta 群聊日志: roomId -> log[] */
-const uiMetaGroupLogsCache = new Map<string, Array<{ from?: { name?: string; kind?: string }; text?: string; at?: number; thread?: string }>>();
-
-/** 网关托管房间 ID 集合：只有这些房间支持 groups.send / groups.log */
+/** 网关托管房间 ID 集合：支持 groups.send / groups.log */
 const hostedRoomIds = new Set<string>();
 
-/** 从 profile.uiMeta 中提取官方桌面端持久化的旧群聊房间（含完整本地发言日志） */
-function collectUiMetaRooms(profiles: AgentProfile[]): LeftRailGroupRoom[] {
-  const rooms: LeftRailGroupRoom[] = [];
-  for (const p of profiles) {
-    const meta = p.uiMeta?.['hermes-bots-groups'];
-    const rawRooms = meta?.rooms;
-    if (!rawRooms || typeof rawRooms !== 'object') continue;
-    for (const [key, r] of Object.entries(rawRooms)) {
-      if (!r || typeof r !== 'object') continue;
-      // 官方 ui_meta 的键是 `id:<roomId>`，真实 roomId 在 r.roomId 上
-      const roomId = String(r.roomId || key.replace(/^id:/, ''));
-      const members = Array.isArray(r.members)
-        ? r.members.map((m) => (typeof m === 'string' ? m : m.name || m.profile || 'member'))
-        : [];
-      if (Array.isArray(r.log) && r.log.length > 0) {
-        uiMetaGroupLogsCache.set(roomId, r.log);
-        uiMetaGroupLogsCache.set(key, r.log);
-      }
-      rooms.push({
-        roomId,
-        name: r.name || t('rail.groups'),
-        members,
-        createdAt: r.createdAt || Date.now(),
-        updatedAt: r.updatedAt || Date.now(),
-      });
-    }
-  }
-  return rooms;
-}
-
-/** 真实拉取网关多 Agent 群聊房间列表 (groups.list 托管房间 + profile.uiMeta 历史房间并集) */
+/** 真实拉取网关多 Agent 群聊房间列表 (以官方 groups.* 服务端托管为主) */
 async function fetchGroupRooms(): Promise<void> {
   const client = gatewayClient;
   if (!client) return;
   try {
-    // profiles 未就绪时必须先补齐，否则 uiMeta 历史房间会被整轮覆盖丢掉
     if (state.profiles.length === 0) {
       try {
         state.profiles = await client.listProfiles();
@@ -973,12 +1164,18 @@ async function fetchGroupRooms(): Promise<void> {
 
     const mergedRoomsMap = new Map<string, LeftRailGroupRoom>();
 
-    // 1. 网关托管房间（支持 groups.send / groups.log）
+    // 1. 网关正统托管房间（支持 groups.send / groups.log / 真实多智能体协同调度）
     hostedRoomIds.clear();
     try {
       const rpcRooms = await groupRoomStore.listRooms(client);
       for (const r of rpcRooms) {
         hostedRoomIds.add(r.roomId);
+        const existing = state.groupRooms.find((old) => old.roomId === r.roomId);
+        if (existing && r.updatedAt && existing.updatedAt && r.updatedAt > existing.updatedAt) {
+          if (state.activeFocus.type !== 'group' || state.activeFocus.roomId !== r.roomId) {
+            unreadGroupRoomIds.add(r.roomId);
+          }
+        }
         mergedRoomsMap.set(r.roomId, {
           roomId: r.roomId,
           name: r.name,
@@ -989,11 +1186,6 @@ async function fetchGroupRooms(): Promise<void> {
       }
     } catch (e) {
       console.warn('[Flux] groups.list failed:', e);
-    }
-
-    // 2. profile.uiMeta 中官方桌面端持久化的历史房间（只读，发言日志在本地 ui_meta 内）
-    for (const r of collectUiMetaRooms(state.profiles)) {
-      if (!mergedRoomsMap.has(r.roomId)) mergedRoomsMap.set(r.roomId, r);
     }
 
     state.groupRooms = Array.from(mergedRoomsMap.values());
@@ -1009,6 +1201,7 @@ async function fetchGroupRooms(): Promise<void> {
 async function openGroupRoom(roomId: string): Promise<void> {
   if (!roomId || !gatewayClient) return;
   state.activeFocus = { type: 'group', roomId };
+  applyEnteredRead(unreadGroupRoomIds, roomId);
   const targetRoom = state.groupRooms.find((r) => r.roomId === roomId);
 
   state.activeSessionId = roomId;
@@ -1018,56 +1211,53 @@ async function openGroupRoom(roomId: string): Promise<void> {
   activeGroupThreadId = null;
   activeGroupThreadAt = 0;
 
-  // 1. ui_meta 历史房间：网关未托管（groups.log 返回 4112），发言流只能取自本地 ui_meta 日志
-  const cachedLog = uiMetaGroupLogsCache.get(roomId);
-  if (cachedLog && cachedLog.length > 0) {
-    state.messages = cachedLog.map((entry, idx) => ({
-      id: `g_msg_${idx}`,
-      role: entry.from?.kind === 'user' ? 'user' : 'assistant',
-      content: entry.text || '',
-      sender: entry.from?.name || (entry.from?.kind === 'user' ? 'user' : 'Agent'),
-      timestamp: formatTimestamp(entry.at || Date.now()),
-    }));
-  } else {
-    // 2. 托管房间：从 groups.log 拉取官方事件流
-    try {
-      const logs = await groupRoomStore.fetchLogs(roomId, gatewayClient);
-      if (logs && logs.length > 0) {
-        state.messages = logs.map((entry, idx) => ({
+  // 从 groups.log 拉取官方事件流
+  try {
+    const logs = await groupRoomStore.fetchLogs(roomId, gatewayClient);
+    if (logs && logs.length > 0) {
+      state.messages = logs.map((entry, idx) => {
+        const senderName = entry.senderProfile || 'Agent';
+        return {
           id: entry.messageId || `g_msg_${idx}`,
           role: entry.actorKind === 'user' || entry.senderProfile === 'user' ? 'user' : 'assistant',
           content: entry.text,
-          sender: entry.senderProfile || 'Agent',
+          sender: senderName,
+          senderAvatar: resolveAgentAvatar(senderName),
           timestamp: formatTimestamp(entry.timestamp || Date.now()),
-        }));
-      } else {
-        const roomName = targetRoom?.name || t('group.defaultRoomName');
-        const membersText = targetRoom?.members?.join('、') || '';
-        state.messages = [
-          {
-            id: 'group_seed_notice',
-            role: 'system',
-            content: t('group.welcomeInit', { name: roomName, members: membersText }),
-            timestamp: formatTimestamp(Date.now()),
-          },
-        ];
-      }
-    } catch {
+        };
+      });
+    } else {
       const roomName = targetRoom?.name || t('group.defaultRoomName');
       const membersText = targetRoom?.members?.join('、') || '';
       state.messages = [
         {
           id: 'group_seed_notice',
           role: 'system',
-          content: t('group.welcomeReady', { name: roomName, members: membersText }),
+          content: t('group.welcomeInit', { name: roomName, members: membersText }),
           timestamp: formatTimestamp(Date.now()),
         },
       ];
     }
+  } catch {
+    const roomName = targetRoom?.name || t('group.defaultRoomName');
+    const membersText = targetRoom?.members?.join('、') || '';
+    state.messages = [
+      {
+        id: 'group_seed_notice',
+        role: 'system',
+        content: t('group.welcomeReady', { name: roomName, members: membersText }),
+        timestamp: formatTimestamp(Date.now()),
+      },
+    ];
   }
 
   pendingScrollToBottom = true;
   render();
+
+  // 若为托管房间，进入时自动启动持续同步
+  if (hostedRoomIds.has(roomId)) {
+    void pollGroupRoomLog(roomId);
+  }
 }
 
 /** Bot 终身主工位内存秒开缓存 (消除串行 RPC 延迟，实现 0ms 瞬间切换) */
@@ -1082,6 +1272,9 @@ async function openBotChat(botProfile: string): Promise<void> {
   state.activeFocus = { type: 'bot', botName: botProfile };
   localStorage.setItem('hermes_flux_profile', botProfile);
   localStorage.setItem('hermes_aura_profile', botProfile);
+
+  // 清除属于该智能体的未读标记（仅针对该 Bot 本身，会话状态严格独立）
+  applyEnteredRead(unreadBotNames, botProfile);
 
   // 1. 若内存缓存已持有该 Bot 的 Forever Chat ID，0ms 瞬间秒开切入！
   const cachedSessionId = botForeverChatCache.get(botProfile);
@@ -1148,31 +1341,39 @@ async function fetchProfiles(): Promise<void> {
   if (!client) return;
   try {
     const list = await client.listProfiles();
-    state.profiles = list;
-    render();
-
-    // 1. 从 profiles 的 uiMeta['hermes-bots-groups'] 中即时同步官方历史群聊（含完整发言日志）
-    for (const r of collectUiMetaRooms(list)) {
-      if (!state.groupRooms.some((existing) => existing.roomId === r.roomId)) {
-        state.groupRooms.push(r);
+    // 1. 命中持久缓存，0ms 秒开回填头像资产
+    for (const p of list) {
+      if (!p.avatar) {
+        const cached = profileAvatarCache.get(p.name.toLowerCase()) || (p.displayName ? profileAvatarCache.get(p.displayName.toLowerCase()) : undefined);
+        if (cached) p.avatar = cached;
       }
     }
-    if (state.groupRooms.length > 0) render();
+    state.profiles = list;
+    syncProfileLastMessages();
+    render();
 
-    // 2. 并发向网关拉取 Bot 真实高清头像资产 (profiles.get_asset)
-    void Promise.allSettled(
+    // 2. 并发向网关拉取 Bot 真实高清头像资产 (profiles.get_asset)，严格 await 杜绝会话时序冲刷
+    await Promise.allSettled(
       list.map(async (p) => {
+        if (p.avatar) {
+          profileAvatarCache.set(p.name.toLowerCase(), p.avatar);
+          if (p.displayName) profileAvatarCache.set(p.displayName.toLowerCase(), p.avatar);
+          return;
+        }
         try {
           const assetBase64 = await profileService.getAsset(p.name, 'avatar', client);
           if (assetBase64) {
-            p.avatar = assetBase64.startsWith('data:')
+            const finalUrl = assetBase64.startsWith('data:')
               ? assetBase64
               : `data:image/png;base64,${assetBase64}`;
+            p.avatar = finalUrl;
+            profileAvatarCache.set(p.name.toLowerCase(), finalUrl);
+            if (p.displayName) profileAvatarCache.set(p.displayName.toLowerCase(), finalUrl);
 
             // 同步将真实头像回填到会话列表中对应 Bot 的所有会话项，彻底消除占位图腾
             for (const s of state.sessions) {
-              if (s.botName === p.name) {
-                s.botAvatar = p.avatar;
+              if (s.botName === p.name || (s.botDisplayName && s.botDisplayName === p.displayName)) {
+                s.botAvatar = finalUrl;
               }
             }
             render();
@@ -1182,7 +1383,7 @@ async function fetchProfiles(): Promise<void> {
           console.warn(`[Flux] profiles.get_asset failed for ${p.name}:`, e);
         }
 
-        // 3. 异步尝试探查该 Bot 的终生主工位最新一条消息摘要与时间 (order: 'latest' 确保拉取真正最新，而不是第1条老消息)
+        // 3. 异步尝试探查该 Bot 的终生主工位最新一条消息摘要与时间
         try {
           const forever = await profileService.getOrCreateForeverChat(p.name, client);
           if (forever && forever.sessionId) {
@@ -1297,12 +1498,22 @@ function parseRawMessages(list: any[]): MessageViewModel[] {
 
       const argsStr = typeof rawArgs === 'string' ? rawArgs : JSON.stringify(rawArgs);
 
+      const formatRawOutput = (val: unknown): string | undefined => {
+        if (val === null || val === undefined) return undefined;
+        if (typeof val === 'string') return val;
+        try {
+          return JSON.stringify(val, null, 2);
+        } catch {
+          return String(val);
+        }
+      };
+
       return {
         id: tc.id || tc.tool_call_id || `tc-${idx}-${tIdx}`,
         name: toolName,
         status: (tc.status || 'completed') as any,
         args: cleanArg ? cleanArg : argsStr,
-        output: tc.output ? String(tc.output) : tc.result ? String(tc.result) : tc.stdout ? String(tc.stdout) : undefined,
+        output: formatRawOutput(tc.output ?? tc.result ?? tc.stdout),
       };
     });
 
@@ -1528,9 +1739,25 @@ async function loadMessages(sessionId: string): Promise<void> {
 
     if (outcome.ok && outcome.messages.length > 0) {
       const parsed = parseRawMessages(outcome.messages);
-      sessionMessagesCache.set(sessionId, parsed);
+      const existing = sessionMessagesCache.get(sessionId);
+      // 【防范丢数据核心不变量 (Failure Is Not Empty)】
+      // 若本地缓存中已持有比网关返回更多的消息（说明本地有刚刚收发但网关尚未刷盘的最新轮次），
+      // 绝不能直接用网关较短的截断历史覆盖本地！必须将本地未落盘的最新尾部消息保留下来！
+      let merged = parsed;
+      if (existing && existing.length > 0) {
+        if (existing.length > parsed.length) {
+          const lastParsed = parsed[parsed.length - 1];
+          const matchIdx = lastParsed ? existing.findIndex((m) => m.id === lastParsed.id) : -1;
+          if (matchIdx >= 0 && matchIdx < existing.length - 1) {
+            merged = [...parsed, ...existing.slice(matchIdx + 1)];
+          } else {
+            merged = [...existing];
+          }
+        }
+      }
+      sessionMessagesCache.set(sessionId, merged);
       sessionServerOffset.set(sessionId, outcome.pagination?.returned || outcome.messages.length);
-      state.messages = parsed;
+      state.messages = merged;
       state.hasOlderMessages = Boolean(outcome.pagination && outcome.pagination.returned >= INITIAL_WINDOW_PAGE_SIZE);
       state.dockNotice = '';
       pendingScrollToBottom = true;
@@ -1575,21 +1802,62 @@ async function loadMessages(sessionId: string): Promise<void> {
         state.activeLiveSessionId = sessionId;
       }
 
+      // 同步提取 session.resume 返回的 cwd / project_id / project_name 元数据，丰富当前会话对象
+      const rawInfo = (res && typeof res === 'object' && res.info && typeof res.info === 'object' ? res.info : res) as Record<string, unknown>;
+      const resumedCwd = typeof rawInfo.cwd === 'string' ? rawInfo.cwd : typeof rawInfo.path === 'string' ? rawInfo.path : undefined;
+      const resumedProjId = typeof rawInfo.project_id === 'string' ? rawInfo.project_id : typeof rawInfo.projectId === 'string' ? rawInfo.projectId : undefined;
+      const resumedProjName = typeof rawInfo.project_name === 'string' ? rawInfo.project_name : typeof rawInfo.projectName === 'string' ? rawInfo.projectName : undefined;
+      
+      const currentActive = state.sessions.find((s) => s.id === sessionId);
+      if (currentActive) {
+        let changed = false;
+        if (resumedCwd && !currentActive.cwd) {
+          currentActive.cwd = resumedCwd;
+          changed = true;
+        }
+        if (resumedProjId && !currentActive.projectId) {
+          currentActive.projectId = resumedProjId;
+          changed = true;
+        }
+        if (resumedProjName && !currentActive.projectName) {
+          currentActive.projectName = resumedProjName;
+          changed = true;
+        }
+        if (changed) {
+          syncProjectSessions();
+          render();
+        }
+      }
+
       // If REST load did not succeed, fallback to mounting messages from WS result
       if (!fastLoaded) {
         const list = Array.isArray(res?.messages) ? res.messages : Array.isArray(res?.history) ? res.history : [];
-        const parsed = parseRawMessages(list);
-        sessionMessagesCache.set(sessionId, parsed);
-        if (parsed.length > INITIAL_WINDOW_PAGE_SIZE) {
-          state.messages = parsed.slice(-INITIAL_WINDOW_PAGE_SIZE);
-          state.hasOlderMessages = true;
+        if (list.length > 0) {
+          const parsed = parseRawMessages(list);
+          const existing = sessionMessagesCache.get(sessionId);
+          let merged = parsed;
+          if (existing && existing.length > parsed.length) {
+            merged = [...existing];
+          }
+          sessionMessagesCache.set(sessionId, merged);
+          if (merged.length > INITIAL_WINDOW_PAGE_SIZE) {
+            state.messages = merged.slice(-INITIAL_WINDOW_PAGE_SIZE);
+            state.hasOlderMessages = true;
+          } else {
+            state.messages = merged;
+            state.hasOlderMessages = false;
+          }
+          pendingScrollToBottom = true;
+          render();
+          scrollStreamToBottom('ws fallback loaded');
         } else {
-          state.messages = parsed;
-          state.hasOlderMessages = false;
+          // Failure Is Not Empty: 当网关返回空消息时，绝对禁止把本地内存中已有的聊天记录抹杀为空白！
+          const existing = sessionMessagesCache.get(sessionId);
+          if (existing && existing.length > 0) {
+            state.messages = [...existing];
+            render();
+          }
         }
-        pendingScrollToBottom = true;
-        render();
-        scrollStreamToBottom('ws fallback loaded');
       }
 
       logSession.debug('background session.resume activated', {
@@ -1624,7 +1892,14 @@ async function ensureLiveSessionId(): Promise<string> {
   if (!gatewayClient || !state.activeSessionId) return '';
 
   try {
-    const res = await gatewayClient.call<any>('session.resume', { session_id: state.activeSessionId });
+    const sess = state.sessions.find((s) => s.id === state.activeSessionId);
+    const prof = sess?.botName || state.profileName || 'default';
+    let res: Record<string, unknown> | null = null;
+    try {
+      res = await gatewayClient.call<Record<string, unknown>>('session.resume', { session_id: state.activeSessionId, profile: prof });
+    } catch {
+      res = await gatewayClient.call<Record<string, unknown>>('session.resume', { session_id: state.activeSessionId });
+    }
     const handles = readSessionHandles(res, state.activeSessionId);
     if (handles) {
       state.activeLiveSessionId = handles.liveId;
@@ -1792,6 +2067,24 @@ async function deleteSession(id: string): Promise<void> {
 
     state.sessions = state.sessions.filter((s) => s.id !== id);
     state.pendingSessionIds = state.pendingSessionIds.filter((pid) => pid !== id);
+    sessionMessagesCache.delete(id);
+    sessionServerOffset.delete(id);
+    sessionDraftMap.delete(id);
+    unreadSessionIds.delete(id);
+    activeRunningSessionIds.delete(id);
+
+    // 如果被删除的会话正在流式运行，安全重置流式看门狗与标志，彻底杜绝输入框被全局 isStreaming 锁死
+    if (activeStreamingStoredSessionId === id) {
+      tokenCoalescer.clear();
+      disarmTurnWatchdog();
+      activeStreamingMessageId = null;
+      activeStreamingStoredSessionId = null;
+      activeStreamingLiveId = null;
+      activeStreamingBotName = null;
+      state.isStreaming = false;
+      state.agentActivityStatus = undefined;
+      updateActivityPill(undefined);
+    }
 
     if (state.activeSessionId === id) {
       state.activeSessionId = state.sessions[0]?.id || '';
@@ -1799,23 +2092,55 @@ async function deleteSession(id: string): Promise<void> {
       if (state.activeSessionId) {
         await selectSession(state.activeSessionId);
       } else {
+        // 当删除最后一条会话导致会话池为空时，干净回退至默认智能体工位，重置焦点与空消息流
+        state.activeFocus = { type: 'bot', botName: state.profileName || 'default' };
         state.messages = [];
+        state.isStreaming = false;
         render();
       }
     } else {
       render();
     }
+
+    // 焦点重连保护：强力恢复输入舱光标与焦点，确保键盘可立即键入
+    restoreComposerFocus();
   } catch (e: unknown) {
     console.error('[Hermes Gateway] Delete session failed:', e);
     const msg = describeRpcError(e);
     if (msg.includes('4007') || msg.includes('not found')) {
       state.sessions = state.sessions.filter((s) => s.id !== id);
       state.pendingSessionIds = state.pendingSessionIds.filter((pid) => pid !== id);
+      sessionMessagesCache.delete(id);
+      sessionServerOffset.delete(id);
+      sessionDraftMap.delete(id);
+      unreadSessionIds.delete(id);
+      activeRunningSessionIds.delete(id);
+      if (activeStreamingStoredSessionId === id) {
+        tokenCoalescer.clear();
+        disarmTurnWatchdog();
+        activeStreamingMessageId = null;
+        activeStreamingStoredSessionId = null;
+        activeStreamingLiveId = null;
+        activeStreamingBotName = null;
+        state.isStreaming = false;
+        state.agentActivityStatus = undefined;
+        updateActivityPill(undefined);
+      }
       if (state.activeSessionId === id) {
         state.activeSessionId = state.sessions[0]?.id || '';
         state.activeLiveSessionId = '';
+        if (state.activeSessionId) {
+          await selectSession(state.activeSessionId);
+        } else {
+          state.activeFocus = { type: 'bot', botName: state.profileName || 'default' };
+          state.messages = [];
+          state.isStreaming = false;
+          render();
+        }
+      } else {
+        render();
       }
-      render();
+      restoreComposerFocus();
       return;
     }
     state.dockNotice = `删除会话失败: ${msg}`;
@@ -1841,14 +2166,56 @@ async function renameSession(id: string, currentTitle: string): Promise<void> {
   }
 }
 
+/** 独立的轻量全局浮层 Toast，绝不污染输入舱 */
+let toastTimer: ReturnType<typeof setTimeout> | null = null;
+function showToast(message: string, durationMs = 2200): void {
+  let toastEl = document.getElementById('flux-floating-toast');
+  if (!toastEl) {
+    toastEl = document.createElement('div');
+    toastEl.id = 'flux-floating-toast';
+    toastEl.style.cssText = `
+      position: fixed;
+      bottom: 96px;
+      left: 50%;
+      transform: translateX(-50%) translateY(10px);
+      background: var(--bg-card);
+      color: var(--text-main);
+      border: 1px solid var(--border-strong);
+      box-shadow: var(--shadow-window);
+      padding: 6px 14px;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 500;
+      z-index: 3000;
+      pointer-events: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      backdrop-filter: blur(16px);
+      transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      opacity: 0;
+    `;
+    document.body.appendChild(toastEl);
+  }
+  toastEl.innerHTML = `<span style="color: var(--accent); font-weight: bold;">✓</span> <span>${escapeHtml(message)}</span>`;
+  toastEl.style.opacity = '1';
+  toastEl.style.transform = 'translateX(-50%) translateY(0)';
+
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    if (toastEl) {
+      toastEl.style.opacity = '0';
+      toastEl.style.transform = 'translateX(-50%) translateY(10px)';
+    }
+  }, durationMs);
+}
+
 async function copySessionId(id: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(id);
-    state.dockNotice = `已复制会话 ID: ${id}`;
-    render();
+    showToast(t('toast.copied'));
   } catch {
-    state.dockNotice = `会话 ID: ${id}`;
-    render();
+    showToast(id);
   }
 }
 
@@ -1856,7 +2223,7 @@ async function pinSession(id: string): Promise<void> {
   const target = state.sessions.find((s) => s.id === id);
   if (!target) return;
   state.sessions = [target, ...state.sessions.filter((s) => s.id !== id)];
-  state.dockNotice = `已将会话「${target.title}」置顶`;
+  showToast(t('toast.pinned', { title: target.title }));
   render();
 }
 
@@ -1871,11 +2238,9 @@ async function exportMarkdown(id: string): Promise<void> {
 
   try {
     await navigator.clipboard.writeText(mdContent);
-    state.dockNotice = `已将「${activeTitle}」全量对话导出并复制至剪贴板`;
-    render();
+    showToast(t('toast.exported', { title: activeTitle }));
   } catch {
-    state.dockNotice = '导出失败，请检查剪贴板权限';
-    render();
+    showToast(t('toast.exportFailed'));
   }
 }
 
@@ -1905,6 +2270,7 @@ async function selectSession(id: string, options?: { preserveFocus?: boolean }):
 
   state.activeSessionId = id;
   state.activeLiveSessionId = ''; // must be re-resolved through session.resume
+  applyEnteredRead(unreadSessionIds, id);
   state.modelMenuOpen = false;
 
   // 严格更新互斥单焦点：仅当未要求保持焦点时，更新为普通会话焦点
@@ -1941,27 +2307,14 @@ async function applyModelToLiveSession(model: string, provider?: string): Promis
   if (!liveId) return;
 
   try {
-    const payload: { session_id: string; key: string; value: string; provider?: string } = {
+    // 【网关契约约束】config.set 只接受 [profile, key, value, session_id, scope, confirm_expensive_model]
+    // 严禁附加顶层 provider 字段，否则会被客户端运行期守卫抛出 CONTRACT_VIOLATION，或被网关报 4000 Extra inputs
+    await gatewayClient.call('config.set', {
       session_id: liveId,
       key: 'model',
       value: model,
-    };
-    if (provider) {
-      payload.provider = provider;
-    }
-    await gatewayClient.call('config.set', payload);
+    });
   } catch (e) {
-    if (provider && isExtraInputsError(e)) {
-      // Gateway rejected provider field, retry with bare model
-      try {
-        await gatewayClient.call('config.set', { session_id: liveId, key: 'model', value: model });
-        return;
-      } catch (retryErr) {
-        state.dockNotice = `切换模型失败: ${describeRpcError(retryErr)}`;
-        render();
-        return;
-      }
-    }
     state.dockNotice = `切换模型失败: ${describeRpcError(e)}`;
     render();
   }
@@ -1990,6 +2343,16 @@ async function switchModel(model: string, provider?: string): Promise<void> {
     return;
   }
 
+  // 【设计意图 (Why)】
+  // 群聊房间由网关 Group Chat Worker 调度各 Agent 自身绑定的模型，群聊本身不是 session 实体。
+  // 【防范的历史坑 (Pitfall)】
+  // 历史代码在群聊视口中调用 ensureLiveSessionId() -> session.resume，网关坚决抛出 4001 session not found。
+  // 【规则 (Rules)】
+  // 当处于群聊房间（activeFocus.type === 'group'）时，切换模型仅更新客户端选择器状态与近期偏好，禁止向不存在的 session 发送 config.set。
+  if (state.activeFocus.type === 'group') {
+    return;
+  }
+
   const liveId = await ensureLiveSessionId();
   if (!liveId) {
     state.selectedModel = previous;
@@ -1999,27 +2362,13 @@ async function switchModel(model: string, provider?: string): Promise<void> {
   }
 
   try {
-    const payload: { session_id: string; key: string; value: string; provider?: string } = {
+    // 【网关契约约束】config.set 纯净传参，严禁注入未声明的 provider 字段
+    await gatewayClient.call('config.set', {
       session_id: liveId,
       key: 'model',
       value: model,
-    };
-    if (provider) {
-      payload.provider = provider;
-    }
-    await gatewayClient.call('config.set', payload);
+    });
   } catch (e) {
-    if (provider && isExtraInputsError(e)) {
-      try {
-        await gatewayClient.call('config.set', { session_id: liveId, key: 'model', value: model });
-        return;
-      } catch (retryErr) {
-        state.selectedModel = previous;
-        state.dockNotice = `切换模型失败: ${describeRpcError(retryErr)}`;
-        render();
-        return;
-      }
-    }
     state.selectedModel = previous;
     state.dockNotice = `切换模型失败: ${describeRpcError(e)}`;
     render();
@@ -2031,6 +2380,7 @@ async function switchReasoning(effort: AppState['reasoningLevel']): Promise<void
   render();
 
   if (!gatewayClient || !state.activeSessionId) return;
+  if (state.activeFocus.type === 'group') return;
 
   const liveId = await ensureLiveSessionId();
   if (!liveId) {
@@ -2100,8 +2450,19 @@ function armTurnWatchdog(): void {
     turnWatchdogTimer = null;
     if (!state.isStreaming) return;
     tokenCoalescer.flush();
+    // 看门狗超时同样属于"回合异常终止"：必须收尾三个域的运行态，
+    // 否则会话/Bot/群聊会永久停在"进行中"且永不进入未读（历史坑）。
+    settleTurnTermination({
+      runningSessionIds: activeRunningSessionIds,
+      runningBotNames: activeRunningBotNames,
+      sessionId: activeStreamingStoredSessionId,
+      botName: activeStreamingBotName,
+    });
     state.isStreaming = false;
     activeStreamingMessageId = null;
+    activeStreamingStoredSessionId = null;
+    activeStreamingLiveId = null;
+    activeStreamingBotName = null;
     state.dockNotice = '上游长时间没有回传本轮结果，已解除发送锁定；如需继续请重新发送';
     render();
   }, TURN_WATCHDOG_MS);
@@ -2167,12 +2528,21 @@ async function interruptTurn(): Promise<void> {
     }
   }
 
+  // 中断同样属于"回合终止"：必须收尾运行态，否则该会话/Bot 永久停在"进行中"
+  settleTurnTermination({
+    runningSessionIds: activeRunningSessionIds,
+    runningBotNames: activeRunningBotNames,
+    sessionId: activeStreamingStoredSessionId,
+    botName: activeStreamingBotName,
+  });
+
   state.isStreaming = false;
   state.agentActivityStatus = undefined;
   updateActivityPill(undefined);
   activeStreamingMessageId = null;
   activeStreamingStoredSessionId = null;
   activeStreamingLiveId = null;
+  activeStreamingBotName = null;
 
   setTimedDockNotice('本轮生成已中断');
   render();
@@ -2199,13 +2569,6 @@ async function sendGroupMessage(roomId: string, text: string): Promise<void> {
   const client = gatewayClient;
   if (!client) return;
 
-  // ui_meta 历史房间网关未托管，groups.send 会返回 4111/4112，这里显式提示而不是抛 4001
-  if (!hostedRoomIds.has(roomId)) {
-    setTimedDockNotice(t('group.legacyReadOnly'));
-    render();
-    return;
-  }
-
   const now = Date.now();
   const threadId = activeGroupThreadId && now - activeGroupThreadAt < GROUP_THREAD_GAP_MS
     ? activeGroupThreadId
@@ -2219,6 +2582,16 @@ async function sendGroupMessage(roomId: string, text: string): Promise<void> {
     timestamp: formatTimestamp(now),
   });
   pendingScrollToBottom = true;
+
+  // 即时更新该群聊最新消息副标题与时间戳，并排在列表最前
+  const targetRoom = state.groupRooms.find((r) => r.roomId === roomId);
+  if (targetRoom) {
+    targetRoom.lastMessage = text;
+    targetRoom.updatedAt = now;
+    state.groupRooms = [targetRoom, ...state.groupRooms.filter((r) => r.roomId !== roomId)];
+  }
+  applyTurnStarted(activeRunningGroupRoomIds, unreadGroupRoomIds, roomId);
+
   render();
   scrollStreamToBottom('group message sent');
 
@@ -2231,6 +2604,7 @@ async function sendGroupMessage(roomId: string, text: string): Promise<void> {
     void refreshGroupRoomLog(roomId);
     void pollGroupRoomLog(roomId);
   } catch (err) {
+    applyTurnFailed(activeRunningGroupRoomIds, roomId);
     console.error('[Flux] groups.send failed:', err);
     setTimedDockNotice(t('group.sendFailed', { error: describeRpcError(err) }));
     render();
@@ -2240,20 +2614,32 @@ async function sendGroupMessage(roomId: string, text: string): Promise<void> {
 /** 回读群聊房间日志并增量刷新中间对话舱 */
 async function refreshGroupRoomLog(roomId: string): Promise<number> {
   const client = gatewayClient;
-  if (!client || state.activeFocus.type !== 'group' || state.activeFocus.roomId !== roomId) return 0;
+  if (!client) return 0;
   try {
     const logs = await groupRoomStore.fetchLogs(roomId, client);
     if (!logs || logs.length === 0) return 0;
-    if (state.activeFocus.type !== 'group' || state.activeFocus.roomId !== roomId) return 0;
-    state.messages = logs.map((entry, idx) => ({
-      id: entry.messageId || `g_msg_${idx}`,
-      role: entry.actorKind === 'user' || entry.senderProfile === 'user' ? 'user' : 'assistant',
-      content: entry.text,
-      sender: entry.senderProfile || 'Agent',
-      timestamp: formatTimestamp(entry.timestamp || Date.now()),
-    }));
-    pendingScrollToBottom = true;
-    render();
+    const lastEntry = logs[logs.length - 1];
+    const targetRoom = state.groupRooms.find((r) => r.roomId === roomId);
+    if (targetRoom && lastEntry) {
+      targetRoom.lastMessage = lastEntry.text;
+      targetRoom.updatedAt = lastEntry.timestamp || Date.now();
+      state.groupRooms = [targetRoom, ...state.groupRooms.filter((r) => r.roomId !== roomId)];
+    }
+    if (state.activeFocus.type === 'group' && state.activeFocus.roomId === roomId) {
+      state.messages = logs.map((entry, idx) => {
+        const senderName = entry.senderProfile || 'Agent';
+        return {
+          id: entry.messageId || `g_msg_${idx}`,
+          role: entry.actorKind === 'user' || entry.senderProfile === 'user' ? 'user' : 'assistant',
+          content: entry.text,
+          sender: senderName,
+          senderAvatar: resolveAgentAvatar(senderName),
+          timestamp: formatTimestamp(entry.timestamp || Date.now()),
+        };
+      });
+      pendingScrollToBottom = true;
+      render();
+    }
     return logs.length;
   } catch (e) {
     console.warn('[Flux] refreshGroupRoomLog failed:', e);
@@ -2274,23 +2660,89 @@ async function refreshGroupRoomLog(roomId: string): Promise<number> {
  *
  * 【规则 (Rules)】
  * - 轮次与间隔必须硬编码上限，禁止无界等待；
- * - 房间切换后立即停止，不得把 A 房间的日志写进 B 房间。
+ * - 房间切换后后台静默轮询直至结果落盘，自动标记为未读小绿点。
  */
-async function pollGroupRoomLog(roomId: string, rounds = 8, intervalMs = 2500): Promise<void> {
-  let lastCount = -1;
-  let stagnant = 0;
-  for (let i = 0; i < rounds; i++) {
-    await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
-    if (state.activeFocus.type !== 'group' || state.activeFocus.roomId !== roomId) return;
-    const count = await refreshGroupRoomLog(roomId);
-    if (count <= lastCount) {
-      stagnant++;
-      if (stagnant >= 2) return;
-    } else {
-      stagnant = 0;
-      lastCount = count;
-    }
+let activeGroupPollerTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearGroupPoller(): void {
+  if (activeGroupPollerTimer) {
+    clearTimeout(activeGroupPollerTimer);
+    activeGroupPollerTimer = null;
   }
+}
+
+/**
+ * 持续轮询群聊房间日志，直到房间不再处于激活态或连续空转超时
+ */
+async function pollGroupRoomLog(roomId: string, maxRounds = 30, intervalMs = 1200): Promise<void> {
+  clearGroupPoller();
+  let round = 0;
+  let stagnantCount = 0;
+  let lastCount = -1;
+
+  const step = async () => {
+    if (state.activeFocus.type !== 'group' || state.activeFocus.roomId !== roomId) {
+      // 用户已切到其他界面，群聊在后台继续静默等待 Agent 回复落盘
+      round++;
+      const count = await refreshGroupRoomLog(roomId);
+      if (count > lastCount) {
+        // 后台完成：退出 running 并置未读小绿点（用户不在该房间）
+        applyTurnCompleted(activeRunningGroupRoomIds, unreadGroupRoomIds, roomId, false);
+        render();
+        clearGroupPoller();
+        return;
+      }
+      if (round >= maxRounds) {
+        applyTurnFailed(activeRunningGroupRoomIds, roomId);
+        render();
+        clearGroupPoller();
+        return;
+      }
+      activeGroupPollerTimer = setTimeout(() => {
+        void step();
+      }, intervalMs);
+      return;
+    }
+
+    round++;
+    const count = await refreshGroupRoomLog(roomId);
+    const lastMsg = state.messages.length > 0 ? state.messages[state.messages.length - 1] : null;
+    const hasAgentReplied = Boolean(lastMsg && lastMsg.role === 'assistant');
+
+    if (count > lastCount) {
+      lastCount = count;
+      stagnantCount = 0;
+      // 只要检测到已有 Agent 回复落盘，立即在首帧解除 running 状态！
+      if (hasAgentReplied) {
+        applyTurnCompleted(activeRunningGroupRoomIds, unreadGroupRoomIds, roomId, true);
+        render();
+      }
+    } else {
+      stagnantCount++;
+    }
+
+    // 若已经有回复且连续 2 轮无新消息，或者未回复但空转达到 6 轮，立即停止轮询，杜绝无界空转
+    if ((hasAgentReplied && stagnantCount >= 2) || (stagnantCount >= 5 && round >= 6) || round >= maxRounds) {
+      // 收尾：有回复走完成（当前聚焦即已读），无回复的超时视为失败而非未读
+      if (hasAgentReplied) {
+        applyTurnCompleted(activeRunningGroupRoomIds, unreadGroupRoomIds, roomId, true);
+      } else {
+        applyTurnFailed(activeRunningGroupRoomIds, roomId);
+      }
+      render();
+      clearGroupPoller();
+      return;
+    }
+
+    const nextInterval = stagnantCount > 2 ? 2000 : intervalMs;
+    activeGroupPollerTimer = setTimeout(() => {
+      void step();
+    }, nextInterval);
+  };
+
+  activeGroupPollerTimer = setTimeout(() => {
+    void step();
+  }, intervalMs);
 }
 
 async function sendMessage(text: string): Promise<void> {
@@ -2345,6 +2797,38 @@ async function sendMessage(text: string): Promise<void> {
   activeStreamingMessageId = assistantMsgId;
   activeStreamingStoredSessionId = state.activeSessionId;
   activeStreamingLiveId = liveId;
+  if (state.activeSessionId) {
+    // 回合开始：进入 running 并当场清除该会话的历史未读残留（禁止"运行中 + 未读绿点"并存）
+    applyTurnStarted(activeRunningSessionIds, unreadSessionIds, state.activeSessionId);
+    // 即时更新当前会话的最新消息副标题与时间戳，并排在会话列表最前
+    const activeSess = state.sessions.find((s) => s.id === state.activeSessionId);
+    if (activeSess) {
+      activeSess.preview = trimmed;
+      activeSess.timestamp = Date.now();
+      activeSess.time = formatTimestamp(Date.now());
+      state.sessions = [activeSess, ...state.sessions.filter((s) => s.id !== activeSess.id)];
+    }
+  }
+
+  // 状态严格独立：仅当用户处于 Bot 专属工位时，才标记该 Bot 处于运行态
+  const currentFocus = state.activeFocus;
+  activeStreamingBotName = currentFocus.type === 'bot' ? currentFocus.botName : null;
+  if (currentFocus.type === 'bot') {
+    applyTurnStarted(activeRunningBotNames, unreadBotNames, currentFocus.botName);
+    const focusBotName = currentFocus.botName;
+    const nowMs = Date.now();
+    botLatestActivityMap.set(focusBotName, {
+      lastMessage: trimmed.replace(/\s+/g, ' ').trim(),
+      timestamp: nowMs,
+    });
+    const currentBot = state.profiles.find((p) => p.name === focusBotName);
+    if (currentBot) {
+      currentBot.lastMessage = trimmed.replace(/\s+/g, ' ').trim();
+      currentBot.timestamp = nowMs;
+      currentBot.lastTime = formatSessionTime(nowMs);
+      state.profiles = [currentBot, ...state.profiles.filter((p) => p.name !== currentBot.name)];
+    }
+  }
 
   const assistantMsg: MessageViewModel = {
     id: assistantMsgId,
@@ -2357,17 +2841,6 @@ async function sendMessage(text: string): Promise<void> {
 
   // Sync session cache
   sessionMessagesCache.set(state.activeSessionId, [...state.messages]);
-
-  // 即时更新 Bot 工位的最新消息与时间
-  const currentFocus = state.activeFocus;
-  if (currentFocus.type === 'bot') {
-    const focusBotName = currentFocus.botName;
-    const currentBot = state.profiles.find((p) => p.name === focusBotName);
-    if (currentBot) {
-      currentBot.lastMessage = trimmed.replace(/\s+/g, ' ').trim();
-      currentBot.lastTime = t('time.minutesAgo', { count: '1' });
-    }
-  }
 
   state.isStreaming = true;
   state.agentActivityStatus = 'thinking';
@@ -2393,6 +2866,8 @@ async function sendMessage(text: string): Promise<void> {
       state.isStreaming = false;
       state.agentActivityStatus = undefined;
       updateActivityPill(undefined);
+      if (activeStreamingStoredSessionId) applyTurnFailed(activeRunningSessionIds, activeStreamingStoredSessionId);
+      if (activeStreamingBotName) { applyTurnFailed(activeRunningBotNames, activeStreamingBotName); activeStreamingBotName = null; }
       activeStreamingMessageId = null;
       activeStreamingStoredSessionId = null;
       activeStreamingLiveId = null;
@@ -2405,6 +2880,8 @@ async function sendMessage(text: string): Promise<void> {
     state.isStreaming = false;
     state.agentActivityStatus = undefined;
     updateActivityPill(undefined);
+    if (activeStreamingStoredSessionId) applyTurnFailed(activeRunningSessionIds, activeStreamingStoredSessionId);
+    if (activeStreamingBotName) { applyTurnFailed(activeRunningBotNames, activeStreamingBotName); activeStreamingBotName = null; }
     activeStreamingMessageId = null;
     activeStreamingStoredSessionId = null;
     activeStreamingLiveId = null;
@@ -2579,10 +3056,16 @@ function applyTurnActions(actions: TurnAction[]): void {
         const now = Date.now();
         const updateTc = (target?: MessageViewModel) => {
           if (target && target.toolCalls) {
-            const tc = target.toolCalls.find((t) => !action.toolCallId || t.id === action.toolCallId);
+            let tc = target.toolCalls.find((t) => action.toolCallId && t.id === action.toolCallId);
+            if (!tc) {
+              // 容错降级：若 ID 未严格命中，将最近一个正在运行的工具调用标记为完成
+              tc = [...target.toolCalls].reverse().find((t) => t.status === 'running');
+            }
             if (tc) {
               tc.status = 'completed';
-              if (action.output) tc.output = action.output;
+              if (action.output) {
+                tc.output = typeof action.output === 'object' ? JSON.stringify(action.output, null, 2) : String(action.output);
+              }
               if (tc.startTime) tc.durationMs = Math.max(100, now - tc.startTime);
             }
           }
@@ -2619,6 +3102,51 @@ function applyTurnActions(actions: TurnAction[]): void {
             if (target) target.content = replacement.text;
           }
         }
+        // 当回合终结时，所有消息内部若仍残留 status === 'running' 的工具，强制收拢为 completed 保证状态自愈
+        for (const msg of state.messages) {
+          if (msg.toolCalls) {
+            for (const tc of msg.toolCalls) {
+              if (tc.status === 'running') {
+                tc.status = 'completed';
+                if (tc.startTime && !tc.durationMs) {
+                  tc.durationMs = Math.max(100, Date.now() - tc.startTime);
+                }
+              }
+            }
+          }
+        }
+        if (activeStreamingStoredSessionId) {
+          // 回合完成：退出 running；焦点不在该会话时置未读（显式传入焦点判定，禁止函数内从全局反推）
+          const isFocused = activeStreamingStoredSessionId === state.activeSessionId;
+          applyTurnCompleted(activeRunningSessionIds, unreadSessionIds, activeStreamingStoredSessionId, isFocused);
+          // 【核心固化】回合完成瞬间，将当前已累加完整的消息快照 100% 写入缓存，防止切走切回丢数据！
+          sessionMessagesCache.set(activeStreamingStoredSessionId, [...state.messages]);
+          const completedSess = state.sessions.find((s) => s.id === activeStreamingStoredSessionId);
+          if (completedSess) {
+            const finalMsg = state.messages.length > 0 ? state.messages[state.messages.length - 1] : null;
+            if (finalMsg?.content) {
+              completedSess.preview = finalMsg.content;
+            }
+            completedSess.timestamp = Date.now();
+            completedSess.time = formatTimestamp(Date.now());
+            state.sessions = [completedSess, ...state.sessions.filter((s) => s.id !== completedSess.id)];
+          }
+        }
+        // 状态严格独立：用"回合发起时的 Bot"收尾，与当前焦点解耦。
+        // 用户切走后仍能正确退出 running 并置未读；仍停在该 Bot 工位则直接已读。
+        if (activeStreamingBotName) {
+          const finalMsg = state.messages.length > 0 ? state.messages[state.messages.length - 1] : null;
+          if (finalMsg?.content) {
+            botLatestActivityMap.set(activeStreamingBotName, {
+              lastMessage: finalMsg.content.slice(0, 100).replace(/\s+/g, ' ').trim(),
+              timestamp: Date.now(),
+            });
+          }
+          const stillOnThisBot = state.activeFocus.type === 'bot' && state.activeFocus.botName === activeStreamingBotName;
+          applyTurnCompleted(activeRunningBotNames, unreadBotNames, activeStreamingBotName, stillOnThisBot);
+          activeStreamingBotName = null;
+        }
+        syncProfileLastMessages();
         state.isStreaming = false;
         state.agentActivityStatus = undefined;
         updateActivityPill(undefined);
@@ -2638,6 +3166,15 @@ function applyTurnActions(actions: TurnAction[]): void {
         if (pendingMsg && !pendingMsg.content) {
           pendingMsg.content = `[回合中断] ${action.message}`;
         }
+        if (activeStreamingStoredSessionId) {
+          // 回合失败：退出 running，但绝不置未读（失败没有可查看的成果）
+          applyTurnFailed(activeRunningSessionIds, activeStreamingStoredSessionId);
+        }
+        if (activeStreamingBotName) {
+          applyTurnFailed(activeRunningBotNames, activeStreamingBotName);
+          activeStreamingBotName = null;
+        }
+        syncProfileLastMessages();
         state.isStreaming = false;
         state.agentActivityStatus = undefined;
         updateActivityPill(undefined);
@@ -2834,6 +3371,15 @@ function disconnect(): void {
   activeStreamingMessageId = null;
   activeStreamingStoredSessionId = null;
   activeStreamingLiveId = null;
+  activeStreamingBotName = null;
+  // 断线时清空全部三态集合：连接已断，"进行中"不再有任何真实依据，
+  // 残留会让重连后的界面继续显示呼吸动效与未读绿点（历史坑）。
+  activeRunningSessionIds.clear();
+  unreadSessionIds.clear();
+  activeRunningBotNames.clear();
+  unreadBotNames.clear();
+  activeRunningGroupRoomIds.clear();
+  unreadGroupRoomIds.clear();
   if (sessionsRefreshTimer) {
     clearTimeout(sessionsRefreshTimer);
     sessionsRefreshTimer = null;
@@ -2947,57 +3493,6 @@ interface RenderMessagesSnapshot {
 
 let lastMessagesSnapshot: RenderMessagesSnapshot | null = null;
 
-function renderContextMenuHtml(ctx?: AppState['sessionContextMenu']): string {
-  if (!ctx) return '';
-  return `
-    <div id="session-context-menu" style="
-      position: fixed;
-      left: ${ctx.x}px;
-      top: ${ctx.y}px;
-      background: var(--bg-card);
-      border: 1px solid var(--border-strong);
-      border-radius: 9px;
-      box-shadow: var(--shadow-window);
-      padding: 4px;
-      min-width: 160px;
-      z-index: 2000;
-      display: flex;
-      flex-direction: column;
-      gap: 1px;
-      font-size: 12px;
-      user-select: none;
-      backdrop-filter: blur(20px);
-      animation: flux-fade-in 0.15s cubic-bezier(0.16, 1, 0.3, 1);
-    ">
-      <button type="button" class="ctx-item" data-action="rename" style="padding: 6px 9px; border-radius: 6px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 9px; cursor: pointer; text-align: left; font-size: 12px;">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-secondary); flex-shrink: 0;"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
-        <span>重命名</span>
-      </button>
-      <button type="button" class="ctx-item" data-action="copy-id" style="padding: 6px 9px; border-radius: 6px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 9px; cursor: pointer; text-align: left; font-size: 12px;">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-secondary); flex-shrink: 0;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-        <span>复制会话 ID</span>
-      </button>
-      <button type="button" class="ctx-item" data-action="pin" style="padding: 6px 9px; border-radius: 6px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 9px; cursor: pointer; text-align: left; font-size: 12px;">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-secondary); flex-shrink: 0;"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
-        <span>置顶会话</span>
-      </button>
-      <button type="button" class="ctx-item" data-action="export" style="padding: 6px 9px; border-radius: 6px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 9px; cursor: pointer; text-align: left; font-size: 12px;">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-secondary); flex-shrink: 0;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        <span>导出 Markdown</span>
-      </button>
-      <div style="height: 1px; background: var(--border-subtle); margin: 3px 0;"></div>
-      <button type="button" class="ctx-item" data-action="archive" style="padding: 6px 9px; border-radius: 6px; border: none; background: transparent; color: var(--text-main); display: flex; align-items: center; gap: 9px; cursor: pointer; text-align: left; font-size: 12px;">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-secondary); flex-shrink: 0;"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
-        <span>归档</span>
-      </button>
-      <button type="button" class="ctx-item" data-action="delete" style="padding: 6px 9px; border-radius: 6px; border: none; background: transparent; color: #EF4444; display: flex; align-items: center; gap: 9px; cursor: pointer; text-align: left; font-size: 12px;">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: #EF4444; flex-shrink: 0;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-        <span>删除</span>
-      </button>
-    </div>
-  `;
-}
-
 function render(): void {
   const root = document.getElementById('flux-app-root');
   if (!root) return;
@@ -3023,6 +3518,22 @@ function render(): void {
   const activeSession = state.sessions.find((s) => s.id === state.activeSessionId);
   const rawTitle = activeSession ? activeSession.title : (state.gatewayConnected ? t('titlebar.defaultTitle') : t('titlebar.notConnected'));
   const currentTitle = rawTitle === 'Bot Chat' ? `🤖 ${state.profileName} (Forever Chat)` : rawTitle;
+
+  const currentProject = activeSession
+    ? state.projects.find((p) => p.id === activeSession.projectId || (activeSession.projectName && p.name === activeSession.projectName) || doesSessionBelongToProject(activeSession, p))
+    : undefined;
+  let currentProjectName = currentProject ? currentProject.name : activeSession?.projectName;
+  let currentProjectPath = currentProject ? currentProject.path : undefined;
+
+  // 兜底路径推断：若会话未关联项目实体，但拥有有效工作目录 cwd，从目录末端提取 Workspace 名称展示
+  if (!currentProjectName && activeSession?.cwd) {
+    const norm = activeSession.cwd.replace(/\\/g, '/').replace(/\/+$/, '');
+    const folderName = norm.split('/').pop() || norm;
+    if (folderName && folderName !== '/' && !folderName.endsWith(':')) {
+      currentProjectName = folderName;
+      currentProjectPath = norm;
+    }
+  }
 
   const currentLastMsg = state.messages.length > 0 ? state.messages[state.messages.length - 1] : null;
   const currentMessagesSnapshot: RenderMessagesSnapshot = {
@@ -3057,6 +3568,43 @@ function render(): void {
       lastMessagesSnapshot.isLoadingOlder !== currentMessagesSnapshot.isLoadingOlder ||
       lastMessagesSnapshot.profileName !== currentMessagesSnapshot.profileName);
 
+  const resolveSessionActivity = (sessionId: string): ActivityState =>
+    // 会话域：仅消费会话自己的运行/未读集合，绝不向 Bot 或群聊领域冒泡
+    resolveActivityState(sessionId, {
+      runningIds: activeRunningSessionIds,
+      unreadIds: unreadSessionIds,
+      streamingId: activeStreamingStoredSessionId,
+    });
+
+  const resolveGroupActivity = (roomId: string): ActivityState =>
+    // 群聊域：独立的运行/未读集合，与任何会话、Bot 无耦合
+    resolveActivityState(roomId, {
+      runningIds: activeRunningGroupRoomIds,
+      unreadIds: unreadGroupRoomIds,
+    });
+
+  const resolveBotActivity = (botName: string): ActivityState =>
+    // Bot 域：严格独立。历史实现会让"任一子会话在跑"把 Bot 也点亮，属于跨实体串扰，已移除
+    resolveActivityState(botName, {
+      runningIds: activeRunningBotNames,
+      unreadIds: unreadBotNames,
+    });
+
+  const decoratedSessions = state.sessions.map((s) => ({
+    ...s,
+    activityState: resolveSessionActivity(s.id),
+  }));
+
+  const decoratedGroups = state.groupRooms.map((g) => ({
+    ...g,
+    activityState: resolveGroupActivity(g.roomId),
+  }));
+
+  const decoratedProfiles = state.profiles.map((p) => ({
+    ...p,
+    activityState: resolveBotActivity(p.name),
+  }));
+
   const bodyContainer = root.querySelector('.flux-body-container');
 
   if (!bodyContainer) {
@@ -3065,6 +3613,8 @@ function render(): void {
       ${renderTitlebar({
         platform: state.platform,
         title: currentTitle,
+        projectName: currentProjectName,
+        projectPath: currentProjectPath,
         isMaximized: state.isMaximized,
         gatewayConnected: state.gatewayConnected,
         gatewayLatencyMs: state.gatewayLatencyMs,
@@ -3078,18 +3628,20 @@ function render(): void {
           collapsed: state.leftRailCollapsed,
           activeSessionId: state.activeSessionId,
           activeFocus: state.activeFocus,
-          sessions: state.sessions,
+          sessions: decoratedSessions,
           profileName: state.profileName,
-          profiles: state.profiles,
-          groups: state.groupRooms,
+          profiles: decoratedProfiles,
+          groups: decoratedGroups,
           projects: state.projects,
           activeRailTab: state.activeRailTab,
           gatewayOnline: state.gatewayConnected,
           gatewayLatencyMs: state.gatewayLatencyMs,
           searchQuery: state.sessionSearchQuery,
+          isBotsGroupExpanded: state.isBotsGroupExpanded,
           isSessionsGroupExpanded: state.isSessionsGroupExpanded,
           isGroupsGroupExpanded: state.isGroupsGroupExpanded,
           isMoreSessionsExpanded: state.isMoreSessionsExpanded,
+          editingGroupRoomId: state.editingGroupRoomId,
           error: state.sessionListError,
         })}
 
@@ -3169,7 +3721,13 @@ function render(): void {
         selectedProjectId: state.selectedNewTaskProjectId,
       })}
 
-      ${renderContextMenuHtml(state.sessionContextMenu)}
+      ${renderContextMenu(state.sessionContextMenu)}
+
+      ${renderAgentProfileEditorModal({
+        isOpen: state.isAgentEditorOpen,
+        profile: state.editingAgentProfileName ? state.profiles.find((p) => p.name === state.editingAgentProfileName) : undefined,
+        availableModels: state.availableModels,
+      })}
     `;
 
     root.innerHTML = html;
@@ -3182,6 +3740,8 @@ function render(): void {
       titlebarEl.outerHTML = renderTitlebar({
         platform: state.platform,
         title: currentTitle,
+        projectName: currentProjectName,
+        projectPath: currentProjectPath,
         isMaximized: state.isMaximized,
         gatewayConnected: state.gatewayConnected,
         gatewayLatencyMs: state.gatewayLatencyMs,
@@ -3193,24 +3753,36 @@ function render(): void {
 
     const railEl = root.querySelector('#flux-left-rail') || root.querySelector('.flux-left-rail');
     if (railEl) {
+      const oldScrollContainer = railEl.querySelector('#session-list-container') as HTMLElement | null;
+      const prevRailScrollTop = oldScrollContainer ? oldScrollContainer.scrollTop : 0;
+
       railEl.outerHTML = renderLeftRail({
         collapsed: state.leftRailCollapsed,
         activeSessionId: state.activeSessionId,
         activeFocus: state.activeFocus,
-        sessions: state.sessions,
+        sessions: decoratedSessions,
         profileName: state.profileName,
-        profiles: state.profiles,
-        groups: state.groupRooms,
+        profiles: decoratedProfiles,
+        groups: decoratedGroups,
         projects: state.projects,
         activeRailTab: state.activeRailTab,
         gatewayOnline: state.gatewayConnected,
         gatewayLatencyMs: state.gatewayLatencyMs,
         searchQuery: state.sessionSearchQuery,
+        isBotsGroupExpanded: state.isBotsGroupExpanded,
         isSessionsGroupExpanded: state.isSessionsGroupExpanded,
         isGroupsGroupExpanded: state.isGroupsGroupExpanded,
         isMoreSessionsExpanded: state.isMoreSessionsExpanded,
+        editingGroupRoomId: state.editingGroupRoomId,
         error: state.sessionListError,
       });
+
+      if (prevRailScrollTop > 0) {
+        const newScrollContainer = root.querySelector('#session-list-container') as HTMLElement | null;
+        if (newScrollContainer) {
+          newScrollContainer.scrollTop = prevRailScrollTop;
+        }
+      }
     }
 
     const inspectEl = root.querySelector('#flux-inspector-pod') || root.querySelector('.flux-inspector-pod');
@@ -3312,9 +3884,26 @@ function render(): void {
       root.insertAdjacentHTML('beforeend', nextTaskModalHtml);
     }
 
+    // Agent Profile Editor Modal
+    const agentEditorRoot = document.getElementById('agent-profile-editor-backdrop');
+    const nextAgentEditorHtml = renderAgentProfileEditorModal({
+      isOpen: state.isAgentEditorOpen,
+      profile: state.editingAgentProfileName ? state.profiles.find((p) => p.name === state.editingAgentProfileName) : undefined,
+      availableModels: state.availableModels,
+    });
+    if (agentEditorRoot) {
+      if (nextAgentEditorHtml) {
+        agentEditorRoot.outerHTML = nextAgentEditorHtml;
+      } else {
+        agentEditorRoot.remove();
+      }
+    } else if (nextAgentEditorHtml) {
+      root.insertAdjacentHTML('beforeend', nextAgentEditorHtml);
+    }
+
     // Context Menu
     const existingMenu = document.getElementById('session-context-menu');
-    const nextMenuHtml = renderContextMenuHtml(state.sessionContextMenu);
+    const nextMenuHtml = renderContextMenu(state.sessionContextMenu);
     if (existingMenu) {
       if (nextMenuHtml) existingMenu.outerHTML = nextMenuHtml;
       else existingMenu.remove();
@@ -3983,6 +4572,69 @@ function bindEvents(): void {
   if (closeTaskModalBtn) closeTaskModalBtn.onclick = () => { state.isNewTaskModalOpen = false; render(); };
   if (cancelTaskModalBtn) cancelTaskModalBtn.onclick = () => { state.isNewTaskModalOpen = false; render(); };
 
+  // Agent Profile Editor Modal Events
+  const closeAgentEditorBtn = document.getElementById('btn-close-agent-editor');
+  const cancelAgentEditorBtn = document.getElementById('btn-cancel-agent-editor');
+  const agentEditorBackdrop = document.getElementById('agent-profile-editor-backdrop');
+  const saveAgentEditorBtn = document.getElementById('btn-save-agent-editor');
+
+  const closeAgentEditor = () => {
+    state.isAgentEditorOpen = false;
+    state.editingAgentProfileName = undefined;
+    render();
+  };
+
+  if (closeAgentEditorBtn) closeAgentEditorBtn.onclick = closeAgentEditor;
+  if (cancelAgentEditorBtn) cancelAgentEditorBtn.onclick = closeAgentEditor;
+  if (agentEditorBackdrop) {
+    agentEditorBackdrop.onclick = (e) => {
+      if (e.target === agentEditorBackdrop) closeAgentEditor();
+    };
+  }
+
+  if (saveAgentEditorBtn) {
+    saveAgentEditorBtn.onclick = async () => {
+      const targetName = state.editingAgentProfileName;
+      if (!targetName) return;
+      const targetProfile = state.profiles.find((p) => p.name === targetName);
+      if (!targetProfile) return;
+
+      const nameInput = document.getElementById('agent-editor-display-name') as HTMLInputElement | null;
+      const descInput = document.getElementById('agent-editor-desc') as HTMLTextAreaElement | null;
+      const modelSelect = document.getElementById('agent-editor-model-select') as HTMLSelectElement | null;
+      const promptInput = document.getElementById('agent-editor-prompt') as HTMLTextAreaElement | null;
+
+      const newDisplayName = nameInput?.value?.trim() || targetProfile.name;
+      const newDesc = descInput?.value?.trim() || '';
+      const newModel = modelSelect?.value?.trim() || '';
+      const newPrompt = promptInput?.value?.trim() || '';
+
+      // 1. 本地状态即刻响应更新
+      targetProfile.displayName = newDisplayName;
+      targetProfile.description = newDesc;
+      targetProfile.model = newModel;
+
+      // 2. 若底层网关在线，异步持久化至网关配置档
+      if (gatewayClient) {
+        void profileService.configureProfile(
+          targetProfile.name,
+          {
+            displayName: newDisplayName,
+            description: newDesc,
+            model: newModel || undefined,
+            soulContent: newPrompt || undefined,
+          },
+          gatewayClient
+        ).catch((err) => {
+          console.warn('[Flux] configureProfile failed:', err);
+        });
+      }
+
+      showToast(t('agent.saveSuccess'));
+      closeAgentEditor();
+    };
+  }
+
   let activeModalType: 'solo' | 'group' = 'solo';
   const modalTabSolo = document.getElementById('modal-tab-solo');
   const modalTabGroup = document.getElementById('modal-tab-group');
@@ -4113,6 +4765,15 @@ function bindEvents(): void {
     };
   }
 
+  // Left rail bots accordion toggle
+  const botsTrigger = document.getElementById('rail-bots-accordion-trigger');
+  if (botsTrigger) {
+    botsTrigger.onclick = () => {
+      state.isBotsGroupExpanded = !state.isBotsGroupExpanded;
+      render();
+    };
+  }
+
   // Left rail groups accordion toggle
   const groupsTrigger = document.getElementById('rail-groups-accordion-trigger');
   if (groupsTrigger) {
@@ -4143,7 +4804,7 @@ function bindEvents(): void {
     };
   });
 
-  // Pinned Bot Row click in Left Rail: 直接进入该 Bot 的对话界面
+  // Pinned Bot Row click & Context Menu in Left Rail
   document.querySelectorAll('.rail-pinned-bot-row').forEach((row) => {
     (row as HTMLElement).onclick = (e) => {
       const profile = (row as HTMLElement).dataset.profile;
@@ -4151,14 +4812,99 @@ function bindEvents(): void {
         void openBotChat(profile);
       }
     };
+
+    (row as HTMLElement).oncontextmenu = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const profile = (row as HTMLElement).dataset.profile;
+      if (profile) {
+        state.sessionContextMenu = {
+          x: Math.min(e.clientX, window.innerWidth - 180),
+          y: Math.min(e.clientY, window.innerHeight - 220),
+          targetType: 'bot',
+          targetId: profile,
+          targetName: profile,
+        };
+        render();
+      }
+    };
   });
 
-  // Multi-Agent Group Room item click
+  // Multi-Agent Group Room item click & Context Menu
   document.querySelectorAll('.rail-group-item').forEach((row) => {
     (row as HTMLElement).onclick = (e) => {
       const roomId = (row as HTMLElement).dataset.roomId;
       if (roomId) {
         void openGroupRoom(roomId);
+      }
+    };
+
+    (row as HTMLElement).oncontextmenu = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const roomId = (row as HTMLElement).dataset.roomId;
+      const targetRoom = state.groupRooms.find((r) => r.roomId === roomId);
+      if (roomId) {
+        state.sessionContextMenu = {
+          x: Math.min(e.clientX, window.innerWidth - 180),
+          y: Math.min(e.clientY, window.innerHeight - 220),
+          targetType: 'group',
+          targetId: roomId,
+          targetName: targetRoom?.name || roomId,
+        };
+        render();
+      }
+    };
+  });
+
+  // Group inline rename actions (Confirm / Cancel / Keyboard enter & esc)
+  document.querySelectorAll('.btn-confirm-group-rename').forEach((btn) => {
+    (btn as HTMLElement).onclick = (e) => {
+      e.stopPropagation();
+      const roomId = (btn as HTMLElement).dataset.roomId;
+      if (!roomId) return;
+      const inputEl = document.getElementById(`rail-group-rename-input-${roomId}`) as HTMLInputElement | null;
+      const newName = inputEl?.value?.trim();
+      if (newName && gatewayClient) {
+        state.editingGroupRoomId = undefined;
+        // 乐观即时更新本地房间列表
+        state.groupRooms = state.groupRooms.map((r) => (r.roomId === roomId ? { ...r, name: newName } : r));
+        render();
+        void groupRoomStore.renameRoom(roomId, newName, gatewayClient).then(async () => {
+          showToast(t('toast.groupRenamed'));
+          await fetchGroupRooms();
+        }).catch((err) => {
+          showToast(t('ctx.groupRenameFailed', { error: describeRpcError(err) }));
+        });
+      } else {
+        state.editingGroupRoomId = undefined;
+        render();
+      }
+    };
+  });
+
+  document.querySelectorAll('.btn-cancel-group-rename').forEach((btn) => {
+    (btn as HTMLElement).onclick = (e) => {
+      e.stopPropagation();
+      state.editingGroupRoomId = undefined;
+      render();
+    };
+  });
+
+  document.querySelectorAll('.rail-group-rename-input').forEach((input) => {
+    (input as HTMLElement).onclick = (e) => e.stopPropagation();
+    (input as HTMLInputElement).onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        const roomId = (input as HTMLElement).id.replace('rail-group-rename-input-', '');
+        const confirmBtn = document.querySelector(`.btn-confirm-group-rename[data-room-id="${roomId}"]`) as HTMLElement | null;
+        if (confirmBtn) confirmBtn.click();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        state.editingGroupRoomId = undefined;
+        render();
       }
     };
   });
@@ -4179,6 +4925,9 @@ function bindEvents(): void {
         state.sessionContextMenu = {
           x: Math.min(e.clientX, window.innerWidth - 180),
           y: Math.min(e.clientY, window.innerHeight - 220),
+          targetType: 'session',
+          targetId: id,
+          targetName: title,
           sessionId: id,
           sessionTitle: title,
         };
@@ -4197,19 +4946,69 @@ function bindEvents(): void {
       render();
 
       if (!ctx) return;
-      if (action === 'rename') {
-        void renameSession(ctx.sessionId, ctx.sessionTitle);
+      if (action === 'bot-chat') {
+        void openBotChat(ctx.targetId);
+      } else if (action === 'bot-edit') {
+        state.editingAgentProfileName = ctx.targetId;
+        state.isAgentEditorOpen = true;
+        render();
+
+        // 【关键修复点】：右键点击查看/编辑资料瞬间，立即强制向网关远端同步最新的 Profile 数据并重绘弹窗
+        if (gatewayClient) {
+          void (async () => {
+            try {
+              const freshProfiles = await gatewayClient.listProfiles();
+              if (Array.isArray(freshProfiles) && freshProfiles.length > 0) {
+                state.profiles = freshProfiles;
+                syncProfileLastMessages();
+                if (state.isAgentEditorOpen && state.editingAgentProfileName === ctx.targetId) {
+                  render();
+                }
+              }
+            } catch (err) {
+              console.warn('[Flux] Immediate fetch profile on open editor failed:', err);
+            }
+          })();
+        }
+      } else if (action === 'group-rename') {
+        state.editingGroupRoomId = ctx.targetId;
+        render();
+        setTimeout(() => {
+          const inputEl = document.getElementById(`rail-group-rename-input-${ctx.targetId}`) as HTMLInputElement | null;
+          if (inputEl) {
+            inputEl.focus();
+            inputEl.select();
+          }
+        }, 40);
+      } else if (action === 'disband-group') {
+        if (confirm(t('ctx.confirmDisbandGroup', { name: ctx.targetName }))) {
+          if (gatewayClient) {
+            void groupRoomStore.disbandRoom(ctx.targetId, gatewayClient).then(async () => {
+              await fetchGroupRooms();
+              if (state.activeFocus.type === 'group' && state.activeFocus.roomId === ctx.targetId) {
+                if (state.sessions.length > 0) void selectSession(state.sessions[0].id);
+              }
+            }).catch((err) => {
+              state.dockNotice = t('ctx.disbandGroupFailed', { error: describeRpcError(err) });
+              render();
+            });
+          }
+        }
+      } else if (action === 'rename') {
+        void renameSession(ctx.targetId, ctx.targetName);
       } else if (action === 'copy-id') {
-        void copySessionId(ctx.sessionId);
+        void copySessionId(ctx.targetId);
       } else if (action === 'pin') {
-        void pinSession(ctx.sessionId);
+        void pinSession(ctx.targetId);
       } else if (action === 'export') {
-        void exportMarkdown(ctx.sessionId);
+        void exportMarkdown(ctx.targetId);
       } else if (action === 'archive') {
-        void archiveSession(ctx.sessionId);
+        void archiveSession(ctx.targetId);
       } else if (action === 'delete') {
-        if (confirm(`确定要删除会话「${ctx.sessionTitle || ctx.sessionId}」吗？`)) {
-          void deleteSession(ctx.sessionId);
+        const confirmed = confirm(t('ctx.confirmDeleteSession', { name: ctx.targetName || ctx.targetId }));
+        restoreComposerFocus();
+        if (confirmed) {
+          void deleteSession(ctx.targetId);
         }
       }
     };
@@ -4219,8 +5018,10 @@ function bindEvents(): void {
     (btn as HTMLElement).onclick = (e) => {
       e.stopPropagation();
       const id = (btn as HTMLElement).dataset.id;
-      if (id && confirm('确定要删除此会话吗？')) {
-        deleteSession(id);
+      const confirmed = id && confirm(t('ctx.confirmDeleteSession', { name: id }));
+      restoreComposerFocus();
+      if (confirmed) {
+        void deleteSession(id);
       }
     };
   });
@@ -4346,6 +5147,44 @@ function bindEvents(): void {
 
   if (sendBtn) sendBtn.onclick = () => handleSend('button');
   if (inputEl) {
+    const collapseBtn = document.getElementById('dock-input-collapse-toggle') as HTMLButtonElement | null;
+    let isManuallyCollapsed = false;
+
+    const adjustHeight = () => {
+      if (isManuallyCollapsed) return;
+      inputEl.style.height = 'auto';
+      const scrollHeight = inputEl.scrollHeight;
+      const targetHeight = Math.min(Math.max(scrollHeight, 48), 240);
+      inputEl.style.height = `${targetHeight}px`;
+
+      if (collapseBtn) {
+        if (scrollHeight > 100) {
+          collapseBtn.style.display = 'inline-block';
+          collapseBtn.textContent = t('dock.collapse');
+        } else {
+          collapseBtn.style.display = 'none';
+        }
+      }
+    };
+
+    if (collapseBtn) {
+      collapseBtn.onclick = (e) => {
+        e.preventDefault();
+        isManuallyCollapsed = !isManuallyCollapsed;
+        if (isManuallyCollapsed) {
+          inputEl.style.height = '64px';
+          collapseBtn.textContent = t('dock.showMore');
+        } else {
+          adjustHeight();
+          collapseBtn.textContent = t('dock.collapse');
+        }
+      };
+    }
+
+    inputEl.addEventListener('input', adjustHeight);
+    // Initial auto adjustment for restored drafts
+    adjustHeight();
+
     inputEl.addEventListener('compositionstart', () => { isComposing = true; });
     inputEl.addEventListener('compositionend', () => { isComposing = false; });
     inputEl.onkeydown = (e) => {

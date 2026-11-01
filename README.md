@@ -39,6 +39,7 @@ hermes-flux/
 
 ## 核心架构与设计规范索引
 
+* [全局研发路线图与状态看板 (Roadmap)](docs/roadmap.md)
 * [核心技术架构与双向数据交互设计规范](docs/architecture/core-architecture-and-data-flow-spec.md)
 * [官方网关 252 RPC / 77 事件 / 13 反向请求全量映射表](docs/architecture/gateway-api-and-features-matrix.md)
 * [动态主题引擎与扩展架构设计方案](docs/architecture/theme-engine-spec.md)

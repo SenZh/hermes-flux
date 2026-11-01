@@ -1,10 +1,91 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dedupeSessionsByProfile, dedupeSessionsWithReport, isVisibleSession, pruneSupersededSessions, reconcileSessionList, sessionProfileKey } from '../../dist/session/sessionMerge.js';
+import { dedupeSessionsByProfile, dedupeSessionsWithReport, isVisibleSession, pruneSupersededSessions, reconcileSessionList, sessionProfileKey, preserveRunningActivity } from '../../dist/session/sessionMerge.js';
 
 function session(id, botName, title, timestamp) {
   return { id, botName, title, timestamp, model: '', time: '', preview: '', isArchived: false };
 }
+
+test('preserveRunningActivity - 运行中会话的乐观时间戳不被过期列表覆盖', async (t) => {
+  await t.test('1. 运行中会话的本地时间戳更新，必须保留本地值（防止置顶被冲掉）', () => {
+    // Arrange: 权威列表给的是旧的 last_active，本地刚发消息已推进到"现在"
+    const authoritative = [session('s1', 'default', '会话A', 1791000000000)];
+    const local = [{ ...session('s1', 'default', '会话A', 1793540000000), preview: '我刚发出的消息' }];
+
+    // Act
+    const result = preserveRunningActivity(authoritative, local, new Set(['s1']));
+
+    // Assert
+    assert.equal(result[0].timestamp, 1793540000000, '运行中会话必须保留本地新时间戳');
+    assert.equal(result[0].preview, '我刚发出的消息', '运行中会话必须保留本地副标题');
+  });
+
+  await t.test('2. 非运行中会话必须以权威结果为准（本地旧值不得覆盖）', () => {
+    const authoritative = [session('s2', 'default', '会话B', 1793500000000)];
+    const local = [session('s2', 'default', '会话B', 1791000000000)];
+
+    const result = preserveRunningActivity(authoritative, local, new Set(['s1']));
+
+    assert.equal(result[0].timestamp, 1793500000000, '非运行中会话必须采用权威时间戳');
+  });
+
+  await t.test('3. 边界：运行集合为空时原样返回，零开销', () => {
+    const authoritative = [session('s1', 'default', 'A', 1)];
+    const result = preserveRunningActivity(authoritative, [], new Set());
+    assert.equal(result, authoritative, '空运行集合必须原样返回同一引用');
+  });
+
+  await t.test('4. 边界：权威时间已更新则不得回退到本地旧值', () => {
+    const authoritative = [session('s1', 'default', 'A', 1793600000000)];
+    const local = [session('s1', 'default', 'A', 1793500000000)];
+    const result = preserveRunningActivity(authoritative, local, new Set(['s1']));
+    assert.equal(result[0].timestamp, 1793600000000, '权威时间更新时保留权威值');
+  });
+
+  await t.test('5. 边界：本地没有该会话时不得凭空造条目', () => {
+    const authoritative = [session('s3', 'default', 'C', 5)];
+    const result = preserveRunningActivity(authoritative, [], new Set(['s3']));
+    assert.equal(result.length, 1);
+    assert.equal(result[0].timestamp, 5);
+  });
+
+  await t.test('6. 本地副标题为空时必须回退到权威副标题，不得把副标题清空', () => {
+    const authoritative = [{ ...session('s1', 'default', 'A', 1791000000000), preview: '权威副标题' }];
+    const local = [{ ...session('s1', 'default', 'A', 1793540000000), preview: '' }];
+    const result = preserveRunningActivity(authoritative, local, new Set(['s1']));
+    assert.equal(result[0].timestamp, 1793540000000, '仍应保留本地新时间戳');
+    assert.equal(result[0].preview, '权威副标题', '本地副标题为空时必须回退权威值，不得清空');
+  });
+
+  await t.test('7. 本地 time 为空时必须回退到权威 time', () => {
+    const authoritative = [{ ...session('s1', 'default', 'A', 1791000000000), time: '10:00' }];
+    const local = [{ ...session('s1', 'default', 'A', 1793540000000), time: '' }];
+    const result = preserveRunningActivity(authoritative, local, new Set(['s1']));
+    assert.equal(result[0].time, '10:00', '本地 time 为空时必须回退权威值');
+  });
+
+  await t.test('8. 覆盖乐观时间时必须保留权威时间戳，供副标题缓存做失效键', () => {
+    // Arrange: 权威 last_active 是旧的，本地乐观时间已推进到现在
+    const authoritativeTs = 1791000000000;
+    const localTs = 1793540000000;
+    const authoritative = [session('s1', 'default', 'A', authoritativeTs)];
+    const local = [session('s1', 'default', 'A', localTs)];
+
+    // Act
+    const result = preserveRunningActivity(authoritative, local, new Set(['s1']));
+
+    // Assert: timestamp 用本地（保证置顶），authoritativeTimestamp 必须是网关原值
+    assert.equal(result[0].timestamp, localTs, '排序用本地乐观时间，保证置顶');
+    assert.equal(result[0].authoritativeTimestamp, authoritativeTs, '必须保留网关权威时间，否则副标题缓存每轮全 miss');
+  });
+
+  await t.test('9. 未发生覆盖时不得凭空写入 authoritativeTimestamp', () => {
+    const authoritative = [session('s2', 'default', 'B', 1793500000000)];
+    const local = [session('s2', 'default', 'B', 1791000000000)];
+    const result = preserveRunningActivity(authoritative, local, new Set(['s2']));
+    assert.equal(result[0].authoritativeTimestamp, undefined, '未覆盖时权威值就是 timestamp 本身，无需额外字段');
+  });
+});
 
 test('sessionMerge - 跨 Profile 会话合并与去重', async (t) => {
   await t.test('1. 跨 Profile 同 ID 会话必须全部保留（不得互相顶掉）', () => {
@@ -147,8 +228,7 @@ test('sessionMerge - 跨 Profile 会话合并与去重', async (t) => {
     assert.deepEqual(pruneSupersededSessions([], null), [], '空本地列表无需处理');
   });
 
-  await t.test('10. 活跃时间线可见性：归档、子代理、日期流水线、空标题都必须不可见', () => {
-    // 正向：普通会话可见
+  await t.test('10. 活跃时间线可见性：归档、子代理、日期流水线、空标题都必须不可见', () => {    // 正向：普通会话可见
     assert.equal(isVisibleSession(session('ok-1', 'aura', '正常的用户会话', 1)), true);
 
     // 负向四类
@@ -175,6 +255,17 @@ test('sessionMerge - 跨 Profile 会话合并与去重', async (t) => {
     assert.equal(isVisibleSession(session('blank-1', 'aura', '   ', 1)), false, '空标题占位必须不可见');
     assert.equal(isVisibleSession(null), false, 'null 条目必须不可见');
     assert.equal(isVisibleSession({ ...session('no-id', 'aura', '无 id', 1), id: '' }), false, '缺 id 必须不可见');
+    // 网关 hidden 标记（Bot 终身主工位 / Bot Chat）不得出现在用户时间线
+    assert.equal(
+      isVisibleSession({ ...session('hidden-1', 'aura', 'Bot Chat', 1), hidden: true }),
+      false,
+      'hidden 会话必须不可见（Bot 终身主工位不得混入用户会话列表）'
+    );
+    assert.equal(
+      isVisibleSession({ ...session('visible-1', 'aura', '普通会话', 1), hidden: false }),
+      true,
+      'hidden=false 的正常会话必须可见'
+    );
   });
 
   await t.test('11. 归档行也是"该 id 已被权威端处置"的证据，必须驱动本地副本收敛', () => {

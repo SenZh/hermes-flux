@@ -5,17 +5,17 @@
 
 | 方法 | 入参（契约） | 出参（契约） | 调用点 | 真实探针 |
 | --- | --- | --- | --- | --- |
-| `config.set` | `profile` `key` `value` `session_id` `scope` `confirm_expensive_model` | `key` `value` `warning` `confirm_required` `confirm_message` `scope` `deferred` `tool_progress` `cwd` `branch` `history_reset` `info` | `packages/desktop/src/renderer/index.ts:1952`<br>`packages/desktop/src/renderer/index.ts:1957`<br>`packages/desktop/src/renderer/index.ts:2010`<br>`packages/desktop/src/renderer/index.ts:2014`<br>`packages/desktop/src/renderer/index.ts:2054`<br>`packages/desktop/src/renderer/index.ts:2083` | ✅ 0.22.5 |
-| `session.archive` | `session_id` `session_key` `archived` `profile` | `archived` `session_key` | `packages/desktop/src/renderer/index.ts:1885` | ✅ 0.22.5 |
+| `config.set` | `profile` `key` `value` `session_id` `scope` `confirm_expensive_model` | `key` `value` `warning` `confirm_required` `confirm_message` `scope` `deferred` `tool_progress` `cwd` `branch` `history_reset` `info` | `packages/desktop/src/renderer/index.ts:2312`<br>`packages/desktop/src/renderer/index.ts:2366`<br>`packages/desktop/src/renderer/index.ts:2404`<br>`packages/desktop/src/renderer/index.ts:2433` | ✅ 0.22.5 |
+| `session.archive` | `session_id` `session_key` `archived` `profile` | `archived` `session_key` | `packages/desktop/src/renderer/index.ts:2250` | ✅ 0.22.5 |
 | `session.branch_whole` | `session_id` `profile` `name` `idempotency_key` | `session_id` `stored_session_id` `title` `parent` `message_count` `messages_omitted` `info` | `packages/core/src/session/handoffService.ts:91` | ✅ 0.22.5 |
-| `session.close` | `session_id` `profile` | `closed` `messages` | `packages/desktop/src/renderer/index.ts:1754` | ✅ 0.22.5 |
-| `session.create` | `profile` `cols` `source` `cwd` `cwd_explicit` `messages` `parent_session_id` `title` `model` `provider` `reasoning_effort` `fast` `service_tier` `close_on_disconnect` `hidden` `room_plumbing` `follow_profile_config` `idempotency_key` | `session_id` `stored_session_id` `message_count` `messages` `info` | `packages/core/src/profile/profileService.ts:265`<br>`packages/desktop/src/renderer/index.ts:1672`<br>`packages/desktop/src/renderer/index.ts:1676` | ✅ 0.22.5 |
-| `session.delete` | `session_id` `profile` | `deleted` | `packages/desktop/src/renderer/index.ts:1766` | ✅ 0.22.5 |
-| `session.interrupt` | `session_id` `profile` `expected_hosted_task_id` | `status` `interrupted` `turn_isolation` | `packages/desktop/src/renderer/index.ts:1758`<br>`packages/desktop/src/renderer/index.ts:2183` | ✅ 0.22.5 |
-| `session.list` | `profile` `title` `limit` `include_hidden` | `sessions` | `packages/core/src/profile/profileService.ts:238`<br>`packages/core/src/rpc/client.ts:585` | ✅ 0.22.5 |
-| `session.resume` | `session_id` `profile` `cols` `source` `lazy` `defer_history` `omit_messages` `eager_build` `close_on_disconnect` `inline_images` | `session_id` `message_count` `messages` `info` `stored_session_id` `resumed` `session_key` `messages_omitted` `hydrating` `running` `turn_started_at` `started_at` `status` `inflight` `queued` `pending_approval` `open_requests` `pending_connection` `todo_state` `auto_continue` | `packages/desktop/src/renderer/index.ts:1558`<br>`packages/desktop/src/renderer/index.ts:1565`<br>`packages/desktop/src/renderer/index.ts:1627` | ✅ 0.22.5 |
-| `session.set_hidden` | `session_id` `hidden` `profile` | `hidden` `session_key` | `packages/core/src/profile/profileService.ts:277`<br>`packages/desktop/src/renderer/index.ts:1772` | ✅ 0.22.5 |
-| `session.title` | `session_id` `profile` `title` | `title` `session_key` `pending` | `packages/desktop/src/renderer/index.ts:1833` | ✅ 0.22.5 |
+| `session.close` | `session_id` `profile` | `closed` `messages` | `packages/desktop/src/renderer/index.ts:2029` | ✅ 0.22.5 |
+| `session.create` | `profile` `cols` `source` `cwd` `cwd_explicit` `messages` `parent_session_id` `title` `model` `provider` `reasoning_effort` `fast` `service_tier` `close_on_disconnect` `hidden` `room_plumbing` `follow_profile_config` `idempotency_key` | `session_id` `stored_session_id` `message_count` `messages` `info` | `packages/core/src/profile/profileService.ts:272`<br>`packages/desktop/src/renderer/index.ts:1947`<br>`packages/desktop/src/renderer/index.ts:1951` | ✅ 0.22.5 |
+| `session.delete` | `session_id` `profile` | `deleted` | `packages/desktop/src/renderer/index.ts:2041` | ✅ 0.22.5 |
+| `session.interrupt` | `session_id` `profile` `expected_hosted_task_id` | `status` `interrupted` `turn_isolation` | `packages/desktop/src/renderer/index.ts:2033`<br>`packages/desktop/src/renderer/index.ts:2553` | ✅ 0.22.5 |
+| `session.list` | `profile` `title` `limit` `include_hidden` | `sessions` | `packages/core/src/profile/profileService.ts:245`<br>`packages/core/src/rpc/client.ts:617` | ✅ 0.22.5 |
+| `session.resume` | `session_id` `profile` `cols` `source` `lazy` `defer_history` `omit_messages` `eager_build` `close_on_disconnect` `inline_images` | `session_id` `message_count` `messages` `info` `stored_session_id` `resumed` `session_key` `messages_omitted` `hydrating` `running` `turn_started_at` `started_at` `status` `inflight` `queued` `pending_approval` `open_requests` `pending_connection` `todo_state` `auto_continue` | `packages/desktop/src/renderer/index.ts:1785`<br>`packages/desktop/src/renderer/index.ts:1792`<br>`packages/desktop/src/renderer/index.ts:1899`<br>`packages/desktop/src/renderer/index.ts:1901` | ✅ 0.22.5 |
+| `session.set_hidden` | `session_id` `hidden` `profile` | `hidden` `session_key` | `packages/core/src/profile/profileService.ts:284`<br>`packages/desktop/src/renderer/index.ts:2047` | ✅ 0.22.5 |
+| `session.title` | `session_id` `profile` `title` | `title` `session_key` `pending` | `packages/desktop/src/renderer/index.ts:2158` | ✅ 0.22.5 |
 
 ## 明细
 
@@ -25,12 +25,10 @@
 - 结果类型：`ConfigSetResult`
 - 真实探针：已通过（网关 0.22.5，录制于 2026-11-01T01:59:35.303Z）
 - 调用点：
-  - `packages/desktop/src/renderer/index.ts:1952`
-  - `packages/desktop/src/renderer/index.ts:1957`
-  - `packages/desktop/src/renderer/index.ts:2010`
-  - `packages/desktop/src/renderer/index.ts:2014`
-  - `packages/desktop/src/renderer/index.ts:2054`
-  - `packages/desktop/src/renderer/index.ts:2083`
+  - `packages/desktop/src/renderer/index.ts:2312`
+  - `packages/desktop/src/renderer/index.ts:2366`
+  - `packages/desktop/src/renderer/index.ts:2404`
+  - `packages/desktop/src/renderer/index.ts:2433`
 
 ### `session.archive`
 
@@ -38,7 +36,7 @@
 - 结果类型：`SessionArchiveResult`
 - 真实探针：已通过（网关 0.22.5，录制于 2026-11-01T01:59:35.303Z）
 - 调用点：
-  - `packages/desktop/src/renderer/index.ts:1885`
+  - `packages/desktop/src/renderer/index.ts:2250`
 
 ### `session.branch_whole`
 
@@ -55,7 +53,7 @@
 - 结果类型：`SessionCloseResult`
 - 真实探针：已通过（网关 0.22.5，录制于 2026-11-01T01:59:35.303Z）
 - 调用点：
-  - `packages/desktop/src/renderer/index.ts:1754`
+  - `packages/desktop/src/renderer/index.ts:2029`
 
 ### `session.create`
 
@@ -63,9 +61,9 @@
 - 结果类型：`SessionCreateResult`
 - 真实探针：已通过（网关 0.22.5，录制于 2026-11-01T01:59:35.303Z）
 - 调用点：
-  - `packages/core/src/profile/profileService.ts:265`
-  - `packages/desktop/src/renderer/index.ts:1672`
-  - `packages/desktop/src/renderer/index.ts:1676`
+  - `packages/core/src/profile/profileService.ts:272`
+  - `packages/desktop/src/renderer/index.ts:1947`
+  - `packages/desktop/src/renderer/index.ts:1951`
 
 ### `session.delete`
 
@@ -74,7 +72,7 @@
 - 真实探针：已通过（网关 0.22.5，录制于 2026-11-01T01:59:35.303Z）
 - 本次探针走的是守卫分支：错误码 `4023`（属于正确行为，不是失败）
 - 调用点：
-  - `packages/desktop/src/renderer/index.ts:1766`
+  - `packages/desktop/src/renderer/index.ts:2041`
 
 ### `session.interrupt`
 
@@ -82,8 +80,8 @@
 - 结果类型：`SessionInterruptResult`
 - 真实探针：已通过（网关 0.22.5，录制于 2026-11-01T01:59:35.303Z）
 - 调用点：
-  - `packages/desktop/src/renderer/index.ts:1758`
-  - `packages/desktop/src/renderer/index.ts:2183`
+  - `packages/desktop/src/renderer/index.ts:2033`
+  - `packages/desktop/src/renderer/index.ts:2553`
 
 ### `session.list`
 
@@ -91,8 +89,8 @@
 - 结果类型：`SessionListResult`
 - 真实探针：已通过（网关 0.22.5，录制于 2026-11-01T01:59:35.303Z）
 - 调用点：
-  - `packages/core/src/profile/profileService.ts:238`
-  - `packages/core/src/rpc/client.ts:585`
+  - `packages/core/src/profile/profileService.ts:245`
+  - `packages/core/src/rpc/client.ts:617`
 
 ### `session.resume`
 
@@ -100,9 +98,10 @@
 - 结果类型：`SessionResumeResult`
 - 真实探针：已通过（网关 0.22.5，录制于 2026-11-01T01:59:35.303Z）
 - 调用点：
-  - `packages/desktop/src/renderer/index.ts:1558`
-  - `packages/desktop/src/renderer/index.ts:1565`
-  - `packages/desktop/src/renderer/index.ts:1627`
+  - `packages/desktop/src/renderer/index.ts:1785`
+  - `packages/desktop/src/renderer/index.ts:1792`
+  - `packages/desktop/src/renderer/index.ts:1899`
+  - `packages/desktop/src/renderer/index.ts:1901`
 
 ### `session.set_hidden`
 
@@ -110,8 +109,8 @@
 - 结果类型：`SessionSetHiddenResult`
 - 真实探针：已通过（网关 0.22.5，录制于 2026-11-01T01:59:35.303Z）
 - 调用点：
-  - `packages/core/src/profile/profileService.ts:277`
-  - `packages/desktop/src/renderer/index.ts:1772`
+  - `packages/core/src/profile/profileService.ts:284`
+  - `packages/desktop/src/renderer/index.ts:2047`
 
 ### `session.title`
 
@@ -119,5 +118,5 @@
 - 结果类型：`SessionTitleResult`
 - 真实探针：已通过（网关 0.22.5，录制于 2026-11-01T01:59:35.303Z）
 - 调用点：
-  - `packages/desktop/src/renderer/index.ts:1833`
+  - `packages/desktop/src/renderer/index.ts:2158`
 

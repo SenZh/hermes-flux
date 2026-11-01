@@ -9,6 +9,8 @@
  * - Attachment & high-gloss Send action button with active feedback
  */
 
+import { t } from '../../i18n/index.js';
+
 export interface InputDockProps {
   selectedModel: string;
   models?: string[];
@@ -118,20 +120,39 @@ export function renderInputDock(props: InputDockProps): string {
         gap: 10px;
         transition: border-color 0.15s ease, box-shadow 0.15s ease;
       ">
-        <!-- Textarea Field -->
-        <textarea id="dock-prompt-input" rows="2" placeholder="${props.disabled ? '请先连接网关...' : '给 Hermes 下达任务... (Enter 发送, Shift+Enter 换行)'}" ${props.disabled ? 'disabled' : ''} style="
-          width: 100%;
-          border: none;
-          background: transparent;
-          color: var(--text-main);
-          font-family: inherit;
-          font-size: 13.5px;
-          line-height: 1.5;
-          resize: none;
-          outline: none;
-          box-sizing: border-box;
-          max-height: 180px;
-        "></textarea>
+        <!-- Textarea Container & Smart Collapse Button -->
+        <div style="position: relative; display: flex; flex-direction: column;">
+          <textarea id="dock-prompt-input" rows="2" placeholder="${props.disabled ? '请先连接网关...' : '给 Hermes 下达任务... (Enter 发送, Shift+Enter 换行)'}" ${props.disabled ? 'disabled' : ''} style="
+            width: 100%;
+            min-height: 48px;
+            max-height: 240px;
+            border: none;
+            background: transparent;
+            color: var(--text-main);
+            font-family: inherit;
+            font-size: 13.5px;
+            line-height: 1.5;
+            resize: none;
+            outline: none;
+            box-sizing: border-box;
+            overflow-y: auto;
+            transition: height 0.12s ease;
+          "></textarea>
+
+          <button id="dock-input-collapse-toggle" type="button" style="
+            display: none;
+            align-self: flex-end;
+            margin-top: 4px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-subtle);
+            border-radius: 4px;
+            color: var(--text-secondary);
+            font-size: 11px;
+            padding: 2px 8px;
+            cursor: pointer;
+            transition: all 0.12s ease;
+          ">${t('dock.collapse')}</button>
+        </div>
 
         ${
           notice

@@ -37,14 +37,38 @@ export function normalizeAgentProfile(item: unknown): AgentProfile {
   const uiMeta =
     obj.ui_meta && typeof obj.ui_meta === 'object' ? (obj.ui_meta as ProfileUiMeta) : undefined;
 
+  const name = String(obj.name || obj.id || 'default');
+  const defaultDisplayName = name === 'default' ? 'Hermes' : name;
+  const metaBots =
+    uiMeta && typeof uiMeta === 'object' && uiMeta['hermes-bots'] && typeof uiMeta['hermes-bots'] === 'object'
+      ? (uiMeta['hermes-bots'] as Record<string, unknown>)
+      : undefined;
+  // 【设计意图 (Why)】
+  // 对齐官方 Desktop (labels.ts:displayName)：官方保存 bot 自定义名称的字段实名为 `title`，并以 `ui_meta['hermes-bots'].title` 为第一优先级。
+  // 【防范的历史坑 (Pitfall)】
+  // 曾误以为别名字段叫 `alias`，导致官方 Desktop 保存的 "大总管"（落在 title 字段）被忽略降级为 default。
+  const titleFromMeta = metaBots?.title || metaBots?.alias || metaBots?.name;
+  const displayName = String(titleFromMeta || obj.display_name || obj.title || obj.alias || defaultDisplayName);
+
+  const lastSessionRaw = obj.last_session && typeof obj.last_session === 'object' ? (obj.last_session as Record<string, unknown>) : undefined;
+  const lastSession = lastSessionRaw
+    ? {
+        preview: typeof lastSessionRaw.preview === 'string' ? lastSessionRaw.preview : undefined,
+        title: typeof lastSessionRaw.title === 'string' ? lastSessionRaw.title : undefined,
+        last_active: typeof lastSessionRaw.last_active === 'number' ? lastSessionRaw.last_active : undefined,
+        started_at: typeof lastSessionRaw.started_at === 'number' ? lastSessionRaw.started_at : undefined,
+      }
+    : undefined;
+
   return {
-    name: String(obj.name || obj.id || 'default'),
-    displayName: String(obj.display_name || obj.title || obj.name || '默认 Agent'),
+    name,
+    displayName,
     description: typeof obj.description === 'string' ? obj.description : '',
     avatar: rawAvatar,
     model: typeof obj.model === 'string' ? obj.model : '',
-    isDefault: Boolean(obj.is_default || obj.name === 'default'),
+    isDefault: Boolean(obj.is_default || name === 'default'),
     hasAvatar: obj.has_avatar === true,
     uiMeta,
+    last_session: lastSession,
   };
 }
