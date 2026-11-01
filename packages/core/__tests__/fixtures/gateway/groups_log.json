@@ -1,0 +1,33 @@
+{
+  "method": "groups.log",
+  "recordedAt": "2026-11-01T01:59:35.303Z",
+  "gatewayVersion": "0.22.5",
+  "result": {
+    "events": [
+      {
+        "room_id": "rmvx6mlf7-552bw",
+        "seq": 1,
+        "event_id": "user:589faa0622d5890e58ed962a66ca58240bba4db23a9fc8c16810b57e8e722852",
+        "kind": "message.user",
+        "actor": {
+          "id": "desktop",
+          "kind": "user"
+        },
+        "authority_epoch": 1,
+        "payload": {
+          "text": "契约探针：验证 groups.send 的 payload 形状",
+          "thread_id": "tmvx6mnnn-zag4x"
+        },
+        "created_at": 1793498381.2849772,
+        "idempotent": false
+      }
+    ],
+    "cursor": 1,
+    "latest_seq": 1,
+    "has_more": false,
+    "authority": {
+      "gateway_id": "install:df6c6e090573444e8e14b74c1aa39cca",
+      "epoch": 1
+    }
+  }
+}

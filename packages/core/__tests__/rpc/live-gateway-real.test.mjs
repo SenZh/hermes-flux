@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import {
   ProfileService,
   ProjectService,
@@ -10,11 +11,31 @@ import {
   RollbackService,
 } from '../../dist/index.js';
 
-const PYTHON_EXE = 'C:\\Users\\zjxin\\AppData\\Local\\hermes\\tools\\python-3.14.7+20260901-win32-x64\\python.exe';
-const AGENT_DIR = 'C:\\Users\\zjxin\\AppData\\Local\\hermes\\hermes-agent';
-const ENTRY_PY = `${AGENT_DIR}\\tui_gateway\\entry.py`;
+/**
+ * 本地 Python 网关的定位全部走环境变量，禁止写死个人机器路径。
+ *
+ * 【设计意图 (Why)】
+ *   把 `C:\Users\<某人>\AppData\...` 写进测试会让它在任何其他机器上必然失败，
+ *   最终所有人都选择跳过它——门禁形同虚设。
+ *
+ * 【规则 (Rules)】
+ *   - 未配置 `HERMES_GATEWAY_PYTHON` 或 `HERMES_GATEWAY_REPO` 时整组 skip；
+ *   - 配置了但路径不存在时同样 skip，并在输出里说明原因，而不是假装通过。
+ */
+const PYTHON_EXE = process.env.HERMES_GATEWAY_PYTHON || '';
+const AGENT_DIR = process.env.HERMES_GATEWAY_REPO || '';
+const ENTRY_PY = AGENT_DIR ? `${AGENT_DIR}/tui_gateway/entry.py` : '';
+const LIVE_ENV_READY =
+  Boolean(PYTHON_EXE) && Boolean(AGENT_DIR) && fs.existsSync(PYTHON_EXE) && fs.existsSync(ENTRY_PY);
 
 test('Hermes Live Gateway Full-Coverage RPC Integration Suite (22 Methods)', async (t) => {
+  if (!LIVE_ENV_READY) {
+    t.skip(
+      '未配置本地网关：需要 HERMES_GATEWAY_PYTHON 与 HERMES_GATEWAY_REPO 指向真实的 python 与网关仓库'
+    );
+    return;
+  }
+
   // Launch live Python Gateway
   const env = { ...process.env, PYTHONPATH: AGENT_DIR };
   const gatewayProc = spawn(PYTHON_EXE, ['-u', ENTRY_PY], { env });
@@ -22,7 +43,10 @@ test('Hermes Live Gateway Full-Coverage RPC Integration Suite (22 Methods)', asy
   t.after(() => {
     try {
       gatewayProc.kill();
-    } catch {}
+    } catch (err) {
+      // gate-degrade: 测试收尾时进程可能已退出，kill 失败不影响结论
+      void err;
+    }
   });
 
   let reqId = 1;

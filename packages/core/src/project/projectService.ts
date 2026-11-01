@@ -27,6 +27,7 @@ import type {
   ProjectsGetParams,
   ProjectsGetResult,
   ProjectsCreateParams,
+  CreateProjectInput,
   ProjectsCreateResult,
   ProjectsUpdateParams,
   ProjectsUpdateResult,
@@ -138,7 +139,7 @@ export class ProjectService {
    * 兼容官方 Gateway 参数签名：folders 与 primary_path，支持 path 字段自动适配
    */
   public async createProject(
-    params: ProjectsCreateParams,
+    params: CreateProjectInput,
     bridge: IRpcCaller
   ): Promise<ProjectsCreateResult> {
     const rawPath = params.path || params.primary_path || (params.folders && params.folders[0]);
@@ -146,6 +147,7 @@ export class ProjectService {
       throw new Error('Project name and root path are mandatory');
     }
 
+    // 线上契约只接受 folders / primary_path；`path` 是本地便捷入参，必须在此展开
     const payload: ProjectsCreateParams = {
       name: params.name,
       folders: params.folders || [rawPath],

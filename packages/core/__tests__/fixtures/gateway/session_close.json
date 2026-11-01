@@ -1,0 +1,9 @@
+{
+  "method": "session.close",
+  "recordedAt": "2026-11-01T01:59:35.303Z",
+  "gatewayVersion": "0.22.5",
+  "result": {
+    "closed": true,
+    "messages": []
+  }
+}

@@ -2,7 +2,7 @@
  * HermesGatewayClient 移动端与跨端生命周期、心跳看门狗与候选地址单元测试
  *
  * 覆盖四大象限：
- * 1. 正向主路径 (Happy Path)：心跳正常触发 system.ping、候选池正确获取与轮换
+ * 1. 正向主路径 (Happy Path)：心跳正常触发 ping、候选池正确获取与轮换
  * 2. 极限与边界 (Boundary Limits)：禁用心跳/生命周期选项、disconnect 彻底清理定时器
  * 3. 负向与混沌 (Negative & Chaos)：心跳未响应触发超时看门狗主动斩断死连接、前台唤醒短路
  * 4. 竞态与时序 (Concurrency & Order)：visibilitychange 与 online 触发即刻唤醒重连与退避重置
@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { HermesGatewayClient } from '../../dist/rpc/client.js';
 
 test('HermesGatewayClient Lifecycle, Heartbeat & Failover Suite', async (t) => {
-  await t.test('1. 正向主路径：连接成功后周期性启动心跳并发送 system.ping', async () => {
+  await t.test('1. 正向主路径：连接成功后周期性启动心跳并发送 ping', async () => {
     // 1. Arrange: 准备 50ms 心跳周期的受控客户端
     const sentFrames = [];
     let closeCalled = false;
@@ -22,14 +22,14 @@ test('HermesGatewayClient Lifecycle, Heartbeat & Failover Suite', async (t) => {
       send(data) {
         const frame = JSON.parse(data);
         sentFrames.push(frame);
-        if (frame.method === 'system.ping' && frame.id) {
+        if (frame.method === 'ping' && frame.id) {
           // 模拟网关秒级应答 pong，消除 RPC 挂起定时器
           setTimeout(() => {
             client['handleMessage'](
               JSON.stringify({
                 jsonrpc: '2.0',
                 id: frame.id,
-                result: { pong: true, timestamp: Date.now() },
+                result: { pong: true },
               })
             );
           }, 0);
@@ -58,7 +58,7 @@ test('HermesGatewayClient Lifecycle, Heartbeat & Failover Suite', async (t) => {
     await new Promise((r) => setTimeout(r, 95));
 
     // 3. Assert: 断言至少产生了一次心跳 ping 帧且未异常关闭连接
-    const pingFrames = sentFrames.filter((f) => f.method === 'system.ping');
+    const pingFrames = sentFrames.filter((f) => f.method === 'ping');
     assert.ok(pingFrames.length >= 1, `应至少发出 1 次心跳 ping 帧，实际: ${pingFrames.length}`);
     assert.equal(closeCalled, false, '正常心跳周期内不应主动关闭连接');
 

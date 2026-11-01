@@ -32,6 +32,8 @@
 | **多端流转** | [`docs/architecture/multi-device-shared-session-handover.md`](docs/architecture/multi-device-shared-session-handover.md) | **多设备共享会话与接力流转设计**：跨端会话握手、状态迁移、局域网直连探测与离线同步机制。 |
 | **主题引擎** | [`docs/architecture/theme-engine-spec.md`](docs/architecture/theme-engine-spec.md) | **标准化可插拔主题注册表规范**：CSS 变量注入系统、暗黑极夜金/白玉翡翠皮肤、动态 Token 运行时切换。 |
 | **问题档案** | [`docs/architecture/known-issues-and-backlog.md`](docs/architecture/known-issues-and-backlog.md) | **已知架构缺陷与演进 Backlog**：技术债务登记簿、时序竞态历史陷阱与中长程规划。 |
+| **坑位登记** | [`docs/architecture/pitfall-registry.md`](docs/architecture/pitfall-registry.md) | **踩过的坑 → 根因 → 守卫探针 三列映射**：每条坑必须绑定一个能变红的门禁/单测/fixture，无守卫不算登记完成。 |
+| **接口索引** | [`docs/gateway/README.md`](docs/gateway/README.md) | **网关接口文档总索引（自动生成）**：按模块拆分为 9 个小文档，含每个方法的契约字段、调用点、真实探针状态。禁止手改。 |
 | **移动端桥** | [`docs/architecture/capacitor-mobile-bridge-spec.md`](docs/architecture/capacitor-mobile-bridge-spec.md) | **Capacitor 移动端 PlatformBridge 规范**：Android/iOS 原生 8 插件映射、同构双桥注入、16 个方法 100% 契约对齐、三层自动化验证流水线。 |
 | **设计系统 1**| [`docs/design-system/01-classic-books-and-theories.md`](docs/design-system/01-classic-books-and-theories.md) | **经典设计书籍与排版理论基石**：网格系统、微距阅读律动、字体阶梯与对比度科学。 |
 | **设计系统 2**| [`docs/design-system/02-aesthetic-philosophy-and-standards.md`](docs/design-system/02-aesthetic-philosophy-and-standards.md) | **美学哲学与电影级暗黑质感标准**：微距物理受光、双层边框高光、极黑纯净空间与翡翠微光点。 |

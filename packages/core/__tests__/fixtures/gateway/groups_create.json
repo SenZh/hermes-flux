@@ -1,0 +1,39 @@
+{
+  "method": "groups.create",
+  "recordedAt": "2026-11-01T01:59:35.303Z",
+  "gatewayVersion": "0.22.5",
+  "result": {
+    "room": {
+      "room_id": "rmvx6mojd-eipt6",
+      "name": "flux-probe-create-mvx6moje",
+      "members": [
+        {
+          "member_id": "m_default_0",
+          "profile": "default",
+          "handle": "default",
+          "target": {
+            "kind": "local",
+            "profile": "default"
+          },
+          "display_name": "default"
+        },
+        {
+          "member_id": "m_aura_1",
+          "profile": "aura",
+          "handle": "aura",
+          "target": {
+            "kind": "local",
+            "profile": "aura"
+          },
+          "display_name": "aura"
+        }
+      ],
+      "authority_gateway_id": "install:df6c6e090573444e8e14b74c1aa39cca",
+      "authority_epoch": 1,
+      "revision": 1,
+      "created_at": 1793498382.4003189,
+      "updated_at": 1793498382.4003189,
+      "idempotent": false
+    }
+  }
+}

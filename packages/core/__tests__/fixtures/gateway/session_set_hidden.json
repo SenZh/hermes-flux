@@ -1,0 +1,9 @@
+{
+  "method": "session.set_hidden",
+  "recordedAt": "2026-11-01T01:59:35.303Z",
+  "gatewayVersion": "0.22.5",
+  "result": {
+    "hidden": true,
+    "session_key": "20261101_015936_e3c8cb"
+  }
+}

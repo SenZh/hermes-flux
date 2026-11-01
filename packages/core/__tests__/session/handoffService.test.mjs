@@ -11,11 +11,8 @@ test('HandoffService - BTW 只读胶囊与 session.branch_whole 全权移交', a
       async request(method, params) {
         assert.equal(method, 'prompt.btw');
         requestedPayload = params;
-        return {
-          response: '当前数据库索引结构合理，无死锁隐患。',
-          profile: 'arch-wang',
-          token_count: 42,
-        };
+        // 官方 TaskIdResult 契约：只返回 task_id，答案经事件流异步到达
+        return { task_id: 'btw-task-42' };
       },
     };
 
@@ -26,16 +23,16 @@ test('HandoffService - BTW 只读胶囊与 session.branch_whole 全权移交', a
       mockBridge
     );
 
-    assert.equal(res.profile, 'arch-wang');
-    assert.ok(res.response.includes('无死锁隐患'));
+    assert.equal(res.task_id, 'btw-task-42');
     assert.equal(requestedPayload?.session_id, 'sess-active-1');
-    assert.equal(requestedPayload?.target_profile, 'arch-wang');
+    assert.equal(requestedPayload?.profile, 'arch-wang', '契约字段是 profile，不是 target_profile');
+    assert.equal(requestedPayload?.target_profile, undefined, '严禁传契约未声明的字段');
 
     // 负向防护：空参数
     await assert.rejects(() => service.sendBtw('', '问句', 'arch-wang', mockBridge), /Session ID and text are mandatory/);
     await assert.rejects(() => service.sendBtw('sess-1', '', 'arch-wang', mockBridge), /Session ID and text are mandatory/);
 
-    // 负向防护：网关返回畸变数据（非字符串 response）
+    // 负向防护：网关返回畸变数据（缺少 task_id）
     await assert.rejects(
       () => service.sendBtw('sess-1', '问句', 'arch-wang', { async request() { return {}; } }),
       /非法的 prompt.btw 响应数据/

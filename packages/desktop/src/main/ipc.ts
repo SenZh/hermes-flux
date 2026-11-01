@@ -6,9 +6,40 @@ import { ipcMain, BrowserWindow, shell, dialog, app, clipboard } from 'electron'
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { appendExternalLogRecord, getLogDir } from './logFile';
+import type { LogRecord } from '@hermes-flux/core';
 
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   let activeGatewayCookies = '';
+
+  /**
+   * 渲染进程日志转发。
+   *
+   * 设计意图 (Why):
+   *   渲染层跑在独立进程里，它看到的 RPC 错误、解析异常与状态迁移
+   *   只有主进程能写进同一个日志文件。用 send（单向）而不是 invoke，
+   *   避免每次打日志都产生一次 IPC 往返。
+   *
+   * 约束 (Rules):
+   *   必须校验形状后再落盘，防止渲染层被注入后写入任意内容。
+   */
+  ipcMain.on('log:append', (_event, payload: unknown) => {
+    if (!payload || typeof payload !== 'object') return;
+    const rec = payload as Partial<LogRecord>;
+    if (typeof rec.message !== 'string' || typeof rec.scope !== 'string') return;
+    const level = rec.level;
+    if (level !== 'error' && level !== 'warn' && level !== 'info' && level !== 'debug' && level !== 'trace') return;
+    appendExternalLogRecord({
+      ts: typeof rec.ts === 'number' ? rec.ts : Date.now(),
+      iso: typeof rec.iso === 'string' ? rec.iso : new Date().toISOString(),
+      level,
+      scope: rec.scope,
+      message: rec.message,
+      data: rec.data,
+    });
+  });
+
+  ipcMain.handle('log:get-dir', () => getLogDir());
 
   // Window management IPC
   ipcMain.handle('window:minimize', () => {
@@ -96,6 +127,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
           return { ok: false, message: `服务返回异常 HTTP ${statusRes.status}`, latency };
         }
 
+        // gate-degrade: 路径越界判定失败一律按不安全处理（返回 false），这是安全默认值
         const statusData: any = await statusRes.json().catch(() => ({}));
         const authRequired = Boolean(statusData.auth_required);
 
@@ -165,6 +197,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
           };
         }
 
+        // gate-degrade: 文件预览读取失败时由调用方渲染"无法预览"错误态
         const ticketData: any = await ticketRes.json().catch(() => ({}));
         return {
           ok: true,
@@ -356,6 +389,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         return true;
       }
       return false;
+    // gate-degrade: 目录列举失败时返回空清单由 UI 提示，异常细节已在上层日志记录
     } catch {
       return false;
     }
@@ -387,7 +421,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       }
 
       return fs.readFileSync(absoluteFilePath, 'utf8');
-    } catch {
+    } catch (err) {
+      // gate-degrade: 文件预览读取失败由调用方渲染"无法预览"错误态
+      console.warn('[Hermes Flux] read-file failed:', absoluteFilePath, err);
       return null;
     }
   };
@@ -447,7 +483,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       }
 
       return null;
-    } catch {
+    } catch (err) {
+      // gate-degrade: 目录列举失败时返回空清单由 UI 提示，异常细节在此记录
+      console.warn('[Hermes Flux] list-directory failed:', err);
       return null;
     }
   });

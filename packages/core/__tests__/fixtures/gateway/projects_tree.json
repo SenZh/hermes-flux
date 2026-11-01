@@ -1,0 +1,100 @@
+{
+  "method": "projects.tree",
+  "recordedAt": "2026-11-01T01:59:35.303Z",
+  "gatewayVersion": "0.22.5",
+  "result": {
+    "projects": [
+      {
+        "id": "__no_project__",
+        "label": "Home",
+        "path": null,
+        "color": null,
+        "icon": null,
+        "isAuto": false,
+        "isNoProject": true,
+        "sessionCount": 1,
+        "lastActive": 1793497485.7070017,
+        "totalTokens": 197043,
+        "totalCostUsd": 0,
+        "repos": [
+          {
+            "id": "__no_project__",
+            "label": "Home",
+            "path": null,
+            "groups": [
+              {
+                "id": "<max-depth>",
+                "label": "<max-depth>",
+                "path": "<max-depth>",
+                "isMain": "<max-depth>",
+                "isKanban": "<max-depth>",
+                "sessions": "<max-depth>"
+              }
+            ],
+            "sessionCount": 1
+          }
+        ],
+        "previewSessions": [
+          {
+            "id": "20261101_013727_ebdb0f",
+            "_lineage_root_id": null,
+            "_lineage_ids": null,
+            "parent_session_id": null,
+            "_reset_from": null,
+            "_branched_from": null,
+            "title": "验证 Hermes profile 路径与会话",
+            "preview": "我的推断里有一处还没证实：default 永远解析到 ~/.hermes（profiles.py:430），只有当网关自...",
+            "started_at": 1793497058.6175015,
+            "ended_at": null,
+            "last_active": 1793497485.7070017,
+            "source": "desktop",
+            "archived": false,
+            "message_count": 114,
+            "tool_call_count": 56,
+            "input_tokens": 183949,
+            "output_tokens": 13094,
+            "actual_cost_usd": null,
+            "estimated_cost_usd": 0,
+            "model": "gemini-3.8-flash",
+            "is_active": false,
+            "cwd": null,
+            "git_branch": null,
+            "git_repo_root": null,
+            "profile": "default"
+          }
+        ],
+        "sessionIds": [
+          "20261101_013727_ebdb0f"
+        ]
+      },
+      {
+        "id": "p_99c43ce7",
+        "label": "flux-probe-mvx6mr3q",
+        "path": "<path>",
+        "color": null,
+        "icon": null,
+        "isAuto": false,
+        "isNoProject": false,
+        "sessionCount": 0,
+        "lastActive": 0,
+        "totalTokens": 0,
+        "totalCostUsd": 0,
+        "repos": [
+          {
+            "id": "<path>",
+            "label": "proj-mvx6mr3q",
+            "path": "<path>",
+            "groups": [],
+            "sessionCount": 0
+          }
+        ],
+        "previewSessions": [],
+        "sessionIds": []
+      }
+    ],
+    "active_id": "p_5068afa0",
+    "scoped_session_ids": [
+      "20261101_013727_ebdb0f"
+    ]
+  }
+}

@@ -14,6 +14,7 @@ export * from './session/agentRouter.js';
 export * from './session/handoffService.js';
 export * from './fs/fileService.js';
 export * from './log/logger.js';
+export * from './log/fileLogPolicy.js';
 export * from './subagent/ringBuffer.js';
 export * from './subagent/subagentStore.js';
 export * from './profile/profileService.js';

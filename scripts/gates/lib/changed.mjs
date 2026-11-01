@@ -28,6 +28,7 @@ function git(args) {
       stdio: ['ignore', 'pipe', 'ignore'],
       maxBuffer: 32 * 1024 * 1024,
     });
+  // gate-degrade: git 不可用时返回 null，由调用方按"无改动"处理
   } catch {
     return null;
   }

@@ -1,0 +1,8 @@
+{
+  "method": "gateway.capabilities",
+  "recordedAt": "2026-11-01T01:59:35.303Z",
+  "gatewayVersion": "0.22.5",
+  "result": {
+    "per_session_exclusive_submit": true
+  }
+}

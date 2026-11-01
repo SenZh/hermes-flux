@@ -29,6 +29,26 @@ export interface HermesDesktopBridge extends IPlatformBridge {
   saveFile: (options: { fileName: string; content: string; isBase64?: boolean }) => Promise<{ success: boolean; canceled?: boolean; filePath?: string; error?: string }>;
   clipboardWrite: (text: string) => Promise<boolean>;
   clipboardRead: () => Promise<string>;
+  /**
+   * 把渲染进程日志转发给主进程落盘。
+   *
+   * 设计意图 (Why):
+   *   渲染层无法直接写文件；现场排障需要一份统一日志，
+   *   因此用单向 IPC 把结构化记录交给主进程的落盘队列。
+   *
+   * 约束 (Rules):
+   *   单向 send，不返回 Promise，避免每条日志一次往返开销。
+   */
+  appendLog: (record: {
+    ts: number;
+    iso: string;
+    level: 'error' | 'warn' | 'info' | 'debug' | 'trace';
+    scope: string;
+    message: string;
+    data?: unknown;
+  }) => void;
+  /** 日志目录绝对路径，用于「打开日志目录」入口 */
+  getLogDir: () => Promise<string | null>;
 }
 
 const bridge: HermesDesktopBridge = {
@@ -54,6 +74,15 @@ const bridge: HermesDesktopBridge = {
   saveFile: (options) => ipcRenderer.invoke('fs:save-file', options),
   clipboardWrite: (text: string) => ipcRenderer.invoke('clipboard:write-text', text),
   clipboardRead: () => ipcRenderer.invoke('clipboard:read-text'),
+  appendLog: (record) => {
+    try {
+      ipcRenderer.send('log:append', record);
+    // gate-degrade: IPC 通道不可用时日志转发降级为静默，不能影响渲染层业务
+    } catch {
+      // 日志通道不可用时静默降级，绝不影响渲染层业务
+    }
+  },
+  getLogDir: () => ipcRenderer.invoke('log:get-dir'),
 };
 
 contextBridge.exposeInMainWorld('hermesDesktop', bridge);

@@ -1,0 +1,28 @@
+{
+  "method": "groups.disband",
+  "recordedAt": "2026-11-01T01:59:35.303Z",
+  "gatewayVersion": "0.22.5",
+  "result": {
+    "tombstone": {
+      "room_id": "rmvx6mlf7-552bw",
+      "disbanded_at": 1793498385.624221,
+      "idempotent": false,
+      "event": {
+        "room_id": "rmvx6mlf7-552bw",
+        "seq": 5,
+        "event_id": "system:room-disbanded",
+        "kind": "room.disbanded",
+        "actor": {
+          "id": "room-control",
+          "kind": "system"
+        },
+        "authority_epoch": 1,
+        "payload": {
+          "room_id": "rmvx6mlf7-552bw"
+        },
+        "created_at": 1793498385.624221,
+        "idempotent": false
+      }
+    }
+  }
+}

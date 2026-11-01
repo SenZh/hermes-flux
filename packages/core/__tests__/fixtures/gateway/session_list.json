@@ -1,0 +1,37 @@
+{
+  "method": "session.list",
+  "recordedAt": "2026-11-01T01:59:35.303Z",
+  "gatewayVersion": "0.22.5",
+  "result": {
+    "sessions": [
+      {
+        "id": "20261101_013727_ebdb0f",
+        "title": "验证 Hermes profile 路径与会话",
+        "preview": "我的推断里有一处还没证实：default 永远解析到 ~/.hermes（profiles.py:430），只有当网关自...",
+        "started_at": 1793497058.6175015,
+        "message_count": 114,
+        "source": "desktop",
+        "_lineage_root_id": null
+      },
+      {
+        "id": "20261029_025716_6d9179",
+        "title": "",
+        "preview": "",
+        "started_at": 1793448216.4720225,
+        "message_count": 0,
+        "source": "tui",
+        "_lineage_root_id": null
+      },
+      {
+        "id": "20261017_155949_6b41a97a",
+        "title": "安卓开发",
+        "preview": "记得上一轮绘画的内容吗？我让你给电销搭子选三个主题，用 CPA provider 里面的千问 3.7 Plus 模型去生...",
+        "started_at": 1792252789.687694,
+        "message_count": 933,
+        "source": "weixin",
+        "_lineage_root_id": null
+      },
+      "<more:2>"
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "method": "projects.delete",
+  "recordedAt": "2026-11-01T01:59:35.303Z",
+  "gatewayVersion": "0.22.5",
+  "result": {
+    "projects": [],
+    "active_id": "p_99c43ce7"
+  }
+}

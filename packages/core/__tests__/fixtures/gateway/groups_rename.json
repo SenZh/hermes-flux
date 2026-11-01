@@ -1,0 +1,56 @@
+{
+  "method": "groups.rename",
+  "recordedAt": "2026-11-01T01:59:35.303Z",
+  "gatewayVersion": "0.22.5",
+  "result": {
+    "room": {
+      "room_id": "rmvx6mlf7-552bw",
+      "name": "flux-probe-renamed-mvx6mogj",
+      "members": [
+        {
+          "display_name": "default",
+          "handle": "default",
+          "member_id": "m_default_0",
+          "profile": "default",
+          "target": {
+            "kind": "local",
+            "profile": "default"
+          }
+        },
+        {
+          "display_name": "aura",
+          "handle": "aura",
+          "member_id": "m_aura_1",
+          "profile": "aura",
+          "target": {
+            "kind": "local",
+            "profile": "aura"
+          }
+        }
+      ],
+      "authority_gateway_id": "install:df6c6e090573444e8e14b74c1aa39cca",
+      "authority_epoch": 1,
+      "revision": 2,
+      "created_at": 1793498378.3635063,
+      "updated_at": 1793498382.2966866,
+      "idempotent": false,
+      "latest_seq": 2,
+      "event": {
+        "room_id": "rmvx6mlf7-552bw",
+        "seq": 2,
+        "event_id": "evt-mvx6mogj-14oeco6l",
+        "kind": "room.renamed",
+        "actor": {
+          "id": "room-control",
+          "kind": "system"
+        },
+        "authority_epoch": 1,
+        "payload": {
+          "name": "flux-probe-renamed-mvx6mogj"
+        },
+        "created_at": 1793498382.2966866,
+        "idempotent": false
+      }
+    }
+  }
+}

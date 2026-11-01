@@ -1,0 +1,141 @@
+{
+  "method": "profiles.list",
+  "recordedAt": "2026-11-01T01:59:35.303Z",
+  "gatewayVersion": "0.22.5",
+  "result": {
+    "profiles": [
+      {
+        "name": "default",
+        "path": "<path>",
+        "is_default": true,
+        "model": "gemini-3.8-flash",
+        "provider": "cpa",
+        "description": "",
+        "display_name": "",
+        "skill_count": 93,
+        "previous_names": [],
+        "last_session": {
+          "id": "20261101_013727_ebdb0f",
+          "title": "验证 Hermes profile 路径与会话",
+          "preview": "### 1. 官方 REST 接口视角 (`/api/profiles/sessions`) 调用端点并经过 Cookie/Token 认证后的实测数据： ``...",
+          "started_at": 1793497058.6175015,
+          "last_active": 1793497485.7070017,
+          "message_count": 114,
+          "live_message_count": 114
+        },
+        "worker_session": null,
+        "canonical_session": {
+          "id": "20261011_145658_fd12d2",
+          "resolved_id": "20261011_145658_fd12d2",
+          "root_title": "Bot Chat",
+          "title": "Bot Chat",
+          "preview": "**已经彻底破案并修复！现在所有插件都正常显示【Install】（安装）了！** --- ### 一、 为什么之前全显示“即将上线”？（定位到真实根因） 这背后...",
+          "started_at": 1791730618.3887253,
+          "last_active": 1793459472.27047,
+          "message_count": 833,
+          "live_message_count": 833
+        },
+        "ui_meta_revisions": {
+          "hermes-bots": 1,
+          "hermes-bots-groups": 32
+        },
+        "ui_meta": {
+          "hermes-bots": {
+            "groups": [
+              "Hermes, Aura"
+            ],
+            "group": "Hermes, Aura"
+          },
+          "hermes-bots-groups": {
+            "version": 3,
+            "updatedAt": 1793464463897,
+            "rooms": {
+              "id:rmvvnkwv9-1xpyu": {
+                "name": "<max-depth>",
+                "roomId": "<max-depth>",
+                "log": "<max-depth>",
+                "holdDetection": "<max-depth>",
+                "members": "<max-depth>",
+                "revision": "<max-depth>"
+              }
+            }
+          }
+        },
+        "has_avatar": true
+      },
+      {
+        "name": "aura",
+        "path": "<path>",
+        "is_default": false,
+        "model": "gemini-3.8-flash",
+        "provider": "cpa",
+        "description": "负责 UI、UE 美学设计 具有高级审美。自身移动端、客户端和 PC 端的设计总监",
+        "display_name": "",
+        "skill_count": 17,
+        "previous_names": [],
+        "last_session": {
+          "id": "20261031_155456_4192aa",
+          "title": "DeepSeek Superagent prototype repository bookmark",
+          "preview": "### 结论与宏观定性 `deepseek-ai/dsh-superagent-prototype` 是 DeepSeek 官方团队于 **2026 年 10 ...",
+          "started_at": 1793462096.8852346,
+          "last_active": 1793462346.8533363,
+          "message_count": 62,
+          "live_message_count": 62
+        },
+        "worker_session": null,
+        "canonical_session": {
+          "id": "20261030_161541_b23bd3",
+          "resolved_id": "20261030_161541_b23bd3",
+          "root_title": "Bot Chat",
+          "title": "Bot Chat",
+          "preview": "**我已经完全切入并定位到 `/opt/data/projects/hermes-flux` 目录了！** 别小看“BOT”——我是手握全套 Shell、Git...",
+          "started_at": 1793376941.5212388,
+          "last_active": 1793443711.2299037,
+          "message_count": 22,
+          "live_message_count": 22
+        },
+        "ui_meta_revisions": {
+          "hermes-bots": 1
+        },
+        "ui_meta": {
+          "hermes-bots": {
+            "groups": [
+              "Hermes, Aura"
+            ],
+            "group": "Hermes, Aura"
+          }
+        },
+        "has_avatar": true
+      },
+      {
+        "name": "flux-probe-bot",
+        "path": "<path>",
+        "is_default": false,
+        "model": "gemini-3.8-flash",
+        "provider": "cpa",
+        "description": "Hermes Flux 契约探针专用 Bot",
+        "display_name": "",
+        "skill_count": 1,
+        "previous_names": [],
+        "last_session": null,
+        "worker_session": null,
+        "canonical_session": {
+          "id": "20261101_015556_b51ca1",
+          "resolved_id": "20261101_015556_b51ca1",
+          "root_title": "Bot Chat",
+          "title": "Bot Chat",
+          "preview": "",
+          "started_at": 1793498156.455813,
+          "last_active": 1793498156.455813,
+          "message_count": 0,
+          "live_message_count": 0
+        },
+        "ui_meta_revisions": {},
+        "has_avatar": false
+      },
+      "<more:1>"
+    ],
+    "bot_mode_protocol": true,
+    "install_id": "df6c6e090573444e8e14b74c1aa39cca"
+  }
+}

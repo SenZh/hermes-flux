@@ -17,6 +17,7 @@
  *
  * 约束与规则 (Rules):
  *   - 纯 TypeScript 实现，零宿主 API 或 DOM 依赖。
+ // gate-degrade: set_hidden 失败不改变会话可用性，主工位已在创建时带 hidden=true
  *   - 显式失败（Failure Is Not Empty）：网络或网关报错必须显式向上抛出，严禁 catch 空数组。
  */
 
@@ -38,6 +39,7 @@ import type {
   SessionItemPayload,
   IRpcCaller,
 } from '../rpc/types.js';
+import { normalizeAgentProfile } from '../rpc/profileNormalize.js';
 
 export interface ForeverChatDescriptor {
   sessionId: string;
@@ -71,11 +73,15 @@ export class ProfileService {
       throw new Error('网关返回了非法的 profiles.list 响应数据结构');
     }
 
+    // 归一化只做一次，且与 client.listProfiles() 共用同一实现：
+    // 否则两条路径会给出不同形状，ui_meta 这类透传字段在其中一条上静默消失。
+    const normalized = res.profiles.map((p) => normalizeAgentProfile(p));
+
     this.profileCache.clear();
-    for (const p of res.profiles) {
+    for (const p of normalized) {
       this.profileCache.set(p.name, p);
     }
-    return res.profiles;
+    return normalized;
   }
 
   /**
@@ -130,20 +136,32 @@ export class ProfileService {
 
   /**
    * 更新配置专职 Bot 属性
+   *
+   * 【契约依据】ProfilesConfigureParams 是**扁平字段**（description / soul / model / ...），
+   * 不存在整包 `patch`；结果字段是 `ok/applied`，不是 `success`。
+   *
+   * 【防范的历史坑】曾发送 `{ name, patch }` → 网关 4000；
+   * 且用 `res.success` 判定，真实返回 `ok` 时永远得到 false。
    */
   public async configureProfile(
     name: string,
     patch: Partial<AgentProfileDetail>,
     bridge: IRpcCaller
   ): Promise<boolean> {
+    const params: ProfilesConfigureParams = { name };
+    if (patch.description !== undefined) params.description = patch.description;
+    if (patch.soulContent !== undefined) params.soul = patch.soulContent;
+    if (patch.model !== undefined) params.model = patch.model;
+
     const res = await bridge.request<ProfilesConfigureResult, ProfilesConfigureParams>(
       'profiles.configure',
-      { name, patch }
+      params
     );
-    if (res.success) {
+    const ok = res?.ok === true;
+    if (ok) {
       await this.listProfiles(bridge, true);
     }
-    return res.success;
+    return ok;
   }
 
   /**
@@ -176,18 +194,22 @@ export class ProfileService {
 
   /**
    * 设置 Bot 头像/资产
+   *
+   * 【契约依据】ProfilesSetAssetParams: { profile?, name, asset, data, clear? }
+   * 【防范的历史坑】曾传 `key` 与 `base64`，网关直接 4000 Extra inputs are not permitted。
    */
   public async setAsset(
     name: string,
-    key: string,
-    base64: string,
+    asset: string,
+    data: string,
     bridge: IRpcCaller
   ): Promise<boolean> {
     const res = await bridge.request<ProfilesSetAssetResult, ProfilesSetAssetParams>(
       'profiles.set_asset',
-      { name, key, base64 }
+      { name, asset, data }
     );
-    return res.success;
+    // 契约：{ ok, asset, size, removed }；兼容早期网关的 success
+    return res.ok === true || res.success === true;
   }
 
   /**
@@ -238,10 +260,12 @@ export class ProfileService {
     }
 
     // 3. 不存在时自动为该 Bot 建立终身主工位
+    // 契约依据：SessionCreateParams 不含 system_prompt（人格由 profile 的 SOUL 决定），
+    // 但支持 hidden，可在创建时直接标记隐藏，避免污染普通会话列表。
     const createRes = await bridge.request<{ session_id?: string; id?: string }>('session.create', {
       title: 'Bot Chat',
       profile: botProfile,
-      system_prompt: `You are dedicated specialist Bot [${botProfile}].`,
+      hidden: true,
     });
     const sessionId = createRes.session_id || createRes.id;
     if (!sessionId) {
@@ -251,8 +275,10 @@ export class ProfileService {
     // 4. 将其标记为 hidden 避免在普通旁聊列表中混排
     try {
       await bridge.request('session.set_hidden', { session_id: sessionId, hidden: true });
-    } catch {
-      // 容错放行
+    } catch (err) {
+      // gate-degrade: 主工位创建时已带 hidden=true，这里只是二次保险；失败不影响会话可用性
+      // 但仍要留下证据，避免"以为隐藏了其实没隐藏"
+      console.warn('[ProfileService] session.set_hidden failed for forever chat', err);
     }
 
     const descriptor: ForeverChatDescriptor = {

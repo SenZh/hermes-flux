@@ -262,3 +262,78 @@ test('Gateway event reducer - subagent delegation events', async (t) => {
   });
 });
 
+test('Gateway event contract guard - 事件 payload 必须落在契约白名单内', async (t) => {
+  const { addLogSink, clearLogSinks, setLogLevel } = await import('../../dist/log/logger.js');
+  const { resetEventContractReports } = await import('../../dist/session/eventReducer.js');
+
+  function captureLogs(tt) {
+    const records = [];
+    const previous = setLogLevel('debug');
+    clearLogSinks();
+    addLogSink((r) => records.push(r), 'trace');
+    tt.after(() => {
+      clearLogSinks();
+      setLogLevel(previous);
+      resetEventContractReports();
+    });
+    return records;
+  }
+
+  await t.test('契约内的 payload 字段不产生告警', (tt) => {
+    const records = captureLogs(tt);
+    // message.delta 的契约字段是 text / rendered / verbose
+    const actions = reduceGatewayEvent(
+      { type: 'message.delta', session_id: 'live-42', payload: { text: '你好' } },
+      CTX
+    );
+    assert.equal(actions.length, 1);
+    assert.equal(actions[0].type, 'append-content');
+    assert.equal(records.filter((r) => r.level === 'warn').length, 0, '合法字段不得告警');
+  });
+
+  await t.test('payload 出现契约外字段必须告警，但不中断事件流', (tt) => {
+    const records = captureLogs(tt);
+    const actions = reduceGatewayEvent(
+      {
+        type: 'message.delta',
+        session_id: 'live-42',
+        payload: { text: '你好', delta: '网关改名后的字段' },
+      },
+      CTX
+    );
+
+    // 行为不变：仍然按 text 解析
+    assert.equal(actions.length, 1);
+    assert.equal(actions[0].type, 'append-content');
+
+    const warn = records.find((r) => r.level === 'warn' && r.message.includes('outside the gateway contract'));
+    assert.ok(warn, '必须留下字段漂移的告警');
+    assert.equal(warn.data.type, 'message.delta');
+    assert.deepEqual(warn.data.unknownFields, ['delta']);
+    assert.ok(warn.data.allowedFields.includes('text'));
+  });
+
+  await t.test('同一偏差只上报一次，避免高频事件刷爆日志', (tt) => {
+    const records = captureLogs(tt);
+    for (let i = 0; i < 5; i += 1) {
+      reduceGatewayEvent(
+        { type: 'message.delta', session_id: 'live-42', payload: { text: 'x', delta: 'y' } },
+        CTX
+      );
+    }
+    const warns = records.filter((r) => r.level === 'warn' && r.message.includes('outside the gateway contract'));
+    assert.equal(warns.length, 1, `同一偏差只应上报一次，实际 ${warns.length} 次`);
+  });
+
+  await t.test('契约外的事件名只记 debug，不报错也不产生动作', (tt) => {
+    const records = captureLogs(tt);
+    const actions = reduceGatewayEvent(
+      { type: 'brand.new.event', session_id: 'live-42', payload: { anything: 1 } },
+      CTX
+    );
+    assert.deepEqual(actions, []);
+    assert.equal(records.filter((r) => r.level === 'warn').length, 0, '未知事件不得告警');
+    assert.ok(records.some((r) => r.level === 'debug' && r.message.includes('not in gateway contract')));
+  });
+});
+

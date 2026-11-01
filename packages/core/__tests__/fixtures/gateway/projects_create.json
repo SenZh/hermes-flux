@@ -1,0 +1,27 @@
+{
+  "method": "projects.create",
+  "recordedAt": "2026-11-01T01:59:35.303Z",
+  "gatewayVersion": "0.22.5",
+  "result": {
+    "project": {
+      "id": "p_a1967949",
+      "slug": "flux-probe-create-mvx6mrby",
+      "name": "flux-probe-create-mvx6mrby",
+      "description": null,
+      "icon": null,
+      "color": null,
+      "board_slug": null,
+      "primary_path": "<path>",
+      "archived": false,
+      "created_at": 1793498386,
+      "folders": [
+        {
+          "path": "<path>",
+          "label": null,
+          "is_primary": true,
+          "added_at": 1793498386
+        }
+      ]
+    }
+  }
+}

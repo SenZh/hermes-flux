@@ -1,0 +1,9 @@
+{
+  "method": "subagent.tail",
+  "recordedAt": "2026-11-01T01:59:35.303Z",
+  "gatewayVersion": "0.22.5",
+  "result": {
+    "__guard": 4001,
+    "message": "session not found or not owned by this transport"
+  }
+}

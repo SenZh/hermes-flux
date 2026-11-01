@@ -17,6 +17,8 @@ build/
 # Environment & Credentials (STRICT)
 .env
 .env.*
+# 样例文件只含变量名，不含任何真实值，必须能入库
+!.env.example
 *.local
 credentials.json
 *.key
@@ -36,4 +38,5 @@ ui/icon1.jpg
 tmp-*.mjs
 *.log
 .playwright-mcp/
+bun.lock
 

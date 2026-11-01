@@ -155,14 +155,19 @@ test('GroupRoomStore - 多 Agent 群聊房间与四阶拉群升级管线', async
     const mockBridge = {
       async request(method, params) {
         if (method === 'groups.create') {
-          return { room_id: 'grp-state-1', name: params.name, members: params.members };
+          // 官方契约：groups.create -> { room }
+          return { room: { room_id: 'grp-state-1', name: params.name, members: params.members } };
         }
         if (method === 'groups.rename') {
-          assert.equal(params.new_name, '新会议名称');
-          return { success: true };
+          // 官方契约：groups.rename 需要 event_id，参数名是 name 而不是 new_name
+          assert.equal(typeof params.event_id, 'string', 'event_id 必须存在（否则网关 4111）');
+          assert.equal(params.new_name, undefined, 'new_name 不是契约字段');
+          assert.equal(params.name, '新会议名称');
+          return { room: { room_id: 'grp-state-1', name: params.name } };
         }
         if (method === 'groups.disband') {
-          return { success: true };
+          // 官方契约：groups.disband -> { tombstone }，不是 success 布尔
+          return { tombstone: { room_id: 'grp-state-1', kind: 'room.disbanded' } };
         }
         throw new Error(`Unexpected method: ${method}`);
       },
@@ -170,10 +175,10 @@ test('GroupRoomStore - 多 Agent 群聊房间与四阶拉群升级管线', async
 
     await store.createRoom('旧会议', ['arch-wang', 'default'], mockBridge);
     const renamed = await store.renameRoom('grp-state-1', '新会议名称', mockBridge);
-    assert.equal(renamed, true);
+    assert.equal(renamed, true, 'rename 必须依据 { room } 判定成功');
 
     const disbanded = await store.disbandRoom('grp-state-1', mockBridge);
-    assert.equal(disbanded, true);
+    assert.equal(disbanded, true, 'disband 必须依据 { tombstone } 判定成功');
   });
 
   await t.test('5. promoteSessionToGroup：单聊一键拉群四阶工程管道闭环与负向校验', async () => {

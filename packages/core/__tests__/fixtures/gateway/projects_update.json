@@ -1,0 +1,27 @@
+{
+  "method": "projects.update",
+  "recordedAt": "2026-11-01T01:59:35.303Z",
+  "gatewayVersion": "0.22.5",
+  "result": {
+    "project": {
+      "id": "p_99c43ce7",
+      "slug": "flux-probe-mvx6mr3q",
+      "name": "flux-probe-mvx6mr3q",
+      "description": "契约探针已更新描述",
+      "icon": null,
+      "color": null,
+      "board_slug": null,
+      "primary_path": "<path>",
+      "archived": false,
+      "created_at": 1793498385,
+      "folders": [
+        {
+          "path": "<path>",
+          "label": null,
+          "is_primary": true,
+          "added_at": 1793498385
+        }
+      ]
+    }
+  }
+}

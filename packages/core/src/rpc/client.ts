@@ -5,6 +5,64 @@
 import { JsonRpcRequest, JsonRpcResponse, JsonRpcNotification, NormalizedSession, ModelDetail, AgentProfile } from './types.js';
 import { WebSocketFsm, FsmState } from './fsm.js';
 import { normalizeSessionsResult, extractAvailableModels, extractModelDetails } from '../models/types.js';
+import { createLogger } from '../log/logger.js';
+import { CONTRACT_METHODS } from './contracts/contractTable.generated.js';
+import { EXTRA_METHODS } from './contracts/extraMethods.js';
+import { normalizeAgentProfile } from './profileNormalize.js';
+
+const log = createLogger('rpc');
+
+/**
+ * 契约守卫开关。
+ *
+ * 【规则 (Rules)】
+ * 默认开启。仅在排障时可用 `FLUX_CONTRACT_GUARD=0` 临时关闭，
+ * 关闭期间产生的 4000 错误仍必须落日志，不得作为长期方案。
+ */
+function contractGuardEnabled(): boolean {
+  try {
+    const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
+    const value = proc?.env?.FLUX_CONTRACT_GUARD;
+    if (value === '0' || value === 'false') return false;
+  // gate-degrade: 浏览器环境没有 process.env，属于正常的不可达分支而非失败
+  } catch {
+    // 无 process 环境（浏览器）时保持开启
+  }
+  return true;
+}
+
+/**
+ * 契约违规错误：请求字段不在网关契约白名单内。
+ *
+ * 【设计意图 (Why)】
+ *   把"我们以为网关要什么"与"网关实际要什么"的差异，从运行时的
+ *   `4000 Extra inputs are not permitted` 提前到发送前，并给出精确字段名。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ // gate-degrade: 连接已判定半开，close 失败也要继续走重连流程，不能卡在看门狗里
+ *   profiles.get_asset 多传 `key` 被网关 4000 拒绝，调用方 catch 后返回 null，
+ *   界面只表现为"没有头像"，排查成本极高。
+ *
+ * 【规则 (Rules)】
+ *   该错误必须显式抛出，严禁被调用方降级为空数据。
+ */
+export class ContractViolationError extends Error {
+  public readonly code = 'CONTRACT_VIOLATION';
+  public readonly method: string;
+  public readonly unknownFields: string[];
+  public readonly allowedFields: string[];
+
+  constructor(method: string, unknownFields: string[], allowedFields: string[]) {
+    super(
+      `RPC "${method}" 传入了网关契约未声明的字段 [${unknownFields.join(', ')}]，` +
+        `允许字段为 [${allowedFields.join(', ') || '无'}]。请对照网关契约修正调用参数。`
+    );
+    this.name = 'ContractViolationError';
+    this.method = method;
+    this.unknownFields = unknownFields;
+    this.allowedFields = allowedFields;
+  }
+}
 
 export interface RpcClientOptions {
   url: string;
@@ -235,16 +293,23 @@ export class HermesGatewayClient {
 
   /**
    * 设计意图 (Why):
-   *   在长连接成功建立后启动周期性应用层心跳看门狗（system.ping）。
+   *   在长连接成功建立后启动周期性应用层心跳看门狗。
    *
    * 防范的历史坑 (Pitfall):
-   *   移动网络与 NAT 路由存在短生存期的半开连接陷阱（客户端认为连接正常但网关已死）。
-   *   若无周期性心跳应答超时检测，客户端将永久挂在假在线状态无法感知断网。
+   *   1. 移动网络与 NAT 路由存在短生存期的半开连接陷阱（客户端认为连接正常但网关已死）。
+   *      若无周期性心跳应答超时检测，客户端将永久挂在假在线状态无法感知断网。
+   *   2. 曾使用不存在的方法名 `system.ping`：网关直接返回 -32601，
+   *      而 `.finally` 又把超时看门狗清掉，导致看门狗**从未真正生效**。
+   *      正确方法是网关在 `tui_gateway/methods_voice.py` 单独注册的 `ping`
+   *      （返回 `{ pong: true }`，专门用于 sleep/wake 后的半开探测）。
+   *   3. 失败分支也曾无条件清理看门狗：传输层超时被当作"有应答"处理，
+   *      半开连接永远不会被主动关闭。只有「服务器确实回了包」才允许清理。
    *
    * 约束与规则 (Rules):
    *   - 仅在 CONNECTED 状态下运行；
    *   - 发起 ping 后必须设置超时看门狗，超时未应答直接主动 close() 销毁死连接触发重连自愈；
-   *   - 收到任何合法响应必须立即清理本次超时看门狗。
+   *   - 只有收到服务器响应（成功或带 JSON-RPC 错误码）才清理看门狗；
+   *     传输层失败一律保留看门狗，让它把死连接关掉。
    */
   private startHeartbeat(): void {
     this.stopHeartbeat();
@@ -256,24 +321,43 @@ export class HermesGatewayClient {
       }
 
       this.heartbeatTimeoutHandle = setTimeout(() => {
-        console.warn('[HermesGatewayClient] Heartbeat watchdog timeout, terminating half-open connection');
+        log.warn('heartbeat watchdog timeout, terminating half-open connection', {
+          heartbeatTimeoutMs: this.heartbeatTimeoutMs,
+          state: this.fsm.getState(),
+        });
         this.stopHeartbeat();
         if (this.ws) {
           try {
             this.ws.close();
-          } catch {}
+          } catch (err) {
+            // gate-degrade: 连接已判定半开，close 失败也要继续走重连流程，不能卡在看门狗里
+            log.debug('close() on half-open socket failed', err);
+          }
         }
       }, this.heartbeatTimeoutMs);
 
-      this.call('system.ping', { timestamp: Date.now() })
-        .catch(() => {})
-        .finally(() => {
-          if (this.heartbeatTimeoutHandle) {
-            clearTimeout(this.heartbeatTimeoutHandle);
-            this.heartbeatTimeoutHandle = null;
+      this.call('ping', {})
+        .then(() => {
+          this.clearHeartbeatTimeout();
+        })
+        .catch((err: unknown) => {
+          const code = (err as { code?: unknown } | null)?.code;
+          // 服务器回了 JSON-RPC 错误码说明链路是活的，可以清理看门狗；
+          // 传输层超时/断开则保留看门狗，交给它关闭死连接。
+          if (typeof code === 'number') {
+            this.clearHeartbeatTimeout();
+            return;
           }
+          log.warn('heartbeat ping failed without server response', err);
         });
     }, this.heartbeatIntervalMs);
+  }
+
+  private clearHeartbeatTimeout(): void {
+    if (this.heartbeatTimeoutHandle) {
+      clearTimeout(this.heartbeatTimeoutHandle);
+      this.heartbeatTimeoutHandle = null;
+    }
   }
 
   private stopHeartbeat(): void {
@@ -305,14 +389,18 @@ export class HermesGatewayClient {
 
       this.ws.onopen = () => {
         this.fsm.transitionTo('HANDSHAKING');
-        // Perform fast handshake ping
-        this.call('system.ping', { timestamp: Date.now() })
+        log.info('websocket open, handshaking', { url: this.url });
+        // 握手探针：网关 `ping` 返回 { pong: true }，是最轻量的存活确认
+        this.call('ping', {})
           .then(() => {
+            log.info('handshake ok, connected');
             this.fsm.transitionTo('CONNECTED');
             this.startHeartbeat();
           })
-          .catch(() => {
-            // Even if ping is not directly supported, connection opened
+          .catch((err: unknown) => {
+            // 握手探针失败不代表连接不可用（老版本网关可能未注册 ping），
+            // 但必须留下证据，避免"假在线"。
+            log.warn('handshake ping failed, proceeding as connected', err);
             this.fsm.transitionTo('CONNECTED');
             this.startHeartbeat();
           });
@@ -382,7 +470,55 @@ export class HermesGatewayClient {
     }, delay);
   }
 
+  /**
+   * 发送前契约守卫：字段白名单校验。
+   *
+   * 【设计意图 (Why)】
+   * 网关对入参执行 Pydantic `extra='forbid'`，多写一个字段就是 4000。
+   * 把这一步提前到本地，能让错误在开发期就带着精确字段名暴露，
+   * 而不是等网关拒绝、再被上层 catch 降级成"没数据"。
+   *
+   * 【防范的历史坑 (Pitfall)】
+   * profiles.get_asset 多传 key、groups.send 平铺 text、
+   * subagent.steer 传 instruction 等，全部属于此类静默失败。
+   *
+   * 【规则 (Rules)】
+   * - 契约快照里没有登记的方法只记 debug 日志放行（可能是网关新增方法）；
+   * - 可通过 FLUX_CONTRACT_GUARD=0 临时关闭（仅限排障，禁止长期关闭）；
+   * - 违规必须抛出 ContractViolationError，不允许静默丢弃字段后继续发送。
+   */
+  private validateContract(method: string, params: unknown): void {
+    if (!contractGuardEnabled()) return;
+    if (!params || typeof params !== 'object' || Array.isArray(params)) return;
+
+    const spec = CONTRACT_METHODS[method] ?? EXTRA_METHODS[method];
+    if (!spec) {
+      log.debug('contract: method not in snapshot, allowing through', { method });
+      return;
+    }
+
+    const allowed = new Set<string>(spec.params);
+    const unknownFields = Object.keys(params as Record<string, unknown>).filter((key) => !allowed.has(key));
+    if (unknownFields.length === 0) return;
+
+    const error = new ContractViolationError(method, unknownFields, spec.params as string[]);
+    log.error('contract violation', {
+      method,
+      unknownFields,
+      allowedFields: spec.params,
+      params,
+    });
+    throw error;
+  }
+
   public call<T = unknown>(method: string, params?: unknown): Promise<T> {
+    // 契约校验失败必须以 rejected promise 形式返回，保证调用方的
+    // `await` / `.catch()` 语义统一，不会出现"同步抛错绕过 catch"的漏洞。
+    try {
+      this.validateContract(method, params);
+    } catch (err) {
+      return Promise.reject(err);
+    }
     const id = this.nextId++;
     const request: JsonRpcRequest = {
       jsonrpc: '2.0',
@@ -391,13 +527,17 @@ export class HermesGatewayClient {
       params,
     };
 
+    log.debug('rpc call', { id, method, params });
+
     return new Promise<T>((resolve, reject) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        log.warn('rpc call rejected: socket not open', { method, state: this.fsm.getState() });
         return reject(new Error(`WebSocket is not connected (current state: ${this.fsm.getState()})`));
       }
 
       const timer = setTimeout(() => {
         this.pendingRequests.delete(id);
+        log.warn('rpc call timed out', { id, method, timeoutMs: this.timeoutMs });
         reject(new Error(`RPC request '${method}' with id ${id} timed out after ${this.timeoutMs}ms`));
       }, this.timeoutMs);
 
@@ -618,32 +758,7 @@ export class HermesGatewayClient {
         : Array.isArray((res as Record<string, unknown>)?.profiles)
           ? ((res as Record<string, unknown>).profiles as unknown[])
           : [];
-      return list.map((item: unknown) => {
-        const obj = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
-        const rawAvatar = typeof obj.avatar === 'string' && obj.avatar
-          ? obj.avatar
-          : typeof obj.avatar_url === 'string' && obj.avatar_url
-          ? obj.avatar_url
-          : typeof obj.icon === 'string' && obj.icon
-          ? obj.icon
-          : typeof obj.image === 'string' && obj.image
-          ? obj.image
-          : '';
-        // ui_meta 必须原样透传：旧群聊房间与其历史发言只存在于这里
-        const uiMeta = obj.ui_meta && typeof obj.ui_meta === 'object'
-          ? (obj.ui_meta as AgentProfile['uiMeta'])
-          : undefined;
-        return {
-          name: String(obj.name || obj.id || 'default'),
-          displayName: String(obj.display_name || obj.title || obj.name || '默认 Agent'),
-          description: typeof obj.description === 'string' ? obj.description : '',
-          avatar: rawAvatar,
-          model: typeof obj.model === 'string' ? obj.model : '',
-          isDefault: Boolean(obj.is_default || obj.name === 'default'),
-          hasAvatar: obj.has_avatar === true,
-          uiMeta,
-        };
-      });
+      return list.map((item: unknown) => normalizeAgentProfile(item));
     } catch (e) {
       console.warn('[HermesGatewayClient] profiles.list failed, returning default profile:', e);
       return [

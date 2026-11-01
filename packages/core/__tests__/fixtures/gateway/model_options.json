@@ -1,0 +1,947 @@
+{
+  "method": "model.options",
+  "recordedAt": "2026-11-01T01:59:35.303Z",
+  "gatewayVersion": "0.22.5",
+  "result": {
+    "providers": [
+      {
+        "slug": "nous",
+        "name": "Nous Portal",
+        "is_current": false,
+        "is_user_defined": false,
+        "models": [
+          "anthropic/claude-fable-5.1",
+          "anthropic/claude-fable-5",
+          "anthropic/claude-opus-5.5",
+          "<more:69>"
+        ],
+        "total_models": 72,
+        "source": "hermes",
+        "authenticated": true,
+        "pricing": {
+          "anthropic/claude-fable-5.1": {
+            "input": "$10.00",
+            "output": "$50.00",
+            "cache": "$0.25",
+            "free": false
+          },
+          "anthropic/claude-fable-5": {
+            "input": "$10.00",
+            "output": "$50.00",
+            "cache": "$1.00",
+            "free": false
+          },
+          "anthropic/claude-opus-5.5": {
+            "input": "$4.00",
+            "output": "$20.00",
+            "cache": "$0.20",
+            "free": false
+          },
+          "anthropic/claude-opus-5": {
+            "input": "$5.00",
+            "output": "$25.00",
+            "cache": "$0.50",
+            "free": false
+          },
+          "anthropic/claude-opus-4.8": {
+            "input": "$5.00",
+            "output": "$25.00",
+            "cache": "$0.50",
+            "free": false
+          },
+          "anthropic/claude-sonnet-5.5": {
+            "input": "$2.00",
+            "output": "$10.00",
+            "cache": "$0.10",
+            "free": false
+          },
+          "anthropic/claude-sonnet-5": {
+            "input": "$2.00",
+            "output": "$10.00",
+            "cache": "$0.20",
+            "free": false
+          },
+          "anthropic/claude-haiku-5.5": {
+            "input": "$0.10",
+            "output": "$0.50",
+            "cache": "$0.01",
+            "free": false
+          },
+          "anthropic/claude-haiku-4.5": {
+            "input": "$1.00",
+            "output": "$5.00",
+            "cache": "$0.10",
+            "free": false
+          },
+          "openai/gpt-6-astra": {
+            "input": "$10.00",
+            "output": "$50.00",
+            "cache": "$1.00",
+            "free": false
+          },
+          "openai/gpt-6-astra-fast": {
+            "input": "$20.00",
+            "output": "$100.00",
+            "cache": "$2.00",
+            "free": false
+          },
+          "openai/gpt-6-astra-flex": {
+            "input": "$5.00",
+            "output": "$25.00",
+            "cache": "$0.50",
+            "free": false
+          },
+          "openai/gpt-6-astra-pro": {
+            "input": "$10.00",
+            "output": "$50.00",
+            "cache": "$1.00",
+            "free": false
+          },
+          "openai/gpt-6-astra-pro-fast": {
+            "input": "$20.00",
+            "output": "$100.00",
+            "cache": "$2.00",
+            "free": false
+          },
+          "openai/gpt-6-astra-pro-flex": {
+            "input": "$5.00",
+            "output": "$25.00",
+            "cache": "$0.50",
+            "free": false
+          },
+          "openai/gpt-6.1-sol": {
+            "input": "$2.00",
+            "output": "$10.00",
+            "cache": "$0.10",
+            "free": false
+          },
+          "openai/gpt-6.1-sol-pro": {
+            "input": "$2.00",
+            "output": "$10.00",
+            "cache": "$0.10",
+            "free": false
+          },
+          "openai/gpt-6.1-terra": {
+            "input": "$1.00",
+            "output": "$5.00",
+            "cache": "$0.05",
+            "free": false
+          },
+          "openai/gpt-6-sol": {
+            "input": "$2.00",
+            "output": "$10.00",
+            "cache": "$0.20",
+            "free": false
+          },
+          "openai/gpt-6-sol-pro": {
+            "input": "$2.00",
+            "output": "$10.00",
+            "cache": "$0.20",
+            "free": false
+          },
+          "openai/gpt-6-luna": {
+            "input": "$0.10",
+            "output": "$0.50",
+            "cache": "$0.01",
+            "free": false
+          },
+          "openai/gpt-6-luna-pro": {
+            "input": "$0.10",
+            "output": "$0.50",
+            "cache": "$0.01",
+            "free": false
+          },
+          "openai/gpt-5.5": {
+            "input": "$5.00",
+            "output": "$30.00",
+            "cache": "$0.50",
+            "free": false
+          },
+          "openai/gpt-5.5-pro": {
+            "input": "$30.00",
+            "output": "$180.00",
+            "cache": null,
+            "free": false
+          },
+          "openai/gpt-5.4-mini": {
+            "input": "$0.75",
+            "output": "$4.50",
+            "cache": "$0.07",
+            "free": false
+          },
+          "google/gemini-4-argon": {
+            "input": "$2.00",
+            "output": "$10.00",
+            "cache": "$0.10",
+            "free": false,
+            "discount_percent": 50,
+            "was_input": "$4.00",
+            "was_output": "$20.00"
+          },
+          "google/gemini-3.1-pro-preview": {
+            "input": "$2.00",
+            "output": "$12.00",
+            "cache": "$0.20",
+            "free": false
+          },
+          "google/gemini-3.8-flash": {
+            "input": "$0.83",
+            "output": "$4.12",
+            "cache": "$0.08",
+            "free": false
+          },
+          "google/gemini-3.7-flash": {
+            "input": "$0.75",
+            "output": "$3.75",
+            "cache": "$0.07",
+            "free": false,
+            "discount_percent": 50,
+            "was_input": "$1.50",
+            "was_output": "$7.50"
+          },
+          "x-ai/grok-4.7": {
+            "input": "$2.00",
+            "output": "$6.00",
+            "cache": "$0.50",
+            "free": false
+          },
+          "x-ai/grok-4.6": {
+            "input": "$2.00",
+            "output": "$6.00",
+            "cache": "$0.50",
+            "free": false
+          },
+          "deepseek/deepseek-v4-pro": {
+            "input": "$0.94",
+            "output": "$1.89",
+            "cache": "$0.08",
+            "free": false
+          },
+          "deepseek/deepseek-v4-pro-0813": {
+            "input": "$0.11",
+            "output": "$4.00",
+            "cache": "$0.11",
+            "free": false
+          },
+          "deepseek/deepseek-v4.1-flash": {
+            "input": "$0.11",
+            "output": "$0.51",
+            "cache": "$0.004",
+            "free": false
+          },
+          "deepseek/deepseek-v4.1-flash-1017": {
+            "input": "$0.15",
+            "output": "$0.60",
+            "cache": "$0.003",
+            "free": false
+          },
+          "deepseek/deepseek-v4-flash-0731": {
+            "input": "$0.05",
+            "output": "$0.16",
+            "cache": "$0.01",
+            "free": false
+          },
+          "qwen/qwen3.8-max-0902": {
+            "input": "$2.00",
+            "output": "$6.00",
+            "cache": "$0.25",
+            "free": false
+          },
+          "qwen/qwen3.8-flash": {
+            "input": "$0.15",
+            "output": "$0.47",
+            "cache": "$0.02",
+            "free": false
+          },
+          "moonshotai/kimi-k3": {
+            "input": "$0.28",
+            "output": "$9.60",
+            "cache": "$0.13",
+            "free": false
+          },
+          "minimax/minimax-m3": {
+            "input": "$0.30",
+            "output": "$1.20",
+            "cache": "$0.06",
+            "free": false
+          },
+          "z-ai/glm-5.3": {
+            "input": "$0.91",
+            "output": "$2.86",
+            "cache": "$0.17",
+            "free": false
+          },
+          "z-ai/glm-5.3-flash": {
+            "input": "$0.12",
+            "output": "$0.40",
+            "cache": "$0.02",
+            "free": false,
+            "discount_percent": 20,
+            "was_input": "$0.15",
+            "was_output": "$0.50"
+          },
+          "z-ai/glm-5.3-flashx": {
+            "input": "$0.37",
+            "output": "$1.25",
+            "cache": "$0.09",
+            "free": false
+          },
+          "z-ai/glm-5.2": {
+            "input": "$0.90",
+            "output": "$2.83",
+            "cache": "$0.16",
+            "free": false
+          },
+          "xiaomi/mimo-v2.6-pro": {
+            "input": "$0.43",
+            "output": "$0.87",
+            "cache": "$0.0036",
+            "free": false
+          },
+          "xiaomi/mimo-v2.6-flash": {
+            "input": "$0.14",
+            "output": "$0.28",
+            "cache": "$0.0028",
+            "free": false
+          },
+          "xiaomi/mimo-v2.6-pro-ultraspeed": {
+            "input": "$4.35",
+            "output": "$8.70",
+            "cache": "$0.04",
+            "free": false
+          },
+          "xiaomi/mimo-v2.5-pro": {
+            "input": "$0.48",
+            "output": "$1.80",
+            "cache": "$0.10",
+            "free": false
+          },
+          "tencent/hy4-preview": {
+            "input": "$0.42",
+            "output": "$1.25",
+            "cache": "$0.02",
+            "free": false,
+            "discount_percent": 44,
+            "was_input": "$0.75",
+            "was_output": "$2.25"
+          },
+          "tencent/hy3": {
+            "input": "$0.13",
+            "output": "$0.53",
+            "cache": "$0.03",
+            "free": false
+          },
+          "stepfun/step-3.7-flash": {
+            "input": "$0.20",
+            "output": "$1.15",
+            "cache": "$0.04",
+            "free": false
+          },
+          "nvidia/nemotron-3-super-120b-a12b": {
+            "input": "$0.30",
+            "output": "$2.40",
+            "cache": "$0.15",
+            "free": false
+          },
+          "meta/muse-spark-1.2": {
+            "input": "$1.25",
+            "output": "$4.25",
+            "cache": "$0.15",
+            "free": false
+          },
+          "meta/muse-spark-1.3": {
+            "input": "$1.25",
+            "output": "$4.25",
+            "cache": "$0.15",
+            "free": false
+          },
+          "sakana/fugu-ultra": {
+            "input": "$5.00",
+            "output": "$30.00",
+            "cache": "$0.50",
+            "free": false
+          },
+          "upstage/solar-pro4": {
+            "input": "$0.15",
+            "output": "$0.60",
+            "cache": "$0.03",
+            "free": false,
+            "discount_percent": 50,
+            "was_input": "$0.30",
+            "was_output": "$1.20"
+          },
+          "upstage/solar-mini4": {
+            "input": "$0.05",
+            "output": "$0.20",
+            "cache": "$0.005",
+            "free": false,
+            "discount_percent": 50,
+            "was_input": "$0.10",
+            "was_output": "$0.40"
+          },
+          "deepseek/deepseek-v4.1-flash:US": {
+            "input": "$0.36",
+            "output": "$1.09",
+            "cache": "$0.01",
+            "free": false
+          },
+          "z-ai/glm-5.3:US": {
+            "input": "$2.31",
+            "output": "$7.26",
+            "cache": "$0.43",
+            "free": false
+          },
+          "z-ai/glm-5.3-flash:US": {
+            "input": "$0.25",
+            "output": "$0.83",
+            "cache": "$0.05",
+            "free": false
+          },
+          "upstage/solar-mini4:free": {
+            "input": "free",
+            "output": "free",
+            "cache": "free",
+            "free": true,
+            "discount_percent": 100
+          },
+          "stepfun/step-3.7-flash:free": {
+            "input": "free",
+            "output": "free",
+            "cache": "free",
+            "free": true,
+            "discount_percent": 100
+          },
+          "reflection/beam-1.0-501b-a23b:free": {
+            "input": "free",
+            "output": "free",
+            "cache": null,
+            "free": true,
+            "discount_percent": 100
+          },
+          "ornith/ornith-1.5-122b:free": {
+            "input": "free",
+            "output": "free",
+            "cache": null,
+            "free": true,
+            "discount_percent": 100
+          },
+          "moonshotai/kimi-k3.1-pro": {
+            "input": "$2.00",
+            "output": "$10.00",
+            "cache": "$0.20",
+            "free": false
+          },
+          "minimax/minimax-m3.1-flash": {
+            "input": "$0.15",
+            "output": "$0.60",
+            "cache": "$0.01",
+            "free": false
+          },
+          "inception/mercury-2.5": {
+            "input": "$0.04",
+            "output": "$0.15",
+            "cache": "$0.004",
+            "free": false,
+            "discount_percent": 80,
+            "was_input": "$0.20",
+            "was_output": "$0.75"
+          },
+          "inception/mercury-3": {
+            "input": "$0.10",
+            "output": "$0.35",
+            "cache": "$0.01",
+            "free": false,
+            "discount_percent": 50,
+            "was_input": "$0.20",
+            "was_output": "$0.70"
+          },
+          "minimax/minimax-m2": {
+            "input": "$0.26",
+            "output": "$1.02",
+            "cache": null,
+            "free": false,
+            "discount_percent": 15,
+            "was_input": "$0.30",
+            "was_output": "$1.20"
+          }
+        },
+        "free_tier": false,
+        "unavailable_models": [],
+        "capabilities": {
+          "anthropic/claude-fable-5.1": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "anthropic/claude-fable-5": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "anthropic/claude-opus-5.5": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "anthropic/claude-opus-5": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "anthropic/claude-opus-4.8": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "anthropic/claude-sonnet-5.5": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "anthropic/claude-sonnet-5": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "anthropic/claude-haiku-5.5": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "anthropic/claude-haiku-4.5": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "openai/gpt-6-astra": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "openai/gpt-6-astra-fast": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "openai/gpt-6-astra-flex": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "openai/gpt-6-astra-pro": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "openai/gpt-6-astra-pro-fast": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "openai/gpt-6-astra-pro-flex": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "openai/gpt-6.1-sol": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "openai/gpt-6.1-sol-pro": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "openai/gpt-6.1-terra": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "openai/gpt-6-sol": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "openai/gpt-6-sol-pro": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "openai/gpt-6-luna": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "openai/gpt-6-luna-pro": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "openai/gpt-5.5": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "openai/gpt-5.5-pro": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "openai/gpt-5.4-mini": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "google/gemini-4-argon": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "google/gemini-3.1-pro-preview": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "google/gemini-3.8-flash": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "google/gemini-3.7-flash": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "x-ai/grok-4.7": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "x-ai/grok-4.6": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "deepseek/deepseek-v4-pro": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "deepseek/deepseek-v4-pro-0813": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "deepseek/deepseek-v4.1-flash": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "deepseek/deepseek-v4.1-flash-1017": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "deepseek/deepseek-v4-flash-0731": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "qwen/qwen3.8-max-0902": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "qwen/qwen3.8-flash": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "moonshotai/kimi-k3": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "minimax/minimax-m3": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "z-ai/glm-5.3": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "z-ai/glm-5.3-flash": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "z-ai/glm-5.3-flashx": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "z-ai/glm-5.2": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "xiaomi/mimo-v2.6-pro": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "xiaomi/mimo-v2.6-flash": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "xiaomi/mimo-v2.6-pro-ultraspeed": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "xiaomi/mimo-v2.5-pro": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "tencent/hy4-preview": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "tencent/hy3": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "stepfun/step-3.7-flash": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "nvidia/nemotron-3-super-120b-a12b": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "meta/muse-spark-1.2": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "meta/muse-spark-1.3": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "sakana/fugu-ultra": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "upstage/solar-pro4": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "upstage/solar-mini4": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "stealth/space-bunny-alpha": {
+            "fast": false,
+            "reasoning": true
+          },
+          "deepseek/deepseek-v4.1-flash:US": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "z-ai/glm-5.3:US": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "z-ai/glm-5.3-flash:US": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "upstage/solar-mini4:free": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "poolside/laguna-s-2.1:free": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "stepfun/step-3.7-flash:free": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "poolside/laguna-xs-2.1:free": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "reflection/beam-1.0-501b-a23b:free": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "ornith/ornith-1.5-122b:free": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "moonshotai/kimi-k3.1-pro": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "minimax/minimax-m3.1-flash": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          },
+          "inception/mercury-2.5": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "inception/mercury-3": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": true
+          },
+          "minimax/minimax-m2": {
+            "fast": false,
+            "reasoning": true,
+            "can_disable_reasoning": false
+          }
+        },
+        "featured_models": []
+      },
+      {
+        "slug": "xai-oauth",
+        "name": "xAI Grok OAuth (SuperGrok / Premium+)",
+        "is_current": false,
+        "is_user_defined": false,
+        "models": [
+          "grok-4.6",
+          "grok-4.20-0309-reasoning",
+          "grok-4.3",
+          "<more:6>"
+        ],
+        "total_models": 9,
+        "source": "hermes",
+        "authenticated": true,
+        "capabilities": {
+          "grok-4.6": {
+            "fast": false,
+            "reasoning": true
+          },
+          "grok-4.20-0309-reasoning": {
+            "fast": false,
+            "reasoning": true
+          },
+          "grok-4.3": {
+            "fast": false,
+            "reasoning": true
+          },
+          "grok-4.5": {
+            "fast": false,
+            "reasoning": true
+          },
+          "grok-4.20-0309-non-reasoning": {
+            "fast": false,
+            "reasoning": false
+          },
+          "grok-4.7": {
+            "fast": false,
+            "reasoning": true
+          },
+          "grok-build-0.1": {
+            "fast": false,
+            "reasoning": true
+          },
+          "grok-4.20-multi-agent-0309": {
+            "fast": false,
+            "reasoning": true
+          },
+          "grok-composer-2.5-fast": {
+            "fast": false,
+            "reasoning": true
+          }
+        },
+        "featured_models": []
+      },
+      {
+        "slug": "cpa",
+        "name": "cpa",
+        "is_current": true,
+        "is_user_defined": true,
+        "models": [
+          "gpt-6-luna",
+          "group/deepseek-v4.1-flash",
+          "deepseek-v4.1-flash",
+          "<more:5>"
+        ],
+        "total_models": 8,
+        "source": "user-config",
+        "api_url": "https://ai.codepower.cloud/v1",
+        "native_catalog_empty": false,
+        "authenticated": true,
+        "capabilities": {
+          "gpt-6-luna": {
+            "fast": false,
+            "reasoning": true
+          },
+          "group/deepseek-v4.1-flash": {
+            "fast": false,
+            "reasoning": true
+          },
+          "deepseek-v4.1-flash": {
+            "fast": false,
+            "reasoning": true
+          },
+          "claude-sonnet-4-6": {
+            "fast": false,
+            "reasoning": true
+          },
+          "gemini-3.8-flash": {
+            "fast": false,
+            "reasoning": true
+          },
+          "claude-opus-4-6": {
+            "fast": false,
+            "reasoning": true
+          },
+          "gpt-6.1-terra": {
+            "fast": false,
+            "reasoning": true
+          },
+          "qiniu/conatus-free": {
+            "fast": false,
+            "reasoning": true
+          }
+        },
+        "featured_models": [],
+        "aliases": [
+          "cpa",
+          "custom:cpa"
+        ]
+      }
+    ],
+    "model": "gemini-3.8-flash",
+    "provider": "cpa"
+  }
+}

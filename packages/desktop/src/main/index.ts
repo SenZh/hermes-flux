@@ -5,9 +5,13 @@
 import { app, BrowserWindow } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createLogger } from '@hermes-flux/core';
 import { createMainWindow } from './window';
 import { registerIpcHandlers } from './ipc';
 import { HermesFluxTray } from './tray';
+import { initFileLogging } from './logFile';
+
+const appLog = createLogger('main');
 
 /**
  * One-time migration of the legacy "Hermes Aura" profile directory.
@@ -39,6 +43,7 @@ function migrateLegacyUserData(): void {
             (f.endsWith('.ldb') || f.endsWith('.log')) &&
             fs.statSync(path.join(ldbPath, f)).size > 100
         );
+      // gate-degrade: 探测旧配置目录是否可用，读不到即视为不可迁移，属于探测型调用
       } catch {
         return false;
       }
@@ -98,6 +103,35 @@ if (!gotTheLock) {
   // Enable Remote Debugging Port for CDP testing & automation
   app.commandLine.appendSwitch('remote-debugging-port', '9222');
 
+  /**
+   * 文件日志必须在创建窗口之前初始化：
+   * 主进程启动早期的窗口创建失败、迁移异常与单实例冲突都需要留下证据。
+   */
+  let fileLogHandle: ReturnType<typeof initFileLogging> | null = null;
+  try {
+    fileLogHandle = initFileLogging(app.getPath('userData'));
+    appLog.info('desktop boot', {
+      appVersion: app.getVersion(),
+      packaged: app.isPackaged,
+      platform: process.platform,
+      logDir: fileLogHandle.logDir,
+    });
+  } catch (err) {
+    appLog.error('file logging init failed', err);
+  }
+
+  // 主进程未捕获异常同样必须落盘，否则崩溃后只剩一个空白窗口
+  process.on('uncaughtException', (err) => {
+    appLog.error('uncaughtException', err);
+  });
+  process.on('unhandledRejection', (reason) => {
+    appLog.error('unhandledRejection', reason);
+  });
+
+  app.on('before-quit', () => {
+    void fileLogHandle?.flush();
+  });
+
   app.whenReady().then(() => {
     // Create main window
     const win = createMainWindow();
@@ -112,6 +146,8 @@ if (!gotTheLock) {
 
     // Load renderer bundle
     loadRenderer(win);
+
+    appLog.info('main window ready', { rendererLogLevel: rendererLogLevel || 'info' });
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {

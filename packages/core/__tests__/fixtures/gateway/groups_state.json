@@ -1,0 +1,49 @@
+{
+  "method": "groups.state",
+  "recordedAt": "2026-11-01T01:59:35.303Z",
+  "gatewayVersion": "0.22.5",
+  "result": {
+    "room": {
+      "room_id": "rmvx6mlf7-552bw",
+      "name": "flux-probe-room-mvx6mlf7",
+      "members": [
+        {
+          "display_name": "default",
+          "handle": "default",
+          "member_id": "m_default_0",
+          "profile": "default",
+          "target": {
+            "kind": "local",
+            "profile": "default"
+          }
+        },
+        {
+          "display_name": "aura",
+          "handle": "aura",
+          "member_id": "m_aura_1",
+          "profile": "aura",
+          "target": {
+            "kind": "local",
+            "profile": "aura"
+          }
+        }
+      ],
+      "authority_gateway_id": "install:df6c6e090573444e8e14b74c1aa39cca",
+      "authority_epoch": 1,
+      "revision": 1,
+      "created_at": 1793498378.3635063,
+      "updated_at": 1793498378.3635063,
+      "idempotent": false,
+      "latest_seq": 0
+    },
+    "driver_status": {
+      "running": true,
+      "working": false,
+      "blocked": false,
+      "counts": {},
+      "pending_actions": [],
+      "member_activity": [],
+      "peer_routes": []
+    }
+  }
+}

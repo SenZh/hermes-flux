@@ -297,11 +297,15 @@ export interface SubagentTailResult {
   latest_seq?: number;
 }
 
+/**
+ * 契约依据：SubagentSteerParams { session_id?, profile?, subagent_id, text? }
+ * 【防范的历史坑】曾声明 `instruction`，网关只认 `text`（多传即 4000）。
+ */
 export interface SubagentSteerParams {
   subagent_id: string;
   session_id?: string;
+  profile?: string;
   text?: string;
-  instruction?: string;
 }
 
 export interface SubagentSteerResult {
@@ -364,11 +368,25 @@ export interface ProfilesDescribeResult {
   mcp_servers?: unknown[];
 }
 
+/**
+ * 契约依据：ProfilesCreateParams
+ * { profile?, name, description?, clone_from?, clone_all?, clone_channels?,
+ *   no_skills?, no_alias?, soul?, model?, provider?, share_auth?, mirror_credentials? }
+ *
+ * 【防范的历史坑】曾传 `template` / `display_name`，两者都不是契约字段（4000）。
+ */
 export interface ProfilesCreateParams {
   name: string;
-  template?: string;
-  display_name?: string;
   description?: string;
+  clone_from?: string;
+  clone_all?: boolean;
+  no_skills?: boolean;
+  no_alias?: boolean;
+  soul?: string;
+  model?: string;
+  provider?: string;
+  share_auth?: boolean;
+  mirror_credentials?: boolean;
 }
 
 export interface ProfilesCreateResult {
@@ -376,37 +394,69 @@ export interface ProfilesCreateResult {
   created: boolean;
 }
 
+/**
+ * 契约依据：ProfilesConfigureParams
+ * { profile?, name, ui_meta?, ui_meta_expected_revisions?, soul?, description?,
+ *   model?, provider?, confirm_expensive_model?, disabled_skills?,
+ *   enabled_toolsets?, enabled_mcp_servers? }
+ *
+ * 【防范的历史坑】曾把整包 `patch` 塞进请求体，网关 4000；结果字段也误判为 `success`，
+ * 真实契约是 `ok/applied`，导致配置成功也返回 false。
+ */
 export interface ProfilesConfigureParams {
   name: string;
-  patch: Partial<AgentProfileDetail>;
+  soul?: string;
+  description?: string;
+  model?: string;
+  provider?: string;
+  disabled_skills?: string[];
+  enabled_toolsets?: string[];
+  enabled_mcp_servers?: string[];
+  ui_meta?: Record<string, unknown>;
 }
 
 export interface ProfilesConfigureResult {
-  success: boolean;
+  ok?: boolean;
+  applied?: string[];
+  confirm_required?: boolean;
+  confirm_message?: string;
 }
 
 export interface ProfilesGetAssetParams {
+  /** 归属 Bot（网关可选参数，缺省为当前 profile） */
+  profile?: string;
   name: string;
-  key?: string;
-  asset?: string;
+  asset: string;
 }
 
 export interface ProfilesGetAssetResult {
   found?: boolean;
   data?: string;
   mime?: string;
+  size?: number;
+  /** 兼容早期网关字段 */
   asset_base64?: string;
   avatar?: string;
 }
 
+/**
+ * 契约依据：ProfilesSetAssetParams { profile?, name, asset, data, clear? }
+ * 【防范的历史坑】曾写 `key` + `base64`，网关 4000 Extra inputs are not permitted。
+ */
 export interface ProfilesSetAssetParams {
   name: string;
-  key: string;
-  base64: string;
+  asset: string;
+  data: string;
+  clear?: boolean;
 }
 
 export interface ProfilesSetAssetResult {
-  success: boolean;
+  ok?: boolean;
+  asset?: string;
+  size?: number;
+  removed?: boolean;
+  /** 兼容早期网关字段 */
+  success?: boolean;
 }
 
 /**
@@ -455,9 +505,17 @@ export interface GroupsCreateParams {
 }
 
 export interface GroupsCreateResult {
-  room_id: string;
-  name: string;
-  members: string[];
+  room?: {
+    room_id?: string;
+    name?: string;
+    members?: Array<string | { profile?: string; handle?: string; display_name?: string }>;
+    created_at?: number;
+    updated_at?: number;
+  };
+  /** 兼容早期网关的扁平字段 */
+  room_id?: string;
+  name?: string;
+  members?: Array<string | { profile?: string; handle?: string; display_name?: string }>;
 }
 
 export interface GroupsStateParams {
@@ -542,19 +600,46 @@ export interface GroupsLogResult {
 
 export interface GroupsDisbandParams {
   room_id: string;
+  cancel_id?: string;
 }
 
 export interface GroupsDisbandResult {
-  success: boolean;
+  /** 契约依据：groups.disband -> { tombstone }（解散事件），不是 success 布尔 */
+  tombstone?: {
+    room_id?: string;
+    event_id?: string;
+    kind?: string;
+    seq?: number;
+  };
+  /** 兼容早期网关 */
+  success?: boolean;
 }
 
+/**
+ * 群聊房间契约（与网关 RpcMethods 1:1 对齐）
+ *
+ * 【契约依据】
+ *   groups.create   params { profile?, room_id, name, members } -> { room }
+ *   groups.rename   params { profile?, room_id, event_id, name } -> { room }
+ *   groups.disband  params { profile?, room_id, cancel_id? }     -> { tombstone }
+ *
+ * 【防范的历史坑】
+ *   手写类型曾声明 `success: boolean` 与 `new_name`，与网关完全不符：
+ *   rename 会被 4000/4111 拒绝，disband 永远读到 undefined 而被判为失败。
+ */
 export interface GroupsRenameParams {
   room_id: string;
-  new_name: string;
+  event_id: string;
+  name: string;
 }
 
 export interface GroupsRenameResult {
-  success: boolean;
+  room?: {
+    room_id?: string;
+    name?: string;
+    members?: Array<string | { profile?: string; handle?: string; display_name?: string }>;
+    updated_at?: number;
+  };
 }
 
 /**
@@ -608,7 +693,25 @@ export interface ProjectsGetResult {
   };
 }
 
+/**
+ * 契约依据：ProjectsCreateParams
+ * { profile?, name, folders, slug?, primary_path, description?, icon?, color?, board_slug?, use? }
+ * 【防范的历史坑】曾传 `path`，契约里没有这个字段（4000）。
+ */
 export interface ProjectsCreateParams {
+  name: string;
+  folders: string[];
+  primary_path: string;
+  description?: string;
+  slug?: string;
+  icon?: string;
+  color?: string;
+  board_slug?: string;
+  use?: boolean;
+}
+
+/** 本地输入类型（非线上契约）：允许只给一个 path，由服务层展开成 folders/primary_path */
+export interface CreateProjectInput {
   name: string;
   path?: string;
   folders?: string[];
@@ -631,15 +734,17 @@ export interface ProjectsCreateResult {
   path?: string;
 }
 
+/**
+ * 契约依据：ProjectsUpdateParams { profile?, id, name?, description?, icon?, color?, board_slug? }
+ * 【防范的历史坑】曾声明 project_id 与整包 patch，两者都会触发 4000。
+ */
 export interface ProjectsUpdateParams {
-  id?: string;
-  project_id?: string;
+  id: string;
   name?: string;
   description?: string;
   icon?: string;
   color?: string;
   board_slug?: string;
-  patch?: Partial<ProjectDetail>;
 }
 
 export interface ProjectsUpdateResult {
@@ -657,8 +762,7 @@ export interface ProjectsDeleteResult {
 }
 
 export interface ProjectsSetActiveParams {
-  id?: string;
-  project_id?: string;
+  id: string;
 }
 
 export interface ProjectsSetActiveResult {
@@ -666,8 +770,7 @@ export interface ProjectsSetActiveResult {
 }
 
 export interface ProjectsAddFolderParams {
-  id?: string;
-  project_id?: string;
+  id: string;
   path: string;
   is_primary?: boolean;
   label?: string;
@@ -679,8 +782,7 @@ export interface ProjectsAddFolderResult {
 }
 
 export interface ProjectsRemoveFolderParams {
-  id?: string;
-  project_id?: string;
+  id: string;
   path: string;
 }
 
@@ -697,13 +799,14 @@ export interface ProjectTreeNode {
   children?: ProjectTreeNode[];
 }
 
+/**
+ * 契约依据：ProjectsTreeParams { profile?, preview_limit?, session_limit? }
+ * 【防范的历史坑】曾声明 project_id / relative_path / depth，三个都不是契约字段。
+ */
 export interface ProjectsTreeParams {
-  project_id?: string;
-  relative_path?: string;
-  depth?: number;
+  profile?: string;
   preview_limit?: number;
   session_limit?: number;
-  profile?: string;
 }
 
 export interface ProjectsTreeResult {
@@ -768,23 +871,28 @@ export interface RollbackRestoreResult {
 
 /**
  * 旁路问答与接力分叉契约 (BTW & Handoff Contracts)
+ *
+ * 【契约依据】SideAgentParams: { session_id, profile?, text } -> TaskIdResult { task_id }
+ * 【防范的历史坑】曾用 `target_profile` 传参、并假设同步返回 `response` 字符串；
+ * 实际网关只返回 task_id，答案经事件流异步到达。两处都会导致静默失败。
  */
 export interface PromptBtwParams {
   session_id: string;
   text: string;
-  target_profile?: string;
+  profile?: string;
 }
 
 export interface PromptBtwResult {
-  response: string;
-  profile: string;
-  token_count?: number;
+  task_id: string;
 }
 
+/**
+ * 契约依据：SessionBranchWholeParams { session_id, profile?, name?, idempotency_key? }
+ * 【防范的历史坑】曾声明 `title`，契约里没有这个字段（4000）。
+ */
 export interface SessionBranchWholeParams {
   session_id: string;
   name?: string;
-  title?: string;
   idempotency_key?: string;
 }
 

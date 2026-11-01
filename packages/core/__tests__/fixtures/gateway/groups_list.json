@@ -1,0 +1,110 @@
+{
+  "method": "groups.list",
+  "recordedAt": "2026-11-01T01:59:35.303Z",
+  "gatewayVersion": "0.22.5",
+  "result": {
+    "rooms": [
+      {
+        "room_id": "rmvx6mlf7-552bw",
+        "name": "flux-probe-room-mvx6mlf7",
+        "members": [
+          {
+            "display_name": "default",
+            "handle": "default",
+            "member_id": "m_default_0",
+            "profile": "default",
+            "target": {
+              "kind": "local",
+              "profile": "default"
+            }
+          },
+          {
+            "display_name": "aura",
+            "handle": "aura",
+            "member_id": "m_aura_1",
+            "profile": "aura",
+            "target": {
+              "kind": "local",
+              "profile": "aura"
+            }
+          }
+        ],
+        "authority_gateway_id": "install:df6c6e090573444e8e14b74c1aa39cca",
+        "authority_epoch": 1,
+        "revision": 1,
+        "created_at": 1793498378.3635063,
+        "updated_at": 1793498378.3635063,
+        "idempotent": false,
+        "latest_seq": 0
+      },
+      {
+        "room_id": "rmvx5t3ns-4kxej",
+        "name": "flux-probe-room-mvx5t3ns",
+        "members": [
+          {
+            "display_name": "default",
+            "handle": "default",
+            "member_id": "m_default_0",
+            "profile": "default",
+            "target": {
+              "kind": "local",
+              "profile": "default"
+            }
+          },
+          {
+            "display_name": "aura",
+            "handle": "aura",
+            "member_id": "m_aura_1",
+            "profile": "aura",
+            "target": {
+              "kind": "local",
+              "profile": "aura"
+            }
+          }
+        ],
+        "authority_gateway_id": "install:df6c6e090573444e8e14b74c1aa39cca",
+        "authority_epoch": 1,
+        "revision": 1,
+        "created_at": 1793497002.3144398,
+        "updated_at": 1793497035.77275,
+        "idempotent": false,
+        "latest_seq": 9
+      },
+      {
+        "room_id": "rmvwg8yj4-j3unq",
+        "name": "测试群聊",
+        "members": [
+          {
+            "display_name": "default",
+            "handle": "default",
+            "member_id": "m_default_0",
+            "profile": "default",
+            "target": {
+              "kind": "local",
+              "profile": "default"
+            }
+          },
+          {
+            "display_name": "aura",
+            "handle": "aura",
+            "member_id": "m_aura_1",
+            "profile": "aura",
+            "target": {
+              "kind": "local",
+              "profile": "aura"
+            }
+          }
+        ],
+        "authority_gateway_id": "install:df6c6e090573444e8e14b74c1aa39cca",
+        "authority_epoch": 1,
+        "revision": 1,
+        "created_at": 1793454071.9992654,
+        "updated_at": 1793460443.429979,
+        "idempotent": false,
+        "latest_seq": 23
+      },
+      "<more:1>"
+    ],
+    "next_offset": null
+  }
+}

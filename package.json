@@ -32,7 +32,14 @@
     "gates:freeze": "node scripts/gates/run.mjs --update-baseline",
     "gates:mutation": "node scripts/gates/mutation-check.mjs",
     "gates:config": "node scripts/gates/verify-config.mjs",
-    "verify": "npm run gates && npm run typecheck && npm test",
+    "contract:sync": "node scripts/contract/sync.mjs",
+    "contract:verify": "node scripts/contract/verify.mjs",
+    "contract:coverage": "node scripts/contract/coverage.mjs",
+    "contract:doc": "node scripts/contract/doc.mjs",
+    "contract:doc:check": "node scripts/contract/doc.mjs --check",
+    "probe:gateway": "node scripts/contract/probe.mjs",
+    "probe:drift": "node scripts/contract/probe.mjs --check",
+    "verify": "npm run gates && npm run contract:verify && npm run contract:coverage && npm run contract:doc:check && npm run typecheck && npm test",
     "prepare": "node -e \"try { require('child_process').execSync('git config core.hooksPath .githooks'); } catch {}\""
   },
   "devDependencies": {

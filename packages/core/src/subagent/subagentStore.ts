@@ -33,6 +33,10 @@ import type {
   SubagentTailResult,
 } from '../rpc/types.js';
 import { RingBuffer } from './ringBuffer.js';
+import { createLogger } from '../log/logger.js';
+import { UnsupportedCapabilityError } from '../rpc/errors.js';
+
+const log = createLogger('subagent');
 
 export interface ISubagentRpcBridge {
   request<TResult = unknown, TParams = unknown>(method: string, params?: TParams): Promise<TResult>;
@@ -197,52 +201,38 @@ export class SubagentStore {
   /**
    * 派生并启动一个新子代理 (subagent.spawn)
    */
+  /**
+   * 派生并启动一个新子代理
+   *
+   * 【网关事实 (Verified)】
+   *   网关契约 RpcMethods 中**不存在** `subagent.spawn`（257 个方法里只有
+   *   subagent.list / steer / interrupt / tail）。子代理由 Agent 自身在回合内
+   *   通过 `delegate_task` 工具派生，客户端只能观察与干预，不能创建。
+   *
+   * 【防范的历史坑 (Pitfall)】
+   // gate-degrade: 离线时子代理列表本就不可得，保持本地缓存是期望行为
+   *   旧实现向不存在的方法发请求，网关返回 -32601 后被 catch 转成
+   *   "唤起失败"，UI 表现为能力不可用却查不出原因。这是典型的"凭空假设接口"。
+   *
+   * 【规则 (Rules)】
+   *   这里必须显式抛出 UnsupportedCapabilityError，禁止伪造本地成功状态，
+   *   也禁止把 -32601 包装成业务失败原因。
+   */
   public async spawnSubagent(
     params: SubagentSpawnParams,
     bridge: ISubagentRpcBridge
   ): Promise<SubagentTaskState> {
-    const now = Date.now();
-    // 先在本地建立 requested 占位，保证 UI 秒开无等待反馈
-    const tempId = `sub-${now}-${Math.random().toString(36).slice(2, 7)}`;
-    this.upsertTask({
-      subagentId: tempId,
+    void bridge;
+    log.error('subagent.spawn is not an RPC on this gateway', {
       parentSessionId: params.parent_session_id,
       targetProfile: params.target_profile,
-      taskTitle: params.task_title,
-      status: 'requested',
-      progressPercent: 5,
-      currentActionText: '正在唤起子代理沙箱...',
-      startedAt: now,
+      hint: '子代理由 Agent 通过 delegate_task 工具派生，客户端仅有 list/steer/interrupt/tail',
     });
-
-    try {
-      const res = await bridge.request<SubagentSpawnResult, SubagentSpawnParams>('subagent.spawn', params);
-      const realId = res.subagent_id || tempId;
-
-      if (realId !== tempId) {
-        this.tasks.delete(tempId);
-      }
-
-      return this.upsertTask({
-        subagentId: realId,
-        parentSessionId: params.parent_session_id,
-        targetProfile: params.target_profile,
-        taskTitle: params.task_title,
-        status: res.status || 'running',
-        progressPercent: 10,
-        currentActionText: '子代理沙箱已挂载，开始执行...',
-        startedAt: now,
-      });
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      this.upsertTask({
-        subagentId: tempId,
-        status: 'failed',
-        error: errMsg,
-        currentActionText: `唤起失败: ${errMsg}`,
-      });
-      throw err;
-    }
+    throw new UnsupportedCapabilityError(
+      'subagent.spawn',
+      '网关不提供 subagent.spawn RPC：子代理由 Agent 在回合内通过 delegate_task 工具派生，' +
+        '客户端只能 subagent.list / steer / interrupt / tail。'
+    );
   }
 
   /**
@@ -269,7 +259,6 @@ export class SubagentStore {
     const res = await bridge.request<SubagentSteerResult, SubagentSteerParams>('subagent.steer', {
       subagent_id: subagentId,
       session_id: task.parentSessionId,
-      instruction,
       text: instruction,
     });
 
@@ -343,14 +332,17 @@ export class SubagentStore {
           });
         }
       }
-    } catch {
-      // 保持静默，不破坏离线状态
+    } catch (err) {
+      // gate-degrade: 离线时子代理列表本就不可得，保持本地缓存是期望行为
+      log.debug('subagent.list sync skipped (offline or unavailable)', err);
     }
   }
 
   /**
    * 穿透加载子代理的历史日志 (subagent.tail)
-   * 适配官方 Gateway 返回结构：text / available 与 entries 数组
+   *
+   * 【契约依据】SubagentIdParams: { session_id, profile?, subagent_id } —— 不含 limit。
+   * 【防范的历史坑】曾传 limit，网关 4000 拒绝后被 catch 吞成"没有日志"。
    */
   public async loadSubagentTail(subagentId: string, bridge: ISubagentRpcBridge, limit = 100): Promise<SubagentLogEntry[]> {
     const task = this.tasks.get(subagentId);
@@ -358,7 +350,6 @@ export class SubagentStore {
       const res = await bridge.request<SubagentTailResult>('subagent.tail', {
         subagent_id: subagentId,
         session_id: task?.parentSessionId,
-        limit,
       });
       if (res && Array.isArray(res.entries)) {
         for (const entry of res.entries) {
@@ -372,8 +363,9 @@ export class SubagentStore {
           text: res.text,
         });
       }
-    } catch {
-      // 降级为本地已有的日志缓存
+    } catch (err) {
+      // 显式记录失败原因，避免把契约错误伪装成"没有日志"
+      log.warn('subagent.tail failed', { subagentId, limit, err });
     }
     return this.getLogs(subagentId);
   }

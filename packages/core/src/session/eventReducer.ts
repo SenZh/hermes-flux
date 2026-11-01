@@ -9,7 +9,56 @@
  * This reducer is pure: it turns one gateway frame into an ordered list of UI
  * actions. Keeping it out of the renderer makes the turn lifecycle testable
  * without a DOM or a socket.
+ *
+ * 事件契约守卫 (Event Contract Guard):
+ *   网关契约里有 72 个下行事件的 payload 定义（BackendGatewayEventMap）。
+ *   本模块只消费其中一部分，但**任何**事件的 payload 字段都必须落在契约白名单内。
+ *   历史上字段名靠猜，一旦网关改名（如 text -> delta），界面只会安静地空白。
+ *   因此这里在解析前做一次字段校验，并把偏差写进日志，而不是让它静默发生。
  */
+
+import { CONTRACT_EVENTS } from '../rpc/contracts/contractTable.generated.js';
+import { createLogger } from '../log/logger.js';
+
+const log = createLogger('events');
+
+/** 已上报过的事件偏差，避免高频事件把日志刷爆 */
+const reportedEventDrift = new Set<string>();
+/** 已上报过的未知事件名 */
+const reportedUnknownEvents = new Set<string>();
+
+/**
+ * 校验一个 event 帧的 payload 字段是否落在契约白名单内。
+ * 只记日志，不改变解析行为——事件流不能因为一个多余字段就中断。
+ */
+function checkEventContract(type: string, payload: Record<string, unknown>): void {
+  const spec = CONTRACT_EVENTS[type];
+  if (!spec) {
+    if (!reportedUnknownEvents.has(type)) {
+      reportedUnknownEvents.add(type);
+      log.debug('event type not in gateway contract (may be newer or internal)', { type });
+    }
+    return;
+  }
+  const allowed = new Set(spec.payload);
+  const unknown = Object.keys(payload).filter((k) => !allowed.has(k));
+  if (unknown.length === 0) return;
+  const key = `${type}::${unknown.join(',')}`;
+  if (reportedEventDrift.has(key)) return;
+  reportedEventDrift.add(key);
+  log.warn('event payload has fields outside the gateway contract', {
+    type,
+    payloadType: spec.payloadType,
+    unknownFields: unknown,
+    allowedFields: spec.payload,
+  });
+}
+
+/** 仅供测试：清空上报去重状态 */
+export function resetEventContractReports(): void {
+  reportedEventDrift.clear();
+  reportedUnknownEvents.clear();
+}
 
 export interface TurnEventContext {
   /** Every id identifying the conversation currently on screen (live id + stored id). */
@@ -86,6 +135,9 @@ export function reduceGatewayEvent(params: unknown, ctx: TurnEventContext): Turn
 
   const payload = asRecord(frame.payload);
   const frameSessionId = asText(frame.session_id);
+
+  // 契约守卫：payload 字段必须落在网关事件契约内（只记日志，不中断事件流）
+  checkEventContract(type, payload);
 
   // --- Global broadcasts: independent of which conversation is focused ------
   if (type === 'sessions.changed') {

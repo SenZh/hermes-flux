@@ -348,6 +348,7 @@ function extractToolsFromContent(content: string): { cleanContent: string; extra
           ],
         };
       }
+    // gate-degrade: 工具参数解析失败时保留原始文本展示，不影响消息渲染
     } catch {}
   }
 
@@ -693,6 +694,7 @@ function parseToolItem(tc: NonNullable<MessageViewModel['toolCalls']>[0]): Parse
             cleanArgs = JSON.stringify(candidate);
           }
         }
+      // gate-degrade: 参数无法结构化时保留原始字符串作为展示值
       } catch {
         // keep raw string
       }
@@ -1040,6 +1042,7 @@ function renderChangedFilesBar(m: MessageViewModel): string {
         if (parsed && typeof parsed === 'object') {
           targetPath = parsed.path || parsed.file || parsed.resolved_path || (parsed.files_modified ? parsed.files_modified[0] : '');
         }
+      // gate-degrade: 无法从参数解析路径时留空，由后续 normalizeToolOutput 补齐
       } catch {}
     }
 
@@ -1125,6 +1128,7 @@ function normalizeToolOutput(output: unknown, isWriteTool = false): { text: stri
             str = '';
           }
         }
+      // gate-degrade: 输出无法解析成结构化字段时按原文展示
       } catch {}
     }
   } else if (typeof output === 'object') {

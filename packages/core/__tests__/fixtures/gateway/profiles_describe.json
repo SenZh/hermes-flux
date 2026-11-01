@@ -1,0 +1,55 @@
+{
+  "method": "profiles.describe",
+  "recordedAt": "2026-11-01T01:59:35.303Z",
+  "gatewayVersion": "0.22.5",
+  "result": {
+    "name": "default",
+    "description": "",
+    "soul": "You are Hermes Agent, built by Nous Research. Be direct: match the length of your reply to the weight of the ask — a one-line question gets a one-line answer, and finished work gets a short report of …<truncated:2940>",
+    "model": {
+      "provider": "cpa",
+      "default": "gemini-3.8-flash"
+    },
+    "skills": [
+      {
+        "name": "apple-notes",
+        "enabled": true
+      },
+      {
+        "name": "apple-reminders",
+        "enabled": true
+      },
+      {
+        "name": "findmy",
+        "enabled": true
+      },
+      "<more:90>"
+    ],
+    "toolsets": [
+      {
+        "name": "web",
+        "label": "🔍 Web Search & Scraping",
+        "description": "web_search, web_extract",
+        "tool_count": 2,
+        "enabled": false
+      },
+      {
+        "name": "browser",
+        "label": "🌐 Browser Automation",
+        "description": "navigate, click, type, scroll",
+        "tool_count": 14,
+        "enabled": true
+      },
+      {
+        "name": "terminal",
+        "label": "💻 Terminal & Processes",
+        "description": "terminal, process",
+        "tool_count": 2,
+        "enabled": true
+      },
+      "<more:16>"
+    ],
+    "toolsets_pinned": true,
+    "mcp_servers": []
+  }
+}

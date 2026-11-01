@@ -38,6 +38,7 @@ import {
   applySessionTitle,
   createLogger,
   setLogLevel,
+  addLogSink,
   getLogLevel,
   parseLogLevel,
   isLogLevelEnabled,
@@ -48,7 +49,7 @@ import {
   type AgentProfile,
   ProfileService,
   GroupRoomStore,
-  dedupeSessionsByProfile,
+  reconcileSessionList,
   resolveFileContent,
 } from '@hermes-flux/core';
 
@@ -142,6 +143,9 @@ interface AppState {
 
 const desktopApi: HermesDesktopBridge | undefined = window.hermesDesktop;
 
+/** 启动阶段专用 logger（此时业务 logger 尚未初始化） */
+const bootLog = createLogger('boot');
+
 /* --------------------------------------------------------------------------
    Leveled diagnostics
    Level resolution order:
@@ -164,6 +168,40 @@ function resolveInitialLogLevel(): LogLevel {
 setLogLevel(resolveInitialLogLevel());
 
 /**
+ * 渲染进程日志落盘：把结构化记录经 IPC 转发给主进程统一写入
+ * `userData/logs/flux-YYYY-MM-DD.log`。
+ *
+ * 【设计意图 (Why)】
+ * 用户现场出问题时不能要求他开 DevTools 手抄 console。日志落盘后，
+ * 只要把日志目录发回来就能还原完整的 RPC 参数、错误码与状态迁移。
+ *
+ * 【约束 (Rules)】
+ * sink 注册必须在任何业务代码之前完成，否则启动阶段的失败会丢失。
+ */
+if (desktopApi?.appendLog) {
+  addLogSink((record) => desktopApi.appendLog?.(record), 'debug');
+}
+
+/**
+ * 兜底捕获：未处理的异常与 Promise 拒绝同样必须进日志文件。
+ * 这两个入口是"界面白屏但没有任何报错"的唯一线索。
+ */
+window.addEventListener('error', (event) => {
+  bootLog.error('window.error', {
+    message: event.message,
+    filename: event.filename,
+    lineno: event.lineno,
+    colno: event.colno,
+    stack: event.error instanceof Error ? event.error.stack : undefined,
+  });
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  const reason = event.reason;
+  bootLog.error('unhandledrejection', reason instanceof Error ? reason : { reason });
+});
+
+/**
  * 跨平台安全剪贴板写入工具 (Triple Fallback)
  * 1. desktopApi.clipboardWrite (Electron 原生剪贴板 IPC，不受窗口失焦和权限限制)
  * 2. navigator.clipboard.writeText
@@ -175,12 +213,14 @@ async function safeCopyText(text: string): Promise<boolean> {
     try {
       const ok = await desktopApi.clipboardWrite(content);
       if (ok) return true;
+    // gate-degrade: localStorage 读取在隐私模式下会抛错，属于可选增强而非必需能力
     } catch {}
   }
   if (navigator?.clipboard?.writeText) {
     try {
       await navigator.clipboard.writeText(content);
       return true;
+    // gate-degrade: 可选的本地偏好读取失败即回落到默认值
     } catch {}
   }
   try {
@@ -195,6 +235,7 @@ async function safeCopyText(text: string): Promise<boolean> {
     const success = document.execCommand('copy');
     document.body.removeChild(ta);
     if (success) return true;
+  // gate-degrade: 可选的本地偏好读取失败即回落到默认值
   } catch {}
   return false;
 }
@@ -415,6 +456,7 @@ function installLayoutShiftDiagnostics(): void {
       }
     });
     observer.observe({ type: 'layout-shift', buffered: true });
+  // gate-degrade: 剪贴板首选通道失败时必须继续尝试次选通道，属于三重降级链的一环
   } catch {
     // The API is Chromium-only; its absence is not an error.
   }
@@ -555,6 +597,7 @@ async function testConnection(
       return { ok: false, message: `网关返回异常 HTTP ${statusRes.status}`, latency };
     }
 
+    // gate-degrade: 剪贴板次选通道失败后仍有 execCommand 保底，属于降级链的一环
     const statusData = await statusRes.json().catch(() => ({}));
     if (statusData.auth_required) {
       if (!username || !pass) {
@@ -581,6 +624,7 @@ async function testConnection(
           const td = await tRes.json();
           ticket = td.ticket;
         }
+      // gate-degrade: 探测网关状态失败时按未连接处理，由连接流程给出明确提示
       } catch {}
 
       return {
@@ -663,10 +707,10 @@ function formatSessionTime(timestamp: number): string {
   return `${target.getFullYear()}/${month}/${date}`;
 }
 
-// gate-i18n-allow: 用于过滤子代理派生日期流水线标题
-const isSubagentDatePattern = (t: string) => /^会话\s*\d{8}$/i.test(t);
-
 let activeFetchSessionsGeneration = 0;
+
+// 空会话列表常量：避免在多处写 `[] as NormalizedSession[]` 类型断言（调用方只读，不会原地修改）
+const NO_SESSIONS: NormalizedSession[] = [];
 
 async function fetchSessions(): Promise<void> {
   const client = gatewayClient;
@@ -678,6 +722,7 @@ async function fetchSessions(): Promise<void> {
   if (state.profiles.length === 0) {
     try {
       state.profiles = await client.listProfiles();
+    // gate-degrade: 读取本地会话缓存失败时回落到网络拉取，缓存本就是可选加速
     } catch {}
   }
 
@@ -694,12 +739,16 @@ async function fetchSessions(): Promise<void> {
   }
 
   // 2. 并发向网关拉取所有当前已注册 Agent 的会话列表
+  //    每个结果都保留 ok 标记：全部成功时本轮结果才是权威的；任一失败都不能把"失败"当成"没有会话"，
+  //    否则一次网络抖动就会把用户看得见的会话全部抹掉（失败 ≠ 空）。
   const results = await Promise.allSettled(
     Array.from(targetProfiles).map(async (profName) => {
       const outcome = await client.listSessions(profName, 100);
-      if (!outcome.ok || !outcome.sessions) return [];
+      if (!outcome.ok || !outcome.sessions) {
+        return { ok: false, profile: profName, error: outcome.error ?? 'unknown error', sessions: NO_SESSIONS };
+      }
       const prof = profileMap.get(profName);
-      return outcome.sessions.map((s) => {
+      const sessions = outcome.sessions.map((s) => {
         const botName = s.botName || profName;
         const matchingProfile = profileMap.get(botName) || prof;
         const timeWithDate = formatSessionTime(s.timestamp) || s.time;
@@ -711,51 +760,58 @@ async function fetchSessions(): Promise<void> {
           botAvatar: matchingProfile?.avatar || '',
         };
       });
+      return { ok: true, profile: profName, error: '', sessions };
     })
   );
 
   // 竞态守卫：如果本轮拉取期间已有更新的请求发出，放弃当前结果
   if (currentGen !== activeFetchSessionsGeneration) return;
 
-  // 跨 Profile 会话 ID 会碰撞（同一时间戳前缀 + 短随机后缀，不同 Bot 库各自独立生成），
-  // 去重必须使用 `profile::sessionId` 复合键，否则真实会话会被同名空白会话顶掉。
-  const allMerged = dedupeSessionsByProfile(
-    results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
+  const settled = results.map((r) =>
+    r.status === 'fulfilled'
+      ? r.value
+      : { ok: false, profile: 'unknown', error: String(r.reason), sessions: NO_SESSIONS }
   );
-  const seenKeys = new Set(allMerged.map((s) => `${s.botName || 'default'}::${s.id}`));
+  const authoritative = settled.every((r) => r.ok);
 
-  // 过滤纯子代理与无意图空白占位会话，确保用户真正的交互会话置顶平铺展示
-  const userDirectSessions = allMerged.filter((s) => {
-    if (s.isSubagent || s.source === 'subagent') return false;
-    if (isSubagentDatePattern(s.title)) return false;
-    // 过滤既无标题又无消息内容的空白临时占位会话
-    if (!s.title.trim()) return false;
-    return true;
-  });
-
-  // 保留尚未持久化落盘的本地临时新建会话
-  const isSeen = (s: NormalizedSession) => seenKeys.has(`${s.botName || state.profileName || 'default'}::${s.id}`);
-  const stillPending = state.sessions.filter(
-    (s) => state.pendingSessionIds.includes(s.id) && !isSeen(s)
-  );
-  state.pendingSessionIds = state.pendingSessionIds.filter((id) => !seenKeys.has(`${state.profileName || 'default'}::${id}`));
-
-  // 合并保全：如果本地已有的老列表中存在未在本次返回中的正常用户会话，予以保留，防范闪烁
-  const existingValidSessions = state.sessions.filter(
-    (s) => !isSeen(s) && !s.isSubagent && s.source !== 'subagent' && s.title && !isSubagentDatePattern(s.title)
-  );
-
-  state.sessions = [...stillPending, ...userDirectSessions];
-  if (existingValidSessions.length > 0) {
-    for (const oldS of existingValidSessions) {
-      if (!state.sessions.some((cur) => cur.id === oldS.id && cur.botName === oldS.botName)) {
-        state.sessions.push(oldS);
-      }
-    }
-    state.sessions.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  // 失败不可静默：具体是哪个 Bot、什么错误必须进日志，界面只保留通用提示
+  if (!authoritative) {
+    logSession.warn('session list partially failed', {
+      profiles: settled.filter((r) => !r.ok).map((r) => ({ profile: r.profile, error: r.error })),
+    });
   }
 
-  state.sessionListError = '';
+  // 3. 对账：权威结果与本地列表合并（去重、可见性、临时会话、归档残影剔除全部在 core 纯函数里完成）
+  const reconciled = reconcileSessionList({
+    previous: state.sessions,
+    fetched: settled.flatMap((r) => r.sessions),
+    authoritative,
+    pendingIds: state.pendingSessionIds,
+    profileName: state.profileName,
+  });
+  state.sessions = reconciled.sessions;
+  state.pendingSessionIds = reconciled.pendingIds;
+
+  // 对账：任何被丢弃的会话都必须留痕，避免"会话凭空消失"
+  if (reconciled.dropped.length > 0) {
+    logSession.debug('session dedupe report', {
+      dropped: reconciled.dropped.length,
+      samples: reconciled.dropped.slice(0, 5),
+    });
+  }
+  if (reconciled.pruned.length > 0) {
+    logSession.debug('session superseded by authority', {
+      pruned: reconciled.pruned.length,
+      samples: reconciled.pruned.slice(0, 5),
+    });
+  }
+
+  // 失败不可静默：任一 Profile 拉取失败时保留错误提示，只有全部成功才清空
+  if (authoritative) {
+    state.sessionListError = '';
+  } else if (!state.sessionListError) {
+    state.sessionListError = t('rail.errorSub');
+  }
 
   // 4. 同步刷新工程项目的关联会话
   if (state.projects.length > 0) {
@@ -800,6 +856,7 @@ async function fetchProjects(): Promise<void> {
     const profileCalls = Array.from(targetProfiles).map((prof) =>
       client.call<ProjectsListResponse>('projects.list', { profile: prof }).catch(() => null)
     );
+    // gate-degrade: 解析历史消息的畸形条目时跳过该条，避免单条脏数据毁掉整页
     profileCalls.push(client.call<ProjectsListResponse>('projects.list', {}).catch(() => null));
 
     const results = await Promise.all(profileCalls);
@@ -1145,6 +1202,7 @@ async function fetchProfiles(): Promise<void> {
               render();
             }
           }
+        // gate-degrade: 单条消息解析失败按跳过处理，其余消息照常渲染
         } catch {
           // 容错放行
         }
@@ -1224,6 +1282,7 @@ function parseRawMessages(list: any[]): MessageViewModel[] {
         if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
           try {
             rawArgs = JSON.parse(trimmed);
+          // gate-degrade: 删除会话时逐个 profile 尝试，某个库没有该会话属正常情况
           } catch {}
         }
       }
@@ -1284,6 +1343,7 @@ function parseRawMessages(list: any[]): MessageViewModel[] {
             output: formattedOutput,
           };
         }
+      // gate-degrade: 跨库删除的容错分支，某个 profile 未持有该会话属正常
       } catch {
         // not json
       }
@@ -1692,9 +1752,11 @@ async function deleteSession(id: string): Promise<void> {
     // 1. 先关闭与中断可能处于活跃状态的句柄
     try {
       await gatewayClient.call('session.close', { session_id: id });
+    // gate-degrade: 删除后刷新列表失败不影响删除结果，下次刷新会自愈
     } catch {}
     try {
       await gatewayClient.call('session.interrupt', { session_id: id });
+    // gate-degrade: 渲染层可选增强（本地偏好）读取失败时回落默认值
     } catch {}
 
     // 2. 遍历可能归属的 Profile 库物理执行真实 session.delete
@@ -1709,7 +1771,10 @@ async function deleteSession(id: string): Promise<void> {
           try {
             await gatewayClient.call('session.set_hidden', { session_id: id, hidden: true, profile: prof });
             deleteSucceeded = true;
-          } catch {}
+          } catch (hideErr) {
+            // gate-degrade: 会话被占用时 set_hidden 是尽力而为的兜底，失败仍继续走 REST 物理删除
+            console.warn('[Flux] session.set_hidden fallback failed:', hideErr);
+          }
         }
       }
 
@@ -1819,7 +1884,10 @@ async function archiveSession(id: string): Promise<void> {
     if (gatewayClient) {
       await gatewayClient.call('session.archive', { session_id: id });
     }
-  } catch {}
+  } catch (archiveErr) {
+    // gate-degrade: 归档为乐观更新，RPC 失败时仍按用户意图切换本地状态，但必须留下证据
+    console.warn('[Flux] session.archive failed, applying optimistic local toggle:', archiveErr);
+  }
   state.sessions = state.sessions.map((s) => (s.id === id ? { ...s, isArchived: !s.isArchived } : s));
   state.dockNotice = `已更新会话归档状态`;
   render();

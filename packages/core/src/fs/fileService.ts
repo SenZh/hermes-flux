@@ -143,6 +143,7 @@ export function extractFileContentFromSessionTools(
             const candidate = tcArgsObj?.path || tcArgsObj?.file || tcArgsObj?.filePath || tcArgsObj?.file_path || tcArgsObj?.resolved_path;
             tcPath = typeof candidate === 'string' ? candidate : '';
           }
+        // gate-degrade: 工具参数是模型产出的自由文本，解析失败即视为没有路径
         } catch {}
       } else if (tc.args && typeof tc.args === 'object') {
         // SAFETY: typeof check ensures object
@@ -215,6 +216,7 @@ export function extractFileContentFromSessionTools(
           if (typeof parsed.content === 'string') outStr = parsed.content;
           else if (typeof parsed.text === 'string') outStr = parsed.text;
           else if (typeof parsed.output === 'string') outStr = parsed.output;
+        // gate-degrade: 工具输出可能是非 JSON 文本，解析失败即原样使用
         } catch {}
       }
       if (!outStr && tcArgsObj && typeof tcArgsObj.content === 'string') {
@@ -339,6 +341,7 @@ export async function resolveFileContent(
           source: 'local_fs',
         };
       }
+    // gate-degrade: 本地文件读取是四级回退链的第一级，失败必须继续下一级
     } catch {}
   }
 
@@ -360,6 +363,7 @@ export async function resolveFileContent(
           source: 'remote_http',
         };
       }
+    // gate-degrade: HTTP 抓取是回退链的一环，失败继续走网关 REST 端点
     } catch {}
   }
 
@@ -395,6 +399,7 @@ export async function resolveFileContent(
             source: 'gateway_api',
           };
         }
+      // gate-degrade: 网关 REST 拉取是回退链的一环，失败落到最终兜底文本
       } catch {}
     }
   }

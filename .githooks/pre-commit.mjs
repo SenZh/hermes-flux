@@ -74,7 +74,10 @@ function main() {
   console.log(`${C.bold}══════════════════════════════════════════════════${C.reset}`);
 
   const gates = [
-    ['Gate 0/4 · 静态门禁（架构/换肤/i18n/性能）', 'node', ['scripts/gates/run.mjs', '--staged']],
+    ['Gate 0/4 · 静态门禁（架构/失败静默/换肤/i18n/性能）', 'node', ['scripts/gates/run.mjs', '--staged']],
+    ['Gate 0b · 网关契约一致性（方法名与字段白名单）', 'node', ['scripts/contract/verify.mjs']],
+    ['Gate 0c · 探针覆盖率（每个调用点都要有真实响应证据）', 'node', ['scripts/contract/coverage.mjs']],
+    ['Gate 0d · 接口文档与契约同步', 'node', ['scripts/contract/doc.mjs', '--check']],
     ['Gate 1 · 全栈严格类型', NPM, ['run', 'typecheck']],
     ['Gate 2 · 单元与不变量测试', NPM, ['test']],
   ];

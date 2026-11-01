@@ -6,6 +6,12 @@ import {
   getLogLevel,
   isLogLevelEnabled,
   parseLogLevel,
+  addLogSink,
+  clearLogSinks,
+  setConsoleLogLevel,
+  getConsoleLogLevel,
+  safeSerialize,
+  formatLogRecord,
 } from '../../dist/log/logger.js';
 
 /**
@@ -166,5 +172,86 @@ test('Leveled logger contract', async (t) => {
 
     assert.equal(typeof elapsed, 'number', 'timing must still measure when logging is off');
     assert.equal(calls.length, 0, 'no console output at info level');
+  });
+
+  await t.test('文件 sink 与 console 阈值彼此独立：console 静默时文件仍收到 debug', (tt) => {
+    captureConsole(tt);
+    const previousFile = getLogLevel();
+    const previousConsole = getConsoleLogLevel();
+    tt.after(() => {
+      setLogLevel(previousFile);
+      setConsoleLogLevel(previousConsole);
+      clearLogSinks();
+    });
+
+    // 文件阈值 debug，控制台阈值 info
+    setLogLevel('debug');
+    setConsoleLogLevel('info');
+    // 移除默认 console sink 的干扰：只保留本测试注册的 sink
+    clearLogSinks();
+    const collected = [];
+    addLogSink((record) => collected.push(record), 'debug');
+
+    const log = createLogger('file-sink');
+    log.debug('rpc params', { method: 'groups.send', keys: ['room_id', 'event_id'] });
+    log.info('turn started');
+
+    assert.equal(collected.length, 2, 'debug 与 info 都必须进文件 sink');
+    assert.equal(collected[0].level, 'debug');
+    assert.equal(collected[0].scope, 'file-sink');
+    assert.equal(collected[0].message, 'rpc params');
+    assert.deepEqual(collected[0].data, { method: 'groups.send', keys: ['room_id', 'event_id'] });
+    assert.ok(typeof collected[0].iso === 'string' && collected[0].iso.includes('T'), '记录必须带 ISO 时间戳');
+  });
+
+  await t.test('sink 自身抛错不得影响业务调用链', (tt) => {
+    const previousFile = getLogLevel();
+    tt.after(() => {
+      setLogLevel(previousFile);
+      clearLogSinks();
+    });
+    setLogLevel('debug');
+    clearLogSinks();
+
+    let reached = false;
+    addLogSink(() => {
+      throw new Error('disk full');
+    }, 'debug');
+
+    const log = createLogger('resilient');
+    log.info('this must not throw');
+    reached = true;
+
+    assert.equal(reached, true, '日志 sink 抛错必须被吞掉，不能打断业务');
+  });
+
+  await t.test('safeSerialize 处理 Error / 循环引用 / BigInt 不抛错', () => {
+    const circular = { name: 'loop' };
+    circular.self = circular;
+
+    const errText = safeSerialize(new Error('boom'));
+    assert.ok(errText.includes('Error: boom'), `Error 必须可读，得到 "${errText}"`);
+
+    const circularText = safeSerialize(circular);
+    assert.ok(circularText.includes('[Circular]'), `循环引用必须被标记，得到 "${circularText}"`);
+
+    assert.equal(safeSerialize(10n), '10n', 'BigInt 必须可序列化');
+
+    const longText = safeSerialize('x'.repeat(500), 100);
+    assert.ok(longText.length > 100 && longText.includes('chars'), '超长内容必须截断并标注原始长度');
+  });
+
+  await t.test('formatLogRecord 输出单行可 grep 的文本', () => {
+    const line = formatLogRecord({
+      ts: 1,
+      iso: '2026-10-31T00:00:00.000Z',
+      level: 'error',
+      scope: 'gateway',
+      message: 'groups.send rejected',
+      data: { code: 4000 },
+    });
+    assert.ok(line.startsWith('2026-10-31T00:00:00.000Z ERROR [gateway] groups.send rejected'), `实际: ${line}`);
+    assert.ok(line.includes('{"code":4000}'));
+    assert.ok(line.endsWith('\n'), '每条记录必须以换行结尾，便于 append 落盘');
   });
 });

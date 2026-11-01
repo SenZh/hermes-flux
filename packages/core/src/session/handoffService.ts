@@ -58,10 +58,11 @@ export class HandoffService {
     const res = await bridge.request<PromptBtwResult, PromptBtwParams>('prompt.btw', {
       session_id: sessionId,
       text,
-      target_profile: targetProfile || 'default',
+      profile: targetProfile || 'default',
     });
 
-    if (!res || typeof res.response !== 'string') {
+    // 网关只返回 task_id，答案经事件流异步到达；没有 task_id 即为畸形响应
+    if (!res || typeof res.task_id !== 'string' || res.task_id.length === 0) {
       throw new Error('网关返回了非法的 prompt.btw 响应数据');
     }
 

@@ -1,0 +1,22 @@
+{
+  "method": "session.create",
+  "recordedAt": "2026-11-01T01:59:35.303Z",
+  "gatewayVersion": "0.22.5",
+  "result": {
+    "session_id": "25cac25c",
+    "stored_session_id": "20261101_015937_0a4960",
+    "message_count": 0,
+    "messages": [],
+    "info": {
+      "model": "gemini-3.8-flash",
+      "tools": {},
+      "skills": {},
+      "cwd": "<path>",
+      "branch": "",
+      "project": null,
+      "lazy": true,
+      "desktop_contract": 8,
+      "profile_name": "default"
+    }
+  }
+}

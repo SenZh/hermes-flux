@@ -105,27 +105,39 @@ export class GroupRoomStore {
     const rawList = Array.isArray(res?.groups)
       ? res.groups
       : Array.isArray(res?.rooms)
-      ? res.rooms.map((r) => ({
-          roomId: r.room_id,
-          name: r.name,
-          members: Array.isArray(r.members)
-            ? r.members.map((m) => m.profile || m.handle || 'member')
-            : [],
-          createdAt: typeof r.created_at === 'number' ? r.created_at * 1000 : Date.now(),
-          updatedAt: typeof r.updated_at === 'number' ? r.updated_at * 1000 : Date.now(),
-          isDisbanded: Boolean(r.disbanded_at),
-        }))
+      ? res.rooms
+          // 防御：网关可能返回非对象行（脱敏/占位/历史脏数据），
+          // 直接 map 会造出 roomId 为空的幽灵房间，在 UI 里表现为一条点不开的空白项。
+          .filter((r) => r && typeof r === 'object')
+          .map((r) => ({
+            roomId: r.room_id,
+            name: r.name,
+            members: Array.isArray(r.members)
+              ? r.members.map((m) => m.profile || m.handle || 'member')
+              : [],
+            createdAt: typeof r.created_at === 'number' ? r.created_at * 1000 : Date.now(),
+            updatedAt: typeof r.updated_at === 'number' ? r.updated_at * 1000 : Date.now(),
+            isDisbanded: Boolean(r.disbanded_at),
+          }))
       : null;
 
     if (!rawList) {
       throw new Error('网关返回了非法的 groups.list 响应数据结构');
     }
 
+    // 没有 room_id 的行无法寻址，直接丢弃并留痕（Failure Is Not Empty 的对偶：
+    // 丢弃必须有理由，不能悄悄产生不可用的实体）
+    const usable = rawList.filter((room) => {
+      if (room.roomId) return true;
+      console.warn('[GroupRoomStore] groups.list 返回了缺少 room_id 的房间行，已跳过');
+      return false;
+    });
+
     this.rooms.clear();
-    for (const room of rawList) {
+    for (const room of usable) {
       this.rooms.set(room.roomId, room);
     }
-    return rawList;
+    return usable;
   }
 
   /**
@@ -182,11 +194,15 @@ export class GroupRoomStore {
       members: formattedMembers,
     });
 
+    // 契约：groups.create -> { room }；兼容早期网关的扁平字段
+    const room = res.room;
+    const resolvedRoomId = room?.room_id || res.room_id || assignedRoomId;
+    const rawMembers = room?.members ?? res.members;
     const summary: GroupRoomSummary = {
-      roomId: res.room_id || assignedRoomId,
-      name: res.name || name,
-      members: Array.isArray(res.members)
-        ? res.members.map((m) => {
+      roomId: resolvedRoomId,
+      name: room?.name || res.name || name,
+      members: Array.isArray(rawMembers)
+        ? rawMembers.map((m) => {
             if (typeof m === 'string') return m;
             const obj = m as Record<string, unknown>;
             return String(obj.profile || obj.handle || obj.display_name || 'member');
@@ -322,30 +338,38 @@ export class GroupRoomStore {
     const res = await bridge.request<GroupsDisbandResult, GroupsDisbandParams>('groups.disband', {
       room_id: roomId,
     });
-    if (res.success) {
+    // 契约：groups.disband -> { tombstone }，不是 success 布尔
+    const disbanded = Boolean(res.tombstone) || res.success === true;
+    if (disbanded) {
       const existing = this.rooms.get(roomId);
       if (existing) {
         existing.isDisbanded = true;
       }
     }
-    return res.success;
+    return disbanded;
   }
 
   /**
    * 重命名群聊房间
+   *
+   * 【契约依据】GroupsRenameParams: { profile?, room_id, event_id, name }
+   * 【防范的历史坑】曾传 `new_name` 且不带 `event_id`，网关会先报 4111 再报 4000。
    */
   public async renameRoom(roomId: string, newName: string, bridge: IRpcCaller): Promise<boolean> {
     const res = await bridge.request<GroupsRenameResult, GroupsRenameParams>('groups.rename', {
       room_id: roomId,
-      new_name: newName,
+      event_id: mintGroupEventId(),
+      name: newName,
     });
-    if (res.success) {
+    // 契约：groups.rename -> { room }，不是 success 布尔
+    const renamed = Boolean(res.room);
+    if (renamed) {
       const existing = this.rooms.get(roomId);
       if (existing) {
-        existing.name = newName;
+        existing.name = res.room?.name || newName;
       }
     }
-    return res.success;
+    return renamed;
   }
 
   /**
@@ -438,7 +462,11 @@ export class GroupRoomStore {
 
     // 阶段三：创建群房间与种子注入 (Group Creation & Seed Injection)
     const createRes = await this.createRoom(groupName, selectedMembers, bridge);
-    const roomId = createRes.room_id;
+    // 契约：groups.create -> { room }；兼容早期扁平字段
+    const roomId = createRes.room?.room_id || createRes.room_id;
+    if (!roomId) {
+      throw new Error('创建群聊成功但网关未返回 room_id，无法继续注入种子备忘录');
+    }
 
     // 将 Briefing Memo 作为 Room 0 种子备忘录注入
     await this.sendMessage(roomId, briefingMemo, 'system', bridge, { isSeed: true });

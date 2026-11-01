@@ -58,7 +58,7 @@ test('HermesGatewayClient JSON-RPC 2.0 Unit Tests', async (t) => {
     };
     client['ws'] = mockWs;
 
-    const promise = client.call('session.delete', { id: 'invalid-id' });
+    const promise = client.call('session.delete', { session_id: 'invalid-id', profile: 'default' });
 
     client['handleMessage'](
       JSON.stringify({
@@ -110,6 +110,64 @@ test('HermesGatewayClient JSON-RPC 2.0 Unit Tests', async (t) => {
       })
     );
     assert.equal(receivedData, null, 'Must not receive after unsubscribe');
+  });
+
+  await t.test('运行时契约守卫：未知字段必须在发送前被拒绝，而不是等网关 4000', async () => {
+    const client = new HermesGatewayClient({
+      url: 'ws://127.0.0.1:9119/api/ws',
+      timeoutMs: 1000,
+    });
+
+    let sent = null;
+    client['ws'] = {
+      readyState: 1,
+      send(data) {
+        sent = JSON.parse(data);
+      },
+    };
+
+    // 复刻本次真实事故：profiles.get_asset 多传 key
+    await assert.rejects(
+      () => client.call('profiles.get_asset', { name: 'default', asset: 'avatar', key: 'avatar' }),
+      (err) => {
+        assert.equal(err.code, 'CONTRACT_VIOLATION');
+        assert.equal(err.method, 'profiles.get_asset');
+        assert.deepEqual(err.unknownFields, ['key']);
+        assert.ok(err.allowedFields.includes('name'));
+        assert.ok(err.allowedFields.includes('asset'));
+        return true;
+      }
+    );
+    assert.equal(sent, null, '违规请求绝不允许真的发出去');
+
+    // 合法参数必须正常发送
+    const okPromise = client.call('profiles.get_asset', { name: 'default', asset: 'avatar' });
+    assert.ok(sent, '合法请求必须被发送');
+    assert.equal(sent.method, 'profiles.get_asset');
+    client['handleMessage'](
+      JSON.stringify({ jsonrpc: '2.0', id: sent.id, result: { found: false } })
+    );
+    await okPromise;
+  });
+
+  await t.test('运行时契约守卫：ping 属于网关额外方法，必须放行', async () => {
+    const client = new HermesGatewayClient({
+      url: 'ws://127.0.0.1:9119/api/ws',
+      timeoutMs: 1000,
+    });
+    let sent = null;
+    client['ws'] = {
+      readyState: 1,
+      send(data) {
+        sent = JSON.parse(data);
+      },
+    };
+
+    const promise = client.call('ping', {});
+    assert.ok(sent, 'ping 必须被放行（网关确有该方法，只是不在生成契约里）');
+    assert.equal(sent.method, 'ping');
+    client['handleMessage'](JSON.stringify({ jsonrpc: '2.0', id: sent.id, result: { pong: true } }));
+    assert.deepEqual(await promise, { pong: true });
   });
 
   await t.test('listProfiles 必须原样透传 ui_meta 与 has_avatar（旧群聊房间的唯一来源）', async () => {

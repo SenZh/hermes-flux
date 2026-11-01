@@ -71,22 +71,23 @@ test('ProfileService - 专职 Bot 管理与 Forever Chat 终身主工位状态�
   await t.test('3. createProfile 与 configureProfile：动态创建与属性配置', async () => {
     const service = new ProfileService();
     let createdName = '';
-    let configuredPatch = null;
+    let configuredParams = null;
 
     const mockBridge = {
       async request(method, params) {
         if (method === 'profiles.create') {
           createdName = params.name;
-          return { name: params.name, created: true };
+          return { ok: true, name: params.name };
         }
         if (method === 'profiles.configure') {
-          configuredPatch = params.patch;
-          return { success: true };
+          configuredParams = params;
+          // 官方契约结果字段是 ok/applied，不是 success
+          return { ok: true, applied: ['description'] };
         }
         if (method === 'profiles.list') {
           return {
             profiles: [
-              { name: 'sec-guard', displayName: '安全守卫' },
+              { name: 'sec-guard', display_name: '安全守卫' },
             ],
           };
         }
@@ -95,17 +96,19 @@ test('ProfileService - 专职 Bot 管理与 Forever Chat 终身主工位状态�
     };
 
     // 正向创建
-    const resCreate = await service.createProfile({ name: 'sec-guard', display_name: '安全守卫' }, mockBridge);
+    const resCreate = await service.createProfile({ name: 'sec-guard', description: '安全守卫' }, mockBridge);
     assert.equal(resCreate.name, 'sec-guard');
     assert.equal(createdName, 'sec-guard');
 
     // 负向创建：名称为空
     await assert.rejects(() => service.createProfile({ name: '' }, mockBridge), /Bot profile name cannot be empty/);
 
-    // 正向配置
-    const okConfig = await service.configureProfile('sec-guard', { displayName: '首席安全官' }, mockBridge);
+    // 正向配置：字段必须扁平，不能包一层 patch
+    const okConfig = await service.configureProfile('sec-guard', { description: '首席安全官' }, mockBridge);
     assert.equal(okConfig, true);
-    assert.equal(configuredPatch?.displayName, '首席安全官');
+    assert.equal(configuredParams?.description, '首席安全官');
+    assert.equal(configuredParams?.patch, undefined, 'patch 不是契约字段，会被网关 4000 拒绝');
+    assert.equal(configuredParams?.name, 'sec-guard');
   });
 
   await t.test('4. getAsset 与 setAsset：Bot 头像与静态资产存取', async () => {
@@ -130,9 +133,12 @@ test('ProfileService - 专职 Bot 管理与 Forever Chat 终身主工位状态�
           return { found: false };
         }
         if (method === 'profiles.set_asset') {
-          setKey = params.key;
-          setBase64 = params.base64;
-          return { success: true };
+          // 契约字段是 asset + data，不是 key + base64
+          assert.equal(params.key, undefined, 'key 不是契约字段（会触发 4000）');
+          assert.equal(params.base64, undefined, 'base64 不是契约字段（会触发 4000）');
+          setKey = params.asset;
+          setBase64 = params.data;
+          return { ok: true };
         }
         throw new Error(`Unexpected call: ${method}`);
       },

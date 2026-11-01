@@ -446,6 +446,87 @@ const layoutRules = {
   },
 };
 
-export const RULES = [architectureRules, themeRules, i18nRules, perfRules, layoutRules];
+/**
+ * Gate 0b · 失败不可静默（Silent Catch Ban）
+ *
+ * 设计意图 (Why):
+ *   本次四个线上问题里有三个的共同根因是"错误被吞成空数据"：
+ *   profiles.get_asset 的 4000 被 catch 成 null（头像永远拉不到）、
+ *   subagent.tail 的 4000 被吞成"没有日志"、心跳用不存在的方法名后被 catch 吞掉
+ *   （看门狗从未生效）。文档里写了"Failure Is Not Empty"，但没有探针，等于不存在。
+ *
+ * 防范的历史坑 (Pitfall):
+ *   只靠 code review 抓不住这类问题——空 catch 在 diff 里毫不起眼，
+ *   但会让所有证据消失，把可定位的错误变成不可定位的"没数据"。
+ *
+ * 约束与规则 (Rules):
+ *   - 允许合法降级，但必须在 catch 上一行写 `// gate-degrade: 为什么该失败等价于空`；
+ *   - 只拦"完全空体"与"仅返回空值"两类；带日志/带兜底赋值的 catch 放行；
+ *   - 与 arch 规则一样纳入债务棘轮：存量冻结，新增零容忍。
+ */
+const integrityRules = {
+  id: 'integrity',
+  gate: 'Gate 0',
+  title: '失败不可静默（禁止 catch 吞掉错误）',
+  check(file, ctx) {
+    if (!/\.(ts|tsx|js|mjs)$/.test(file)) return [];
+
+    const out = [];
+    const src = ctx.stripped;
+    const catchRe = /catch\s*(?:\([^)]*\))?\s*\{/g;
+    let m;
+
+    while ((m = catchRe.exec(src)) !== null) {
+      const bodyStart = m.index + m[0].length;
+      let depth = 1;
+      let i = bodyStart;
+      for (; i < src.length; i += 1) {
+        if (src[i] === '{') depth += 1;
+        else if (src[i] === '}') {
+          depth -= 1;
+          if (depth === 0) break;
+        }
+      }
+      const body = src.slice(bodyStart, i);
+      const normalized = body.replace(/[\s;]/g, '');
+
+      const isEmpty = normalized === '';
+      const isReturnOnly =
+        /^return(?:null|undefined|\[\]|\{\}|void0|false|true)$/.test(normalized) ||
+        /^return[A-Za-z_$][\w$]*$/.test(normalized);
+
+      if (!isEmpty && !isReturnOnly) continue;
+
+      const lineNo = lineAt(src, m.index);
+      const lineIdx = lineNo - 1;
+      if (hasInlineAllowance(ctx.rawLines, lineIdx, 'degrade')) continue;
+      // 降级语义专用标记：`// gate-degrade: 理由`
+      const currentRaw = ctx.rawLines[lineIdx] ?? '';
+      const prevRaw = lineIdx > 0 ? (ctx.rawLines[lineIdx - 1] ?? '') : '';
+      if (currentRaw.includes('gate-degrade:') || prevRaw.includes('gate-degrade:')) continue;
+
+      out.push({
+        file,
+        line: lineNo,
+        lineIdx,
+        ruleId: 'integrity/silent-catch',
+        message:
+          '禁止把失败静默吞成空值：catch 必须记录日志或显式抛出；确需降级时在上一行写 // gate-degrade: 理由',
+        snippet: (ctx.rawLines[lineIdx] ?? '').trim().slice(0, 110),
+      });
+    }
+
+    return out;
+  },
+};
+
+/** 字符偏移换算成 1-based 行号 */
+function lineAt(text, offset) {
+  let line = 1;
+  for (let k = 0; k < offset; k += 1) if (text[k] === '\n') line += 1;
+  return line;
+}
+
+export const RULES = [architectureRules, integrityRules, themeRules, i18nRules, perfRules, layoutRules];
 
 export { KNOWN_LAYOUT_DEVIATIONS };

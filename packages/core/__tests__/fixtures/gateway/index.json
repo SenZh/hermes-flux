@@ -1,0 +1,1254 @@
+{
+  "recordedAt": "2026-11-01T01:59:35.303Z",
+  "gatewayVersion": "0.22.5",
+  "profile": "default",
+  "promptProbesEnabled": true,
+  "modules": [
+    {
+      "module": "system",
+      "cases": [
+        {
+          "module": "system",
+          "method": "ping",
+          "ok": true,
+          "params": {},
+          "resultKeys": [
+            "pong"
+          ]
+        },
+        {
+          "module": "system",
+          "method": "gateway.capabilities",
+          "ok": true,
+          "params": {},
+          "resultKeys": [
+            "per_session_exclusive_submit"
+          ]
+        },
+        {
+          "module": "system",
+          "method": "model.options",
+          "ok": true,
+          "params": {
+            "profile": "default"
+          },
+          "resultKeys": [
+            "providers",
+            "model",
+            "provider"
+          ]
+        }
+      ]
+    },
+    {
+      "module": "profiles",
+      "cases": [
+        {
+          "module": "profiles",
+          "method": "profiles.list",
+          "ok": true,
+          "params": {},
+          "resultKeys": [
+            "profiles",
+            "bot_mode_protocol",
+            "install_id"
+          ]
+        },
+        {
+          "module": "profiles",
+          "method": "profiles.describe",
+          "ok": true,
+          "params": {
+            "name": "default"
+          },
+          "resultKeys": [
+            "name",
+            "description",
+            "soul",
+            "model",
+            "skills",
+            "toolsets",
+            "toolsets_pinned",
+            "mcp_servers"
+          ]
+        },
+        {
+          "module": "profiles",
+          "method": "profiles.get_asset",
+          "ok": true,
+          "params": {
+            "name": "default",
+            "asset": "avatar"
+          },
+          "resultKeys": [
+            "found",
+            "mime",
+            "size",
+            "data"
+          ]
+        },
+        {
+          "module": "profiles",
+          "method": "profiles.create",
+          "error": {
+            "code": 4062,
+            "message": "A profile named 'flux-probe-bot' already exists. Switch to it with `hermes profile use flux-probe-bot`, see all profiles with `hermes profile list`, or choose a different name."
+          },
+          "ok": true,
+          "expectedGuard": 4062
+        },
+        {
+          "module": "profiles",
+          "method": "profiles.configure",
+          "ok": true,
+          "params": {
+            "name": "flux-probe-bot",
+            "description": "Hermes Flux 契约探针专用 Bot"
+          },
+          "resultKeys": [
+            "ok",
+            "applied"
+          ]
+        },
+        {
+          "module": "profiles",
+          "method": "profiles.set_asset",
+          "ok": true,
+          "params": {
+            "name": "flux-probe-bot",
+            "asset": "avatar",
+            "data": "",
+            "clear": true
+          },
+          "resultKeys": [
+            "ok",
+            "asset",
+            "size",
+            "removed"
+          ]
+        }
+      ]
+    },
+    {
+      "module": "sessions",
+      "cases": [
+        {
+          "module": "sessions",
+          "method": "session.list",
+          "ok": true,
+          "params": {
+            "profile": "default",
+            "limit": 5
+          },
+          "resultKeys": [
+            "sessions"
+          ]
+        },
+        {
+          "module": "sessions",
+          "method": "session.resume",
+          "ok": true,
+          "params": {
+            "session_id": "20261101_015936_e3c8cb",
+            "profile": "default",
+            "lazy": true
+          },
+          "resultKeys": [
+            "session_id",
+            "stored_session_id",
+            "message_count",
+            "messages",
+            "info"
+          ]
+        },
+        {
+          "module": "sessions",
+          "method": "session.title",
+          "ok": true,
+          "params": {
+            "session_id": "5a93f653",
+            "profile": "default",
+            "title": "flux-probe-renamed-mvx6mjtr"
+          },
+          "resultKeys": [
+            "pending",
+            "title"
+          ]
+        },
+        {
+          "module": "sessions",
+          "method": "session.set_hidden",
+          "ok": true,
+          "params": {
+            "session_id": "5a93f653",
+            "profile": "default",
+            "hidden": true
+          },
+          "resultKeys": [
+            "hidden",
+            "session_key"
+          ]
+        },
+        {
+          "module": "sessions",
+          "method": "session.archive",
+          "ok": true,
+          "params": {
+            "session_id": "5a93f653",
+            "profile": "default",
+            "archived": false
+          },
+          "resultKeys": [
+            "archived",
+            "session_key"
+          ]
+        },
+        {
+          "module": "sessions",
+          "method": "session.interrupt",
+          "ok": true,
+          "params": {
+            "session_id": "5a93f653",
+            "profile": "default"
+          },
+          "resultKeys": [
+            "status"
+          ]
+        },
+        {
+          "module": "sessions",
+          "method": "session.branch_whole",
+          "error": {
+            "code": 4008,
+            "message": "nothing to branch — send a message first"
+          },
+          "ok": true,
+          "expectedGuard": 4008
+        },
+        {
+          "module": "sessions",
+          "method": "config.set",
+          "ok": true,
+          "params": {
+            "session_id": "5a93f653",
+            "profile": "default",
+            "key": "model",
+            "value": "gemini-3.8-flash"
+          },
+          "resultKeys": [
+            "key",
+            "value",
+            "warning",
+            "confirm_required",
+            "confirm_message",
+            "scope"
+          ]
+        },
+        {
+          "module": "sessions",
+          "method": "session.create",
+          "ok": true,
+          "params": {
+            "profile": "default",
+            "title": "flux-probe-create-mvx6mkkg",
+            "hidden": true
+          },
+          "resultKeys": [
+            "session_id",
+            "stored_session_id",
+            "message_count",
+            "messages",
+            "info"
+          ]
+        },
+        {
+          "module": "sessions",
+          "method": "session.delete",
+          "error": {
+            "code": 4023,
+            "message": "cannot delete an active session"
+          },
+          "ok": true,
+          "expectedGuard": 4023
+        },
+        {
+          "module": "sessions",
+          "method": "session.close",
+          "ok": true,
+          "params": {
+            "session_id": "89452054",
+            "profile": "default"
+          },
+          "resultKeys": [
+            "closed",
+            "messages"
+          ]
+        }
+      ]
+    },
+    {
+      "module": "groups",
+      "cases": [
+        {
+          "module": "groups",
+          "method": "groups.list",
+          "ok": true,
+          "params": {},
+          "resultKeys": [
+            "rooms",
+            "next_offset"
+          ]
+        },
+        {
+          "module": "groups",
+          "method": "groups.state",
+          "ok": true,
+          "params": {
+            "room_id": "rmvx6mlf7-552bw"
+          },
+          "resultKeys": [
+            "room",
+            "driver_status"
+          ]
+        },
+        {
+          "module": "groups",
+          "method": "groups.send",
+          "ok": true,
+          "params": {
+            "room_id": "rmvx6mlf7-552bw",
+            "event_id": "evt-mvx6mnnn-izjw7rwj",
+            "payload": {
+              "text": "契约探针：验证 groups.send 的 payload 形状",
+              "thread_id": "tmvx6mnnn-zag4x"
+            }
+          },
+          "resultKeys": [
+            "event",
+            "client_event_id",
+            "accepted",
+            "driver_started"
+          ]
+        },
+        {
+          "module": "groups",
+          "method": "groups.log",
+          "ok": true,
+          "params": {
+            "room_id": "rmvx6mlf7-552bw",
+            "limit": 10
+          },
+          "resultKeys": [
+            "events",
+            "cursor",
+            "latest_seq",
+            "has_more",
+            "authority"
+          ]
+        },
+        {
+          "module": "groups",
+          "method": "groups.rename",
+          "ok": true,
+          "params": {
+            "room_id": "rmvx6mlf7-552bw",
+            "event_id": "evt-mvx6mogj-14oeco6l",
+            "name": "flux-probe-renamed-mvx6mogj"
+          },
+          "resultKeys": [
+            "room"
+          ]
+        },
+        {
+          "module": "groups",
+          "method": "groups.create",
+          "ok": true,
+          "params": {
+            "room_id": "rmvx6mojd-eipt6",
+            "name": "flux-probe-create-mvx6moje",
+            "members": [
+              {
+                "member_id": "m_default_0",
+                "profile": "default",
+                "handle": "default",
+                "display_name": "default"
+              },
+              {
+                "member_id": "m_aura_1",
+                "profile": "aura",
+                "handle": "aura",
+                "display_name": "aura"
+              }
+            ]
+          },
+          "resultKeys": [
+            "room"
+          ]
+        },
+        {
+          "module": "groups",
+          "method": "groups.disband",
+          "ok": true,
+          "params": {
+            "room_id": "rmvx6mlf7-552bw"
+          },
+          "resultKeys": [
+            "tombstone"
+          ]
+        }
+      ]
+    },
+    {
+      "module": "projects",
+      "cases": [
+        {
+          "module": "projects",
+          "method": "projects.list",
+          "ok": true,
+          "params": {
+            "profile": "default"
+          },
+          "resultKeys": [
+            "projects",
+            "active_id"
+          ]
+        },
+        {
+          "module": "projects",
+          "method": "projects.get",
+          "ok": true,
+          "params": {
+            "id": "p_99c43ce7"
+          },
+          "resultKeys": [
+            "project"
+          ]
+        },
+        {
+          "module": "projects",
+          "method": "projects.update",
+          "ok": true,
+          "params": {
+            "id": "p_99c43ce7",
+            "description": "契约探针已更新描述"
+          },
+          "resultKeys": [
+            "project"
+          ]
+        },
+        {
+          "module": "projects",
+          "method": "projects.tree",
+          "ok": true,
+          "params": {
+            "profile": "default",
+            "preview_limit": 3,
+            "session_limit": 1
+          },
+          "resultKeys": [
+            "projects",
+            "active_id",
+            "scoped_session_ids"
+          ]
+        },
+        {
+          "module": "projects",
+          "method": "projects.add_folder",
+          "ok": true,
+          "params": {
+            "id": "p_99c43ce7",
+            "path": "<path>"
+          },
+          "resultKeys": [
+            "project"
+          ]
+        },
+        {
+          "module": "projects",
+          "method": "projects.remove_folder",
+          "ok": true,
+          "params": {
+            "id": "p_99c43ce7",
+            "path": "<path>"
+          },
+          "resultKeys": [
+            "project"
+          ]
+        },
+        {
+          "module": "projects",
+          "method": "projects.set_active",
+          "ok": true,
+          "params": {
+            "id": "p_99c43ce7"
+          },
+          "resultKeys": [
+            "active_id"
+          ]
+        },
+        {
+          "module": "projects",
+          "method": "projects.create",
+          "ok": true,
+          "params": {
+            "profile": "default",
+            "name": "flux-probe-create-mvx6mrby",
+            "folders": [
+              "<path>"
+            ],
+            "primary_path": "<path>"
+          },
+          "resultKeys": [
+            "project"
+          ]
+        },
+        {
+          "module": "projects",
+          "method": "projects.delete",
+          "ok": true,
+          "params": {
+            "id": "p_99c43ce7"
+          },
+          "resultKeys": [
+            "projects",
+            "active_id"
+          ]
+        }
+      ]
+    },
+    {
+      "module": "rollback",
+      "cases": [
+        {
+          "module": "rollback",
+          "method": "rollback.list",
+          "error": {
+            "code": 4001,
+            "message": "session not found"
+          },
+          "ok": true,
+          "expectedGuard": 4001
+        },
+        {
+          "module": "rollback",
+          "method": "rollback.diff",
+          "error": {
+            "code": 4001,
+            "message": "session not found"
+          },
+          "ok": true,
+          "expectedGuard": 4001
+        },
+        {
+          "module": "rollback",
+          "method": "rollback.restore",
+          "error": {
+            "code": 4001,
+            "message": "session not found"
+          },
+          "ok": true,
+          "expectedGuard": 4001
+        }
+      ]
+    },
+    {
+      "module": "subagent",
+      "cases": [
+        {
+          "module": "subagent",
+          "method": "subagent.list",
+          "error": {
+            "code": 4001,
+            "message": "session not found or not owned by this transport"
+          },
+          "ok": true,
+          "expectedGuard": 4001
+        },
+        {
+          "module": "subagent",
+          "method": "subagent.steer",
+          "error": {
+            "code": 4001,
+            "message": "session not found"
+          },
+          "ok": true,
+          "expectedGuard": 4001
+        },
+        {
+          "module": "subagent",
+          "method": "subagent.interrupt",
+          "error": {
+            "code": 4001,
+            "message": "session not found or not owned by this transport"
+          },
+          "ok": true,
+          "expectedGuard": 4001
+        },
+        {
+          "module": "subagent",
+          "method": "subagent.tail",
+          "error": {
+            "code": 4001,
+            "message": "session not found or not owned by this transport"
+          },
+          "ok": true,
+          "expectedGuard": 4001
+        }
+      ]
+    },
+    {
+      "module": "prompt",
+      "cases": [
+        {
+          "module": "prompt",
+          "method": "prompt.submit",
+          "ok": true,
+          "params": {
+            "session_id": "8227bd0b",
+            "profile": "default",
+            "text": "契约探针：请只回复 ok"
+          },
+          "resultKeys": [
+            "status",
+            "user_row_id"
+          ]
+        },
+        {
+          "module": "prompt",
+          "method": "prompt.btw",
+          "ok": true,
+          "params": {
+            "session_id": "8227bd0b",
+            "profile": "default",
+            "text": "契约探针：旁路问题，请只回复 ok"
+          },
+          "resultKeys": [
+            "task_id"
+          ]
+        }
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "module": "system",
+      "method": "ping",
+      "ok": true,
+      "params": {},
+      "resultKeys": [
+        "pong"
+      ]
+    },
+    {
+      "module": "system",
+      "method": "gateway.capabilities",
+      "ok": true,
+      "params": {},
+      "resultKeys": [
+        "per_session_exclusive_submit"
+      ]
+    },
+    {
+      "module": "system",
+      "method": "model.options",
+      "ok": true,
+      "params": {
+        "profile": "default"
+      },
+      "resultKeys": [
+        "providers",
+        "model",
+        "provider"
+      ]
+    },
+    {
+      "module": "profiles",
+      "method": "profiles.list",
+      "ok": true,
+      "params": {},
+      "resultKeys": [
+        "profiles",
+        "bot_mode_protocol",
+        "install_id"
+      ]
+    },
+    {
+      "module": "profiles",
+      "method": "profiles.describe",
+      "ok": true,
+      "params": {
+        "name": "default"
+      },
+      "resultKeys": [
+        "name",
+        "description",
+        "soul",
+        "model",
+        "skills",
+        "toolsets",
+        "toolsets_pinned",
+        "mcp_servers"
+      ]
+    },
+    {
+      "module": "profiles",
+      "method": "profiles.get_asset",
+      "ok": true,
+      "params": {
+        "name": "default",
+        "asset": "avatar"
+      },
+      "resultKeys": [
+        "found",
+        "mime",
+        "size",
+        "data"
+      ]
+    },
+    {
+      "module": "profiles",
+      "method": "profiles.create",
+      "error": {
+        "code": 4062,
+        "message": "A profile named 'flux-probe-bot' already exists. Switch to it with `hermes profile use flux-probe-bot`, see all profiles with `hermes profile list`, or choose a different name."
+      },
+      "ok": true,
+      "expectedGuard": 4062
+    },
+    {
+      "module": "profiles",
+      "method": "profiles.configure",
+      "ok": true,
+      "params": {
+        "name": "flux-probe-bot",
+        "description": "Hermes Flux 契约探针专用 Bot"
+      },
+      "resultKeys": [
+        "ok",
+        "applied"
+      ]
+    },
+    {
+      "module": "profiles",
+      "method": "profiles.set_asset",
+      "ok": true,
+      "params": {
+        "name": "flux-probe-bot",
+        "asset": "avatar",
+        "data": "",
+        "clear": true
+      },
+      "resultKeys": [
+        "ok",
+        "asset",
+        "size",
+        "removed"
+      ]
+    },
+    {
+      "module": "sessions",
+      "method": "session.list",
+      "ok": true,
+      "params": {
+        "profile": "default",
+        "limit": 5
+      },
+      "resultKeys": [
+        "sessions"
+      ]
+    },
+    {
+      "module": "sessions",
+      "method": "session.resume",
+      "ok": true,
+      "params": {
+        "session_id": "20261101_015936_e3c8cb",
+        "profile": "default",
+        "lazy": true
+      },
+      "resultKeys": [
+        "session_id",
+        "stored_session_id",
+        "message_count",
+        "messages",
+        "info"
+      ]
+    },
+    {
+      "module": "sessions",
+      "method": "session.title",
+      "ok": true,
+      "params": {
+        "session_id": "5a93f653",
+        "profile": "default",
+        "title": "flux-probe-renamed-mvx6mjtr"
+      },
+      "resultKeys": [
+        "pending",
+        "title"
+      ]
+    },
+    {
+      "module": "sessions",
+      "method": "session.set_hidden",
+      "ok": true,
+      "params": {
+        "session_id": "5a93f653",
+        "profile": "default",
+        "hidden": true
+      },
+      "resultKeys": [
+        "hidden",
+        "session_key"
+      ]
+    },
+    {
+      "module": "sessions",
+      "method": "session.archive",
+      "ok": true,
+      "params": {
+        "session_id": "5a93f653",
+        "profile": "default",
+        "archived": false
+      },
+      "resultKeys": [
+        "archived",
+        "session_key"
+      ]
+    },
+    {
+      "module": "sessions",
+      "method": "session.interrupt",
+      "ok": true,
+      "params": {
+        "session_id": "5a93f653",
+        "profile": "default"
+      },
+      "resultKeys": [
+        "status"
+      ]
+    },
+    {
+      "module": "sessions",
+      "method": "session.branch_whole",
+      "error": {
+        "code": 4008,
+        "message": "nothing to branch — send a message first"
+      },
+      "ok": true,
+      "expectedGuard": 4008
+    },
+    {
+      "module": "sessions",
+      "method": "config.set",
+      "ok": true,
+      "params": {
+        "session_id": "5a93f653",
+        "profile": "default",
+        "key": "model",
+        "value": "gemini-3.8-flash"
+      },
+      "resultKeys": [
+        "key",
+        "value",
+        "warning",
+        "confirm_required",
+        "confirm_message",
+        "scope"
+      ]
+    },
+    {
+      "module": "sessions",
+      "method": "session.create",
+      "ok": true,
+      "params": {
+        "profile": "default",
+        "title": "flux-probe-create-mvx6mkkg",
+        "hidden": true
+      },
+      "resultKeys": [
+        "session_id",
+        "stored_session_id",
+        "message_count",
+        "messages",
+        "info"
+      ]
+    },
+    {
+      "module": "sessions",
+      "method": "session.delete",
+      "error": {
+        "code": 4023,
+        "message": "cannot delete an active session"
+      },
+      "ok": true,
+      "expectedGuard": 4023
+    },
+    {
+      "module": "sessions",
+      "method": "session.close",
+      "ok": true,
+      "params": {
+        "session_id": "89452054",
+        "profile": "default"
+      },
+      "resultKeys": [
+        "closed",
+        "messages"
+      ]
+    },
+    {
+      "module": "groups",
+      "method": "groups.list",
+      "ok": true,
+      "params": {},
+      "resultKeys": [
+        "rooms",
+        "next_offset"
+      ]
+    },
+    {
+      "module": "groups",
+      "method": "groups.state",
+      "ok": true,
+      "params": {
+        "room_id": "rmvx6mlf7-552bw"
+      },
+      "resultKeys": [
+        "room",
+        "driver_status"
+      ]
+    },
+    {
+      "module": "groups",
+      "method": "groups.send",
+      "ok": true,
+      "params": {
+        "room_id": "rmvx6mlf7-552bw",
+        "event_id": "evt-mvx6mnnn-izjw7rwj",
+        "payload": {
+          "text": "契约探针：验证 groups.send 的 payload 形状",
+          "thread_id": "tmvx6mnnn-zag4x"
+        }
+      },
+      "resultKeys": [
+        "event",
+        "client_event_id",
+        "accepted",
+        "driver_started"
+      ]
+    },
+    {
+      "module": "groups",
+      "method": "groups.log",
+      "ok": true,
+      "params": {
+        "room_id": "rmvx6mlf7-552bw",
+        "limit": 10
+      },
+      "resultKeys": [
+        "events",
+        "cursor",
+        "latest_seq",
+        "has_more",
+        "authority"
+      ]
+    },
+    {
+      "module": "groups",
+      "method": "groups.rename",
+      "ok": true,
+      "params": {
+        "room_id": "rmvx6mlf7-552bw",
+        "event_id": "evt-mvx6mogj-14oeco6l",
+        "name": "flux-probe-renamed-mvx6mogj"
+      },
+      "resultKeys": [
+        "room"
+      ]
+    },
+    {
+      "module": "groups",
+      "method": "groups.create",
+      "ok": true,
+      "params": {
+        "room_id": "rmvx6mojd-eipt6",
+        "name": "flux-probe-create-mvx6moje",
+        "members": [
+          {
+            "member_id": "m_default_0",
+            "profile": "default",
+            "handle": "default",
+            "display_name": "default"
+          },
+          {
+            "member_id": "m_aura_1",
+            "profile": "aura",
+            "handle": "aura",
+            "display_name": "aura"
+          }
+        ]
+      },
+      "resultKeys": [
+        "room"
+      ]
+    },
+    {
+      "module": "groups",
+      "method": "groups.disband",
+      "ok": true,
+      "params": {
+        "room_id": "rmvx6mlf7-552bw"
+      },
+      "resultKeys": [
+        "tombstone"
+      ]
+    },
+    {
+      "module": "projects",
+      "method": "projects.list",
+      "ok": true,
+      "params": {
+        "profile": "default"
+      },
+      "resultKeys": [
+        "projects",
+        "active_id"
+      ]
+    },
+    {
+      "module": "projects",
+      "method": "projects.get",
+      "ok": true,
+      "params": {
+        "id": "p_99c43ce7"
+      },
+      "resultKeys": [
+        "project"
+      ]
+    },
+    {
+      "module": "projects",
+      "method": "projects.update",
+      "ok": true,
+      "params": {
+        "id": "p_99c43ce7",
+        "description": "契约探针已更新描述"
+      },
+      "resultKeys": [
+        "project"
+      ]
+    },
+    {
+      "module": "projects",
+      "method": "projects.tree",
+      "ok": true,
+      "params": {
+        "profile": "default",
+        "preview_limit": 3,
+        "session_limit": 1
+      },
+      "resultKeys": [
+        "projects",
+        "active_id",
+        "scoped_session_ids"
+      ]
+    },
+    {
+      "module": "projects",
+      "method": "projects.add_folder",
+      "ok": true,
+      "params": {
+        "id": "p_99c43ce7",
+        "path": "<path>"
+      },
+      "resultKeys": [
+        "project"
+      ]
+    },
+    {
+      "module": "projects",
+      "method": "projects.remove_folder",
+      "ok": true,
+      "params": {
+        "id": "p_99c43ce7",
+        "path": "<path>"
+      },
+      "resultKeys": [
+        "project"
+      ]
+    },
+    {
+      "module": "projects",
+      "method": "projects.set_active",
+      "ok": true,
+      "params": {
+        "id": "p_99c43ce7"
+      },
+      "resultKeys": [
+        "active_id"
+      ]
+    },
+    {
+      "module": "projects",
+      "method": "projects.create",
+      "ok": true,
+      "params": {
+        "profile": "default",
+        "name": "flux-probe-create-mvx6mrby",
+        "folders": [
+          "<path>"
+        ],
+        "primary_path": "<path>"
+      },
+      "resultKeys": [
+        "project"
+      ]
+    },
+    {
+      "module": "projects",
+      "method": "projects.delete",
+      "ok": true,
+      "params": {
+        "id": "p_99c43ce7"
+      },
+      "resultKeys": [
+        "projects",
+        "active_id"
+      ]
+    },
+    {
+      "module": "rollback",
+      "method": "rollback.list",
+      "error": {
+        "code": 4001,
+        "message": "session not found"
+      },
+      "ok": true,
+      "expectedGuard": 4001
+    },
+    {
+      "module": "rollback",
+      "method": "rollback.diff",
+      "error": {
+        "code": 4001,
+        "message": "session not found"
+      },
+      "ok": true,
+      "expectedGuard": 4001
+    },
+    {
+      "module": "rollback",
+      "method": "rollback.restore",
+      "error": {
+        "code": 4001,
+        "message": "session not found"
+      },
+      "ok": true,
+      "expectedGuard": 4001
+    },
+    {
+      "module": "subagent",
+      "method": "subagent.list",
+      "error": {
+        "code": 4001,
+        "message": "session not found or not owned by this transport"
+      },
+      "ok": true,
+      "expectedGuard": 4001
+    },
+    {
+      "module": "subagent",
+      "method": "subagent.steer",
+      "error": {
+        "code": 4001,
+        "message": "session not found"
+      },
+      "ok": true,
+      "expectedGuard": 4001
+    },
+    {
+      "module": "subagent",
+      "method": "subagent.interrupt",
+      "error": {
+        "code": 4001,
+        "message": "session not found or not owned by this transport"
+      },
+      "ok": true,
+      "expectedGuard": 4001
+    },
+    {
+      "module": "subagent",
+      "method": "subagent.tail",
+      "error": {
+        "code": 4001,
+        "message": "session not found or not owned by this transport"
+      },
+      "ok": true,
+      "expectedGuard": 4001
+    },
+    {
+      "module": "prompt",
+      "method": "prompt.submit",
+      "ok": true,
+      "params": {
+        "session_id": "8227bd0b",
+        "profile": "default",
+        "text": "契约探针：请只回复 ok"
+      },
+      "resultKeys": [
+        "status",
+        "user_row_id"
+      ]
+    },
+    {
+      "module": "prompt",
+      "method": "prompt.btw",
+      "ok": true,
+      "params": {
+        "session_id": "8227bd0b",
+        "profile": "default",
+        "text": "契约探针：旁路问题，请只回复 ok"
+      },
+      "resultKeys": [
+        "task_id"
+      ]
+    },
+    {
+      "module": "negative",
+      "method": "profiles.get_asset",
+      "name": "profiles.get_asset 多传 key 必须被拒",
+      "kind": "negative",
+      "ok": true,
+      "code": 4000,
+      "message": "invalid params for profiles.get_asset: key: Extra inputs are not permitted — the client and the Hermes backend are out of sync (different versions); run `hermes update` and restart both"
+    },
+    {
+      "module": "negative",
+      "method": "groups.send",
+      "name": "groups.send 平铺 text 必须被拒",
+      "kind": "negative",
+      "ok": true,
+      "code": 4000,
+      "message": "invalid params for groups.send: text: Extra inputs are not permitted — the client and the Hermes backend are out of sync (different versions); run `hermes update` and restart both"
+    },
+    {
+      "module": "negative",
+      "method": "groups.send",
+      "name": "groups.send payload 缺少 thread_id 必须被拒",
+      "kind": "negative",
+      "ok": true,
+      "code": 5112,
+      "message": "user payload is missing fields: thread_id"
+    },
+    {
+      "module": "negative",
+      "method": "session.delete",
+      "name": "session.delete 用不存在的会话必须被拒",
+      "kind": "negative",
+      "ok": true,
+      "code": 4007,
+      "message": "session not found"
+    }
+  ]
+}

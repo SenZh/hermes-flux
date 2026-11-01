@@ -1,0 +1,9 @@
+{
+  "method": "profiles.create",
+  "recordedAt": "2026-11-01T01:59:35.303Z",
+  "gatewayVersion": "0.22.5",
+  "result": {
+    "__guard": 4062,
+    "message": "A profile named 'flux-probe-bot' already exists. Switch to it with `hermes profile use flux-probe-bot`, see all profiles with `hermes profile list`, or choose a different name."
+  }
+}

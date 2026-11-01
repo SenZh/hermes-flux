@@ -116,35 +116,38 @@ test('SubagentStore - 子代理生命周期与穿透日志流状态机', async (
     assert.equal(receivedEntries.length, 2, '注销后不再接收推送');
   });
 
-  await t.test('3. spawnSubagent：乐观反馈与真实 RPC 状态流转', async () => {
+  await t.test('3. spawnSubagent：网关无此 RPC，必须显式抛出 UnsupportedCapabilityError', async () => {
     // Arrange
     const store = new SubagentStore(100);
+    let rpcCalled = false;
     const mockBridge = {
-      async request(method, params) {
-        assert.equal(method, 'subagent.spawn');
-        return {
-          subagent_id: 'sub-real-888',
-          status: 'running',
-        };
+      async request() {
+        rpcCalled = true;
+        return {};
       },
     };
 
-    // Act
-    const task = await store.spawnSubagent(
-      {
-        parent_session_id: 'sess-100',
-        target_profile: 'arch-wang',
-        task_title: '推演并发竞态',
-        instruction: '查锁',
-      },
-      mockBridge
+    // Act & Assert：网关契约里没有 subagent.spawn（只有 list/steer/interrupt/tail），
+    // 严禁向不存在的方法发请求后把 -32601 包装成业务失败。
+    await assert.rejects(
+      () =>
+        store.spawnSubagent(
+          {
+            parent_session_id: 'sess-100',
+            target_profile: 'arch-wang',
+            task_title: '推演并发竞态',
+            instruction: '查锁',
+          },
+          mockBridge
+        ),
+      (err) => {
+        assert.equal(err.code, 'UNSUPPORTED_CAPABILITY');
+        assert.equal(err.method, 'subagent.spawn');
+        assert.match(err.message, /delegate_task/);
+        return true;
+      }
     );
-
-    // Assert
-    assert.equal(task.subagentId, 'sub-real-888');
-    assert.equal(task.status, 'running');
-    assert.equal(task.parentSessionId, 'sess-100');
-    assert.equal(store.getTask('sub-real-888')?.taskTitle, '推演并发竞态');
+    assert.equal(rpcCalled, false, '禁止向不存在的方法发起 RPC');
   });
 
   await t.test('4. steerSubagent：实时干预指令下发与日志记录', async () => {
@@ -161,7 +164,9 @@ test('SubagentStore - 子代理生命周期与穿透日志流状态机', async (
     const mockBridge = {
       async request(method, params) {
         assert.equal(method, 'subagent.steer');
-        steeredInstruction = params.instruction;
+        // 契约字段是 text，不是 instruction
+        assert.equal(params.instruction, undefined, 'instruction 不是契约字段（会触发 4000）');
+        steeredInstruction = params.text;
         return { accepted: true };
       },
     };
