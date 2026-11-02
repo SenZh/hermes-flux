@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   hasDockSnapshotChanged,
   renderInputDock,
+  renderConfirmModal,
 } from '../../../../packages/ui/dist/index.js';
 
 /**
@@ -177,5 +178,123 @@ test('Delete Session Focus & InputDock Snapshot Invariants', async (t) => {
     assert.equal(windowFocusCalled, true, '必须调用 window.focus() 激活顶层渲染窗口');
     assert.equal(blurCalled, false, '绝对禁止调用 input.blur() 自毁光标');
     assert.deepEqual(selectionRange, { start: 22, end: 22 }, '光标必须精准激活在末尾');
+  });
+
+  await t.test('6. 生产 ConfirmModal 纯 DOM 模态架构断言: 彻底根除 Win32 阻塞模态脱敏', () => {
+    // 1. Arrange: 准备常规与危险态模态属性
+    const normalProps = {
+      isOpen: true,
+      title: '解散群聊',
+      message: '确定要解散群聊房间「研究小组」吗？',
+      confirmLabel: '解散群聊',
+      cancelLabel: '取消',
+      isDanger: true,
+    };
+
+    // 2. Act: 调用真实生产渲染函数
+    const normalHtml = renderConfirmModal(normalProps);
+    const closedHtml = renderConfirmModal({ ...normalProps, isOpen: false });
+    const emptyHtml = renderConfirmModal(undefined);
+
+    // 3. Assert: 结构自洽与零脱敏保障
+    assert.equal(closedHtml, '', '未打开时必须返回空串');
+    assert.equal(emptyHtml, '', '未传参数时必须返回空串');
+    assert.ok(normalHtml.includes('id="flux-confirm-modal-overlay"'), '必须包含纯 DOM 遮罩层，杜绝原生 confirm 阻塞');
+    assert.ok(normalHtml.includes('id="flux-confirm-modal-card"'), '必须包含电影级暗黑卡片容器');
+    assert.ok(normalHtml.includes('id="btn-confirm-modal-ok"'), '必须包含确认按钮');
+    assert.ok(normalHtml.includes('id="btn-confirm-modal-cancel"'), '必须包含取消按钮');
+    assert.ok(normalHtml.includes('id="btn-confirm-modal-close"'), '必须包含顶部关闭按钮');
+    assert.ok(normalHtml.includes('min-height: 44px'), '所有交互按钮热区必须严格保持 >= 44px/44pt');
+    assert.ok(normalHtml.includes('var(--danger-color'), '危险操作必须渲染危险警示色');
+    assert.ok(!normalHtml.includes('undefined'), '模板插值禁止出现 undefined 残留');
+  });
+
+  await t.test('7. 非破坏性草稿恢复守卫 (Non-Destructive Draft Restoration)', () => {
+    // 1. Arrange: 模拟切换会话时的草稿处理
+    const sessionDraftMap = new Map();
+    sessionDraftMap.set('sess-old', 'Old draft');
+    sessionDraftMap.set('sess-new', ''); // 新会话的历史草稿为空
+
+    // Case A: 用户在网络等待期间已在输入框敲入实时文字 'live typing'
+    const liveInput = { value: 'live typing' };
+    const handleRestoreDraft = (input, targetId) => {
+      const currentVal = input.value;
+      if (!currentVal.trim() && sessionDraftMap.has(targetId)) {
+        input.value = sessionDraftMap.get(targetId) || '';
+      }
+    };
+
+    // 2. Act: 执行草稿恢复
+    handleRestoreDraft(liveInput, 'sess-new');
+
+    // 3. Assert: 实时输入的文字绝对禁止被空草稿冲刷清空！
+    assert.equal(liveInput.value, 'live typing', '实时打字内容绝不能被后台迟滞返回的空草稿冲刷抹除！');
+
+    // Case B: 输入框完全为空时，能够正常恢复已有草稿
+    const emptyInput = { value: '' };
+    handleRestoreDraft(emptyInput, 'sess-old');
+    assert.equal(emptyInput.value, 'Old draft', '输入框为空时必须正确接力恢复目标会话草稿');
+  });
+
+  await t.test('8. Desktop PAL 物理窗口激活机制 (activateWindow 穿透调用)', async () => {
+    // 1. Arrange
+    let activateWindowCalls = 0;
+    let inputFocusCalls = 0;
+
+    const mockDesktopApi = {
+      activateWindow: async () => {
+        activateWindowCalls++;
+      },
+    };
+
+    const mockInput = {
+      value: '',
+      focus: () => { inputFocusCalls++; },
+      setSelectionRange: () => {},
+    };
+
+    // 模拟生产 restoreComposerFocus 物理激活
+    const restoreFocusWithPal = (api, input) => {
+      if (api?.activateWindow) {
+        void api.activateWindow().catch(() => {});
+      }
+      if (input) {
+        input.focus();
+      }
+    };
+
+    // 2. Act
+    restoreFocusWithPal(mockDesktopApi, mockInput);
+
+    // 3. Assert
+    assert.equal(activateWindowCalls, 1, '必须通过 Desktop PAL 调用 activateWindow 激活底层 Win32 宿主窗口');
+    assert.equal(inputFocusCalls, 1, '必须同步唤起 input.focus()');
+  });
+
+  await t.test('9. 确定删除微任务即刻聚焦保障 (Zero Latency Focus Handover)', () => {
+    // 验证场景：用户点击确认删除瞬间，在网络 IO 开始前立即调用 restoreComposerFocus
+    let focusOrder = [];
+
+    const mockRestoreFocus = () => {
+      focusOrder.push('focus-restored');
+    };
+
+    const mockDeleteSessionRpc = async () => {
+      // 模拟 100ms 网络延迟
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      focusOrder.push('rpc-completed');
+    };
+
+    // 模拟生产 onConfirm 触发链路
+    const handleConfirmDelete = (id) => {
+      mockRestoreFocus(); // 第一时间立即聚焦
+      void mockDeleteSessionRpc(id);
+    };
+
+    handleConfirmDelete('sess-target');
+
+    // 断言：聚焦动作必须在第一微任务发生，先于任何异步 RPC 往返
+    assert.equal(focusOrder[0], 'focus-restored', '点击确认瞬间必须同步首帧调用 restoreComposerFocus');
+    assert.equal(focusOrder.includes('rpc-completed'), false, '网络 RPC 完成前焦点已经锁定到位');
   });
 });

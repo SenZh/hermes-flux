@@ -49,6 +49,8 @@ export interface HermesDesktopBridge extends IPlatformBridge {
   }) => void;
   /** 日志目录绝对路径，用于「打开日志目录」入口 */
   getLogDir: () => Promise<string | null>;
+  /** 物理激活宿主原生窗口，规避失焦与光标抑制 */
+  activateWindow: () => Promise<void>;
 }
 
 const bridge: HermesDesktopBridge = {
@@ -58,6 +60,7 @@ const bridge: HermesDesktopBridge = {
   unmaximize: () => ipcRenderer.invoke('window:unmaximize'),
   close: () => ipcRenderer.invoke('window:close'),
   isMaximized: () => ipcRenderer.invoke('window:is-maximized'),
+  activateWindow: () => ipcRenderer.invoke('window:activate'),
   onWindowStateChange: (callback) => {
     const handler = (_event: unknown, state: { isMaximized: boolean }) => callback(state);
     ipcRenderer.on('window:state-changed', handler);

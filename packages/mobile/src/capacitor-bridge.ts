@@ -67,6 +67,7 @@ export interface HermesMobileBridge {
   close(): Promise<void>;
   isMaximized(): Promise<boolean>;
   onWindowStateChange(callback: (state: WindowControlState) => void): () => void;
+  activateWindow?(): Promise<void>;
   getDefaultGatewayConfig(): Promise<{ url: string; key: string; profile: string }>;
   authenticateGateway(options: {
     url: string;
@@ -143,6 +144,8 @@ export function createCapacitorPlatformBridge(): HermesMobileBridge {
     async isMaximized(): Promise<boolean> {
       return false;
     },
+
+    async activateWindow(): Promise<void> {},
 
     onWindowStateChange(_callback: (state: WindowControlState) => void): () => void {
       return () => {};

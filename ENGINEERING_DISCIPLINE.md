@@ -254,9 +254,10 @@
 | **14. 真实浏览器 CDP 物理交互** | `npm run test:cdp`（真实无头 Edge/Chrome 驱动，物理点击与安全区度量） | 触控热区 $<44\text{pt}$、移动端视口产生横向溢出、遮罩背景点击无法关闭 |
 | **15. 动态时序闭环与非静态自愈** | 模拟触发/在途/完成/消费四阶时序迁移并物理断言 DOM 出现与销毁 | 仅向组件喂入静态数据做快照存在断言（静态假测试）、时钟未推进、状态机未完成闭环自愈 |
 
-### 强制交付验证三位一体闭环 (Mandatory Delivery Triad Pipeline)
-任何代码功能新增、抽象引入或缺陷修复，在声明完成或合并之前，必须在本地依次执行以下三条指令并实现 **100% 绿灯无报错通过**：
-1. `npm run verify`：静态质量门禁 (gates) + TypeScript 全栈严格类型 (typecheck) + 全量单元测试 (test)；
-2. `npm run test:live-gateway`：本地真实 Python Gateway 进程拉起与 22 个 RPC 接口集成联调测试（穷尽出入参契约与状态流转）；
-3. `npm run test:cdp`：本地真实 Blink 内核无头浏览器（Edge/Chrome）启动与 CDP 物理交互、触控热区、安全区避让及视口仿真测试。
-三者缺一不可，任何一项缺失或失败，一票否决禁止交付。
+### 强制交付验证全景闭环 (Mandatory Verification Pipeline)
+任何代码功能新增、抽象引入或缺陷修复，在声明完成或合并之前，必须在本地依次执行以下核心指令并实现 **100% 绿灯无报错通过**：
+1. `npm run verify:formal`：形式化安全不变量检验（基于 fast-check 在 8,500+ 次随机并发交错中证明 7 大核心定理，零反例逃逸）；
+2. `node scripts/verify/control-flux.mjs run <feature-id>`：Blink 内核 CDP 物理渲染验证与屏幕截图留存（产物落位于 `artifacts/verification/`）；
+3. `npm run verify`：交付前全量四位一体总体验收（静态门禁 + 契约一致性 + TypeScript 全栈类型 + 全量单测）；
+4. `npm run test:live-gateway`：本地真实 Python Gateway 进程拉起与 22 个 RPC 接口集成联调测试（离线离境环境下按契约豁免）。
+缺一不可，任何一项缺失或失败，一票否决禁止交付。

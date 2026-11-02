@@ -67,6 +67,14 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     return mainWindow.isMaximized();
   });
 
+  ipcMain.handle('window:activate', () => {
+    if (!mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+      mainWindow.webContents.focus();
+    }
+  });
+
   // System & Platform Info
   ipcMain.handle('system:get-info', () => {
     return {

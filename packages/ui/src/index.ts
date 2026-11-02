@@ -17,6 +17,7 @@ export * from './components/Group/GroupRoomView.js';
 export * from './components/Group/GroupPromotionDialog.js';
 export * from './components/Project/ProjectTreeViewer.js';
 export * from './components/TaskModal/NewTaskModal.js';
+export * from './components/Modal/ConfirmModal.js';
 export * from './components/ContextMenu/ContextMenu.js';
 export * from './components/Bot/AgentProfileEditorModal.js';
 export * from './utils/imagePreprocessor.js';

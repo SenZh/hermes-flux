@@ -51,6 +51,12 @@ export interface IPlatformBridge {
   close(): Promise<void>;
   isMaximized(): Promise<boolean>;
   onWindowStateChange(callback: (state: WindowControlState) => void): () => void;
+  /**
+   * 物理激活应用原生宿主窗口 (Win32 SetForegroundWindow / SetFocus)。
+   * 【设计意图 (Why)】
+   * 规避模态对话框或跨系统事件后 Chromium 宿主窗口脱敏导致光标静默抑制。
+   */
+  activateWindow?(): Promise<void>;
   
   // Gateway & Proxy operations
   getDefaultGatewayConfig?(): Promise<{ url: string; key: string; profile: string }>;

@@ -198,6 +198,54 @@ test('Main Chat Stage & Composer Dock - Live Headless Browser CDP Physical Verif
     assert.equal(rollbackResult.result.value.recordedRollback, rollbackResult.result.value.inputValue);
   });
 
+  // 6.1 物理交互与纯图标样式断言：点击复制、Fork、重新生成按钮
+  await t.test('2.1 物理动作：纯图标按钮无内嵌文本且带title提示，点击复制/Fork/重新生成正常分发', async () => {
+    const actionResult = await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const copyBtn = document.querySelector('[data-action="copy-msg"]');
+        const forkBtn = document.querySelector('[data-action="fork-msg"]');
+        const regenBtn = document.querySelector('[data-action="regenerate-msg"]');
+        if (!copyBtn || !forkBtn || !regenBtn) {
+          return { success: false, reason: 'buttons-missing' };
+        }
+
+        // 验证纯图标特性：按钮内无 span 标签，且具备 title 提示属性
+        const copyHasSpan = Boolean(copyBtn.querySelector('span'));
+        const forkHasSpan = Boolean(forkBtn.querySelector('span'));
+        const regenHasSpan = Boolean(regenBtn.querySelector('span'));
+        const copyTitle = copyBtn.getAttribute('title');
+        const forkTitle = forkBtn.getAttribute('title');
+        const regenTitle = regenBtn.getAttribute('title');
+
+        // 模拟物理触发点击
+        copyBtn.click();
+        forkBtn.click();
+        regenBtn.click();
+
+        return {
+          success: true,
+          copyHasSpan,
+          forkHasSpan,
+          regenHasSpan,
+          hasTitles: Boolean(copyTitle && forkTitle && regenTitle),
+          recordedCopied: document.body.getAttribute('data-last-copied'),
+          recordedFork: document.body.getAttribute('data-last-fork'),
+          recordedRegen: document.body.getAttribute('data-last-regenerate'),
+        };
+      })()`,
+      returnByValue: true,
+    });
+
+    assert.ok(actionResult.result.value.success, '所有操作栏按钮必须渲染存在');
+    assert.equal(actionResult.result.value.copyHasSpan, false, '复制按钮严禁内联文本标签');
+    assert.equal(actionResult.result.value.forkHasSpan, false, 'Fork按钮严禁内联文本标签');
+    assert.equal(actionResult.result.value.regenHasSpan, false, '重新生成按钮严禁内联文本标签');
+    assert.ok(actionResult.result.value.hasTitles, '所有操作按钮必须具备 title 悬浮说明');
+    assert.ok(actionResult.result.value.recordedCopied !== null, '复制按钮必须成功分发事件');
+    assert.ok(actionResult.result.value.recordedFork !== null, 'Fork按钮必须成功分发事件');
+    assert.ok(actionResult.result.value.recordedRegen !== null, '重新生成按钮必须成功分发事件');
+  });
+
   // 7. 物理交互：阶梯式 Token 性能仪表点击展开 Popover
   await t.test('3. 物理动作：点击阶梯式 Token 性能药丸，弹出详细 Popover', async () => {
     const popoverResult = await sendCdp('Runtime.evaluate', {

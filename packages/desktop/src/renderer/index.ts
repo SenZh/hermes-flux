@@ -28,6 +28,7 @@ import {
   renderContextMenu,
   type ContextMenuProps,
   renderAgentProfileEditorModal,
+  renderConfirmModal,
   t,
   hasDockSnapshotChanged,
   type RenderInputDockSnapshot,
@@ -127,6 +128,16 @@ interface AppState {
   modelMenuOpen: boolean;
   /** Context menu for session, bot or group room item */
   sessionContextMenu?: ContextMenuProps;
+  /** 全局极客美学二次确认模态状态机，彻底替换 Win32 阻塞式原生 confirm */
+  confirmModal?: {
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+    isDanger?: boolean;
+    onConfirm: () => void | Promise<void>;
+    onCancel?: () => void;
+  };
   /** Inline failure line inside the dock (failure must never be silent). */
   dockNotice: string;
   /** Rail-level failure line, distinct from a legitimately empty session list. */
@@ -537,6 +548,9 @@ function updateBotLatestActivity(botName: string, text: string, rawTimestamp: nu
  */
 function restoreComposerFocus(): void {
   const restore = () => {
+    if (desktopApi?.activateWindow) {
+      void desktopApi.activateWindow().catch(() => {});
+    }
     const input = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
     if (input) {
       if (typeof window !== 'undefined' && typeof window.focus === 'function') {
@@ -556,6 +570,7 @@ function restoreComposerFocus(): void {
   });
   setTimeout(restore, 50);
   setTimeout(restore, 200);
+  setTimeout(restore, 400);
 }
 
 /** 健壮的 Agent 头像解析器：按 ID、实名、显示名、别名双向穿透查找缓存，避免单聊/群聊匹配丢失 */
@@ -2315,11 +2330,9 @@ async function deleteSession(id: string): Promise<void> {
       if (state.activeSessionId) {
         await selectSession(state.activeSessionId);
       } else {
-        // 当删除最后一条会话导致会话池为空时，干净回退至默认智能体工位，重置焦点与空消息流
-        state.activeFocus = { type: 'bot', botName: state.profileName || 'default' };
-        state.messages = [];
-        state.isStreaming = false;
-        render();
+        // 当删除最后一条会话导致会话池为空时，干净平滑回退至默认智能体工位，拉取并激活 Forever Chat 终身会话通道
+        const targetBot = state.profileName || 'default';
+        await openBotChat(targetBot);
       }
     } else {
       render();
@@ -2355,10 +2368,8 @@ async function deleteSession(id: string): Promise<void> {
         if (state.activeSessionId) {
           await selectSession(state.activeSessionId);
         } else {
-          state.activeFocus = { type: 'bot', botName: state.profileName || 'default' };
-          state.messages = [];
-          state.isStreaming = false;
-          render();
+          const targetBot = state.profileName || 'default';
+          await openBotChat(targetBot);
         }
       } else {
         render();
@@ -2368,6 +2379,7 @@ async function deleteSession(id: string): Promise<void> {
     }
     state.dockNotice = `删除会话失败: ${msg}`;
     render();
+    restoreComposerFocus();
   }
 }
 
@@ -2487,7 +2499,7 @@ async function selectSession(id: string, options?: { preserveFocus?: boolean; bo
 
   // Preserve draft & message snapshot for outgoing session
   const currentInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
-  if (state.activeSessionId) {
+  if (state.activeSessionId && state.activeSessionId !== id) {
     if (currentInput) {
       sessionDraftMap.set(state.activeSessionId, currentInput.value);
     }
@@ -2516,10 +2528,15 @@ async function selectSession(id: string, options?: { preserveFocus?: boolean; bo
 
   await loadMessages(id, options?.botName);
 
-  // Restore draft for incoming session
+  // Restore draft for incoming session without clobbering live typing
   const restoredInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
   if (restoredInput) {
-    restoredInput.value = sessionDraftMap.get(id) || '';
+    const currentVal = restoredInput.value;
+    // 【非破坏性草稿恢复 (Non-Destructive Draft Restoration)】
+    // 若用户在网络加载期间已在输入框敲入文字，绝对禁止用空草稿冲刷抹除实时输入！
+    if (!currentVal.trim() && sessionDraftMap.has(id)) {
+      restoredInput.value = sessionDraftMap.get(id) || '';
+    }
   }
 
   // 【设计意图 (Why)】
@@ -3925,6 +3942,7 @@ function render(): void {
           testStatus: state.testStatus,
           hasOlderMessages: state.hasOlderMessages,
           isLoadingOlder: state.isLoadingOlder,
+          isStreaming: isStreamingActiveForCurrentSession(),
           dockHtml: state.gatewayConnected
             ? renderInputDock({
                 selectedModel: state.selectedModel,
@@ -3997,6 +4015,15 @@ function render(): void {
         profile: state.editingAgentProfileName ? state.profiles.find((p) => p.name === state.editingAgentProfileName) : undefined,
         availableModels: state.availableModels,
       })}
+
+      ${renderConfirmModal(state.confirmModal ? {
+        isOpen: true,
+        title: state.confirmModal.title,
+        message: state.confirmModal.message,
+        confirmLabel: state.confirmModal.confirmLabel,
+        cancelLabel: state.confirmModal.cancelLabel,
+        isDanger: state.confirmModal.isDanger,
+      } : undefined)}
     `;
 
     root.innerHTML = html;
@@ -4183,6 +4210,26 @@ function render(): void {
       }
     } else if (nextAgentEditorHtml) {
       root.insertAdjacentHTML('beforeend', nextAgentEditorHtml);
+    }
+
+    // Confirm Modal
+    const confirmModalRoot = document.getElementById('flux-confirm-modal-overlay');
+    const nextConfirmModalHtml = renderConfirmModal(state.confirmModal ? {
+      isOpen: true,
+      title: state.confirmModal.title,
+      message: state.confirmModal.message,
+      confirmLabel: state.confirmModal.confirmLabel,
+      cancelLabel: state.confirmModal.cancelLabel,
+      isDanger: state.confirmModal.isDanger,
+    } : undefined);
+    if (confirmModalRoot) {
+      if (nextConfirmModalHtml) {
+        confirmModalRoot.outerHTML = nextConfirmModalHtml;
+      } else {
+        confirmModalRoot.remove();
+      }
+    } else if (nextConfirmModalHtml) {
+      root.insertAdjacentHTML('beforeend', nextConfirmModalHtml);
     }
 
     // Context Menu
@@ -4919,6 +4966,33 @@ function bindEvents(): void {
     };
   }
 
+  // Confirm Modal Events
+  const confirmModalOkBtn = document.getElementById('btn-confirm-modal-ok');
+  const confirmModalCancelBtn = document.getElementById('btn-confirm-modal-cancel');
+  const confirmModalCloseBtn = document.getElementById('btn-confirm-modal-close');
+  const confirmModalOverlay = document.getElementById('flux-confirm-modal-overlay');
+
+  const closeConfirmModal = (action: 'ok' | 'cancel') => {
+    const modal = state.confirmModal;
+    state.confirmModal = undefined;
+    render();
+    if (action === 'ok' && modal?.onConfirm) {
+      void modal.onConfirm();
+    } else if (action === 'cancel') {
+      if (modal?.onCancel) modal.onCancel();
+      else restoreComposerFocus();
+    }
+  };
+
+  if (confirmModalOkBtn) confirmModalOkBtn.onclick = () => closeConfirmModal('ok');
+  if (confirmModalCancelBtn) confirmModalCancelBtn.onclick = () => closeConfirmModal('cancel');
+  if (confirmModalCloseBtn) confirmModalCloseBtn.onclick = () => closeConfirmModal('cancel');
+  if (confirmModalOverlay) {
+    confirmModalOverlay.onclick = (e) => {
+      if (e.target === confirmModalOverlay) closeConfirmModal('cancel');
+    };
+  }
+
   let activeModalType: 'solo' | 'group' = 'solo';
   const modalTabSolo = document.getElementById('modal-tab-solo');
   const modalTabGroup = document.getElementById('modal-tab-group');
@@ -5290,19 +5364,31 @@ function bindEvents(): void {
           }
         }, 40);
       } else if (action === 'disband-group') {
-        if (confirm(t('ctx.confirmDisbandGroup', { name: ctx.targetName }))) {
-          if (gatewayClient) {
-            void groupRoomStore.disbandRoom(ctx.targetId, gatewayClient).then(async () => {
-              await fetchGroupRooms();
-              if (state.activeFocus.type === 'group' && state.activeFocus.roomId === ctx.targetId) {
-                if (state.sessions.length > 0) void selectSession(state.sessions[0].id);
-              }
-            }).catch((err) => {
-              state.dockNotice = t('ctx.disbandGroupFailed', { error: describeRpcError(err) });
-              render();
-            });
-          }
-        }
+        state.confirmModal = {
+          title: t('ctx.disbandGroupTitle'),
+          message: t('ctx.confirmDisbandGroup', { name: ctx.targetName }),
+          confirmLabel: t('ctx.disbandGroup'),
+          cancelLabel: t('common.cancel'),
+          isDanger: true,
+          onConfirm: () => {
+            restoreComposerFocus();
+            if (gatewayClient) {
+              void groupRoomStore.disbandRoom(ctx.targetId, gatewayClient).then(async () => {
+                await fetchGroupRooms();
+                if (state.activeFocus.type === 'group' && state.activeFocus.roomId === ctx.targetId) {
+                  if (state.sessions.length > 0) void selectSession(state.sessions[0].id);
+                }
+              }).catch((err) => {
+                state.dockNotice = t('ctx.disbandGroupFailed', { error: describeRpcError(err) });
+                render();
+              });
+            }
+          },
+          onCancel: () => {
+            restoreComposerFocus();
+          },
+        };
+        render();
       } else if (action === 'rename') {
         void renameSession(ctx.targetId, ctx.targetName);
       } else if (action === 'copy-id') {
@@ -5314,13 +5400,21 @@ function bindEvents(): void {
       } else if (action === 'archive') {
         void archiveSession(ctx.targetId);
       } else if (action === 'delete') {
-        const confirmed = confirm(t('ctx.confirmDeleteSession', { name: ctx.targetName || ctx.targetId }));
-        if (confirmed) {
-          void deleteSession(ctx.targetId);
-        } else {
-          // 用户取消删除：因原生 confirm 对话框关闭可能导致窗口脱敏，立即恢复输入舱光标与焦点
-          restoreComposerFocus();
-        }
+        state.confirmModal = {
+          title: t('ctx.deleteSessionTitle'),
+          message: t('ctx.confirmDeleteSession', { name: ctx.targetName || ctx.targetId }),
+          confirmLabel: t('ctx.delete'),
+          cancelLabel: t('common.cancel'),
+          isDanger: true,
+          onConfirm: () => {
+            restoreComposerFocus();
+            void deleteSession(ctx.targetId);
+          },
+          onCancel: () => {
+            restoreComposerFocus();
+          },
+        };
+        render();
       }
     };
   });
@@ -5329,13 +5423,23 @@ function bindEvents(): void {
     (btn as HTMLElement).onclick = (e) => {
       e.stopPropagation();
       const id = (btn as HTMLElement).dataset.id;
-      const confirmed = id && confirm(t('ctx.confirmDeleteSession', { name: id }));
-      if (confirmed) {
-        void deleteSession(id);
-      } else {
-        // 用户取消删除：因原生 confirm 对话框关闭可能导致窗口脱敏，立即恢复输入舱光标与焦点
-        restoreComposerFocus();
-      }
+      if (!id) return;
+      const targetSess = state.sessions.find((s) => s.id === id);
+      state.confirmModal = {
+        title: t('ctx.deleteSessionTitle'),
+        message: t('ctx.confirmDeleteSession', { name: targetSess?.title || id }),
+        confirmLabel: t('ctx.delete'),
+        cancelLabel: t('common.cancel'),
+        isDanger: true,
+        onConfirm: () => {
+          restoreComposerFocus();
+          void deleteSession(id);
+        },
+        onCancel: () => {
+          restoreComposerFocus();
+        },
+      };
+      render();
     };
   });
 
@@ -5538,6 +5642,37 @@ function bindEvents(): void {
   if (streamEl && streamEl.dataset.fileLinkDelegated !== 'true') {
     streamEl.dataset.fileLinkDelegated = 'true';
     streamEl.addEventListener('click', (e) => {
+      // 1. 消息微距操作栏委托：复制、回滚、Fork 分支、重新生成（选择器严格精准收敛）
+      const actionBtn = (e.target as HTMLElement).closest<HTMLElement>('.msg-action-btn[data-action]');
+      if (actionBtn) {
+        const action = actionBtn.getAttribute('data-action');
+        if (action === 'copy-msg') {
+          e.stopPropagation();
+          e.preventDefault();
+          void handleCopyMessage(actionBtn);
+          return;
+        }
+        if (action === 'rollback-msg') {
+          e.stopPropagation();
+          e.preventDefault();
+          handleRollbackMessage(actionBtn);
+          return;
+        }
+        if (action === 'fork-msg') {
+          e.stopPropagation();
+          e.preventDefault();
+          void handleForkMessage(actionBtn);
+          return;
+        }
+        if (action === 'regenerate-msg') {
+          e.stopPropagation();
+          e.preventDefault();
+          void handleRegenerateMessage(actionBtn);
+          return;
+        }
+      }
+
+      // 2. 工具文件预览链接委托
       const linkEl = (e.target as HTMLElement).closest<HTMLElement>('.tool-file-link, [data-preview-file], [data-preview-url]');
       if (linkEl) {
         e.stopPropagation();
@@ -5569,6 +5704,117 @@ function bindEvents(): void {
 
   // Bind Draggable Rails
   bindRailResizeEvents();
+}
+
+/**
+ * 消息微距操作栏动作处理函数集
+ *
+ * 【设计意图 (Why)】
+ * 支撑对话流中每条消息的即时操作（复制纯文本/Markdown、回滚回填至输入框、基于消息节点分支会话、重新生成本轮回复）。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ * - 复制内容防范 HTML 属性截断：优先从 state.messages 模型内存中根据 data-msg-id 提取完整 content，仅在内存缺失时回退 data-content；
+ * - Fork 分支防范 4008 守卫错误：计算截断条数 count = msgIdx + 1，杜绝传空或者传负数；
+ * - 重新生成防范并发重入与上下文脱节：在当前流式中坚决拦截；向前逆序查找到最近一条 user 提问再调用 sendMessage 重新提交；
+ * - 回滚防范光标跳动与高度未刷新：填入 textarea 后触发 input 事件通知自适应高度计算并保持末尾光标。
+ *
+ * 【约束与规则 (Rules)】
+ * - 状态透明：无论成功还是失败，均通过 setTimedDockNotice 和按钮图标微动效给予用户明确反馈；
+ * - 严格类型，严禁 as any。
+ */
+async function handleCopyMessage(btn: HTMLElement): Promise<void> {
+  const contentAttr = btn.getAttribute('data-content') || '';
+  const rowEl = btn.closest<HTMLElement>('[data-msg-id]');
+  const msgId = btn.getAttribute('data-msg-id') || rowEl?.getAttribute('data-msg-id');
+  const targetMsg = msgId ? state.messages.find((m) => m.id === msgId) : undefined;
+  const copyText = targetMsg?.content || contentAttr;
+  if (!copyText) return;
+
+  const ok = await safeCopyText(copyText);
+  if (ok) {
+    const originalSvg = btn.innerHTML;
+    btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+    setTimedDockNotice(t('common.copied'));
+    setTimeout(() => {
+      btn.innerHTML = originalSvg;
+    }, 1500);
+  }
+}
+
+function handleRollbackMessage(btn: HTMLElement): void {
+  const contentAttr = btn.getAttribute('data-content') || '';
+  const rowEl = btn.closest<HTMLElement>('[data-msg-id]');
+  const msgId = btn.getAttribute('data-msg-id') || rowEl?.getAttribute('data-msg-id');
+  const targetMsg = msgId ? state.messages.find((m) => m.id === msgId) : undefined;
+  const rollbackText = targetMsg?.content || contentAttr;
+  if (!rollbackText) return;
+
+  const textarea = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
+  if (textarea) {
+    textarea.value = rollbackText;
+    textarea.focus();
+    textarea.setSelectionRange(rollbackText.length, rollbackText.length);
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    document.body.setAttribute('data-last-rollback', rollbackText);
+    setTimedDockNotice(t('chat.rollbackSuccess'));
+  }
+}
+
+async function handleForkMessage(btn: HTMLElement): Promise<void> {
+  if (!state.activeSessionId || !gatewayClient) {
+    setTimedDockNotice(t('chat.gatewayNotConnected'));
+    return;
+  }
+  const rowEl = btn.closest<HTMLElement>('[data-msg-id]');
+  const msgId = btn.getAttribute('data-msg-id') || rowEl?.getAttribute('data-msg-id');
+  const msgIdx = msgId ? state.messages.findIndex((m) => m.id === msgId) : -1;
+  const count = msgIdx >= 0 ? msgIdx + 1 : state.messages.length;
+
+  try {
+    setTimedDockNotice(t('chat.forking'));
+    const branchRes = await gatewayClient.call<Record<string, unknown>>('session.branch', {
+      session_id: state.activeSessionId,
+      count,
+      profile: state.profileName || 'default',
+    });
+    if (branchRes && (branchRes.session_id || branchRes.stored_session_id)) {
+      const newSessionId = String(branchRes.stored_session_id || branchRes.session_id);
+      await scheduleSessionsRefresh();
+      await selectSession(newSessionId);
+      setTimedDockNotice(t('chat.forkSuccess'));
+    } else {
+      setTimedDockNotice(t('chat.forkFailed'));
+    }
+  } catch (err) {
+    console.error('[Hermes Flux] session.branch failed:', err);
+    setTimedDockNotice(`${t('chat.forkFailed')}: ${describeRpcError(err)}`);
+  }
+}
+
+async function handleRegenerateMessage(btn: HTMLElement): Promise<void> {
+  if (!state.activeSessionId || !gatewayClient) {
+    setTimedDockNotice(t('chat.gatewayNotConnected'));
+    return;
+  }
+  if (isStreamingActiveForCurrentSession()) {
+    setTimedDockNotice(t('chat.streamBusyNotice'));
+    return;
+  }
+  const rowEl = btn.closest<HTMLElement>('[data-msg-id]');
+  const msgId = btn.getAttribute('data-msg-id') || rowEl?.getAttribute('data-msg-id');
+  const msgIdx = msgId ? state.messages.findIndex((m) => m.id === msgId) : -1;
+
+  const prevUserMsg = (msgIdx >= 0 ? state.messages.slice(0, msgIdx) : state.messages)
+    .slice()
+    .reverse()
+    .find((m) => m.role === 'user');
+
+  if (prevUserMsg && prevUserMsg.content) {
+    setTimedDockNotice(t('chat.regenerating'));
+    await sendMessage(prevUserMsg.content);
+  } else {
+    setTimedDockNotice(t('chat.userPromptNotFound'));
+  }
 }
 
 let runningToolTimerHandle: number | undefined;
@@ -5753,12 +5999,30 @@ window.addEventListener('keydown', (e) => {
     state.inspectorCollapsed = !state.inspectorCollapsed;
     render();
   }
-  if (e.key === 'Escape' && state.isSettingsOpen) {
-    state.isSettingsOpen = false;
+  if (e.key === 'Escape') {
+    if (state.confirmModal) {
+      const modal = state.confirmModal;
+      state.confirmModal = undefined;
+      render();
+      if (modal.onCancel) modal.onCancel();
+      else restoreComposerFocus();
+      return;
+    }
+    if (state.isSettingsOpen) {
+      state.isSettingsOpen = false;
+      render();
+    } else if (state.modelMenuOpen) {
+      state.modelMenuOpen = false;
+      render();
+    }
+  }
+  if (e.key === 'Enter' && state.confirmModal) {
+    e.preventDefault();
+    const modal = state.confirmModal;
+    state.confirmModal = undefined;
     render();
-  } else if (e.key === 'Escape' && state.modelMenuOpen) {
-    state.modelMenuOpen = false;
-    render();
+    if (modal.onConfirm) void modal.onConfirm();
+    return;
   }
 });
 

@@ -80,6 +80,7 @@ function main() {
     ['Gate 0d · 接口文档与契约同步', 'node', ['scripts/contract/doc.mjs', '--check']],
     ['Gate 1 · 全栈严格类型', NPM, ['run', 'typecheck']],
     ['Gate 2 · 单元与不变量测试', NPM, ['test']],
+    ['Gate 2b · 形式化安全不变量检验 (7 大数学定理)', NPM, ['run', 'verify:formal']],
   ];
 
   const failures = [];

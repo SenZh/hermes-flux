@@ -364,7 +364,9 @@ test('FSM should compute exponential backoff with full jitter within bounds', ()
 | **全量静态门禁** | `npm run gates` | 扫描 Monorepo 全量源码，断言无新增架构/换肤/i18n/性能违规，存量债务自动放行 |
 | **全栈严格类型** | `npm run typecheck` | 执行 core、ui、desktop 递归类型推导，**0 TS 报错，严禁任何 as any** |
 | **全量单测回归** | `npm test` | 执行全工作区单元测试与架构守卫测试，**100% 绿灯，单测用例必须具可证伪性** |
-| **交付前三位一体** | `npm run verify` | **落盘前必跑**：链式执行 `gates` + `typecheck` + `test`，一键确定是否满足交付准入 |
+| **形式化不变量证明** | `npm run verify:formal` | **状态机必跑**：基于 fast-check 在 8,500+ 次随机并发交错中证明 7 大数学定理 |
+| **物理CDP验证与截图** | `node scripts/verify/control-flux.mjs run <feature-id>` | **用户特征必跑**：驱动真实 Blink 内核，捕获物理截图存盘至 `artifacts/verification/` |
+| **交付前全量四位一体** | `npm run verify` | **落盘前必跑**：链式执行 `gates` + `contract` + `typecheck` + `test`，一键确定交付准入 |
 | **真实无头 CDP** | `node --test packages/desktop/__tests__/cdp/openchamber-toolbar.test.mjs` | 验证真实 Edge/Chrome 浏览器无头环境渲染、样式与事件绑定的真实物理行为 |
 | **门禁自身变异检验** | `npm run gates:mutation` | 故意注入 5 处历史真实缺陷，断言门禁测试必须 100% 变红（证明门禁具备真实杀伤力） |
 | **Agent 配置一致性** | `npm run gates:config` | 验证 `opencode.jsonc` 与 `.opencode/agents/` 审查者只读权限与步骤上限一致性 |
@@ -416,11 +418,13 @@ test('FSM should compute exponential backoff with full jitter within bounds', ()
   3. **约束与规则 (Rules)**：不可破坏的状态机或分层不变量。
 
 ### 3. 第三步：确定性机器自检
-代码修改完成后，主 Agent **必须亲自按顺序运行并通过以下检查**：
+代码修改完成后，主 Agent **必须亲自按顺序运行并通过以下五阶流水线检查**：
 ```bash
-npm run gates:changed    # 静态门禁断言：新增违规数必须为 0
-npm run typecheck        # 静态类型断言：0 错误
-npm test                 # 单测回归断言：100% 通过
+npm run gates:changed                           # 1. 静态门禁断言：新增违规数严格为 0
+npm run typecheck                               # 2. 静态类型断言：0 错误
+npm run verify:formal                           # 3. 形式化安全不变量断言：7 大数学定理获证，零反例逃逸
+node scripts/verify/control-flux.mjs run <feat> # 4. Blink CDP 真实物理渲染验证：捕获截图存盘至 artifacts/verification/
+npm run verify                                  # 5. 交付前四位一体总体验收：全量门禁 + 契约 + 类型 + 单测 100% 绿灯
 ```
 
 ### 4. 第四步：强制 Subagent 独立双审（一票否决硬红线）

@@ -550,6 +550,18 @@ button {
     min-width: 44px !important;
     min-height: 44px !important;
   }
+
+  .msg-action-btn {
+    min-width: 36px !important;
+    min-height: 36px !important;
+  }
 }
+
+/* 微距操作栏纯图标按钮温润反馈 */
+.msg-action-btn:hover {
+  color: var(--text-main) !important;
+  background: var(--bg-card-active) !important;
+}
+
 
 

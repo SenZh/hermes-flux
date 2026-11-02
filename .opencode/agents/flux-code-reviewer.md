@@ -35,6 +35,8 @@ permissions:
 3. `git status` — 核实测试用例文件是否已真实落盘于工作区。
 4. `npm run typecheck` — 必须自己实际执行，不得采信他人转述。
 5. `npm test` — 必须自己实际执行全量单测，断言 100% 绿灯。
+6. `npm run verify:formal` — 必须自己实际执行形式化不变量验证，断言 7 大数学定理获证，零反例逃逸。
+7. `artifacts/verification/<feature-id>/` — 若涉及用户可达界面改动，必须核查是否存在真实 CDP 捕获的物理截图与证据 JSON。
 
 ## 六个必查维度
 
