@@ -1,0 +1,129 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  renderInputDock,
+  renderQueueTray,
+  renderAttachmentTray,
+  renderSlashPopper,
+  renderMentionPopper,
+  renderModelPickerTree,
+} from '../../dist/components/InputDock/InputDock.js';
+
+test('InputDock Enhanced - 队列托盘、附件托盘、手风琴模型器与Popper测试', async (t) => {
+  await t.test('1. 待发送队列托盘 (renderQueueTray)：多条排队与紧急打断插队按钮', () => {
+    const queueItems = [
+      { id: 'q1', text: '先帮我写个单测', model: 'claude-3-7-sonnet' },
+      { id: 'q2', text: '然后补齐文档' },
+    ];
+    const html = renderQueueTray(queueItems);
+
+    assert.ok(html.includes('pending-queue-tray'), '必须渲染排队托盘容器');
+    assert.ok(html.includes('(2)'), '显示排队数量');
+    assert.ok(html.includes('data-action="interrupt-and-push"'), '必须包含打断并执行快捷动作');
+    assert.ok(html.includes('#1'), '包含序号 1');
+    assert.ok(html.includes('先帮我写个单测'), '包含文本摘要');
+    assert.ok(html.includes('data-action="queue-up"'), '包含上移按钮');
+    assert.ok(html.includes('data-action="queue-down"'), '包含下移按钮');
+    assert.ok(html.includes('data-action="queue-edit"'), '包含编辑按钮');
+    assert.ok(html.includes('data-action="queue-cancel"'), '包含取消按钮');
+
+    // 边界：空队列返回空
+    assert.equal(renderQueueTray([]), '');
+    assert.equal(renderQueueTray(undefined), '');
+  });
+
+  await t.test('2. 附件暂存托盘 (renderAttachmentTray)：图片缩略图与移除小叉', () => {
+    const attachments = [
+      { id: 'att-1', name: 'screenshot.png', type: 'image', previewUrl: 'blob:mock-img' },
+      { id: 'att-2', name: 'architecture.pdf', type: 'pdf' },
+    ];
+    const html = renderAttachmentTray(attachments);
+
+    assert.ok(html.includes('composer-attachment-tray'), '必须渲染附件托盘');
+    assert.ok(html.includes('src="blob:mock-img"'), '图片附件渲染缩略图');
+    assert.ok(html.includes('screenshot.png'), '渲染文件名');
+    assert.ok(html.includes('architecture.pdf'), '渲染文档名');
+    assert.ok(html.includes('btn-remove-attachment'), '包含移除小叉');
+
+    // 边界：空附件返回空
+    assert.equal(renderAttachmentTray([]), '');
+  });
+
+  await t.test('3. 斜杠补全面板 (renderSlashPopper)：系统指令与 Skill 标识', () => {
+    const items = [
+      { name: '/clear', description: '清空会话屏幕' },
+      { name: '/code-review', description: '代码架构质量审查', isSkill: true },
+    ];
+
+    // open = true
+    const openHtml = renderSlashPopper(items, true);
+    assert.ok(openHtml.includes('composer-slash-popper'), '展示补全面板');
+    assert.ok(openHtml.includes('/clear'), '包含普通命令');
+    assert.ok(openHtml.includes('/code-review'), '包含 Skill 命令');
+    assert.ok(openHtml.includes('SKILL'), '包含 Skill 徽章标识');
+
+    // open = false
+    assert.equal(renderSlashPopper(items, false), '', '关闭时不应输出任何 HTML');
+  });
+
+  await t.test('4. @ 智能引用面板 (renderMentionPopper)：文档与 Agent 分流', () => {
+    const items = [
+      { type: 'file', name: 'packages/core/src/rpc.ts', detail: '42KB' },
+      { type: 'agent', name: '架构师王工', detail: '专职架构审查' },
+    ];
+
+    const openHtml = renderMentionPopper(items, true);
+    assert.ok(openHtml.includes('composer-mention-popper'), '展示引用面板');
+    assert.ok(openHtml.includes('packages/core/src/rpc.ts'), '包含文件项');
+    assert.ok(openHtml.includes('架构师王工'), '包含 Agent 项');
+    assert.ok(openHtml.includes('📄'), '文件图标');
+    assert.ok(openHtml.includes('🤖'), 'Agent 图标');
+
+    assert.equal(renderMentionPopper(items, false), '');
+  });
+
+  await t.test('5. 模型选择器 Provider 手风琴折叠 (renderModelPickerTree)', () => {
+    const props = {
+      selectedModel: 'anthropic/claude-3-7-sonnet',
+      modelMenuOpen: true,
+      reasoningLevel: 'default',
+      approvalMode: 'auto',
+      isStreaming: false,
+      modelDetails: [
+        { id: 'anthropic/claude-3-7-sonnet', provider: 'Anthropic', name: 'Claude 3.7 Sonnet', displayName: 'Claude 3.7', contextLength: 200000, supportsVision: true },
+        { id: 'openai/gpt-4o', provider: 'OpenAI', name: 'GPT-4o', displayName: 'GPT-4o', contextLength: 128000, supportsVision: true },
+      ],
+      // 将 OpenAI 设为折叠状态
+      collapsedProviders: ['OpenAI'],
+    };
+
+    const html = renderModelPickerTree(props);
+    assert.ok(html.includes('model-provider-group'), '包含厂商分组');
+    assert.ok(html.includes('ANTHROPIC'), '包含 Anthropic 厂商标题');
+    assert.ok(html.includes('OPENAI'), '包含 OpenAI 厂商标题');
+    assert.ok(html.includes('VISION'), '包含 Vision 多模态微标');
+    assert.ok(html.includes('20万'), '包含上下文长度');
+
+    // 验证手风琴折叠状态
+    assert.ok(html.includes('display: none;'), '折叠的厂商 items 容器必须为 display: none');
+    assert.ok(html.includes('display: block;'), '未折叠的厂商 items 容器必须为 display: block');
+  });
+
+  await t.test('6. renderInputDock 宿主装配：集成队列抽屉、附件暂存托盘与黄金限宽', () => {
+    const dockHtml = renderInputDock({
+      selectedModel: 'anthropic/claude-3-7-sonnet',
+      reasoningLevel: 'high',
+      approvalMode: 'auto',
+      isStreaming: false,
+      modelMenuOpen: false,
+      attachments: [{ id: 'att-1', name: 'photo.jpg', type: 'image' }],
+      queuedMessages: [{ id: 'q-1', text: '排队的消息' }],
+    });
+
+    assert.ok(dockHtml.includes('composer-dock'), '必须渲染输入舱容器');
+    assert.ok(dockHtml.includes('max-width: 740px'), '输入舱必须具备 740px 黄金限宽');
+    assert.ok(dockHtml.includes('pending-queue-tray'), '宿主必须自动挂载待发送队列抽屉');
+    assert.ok(dockHtml.includes('composer-attachment-tray'), '宿主必须自动挂载附件暂存托盘');
+    assert.ok(dockHtml.includes('dock-prompt-input'), '必须包含核心输入框');
+  });
+});

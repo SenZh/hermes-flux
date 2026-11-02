@@ -5,10 +5,19 @@
 
 | 方法 | 入参（契约） | 出参（契约） | 调用点 | 真实探针 |
 | --- | --- | --- | --- | --- |
+| `commands.catalog` | `session_id` `profile` | `pairs` `sub` `canon` `commands` `categories` `skills` `skill_count` `warning` | `packages/core/src/session/interactiveService.ts:181` | 跳过：动态命令目录由在线网关运行时按 profile 动态生成，离线探针显式跳过，由契约表严格守护 |
 | `model.options` | `profile` `session_id` `explicit_only` `include_unconfigured` `refresh` | `providers` `model` `provider` | `packages/core/src/rpc/client.ts:744` | ✅ 0.22.5 |
 | `ping` | — | — | `packages/core/src/rpc/client.ts:339`<br>`packages/core/src/rpc/client.ts:394` | ✅ 0.22.5 |
 
 ## 明细
+
+### `commands.catalog`
+
+- 参数类型：`CommandsCatalogParams`
+- 结果类型：`CommandsCatalogResult`
+- 真实探针：跳过 —— 动态命令目录由在线网关运行时按 profile 动态生成，离线探针显式跳过，由契约表严格守护
+- 调用点：
+  - `packages/core/src/session/interactiveService.ts:181`
 
 ### `model.options`
 
