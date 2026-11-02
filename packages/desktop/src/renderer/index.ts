@@ -89,6 +89,13 @@ declare global {
     __fluxCopyText?: (text: string) => Promise<boolean>;
     /** E2E / CDP 对账触发器：全量刷新并对账会话列表 */
     __fluxFetchSessions?: () => Promise<void>;
+    /** E2E / CDP 消息微操作栏动作派发器 */
+    __fluxMessageActions?: {
+      handleCopyMessage: (btn: HTMLElement) => Promise<void>;
+      handleRollbackMessage: (btn: HTMLElement) => void;
+      handleForkMessage: (btn: HTMLElement) => Promise<void>;
+      handleRegenerateMessage: (btn: HTMLElement) => Promise<void>;
+    };
   }
 }
 
@@ -5760,11 +5767,16 @@ function handleRollbackMessage(btn: HTMLElement): void {
   }
 }
 
+let isForkPending = false;
+let isRegeneratePending = false;
+
 async function handleForkMessage(btn: HTMLElement): Promise<void> {
+  if (isForkPending) return;
   if (!state.activeSessionId || !gatewayClient) {
     setTimedDockNotice(t('chat.gatewayNotConnected'));
     return;
   }
+  isForkPending = true;
   const rowEl = btn.closest<HTMLElement>('[data-msg-id]');
   const msgId = btn.getAttribute('data-msg-id') || rowEl?.getAttribute('data-msg-id');
   const msgIdx = msgId ? state.messages.findIndex((m) => m.id === msgId) : -1;
@@ -5788,10 +5800,13 @@ async function handleForkMessage(btn: HTMLElement): Promise<void> {
   } catch (err) {
     console.error('[Hermes Flux] session.branch failed:', err);
     setTimedDockNotice(`${t('chat.forkFailed')}: ${describeRpcError(err)}`);
+  } finally {
+    isForkPending = false;
   }
 }
 
 async function handleRegenerateMessage(btn: HTMLElement): Promise<void> {
+  if (isRegeneratePending) return;
   if (!state.activeSessionId || !gatewayClient) {
     setTimedDockNotice(t('chat.gatewayNotConnected'));
     return;
@@ -5800,6 +5815,7 @@ async function handleRegenerateMessage(btn: HTMLElement): Promise<void> {
     setTimedDockNotice(t('chat.streamBusyNotice'));
     return;
   }
+  isRegeneratePending = true;
   const rowEl = btn.closest<HTMLElement>('[data-msg-id]');
   const msgId = btn.getAttribute('data-msg-id') || rowEl?.getAttribute('data-msg-id');
   const msgIdx = msgId ? state.messages.findIndex((m) => m.id === msgId) : -1;
@@ -5809,12 +5825,25 @@ async function handleRegenerateMessage(btn: HTMLElement): Promise<void> {
     .reverse()
     .find((m) => m.role === 'user');
 
-  if (prevUserMsg && prevUserMsg.content) {
-    setTimedDockNotice(t('chat.regenerating'));
-    await sendMessage(prevUserMsg.content);
-  } else {
-    setTimedDockNotice(t('chat.userPromptNotFound'));
+  try {
+    if (prevUserMsg && prevUserMsg.content) {
+      setTimedDockNotice(t('chat.regenerating'));
+      await sendMessage(prevUserMsg.content);
+    } else {
+      setTimedDockNotice(t('chat.userPromptNotFound'));
+    }
+  } finally {
+    isRegeneratePending = false;
   }
+}
+
+if (typeof window !== 'undefined') {
+  window.__fluxMessageActions = {
+    handleCopyMessage,
+    handleRollbackMessage,
+    handleForkMessage,
+    handleRegenerateMessage,
+  };
 }
 
 let runningToolTimerHandle: number | undefined;

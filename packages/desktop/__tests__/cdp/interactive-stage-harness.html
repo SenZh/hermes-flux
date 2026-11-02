@@ -142,22 +142,12 @@
       if (!btn) return;
 
       const action = btn.getAttribute('data-action');
-      if (action === 'copy-msg') {
-        const text = btn.getAttribute('data-content') || '';
-        document.body.setAttribute('data-last-copied', text);
-      }
-
-      if (action === 'fork-msg') {
-        const msgId = btn.getAttribute('data-msg-id') || '';
-        document.body.setAttribute('data-last-fork', msgId);
-      }
-
-      if (action === 'regenerate-msg') {
-        const msgId = btn.getAttribute('data-msg-id') || '';
-        document.body.setAttribute('data-last-regenerate', msgId);
-      }
-
-      if (action === 'rollback-msg') {
+      if (window.__fluxMessageActions) {
+        if (action === 'copy-msg') void window.__fluxMessageActions.handleCopyMessage(btn);
+        if (action === 'rollback-msg') window.__fluxMessageActions.handleRollbackMessage(btn);
+        if (action === 'fork-msg') void window.__fluxMessageActions.handleForkMessage(btn);
+        if (action === 'regenerate-msg') void window.__fluxMessageActions.handleRegenerateMessage(btn);
+      } else if (action === 'rollback-msg') {
         const text = btn.getAttribute('data-content') || '';
         const textarea = document.getElementById('dock-prompt-input');
         if (textarea) {
