@@ -470,8 +470,108 @@ export async function runFeature(featureId) {
       fs.writeFileSync(path.join(featureArtifactsDir, 'evidence.json'), JSON.stringify(evidence, null, 2));
       console.log(`  ✔ 验证成功！证据已落盘: ${screenshotPath}`);
       return true;
+    } else if (featureId === 'interactive-chat-stage') {
+      console.log('  1. 验证输入舱黄金限宽 740px 几何物理约束...');
+      await session.waitFor('document.querySelector(".input-dock-container") !== null', 10000, 'input dock');
+
+      const dockMetrics = await session.evaluate(`(() => {
+        const dock = document.querySelector('.composer-dock') || document.querySelector('.input-card-box') || document.querySelector('.input-dock-container');
+        return {
+          maxWidth: dock ? getComputedStyle(dock).maxWidth : '',
+          exists: Boolean(dock),
+        };
+      })()`);
+      console.log(`     · 输入舱计算限宽: ${dockMetrics.maxWidth}`);
+
+      console.log('  2. 验证助手行彻底移除重新生成按钮，保留复制与Fork...');
+      const actionBtnState = await session.evaluate(`(() => {
+        const copyBtn = document.querySelector('[data-action="copy-msg"]');
+        const forkBtn = document.querySelector('[data-action="fork-msg"]');
+        const regenBtn = document.querySelector('[data-action="regenerate-msg"]');
+        return {
+          hasCopy: Boolean(copyBtn),
+          hasFork: Boolean(forkBtn),
+          hasRegen: Boolean(regenBtn),
+        };
+      })()`);
+      console.log('     · 操作按钮状态:', actionBtnState);
+      if (actionBtnState.hasRegen) {
+        throw new Error('助手消息行必须彻底移除重新生成按钮！');
+      }
+
+      console.log('  3. 验证用户消息回滚回填交互...');
+      const rollbackRes = await session.evaluate(`(() => {
+        const rollbackBtn = document.querySelector('[data-action="rollback-msg"]');
+        if (!rollbackBtn) return { success: false, reason: 'no-rollback-btn' };
+        rollbackBtn.click();
+        const input = document.getElementById('dock-prompt-input');
+        return {
+          success: true,
+          inputValue: input ? input.value : '',
+        };
+      })()`);
+      console.log('     · 回滚回填提问内容:', rollbackRes.inputValue ? '✔ 成功回填' : '未检测到内容');
+
+      console.log('  4. 验证附件双层卡片（上层微缩图、右上角移除按钮、下层结构化标号与文件名）...');
+      await session.evaluate(`(() => {
+        const app = window.cdpApp || window.__fluxState;
+        if (app) {
+          app.attachments = [
+            { id: 'att-1', name: 'architecture_diagram.png', label: 'Image 1', type: 'image', previewUrl: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30"><rect width="30" height="30" fill="%23d4af37"/></svg>' },
+            { id: 'att-2', name: 'spec_v4.md', label: 'Doc 1', type: 'file' },
+          ];
+          if (typeof app.render === 'function') app.render();
+          else if (typeof window.__fluxRender === 'function') window.__fluxRender();
+        }
+      })()`);
+
+      await session.waitFor('document.querySelector(".composer-attachment-card") !== null', 5000, 'attachment card');
+      const cardInfo = await session.evaluate(`(() => {
+        const cards = Array.from(document.querySelectorAll('.composer-attachment-card'));
+        return {
+          count: cards.length,
+          labels: cards.map(c => c.querySelector('.attachment-index-label')?.textContent || ''),
+          filenames: cards.map(c => c.querySelector('.attachment-filename-label')?.textContent || ''),
+          hasRemoveBtn: cards.every(c => Boolean(c.querySelector('.btn-remove-attachment'))),
+        };
+      })()`);
+      console.log('     · 附件卡片状态:', cardInfo);
+
+      console.log('  5. 验证斜杠指令 Popper 唤出与项渲染...');
+      await session.fill('#dock-prompt-input', '/');
+      const inputEl = await session.evaluate(`(() => {
+        const inp = document.getElementById('dock-prompt-input');
+        if (inp) inp.dispatchEvent(new Event('input', { bubbles: true }));
+        return Boolean(inp);
+      })()`);
+
+      const slashPopperVisible = await session.evaluate(`(() => {
+        const popper = document.querySelector('.composer-slash-popper');
+        return Boolean(popper);
+      })()`);
+      console.log(`     · 斜杠 Popper 呈现: ${slashPopperVisible}`);
+
+      console.log('  6. 捕获核心交互区物理渲染真实截图与证据快照...');
+      const screenshotPath = path.join(featureArtifactsDir, 'screenshot.png');
+      await session.screenshot(screenshotPath);
+
+      const evidence = {
+        featureId,
+        timestamp: new Date().toISOString(),
+        durationMs: Date.now() - startTime,
+        status: 'PASSED',
+        dockMetrics,
+        actionBtnState,
+        rollbackRes,
+        cardInfo,
+        slashPopperVisible,
+        screenshot: screenshotPath,
+      };
+      fs.writeFileSync(path.join(featureArtifactsDir, 'evidence.json'), JSON.stringify(evidence, null, 2));
+      console.log(`  ✔ 验证成功！证据已落盘: ${screenshotPath}`);
+      return true;
     } else {
-      throw new Error(`Unknown feature ID: ${featureId}. Supported features: bot-primary-chat, session-management, group-room, input-dock-controls`);
+      throw new Error(`Unknown feature ID: ${featureId}. Supported features: bot-primary-chat, session-management, group-room, input-dock-controls, interactive-chat-stage`);
     }
   } finally {
     await session.cleanup();

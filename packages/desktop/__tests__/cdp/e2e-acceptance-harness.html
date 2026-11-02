@@ -105,6 +105,12 @@
       editingAgentProfileName: null,
       messages: [
         {
+          id: 'usr-1',
+          role: 'user',
+          content: '请检查并重构分布式锁时钟漂移方案',
+          timestamp: '14:20:00',
+        },
+        {
           id: 'msg-1',
           role: 'assistant',
           content: '您好，当前架构已经通过门禁检验。',
@@ -163,7 +169,12 @@
                 reasoningLevel: 'default',
                 approvalMode: 'auto',
                 isStreaming: false,
-                disabled: false
+                disabled: false,
+                attachments: this.attachments || [],
+                slashPopperOpen: this.slashPopperOpen,
+                slashItems: this.slashItems,
+                mentionPopperOpen: this.mentionPopperOpen,
+                mentionItems: this.mentionItems,
               })
             })}
           </div>
@@ -286,6 +297,34 @@
                 }
               }
               this.lastActions.push(`send_message:${val}`);
+              this.render();
+            }
+          };
+        }
+
+        const rollbackBtn = document.querySelector('[data-action="rollback-msg"]');
+        if (rollbackBtn) {
+          rollbackBtn.onclick = (e) => {
+            e.stopPropagation();
+            const text = rollbackBtn.getAttribute('data-content') || '请检查并重构分布式锁时钟漂移方案';
+            const input = document.getElementById('dock-prompt-input');
+            if (input) {
+              input.value = text;
+              input.focus();
+            }
+          };
+        }
+
+        const inputEl = document.getElementById('dock-prompt-input');
+        if (inputEl) {
+          inputEl.oninput = () => {
+            if (inputEl.value.endsWith('/')) {
+              this.slashPopperOpen = true;
+              this.slashItems = [
+                { name: '/clear', description: '清空会话屏幕' },
+                { name: '/model', description: '切换当前模型' },
+                { name: '/code-review', description: '代码架构质量审查', isSkill: true },
+              ];
               this.render();
             }
           };

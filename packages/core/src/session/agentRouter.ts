@@ -20,6 +20,20 @@ import type { SessionMetadataContract } from '../rpc/types.js';
 
 export type SessionKind = 'scratchpad' | 'bot_forever_chat' | 'group_room';
 
+/**
+ * 从渲染层焦点判别会话类型（按钮可见性与路由分流的单一来源）。
+ * 【防范的历史坑 (Pitfall)】历史 isOrdinarySession 恒真：视图模型从不携带作用域标记，
+ * 导致回滚/Fork 按钮在 Bot 工位与群聊也渲染。统一从这里推导，禁止各处各判一次。
+ */
+export function deriveSessionKind(
+  focus: { type: 'bot'; botName: string } | { type: 'session'; sessionId: string } | { type: 'group'; roomId: string } | undefined
+): SessionKind {
+  if (!focus) return 'scratchpad';
+  if (focus.type === 'bot') return 'bot_forever_chat';
+  if (focus.type === 'group') return 'group_room';
+  return 'scratchpad';
+}
+
 export type MentionRoutingAction =
   | {
       kind: 'subagent_delegation';
@@ -51,6 +65,12 @@ export interface AgentMentionParseResult {
 
 /**
  * 从文本中提取首个有效的 @Agent 标识（例如 "@架构老王 请帮我排查" -> profile: "架构老王"）
+ *
+ * 【防范的历史坑 (Pitfall)】
+ * 旧实现只认行首 `^@`，用户在句中提及（"请帮我 @架构王 看看"）会静默失效，
+ * 整条文本原样发给模型，模型答复"无法调用它"（线上 D4 缺陷的第一根因）。
+ * 现改为：任意位置扫描候选 token；提供 knownProfiles 时仅命中已知 profile 才算提及，
+ * 杜绝把代码里的 @decorator / @2024 之类字面量误判为呼叫。
  */
 export function parseAgentMention(inputText: string, knownProfiles: string[]): AgentMentionParseResult {
   if (!inputText || typeof inputText !== 'string') {
@@ -58,26 +78,99 @@ export function parseAgentMention(inputText: string, knownProfiles: string[]): A
   }
 
   const trimmed = inputText.trim();
-  // 匹配以 @ 紧随字符开头的 Pattern
-  const mentionMatch = trimmed.match(/^@([a-zA-Z0-9_\u4e00-\u9fa5-]+)(\s+|$)/);
-  if (!mentionMatch) {
-    return { hasMention: false, targetProfile: null, rawMention: '', cleanText: trimmed };
+  const lowerKnown = knownProfiles.map((p) => p.toLowerCase());
+  const tokenRe = /(^|\s)@([a-zA-Z0-9_\u4e00-\u9fa5-]+)/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = tokenRe.exec(trimmed)) !== null) {
+    const candidate = match[2];
+    const isKnown = lowerKnown.length === 0
+      // 未提供清单时维持旧语义：行首 @token 直接采纳
+      ? match.index === 0
+      : lowerKnown.includes(candidate.toLowerCase());
+    if (!isKnown) continue;
+
+    const matchedProfile = knownProfiles.find((p) => p.toLowerCase() === candidate.toLowerCase()) || candidate;
+    const rawMention = `@${candidate}`;
+    // 剥离 @token 本身并保留 match[1] 捕获的前置边界（行首为空串或原分隔空白），
+    // 切勿把整个 match[0] 替换成空格——那会把 '@' 连同空白一起留下残影
+    const head = match[1] ?? '';
+    const cleanText = (trimmed.slice(0, match.index) + head + trimmed.slice(match.index + match[0].length))
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return {
+      hasMention: true,
+      targetProfile: matchedProfile,
+      rawMention,
+      cleanText: cleanText || trimmed,
+    };
   }
 
-  const rawMention = mentionMatch[0].trim();
-  const candidate = mentionMatch[1];
-  const remainingText = trimmed.slice(mentionMatch[0].length).trim();
+  return { hasMention: false, targetProfile: null, rawMention: '', cleanText: trimmed };
+}
 
-  // 若提供了已知 profile 清单，进行正向核实；否则直接采纳
-  const matchedProfile = knownProfiles.length > 0
-    ? knownProfiles.find((p) => p.toLowerCase() === candidate.toLowerCase()) || candidate
-    : candidate;
+export type SendRoute =
+  | { readonly kind: 'plain'; readonly text: string }
+  | { readonly kind: 'group-message'; readonly text: string }
+  | { readonly kind: 'mention-subagent'; readonly targetProfile: string; readonly cleanText: string; readonly taskTitle: string }
+  | { readonly kind: 'mention-btw'; readonly targetProfile: string; readonly cleanText: string }
+  | { readonly kind: 'mention-group'; readonly targetProfile: string; readonly text: string };
 
+export interface SendRouteInput {
+  readonly text: string;
+  readonly sessionKind: SessionKind;
+  readonly knownProfiles: readonly string[];
+  /** popper 点选产生的显式提及 token（用户点选即权威，不再做已知性猜测） */
+  readonly pickedMentionToken?: string | null;
+}
+
+/**
+ * 发送链路唯一的路由裁决：先判 mention（点选权威优先），再按会话类型分派通道。
+ * 渲染层拿到路由后只负责执行 RPC，禁止自行解析 '@'。
+ */
+export function planSendRoute(input: SendRouteInput): SendRoute {
+  const text = input.text.trim();
+  const known = [...input.knownProfiles];
+  const parsed = parseAgentMention(text, known);
+  const picked = input.pickedMentionToken?.trim();
+  const pickedHit = picked ? known.find((p) => p.toLowerCase() === picked.toLowerCase()) : undefined;
+
+  if (input.sessionKind === 'group_room') {
+    if (pickedHit || parsed.hasMention) {
+      // 判别收窄：hasMention 为真时 targetProfile 必为非空字符串（见 parseAgentMention 返回契约）
+      if (pickedHit) {
+        return { kind: 'mention-group', targetProfile: pickedHit, text };
+      }
+      if (parsed.targetProfile) {
+        return { kind: 'mention-group', targetProfile: parsed.targetProfile, text };
+      }
+    }
+    return { kind: 'group-message', text };
+  }
+
+  const targetProfile = pickedHit ?? (parsed.hasMention ? parsed.targetProfile : null);
+  if (!targetProfile) {
+    return { kind: 'plain', text };
+  }
+
+  // 点选的 token 若已被用户删掉，视同无提及普通发送，绝不把残缺文本静默改写
+  if (pickedHit && !text.includes(`@${pickedHit}`) && !text.includes(pickedHit)) {
+    return { kind: 'plain', text };
+  }
+
+  const cleanText = parsed.hasMention && parsed.targetProfile?.toLowerCase() === targetProfile.toLowerCase()
+    ? parsed.cleanText
+    : text.replace(new RegExp(`@${targetProfile}`, 'i'), '').trim() || text;
+
+  if (input.sessionKind === 'bot_forever_chat') {
+    return { kind: 'mention-btw', targetProfile, cleanText };
+  }
   return {
-    hasMention: true,
-    targetProfile: matchedProfile,
-    rawMention,
-    cleanText: remainingText || trimmed,
+    kind: 'mention-subagent',
+    targetProfile,
+    cleanText,
+    taskTitle: cleanText.slice(0, 30) || `${targetProfile} 协助处理`,
   };
 }
 

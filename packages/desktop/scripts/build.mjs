@@ -70,6 +70,27 @@ async function buildAll() {
   });
   console.log('  ✔ Message actions module compiled');
 
+  // 3b. 交互区纯逻辑模块（回滚事务 + 工具补丁队列）独立产物，供真实单测导入
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/rollbackTransaction.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/rollbackTransaction.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    sourcemap: true,
+  });
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/toolPatchQueue.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/toolPatchQueue.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    sourcemap: true,
+  });
+  console.log('  ✔ Interactive-stage pure modules compiled (rollbackTransaction, toolPatchQueue)');
+
   // 4. Copy static assets
   fs.copyFileSync(
     path.join(rootDir, 'src/renderer/index.html'),

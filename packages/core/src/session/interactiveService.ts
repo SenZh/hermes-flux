@@ -34,15 +34,25 @@ import type {
   SessionInterruptResult,
   CommandsCatalogParams,
   CommandsCatalogResult,
+  CompleteSlashParams,
+  CompleteSlashResult,
+  CompletePathParams,
+  CompletionItemsResult,
+  SlashExecParams,
+  SlashExecResult,
   SessionUsageResult,
 } from '../rpc/contracts/gateway-contract.generated.js';
 import type { IRpcCaller } from '../rpc/types.js';
+import { isClientTempId, isDurableRowId } from './truncatePlan.js';
 
 export interface TruncateSubmitOptions {
   sessionId: string;
   text: string;
-  truncateBeforeRowId?: number;
-  truncateBeforeMessageId?: string;
+  /** 网关持久行地址（首选锚点） */
+  rowId?: number;
+  /** 服务端签发字符串锚点（窄回退；本地临时主键会被拒绝） */
+  messageId?: string;
+  confirmEmpty?: boolean;
   profile?: string;
 }
 
@@ -51,11 +61,20 @@ export interface ForkBranchOptions {
   count: number;
   name?: string;
   profile?: string;
+  /** 重试幂等键：同一次用户点击的自动重试不得派生两个会话 */
+  idempotencyKey?: string;
 }
 
 export class InteractiveService {
   /**
    * 历史节点截断并重新生成 (Truncate & Regenerate)
+   *
+   * 【防范的历史坑 (Pitfall)】
+   * 双锚点同发或把前端临时 id（usr-*）当 message_id 透传，网关必回 4018；
+   * 契约要求 “explicit consent plus ONE durable target”，本方法是 wire 载荷唯一构造点。
+   *
+   * 【约束与规则 (Rules)】
+   * rowId 与 messageId 严格互斥；二者皆无或非法一律抛错拒绝，绝不静默降级。
    */
   public async truncateAndSubmit(
     bridge: IRpcCaller,
@@ -64,18 +83,26 @@ export class InteractiveService {
     if (!options.sessionId) {
       throw new Error('Session ID is mandatory for truncateAndSubmit');
     }
-    if (!options.truncateBeforeRowId && !options.truncateBeforeMessageId) {
-      throw new Error('truncateBeforeRowId or truncateBeforeMessageId is mandatory for truncation');
-    }
 
     const params: PromptSubmitParams = {
       session_id: options.sessionId,
       text: options.text,
       confirm_truncate: true,
-      truncate_before_row_id: options.truncateBeforeRowId ?? null,
-      truncate_before_message_id: options.truncateBeforeMessageId ?? null,
       profile: options.profile ?? null,
     };
+
+    if (isDurableRowId(options.rowId)) {
+      params.truncate_before_row_id = options.rowId;
+    } else if (typeof options.messageId === 'string' && options.messageId.length > 0 && !isClientTempId(options.messageId)) {
+      // 服务端签发字符串锚点窄通道；usr-/ast- 等本地主键被 isClientTempId 坚决拒绝
+      params.truncate_before_message_id = options.messageId;
+    } else {
+      throw new Error('truncate requires one durable target (rowId or server-issued messageId); client temp ids are forbidden');
+    }
+
+    if (options.confirmEmpty) {
+      params.confirm_empty_truncate = true;
+    }
 
     return bridge.request<PromptSubmitResult, PromptSubmitParams>('prompt.submit', params);
   }
@@ -118,6 +145,7 @@ export class InteractiveService {
       count: options.count,
       name: options.name ?? null,
       profile: options.profile ?? null,
+      idempotency_key: options.idempotencyKey ?? null,
     };
 
     return bridge.request<SessionBranchResult, SessionBranchParams>('session.branch', params);
@@ -179,6 +207,69 @@ export class InteractiveService {
     };
 
     return bridge.request<CommandsCatalogResult, CommandsCatalogParams>('commands.catalog', params);
+  }
+
+  /**
+   * 斜杠命令实时补全（complete.slash）。
+   * 【设计意图 (Why)】commands.catalog 的 skills 无描述且不绑定项目技能，
+   * 补全必须以 complete.slash 为权威（携带 replace_from 供精确替换光标 token）。
+   */
+  public async getSlashCompletions(
+    bridge: IRpcCaller,
+    text: string,
+    sessionId?: string,
+    profile?: string
+  ): Promise<CompleteSlashResult> {
+    const params: CompleteSlashParams = {
+      text,
+      session_id: sessionId ?? null,
+      profile: profile ?? null,
+    };
+    return bridge.request<CompleteSlashResult, CompleteSlashParams>('complete.slash', params);
+  }
+
+  /**
+   * 文件路径补全（complete.path）。projects.tree 只返回项目/仓库/会话节点、不含文件，
+   * 文件检索唯一通道是 complete.path。
+   */
+  public async getPathCompletions(
+    bridge: IRpcCaller,
+    word: string,
+    cwd?: string,
+    sessionId?: string,
+    profile?: string
+  ): Promise<CompletionItemsResult> {
+    const params: CompletePathParams = {
+      word,
+      cwd: cwd ?? null,
+      session_id: sessionId ?? null,
+      profile: profile ?? null,
+    };
+    return bridge.request<CompletionItemsResult, CompletePathParams>('complete.path', params);
+  }
+
+  /**
+   * 执行斜杠命令（slash.exec）。按 DispatchType 分派，不臆造语义：
+   * exec/plugin→output，alias→target，send/prefill/skill→message（UI 展示 display，绝不展示 message 原文）。
+   */
+  public async execSlash(
+    bridge: IRpcCaller,
+    sessionId: string,
+    command: string,
+    profile?: string
+  ): Promise<SlashExecResult> {
+    if (!sessionId) {
+      throw new Error('Session ID is mandatory for execSlash');
+    }
+    if (!command) {
+      throw new Error('Command is mandatory for execSlash');
+    }
+    const params: SlashExecParams = {
+      session_id: sessionId,
+      command,
+      profile: profile ?? null,
+    };
+    return bridge.request<SlashExecResult, SlashExecParams>('slash.exec', params);
   }
 
   /**

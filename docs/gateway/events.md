@@ -9,13 +9,13 @@
 | --- | --- | --- | --- |
 | `agent.terminal.output` | `TerminalOutputPayload` | `process_id` `chunk` |  |
 | `approval.cancelled` | `ApprovalCancelledPayload` | `session_id` `stored_session_id` `reason` `cancelled_count` `request_ids` |  |
-| `background.complete` | `SideAgentCompletePayload` | `task_id` `text` `question` |  |
+| `background.complete` | `SideAgentCompletePayload` | `task_id` `text` `question` | ✅ |
 | `billing.step_up.verification` | `BillingStepUpVerificationPayload` | `verification_url` `user_code` |  |
 | `bot_relay.outbox.pending` | `ChangeSignalPayload` | — |  |
 | `browser.controller.cancel` | `BrowserControllerCancelPayload` | `command_id` `tool_call_id` |  |
 | `browser.controller.command` | `BrowserControllerCommandPayload` | `command_id` `action` `arguments` `controller_id` `browser_profile_id` `tool_call_id` |  |
 | `browser.progress` | `BrowserProgressPayload` | `message` `level` |  |
-| `btw.complete` | `SideAgentCompletePayload` | `task_id` `text` `question` |  |
+| `btw.complete` | `SideAgentCompletePayload` | `task_id` `text` `question` | ✅ |
 | `connection.request` | `ConnectionRequestPayload` | `op_id` `seq` `deadline_at` `timeout_seconds` `targets` `tool_call_id` |  |
 | `connection.update` | `ConnectionUpdatePayload` | `op_id` `seq` `deadline_at` `settled` `settled_at` `settled_by` `targets` `owner` `target` `from` `to` `actor` `detail` |  |
 | `cron.changed` | `ChangeSignalPayload` | — |  |

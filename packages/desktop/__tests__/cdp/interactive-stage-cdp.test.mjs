@@ -198,52 +198,263 @@ test('Main Chat Stage & Composer Dock - Live Headless Browser CDP Physical Verif
     assert.equal(rollbackResult.result.value.recordedRollback, rollbackResult.result.value.inputValue);
   });
 
-  // 6.1 物理交互与纯图标样式断言：点击复制、Fork、重新生成按钮
-  await t.test('2.1 物理动作：纯图标按钮无内嵌文本且带title提示，点击复制/Fork/重新生成正常分发', async () => {
+  // 6.1 物理交互与纯图标样式断言：点击复制、Fork 按钮，彻底验证重新生成已安全剥离
+  await t.test('2.1 物理动作：纯图标按钮无内嵌文本且带title提示，彻底移除重新生成按钮', async () => {
     const actionResult = await sendCdp('Runtime.evaluate', {
       expression: `(() => {
         const copyBtn = document.querySelector('[data-action="copy-msg"]');
         const forkBtn = document.querySelector('[data-action="fork-msg"]');
         const regenBtn = document.querySelector('[data-action="regenerate-msg"]');
-        if (!copyBtn || !forkBtn || !regenBtn) {
+        if (!copyBtn || !forkBtn) {
           return { success: false, reason: 'buttons-missing' };
         }
 
         // 验证纯图标特性：按钮内无 span 标签，且具备 title 提示属性
         const copyHasSpan = Boolean(copyBtn.querySelector('span'));
         const forkHasSpan = Boolean(forkBtn.querySelector('span'));
-        const regenHasSpan = Boolean(regenBtn.querySelector('span'));
         const copyTitle = copyBtn.getAttribute('title');
         const forkTitle = forkBtn.getAttribute('title');
-        const regenTitle = regenBtn.getAttribute('title');
 
         // 模拟物理触发点击，验证无任何异常抛出且状态可达
         copyBtn.click();
         forkBtn.click();
-        regenBtn.click();
 
         return {
           success: true,
           copyHasSpan,
           forkHasSpan,
-          regenHasSpan,
-          hasTitles: Boolean(copyTitle && forkTitle && regenTitle),
+          hasRegenBtn: Boolean(regenBtn),
+          hasTitles: Boolean(copyTitle && forkTitle),
           copyTitle,
           forkTitle,
-          regenTitle,
         };
       })()`,
       returnByValue: true,
     });
 
-    assert.ok(actionResult.result.value.success, '所有操作栏按钮必须渲染存在');
+    assert.ok(actionResult.result.value.success, '核心操作栏按钮必须渲染存在');
     assert.equal(actionResult.result.value.copyHasSpan, false, '复制按钮严禁内联文本标签');
     assert.equal(actionResult.result.value.forkHasSpan, false, 'Fork按钮严禁内联文本标签');
-    assert.equal(actionResult.result.value.regenHasSpan, false, '重新生成按钮严禁内联文本标签');
+    assert.equal(actionResult.result.value.hasRegenBtn, false, '助手消息行必须彻底移除重新生成按钮');
     assert.ok(actionResult.result.value.hasTitles, '所有操作按钮必须具备 title 悬浮说明');
     assert.ok(actionResult.result.value.copyTitle.length > 0, '复制按钮必须具备有效 title');
     assert.ok(actionResult.result.value.forkTitle.length > 0, 'Fork按钮必须具备有效 title');
-    assert.ok(actionResult.result.value.regenTitle.length > 0, '重新生成按钮必须具备有效 title');
+  });
+
+  // 6.2 物理验证：附件暂存托盘双层缩略图卡片（上图下文与结构化标号）
+  await t.test('2.2 物理动作：附件托盘双层卡片，上层缩略图下层 Image 1/Doc 1 结构化标号', async () => {
+    const trayResult = await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const tray = document.querySelector('.composer-attachment-tray');
+        if (!tray) return { success: false, reason: 'tray-not-found' };
+        const cards = Array.from(tray.querySelectorAll('.composer-attachment-card'));
+        const labels = cards.map((c) => c.querySelector('.attachment-index-label')?.textContent || '');
+        const filenames = cards.map((c) => c.querySelector('.attachment-filename-label')?.textContent || '');
+        const hasImg = Boolean(cards[0]?.querySelector('img'));
+        const removeBtns = tray.querySelectorAll('.btn-remove-attachment');
+
+        return {
+          success: true,
+          cardCount: cards.length,
+          labels,
+          filenames,
+          hasImg,
+          removeBtnCount: removeBtns.length,
+        };
+      })()`,
+      returnByValue: true,
+    });
+
+    assert.ok(trayResult.result.value.success, '附件托盘必须渲染存在');
+    assert.equal(trayResult.result.value.cardCount, 2, '必须渲染2个附件卡片');
+    assert.equal(trayResult.result.value.hasImg, true, '图片附件必须渲染上层缩略图');
+    assert.ok(trayResult.result.value.labels.includes('Image 1'), '必须展示 Image 1 逻辑标号');
+    assert.ok(trayResult.result.value.labels.includes('Doc 1'), '必须展示 Doc 1 逻辑标号');
+    assert.ok(trayResult.result.value.filenames.includes('diagram.png'), '必须展示原文件名 diagram.png');
+    assert.ok(trayResult.result.value.filenames.includes('fsm.ts'), '必须展示原文件名 fsm.ts');
+    assert.equal(trayResult.result.value.removeBtnCount, 2, '每个卡片必须提供独立的右上角删除按钮');
+  });
+
+  // 6.3 物理验证：流式中间态操作栏与时间戳时序不变量
+  await t.test('2.3 流式时序不变量：isStreaming: true 时末条助手行隐藏操作栏与时间戳，完成态恢复', async () => {
+    const streamResult = await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const { renderConversationCanvas } = window.__fluxRenderers;
+        const testMsgs = [
+          {
+            id: 'user-stream-1',
+            role: 'user',
+            content: '流式问题测试',
+            timestamp: '10:00:00',
+          },
+          {
+            id: 'ast-stream-1',
+            role: 'assistant',
+            content: '正在生成流式内容中...',
+            timestamp: '10:00:02',
+            durationMs: 1200,
+          },
+        ];
+
+        // 1. 流式输出中：isStreaming: true
+        const streamingHtml = renderConversationCanvas({
+          gatewayConnected: true,
+          messages: testMsgs,
+          isStreaming: true,
+        });
+
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = streamingHtml;
+        const streamingAssistantRow = tempDiv.querySelector('.assistant-row');
+        const streamingFooter = streamingAssistantRow ? streamingAssistantRow.querySelector('.assistant-footer-bar') : null;
+        const streamingTimeTag = streamingAssistantRow ? streamingAssistantRow.querySelector('.time-tag') : null;
+
+        // 2. 流式完成态：isStreaming: false
+        const completedHtml = renderConversationCanvas({
+          gatewayConnected: true,
+          messages: testMsgs,
+          isStreaming: false,
+        });
+        tempDiv.innerHTML = completedHtml;
+        const completedAssistantRow = tempDiv.querySelector('.assistant-row');
+        const completedFooter = completedAssistantRow ? completedAssistantRow.querySelector('.assistant-footer-bar') : null;
+        const completedTimeTag = completedAssistantRow ? completedAssistantRow.querySelector('.time-tag') : null;
+
+        return {
+          streamingHasFooter: Boolean(streamingFooter),
+          streamingHasTimeTag: Boolean(streamingTimeTag),
+          completedHasFooter: Boolean(completedFooter),
+          completedHasTimeTag: Boolean(completedTimeTag),
+          completedTimeText: completedTimeTag ? completedTimeTag.textContent : '',
+        };
+      })()`,
+      returnByValue: true,
+    });
+
+    const val = streamResult.result.value;
+    assert.equal(val.streamingHasFooter, false, 'isStreaming: true 时末条助手行绝不能渲染 assistant-footer-bar');
+    assert.equal(val.streamingHasTimeTag, false, 'isStreaming: true 时末条助手行绝不能渲染 time-tag');
+    assert.equal(val.completedHasFooter, true, 'isStreaming: false 且为回合末条时必须呈现 assistant-footer-bar');
+    assert.equal(val.completedHasTimeTag, true, 'isStreaming: false 且为回合末条时必须呈现 time-tag');
+    assert.equal(val.completedTimeText, '10:00:02', 'time-tag 必须展示真实时间戳内容');
+  });
+
+  // 6.4 物理验证：工具插槽常驻锚点与 renderToolCapsuleSlot 判空契约
+  await t.test('2.4 工具插槽锚点：renderMessage 产出常驻 msg-tools 容器，renderToolCapsuleSlot 判空契约', async () => {
+    const slotResult = await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const { renderMessage, renderToolCapsuleSlot } = window.__fluxRenderers;
+
+        // 1. 带工具调用的消息
+        const msgWithTools = {
+          id: 'ast-with-tools-1',
+          role: 'assistant',
+          content: '正在查询天气...',
+          toolCalls: [
+            {
+              id: 'call-weather-1',
+              name: 'weather_query',
+              args: '{"city":"Hangzhou"}',
+              status: 'running',
+            },
+          ],
+        };
+
+        const htmlWithTools = renderMessage(msgWithTools, 'HERMES', { isFirstInTurn: true, isLastInTurn: true });
+        const slotHtmlWithTools = renderToolCapsuleSlot(msgWithTools);
+
+        const div = document.createElement('div');
+        div.innerHTML = htmlWithTools;
+        const toolsSlot = div.querySelector('#msg-tools-ast-with-tools-1');
+
+        // 2. 空工具调用的消息
+        const msgNoTools = {
+          id: 'ast-no-tools-1',
+          role: 'assistant',
+          content: '普通纯文本回复',
+          toolCalls: [],
+        };
+
+        const htmlNoTools = renderMessage(msgNoTools, 'HERMES', { isFirstInTurn: true, isLastInTurn: true });
+        const slotHtmlNoTools = renderToolCapsuleSlot(msgNoTools);
+        div.innerHTML = htmlNoTools;
+        const noToolsSlot = div.querySelector('#msg-tools-ast-no-tools-1');
+
+        return {
+          hasSlotWithTools: Boolean(toolsSlot),
+          slotWithToolsClass: toolsSlot ? toolsSlot.className : '',
+          slotHtmlWithToolsNonEmpty: slotHtmlWithTools.trim().length > 0,
+          slotHtmlWithToolsIncludesName: slotHtmlWithTools.includes('weather_query'),
+          hasSlotNoTools: Boolean(noToolsSlot),
+          slotHtmlNoToolsExactEmpty: slotHtmlNoTools === '',
+        };
+      })()`,
+      returnByValue: true,
+    });
+
+    const val = slotResult.result.value;
+    assert.ok(val.hasSlotWithTools, '带工具的消息行必须产出 id="msg-tools-<id>" 增量锚点容器');
+    assert.equal(val.slotWithToolsClass, 'tool-capsules-slot', '工具插槽类名必须为 tool-capsules-slot');
+    assert.ok(val.slotHtmlWithToolsNonEmpty, 'renderToolCapsuleSlot 对带工具消息必须返回非空 HTML');
+    assert.ok(val.slotHtmlWithToolsIncludesName, '工具插槽内容必须包含工具名称');
+    assert.ok(val.hasSlotNoTools, '空工具消息行依然必须具备常驻 id="msg-tools-<id>" 锚点容器供后续补丁通道直写');
+    assert.ok(val.slotHtmlNoToolsExactEmpty, 'renderToolCapsuleSlot 对空工具消息必须严格返回空字符串');
+  });
+
+  // 6.5 物理验证：回滚撤回按钮在会话类型间的严格隔离
+  await t.test('2.5 会话隔离不变量：回滚按钮仅在普通工作会话渲染，Bot 工位与群聊会议室严格拒绝', async () => {
+    const sessionResult = await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const { renderMessage } = window.__fluxRenderers;
+
+        const ordinaryMsg = {
+          id: 'usr-ord-1',
+          role: 'user',
+          content: '普通会话提问',
+          isGroupRoom: false,
+          isBotRoom: false,
+        };
+
+        const botMsg = {
+          id: 'usr-bot-1',
+          role: 'user',
+          content: 'Bot 工位提问',
+          isGroupRoom: false,
+          isBotRoom: true,
+        };
+
+        const groupMsg = {
+          id: 'usr-grp-1',
+          role: 'user',
+          content: '群聊会议室提问',
+          isGroupRoom: true,
+          isBotRoom: false,
+        };
+
+        const div = document.createElement('div');
+
+        div.innerHTML = renderMessage(ordinaryMsg);
+        const ordinaryRollback = div.querySelector('[data-action="rollback-msg"]');
+
+        div.innerHTML = renderMessage(botMsg);
+        const botRollback = div.querySelector('[data-action="rollback-msg"]');
+
+        div.innerHTML = renderMessage(groupMsg);
+        const groupRollback = div.querySelector('[data-action="rollback-msg"]');
+
+        return {
+          ordinaryHasRollback: Boolean(ordinaryRollback),
+          botHasRollback: Boolean(botRollback),
+          groupHasRollback: Boolean(groupRollback),
+        };
+      })()`,
+      returnByValue: true,
+    });
+
+    const val = sessionResult.result.value;
+    assert.equal(val.ordinaryHasRollback, true, '普通工作会话必须渲染回滚撤回按钮');
+    assert.equal(val.botHasRollback, false, 'Bot Forever Chat 主工位绝对禁止渲染回滚按钮');
+    assert.equal(val.groupHasRollback, false, 'Group Room 群聊会议室绝对禁止渲染回滚按钮');
   });
 
   // 7. 物理交互：阶梯式 Token 性能仪表点击展开 Popover

@@ -113,6 +113,62 @@
 | 识别特征 | 列表初次渲染为用户第一句话，点击进入后短暂变对，定时刷新对账后打回原形；快速切会话时多个会话副标题完全一致 |
 | 守卫 | ① `reconcileSessionList` 防倒退守卫（时间戳未推进时保留本地真实回复）；<br>② `sessionPreviewCache` 持久化真实副标题（localStorage）；<br>③ `fetchSessionMessages` 与 `fetchLastMessage` 显式携带 `profile`；<br>④ `activeLoadMessagesGeneration` 严格代际令牌阻断迟滞响应；<br>⑤ 单测 `packages/core/__tests__/session/sessionMerge.test.mjs` (用例 15)；<br>⑥ 真实网关 CDP 端到端测试 `packages/desktop/__tests__/e2e/session-subtitles-live-cdp.test.mjs` |
 
+## P-012 前端临时 id 逃逸为网关截断锚点（回滚必报 4018）
+
+| 项目 | 内容 |
+|---|---|
+| 症状 | 点回滚后原消息不消失，重发报 `[4018] target user message is no longer in session history` |
+| 根因 | `parseRawMessages` 丢弃 `row_id`，回滚把前端自造的 `usr-${Date.now()}` 当 `truncate_before_message_id` 透传；渲染层手拼 truncate 字段 |
+| 识别特征 | 网关只认持久 rowId，本地主键进 wire 必失败 |
+| 守卫 | ① core `truncatePlan.ts` 唯一裁决 `planTruncate`，`isClientTempId` 拒临时 id；② `InteractiveService.truncateAndSubmit` 双锚互斥单点构造；③ `parseRawMessages` 写入持久 `rowId`；④ 形式化定理 8/9；⑤ 静态门禁拦 renderer 出现 `truncate_before_` |
+| 真实契约 | `truncate_before_row_id`（首选）/`truncate_before_message_id`（服务端签发串）二选一 + `confirm_truncate` |
+
+## P-013 流式期间结构短路，工具链整轮后才瞬间刷出
+
+| 项目 | 内容 |
+|---|---|
+| 症状 | Agent 输出时工具执行链不实时更新，整轮结束后一次性蹦出来 |
+| 根因 | `render()` 的 `inOngoingStreamingTurn`（isStreaming 且消息条数不变）使 `messagesChanged` 恒 false；工具事件只改消息内部字段不改条数；工具胶囊无独立增量 DOM 通道 |
+| 识别特征 | 正文流式正常（走 `#msg-content-*` 直写），工具胶囊却卡住 |
+| 守卫 | ① `MiddlePod` 常驻 `#msg-tools-<id>` 锚点 + 导出 `renderToolCapsuleSlot`；② `toolPatchQueue` 单 RAF 去重直写、容器缺失置 `canvasStructureDirty` 兜底；③ reducer 权威读 `tool_id`（原读 `payload.id` 恒空）；④ 形式化定理 10 |
+| 残留风险 | server-priority 消费为"读取即删除"，同会话"截断前已发出、截断后返回"的在途慢响应理论上可提前消费标记（概率极低，未加时序戳）；三处消费接线由 `interactive-stage-wiring-guard.test.mjs` 源码守卫锁定，删除调用行必爆红 |
+
+## P-014 双 id 作用域误用于 branch，且提示不上屏致 Fork"点了没反应"
+
+| 项目 | 内容 |
+|---|---|
+| 症状 | Fork 按钮点击无任何反应 |
+| 根因 | `session.branch` 只接受 live id，代码传 rail 的 stored id → 网关 4001；且 `setTimedDockNotice` 只写 `state.dockNotice` 不 `render()`，失败提示永不现形 |
+| 识别特征 | 静默失败：既没切会话也没报错 |
+| 守卫 | ① Fork 先 `ensureLiveSessionId()`；② `idempotency_key` 防重试派生双会话；③ `setTimedDockNotice` 现显式 `render()`；④ 单测断言 branch 携幂等键 |
+
+## P-015 @Agent 被当普通文本上行，模型答复"无法调用"
+
+| 项目 | 内容 |
+|---|---|
+| 症状 | 输入 `@架构王 帮我看看`，模型回复无法调用该 Agent |
+| 根因 | `sendMessage` 把含 `@` 的原文直接 `prompt.submit`，从未调用 core `resolveMentionRoute`/`planSendRoute`；且 `parseAgentMention` 旧实现只认行首 `^@`，句中提及静默失效 |
+| 识别特征 | 模型收到自然语言里的 `@`，当成对话内容而非调度指令 |
+| 守卫 | ① core `planSendRoute` 三态分流（`prompt.background`/`prompt.btw`/`groups.send`）；② `parseAgentMention` 任意位置命中已知 profile；③ 形式化定理 11 断言 cleanText 剥离 `@token`、无命中必 plain |
+
+## P-016 斜杠/文件检索硬编码假数据（命令不全、文件只有两条）
+
+| 项目 | 内容 |
+|---|---|
+| 症状 | `/` 只有 5 条固定命令；`@` 文件永远只有 README.md 与 docs/architecture.md，不能按关键词检索 |
+| 根因 | 输入监听器硬编码命令数组与两个文件对象；`commands.catalog`/`complete.slash`/`complete.path`/`slash.exec` 全未接线；且 `projects.tree` 实际不返回文件（只项目/仓库/会话节点） |
+| 识别特征 | "看起来能用、实际是假数据"；离线也能渲染出条目 |
+| 守卫 | ① 删除硬编码；② 连接后 `prefetchSlashCatalog`（commands.catalog）快照 + `complete.slash` 实时补全（序列号守卫防迟到覆盖）；③ `@` 文件走 `complete.path`；④ `slash.exec` 按 DispatchType（exec/plugin→output，alias→target，send/prefill/skill→message）分派 |
+
+## P-017 Popper 开合进 dock 快照，每次按键重建 textarea 丢光标与 IME
+
+| 项目 | 内容 |
+|---|---|
+| 症状 | 连续输入 `/` 或 `@` 补全时输入法组字被打断、光标跳飞 |
+| 根因 | `hasDockSnapshotChanged` 计入 `slashPopperOpen/mentionPopperOpen`，开合即整体替换 `.input-dock-container` outerHTML，textarea 连根重建 |
+| 识别特征 | 高频 UI 状态触发了容器级 DOM 重建 |
+| 守卫 | ① 四个 popper 字段移出 dock 快照；② 固定 `#composer-popper-mount` 占位，`syncComposerPoppers()` 只写该子树；③ 键盘时序军规 |
+
 ---
 
 ## 守卫总览
@@ -129,3 +185,9 @@
 | fixture 回归 | `npm test` | P-003、P-007、P-009 |
 | 去重对账 | `npm test` + debug 日志 | P-004 |
 | 会话副标题防闪烁守卫 | `npm test` + CDP live E2E | P-011 |
+| 回滚截断锚点守卫 | `npm run verify:formal`（定理 8/9） | P-012 |
+| 流式工具状态机守卫 | `npm run verify:formal`（定理 10） | P-013 |
+| 双 id 作用域守卫（branch） | `npm test` + `idempotency_key` 断言 | P-014 |
+| @Agent 路由守卫 | `npm run verify:formal`（定理 11） | P-015 |
+| 斜杠/文件真实契约守卫 | `npm run contract:coverage` + CDP | P-016 |
+| Popper DOM 稳定性守卫 | CDP 场景 + 快照字段约束 | P-017 |

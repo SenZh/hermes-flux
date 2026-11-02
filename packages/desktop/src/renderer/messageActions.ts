@@ -2,15 +2,15 @@
  * 消息微距操作栏业务逻辑与状态机领域模块 (packages/desktop/src/renderer/messageActions.ts)
  *
  * 【设计意图 (Why)】
- * 1. 从庞大的 index.ts 中将 4 大消息操作动作（复制纯文本/Markdown、回滚回填、Fork 节点截断分支、重新生成提问追溯）彻底解耦；
+ * 1. 从庞大的 index.ts 中将消息核心动作（复制纯文本/Markdown、回滚回填与截断定位、Fork 节点分支）彻底解耦；
  * 2. 纯逻辑与算法保持高内聚、易测试，单测与生产代码无条件真实引用同一实现，彻底根除假测试与循环自证；
- * 3. 集中管理并发互斥锁（isForkPending, isRegeneratePending），严防用户快速双击引发的雪崩与网络竞态。
+ * 3. 集中管理并发互斥锁（isForkPending），严防用户快速双击引发的雪崩与网络竞态。
  *
  * 【防范的历史坑 (Pitfall)】
  * - 复制内容防范 HTML 属性截断：优先从 messages 内存列表中根据 data-msg-id 提取完整 content，仅在内存缺失时回退 data-content；
  * - Fork 分支防范 4008 守卫错误：计算截断条数 count = msgIdx + 1，杜绝传空、传负数或索引偏移；
- * - 重新生成防范并发重入与上下文脱节：在当前流式中坚决拦截；向前逆序查找到最近一条 user 提问再重新提交；
- * - 回滚防范光标跳动与高度未刷新：填入 textarea 后触发 input 事件通知自适应高度计算并保持末尾光标。
+ * - 回滚防范光标跳动与高度未刷新：填入 textarea 后触发 input 事件通知自适应高度计算并保持末尾光标，同时提取 rowId / messageId 供后续提交时物理原子截断；
+ * - 移除不稳定重新生成：规避上下文跨轮截断歧义与模型幻觉。
  *
  * 【约束与规则 (Rules)】
  * - 纯 TypeScript / DOM 辅助函数，零硬编码外部依赖，便于依赖注入与自动化测试；
@@ -18,6 +18,13 @@
  */
 
 import type { MessageViewModel } from '@hermes-flux/ui';
+
+export interface RollbackResult {
+  success: boolean;
+  text?: string;
+  rowId?: number | null;
+  messageId?: string;
+}
 
 /**
  * 提取待复制内容：内存优先，防范 HTML 属性转义截断
@@ -64,18 +71,13 @@ export function findPreviousUserPrompt(
  */
 export class MessageActionController {
   private isForkPending = false;
-  private isRegeneratePending = false;
 
   public get isForking(): boolean {
     return this.isForkPending;
   }
 
-  public get isRegenerating(): boolean {
-    return this.isRegeneratePending;
-  }
-
   /**
-   * 执行回滚：将目标提问填回输入框，激活末尾光标并派发 input 事件
+   * 执行回滚：将目标提问填回输入框，激活末尾光标并派发 input 事件，同时返回截断定位元数据
    */
   public executeRollback(
     btn: HTMLElement,
@@ -83,9 +85,21 @@ export class MessageActionController {
     textarea: HTMLTextAreaElement | null,
     setNotice: (msg: string) => void,
     onSuccessNoticeText: string
-  ): boolean {
+  ): RollbackResult {
     const text = resolveCopyContent(btn, messages);
-    if (!text || !textarea) return false;
+    if (!text || !textarea) return { success: false };
+
+    const rowEl = btn.closest<HTMLElement>('[data-msg-id]');
+    const msgId = btn.getAttribute('data-msg-id') || rowEl?.getAttribute('data-msg-id') || '';
+    const rawRowId = btn.getAttribute('data-row-id');
+    const parsedRowId = rawRowId ? parseInt(rawRowId, 10) : null;
+    const targetMsg = msgId ? messages.find((m) => m.id === msgId) : undefined;
+    const rowId =
+      targetMsg && typeof targetMsg.rowId === 'number'
+        ? targetMsg.rowId
+        : parsedRowId !== null && Number.isFinite(parsedRowId)
+        ? parsedRowId
+        : null;
 
     textarea.value = text;
     textarea.focus();
@@ -95,7 +109,12 @@ export class MessageActionController {
       document.body.setAttribute('data-last-rollback', text);
     }
     setNotice(onSuccessNoticeText);
-    return true;
+    return {
+      success: true,
+      text,
+      rowId,
+      messageId: msgId,
+    };
   }
 
   /**
@@ -125,7 +144,9 @@ export class MessageActionController {
   }
 
   /**
-   * 执行分叉派生新会话：带并发防重入锁与消息计数计算
+   * 执行分叉派生新会话：带并发防重入锁与消息计数计算。
+   * 【约束与规则 (Rules)】wire 载荷由注入的 forkSession（core InteractiveService.forkSession）单点构造，
+   * 本控制器只负责计数与幂等键生成、并发锁、结果规约，杜绝 renderer 手拼 session.branch 字段。
    */
   public async executeFork(
     btn: HTMLElement,
@@ -133,7 +154,12 @@ export class MessageActionController {
       activeSessionId: string | null;
       profileName: string;
       messages: readonly MessageViewModel[];
-      callRpc: (method: string, params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+      forkSession: (input: {
+        sessionId: string;
+        count: number;
+        profile: string;
+        idempotencyKey: string;
+      }) => Promise<{ session_id?: string; stored_session_id?: string }>;
       onSuccess: (newSessionId: string) => Promise<void>;
       setNotice: (msg: string) => void;
       labels: {
@@ -157,10 +183,11 @@ export class MessageActionController {
 
     try {
       options.setNotice(options.labels.forking);
-      const branchRes = await options.callRpc('session.branch', {
-        session_id: options.activeSessionId,
+      const branchRes = await options.forkSession({
+        sessionId: options.activeSessionId,
         count,
         profile: options.profileName || 'default',
+        idempotencyKey: `fork-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       });
       if (branchRes && (branchRes.session_id || branchRes.stored_session_id)) {
         const newSessionId = String(branchRes.stored_session_id || branchRes.session_id);
@@ -175,53 +202,6 @@ export class MessageActionController {
       return 'error';
     } finally {
       this.isForkPending = false;
-    }
-  }
-
-  /**
-   * 执行重新生成：带并发互斥锁、流式态互斥与上轮提问回溯
-   */
-  public async executeRegenerate(
-    btn: HTMLElement,
-    options: {
-      activeSessionId: string | null;
-      isStreaming: boolean;
-      messages: readonly MessageViewModel[];
-      sendPrompt: (text: string) => Promise<void>;
-      setNotice: (msg: string) => void;
-      labels: {
-        notConnected: string;
-        streamingBusy: string;
-        regenerating: string;
-        promptNotFound: string;
-      };
-    }
-  ): Promise<'success' | 'blocked' | 'busy' | 'prompt-not-found' | 'no-session'> {
-    if (this.isRegeneratePending) return 'blocked';
-    if (!options.activeSessionId) {
-      options.setNotice(options.labels.notConnected);
-      return 'no-session';
-    }
-    if (options.isStreaming) {
-      options.setNotice(options.labels.streamingBusy);
-      return 'busy';
-    }
-
-    this.isRegeneratePending = true;
-    const rowEl = btn.closest<HTMLElement>('[data-msg-id]');
-    const msgId = btn.getAttribute('data-msg-id') || rowEl?.getAttribute('data-msg-id');
-    const promptText = findPreviousUserPrompt(msgId, options.messages);
-
-    try {
-      if (promptText) {
-        options.setNotice(options.labels.regenerating);
-        await options.sendPrompt(promptText);
-        return 'success';
-      }
-      options.setNotice(options.labels.promptNotFound);
-      return 'prompt-not-found';
-    } finally {
-      this.isRegeneratePending = false;
     }
   }
 }

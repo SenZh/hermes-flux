@@ -66,8 +66,19 @@
   <div id="stage-container"></div>
 
   <script type="module">
-    import { renderConversationCanvas } from '/packages/ui/dist/components/MiddlePod/MiddlePod.js';
+    import {
+      renderConversationCanvas,
+      renderMessage,
+      renderToolCapsuleSlot,
+    } from '/packages/ui/dist/components/MiddlePod/MiddlePod.js';
     import { renderInputDock } from '/packages/ui/dist/components/InputDock/InputDock.js';
+
+    window.__fluxRenderers = {
+      renderConversationCanvas,
+      renderMessage,
+      renderToolCapsuleSlot,
+      renderInputDock,
+    };
 
     // 模拟数据渲染
     const stage = document.getElementById('stage-container');
@@ -122,7 +133,8 @@
       isStreaming: false,
       modelMenuOpen: false,
       attachments: [
-        { id: 'att-1', name: 'fsm.ts', type: 'file' },
+        { id: 'att-1', name: 'diagram.png', type: 'image', label: 'Image 1', previewUrl: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30"><rect width="30" height="30" fill="%233b82f6"/></svg>' },
+        { id: 'att-2', name: 'fsm.ts', type: 'file', label: 'Doc 1' },
       ],
       queuedMessages: [
         { id: 'q-1', text: '请顺便补齐边界值测试用例', model: 'claude-3-7-sonnet' },
@@ -146,7 +158,6 @@
         if (action === 'copy-msg') void window.__fluxMessageActions.handleCopyMessage(btn);
         if (action === 'rollback-msg') window.__fluxMessageActions.handleRollbackMessage(btn);
         if (action === 'fork-msg') void window.__fluxMessageActions.handleForkMessage(btn);
-        if (action === 'regenerate-msg') void window.__fluxMessageActions.handleRegenerateMessage(btn);
       } else if (action === 'rollback-msg') {
         const text = btn.getAttribute('data-content') || '';
         const textarea = document.getElementById('dock-prompt-input');

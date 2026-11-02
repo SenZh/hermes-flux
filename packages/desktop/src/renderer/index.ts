@@ -4,12 +4,17 @@
  * Zero private WS glue code: Dual-channel fallback, TokenCoalescer 120 FPS stream, robust model & session lifecycle.
  */
 
+import type { IRpcCaller } from '@hermes-flux/core';
+
 import {
   renderTitlebar,
   renderLeftRail,
   renderMiddlePod,
   renderConversationCanvas,
   renderInputDock,
+  renderSlashPopper,
+  renderMentionPopper,
+  renderToolCapsuleSlot,
   renderInspectionPod,
   renderStatusBar,
   renderSettingsModal,
@@ -32,6 +37,9 @@ import {
   t,
   hasDockSnapshotChanged,
   type RenderInputDockSnapshot,
+  type InputAttachmentItem,
+  type SlashCommandOption,
+  type MentionReferenceOption,
 } from '@hermes-flux/ui';
 
 import {
@@ -40,6 +48,8 @@ import {
   calculateForkCount,
   findPreviousUserPrompt,
 } from './messageActions.js';
+import { applyOptimisticCut, planSessionLoadMerge, planRollbackLeaveRestore, takeServerPriority } from './rollbackTransaction.js';
+import { createToolPatchQueue } from './toolPatchQueue.js';
 
 import {
   HermesGatewayClient,
@@ -80,6 +90,15 @@ import {
   syncActiveSessionToBot,
   resolveTitlebarTitle,
   type BotActivityRecord,
+  type AttachedImageResult,
+  InteractiveService,
+  HandoffService,
+  type PromptSubmitResult,
+  planTruncate,
+  resolveCutIndexByAnchor,
+  isDurableRowId,
+  deriveSessionKind,
+  planSendRoute,
 } from '@hermes-flux/core';
 
 import type { HermesDesktopBridge } from '../preload/index.js';
@@ -101,7 +120,6 @@ declare global {
       handleCopyMessage: (btn: HTMLElement) => Promise<void>;
       handleRollbackMessage: (btn: HTMLElement) => void;
       handleForkMessage: (btn: HTMLElement) => Promise<void>;
-      handleRegenerateMessage: (btn: HTMLElement) => Promise<void>;
     };
   }
 }
@@ -191,6 +209,35 @@ interface AppState {
   fileWordWrap: boolean;
   fileSearchOpen: boolean;
   fileSearchQuery: string;
+  attachments: InputAttachmentItem[];
+  slashPopperOpen: boolean;
+  slashItems: SlashCommandOption[];
+  mentionPopperOpen: boolean;
+  mentionItems: MentionReferenceOption[];
+  /** 回滚事务的乐观裁撤状态；null 表示无挂起回滚 */
+  rollbackArmed: {
+    sessionId: string;
+    targetId: string;
+    anchor: { kind: 'row'; rowId: number };
+    snapshot: MessageViewModel[];
+    removedCount: number;
+    anchorLabel: string;
+  } | null;
+  /** @Agent 旁路呼叫（BTW 只读外援 / 子代理委派）的独立渲染域，绝不混入主消息流 */
+  sideAgentCapsules: Array<{
+    id: string;
+    kind: 'btw' | 'delegation';
+    profile: string;
+    question: string;
+    answer?: string;
+    status: 'pending' | 'done' | 'failed' | 'expired';
+    startedAt: number;
+    notice?: string;
+    hintTimer?: ReturnType<typeof setTimeout>;
+    expireTimer?: ReturnType<typeof setTimeout>;
+  }>;
+  /** popper 点选产生的显式 @Agent 提及，发送前校验并作为 planSendRoute 的权威输入 */
+  pickedMention: { profile: string; token: string } | null;
 }
 
 const desktopApi: HermesDesktopBridge | undefined = window.hermesDesktop;
@@ -390,6 +437,30 @@ const state: AppState = {
   browserFrame: undefined,
   gitDiffs: [],
   memories: [],
+  attachments: [],
+  slashPopperOpen: false,
+  slashItems: [],
+  mentionPopperOpen: false,
+  mentionItems: [],
+  rollbackArmed: null,
+  sideAgentCapsules: [],
+  pickedMention: null,
+};
+
+const handoffService = new HandoffService();
+
+/**
+ * 渲染层到 core IRpcCaller 的唯一适配缝隙。
+ * 【设计意图 (Why)】截断/分支等 wire 载荷必须由 core InteractiveService 单点构造，
+ * 渲染层只递交意图；此前渲染层手拼 truncate 字段导致前端临时 id 逃逸触发网关 4018。
+ */
+const rpcCaller: IRpcCaller = {
+  request: <TResult, TParams>(method: string, params?: TParams): Promise<TResult> => {
+    if (!gatewayClient) {
+      return Promise.reject(new Error('Gateway client is not connected'));
+    }
+    return gatewayClient.call<TResult>(method, params);
+  },
 };
 
 window.__fluxLog = {
@@ -804,6 +875,36 @@ const tokenCoalescer = new TokenCoalescer((flushedMap) => {
     scrollTop: stream ? Math.round(stream.scrollTop) : null,
   });
 });
+
+/** 画布结构脏标记：工具补丁容器缺失时置真，驱动下一次全量重建兜底 */
+let canvasStructureDirty = false;
+
+const toolPatchQueue = createToolPatchQueue({
+  renderSlot: (messageId) => {
+    const msg =
+      state.messages.find((m) => m.id === messageId) ||
+      (activeStreamingStoredSessionId
+        ? sessionMessagesCache.get(activeStreamingStoredSessionId)?.find((m) => m.id === messageId)
+        : undefined);
+    return msg ? renderToolCapsuleSlot(msg) : '';
+  },
+  patchElement: (messageId, html) => {
+    const el = document.getElementById(`msg-tools-${messageId}`);
+    if (!el) return false;
+    el.innerHTML = html;
+    return true;
+  },
+  isNearBottom: () => isStreamNearBottom(document.getElementById('conversation-stream')),
+  scrollBottom: () => scrollStreamToBottom('tool patch'),
+  markStructureDirty: () => {
+    canvasStructureDirty = true;
+  },
+  schedule: (cb) => requestAnimationFrame(cb),
+});
+
+function scheduleToolPatch(messageId: string): void {
+  toolPatchQueue.schedulePatch(messageId);
+}
 
 function getEffectiveUrl(base: string): string {
   let url = (base || 'http://127.0.0.1:9119').trim();
@@ -1364,6 +1465,8 @@ async function fetchGroupRooms(): Promise<void> {
 /** 进入指定多 Agent 研讨会议室并载入研讨记录 */
 async function openGroupRoom(roomId: string): Promise<void> {
   if (!roomId || !gatewayClient) return;
+  // 切换焦点域前解除挂起回滚，防止普通会话的乐观裁撤横幅泄漏进群聊视图
+  disarmRollbackOnLeave();
   state.activeFocus = { type: 'group', roomId };
   applyEnteredRead(unreadGroupRoomIds, roomId);
   const targetRoom = state.groupRooms.find((r) => r.roomId === roomId);
@@ -1433,6 +1536,8 @@ async function openBotChat(botProfile: string): Promise<void> {
   if (!botProfile || !client) return;
 
   state.profileName = botProfile;
+  // 切入 Bot 专职工位前解除普通会话挂起回滚，防跨域泄漏
+  disarmRollbackOnLeave();
   state.activeFocus = { type: 'bot', botName: botProfile };
   localStorage.setItem('hermes_flux_profile', botProfile);
   localStorage.setItem('hermes_aura_profile', botProfile);
@@ -1590,8 +1695,158 @@ const INITIAL_WINDOW_PAGE_SIZE = 50;
 const OLDER_BATCH_PAGE_SIZE = 30;
 const sessionMessagesCache = new Map<string, MessageViewModel[]>();
 const sessionServerOffset = new Map<string, number>();
+/** 截断成功后的会话历史权威源标记：'server-priority' 时禁用“本地更长则保留”合并守卫 */
+const sessionHistoryTrust = new Map<string, 'server-priority'>();
+/** core 交互区领域服务单例（截断/分支/目录的唯一 wire 载荷构造入口） */
+const interactiveService = new InteractiveService();
 
+/** commands.catalog 预取的目录快照（本地降级检索源，complete.slash 不可用时兜底） */
+let slashCatalogSnapshot: SlashCommandOption[] = [];
+let slashCatalogLoaded = false;
+let slashDebounce: ReturnType<typeof setTimeout> | undefined;
+let pathDebounce: ReturnType<typeof setTimeout> | undefined;
+// 序列号守卫：丢弃迟到的补全响应，防止旧结果覆盖新输入（竞态）
+let slashSeq = 0;
+let pathSeq = 0;
+
+/** 解析当前活跃会话的工作目录，作为 complete.path 的 cwd 边界 */
+function resolveActiveCwd(): string {
+  const sess = state.sessions.find((s) => s.id === state.activeSessionId);
+  if (sess?.cwd) return sess.cwd;
+  const proj = state.projects.find((p) => p.id === sess?.projectId || (sess?.projectName && p.name === sess.projectName));
+  return proj?.path || '';
+}
+
+/** 将文件补全项与 Agent 项合并进 mention popper（Agent 在上、文件在下，按 query 过滤） */
+function mergeMentionFiles(fileItems: MentionReferenceOption[], query: string): void {
+  const agentItems = state.mentionItems.filter((m) => m.type === 'agent');
+  const q = query.toLowerCase();
+  const filteredFiles = fileItems.filter((f) => f.name.toLowerCase().includes(q));
+  state.mentionItems = [...agentItems, ...filteredFiles].slice(0, 12);
+  state.mentionPopperOpen = state.mentionItems.length > 0;
+  render();
+}
+
+async function prefetchSlashCatalog(): Promise<void> {
+  if (!gatewayClient) return;
+  try {
+    const cat = await interactiveService.getCommandsCatalog(rpcCaller, state.activeSessionId || undefined, state.profileName || undefined);
+    const items: SlashCommandOption[] = [];
+    const pushCmd = (name: string, desc: string) => {
+      if (!name) return;
+      const normalized = name.startsWith('/') ? name : `/${name}`;
+      items.push({ name: normalized, description: desc });
+    };
+    for (const pair of cat.pairs || []) {
+      if (pair[0]) pushCmd(pair[0], pair[1] || '');
+    }
+    if (cat.commands) {
+      for (const [name, meta] of Object.entries(cat.commands)) {
+        pushCmd(name, meta?.desktop || '');
+      }
+    }
+    for (const skillName of Object.keys(cat.skills || {})) {
+      if (skillName) items.push({ name: skillName.startsWith('/') ? skillName : `/${skillName}`, description: 'Skill', isSkill: true });
+    }
+    const seen = new Set<string>();
+    slashCatalogSnapshot = items.filter((it) => (seen.has(it.name) ? false : (seen.add(it.name), true)));
+    slashCatalogLoaded = true;
+  } catch {
+    // gate-degrade: 目录预取失败属可选加速，回退到按键时实时补全，不阻断输入
+    slashCatalogLoaded = false;
+  }
+}
+
+/** 斜杠补全：优先 complete.slash（携带 replace_from），失败降级目录快照本地过滤 */
+function requestSlashCompletion(query: string): void {
+  if (slashDebounce) clearTimeout(slashDebounce);
+  const token = inputTokenSnapshot();
+  slashDebounce = setTimeout(async () => {
+    const mySeq = ++slashSeq;
+    let resolved: SlashCommandOption[] | null = null;
+    if (gatewayClient) {
+      try {
+        const res = await interactiveService.getSlashCompletions(
+          rpcCaller,
+          token.fullText,
+          state.activeSessionId || undefined,
+          state.profileName || undefined
+        );
+        if (mySeq !== slashSeq) return;
+        const replaceFrom = typeof res.replace_from === 'number' ? res.replace_from : undefined;
+        resolved = (res.items || []).map((it) => ({
+          name: it.text,
+          description: it.meta || it.display || '',
+          isSkill: it.kind === 'skill',
+          replaceFrom: it.kind ? replaceFrom : undefined,
+        }));
+      } catch {
+        // gate-degrade: complete.slash 失败降级到目录快照
+        resolved = null;
+      }
+    }
+    if (mySeq !== slashSeq) return;
+    const base = resolved && resolved.length > 0
+      ? resolved
+      : slashCatalogSnapshot.filter((c) => c.name.toLowerCase().includes(query.toLowerCase()));
+    state.slashItems = base.slice(0, 12);
+    state.slashPopperOpen = state.slashItems.length > 0;
+    render();
+  }, 120);
+}
+
+function inputTokenSnapshot(): { fullText: string } {
+  const el = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
+  return { fullText: el ? el.value : '' };
+}
+
+/** 文件补全：complete.path 按当前 cwd + 光标 token 检索，失败降级最近打开文件 */
+function requestPathCompletion(word: string): void {
+  if (pathDebounce) clearTimeout(pathDebounce);
+  const el = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
+  const fullText = el ? el.value : '';
+  pathDebounce = setTimeout(async () => {
+    const mySeq = ++pathSeq;
+    let fileItems: MentionReferenceOption[] = [];
+    if (gatewayClient) {
+      try {
+        const cwd = resolveActiveCwd();
+        const res = await interactiveService.getPathCompletions(
+          rpcCaller,
+          word,
+          cwd || undefined,
+          state.activeSessionId || undefined,
+          state.profileName || undefined
+        );
+        if (mySeq !== pathSeq) return;
+        fileItems = (res.items || []).map((it) => ({
+          type: 'file' as const,
+          name: it.text,
+          detail: it.meta || '',
+        }));
+      } catch {
+        // gate-degrade: complete.path 失败降级到已打开文件列表
+        fileItems = state.openFiles.map((f) => ({ type: 'file' as const, name: f.path, detail: t('mention.recentFile') }));
+      }
+    } else {
+      fileItems = state.openFiles.map((f) => ({ type: 'file' as const, name: f.path, detail: t('mention.recentFile') }));
+    }
+    if (mySeq !== pathSeq) return;
+    mergeMentionFiles(fileItems, word);
+  }, 120);
+}
+
+/**
+ * 解析网关原始消息行为视图模型。
+ * 【防范的历史坑 (Pitfall)】必须提取 row_id 为持久 rowId，回滚截断才有可信锚点；
+ * 历史上此函数丢弃 row_id 导致回滚被迫用临时 id 触发 4018。
+ * 作用域（是否 Bot/群聊）从当前焦点内联派生，避免跨调用残留过期标记。
+ */
 function parseRawMessages(list: any[]): MessageViewModel[] {
+  const messageScope = {
+    isGroupRoom: state.activeFocus.type === 'group',
+    isBotRoom: state.activeFocus.type === 'bot',
+  };
   const parsedMessages: MessageViewModel[] = [];
 
   for (let idx = 0; idx < list.length; idx++) {
@@ -1645,7 +1900,7 @@ function parseRawMessages(list: any[]): MessageViewModel[] {
         if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
           try {
             rawArgs = JSON.parse(trimmed);
-          // gate-degrade: 删除会话时逐个 profile 尝试，某个库没有该会话属正常情况
+          // gate-degrade: 工具 args 字符串非合法 JSON 时按原始文本降级展示，属可选增强失败不影响主流程
           } catch {}
         }
       }
@@ -1785,8 +2040,10 @@ function parseRawMessages(list: any[]): MessageViewModel[] {
     const rawTs = m.timestamp ?? m.created_at;
     const numTs = typeof rawTs === 'number' ? (rawTs > 1e11 ? rawTs : rawTs * 1000) : Date.parse(rawTs) || Date.now();
 
-    parsedMessages.push({
+    const rowIdNum = typeof m.row_id === 'number' && Number.isInteger(m.row_id) && m.row_id > 0 ? m.row_id : undefined;
+    const scopedMsg: MessageViewModel = {
       id: String(m.row_id ?? m.id ?? `msg-${idx}`),
+      rowId: rowIdNum,
       role: (rawRole === 'user' || rawRole === 'system' ? rawRole : 'assistant') as MessageViewModel['role'],
       content: rawText,
       thought,
@@ -1794,7 +2051,10 @@ function parseRawMessages(list: any[]): MessageViewModel[] {
       toolCalls,
       timestamp: formatTimestamp(numTs),
       rawTimestamp: numTs,
-    });
+    };
+    if (messageScope.isGroupRoom) scopedMsg.isGroupRoom = true;
+    if (messageScope.isBotRoom) scopedMsg.isBotRoom = true;
+    parsedMessages.push(scopedMsg);
   }
 
   return parsedMessages;
@@ -1984,21 +2244,11 @@ async function loadMessages(sessionId: string, targetBotName?: string): Promise<
     if (outcome.ok && outcome.messages.length > 0) {
       const parsed = parseRawMessages(outcome.messages);
       const existing = sessionMessagesCache.get(sessionId);
-      // 【防范丢数据核心不变量 (Failure Is Not Empty)】
-      // 若本地缓存中已持有比网关返回更多的消息（说明本地有刚刚收发但网关尚未刷盘的最新轮次），
-      // 绝不能直接用网关较短的截断历史覆盖本地！必须将本地未落盘的最新尾部消息保留下来！
-      let merged = parsed;
-      if (existing && existing.length > 0) {
-        if (existing.length > parsed.length) {
-          const lastParsed = parsed[parsed.length - 1];
-          const matchIdx = lastParsed ? existing.findIndex((m) => m.id === lastParsed.id) : -1;
-          if (matchIdx >= 0 && matchIdx < existing.length - 1) {
-            merged = [...parsed, ...existing.slice(matchIdx + 1)];
-          } else {
-            merged = [...existing];
-          }
-        }
-      }
+      // 【防范丢数据核心不变量 (Failure Is Not Empty) 与 P0-1 防复活】
+      // 合并决策收敛到纯函数 planSessionLoadMerge：截断成功后首次加载以服务端为准（消费 server-priority），
+      // 否则保留本地未落盘尾部。消费后清除标记。
+      const serverPriority = takeServerPriority(sessionHistoryTrust, sessionId);
+      const merged = planSessionLoadMerge(parsed, existing, serverPriority);
       sessionMessagesCache.set(sessionId, merged);
       syncActiveSessionPreviewToRail(sessionId, merged, resolvedBotName);
       sessionServerOffset.set(sessionId, outcome.pagination?.returned || outcome.messages.length);
@@ -2086,10 +2336,8 @@ async function loadMessages(sessionId: string, targetBotName?: string): Promise<
         if (list.length > 0) {
           const parsed = parseRawMessages(list);
           const existing = sessionMessagesCache.get(sessionId);
-          let merged = parsed;
-          if (existing && existing.length > parsed.length) {
-            merged = [...existing];
-          }
+          const wsServerPriority = takeServerPriority(sessionHistoryTrust, sessionId);
+          const merged = planSessionLoadMerge(parsed, existing, wsServerPriority);
           sessionMessagesCache.set(sessionId, merged);
           syncActiveSessionPreviewToRail(sessionId, merged, resolvedBotName);
           if (merged.length > INITIAL_WINDOW_PAGE_SIZE) {
@@ -2104,7 +2352,9 @@ async function loadMessages(sessionId: string, targetBotName?: string): Promise<
           scrollStreamToBottom('ws fallback loaded');
         } else {
           // Failure Is Not Empty: 当网关返回空消息时，绝对禁止把本地内存中已有的聊天记录抹杀为空白！
+          // 但截断成功后的 server-priority 标记必须在此消费，否则悬挂到下次正常加载被误用。
           const existing = sessionMessagesCache.get(sessionId);
+          takeServerPriority(sessionHistoryTrust, sessionId);
           if (existing && existing.length > 0) {
             state.messages = [...existing];
             render();
@@ -2213,6 +2463,8 @@ async function createNewSession(options?: { profile?: string; projectId?: string
       return;
     }
 
+    // 切到新会话前解除旧会话挂起回滚（P0-2 防横幅泄漏与快照丢失），必须在改写 activeSessionId 之前
+    disarmRollbackOnLeave(state.activeSessionId);
     state.profileName = targetProfile;
     state.activeSessionId = handles.storedId;
     state.activeLiveSessionId = handles.liveId;
@@ -2339,6 +2591,7 @@ async function deleteSession(id: string): Promise<void> {
     }
 
     if (state.activeSessionId === id) {
+      handleArmedOnDelete(id);
       state.activeSessionId = state.sessions[0]?.id || '';
       state.activeLiveSessionId = '';
       if (state.activeSessionId) {
@@ -2377,6 +2630,7 @@ async function deleteSession(id: string): Promise<void> {
         updateActivityPill(undefined);
       }
       if (state.activeSessionId === id) {
+        handleArmedOnDelete(id);
         state.activeSessionId = state.sessions[0]?.id || '';
         state.activeLiveSessionId = '';
         if (state.activeSessionId) {
@@ -2507,6 +2761,34 @@ async function archiveSession(id: string): Promise<void> {
   render();
 }
 
+/**
+ * 删除会话时的挂起回滚处置（主路径与 4007 快速清理分支共用）。
+ * 被删会话正是持有 armed 的会话：会话将消失，直接丢弃 armed，不往被删缓存回写；
+ * 否则按离开语义处理（armed 属于别的会话时 planRollbackLeaveRestore 返回 null，仅丢弃）。
+ */
+function handleArmedOnDelete(id: string): void {
+  if (state.rollbackArmed && state.rollbackArmed.sessionId === id) {
+    state.rollbackArmed = null;
+    return;
+  }
+  disarmRollbackOnLeave(id);
+}
+
+/**
+ * 离开当前会话前解除挂起回滚：把被乐观裁撤的历史恢复到该会话缓存，防止横幅跨会话泄漏与快照污染。
+ * outgoingSessionId 省略时用当前 activeSessionId。恢复决策收敛到纯函数 planRollbackLeaveRestore，
+ * armed 不属于正在离开的会话时绝不把它的快照写进别的会话缓存。
+ */
+function disarmRollbackOnLeave(outgoingSessionId?: string): void {
+  const armed = state.rollbackArmed;
+  if (!armed) return;
+  const plan = planRollbackLeaveRestore(armed, outgoingSessionId ?? state.activeSessionId);
+  state.rollbackArmed = null;
+  if (plan) {
+    sessionMessagesCache.set(plan.restoreSessionId, plan.restore);
+  }
+}
+
 async function selectSession(id: string, options?: { preserveFocus?: boolean; botName?: string }): Promise<void> {
   if (!id) return;
   if (state.activeSessionId === id && state.activeLiveSessionId && state.messages.length > 0) return;
@@ -2517,7 +2799,9 @@ async function selectSession(id: string, options?: { preserveFocus?: boolean; bo
     if (currentInput) {
       sessionDraftMap.set(state.activeSessionId, currentInput.value);
     }
-    if (state.messages.length > 0) {
+    if (state.rollbackArmed && state.rollbackArmed.sessionId === state.activeSessionId) {
+      disarmRollbackOnLeave();
+    } else if (state.messages.length > 0) {
       sessionMessagesCache.set(state.activeSessionId, [...state.messages]);
     }
   }
@@ -2755,6 +3039,10 @@ function isStreamingActiveForCurrentSession(): boolean {
 
 function setTimedDockNotice(msg: string, durationMs = 4000): void {
   state.dockNotice = msg;
+  // 【防范的历史坑 (Pitfall)】F14：旧实现只写 state.dockNotice 不调 render()，
+  // 依赖调用方顺带 render；Fork/回滚失败等纯提示路径因此永不上屏，用户误判“点了没反应”。
+  // 现显式触发 render，保证任何一条 dock notice 都即时可见。
+  render();
   if (dockNoticeDismissTimer) {
     clearTimeout(dockNoticeDismissTimer);
     dockNoticeDismissTimer = null;
@@ -3056,13 +3344,53 @@ async function sendMessage(text: string): Promise<void> {
 
   state.dockNotice = '';
 
+  // 挂起回滚事务：发送时以持久锚点重算切点，乐观裁撤本地尾部并保存快照供失败恢复。
+  // 截断 wire 载荷一律由 core InteractiveService 单点构造，渲染层绝不手拼 truncate 字段。
+  const armed =
+    state.rollbackArmed && state.rollbackArmed.sessionId === state.activeSessionId
+      ? state.rollbackArmed
+      : null;
+  let armedSnapshotForRestore: MessageViewModel[] | null = null;
+  let armedRowId: number | null = null;
+  if (armed && armed.anchor.kind === 'row') {
+    // 两段式设计：点击回滚时已乐观裁撤（state.messages 已无该锚点行），
+    // 故此处 resolveCutIndexByAnchor 返回 -1 是常态、不代表"无锚点降级"。
+    // armedRowId 始终携带交由网关做权威截断校验；截断失败由下方 catch 原子恢复快照。
+    // 这里再次 slice 仅覆盖"回滚后又有历史加载把该锚点行带回本地"的边缘情形。
+    armedRowId = armed.anchor.rowId;
+    armedSnapshotForRestore = armed.snapshot.map((m) => ({ ...m }));
+    const cut = resolveCutIndexByAnchor(state.messages, armed.anchor);
+    if (cut >= 0) {
+      state.messages = state.messages.slice(0, cut);
+    }
+  }
+  state.rollbackArmed = null;
+
+  // 处理附件：若输入框暂存了图片或文档，提取图文清单并显式赋予结构化标号（如 Image 1, Doc 1）
+  const currentAttachments = [...state.attachments];
+  state.attachments = [];
+  let finalText = trimmed;
+  if (currentAttachments.length > 0) {
+    let imgCount = 0;
+    let docCount = 0;
+    const attachmentLines = currentAttachments.map((att) => {
+      const isImg = att.type === 'image';
+      if (isImg) imgCount++;
+      else docCount++;
+      const label = att.label || (isImg ? `Image ${imgCount}` : `Doc ${docCount}`);
+      return `- ${label}: ${att.name}`;
+    });
+    finalText = `[${t('dock.attachmentHeader')}]\n${attachmentLines.join('\n')}\n\n${trimmed}`;
+  }
+
   const userMsgId = `usr-${Date.now()}`;
-  state.messages.push({
+  const userMsg: MessageViewModel = {
     id: userMsgId,
     role: 'user',
     content: trimmed,
     timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-  });
+  };
+  state.messages.push(userMsg);
 
   const assistantMsgId = `ast-${Date.now()}`;
   activeStreamingMessageId = assistantMsgId;
@@ -3114,13 +3442,52 @@ async function sendMessage(text: string): Promise<void> {
   logStream.info('turn started', { session: state.activeLiveSessionId, chars: trimmed.length });
 
   try {
+    // 挂载图片附件（若存在）
+    for (const att of currentAttachments) {
+      if (att.type === 'image' && att.previewUrl?.startsWith('data:')) {
+        const base64Data = att.previewUrl.split(',')[1];
+        if (base64Data) {
+          try {
+            await gatewayClient.call<AttachedImageResult>('image.attach_bytes', {
+              session_id: liveId,
+              content_base64: base64Data,
+              filename: att.name,
+            });
+          } catch (e) {
+            logStream.warn('image.attach_bytes failed, continuing with prompt manifest', { error: String(e) });
+          }
+        }
+      }
+    }
+
     // `reasoning_effort` is not part of PromptSubmitParams on this gateway
     // (it answers 4000 / Extra inputs), so reasoning is configured through
     // config.set instead of being smuggled into the submit payload.
-    const submitResult = await gatewayClient.call<any>('prompt.submit', {
-      session_id: liveId,
-      text: trimmed,
-    });
+    let submitResult: PromptSubmitResult;
+    if (armedRowId !== null) {
+      // 回滚截断走 core 单点构造，持久 rowId 锚点唯一，杜绝临时 id 逃逸
+      submitResult = await interactiveService.truncateAndSubmit(rpcCaller, {
+        sessionId: liveId,
+        text: finalText,
+        rowId: armedRowId,
+      });
+    } else {
+      submitResult = await gatewayClient.call<PromptSubmitResult>('prompt.submit', {
+        session_id: liveId,
+        text: finalText,
+      });
+    }
+
+    // 截断/新轮成功后立刻把网关签发的权威 rowId 绑定回本地乐观用户行，形成下次回滚锚点
+    if (typeof submitResult?.user_row_id === 'number' && submitResult.user_row_id > 0) {
+      userMsg.rowId = submitResult.user_row_id;
+    }
+    if (armedRowId !== null && state.activeSessionId) {
+      // 截断成功：本会话历史以服务端为准，禁用“本地更长则保留”合并守卫，防已删消息复活
+      sessionHistoryTrust.set(state.activeSessionId, 'server-priority');
+      sessionServerOffset.delete(state.activeSessionId);
+      state.hasOlderMessages = false;
+    }
 
     if (submitResult?.status && submitResult.status !== 'streaming' && submitResult.status !== 'queued') {
       assistantMsg.content = `[网关未受理本轮] status=${String(submitResult.status)}`;
@@ -3133,6 +3500,12 @@ async function sendMessage(text: string): Promise<void> {
       activeStreamingStoredSessionId = null;
       activeStreamingLiveId = null;
       disarmTurnWatchdog();
+      // 网关未受理且有挂起回滚：按快照原子恢复，草稿绝不丢失
+      if (armedSnapshotForRestore && state.activeSessionId) {
+        state.messages = armedSnapshotForRestore;
+        sessionMessagesCache.set(state.activeSessionId, [...state.messages]);
+        setTimedDockNotice(t('chat.rollbackFailed', { reason: String(submitResult?.status ?? '') }));
+      }
       render();
     }
   } catch (err) {
@@ -3147,8 +3520,189 @@ async function sendMessage(text: string): Promise<void> {
     activeStreamingStoredSessionId = null;
     activeStreamingLiveId = null;
     disarmTurnWatchdog();
+    // 截断失败自愈：恢复乐观裁撤前快照，用户可见“消息回来了 + 草稿还在”，杜绝静默丢历史
+    if (armedSnapshotForRestore && state.activeSessionId) {
+      state.messages = armedSnapshotForRestore;
+      sessionMessagesCache.set(state.activeSessionId, [...state.messages]);
+      setTimedDockNotice(t('chat.rollbackFailed', { reason: describeRpcError(err) }));
+    }
     render();
   }
+}
+
+/**
+ * 发送主分流入口（D4）。渲染层不再自行解析 '@'，统一交给 core planSendRoute 裁决，
+ * 三态分别落 prompt.background / prompt.btw / groups.send，无提及走普通 prompt.submit。
+ * 【防范的历史坑 (Pitfall)】旧实现把 "@架构王 ..." 原文当普通提问 prompt.submit，
+ * 模型收到自然语言里的 @ 便答复"无法调用"，且从不调度被呼叫的 Agent。
+ */
+async function routeSend(text: string): Promise<void> {
+  const sessionKind = deriveSessionKind(state.activeFocus);
+  const knownProfiles = state.profiles.map((p) => p.name);
+  for (const p of state.profiles) {
+    if (p.displayName) knownProfiles.push(p.displayName);
+  }
+  const route = planSendRoute({
+    text,
+    sessionKind,
+    knownProfiles,
+    pickedMentionToken: state.pickedMention?.profile ?? null,
+  });
+  state.pickedMention = null;
+
+  switch (route.kind) {
+    case 'plain':
+      if (route.text.startsWith('/') && gatewayClient) {
+        await runSlashCommand(route.text);
+        return;
+      }
+      await sendMessage(route.text);
+      return;
+    case 'group-message':
+      if (state.activeFocus.type === 'group') await sendGroupMessage(state.activeFocus.roomId, route.text);
+      else await sendMessage(route.text);
+      return;
+    case 'mention-group':
+      if (state.activeFocus.type === 'group') await sendGroupMessage(state.activeFocus.roomId, route.text);
+      return;
+    case 'mention-btw':
+      await askSideAgent('btw', route.targetProfile, route.cleanText);
+      return;
+    case 'mention-subagent':
+      await askSideAgent('delegation', route.targetProfile, route.cleanText);
+      return;
+    default: {
+      // 穷尽守卫：新增 SendRoute 变体若未在此处理，编译期即失败，绝不静默吞消息
+      const exhaustive: never = route;
+      void exhaustive;
+      return;
+    }
+  }
+}
+
+/**
+ * 执行斜杠指令并按 DispatchType 分派（契约：exec/plugin→output，alias→target，
+ * send/prefill/skill→message，UI 展示 display 绝不展示 message 原文）。
+ */
+async function runSlashCommand(command: string): Promise<void> {
+  const liveId = await ensureLiveSessionId();
+  if (!liveId) {
+    setTimedDockNotice(t('chat.forkNoLive'));
+    render();
+    return;
+  }
+  try {
+    const res = await interactiveService.execSlash(rpcCaller, liveId, command, state.profileName || undefined);
+    const type = res.type || 'exec';
+    if (type === 'prefill') {
+      const el = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
+      if (el) el.value = res.target || res.message || '';
+      setTimedDockNotice(res.display || res.notice || '');
+      render();
+      return;
+    }
+    if (type === 'send' || type === 'skill') {
+      const text = res.message || res.output;
+      if (text) await sendMessage(text);
+      return;
+    }
+    if (type === 'alias') {
+      if (res.target) await runSlashCommand(res.target);
+      return;
+    }
+    // exec / plugin：以系统提示呈现 output，不产生回合
+    const out = res.output || res.warning || '';
+    setTimedDockNotice(out || res.display || t('dock.cmdHelp'));
+    render();
+  } catch (err) {
+    setTimedDockNotice(`${t('chat.gatewayNotConnected')}: ${describeRpcError(err)}`);
+  }
+}
+
+/** 旁路呼叫：BTW 只读外援 / 子代理委派。结果以独立胶囊呈现，严禁混入主消息流。 */
+async function askSideAgent(
+  kind: 'btw' | 'delegation',
+  targetProfile: string,
+  question: string
+): Promise<void> {
+  if (!gatewayClient) {
+    setTimedDockNotice(t('chat.gatewayNotConnected'));
+    return;
+  }
+  const liveId = await ensureLiveSessionId();
+  if (!liveId) {
+    setTimedDockNotice(t('chat.forkNoLive'));
+    render();
+    return;
+  }
+
+  // 解析 displayName → 真实 profile name（BTW/background 需要网关 profile 实名）
+  const resolved =
+    state.profiles.find((p) => p.name === targetProfile || p.displayName === targetProfile)?.name || targetProfile;
+
+  try {
+    let taskId: string;
+    if (kind === 'btw') {
+      const res = await handoffService.sendBtw(liveId, question, resolved, rpcCaller);
+      taskId = res.task_id;
+    } else {
+      const res = await gatewayClient.call<{ task_id?: string }>('prompt.background', {
+        session_id: liveId,
+        text: question,
+        profile: resolved,
+      });
+      if (!res?.task_id) throw new Error('prompt.background missing task_id');
+      taskId = res.task_id;
+    }
+
+    state.sideAgentCapsules = [
+      ...state.sideAgentCapsules,
+      {
+        id: taskId,
+        kind,
+        profile: resolved,
+        question,
+        status: 'pending',
+        startedAt: Date.now(),
+      },
+    ];
+    armCapsuleTimers(taskId);
+    render();
+  } catch (err) {
+    state.sideAgentCapsules = [
+      ...state.sideAgentCapsules,
+      {
+        id: `failed-${Date.now()}`,
+        kind,
+        profile: resolved,
+        question,
+        status: 'failed',
+        startedAt: Date.now(),
+        notice: describeRpcError(err),
+      },
+    ];
+    render();
+  }
+}
+
+/** 胶囊两档超时：15 秒提示仍在等待，10 分钟置 expired，杜绝永远转圈 */
+function armCapsuleTimers(taskId: string): void {
+  const cap = state.sideAgentCapsules.find((c) => c.id === taskId);
+  if (!cap) return;
+  cap.hintTimer = setTimeout(() => {
+    const c = state.sideAgentCapsules.find((x) => x.id === taskId);
+    if (c && c.status === 'pending') {
+      c.notice = t('capsule.slowHint');
+      render();
+    }
+  }, 15000);
+  cap.expireTimer = setTimeout(() => {
+    const c = state.sideAgentCapsules.find((x) => x.id === taskId);
+    if (c && c.status === 'pending') {
+      c.status = 'expired';
+      render();
+    }
+  }, 600000);
 }
 
 function formatTimestamp(ts: number | string): string {
@@ -3281,14 +3835,18 @@ function applyTurnActions(actions: TurnAction[]): void {
         const target = state.messages.find((m) => m.id === action.messageId);
         if (target) {
           if (!target.toolCalls) target.toolCalls = [];
-          target.toolCalls.push({
-            id: action.toolCall.id,
-            name: action.toolCall.name,
-            status: 'running',
-            args: action.toolCall.args,
-            startTime: now,
-          });
-          needsRender = true;
+          // 同 id 重复 start 不新建第二枚胶囊（状态机收敛不变量，定理 10）
+          if (!target.toolCalls.some((tc) => tc.id === action.toolCall.id)) {
+            target.toolCalls.push({
+              id: action.toolCall.id,
+              name: action.toolCall.name,
+              status: 'running',
+              args: action.toolCall.args,
+              startTime: now,
+            });
+          }
+          // 流式期间增量直写工具插槽，绕开被短路的 messagesChanged 全量重建
+          scheduleToolPatch(action.messageId);
         }
         // Also update background cache if not focused
         if (activeStreamingStoredSessionId) {
@@ -3317,17 +3875,20 @@ function applyTurnActions(actions: TurnAction[]): void {
         const now = Date.now();
         const updateTc = (target?: MessageViewModel) => {
           if (target && target.toolCalls) {
-            let tc = target.toolCalls.find((t) => action.toolCallId && t.id === action.toolCallId);
-            if (!tc) {
-              // 容错降级：若 ID 未严格命中，将最近一个正在运行的工具调用标记为完成
-              tc = [...target.toolCalls].reverse().find((t) => t.status === 'running');
-            }
+            const tc = target.toolCalls.find((t) => action.toolCallId && t.id === action.toolCallId);
+            // 契约 tool_id 精确匹配；未命中不再兜底改最近 running（防并发工具串态），仅记日志
             if (tc) {
               tc.status = 'completed';
               if (action.output) {
                 tc.output = typeof action.output === 'object' ? JSON.stringify(action.output, null, 2) : String(action.output);
               }
-              if (tc.startTime) tc.durationMs = Math.max(100, now - tc.startTime);
+              const serverMs = action.durationMs;
+              if (typeof serverMs === 'number' && serverMs >= 0) {
+                tc.durationMs = tc.durationMs !== undefined ? Math.max(tc.durationMs, serverMs) : serverMs;
+              } else if (tc.startTime) {
+                const computed = Math.max(100, now - tc.startTime);
+                tc.durationMs = tc.durationMs !== undefined ? Math.max(tc.durationMs, computed) : computed;
+              }
             }
           }
         };
@@ -3335,11 +3896,37 @@ function applyTurnActions(actions: TurnAction[]): void {
         const target = state.messages.find((m) => m.id === action.messageId);
         if (target) {
           updateTc(target);
-          needsRender = true;
+          scheduleToolPatch(action.messageId);
         }
         if (activeStreamingStoredSessionId) {
           const cached = sessionMessagesCache.get(activeStreamingStoredSessionId);
           updateTc(cached?.find((m) => m.id === action.messageId));
+        }
+        break;
+      }
+
+      case 'persisted-turn': {
+        // 回合落盘权威行地址：把网关 rowId 绑定回本地乐观的 user / assistant 行，
+        // 使下一轮回滚拥有可信持久锚点（D1 半环，杜绝把 usr- 临时 id 当锚点触发 4018）。
+        const bindRow = (id: string | undefined, rowId: number | null) => {
+          if (!id || rowId === null) return;
+          const m = state.messages.find((x) => x.id === id);
+          if (m) m.rowId = rowId;
+          if (activeStreamingStoredSessionId) {
+            const c = sessionMessagesCache.get(activeStreamingStoredSessionId)?.find((x) => x.id === id);
+            if (c) c.rowId = rowId;
+          }
+        };
+        // 助手行 id 已知，user 行为该助手行之前最近的一条 user 消息
+        bindRow(action.messageId, action.assistantRowId);
+        const asstIdx = state.messages.findIndex((x) => x.id === action.messageId);
+        if (asstIdx > 0 && action.userRowId !== null) {
+          for (let i = asstIdx - 1; i >= 0; i--) {
+            if (state.messages[i].role === 'user') {
+              bindRow(state.messages[i].id, action.userRowId);
+              break;
+            }
+          }
         }
         break;
       }
@@ -3460,6 +4047,19 @@ function applyTurnActions(actions: TurnAction[]): void {
         state.sessions = applySessionTitle(state.sessions, action.sessionId, action.title);
         needsRender = true;
         break;
+
+      case 'side-agent-complete': {
+        // 旁路应答只更新独立胶囊状态，绝不写入 state.messages / 会话缓存（防上下文毒化）
+        const capsule = state.sideAgentCapsules.find((c) => c.id === action.taskId);
+        if (capsule) {
+          capsule.status = action.text ? 'done' : 'failed';
+          capsule.answer = action.text || undefined;
+          if (capsule.hintTimer) { clearTimeout(capsule.hintTimer); capsule.hintTimer = undefined; }
+          if (capsule.expireTimer) { clearTimeout(capsule.expireTimer); capsule.expireTimer = undefined; }
+          needsRender = true;
+        }
+        break;
+      }
     }
   }
 
@@ -3600,7 +4200,7 @@ async function connect(): Promise<void> {
         render();
 
         if (isConnected) {
-          Promise.allSettled([fetchProfiles().then(() => Promise.allSettled([fetchSessions(), fetchGroupRooms()])), fetchModelOptions(), fetchProjects()]);
+          Promise.allSettled([fetchProfiles().then(() => Promise.allSettled([fetchSessions(), fetchGroupRooms(), prefetchSlashCatalog()])), fetchModelOptions(), fetchProjects()]);
         }
       }
     });
@@ -3610,7 +4210,7 @@ async function connect(): Promise<void> {
       state.gatewayConnected = true;
       state.gatewayConnecting = false;
       render();
-      Promise.allSettled([fetchProfiles().then(() => Promise.allSettled([fetchSessions(), fetchGroupRooms()])), fetchModelOptions(), fetchProjects()]);
+      Promise.allSettled([fetchProfiles().then(() => Promise.allSettled([fetchSessions(), fetchGroupRooms(), prefetchSlashCatalog()])), fetchModelOptions(), fetchProjects()]);
     }
   } catch (err: any) {
     console.error('[Flux Connect] Connection failed:', err);
@@ -3654,6 +4254,8 @@ function disconnect(): void {
   state.gatewayLatencyMs = 0;
   state.sessions = [];
   state.messages = [];
+  // 断线即丢弃挂起回滚：会话通道已断，乐观裁撤快照不再有意义，残留会让重连后横幅跨会话泄漏
+  state.rollbackArmed = null;
   state.activeSessionId = '';
   state.activeLiveSessionId = '';
   state.pendingSessionIds = [];
@@ -3754,15 +4356,29 @@ interface RenderMessagesSnapshot {
   hasOlder: boolean;
   isLoadingOlder: boolean;
   profileName: string;
+  rollbackActive: boolean;
+  capsuleCount: number;
 }
 
 let lastMessagesSnapshot: RenderMessagesSnapshot | null = null;
 let lastInputDockSnapshot: RenderInputDockSnapshot | null = null;
 
+/**
+ * 斜杠与智能引用 Popper 的独立子树同步。
+ * 【设计意图 (Why)】Popper 开合高频，绝不能触发整个 dock 的 outerHTML 替换（会重建 textarea、
+ * 丢光标与 IME，违反键盘时序军规）。此处只写 #composer-popper-mount.innerHTML。
+ */
+function syncComposerPoppers(): void {
+  const mount = document.getElementById('composer-popper-mount');
+  if (!mount) return;
+  mount.innerHTML =
+    renderSlashPopper(state.slashItems, state.slashPopperOpen) +
+    renderMentionPopper(state.mentionItems, state.mentionPopperOpen);
+}
+
 function render(): void {
   const root = document.getElementById('flux-app-root');
   if (!root) return;
-
   const renderStartedAt = performance.now();
 
   const existingInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
@@ -3826,6 +4442,8 @@ function render(): void {
     hasOlder: state.hasOlderMessages,
     isLoadingOlder: state.isLoadingOlder,
     profileName: state.profileName,
+    rollbackActive: Boolean(state.rollbackArmed),
+    capsuleCount: state.sideAgentCapsules.length,
   };
 
   const isStreamingCurrent = isStreamingActiveForCurrentSession();
@@ -3842,6 +4460,8 @@ function render(): void {
     modelSearchQuery: state.modelSearchQuery,
     recentModelsHash: state.recentModels.join(','),
     favoriteModelsHash: state.favoriteModels.join(','),
+    attachmentsCount: state.attachments.length,
+    attachmentsHash: state.attachments.map((a) => `${a.id}:${a.name}`).join(','),
   };
 
   const inOngoingStreamingTurn =
@@ -3850,9 +4470,11 @@ function render(): void {
     lastMessagesSnapshot.sessionId === currentMessagesSnapshot.sessionId &&
     lastMessagesSnapshot.count === currentMessagesSnapshot.count;
 
+  const structureDirty = canvasStructureDirty;
   const messagesChanged =
-    !inOngoingStreamingTurn &&
-    (!lastMessagesSnapshot ||
+    (structureDirty || !inOngoingStreamingTurn) &&
+    (structureDirty ||
+      !lastMessagesSnapshot ||
       lastMessagesSnapshot.sessionId !== currentMessagesSnapshot.sessionId ||
       lastMessagesSnapshot.count !== currentMessagesSnapshot.count ||
       lastMessagesSnapshot.lastMsgId !== currentMessagesSnapshot.lastMsgId ||
@@ -3861,7 +4483,9 @@ function render(): void {
       lastMessagesSnapshot.gatewayConnecting !== currentMessagesSnapshot.gatewayConnecting ||
       lastMessagesSnapshot.hasOlder !== currentMessagesSnapshot.hasOlder ||
       lastMessagesSnapshot.isLoadingOlder !== currentMessagesSnapshot.isLoadingOlder ||
-      lastMessagesSnapshot.profileName !== currentMessagesSnapshot.profileName);
+      lastMessagesSnapshot.profileName !== currentMessagesSnapshot.profileName ||
+      lastMessagesSnapshot.rollbackActive !== currentMessagesSnapshot.rollbackActive ||
+      lastMessagesSnapshot.capsuleCount !== currentMessagesSnapshot.capsuleCount);
 
   const resolveSessionActivity = (sessionId: string): ActivityState =>
     // 会话域：仅消费会话自己的运行/未读集合，绝不向 Bot 或群聊领域冒泡
@@ -3972,6 +4596,11 @@ function render(): void {
                 modelMenuOpen: state.modelMenuOpen,
                 notice: state.dockNotice,
                 activityStatus: isStreamingActiveForCurrentSession() ? state.agentActivityStatus : undefined,
+                attachments: state.attachments,
+                slashPopperOpen: state.slashPopperOpen,
+                slashItems: state.slashItems,
+                mentionPopperOpen: state.mentionPopperOpen,
+                mentionItems: state.mentionItems,
               })
             : '',
         })}
@@ -4152,6 +4781,11 @@ function render(): void {
           modelMenuOpen: state.modelMenuOpen,
           notice: state.dockNotice,
           activityStatus: isStreamingCurrent ? state.agentActivityStatus : undefined,
+          attachments: state.attachments,
+          slashPopperOpen: state.slashPopperOpen,
+          slashItems: state.slashItems,
+          mentionPopperOpen: state.mentionPopperOpen,
+          mentionItems: state.mentionItems,
         })
       : '';
 
@@ -4270,7 +4904,13 @@ function render(): void {
         testStatus: state.testStatus,
         hasOlderMessages: state.hasOlderMessages,
         isLoadingOlder: state.isLoadingOlder,
+        isStreaming: isStreamingActiveForCurrentSession(),
+        sideAgentCapsules: state.sideAgentCapsules,
+        rollbackBanner: state.rollbackArmed
+          ? { removedCount: state.rollbackArmed.removedCount, anchorLabel: state.rollbackArmed.anchorLabel }
+          : null,
       });
+      canvasStructureDirty = false;
       applyStreamAnchor(streamAnchor, pinBottom);
       lastMessagesSnapshot = currentMessagesSnapshot;
     }
@@ -4288,6 +4928,9 @@ function render(): void {
   }
 
   bindEvents();
+
+  // Popper 增量同步：只替换 #composer-popper-mount 子树，绝不重建 dock / textarea
+  syncComposerPoppers();
 
   if (messagesChanged) {
     requestAnimationFrame(() => {
@@ -5573,7 +6216,7 @@ function bindEvents(): void {
 
     if (!text) return;
     inputEl.value = '';
-    void sendMessage(text);
+    void routeSend(text);
   };
 
   if (sendBtn) sendBtn.onclick = () => handleSend('button');
@@ -5614,19 +6257,177 @@ function bindEvents(): void {
         };
       }
 
-      inputEl.addEventListener('input', adjustHeight);
+      inputEl.addEventListener('input', () => {
+        adjustHeight();
+        const textBeforeCursor = inputEl.value.slice(0, inputEl.selectionStart || inputEl.value.length);
+
+        // 斜杠命令 (/): 处于开头或空格后 → complete.slash 动态补全（失败降级目录快照）
+        const slashMatch = /(?:^|\s)\/([a-zA-Z0-9_-]*)$/.exec(textBeforeCursor);
+        if (slashMatch) {
+          state.mentionPopperOpen = false;
+          requestSlashCompletion(slashMatch[1]);
+          return;
+        } else if (state.slashPopperOpen) {
+          state.slashPopperOpen = false;
+          render();
+        }
+
+        // 智能引用 (@): Agent 项本地枚举 + 文件项走 complete.path 动态检索
+        const mentionMatch = /(?:^|\s)@([a-zA-Z0-9_\u4e00-\u9fa5\.-]*)$/.exec(textBeforeCursor);
+        if (mentionMatch) {
+          const query = mentionMatch[1].toLowerCase();
+          const agentItems: MentionReferenceOption[] = [];
+          const isBotChat = state.activeFocus.type === 'bot';
+          const isGroupChat = state.activeFocus.type === 'group';
+
+          if (isGroupChat) {
+            agentItems.push({ type: 'agent', name: 'all', detail: t('mention.allDetail') });
+            const currentRoom = state.groupRooms.find((r) => r.roomId === state.editingGroupRoomId);
+            if (currentRoom) {
+              for (const member of currentRoom.members) {
+                agentItems.push({ type: 'agent', name: member, detail: t('mention.groupMember') });
+              }
+            }
+          } else if (!isBotChat) {
+            for (const p of state.profiles) {
+              agentItems.push({ type: 'agent', name: p.displayName || p.name, detail: p.name });
+            }
+          }
+
+          const filteredAgents = agentItems.filter((m) => m.name.toLowerCase().includes(query));
+          state.mentionItems = filteredAgents;
+          state.mentionPopperOpen = filteredAgents.length > 0;
+          state.slashPopperOpen = false;
+          render();
+          requestPathCompletion(query);
+          return;
+        } else if (state.mentionPopperOpen) {
+          state.mentionPopperOpen = false;
+          render();
+        }
+      });
+
+      // 剪贴板图片/文件粘贴监听 (Ctrl+V)
+      inputEl.addEventListener('paste', (e) => {
+        const files = e.clipboardData?.files;
+        if (files && files.length > 0) {
+          e.preventDefault();
+          void addInputAttachments(files);
+        }
+      });
+
+      // 拖拽支持 (Drag & Drop)
+      const dockContainer = document.querySelector('.input-dock-container') as HTMLElement | null;
+      if (dockContainer && dockContainer.dataset.dragBound !== 'true') {
+        dockContainer.dataset.dragBound = 'true';
+        dockContainer.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        });
+        dockContainer.addEventListener('drop', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const files = e.dataTransfer?.files;
+          if (files && files.length > 0) {
+            void addInputAttachments(files);
+          }
+        });
+      }
+
       // Initial auto adjustment for restored drafts
       adjustHeight();
 
       inputEl.addEventListener('compositionstart', () => { isComposing = true; });
       inputEl.addEventListener('compositionend', () => { isComposing = false; });
       inputEl.onkeydown = (e) => {
+        if (e.key === 'Escape') {
+          if (state.slashPopperOpen || state.mentionPopperOpen) {
+            e.preventDefault();
+            state.slashPopperOpen = false;
+            state.mentionPopperOpen = false;
+            render();
+            return;
+          }
+        }
         if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
+          if (state.slashPopperOpen || state.mentionPopperOpen) {
+            state.slashPopperOpen = false;
+            state.mentionPopperOpen = false;
+          }
           e.preventDefault();
           handleSend('enter');
         }
       };
     }
+  }
+
+  // 附件移除与 Popper 补全委托
+  const dockBox = document.querySelector('.input-dock-container');
+  if (dockBox && !dockBox.hasAttribute('data-popper-delegated')) {
+    dockBox.setAttribute('data-popper-delegated', 'true');
+    dockBox.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+
+      // 移除附件按钮
+      const removeBtn = target.closest<HTMLElement>('.btn-remove-attachment');
+      if (removeBtn) {
+        e.stopPropagation();
+        const attId = removeBtn.getAttribute('data-att-id');
+        if (attId) {
+          state.attachments = state.attachments.filter((a) => a.id !== attId);
+          render();
+        }
+        return;
+      }
+
+      // 斜杠命令项点击：按网关 replace_from 精确替换光标 token
+      const slashOption = target.closest<HTMLElement>('.slash-item-option');
+      if (slashOption) {
+        e.stopPropagation();
+        const cmd = slashOption.getAttribute('data-command') || '';
+        const replaceFromRaw = slashOption.getAttribute('data-replace-from');
+        const replaceFrom = replaceFromRaw ? parseInt(replaceFromRaw, 10) : null;
+        if (cmd && inputEl) {
+          if (replaceFrom !== null && Number.isFinite(replaceFrom)) {
+            const caret = inputEl.selectionStart ?? inputEl.value.length;
+            inputEl.value = inputEl.value.slice(0, replaceFrom) + cmd + ' ' + inputEl.value.slice(caret);
+            const pos = replaceFrom + cmd.length + 1;
+            inputEl.setSelectionRange(pos, pos);
+          } else {
+            inputEl.value = `${cmd} `;
+            inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
+          }
+          inputEl.focus();
+          state.slashPopperOpen = false;
+          render();
+        }
+        return;
+      }
+
+      // 智能引用项点击：区分 Agent（写 pickedMention 权威）与 File（插入相对路径）
+      const mentionOption = target.closest<HTMLElement>('.mention-item-option');
+      if (mentionOption) {
+        e.stopPropagation();
+        const mention = mentionOption.getAttribute('data-mention') || '';
+        const mtype = mentionOption.getAttribute('data-type') || 'agent';
+        if (mention && inputEl) {
+          if (mtype === 'file') {
+            const prefix = inputEl.value.replace(/@\S*$/, '');
+            inputEl.value = `${prefix}@${mention} `;
+            inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
+          } else {
+            const prefix = inputEl.value.replace(/@\S*$/, '');
+            inputEl.value = `${prefix}@${mention} `;
+            inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
+            state.pickedMention = { profile: mention, token: `@${mention}` };
+          }
+          inputEl.focus();
+          state.mentionPopperOpen = false;
+          render();
+        }
+        return;
+      }
+    });
   }
 
   // Scroll stream: Auto-load older messages on top reach with requestAnimationFrame & cooldown lock
@@ -5656,7 +6457,15 @@ function bindEvents(): void {
   if (streamEl && streamEl.dataset.fileLinkDelegated !== 'true') {
     streamEl.dataset.fileLinkDelegated = 'true';
     streamEl.addEventListener('click', (e) => {
-      // 1. 消息微距操作栏委托：复制、回滚、Fork 分支、重新生成（选择器严格精准收敛）
+      // 0. 回滚横幅取消：恢复乐观裁撤快照
+      const cancelBtn = (e.target as HTMLElement).closest<HTMLElement>('[data-action="rollback-cancel"]');
+      if (cancelBtn) {
+        e.stopPropagation();
+        e.preventDefault();
+        handleRollbackCancel();
+        return;
+      }
+      // 1. 消息微距操作栏委托：复制、回滚、Fork 分支（选择器严格精准收敛）
       const actionBtn = (e.target as HTMLElement).closest<HTMLElement>('.msg-action-btn[data-action]');
       if (actionBtn) {
         const action = actionBtn.getAttribute('data-action');
@@ -5676,12 +6485,6 @@ function bindEvents(): void {
           e.stopPropagation();
           e.preventDefault();
           void handleForkMessage(actionBtn);
-          return;
-        }
-        if (action === 'regenerate-msg') {
-          e.stopPropagation();
-          e.preventDefault();
-          void handleRegenerateMessage(actionBtn);
           return;
         }
       }
@@ -5737,6 +6540,57 @@ function bindEvents(): void {
  * - 状态透明：无论成功还是失败，均通过 setTimedDockNotice 和按钮图标微动效给予用户明确反馈；
  * - 严格类型，严禁 as any。
  */
+async function addInputAttachments(fileList: FileList | File[]): Promise<void> {
+  const files = Array.from(fileList);
+  if (files.length === 0) return;
+
+  const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB
+  let imgIndex = state.attachments.filter((a) => a.type === 'image').length;
+  let docIndex = state.attachments.filter((a) => a.type !== 'image').length;
+  const newItems: InputAttachmentItem[] = [];
+
+  for (const file of files) {
+    const isImg = file.type.startsWith('image/');
+    if (isImg && file.size > MAX_IMAGE_SIZE) {
+      setTimedDockNotice(t('dock.imageTooLarge'));
+      continue;
+    }
+
+    if (isImg) {
+      imgIndex++;
+      const dataUrl = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string) || '');
+        reader.onerror = () => resolve('');
+        reader.readAsDataURL(file);
+      });
+
+      newItems.push({
+        id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        name: file.name || `image_${imgIndex}.png`,
+        label: `Image ${imgIndex}`,
+        type: 'image',
+        previewUrl: dataUrl,
+        sizeBytes: file.size,
+      });
+    } else {
+      docIndex++;
+      newItems.push({
+        id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        name: file.name,
+        label: `Doc ${docIndex}`,
+        type: file.name.endsWith('.pdf') ? 'pdf' : 'file',
+        sizeBytes: file.size,
+      });
+    }
+  }
+
+  if (newItems.length > 0) {
+    state.attachments = [...state.attachments, ...newItems];
+    render();
+  }
+}
+
 async function handleCopyMessage(btn: HTMLElement): Promise<void> {
   await messageActionController.executeCopy(
     btn,
@@ -5747,15 +6601,90 @@ async function handleCopyMessage(btn: HTMLElement): Promise<void> {
   );
 }
 
+/**
+ * 回滚：即时乐观裁撤目标提问及其后续消息（点击即消失），保留快照供取消/失败恢复，
+ * 提问回填输入框。截断锚点必须为持久 rowId，否则降级为纯回填（不发截断字段）。
+ */
 function handleRollbackMessage(btn: HTMLElement): void {
+  const rowEl = btn.closest<HTMLElement>('[data-msg-id]');
+  const msgId = btn.getAttribute('data-msg-id') || rowEl?.getAttribute('data-msg-id') || '';
+
+  const plan = planTruncate({
+    messages: state.messages,
+    targetId: msgId,
+    sessionKind: deriveSessionKind(state.activeFocus),
+    isStreaming: isStreamingActiveForCurrentSession(),
+  });
+
+  if (plan.mode === 'blocked') {
+    const reasonText =
+      plan.reason === 'streaming'
+        ? t('chat.rollbackBlockedStreaming')
+        : plan.reason === 'unsupported-scope'
+          ? t('chat.rollbackBlockedScope')
+          : t('chat.rollback');
+    setTimedDockNotice(reasonText);
+    render();
+    return;
+  }
+
+  const targetMsg = state.messages.find((m) => m.id === plan.targetId);
   const textarea = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
-  messageActionController.executeRollback(
+  const refilled = messageActionController.executeRollback(
     btn,
     state.messages,
     textarea,
     setTimedDockNotice,
     t('chat.rollbackSuccess')
   );
+
+  // refill-only：无持久锚点，仅回填文本作为新提问，不进入 armed，不发截断
+  if (plan.mode === 'refill-only') {
+    setTimedDockNotice(t('chat.rollbackNoAnchor'));
+    render();
+    return;
+  }
+
+  if (plan.anchor.kind !== 'row') return;
+  const originalMessages = state.messages;
+  const cut = applyOptimisticCut(originalMessages, plan.anchor);
+  if (!cut) {
+    setTimedDockNotice(t('chat.rollbackNoAnchor'));
+    render();
+    return;
+  }
+
+  state.messages = cut.kept;
+  if (state.activeSessionId) {
+    sessionMessagesCache.set(state.activeSessionId, [...state.messages]);
+  }
+  void refilled;
+  state.rollbackArmed = {
+    sessionId: state.activeSessionId,
+    targetId: plan.targetId,
+    anchor: plan.anchor,
+    snapshot: originalMessages.map((m) => ({ ...m })),
+    removedCount: cut.removed.length,
+    anchorLabel: targetMsg?.timestamp || `#${plan.anchor.rowId}`,
+  };
+  render();
+}
+
+/** 取消挂起回滚：恢复快照并清除横幅 */
+function handleRollbackCancel(): void {
+  const armed = state.rollbackArmed;
+  if (!armed) return;
+  // 作用域守卫：只有横幅属于当前会话时才允许写回 state.messages
+  if (armed.sessionId !== state.activeSessionId) {
+    state.rollbackArmed = null;
+    render();
+    return;
+  }
+  state.messages = armed.snapshot.map((m) => ({ ...m }));
+  sessionMessagesCache.set(armed.sessionId, [...state.messages]);
+  state.rollbackArmed = null;
+  setTimedDockNotice(t('chat.rollbackCancelled'));
+  render();
 }
 
 async function handleForkMessage(btn: HTMLElement): Promise<void> {
@@ -5763,14 +6692,28 @@ async function handleForkMessage(btn: HTMLElement): Promise<void> {
     setTimedDockNotice(t('chat.gatewayNotConnected'));
     return;
   }
+  // Fork 必须作用于 live transport id：stored id 会被网关判为 session not found（4001）
+  const liveId = await ensureLiveSessionId();
+  if (!liveId) {
+    setTimedDockNotice(t('chat.forkNoLive'));
+    render();
+    return;
+  }
   await messageActionController.executeFork(btn, {
-    activeSessionId: state.activeSessionId,
+    activeSessionId: liveId,
     profileName: state.profileName || 'default',
     messages: state.messages,
-    callRpc: (method, params) => gatewayClient!.call<Record<string, unknown>>(method, params),
+    forkSession: (input) =>
+      interactiveService.forkSession(rpcCaller, {
+        sessionId: input.sessionId,
+        count: input.count,
+        profile: input.profile,
+        idempotencyKey: input.idempotencyKey,
+      }),
     onSuccess: async (newSessionId) => {
-      await scheduleSessionsRefresh();
+      // 成功即刻切换并刷新左轨；即时反馈由 setTimedDockNotice(现已触发 render) 提供
       await selectSession(newSessionId);
+      scheduleSessionsRefresh();
     },
     setNotice: setTimedDockNotice,
     labels: {
@@ -5782,30 +6725,11 @@ async function handleForkMessage(btn: HTMLElement): Promise<void> {
   });
 }
 
-async function handleRegenerateMessage(btn: HTMLElement): Promise<void> {
-  await messageActionController.executeRegenerate(btn, {
-    activeSessionId: state.activeSessionId,
-    isStreaming: isStreamingActiveForCurrentSession(),
-    messages: state.messages,
-    sendPrompt: async (text) => {
-      await sendMessage(text);
-    },
-    setNotice: setTimedDockNotice,
-    labels: {
-      notConnected: t('chat.gatewayNotConnected'),
-      streamingBusy: t('chat.streamBusyNotice'),
-      regenerating: t('chat.regenerating'),
-      promptNotFound: t('chat.userPromptNotFound'),
-    },
-  });
-}
-
 if (typeof window !== 'undefined') {
   window.__fluxMessageActions = {
     handleCopyMessage,
     handleRollbackMessage,
     handleForkMessage,
-    handleRegenerateMessage,
   };
 }
 

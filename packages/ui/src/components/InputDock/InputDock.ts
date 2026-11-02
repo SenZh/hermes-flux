@@ -15,9 +15,12 @@ import { t } from '../../i18n/index.js';
 export interface InputAttachmentItem {
   id: string;
   name: string;
+  label?: string;
   type: 'image' | 'file' | 'pdf';
   previewUrl?: string;
   sizeBytes?: number;
+  filePath?: string;
+  contentBase64?: string;
 }
 
 export interface InputQueuedItem {
@@ -31,6 +34,8 @@ export interface SlashCommandOption {
   name: string;
   description: string;
   isSkill?: boolean;
+  /** 网关 complete.slash 的替换起始列；点选时据此精确替换光标 token */
+  replaceFrom?: number;
 }
 
 export interface MentionReferenceOption {
@@ -169,9 +174,8 @@ export function renderInputDock(props: InputDockProps): string {
         gap: 8px;
         transition: border-color 0.15s ease, box-shadow 0.15s ease;
       ">
-        <!-- Floating Slash & Mention Poppers -->
-        ${renderSlashPopper(props.slashItems, props.slashPopperOpen)}
-        ${renderMentionPopper(props.mentionItems, props.mentionPopperOpen)}
+        <!-- Popper 固定挂载点：开合只替换本占位子树，绝不重建 textarea（键盘时序军规） -->
+        <div id="composer-popper-mount">${renderSlashPopper(props.slashItems, props.slashPopperOpen)}${renderMentionPopper(props.mentionItems, props.mentionPopperOpen)}</div>
 
         <!-- Attachment Tray (if any attachments pending send) -->
         ${renderAttachmentTray(props.attachments)}
@@ -529,41 +533,117 @@ export function renderQueueTray(queued?: InputQueuedItem[]): string {
 
 /**
  * 待发送附件暂存托盘 (Attachment Tray)
+ *
+ * 【设计意图 (Why)】
+ * 1. 结构化展现用户粘贴或拖入的图片与文档资产；
+ * 2. 采用微距双层卡片排版：上部呈现高质量微缩图，下部清晰标注逻辑序列标号（如 Image 1, Doc 1）与原始文件名；
+ * 3. 方便 Agent 理解用户提问中针对具体图文指代的精确上下文。
+ *
+ * 【约束与规则 (Rules)】
+ * - 纯 UI 表现层，严禁调用网络或原生 IPC；
+ * - 样式使用主题 Token，严禁硬编码颜色值。
  */
 export function renderAttachmentTray(attachments?: InputAttachmentItem[]): string {
   if (!attachments || attachments.length === 0) return '';
+
+  let imgIndex = 0;
+  let docIndex = 0;
 
   return `
     <div class="composer-attachment-tray" style="
       display: flex;
       flex-wrap: wrap;
-      gap: 6px;
-      padding-bottom: 4px;
+      gap: 8px;
+      padding-bottom: 6px;
+      margin-bottom: 4px;
       border-bottom: 1px solid var(--border-subtle);
     ">
       ${attachments
         .map((att) => {
           const isImg = att.type === 'image';
+          if (isImg) imgIndex++;
+          else docIndex++;
+          const defaultLabel = isImg ? `Image ${imgIndex}` : `Doc ${docIndex}`;
+          const displayLabel = att.label || defaultLabel;
+
           return `
-          <div class="composer-attachment-pill" data-att-id="${att.id}" style="
+          <div class="composer-attachment-pill composer-attachment-card" data-att-id="${att.id}" style="
             display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 3px 8px;
+            flex-direction: column;
+            width: 76px;
             background: var(--bg-panel);
             border: 1px solid var(--border-medium);
             border-radius: 6px;
-            font-size: 11px;
-            font-family: var(--font-mono);
-            color: var(--text-main);
+            overflow: hidden;
+            position: relative;
+            user-select: none;
+            transition: border-color 0.15s ease, background 0.15s ease;
           ">
-            ${
-              isImg && att.previewUrl
-                ? `<img src="${att.previewUrl}" alt="" style="width: 18px; height: 18px; object-fit: cover; border-radius: 3px;" />`
-                : `<span style="color: var(--accent);">📎</span>`
-            }
-            <span style="max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(att.name)}</span>
-            <span class="btn-remove-attachment" data-att-id="${att.id}" title="${t('common.remove')}" style="cursor: pointer; opacity: 0.6; font-size: 12px; margin-left: 2px;">×</span>
+            <!-- Top Thumbnail Box -->
+            <div style="
+              width: 100%;
+              height: 48px;
+              background: var(--bg-card);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              position: relative;
+              overflow: hidden;
+            ">
+              ${
+                isImg && att.previewUrl
+                  ? `<img src="${att.previewUrl}" alt="${escapeHtml(att.name)}" style="width: 100%; height: 100%; object-fit: cover;" />`
+                  : `<span style="font-size: 20px; line-height: 1; color: var(--accent); opacity: 0.85;">${att.type === 'pdf' ? '📕' : '📄'}</span>`
+              }
+              <button class="btn-remove-attachment" data-att-id="${att.id}" title="${t('common.remove')}" aria-label="${t('common.remove')}" style="
+                position: absolute;
+                top: 2px;
+                right: 2px;
+                width: 16px;
+                height: 16px;
+                border-radius: 50%;
+                background: var(--bg-backdrop);
+                color: var(--text-main);
+                border: 1px solid var(--border-subtle);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 11px;
+                line-height: 1;
+                cursor: pointer;
+                padding: 0;
+                opacity: 0.8;
+                transition: opacity 0.15s ease, transform 0.1s ease;
+              ">×</button>
+            </div>
+            <!-- Bottom Metadata Label & Filename -->
+            <div style="
+              padding: 3px 4px 4px;
+              display: flex;
+              flex-direction: column;
+              gap: 1px;
+              background: var(--bg-panel);
+            ">
+              <span class="attachment-index-label" style="
+                font-size: 9.5px;
+                font-weight: 700;
+                font-family: var(--font-mono);
+                color: var(--accent);
+                line-height: 1.2;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+              ">${escapeHtml(displayLabel)}</span>
+              <span class="attachment-filename-label" title="${escapeHtml(att.name)}" style="
+                font-size: 9px;
+                font-family: var(--font-sans);
+                color: var(--text-muted);
+                line-height: 1.2;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+              ">${escapeHtml(att.name)}</span>
+            </div>
           </div>
         `;
         })
@@ -601,7 +681,7 @@ export function renderSlashPopper(items?: SlashCommandOption[], open = false): s
       ${items
         .map((cmd) => {
           return `
-          <div class="slash-item-option" data-command="${escapeHtml(cmd.name)}" style="
+          <div class="slash-item-option" data-command="${escapeHtml(cmd.name)}" data-replace-from="${cmd.replaceFrom ?? ''}" style="
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -889,6 +969,8 @@ export interface RenderInputDockSnapshot {
   modelSearchQuery: string;
   recentModelsHash: string;
   favoriteModelsHash: string;
+  attachmentsCount?: number;
+  attachmentsHash?: string;
 }
 
 /**
@@ -901,6 +983,8 @@ export interface RenderInputDockSnapshot {
  * 【防范的历史坑 (Pitfall)】
  * 历史代码每帧无条件执行 outerHTML = nextDockHtml，导致会话删除或列表刷新时输入框瞬间脱卸，
  * 焦点被浏览器重置至 document.body，引发“无光标无法输入文字”。
+ * Popper 开合曾被计入本快照，导致每次按键整体重建 dock、textarea 连根替换、IME 组字被打断；
+ * 现 Popper 走独立 #composer-popper-mount 子树直写，不再参与 dock 快照比对。
  *
  * 【约束与规则 (Rules)】
  * 仅在快照为 null、或任一影响呈现的物理字段演变时返回 true，未改变时严格返回 false。
@@ -922,6 +1006,8 @@ export function hasDockSnapshotChanged(
     last.modelCount !== curr.modelCount ||
     last.modelSearchQuery !== curr.modelSearchQuery ||
     last.recentModelsHash !== curr.recentModelsHash ||
-    last.favoriteModelsHash !== curr.favoriteModelsHash
+    last.favoriteModelsHash !== curr.favoriteModelsHash ||
+    last.attachmentsCount !== curr.attachmentsCount ||
+    last.attachmentsHash !== curr.attachmentsHash
   );
 }

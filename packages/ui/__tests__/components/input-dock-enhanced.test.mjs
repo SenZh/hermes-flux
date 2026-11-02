@@ -40,6 +40,9 @@ test('InputDock Enhanced - 队列托盘、附件托盘、手风琴模型器与Po
     const html = renderAttachmentTray(attachments);
 
     assert.ok(html.includes('composer-attachment-tray'), '必须渲染附件托盘');
+    assert.ok(html.includes('composer-attachment-card'), '必须渲染附件双层缩略图卡片');
+    assert.ok(html.includes('Image 1'), '必须自动为第1张图片标注 Image 1 序号');
+    assert.ok(html.includes('Doc 1'), '必须自动为第1份文档标注 Doc 1 序号');
     assert.ok(html.includes('src="blob:mock-img"'), '图片附件渲染缩略图');
     assert.ok(html.includes('screenshot.png'), '渲染文件名');
     assert.ok(html.includes('architecture.pdf'), '渲染文档名');

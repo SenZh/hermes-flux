@@ -74,8 +74,19 @@ export type TurnAction =
   | { type: 'append-content'; messageId: string; text: string }
   | { type: 'append-thought'; messageId: string; text: string }
   | { type: 'replace-content'; messageId: string; text: string }
-  | { type: 'tool-start'; messageId: string; toolCall: { id: string; name: string; args: string } }
-  | { type: 'tool-complete'; messageId: string; toolCallId: string; output?: string }
+  | { type: 'tool-start'; messageId: string; toolCall: { id: string; name: string; args: string; title?: string } }
+  | { type: 'tool-complete'; messageId: string; toolCallId: string; output?: string; durationMs?: number }
+  | {
+      /**
+       * message.complete 携带的网关持久行地址：把 rowId 绑定回本地乐观行，
+       * 使下一轮回滚/截断拥有可信锚点（D1 修复的落盘半环）。
+       */
+      type: 'persisted-turn';
+      messageId: string;
+      userRowId: number | null;
+      assistantRowId: number | null;
+      rowIds: number[];
+    }
   | {
       type: 'subagent-spawn';
       subagentId: string;
@@ -112,7 +123,17 @@ export type TurnAction =
       error: string;
     }
   | { type: 'refresh-sessions' }
-  | { type: 'session-title'; sessionId: string; title: string };
+  | { type: 'session-title'; sessionId: string; title: string }
+  | {
+      /**
+       * @Agent 旁路（BTW 只读外援 / background 子代理委派）应答到达。
+       * 严禁写入 state.messages，仅供独立胶囊状态收敛，防上下文毒化。
+       */
+      type: 'side-agent-complete';
+      channel: 'btw' | 'background';
+      taskId: string;
+      text: string;
+    };
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
@@ -166,6 +187,18 @@ export function reduceGatewayEvent(params: unknown, ctx: TurnEventContext): Turn
   switch (type) {
     case 'message.start':
       return [{ type: 'turn-started' }];
+
+    case 'btw.complete':
+    case 'background.complete': {
+      const taskId = asText(payload.task_id);
+      if (!taskId) return [];
+      return [{
+        type: 'side-agent-complete',
+        channel: type === 'btw.complete' ? 'btw' : 'background',
+        taskId,
+        text: asText(payload.text),
+      }];
+    }
 
     case 'message.delta': {
       const text = asText(payload.text);
@@ -247,7 +280,10 @@ export function reduceGatewayEvent(params: unknown, ctx: TurnEventContext): Turn
     case 'subagent.tool': {
       const actions: TurnAction[] = [];
       const subagentId = asText(payload.subagent_id);
-      const toolId = asText(payload.id) || asText(payload.tool_call_id) || `tool-${Date.now()}`;
+      // 契约权威键是 tool_id（ToolStartPayload）；旧实现读 payload.id 恒空，
+      // 时间戳兜底导致 complete 永不匹配 start、胶囊状态错乱的根因之一。
+      const toolId =
+        asText(payload.tool_id) || asText(payload.id) || asText(payload.tool_call_id) || `tool-${Date.now()}`;
       const name = asText(payload.name) || asText(payload.tool) || '工具执行';
       const args = typeof payload.args === 'string'
         ? payload.args
@@ -281,7 +317,8 @@ export function reduceGatewayEvent(params: unknown, ctx: TurnEventContext): Turn
     case 'subagent.complete': {
       const actions: TurnAction[] = [];
       const subagentId = asText(payload.subagent_id);
-      const toolCallId = asText(payload.id) || asText(payload.tool_call_id) || '';
+      // ToolCompletePayload 权威键同样是 tool_id，与 start 保持同一主键才能精确配对
+      const toolCallId = asText(payload.tool_id) || asText(payload.id) || asText(payload.tool_call_id) || '';
       
       const formatToolOutput = (val: unknown): string | undefined => {
         if (val === null || val === undefined) return undefined;
@@ -328,6 +365,18 @@ export function reduceGatewayEvent(params: unknown, ctx: TurnEventContext): Turn
       // corrects any delta that was dropped while the socket was flapping.
       if (finalText && messageId) {
         actions.push({ type: 'replace-content', messageId, text: finalText });
+      }
+      // persisted_turn 是回合落盘后的权威行地址（user_row_id / final_assistant_row_id），
+      // 渲染层据此把网关 rowId 绑定到本地乐观行，这是回滚截断锚点的唯一合法来源之一。
+      const persisted = asRecord(payload.persisted_turn);
+      const userRowId = typeof persisted.user_row_id === 'number' ? persisted.user_row_id : null;
+      const assistantRowId =
+        typeof persisted.final_assistant_row_id === 'number' ? persisted.final_assistant_row_id : null;
+      const rowIds = Array.isArray(persisted.row_ids)
+        ? persisted.row_ids.filter((v): v is number => typeof v === 'number')
+        : [];
+      if (messageId && (userRowId !== null || assistantRowId !== null || rowIds.length > 0)) {
+        actions.push({ type: 'persisted-turn', messageId, userRowId, assistantRowId, rowIds });
       }
       actions.push({ type: 'turn-completed', finalText: finalText || undefined });
       // The turn usually produced the first persisted message of a new session,

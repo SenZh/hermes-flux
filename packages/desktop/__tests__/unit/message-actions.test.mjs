@@ -99,7 +99,7 @@ test('Message Action Bar - 生产模块真实单测与变异不变量检验 (Zer
     };
 
     // 2. Act: 调用真实生产控制器方法
-    const success = controller.executeRollback(
+    const res = controller.executeRollback(
       mockBtn,
       sampleMessages,
       mockTextarea,
@@ -108,7 +108,9 @@ test('Message Action Bar - 生产模块真实单测与变异不变量检验 (Zer
     );
 
     // 3. Assert
-    assert.equal(success, true, '真实生产控制器：回滚必须执行成功');
+    assert.equal(res.success, true, '真实生产控制器：回滚必须执行成功');
+    assert.equal(res.text, '第二轮提问：Redlock 在时钟漂移下有什么缺陷？');
+    assert.equal(res.messageId, 'usr-2');
     assert.equal(textValue, '第二轮提问：Redlock 在时钟漂移下有什么缺陷？');
     assert.equal(focused, true, '输入框必须聚焦');
     assert.equal(selectionStart, textValue.length, '光标必须置于文本最后');
@@ -133,8 +135,8 @@ test('Message Action Bar - 生产模块真实单测与变异不变量检验 (Zer
       activeSessionId: 'sess-active-888',
       profileName: 'default',
       messages: sampleMessages,
-      callRpc: async (method, params) => {
-        rpcCalls.push({ method, params });
+      forkSession: async (input) => {
+        rpcCalls.push({ input });
         return { session_id: 'new-forked-999' };
       },
       onSuccess: async (id) => { switchedSession = id; },
@@ -152,7 +154,7 @@ test('Message Action Bar - 生产模块真实单测与变异不变量检验 (Zer
       activeSessionId: 'sess-active-888',
       profileName: 'default',
       messages: sampleMessages,
-      callRpc: async () => ({}),
+      forkSession: async () => ({}),
       onSuccess: async () => {},
       setNotice: () => {},
       labels: { notConnected: '', forking: '', success: '', failed: '' },
@@ -163,60 +165,63 @@ test('Message Action Bar - 生产模块真实单测与变异不变量检验 (Zer
 
     const firstResult = await forkPromise;
     assert.equal(firstResult, 'success');
-    assert.equal(rpcCalls.length, 1, '严格只允许穿透一笔 RPC 请求');
-    assert.deepEqual(rpcCalls[0].params, {
-      session_id: 'sess-active-888',
-      count: 2, // ast-1 索引 1 + 1 = 2
-      profile: 'default',
-    });
+    assert.equal(rpcCalls.length, 1, '严格只允许穿透一笔分支请求');
+    assert.equal(rpcCalls[0].input.sessionId, 'sess-active-888');
+    assert.equal(rpcCalls[0].input.count, 2, 'ast-1 索引 1 + 1 = 2');
+    assert.equal(rpcCalls[0].input.profile, 'default');
+    assert.ok(
+      typeof rpcCalls[0].input.idempotencyKey === 'string' && rpcCalls[0].input.idempotencyKey.length > 0,
+      '分支必须携带幂等键，自动重试不得派生两个会话'
+    );
     assert.equal(switchedSession, 'new-forked-999', '必须自动切换为新分支 ID');
   });
 
-  await t.test('6. MessageActionController 生产控制器: executeRegenerate 负向守卫与并发重入拦截', async () => {
+  await t.test('6. MessageActionController 生产控制器: executeRollback 精准提取 rowId 截断锚点与边界防御', async () => {
     // 1. Arrange
     const controller = new MessageActionController();
-    const sentPrompts = [];
     let notice = '';
-
-    const mockBtn = {
-      getAttribute: () => null,
-      closest: (sel) => (sel === '[data-msg-id]' ? { getAttribute: () => 'ast-2' } : null),
+    const mockTextarea = {
+      value: '',
+      focus: () => {},
+      setSelectionRange: () => {},
+      dispatchEvent: () => {},
     };
 
-    // 2. 负向守卫 1: 流式态中点击坚决拒绝 (Failure/Busy Guard)
-    const busyResult = await controller.executeRegenerate(mockBtn, {
-      activeSessionId: 'sess-1',
-      isStreaming: true,
-      messages: sampleMessages,
-      sendPrompt: async (t) => { sentPrompts.push(t); },
-      setNotice: (n) => { notice = n; },
-      labels: {
-        notConnected: '未连接',
-        streamingBusy: '正在生成中，请等待',
-        regenerating: '正在重新生成...',
-        promptNotFound: '未找到提问',
-      },
-    });
-    assert.equal(busyResult, 'busy', '流式生成中必须拒绝重新生成');
-    assert.equal(sentPrompts.length, 0);
-    assert.equal(notice, '正在生成中，请等待');
+    const messagesWithRowId = [
+      { id: 'usr-1', role: 'user', content: '第一轮', rowId: 101 },
+      { id: 'ast-1', role: 'assistant', content: '回复一', rowId: 102 },
+      { id: 'usr-2', role: 'user', content: '第二轮', rowId: 201 },
+      { id: 'ast-2', role: 'assistant', content: '回复二', rowId: 202 },
+    ];
 
-    // 3. 正向执行：非流式态正常提交上一轮提问
-    const successResult = await controller.executeRegenerate(mockBtn, {
-      activeSessionId: 'sess-1',
-      isStreaming: false,
-      messages: sampleMessages,
-      sendPrompt: async (t) => { sentPrompts.push(t); },
-      setNotice: (n) => { notice = n; },
-      labels: {
-        notConnected: '未连接',
-        streamingBusy: '正在生成中，请等待',
-        regenerating: '正在重新生成...',
-        promptNotFound: '未找到提问',
-      },
-    });
-    assert.equal(successResult, 'success');
-    assert.equal(sentPrompts.length, 1);
-    assert.equal(sentPrompts[0], '第二轮提问：Redlock 在时钟漂移下有什么缺陷？');
+    const mockBtnWithRowId = {
+      getAttribute: (k) => (k === 'data-row-id' ? '201' : null),
+      closest: (sel) => (sel === '[data-msg-id]' ? { getAttribute: () => 'usr-2' } : null),
+    };
+
+    // 2. Act: 点击带 rowId 的用户消息回滚
+    const res = controller.executeRollback(
+      mockBtnWithRowId,
+      messagesWithRowId,
+      mockTextarea,
+      (n) => { notice = n; },
+      '回滚成功'
+    );
+
+    // 3. Assert
+    assert.equal(res.success, true);
+    assert.equal(res.text, '第二轮');
+    assert.equal(res.rowId, 201, '必须精准提取出对应消息的 rowId 供网关截断物理抹除');
+    assert.equal(res.messageId, 'usr-2');
+
+    // 4. 负向边界：空文本或输入框丢失安全降级
+    const failRes = controller.executeRollback(
+      mockBtnWithRowId,
+      [],
+      null,
+      () => {},
+      ''
+    );
+    assert.equal(failRes.success, false, '输入框不存在时必须返回失败且不抛错');
   });
 });

@@ -55,6 +55,23 @@ export interface ContextGaugeUsage {
   percent: number;
 }
 
+/** 回滚待发送横幅：乐观截断后的可撤销状态条（用户可随时取消恢复历史） */
+export interface RollbackBannerView {
+  removedCount: number;
+  anchorLabel: string;
+}
+
+/** @Agent 旁路呼叫胶囊：BTW 只读外援与子代理委派共用的独立渲染域，严禁混入主消息流 */
+export interface SideAgentCapsuleView {
+  id: string;
+  kind: 'btw' | 'delegation';
+  profile: string;
+  question: string;
+  answer?: string;
+  status: 'pending' | 'done' | 'failed' | 'expired';
+  notice?: string;
+}
+
 export interface MiddlePodProps {
   gatewayConnected: boolean;
   gatewayConnecting?: boolean;
@@ -69,6 +86,8 @@ export interface MiddlePodProps {
   isLoadingOlder?: boolean;
   contextUsage?: ContextGaugeUsage;
   isStreaming?: boolean;
+  rollbackBanner?: RollbackBannerView | null;
+  sideAgentCapsules?: SideAgentCapsuleView[];
 }
 
 export function renderContextGauge(usage?: ContextGaugeUsage): string {
@@ -121,6 +140,11 @@ export function renderConversationCanvas(props: MiddlePodProps): string {
     <div class="content-fluid-canvas" style="width: 100%; max-width: 100%; margin: 0; display: flex; flex-direction: column; gap: 8px; position: relative;">
       ${renderContextGauge(props.contextUsage)}
       ${
+        props.rollbackBanner
+          ? `<div style="position: sticky; bottom: 6px; z-index: 5;">${renderRollbackBanner(props.rollbackBanner)}</div>`
+          : ''
+      }
+      ${
         props.gatewayConnecting
           ? `<div style="max-width: 480px; margin: 120px auto 0; text-align: center; color: var(--text-muted); font-size: 13px; display: flex; flex-direction: column; align-items: center; gap: 10px;">
               <span style="font-size: 20px; animation: pulse 1.5s infinite;">⚡</span>
@@ -162,8 +186,85 @@ export function renderConversationCanvas(props: MiddlePodProps): string {
                 });
               })
               .join('')}
+            ${(props.sideAgentCapsules || []).map(renderSideAgentCapsule).join('')}
           `
       }
+    </div>
+  `;
+}
+
+/** 回滚待发送横幅：纯展示组件，取消按钮走 data-action=rollback-cancel 委托 */
+export function renderRollbackBanner(banner?: RollbackBannerView | null): string {
+  if (!banner) return '';
+  return `
+    <div class="rollback-pending-banner" data-rollback-pending="true" data-count="${banner.removedCount}" style="
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin: 0 0 2px;
+      padding: 6px 10px;
+      background: var(--accent-subtle);
+      border: 1px solid var(--border-medium);
+      border-radius: 8px;
+      font-size: 11.5px;
+      color: var(--text-main);
+    ">
+      <span style="display: inline-flex; align-items: center; gap: 6px; min-width: 0;">
+        <span aria-hidden="true" style="color: var(--accent); font-weight: 700;">↺</span>
+        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${t('chat.rollbackArmed', { count: banner.removedCount, anchor: banner.anchorLabel })}</span>
+      </span>
+      <button class="rollback-banner-cancel" data-action="rollback-cancel" style="
+        background: transparent;
+        border: 1px solid var(--border-subtle);
+        border-radius: 6px;
+        color: var(--text-muted);
+        font-size: 10.5px;
+        padding: 2px 8px;
+        cursor: pointer;
+        white-space: nowrap;
+      ">${t('chat.rollbackCancel')}</button>
+    </div>
+  `;
+}
+
+/**
+ * @Agent 旁路胶囊（BTW 只读外援 / 子代理委派）。
+ * 【约束与规则 (Rules)】胶囊内容绝不进入主消息流数据域，仅独立状态渲染，防上下文毒化。
+ */
+export function renderSideAgentCapsule(capsule: SideAgentCapsuleView): string {
+  const statusTone =
+    capsule.status === 'done' ? 'var(--success)' : capsule.status === 'failed' || capsule.status === 'expired' ? 'var(--text-muted)' : 'var(--accent)';
+  const statusText =
+    capsule.status === 'pending'
+      ? t('capsule.pending')
+      : capsule.status === 'done'
+        ? t('capsule.done')
+        : capsule.status === 'failed'
+          ? t('capsule.failed')
+          : t('capsule.expired');
+  return `
+    <div class="side-agent-capsule" data-capsule-id="${capsule.id}" data-capsule-status="${capsule.status}" style="
+      align-self: flex-start;
+      max-width: 560px;
+      margin-top: 6px;
+      padding: 8px 12px;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-medium);
+      border-left: 3px solid ${statusTone};
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    ">
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-muted);">
+        <strong style="color: var(--text-main); font-size: 11.5px;">@${escapeHtml(capsule.profile)}</strong>
+        <span style="padding: 1px 6px; background: var(--bg-card); border-radius: 8px; border: 1px solid var(--border-subtle);">${capsule.kind === 'btw' ? t('capsule.btwTag') : t('capsule.delegationTag')}</span>
+        <span style="margin-left: auto; color: ${statusTone};">${statusText}</span>
+      </div>
+      ${capsule.question ? `<div style="font-size: 11.5px; color: var(--text-muted);">“${escapeHtml(capsule.question)}”</div>` : ''}
+      ${capsule.answer ? `<div class="capsule-answer prose-block" style="font-size: 12.5px; color: var(--text-main);">${renderMarkdown(capsule.answer)}</div>` : ''}
+      ${capsule.notice ? `<div style="font-size: 11px; color: var(--text-muted);">${escapeHtml(capsule.notice)}</div>` : ''}
     </div>
   `;
 }
@@ -194,6 +295,14 @@ export function renderMiddlePod(props: MiddlePodProps): string {
       ">
         ${renderConversationCanvas(props)}
       </div>
+
+      ${
+        props.rollbackBanner
+          ? `<div style="position: absolute; bottom: 92px; left: 0; right: 0; display: flex; justify-content: center; z-index: 41; pointer-events: none;">
+              <div style="pointer-events: auto; width: 100%; max-width: 740px; padding: 0 24px; box-sizing: border-box;">${renderRollbackBanner(props.rollbackBanner)}</div>
+            </div>`
+          : ''
+      }
 
       <!-- Dock Scrim Fade (Bottom gradient to prevent card collision) -->
       <div class="dock-scrim-fade" style="
@@ -613,7 +722,6 @@ export function renderMessage(
   const { cleanContent, extractedTools } = extractToolsFromContent(m.content);
   const combinedTools = [...(m.toolCalls || []), ...(extractedTools || [])];
   const virtualMsg = { ...m, toolCalls: combinedTools };
-
   return `
     <div class="message-row assistant-row" data-id="${m.id}" data-msg-id="${m.id}" style="
       display: flex;
@@ -650,8 +758,10 @@ export function renderMessage(
       <!-- Thinking Fold -->
       ${renderThinkingFold(m)}
 
-      <!-- Tool Execution Capsules -->
-      ${renderToolCapsules(virtualMsg)}
+      <!-- Tool Execution Capsules (常驻增量锚点，流式期间由补丁通道直写) -->
+      <div id="msg-tools-${m.id}" class="tool-capsules-slot">
+        ${renderToolCapsules(virtualMsg)}
+      </div>
 
       <!-- Core Content (Incremental Anchor) -->
       ${
@@ -732,22 +842,6 @@ export function renderMessage(
                 transition: color 0.15s ease, background 0.15s ease;
               ">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
-              </button>
-              <button class="msg-action-btn" data-action="regenerate-msg" data-msg-id="${m.id}" title="${t('chat.regenerate')}" aria-label="${t('chat.regenerate')}" style="
-                background: transparent;
-                border: none;
-                width: 22px;
-                height: 22px;
-                padding: 0;
-                color: var(--text-muted);
-                cursor: pointer;
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                border-radius: 4px;
-                transition: color 0.15s ease, background 0.15s ease;
-              ">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
               </button>
             `
                 : ''
@@ -1300,9 +1394,20 @@ function renderReadOnlyToolGroup(items: ParsedToolItem[]): string {
   `;
 }
 
+/**
+ * 工具胶囊增量插槽渲染器（供流式期间局部 DOM 直写复用）。
+ * 【设计意图 (Why)】全量画布 renderMessage 与流式补丁必须共用同一“工具组合 + 渲染”实现，
+ * 否则增量通道与全量收敛会产生形态漂移（历史坑：工具事件不进 messagesChanged 时永久不刷新）。
+ * 【约束与规则 (Rules)】返回值即 #msg-tools-<id> 容器 innerHTML；纯函数无副作用。
+ */
+export function renderToolCapsuleSlot(m: MessageViewModel): string {
+  const { extractedTools } = extractToolsFromContent(m.content);
+  const combined = [...(m.toolCalls || []), ...(extractedTools || [])];
+  return renderToolCapsules({ ...m, toolCalls: combined });
+}
+
 function renderToolCapsules(m: MessageViewModel): string {
   if (!m.toolCalls || m.toolCalls.length === 0) return '';
-
   const parsedItems = m.toolCalls.map(parseToolItem);
   const totalCount = parsedItems.length;
   const runningCount = parsedItems.filter((it) => it.status === 'running').length;

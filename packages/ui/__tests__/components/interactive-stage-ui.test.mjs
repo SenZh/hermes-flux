@@ -58,8 +58,8 @@ test('Interactive Stage UI Components - 对话区交互操作栏、Token仪表�
     assert.ok(!groupHtml.includes('data-action="fork-msg"'), '群聊禁止渲染Fork');
   });
 
-  await t.test('3. AI 助手行：普通会话下支持 Fork、重新生成与复制，群聊强显身份头像与阶梯式Token性能仪表', () => {
-    // 3.1 普通会话助手行：渲染 Fork 与重新生成
+  await t.test('3. AI 助手行：普通会话下支持 Fork 与复制，彻底移除重新生成；群聊强显身份头像与阶梯式Token性能仪表', () => {
+    // 3.1 普通会话助手行：渲染 Fork 与复制，禁止渲染重新生成
     const ordinaryHtml = renderMessage({
       id: 'msg-a0',
       role: 'assistant',
@@ -69,11 +69,10 @@ test('Interactive Stage UI Components - 对话区交互操作栏、Token仪表�
       isBotRoom: false,
     });
     assert.ok(ordinaryHtml.includes('data-action="fork-msg"'), '普通会话助手行必须渲染 Fork 按钮');
-    assert.ok(ordinaryHtml.includes('data-action="regenerate-msg"'), '普通会话助手行必须渲染重新生成按钮');
+    assert.ok(!ordinaryHtml.includes('data-action="regenerate-msg"'), '普通会话助手行彻底移除重新生成按钮');
     assert.ok(ordinaryHtml.includes('data-action="copy-msg"'), '普通会话助手行必须渲染复制按钮');
     // 助手行纯图标化物理断言：禁止包含 span 文字，必须具备 title 与 aria-label 说明
     assert.ok(!ordinaryHtml.includes('<span>Fork 分支</span>') && !ordinaryHtml.includes('<span>Fork Branch</span>'), '助手行Fork按钮严禁内联文本标签');
-    assert.ok(!ordinaryHtml.includes('<span>重新生成</span>') && !ordinaryHtml.includes('<span>Regenerate</span>'), '助手行重新生成按钮严禁内联文本标签');
     assert.ok(!ordinaryHtml.includes('<span>复制</span>') && !ordinaryHtml.includes('<span>Copy</span>'), '助手行复制按钮严禁内联文本标签');
     assert.ok(ordinaryHtml.includes('title='), '助手行按钮必须具备 title 悬浮说明');
     assert.ok(ordinaryHtml.includes('aria-label='), '助手行按钮必须具备 aria-label 无障碍说明');
@@ -129,7 +128,7 @@ test('Interactive Stage UI Components - 对话区交互操作栏、Token仪表�
     assert.ok(completedHtml.includes('assistant-footer-bar'), '最终生成完成必须渲染操作栏');
     assert.ok(completedHtml.includes('data-action="copy-msg"'), '最终生成完成必须包含复制');
     assert.ok(completedHtml.includes('data-action="fork-msg"'), '最终生成完成必须包含Fork');
-    assert.ok(completedHtml.includes('data-action="regenerate-msg"'), '最终生成完成必须包含重新生成');
+    assert.ok(!completedHtml.includes('data-action="regenerate-msg"'), '最终生成完成不得包含重新生成按钮');
     assert.ok(completedHtml.includes('time-tag'), '最终生成完成必须展示完成时间');
     assert.ok(completedHtml.includes('14:34:00'), '最终生成完成必须展示精确时间');
 
