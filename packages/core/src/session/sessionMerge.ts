@@ -263,11 +263,16 @@ export function reconcileSessionList(input: SessionReconcileInput): SessionRecon
 
   const report = dedupeSessionsWithReport(input.fetched);
   const allMerged = report.sessions;
-  const seenKeys = new Set(allMerged.map((s) => `${s.botName || 'default'}::${s.id}`));
+  const visible = allMerged.filter(isVisibleSession);
+
+  // 【定理 6 形式化不变量守护 (Failure Is Not Empty)】
+  // 权威模式下（authoritative === true），归档行/权威行都是处置证据，以 allMerged 为 seenKeys 执行 prune；
+  // 非权威模式下（authoritative === false），只有在 visible 中被确认合法的条目，才能被标记为 seen；
+  // 严禁因远端返回的不可见畸变条目（如纯空白标题）导致本地已确认的有效可见会话被剔除置空！
+  const seenSource = input.authoritative ? allMerged : visible;
+  const seenKeys = new Set(seenSource.map((s) => `${s.botName || 'default'}::${s.id}`));
   const isSeen = (s: NormalizedSession) =>
     seenKeys.has(`${s.botName || profileName || 'default'}::${s.id}`);
-
-  const visible = allMerged.filter(isVisibleSession);
 
   // 构建本地历史会话索引表（以 profile::id 为主键，裸 id 为兜底辅助键）
   const previousMap = new Map<string, NormalizedSession>();
