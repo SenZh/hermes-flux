@@ -44,6 +44,7 @@ export interface MessageViewModel {
     startTime?: number;
   }[];
   timestamp: string;
+  rawTimestamp?: number;
   isGroupRoom?: boolean;
   isBotRoom?: boolean;
 }

@@ -871,3 +871,57 @@ function renderModelItemRow(
     </div>
   `;
 }
+
+/**
+ * 输入舱渲染快照接口 (RenderInputDockSnapshot)
+ * 用于判断输入舱视觉与交互状态是否发生实质演变，防止非输入舱操作导致 DOM 物理全量重排
+ */
+export interface RenderInputDockSnapshot {
+  selectedModel: string;
+  reasoningLevel: string;
+  approvalMode: string;
+  isStreaming: boolean;
+  disabled: boolean;
+  modelMenuOpen: boolean;
+  notice: string;
+  activityStatus?: string;
+  modelCount: number;
+  modelSearchQuery: string;
+  recentModelsHash: string;
+  favoriteModelsHash: string;
+}
+
+/**
+ * 输入舱快照演变判断纯函数 (hasDockSnapshotChanged)
+ *
+ * 【设计意图 (Why)】
+ * 在主工作台渲染管道中精确比对输入舱核心属性，只有在自身属性改变时才允许替换 outerHTML，
+ * 保护 <textarea id="dock-prompt-input"> 原生 DOM 节点与 Blink Caret 选区拓扑持久稳定。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ * 历史代码每帧无条件执行 outerHTML = nextDockHtml，导致会话删除或列表刷新时输入框瞬间脱卸，
+ * 焦点被浏览器重置至 document.body，引发“无光标无法输入文字”。
+ *
+ * 【约束与规则 (Rules)】
+ * 仅在快照为 null、或任一影响呈现的物理字段演变时返回 true，未改变时严格返回 false。
+ */
+export function hasDockSnapshotChanged(
+  last: RenderInputDockSnapshot | null | undefined,
+  curr: RenderInputDockSnapshot
+): boolean {
+  if (!last) return true;
+  return (
+    last.selectedModel !== curr.selectedModel ||
+    last.reasoningLevel !== curr.reasoningLevel ||
+    last.approvalMode !== curr.approvalMode ||
+    last.isStreaming !== curr.isStreaming ||
+    last.disabled !== curr.disabled ||
+    last.modelMenuOpen !== curr.modelMenuOpen ||
+    last.notice !== curr.notice ||
+    last.activityStatus !== curr.activityStatus ||
+    last.modelCount !== curr.modelCount ||
+    last.modelSearchQuery !== curr.modelSearchQuery ||
+    last.recentModelsHash !== curr.recentModelsHash ||
+    last.favoriteModelsHash !== curr.favoriteModelsHash
+  );
+}

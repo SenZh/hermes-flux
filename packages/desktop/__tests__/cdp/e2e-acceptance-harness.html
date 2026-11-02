@@ -275,10 +275,20 @@
           }
         }
         this.render();
-        // Focus restore invariant
-        requestAnimationFrame(() => {
+        // Focus restore invariant: 对齐生产代码的双阶 rAF 与选区激活
+        const restore = () => {
           const input = document.getElementById('dock-prompt-input');
-          if (input) input.focus();
+          if (input) {
+            window.focus();
+            input.focus({ preventScroll: true });
+            const len = input.value.length;
+            input.setSelectionRange(len, len);
+          }
+        };
+        restore();
+        requestAnimationFrame(() => {
+          restore();
+          requestAnimationFrame(restore);
         });
       },
 

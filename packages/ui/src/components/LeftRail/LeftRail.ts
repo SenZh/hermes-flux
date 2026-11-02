@@ -1,15 +1,15 @@
 /**
- * Hermes Flux Left Rail Component (v5.4 Production - Native Geek Aligned)
- * Width: 260px, collapsible to 0px (Ctrl+B).
- * Features:
- * - Search box with -webkit-app-region: no-drag, explicit text selection & state preservation.
- * - Prominent Dedicated Bots Station (Native Hermes Roster Aligned: Yellow triangle for Xiaofawang, real photos for Aura/Hermes, status dot, timestamp & snippet).
- * - Clean Flat Hierarchy: NO ugly card box wrappers / backgrounds, smooth transparent list items.
- * - Collapsible "Sessions" Group (with toggle chevron & state preservation).
- * - Collapsible "Groups" Group (always visible, with toggle chevron & empty fallback).
- * - Preserved "Show More" expansion state.
- * - Single-Focus State Machine: strictly mutually exclusive active focus.
- * - Full Design System token compliance: 0 hardcoded colors.
+ * Hermes Flux Left Rail Component (v7.0 Production - Pure Dual-Rail Architecture)
+ *
+ * 【终极架构设计 (True Dual-Rail & Context-Isolated Architecture)】
+ * 1. 物理微轨 (Agents Station Rail): 固定 52px 宽度，永远常驻不可折叠！
+ *    - 顶部 Default 助理，中间通过 station-agents-scroll 容器独立垂直滚动（支持无限个 Agent）；
+ *    - 100% 消费并优先展示 Gateway 返回的真实自定义头像（img src=${avatar}），无 avatar 时安全回退；
+ *    - 完整支持三态指示（running 脉冲 / unread 绿点 / read 纯净）；
+ * 2. 动态抽屉 (Context Drawer): 212px 宽度，支持 Ctrl+B 或顶栏折叠（折叠后宽度 0px，不影响微轨）；
+ *    - 彻底删除【智能体(N)】折叠行！不搞双重入口精神分裂；
+ *    - 抽屉第 1 行展示当前选中的 Agent 核心大卡片（消费 Gateway 真实自定义头像、名称、最新摘要、时间、三态微标）；
+ *    - 【严格数据隔离】：只展示当前选中的这个 Agent 专属的会话与专属群聊，绝不混入全局 86 条杂乱会话！
  */
 
 import { t } from '../../i18n/index.js';
@@ -97,7 +97,7 @@ export interface LeftRailProps {
   }>;
   groups?: LeftRailGroupRoom[];
   projects?: LeftRailProject[];
-  activeRailTab?: 'chats' | 'projects';
+  activeRailTab?: 'chats' | 'projects' | 'groups';
   gatewayOnline: boolean;
   gatewayLatencyMs: number;
   searchQuery?: string;
@@ -106,139 +106,292 @@ export interface LeftRailProps {
   isGroupsGroupExpanded?: boolean;
   isMoreSessionsExpanded?: boolean;
   editingGroupRoomId?: string;
-  /** Why the session list could not be loaded — an empty rail is not a failure. */
   error?: string;
-  onNewChat?: () => void;
-  onSelectSession?: (id: string) => void;
-  onDeleteSession?: (id: string) => void;
-  onOpenSettings?: () => void;
-  onSwitchProfile?: (profileName: string) => void;
-  onSelectBotChat?: (botName: string) => void;
-  onSelectGroup?: (roomId: string) => void;
 }
 
 export function renderLeftRail(props: LeftRailProps): string {
-  if (props.collapsed) {
-    return `<aside id="flux-left-rail" class="flux-left-rail rail-collapsed" style="width: 0px; min-width: 0px; display: none; overflow: hidden;"></aside>`;
-  }
-
   const query = (props.searchQuery || '').toLowerCase().trim();
-  const rawActiveSessions = props.sessions.filter((s) => !s.isArchived);
-  const archivedSessions = props.sessions.filter((s) => s.isArchived);
   const railError = (props.error || '').trim();
   const isProjectsTab = props.activeRailTab === 'projects';
   const realProjects = props.projects || [];
   const realGroups = props.groups || [];
 
-  // 1. Sessions: 严格按时间倒序排序（最新的排在前面）
-  const activeSessions = (query
-    ? rawActiveSessions.filter((s) => {
-        const titleMatch = s.title.toLowerCase().includes(query);
-        const botMatch = (s.botDisplayName || s.botName || '').toLowerCase().includes(query);
-        const prevMatch = (s.preview || '').toLowerCase().includes(query);
-        return titleMatch || botMatch || prevMatch;
-      })
-    : [...rawActiveSessions]
+  // 1. 全部 Profiles 与排序
+  const allProfiles = props.profiles ? [...props.profiles] : [];
+  const filteredProfiles = (query
+    ? allProfiles.filter(
+        (p) =>
+          (p.displayName || p.name).toLowerCase().includes(query) ||
+          (p.description || '').toLowerCase().includes(query) ||
+          (p.lastMessage || '').toLowerCase().includes(query)
+      )
+    : allProfiles
   ).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
-  // 2. Bots (Agents): 严格按最新活跃时间倒序排序（最新的排在前面）
-  const filteredProfiles = (props.profiles
-    ? (query
-        ? props.profiles.filter(
-            (p) =>
-              (p.displayName || p.name).toLowerCase().includes(query) ||
-              (p.description || '').toLowerCase().includes(query) ||
-              (p.lastMessage || '').toLowerCase().includes(query)
-          )
-        : [...props.profiles]
-      ).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
-    : []);
-
-  // 3. Groups: 严格按最新活跃时间倒序排序（最新的排在前面）
-  const filteredGroups = (query
-    ? realGroups.filter((g) => g.name.toLowerCase().includes(query) || (g.lastMessage || '').toLowerCase().includes(query))
-    : [...realGroups]
-  ).sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
-
-  // Determine active focus strictly to eliminate dual-highlight bug
+  // 2. 当前互斥焦点解析与当前选中的 Agent 实体判定
   const currentFocus: LeftRailActiveFocus = props.activeFocus || (
     props.activeSessionId
       ? { type: 'session', sessionId: props.activeSessionId }
       : { type: 'bot', botName: props.profileName || 'default' }
   );
 
+  const currentActiveSession = props.sessions.find((s) => s.id === props.activeSessionId);
+  const currentAgentName =
+    currentFocus.type === 'bot'
+      ? currentFocus.botName
+      : currentFocus.type === 'session'
+      ? (currentActiveSession?.botName || props.profileName || 'default')
+      : (props.profileName || 'default');
+
+  const selectedAgentProfile =
+    allProfiles.find((p) => p.name.toLowerCase() === currentAgentName.toLowerCase()) ||
+    allProfiles.find((p) => p.isDefault) || {
+      name: currentAgentName,
+      displayName: currentAgentName === 'default' ? t('rail.defaultAssistant') : currentAgentName,
+      avatar: '',
+      lastMessage: '',
+      lastTime: '',
+      activityState: 'read' as const,
+    };
+
+  const isDefaultHQ = selectedAgentProfile.name.toLowerCase() === 'default';
+
+  // 3. 【核心上下文隔离】抽屉严格只呈现属于当前选中 Agent 的会话与群聊！
+  // 会话隔离：Default HQ 显示通用/default会话，专职 Agent 只显示自身名下的会话
+  const rawActiveSessions = props.sessions.filter((s) => !s.isArchived);
+  const rawArchivedSessions = props.sessions.filter((s) => s.isArchived);
+
+  const agentScopedActiveSessions = rawActiveSessions.filter((s) => {
+    const bName = (s.botName || 'default').toLowerCase();
+    const bDisplay = (s.botDisplayName || '').toLowerCase();
+    const targetName = selectedAgentProfile.name.toLowerCase();
+    const targetDisplay = (selectedAgentProfile.displayName || '').toLowerCase();
+    if (isDefaultHQ) {
+      return bName === 'default' || !s.botName;
+    }
+    return bName === targetName || (targetDisplay && bDisplay === targetDisplay);
+  });
+
+  const agentScopedArchivedSessions = rawArchivedSessions.filter((s) => {
+    const bName = (s.botName || 'default').toLowerCase();
+    const bDisplay = (s.botDisplayName || '').toLowerCase();
+    const targetName = selectedAgentProfile.name.toLowerCase();
+    const targetDisplay = (selectedAgentProfile.displayName || '').toLowerCase();
+    if (isDefaultHQ) {
+      return bName === 'default' || !s.botName;
+    }
+    return bName === targetName || (targetDisplay && bDisplay === targetDisplay);
+  });
+
+  // 搜索过滤与时间倒序
+  const activeSessions = (query
+    ? agentScopedActiveSessions.filter((s) => {
+        const titleMatch = s.title.toLowerCase().includes(query);
+        const prevMatch = (s.preview || '').toLowerCase().includes(query);
+        return titleMatch || prevMatch;
+      })
+    : [...agentScopedActiveSessions]
+  ).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+  const archivedSessions = (query
+    ? agentScopedArchivedSessions.filter((s) => s.title.toLowerCase().includes(query))
+    : [...agentScopedArchivedSessions]
+  ).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+  // 群聊隔离：Default 中枢展示全部群聊（作为主大厅），专职 Agent 严格只展示自身参与的群聊
+  const agentScopedGroups = isDefaultHQ
+    ? realGroups
+    : realGroups.filter((g) => {
+        const membersLower = (g.members || []).map((m) => m.toLowerCase());
+        return (
+          membersLower.includes(selectedAgentProfile.name.toLowerCase()) ||
+          (selectedAgentProfile.displayName && membersLower.includes(selectedAgentProfile.displayName.toLowerCase()))
+        );
+      });
+
+  const filteredGroups = (query
+    ? agentScopedGroups.filter((g) => g.name.toLowerCase().includes(query) || (g.lastMessage || '').toLowerCase().includes(query))
+    : [...agentScopedGroups]
+  ).sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+
   const isSessionsOpen = props.isSessionsGroupExpanded !== false;
   const isGroupsOpen = props.isGroupsGroupExpanded !== false;
-  const isBotsOpen = props.isBotsGroupExpanded !== false;
+
+  // 微轨 Agent 列表（排除 default 主助理，作为微轨中间平滑滚动项）
+  const otherAgents = filteredProfiles.filter((p) => !p.isDefault && p.name.toLowerCase() !== 'default');
+  const defaultProfile = allProfiles.find((p) => p.isDefault || p.name.toLowerCase() === 'default') || {
+    name: 'default',
+    displayName: t('rail.defaultAssistant'),
+    avatar: '',
+    activityState: 'read' as const,
+  };
+
+  const hasActiveGroup = filteredGroups.some((g) => g.activityState === 'running');
+  const hasUnreadGroup = filteredGroups.some((g) => g.activityState === 'unread');
 
   return `
-    <aside id="flux-left-rail" class="flux-left-rail" style="
-      flex: 0 0 var(--rail-w-left, 260px);
-      width: var(--rail-w-left, 260px);
-      min-width: var(--rail-w-left, 260px);
-      max-width: var(--rail-w-left, 260px);
+    <aside id="flux-left-rail" class="flux-left-rail ${props.collapsed ? 'rail-collapsed' : ''}" style="
+      flex: 0 0 ${props.collapsed ? '52px' : 'var(--rail-w-left, 264px)'};
+      width: ${props.collapsed ? '52px' : 'var(--rail-w-left, 264px)'};
+      min-width: ${props.collapsed ? '52px' : 'var(--rail-w-left, 264px)'};
+      max-width: ${props.collapsed ? '52px' : 'var(--rail-w-left, 264px)'};
       height: 100%;
       background: var(--bg-rail);
       border-right: 1px solid var(--border-subtle);
       display: flex;
-      flex-direction: column;
+      flex-direction: row;
       position: relative;
       user-select: none;
       -webkit-user-select: none;
     ">
-      <!-- Draggable Resize Handle (Left Rail Right Edge) -->
-      <div class="rail-resize-handle" data-rail-handle="left" role="separator" aria-orientation="vertical" tabindex="0" title="拖拽调整左侧栏宽度 · 双击复位" style="
-        position: absolute;
-        right: -3px;
-        top: 0;
-        bottom: 0;
-        width: 6px;
-        z-index: 60;
-        cursor: col-resize;
-        background: transparent;
-      "></div>
+      <!-- 1. 物理微轨 (Agents Station Rail): 固定 52px，永远常驻不可折叠！ -->
+      <div id="flux-station-rail" class="flux-station-rail" style="
+        width: 52px;
+        min-width: 52px;
+        max-width: 52px;
+        height: 100%;
+        background: var(--bg-card);
+        border-right: 1px solid var(--border-subtle);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 8px 0;
+        gap: 8px;
+        flex-shrink: 0;
+        z-index: 20;
+      ">
+        <!-- 顶部固定位：Default 主中枢助理 (100% 消费 Gateway 真实自定义头像) -->
+        <div class="station-sticky-top" style="display: flex; flex-direction: column; align-items: center; width: 100%; padding-bottom: 6px; border-bottom: 1px solid var(--border-subtle);">
+          <div class="station-agent-badge rail-pinned-bot-row ${currentAgentName.toLowerCase() === 'default' ? 'active' : ''}" data-station-profile="default" data-profile="default" title="${t('rail.enterBotChat', { name: defaultProfile.displayName || 'Default' })}" style="
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            background: ${currentAgentName.toLowerCase() === 'default' ? 'var(--accent-subtle)' : 'var(--bg-card)'};
+            border: 1.5px solid ${currentAgentName.toLowerCase() === 'default' ? 'var(--accent)' : 'var(--border-subtle)'};
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            position: relative;
+            transition: all 0.15s ease;
+          ">
+            ${
+              defaultProfile.avatar
+                ? renderBotAvatar(defaultProfile.name, defaultProfile.displayName, defaultProfile.avatar, 30)
+                : `<span style="font-size: 16px; color: ${currentAgentName.toLowerCase() === 'default' ? 'var(--accent)' : 'var(--text-main)'};">✦</span>`
+            }
+            ${
+              defaultProfile.activityState === 'running'
+                // gate-perf-allow: 智能体执行中呼吸指示器
+                ? `<span class="activity-pulse-indicator" title="${t('rail.activityRunning')}" style="position: absolute; top: -2px; right: -2px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); animation: jadePulse 1.2s infinite; z-index: 2;"></span>`
+                : defaultProfile.activityState === 'unread'
+                ? `<span class="activity-unread-badge" title="${t('rail.activityUnread')}" style="position: absolute; top: -2px; right: -2px; width: 7px; height: 7px; border-radius: 50%; background: var(--jade-pulse); box-shadow: 0 0 4px var(--jade-glow); z-index: 2;"></span>`
+                : ''
+            }
+          </div>
+        </div>
 
-      <!-- Top Search & Quick Action Box (no-drag, text selectable) -->
-      <div style="padding: 10px 10px 6px; display: flex; flex-direction: column; gap: 6px; -webkit-app-region: no-drag;">
-        <div style="display: flex; align-items: center; gap: 6px;">
-          <div style="position: relative; flex: 1;">
-            <input type="text" id="session-search-input" placeholder="${t('rail.searchPlaceholder')}" value="${escapeHtml(props.searchQuery || '')}" style="
-              width: 100%;
-              height: 28px;
-              background: var(--bg-panel);
-              border: 1px solid var(--border-subtle);
-              border-radius: 6px;
-              padding: 0 8px 0 28px;
-              font-size: 12px;
-              color: var(--text-main);
-              outline: none;
-              box-sizing: border-box;
-              user-select: text;
-              -webkit-user-select: text;
-              cursor: text;
-              pointer-events: auto;
-            " />
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" style="position: absolute; left: 9px; top: 8px; color: var(--text-muted); pointer-events: none;">
-              <circle cx="7" cy="7" r="5"/>
-              <line x1="11" y1="11" x2="15" y2="15"/>
-            </svg>
+        <!-- 中间独立垂直平滑滚动区：所有专职 Agent 列表 (100% 消费 Gateway 真实自定义头像) -->
+        <div class="station-agents-scroll" style="
+          flex: 1;
+          width: 100%;
+          overflow-y: auto;
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 8px;
+          padding: 2px 0;
+        ">
+          ${otherAgents
+            .map((p) => {
+              const isSelected = currentAgentName.toLowerCase() === p.name.toLowerCase();
+              return `
+              <div class="station-agent-badge rail-pinned-bot-row ${isSelected ? 'active' : ''}" data-station-profile="${escapeHtml(p.name)}" data-profile="${escapeHtml(p.name)}" title="${t('rail.enterBotChat', { name: p.displayName || p.name })}" style="
+                width: 36px;
+                height: 36px;
+                border-radius: 10px;
+                background: ${isSelected ? 'var(--accent-subtle)' : 'var(--bg-card)'};
+                border: 1.5px solid ${isSelected ? 'var(--accent)' : 'var(--border-subtle)'};
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                position: relative;
+                transition: all 0.15s ease;
+                flex-shrink: 0;
+              ">
+                ${renderBotAvatar(p.name, p.displayName, p.avatar, 30)}
+                ${
+                  p.activityState === 'running'
+                    // gate-perf-allow: 智能体执行中呼吸指示器
+                    ? `<span class="activity-pulse-indicator" title="${t('rail.activityRunning')}" style="position: absolute; top: -2px; right: -2px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); animation: jadePulse 1.2s infinite; z-index: 2;"></span>`
+                    : p.activityState === 'unread'
+                    ? `<span class="activity-unread-badge" title="${t('rail.activityUnread')}" style="position: absolute; top: -2px; right: -2px; width: 7px; height: 7px; border-radius: 50%; background: var(--jade-pulse); box-shadow: 0 0 4px var(--jade-glow); z-index: 2;"></span>`
+                    : ''
+                }
+              </div>
+            `;
+            })
+            .join('')}
+        </div>
+
+        <!-- 底部固定位：群聊入口、工作区项目入口、新建按钮 -->
+        <div class="station-sticky-bottom" style="display: flex; flex-direction: column; align-items: center; gap: 8px; width: 100%; padding-top: 6px; border-top: 1px solid var(--border-subtle);">
+          <div id="rail-station-groups-btn" class="station-bottom-badge" title="${t('rail.groups')}" style="
+            width: 34px;
+            height: 34px;
+            border-radius: 8px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            position: relative;
+            transition: all 0.15s ease;
+          ">
+            <span style="font-size: 15px;">👥</span>
+            ${
+              hasActiveGroup
+                // gate-perf-allow: 群聊活跃呼吸指示器
+                ? `<span class="activity-pulse-indicator" style="position: absolute; top: -2px; right: -2px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 4px var(--accent-glow); animation: jadePulse 1.2s infinite;"></span>`
+                : hasUnreadGroup
+                ? `<span class="activity-unread-badge" style="position: absolute; top: -2px; right: -2px; width: 6px; height: 6px; border-radius: 50%; background: var(--jade-pulse); box-shadow: 0 0 3px var(--jade-glow);"></span>`
+                : ''
+            }
           </div>
 
-          <!-- New Task / Chat Trigger (+) opens Task Dispatch Modal -->
+          <div id="rail-station-projects-btn" class="station-bottom-badge" title="${t('rail.projects')}" style="
+            width: 34px;
+            height: 34px;
+            border-radius: 8px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.15s ease;
+          ">
+            <span style="font-size: 15px;">📁</span>
+          </div>
+
           <button id="new-chat-btn" class="btn-new-chat" type="button" title="${t('rail.newChat')}" style="
-            width: 28px;
-            height: 28px;
+            width: 34px;
+            height: 34px;
+            border-radius: 8px;
             background: var(--bg-card);
-            border: 1px solid var(--border-medium);
-            border-radius: 6px;
+            border: 1px dashed var(--border-medium);
             color: var(--text-main);
             display: flex;
             align-items: center;
             justify-content: center;
             cursor: pointer;
-            box-shadow: var(--shadow-card);
-            flex-shrink: 0;
-            transition: transform 0.1s ease, border-color 0.15s ease;
+            transition: all 0.15s ease;
           ">
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
               <line x1="8" y1="3" x2="8" y2="13"/>
@@ -248,455 +401,380 @@ export function renderLeftRail(props: LeftRailProps): string {
         </div>
       </div>
 
-      <!-- View A: Chats & Sessions List -->
-      <div class="session-scroll-area" id="session-list-container" style="
-        flex: 1;
-        overflow-y: auto;
-        padding: 4px 6px 10px;
-        display: ${isProjectsTab ? 'none' : 'block'};
+      <!-- 2. 动态抽屉 (Context Drawer): 折叠时 width: 0px 且 display: none，展开时自适应填充剩余空间(由 --rail-w-left 动态驱动) -->
+      <div class="flux-context-drawer" style="
+        display: ${props.collapsed ? 'none' : 'flex'};
+        width: ${props.collapsed ? '0px' : 'calc(100% - 52px)'};
+        min-width: ${props.collapsed ? '0px' : '150px'};
+        flex: ${props.collapsed ? '0 0 0px' : '1'};
+        height: 100%;
+        background: var(--bg-rail);
+        flex-direction: column;
+        overflow: hidden;
       ">
-        ${
-          railError
-            ? `
-          <div id="session-list-error" role="alert" style="
-            margin: 6px 4px 10px;
-            padding: 8px 10px;
-            border-radius: 8px;
-            border: 1px solid var(--border-strong);
-            background: var(--bg-panel);
-            color: var(--text-main);
-            font-size: 11px;
-            line-height: 1.5;
-            word-break: break-word;
-          ">会话列表加载失败：${escapeHtml(railError)}</div>
-        `
-            : ''
-        }
+        <!-- 抽屉顶部搜索与快速操作栏 -->
+        <div style="padding: 10px 10px 6px; display: flex; flex-direction: column; gap: 6px; -webkit-app-region: no-drag;">
+          <div style="position: relative; width: 100%;">
+            <input type="text" id="session-search-input" placeholder="${t('rail.searchPlaceholder')}" value="${escapeHtml(props.searchQuery || '')}" style="
+              width: 100%;
+              height: 28px;
+              background: var(--bg-panel);
+              border: 1px solid var(--border-subtle);
+              border-radius: 6px;
+              padding: 0 8px 0 26px;
+              font-size: 11.5px;
+              color: var(--text-main);
+              outline: none;
+              box-sizing: border-box;
+              user-select: text;
+              -webkit-user-select: text;
+              cursor: text;
+            " />
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" style="position: absolute; left: 8px; top: 8px; color: var(--text-muted); pointer-events: none;">
+              <circle cx="7" cy="7" r="5"/>
+              <line x1="11" y1="11" x2="15" y2="15"/>
+            </svg>
+          </div>
+        </div>
 
-        <!-- Collapsible Dedicated Agents Section (Flat Minimal Style, Always Present) -->
-        ${
-          filteredProfiles.length > 0 && !railError
-            ? `
-          <div class="bot-section-wrap" style="margin-bottom: 10px;">
-            <div id="rail-bots-accordion-trigger" style="display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; cursor: pointer; user-select: none;">
-              <div style="display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>
-                <span>${t('rail.pinnedBots')} (${filteredProfiles.length})</span>
+        <!-- 抽屉滚动主体：单层平铺，彻底终结多层手风琴嵌套与虚假总数 -->
+        <div class="session-scroll-area" id="session-list-container" style="
+          flex: 1;
+          overflow-y: auto;
+          padding: 4px 6px 12px;
+          display: ${isProjectsTab ? 'none' : 'block'};
+        ">
+          ${
+            railError
+              ? `
+            <div id="session-list-error" role="alert" style="
+              margin: 6px 4px 8px;
+              padding: 6px 8px;
+              border-radius: 6px;
+              border: 1px solid var(--border-strong);
+              background: var(--bg-panel);
+              color: var(--text-main);
+              font-size: 11px;
+              line-height: 1.4;
+              word-break: break-word;
+            ">会话列表加载失败：${escapeHtml(railError)}</div>
+          `
+              : ''
+          }
+
+          <!-- 抽屉第一行：该 Agent 的核心主工位卡片 (100% 消费 Gateway 真实自定义头像) -->
+          <div class="rail-pinned-bot-row rail-primary-agent-card ${currentFocus.type === 'bot' && currentFocus.botName === selectedAgentProfile.name ? 'active' : ''}" data-profile="${escapeHtml(selectedAgentProfile.name)}" data-primary-bot="${escapeHtml(selectedAgentProfile.name)}" title="${t('rail.enterBotChat', { name: selectedAgentProfile.displayName || selectedAgentProfile.name })}" style="
+            min-height: 48px;
+            padding: 6px 8px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            background: ${currentFocus.type === 'bot' && currentFocus.botName === selectedAgentProfile.name ? 'var(--bg-card-active)' : 'var(--bg-panel)'};
+            border: 1px solid ${currentFocus.type === 'bot' && currentFocus.botName === selectedAgentProfile.name ? 'var(--accent)' : 'var(--border-subtle)'};
+            position: relative;
+            transition: background 0.12s ease;
+            margin-bottom: 6px;
+          ">
+            <div style="position: relative; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;">
+              ${renderBotAvatar(selectedAgentProfile.name, selectedAgentProfile.displayName, selectedAgentProfile.avatar, 32)}
+              ${
+                selectedAgentProfile.activityState === 'running'
+                  // gate-perf-allow: 智能体主工位执行态指示器
+                  ? `<span class="activity-pulse-indicator" title="${t('rail.activityRunning')}" style="position: absolute; top: -1px; right: -1px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); animation: jadePulse 1.2s infinite; z-index: 2;"></span>`
+                  : selectedAgentProfile.activityState === 'unread'
+                  ? `<span class="activity-unread-badge" title="${t('rail.activityUnread')}" style="position: absolute; top: -1px; right: -1px; width: 7px; height: 7px; border-radius: 50%; background: var(--jade-pulse); box-shadow: 0 0 4px var(--jade-glow); z-index: 2;"></span>`
+                  : ''
+              }
+            </div>
+            <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 2px;">
+              <div style="display: flex; align-items: center; justify-content: space-between; line-height: 1.2;">
+                <span style="font-size: 12.5px; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                  ${escapeHtml(selectedAgentProfile.displayName || selectedAgentProfile.name)}
+                </span>
+                ${selectedAgentProfile.lastTime ? `<span style="font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); flex-shrink: 0; margin-left: 4px;">${escapeHtml(selectedAgentProfile.lastTime)}</span>` : ''}
               </div>
-              <svg class="bot-chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--text-muted); transform: ${isBotsOpen ? 'rotate(90deg)' : 'rotate(0deg)'}; transition: transform 0.2s ease;"><polyline points="9 18 15 12 9 6"/></svg>
+              <div style="font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3;">
+                ${escapeHtml(formatMessageSnippet(selectedAgentProfile.lastMessage || selectedAgentProfile.description || t('rail.defaultBotSnippet'), 32))}
+              </div>
+            </div>
+          </div>
+
+          <!-- 群聊会议室组 (仅展示当前选中的这个 Agent 参与的群聊) -->
+          ${
+            filteredGroups.length > 0
+              ? `
+            <div class="groups-section-wrap" style="margin-bottom: 8px;">
+              <div id="rail-groups-accordion-trigger" style="display: flex; align-items: center; justify-content: space-between; padding: 4px 6px; cursor: pointer; user-select: none;">
+                <div style="display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                  <span>${t('rail.groups')} (${filteredGroups.length})</span>
+                </div>
+                <svg class="groups-chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--text-muted); transform: ${isGroupsOpen ? 'rotate(90deg)' : 'rotate(0deg)'}; transition: transform 0.2s ease;"><polyline points="9 18 15 12 9 6"/></svg>
+              </div>
+
+              <div id="rail-groups-nested-list" style="display: ${isGroupsOpen ? 'flex' : 'none'}; flex-direction: column; gap: 2px; padding: 2px 0 4px;">
+                ${filteredGroups
+                  .map((g) => {
+                    const isActive = currentFocus.type === 'group' && currentFocus.roomId === g.roomId;
+                    const isEditing = props.editingGroupRoomId === g.roomId;
+                    const collageAvatar = renderGroupCollageAvatar(g.members, props.profiles, 28);
+                    const timeStr = g.updatedAt ? formatSessionTime(g.updatedAt) : '';
+
+                    if (isEditing) {
+                      return `
+                      <div class="rail-group-item editing active rail-group-inline-rename-wrap" data-room-id="${escapeHtml(g.roomId)}" style="
+                        padding: 6px 8px;
+                        border-radius: 6px;
+                        background: var(--bg-card-active);
+                        border: 1px solid var(--accent);
+                        display: flex;
+                        align-items: center;
+                        gap: 6px;
+                      ">
+                        <input type="text" id="rail-group-rename-input-${escapeHtml(g.roomId)}" class="rail-group-rename-input" value="${escapeHtml(g.name)}" style="
+                          flex: 1;
+                          height: 24px;
+                          background: var(--bg-panel);
+                          border: 1px solid var(--accent);
+                          border-radius: 4px;
+                          color: var(--text-main);
+                          font-size: 11px;
+                          padding: 0 6px;
+                          outline: none;
+                        " />
+                        <button class="btn-confirm-group-rename" data-room-id="${escapeHtml(g.roomId)}" title="${t('common.confirm')}" style="background: var(--accent); border: none; border-radius: 4px; color: var(--bg-main); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer;">✓</button>
+                        <button class="btn-cancel-group-rename" data-room-id="${escapeHtml(g.roomId)}" title="${t('common.cancel')}" style="background: transparent; border: 1px solid var(--border-subtle); border-radius: 4px; color: var(--text-muted); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer;">✕</button>
+                      </div>
+                    `;
+                    }
+
+                    return `
+                    <div class="rail-group-item ${isActive ? 'active' : ''}" data-room-id="${escapeHtml(g.roomId)}" title="${escapeHtml(g.name)}" style="
+                      min-height: 40px;
+                      padding: 5px 8px;
+                      border-radius: 6px;
+                      background: ${isActive ? 'var(--bg-card-active)' : 'transparent'};
+                      border: 1px solid ${isActive ? 'var(--accent)' : 'transparent'};
+                      cursor: pointer;
+                      display: flex;
+                      align-items: center;
+                      gap: 8px;
+                      transition: background 0.12s ease;
+                    ">
+                      <div style="position: relative; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                        ${collageAvatar}
+                        ${
+                          g.activityState === 'running'
+                            // gate-perf-allow: 群聊执行中呼吸指示器
+                            ? `<span class="activity-pulse-indicator" title="${t('rail.activityRunning')}" style="position: absolute; top: -1px; right: -1px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); animation: jadePulse 1.2s infinite; z-index: 2;"></span>`
+                            : g.activityState === 'unread'
+                            ? `<span class="activity-unread-badge" title="${t('rail.activityUnread')}" style="position: absolute; top: -1px; right: -1px; width: 7px; height: 7px; border-radius: 50%; background: var(--jade-pulse); box-shadow: 0 0 4px var(--jade-glow); z-index: 2;"></span>`
+                            : ''
+                        }
+                      </div>
+                      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; line-height: 1.2;">
+                          <span style="font-size: 12px; font-weight: ${isActive ? '600' : '400'}; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                            ${escapeHtml(g.name)}
+                          </span>
+                          ${timeStr ? `<span style="font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); margin-left: 4px; flex-shrink: 0;">${escapeHtml(timeStr)}</span>` : ''}
+                        </div>
+                        <div style="font-size: 10.5px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px;">
+                          ${escapeHtml(formatMessageSnippet(g.lastMessage, 32) || t('rail.groupsMembers', { count: String(g.members.length) }))}
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                  })
+                  .join('')}
+              </div>
+            </div>
+          `
+              : ''
+          }
+
+          <!-- 会话组 (仅展示当前选中的这个 Agent 专属的会话/任务) -->
+          <div class="sessions-section-wrap" style="margin-bottom: 8px;">
+            <div id="rail-sessions-accordion-trigger" style="display: flex; align-items: center; justify-content: space-between; padding: 4px 6px; cursor: pointer; user-select: none;">
+              <div style="display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                <span>${t('rail.conversations')} (${activeSessions.length})</span>
+              </div>
+              <svg class="sessions-chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--text-muted); transform: ${isSessionsOpen ? 'rotate(90deg)' : 'rotate(0deg)'}; transition: transform 0.2s ease;"><polyline points="9 18 15 12 9 6"/></svg>
             </div>
 
-            <div id="rail-bots-nested-list" style="display: ${isBotsOpen ? 'flex' : 'none'}; flex-direction: column; gap: 2px; padding: 2px 0 4px;">
-              ${filteredProfiles
-                .map((p) => {
-                  const isSelected = currentFocus.type === 'bot' && currentFocus.botName === p.name;
-                  const avatarNode = renderBotAvatar(p.name, p.displayName, p.avatar, 36);
-                  const rawSnippet = p.lastMessage || p.description || p.model || t('rail.defaultBotSnippet');
-                  const snippet = formatMessageSnippet(rawSnippet, 36);
-                  const timeStr = p.lastTime || '';
+            <div id="rail-sessions-nested-list" style="display: ${isSessionsOpen ? 'flex' : 'none'}; flex-direction: column; gap: 2px; padding: 2px 0 4px;">
+              ${
+                activeSessions.length === 0
+                  ? `
+                <div style="padding: 20px 8px; text-align: center; color: var(--text-muted); font-size: 11px; display: flex; flex-direction: column; align-items: center; gap: 4px;">
+                  <span>${railError ? t('rail.errorTitle') : t('rail.emptyTitle')}</span>
+                  <span style="font-size: 10.5px; color: var(--text-faint);">${railError ? t('rail.errorSub') : t('rail.emptySub')}</span>
+                </div>
+              `
+                  : activeSessions.map((s) => renderSessionRow(s, currentFocus)).join('')
+              }
+            </div>
+          </div>
 
+          <!-- 归档历史折叠区 -->
+          ${
+            archivedSessions.length > 0
+              ? `
+            <div style="font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 6px 2px;">${t('rail.archived')} (${archivedSessions.length})</div>
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              ${archivedSessions
+                .map((s) => {
+                  const isActive = currentFocus.type === 'session' && currentFocus.sessionId === s.id;
                   return `
-                  <div class="rail-pinned-bot-row ${isSelected ? 'active' : ''}" data-profile="${escapeHtml(p.name)}" title="${t('rail.enterBotChat', { name: p.displayName || p.name })}" style="
-                    min-height: 48px;
-                    padding: 6px 8px;
+                  <div class="session-item ${isActive ? 'active' : ''}" data-id="${s.id}" style="
+                    min-height: 32px;
+                    padding: 0 8px;
                     border-radius: 6px;
+                    background: ${isActive ? 'var(--bg-card-active)' : 'transparent'};
+                    border: 1px solid ${isActive ? 'var(--accent)' : 'transparent'};
+                    cursor: pointer;
                     display: flex;
                     align-items: center;
-                    gap: 10px;
-                    cursor: pointer;
-                    background: ${isSelected ? 'var(--bg-card-active)' : 'transparent'};
-                    border: 1px solid ${isSelected ? 'var(--accent)' : 'transparent'};
-                    position: relative;
-                    transition: background 0.12s ease;
+                    opacity: 0.65;
                   ">
-                    <div style="position: relative; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                      ${avatarNode}
-                      ${
-                        p.activityState === 'running'
-                          // gate-perf-allow: 智能体执行中呼吸指示器
-                          ? `<span class="activity-pulse-indicator" title="${t('rail.activityRunning')}" style="position: absolute; top: -1px; right: -1px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); animation: jadePulse 1.2s infinite; z-index: 2;"></span>`
-                          : p.activityState === 'unread'
-                          ? `<span class="activity-unread-badge" title="${t('rail.activityUnread')}" style="position: absolute; top: -1px; right: -1px; width: 7px; height: 7px; border-radius: 50%; background: var(--jade-pulse); box-shadow: 0 0 4px var(--jade-glow); z-index: 2;"></span>`
-                          : ''
-                      }
+                    <span style="font-size: 11.5px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(s.title)}</span>
+                  </div>
+                `;
+                })
+                .join('')}
+            </div>
+          `
+              : ''
+          }
+        </div>
+
+        <!-- 项目卡片甲板 (View B: Projects Deck) -->
+        <div id="rail-projects-deck" style="
+          flex: 1;
+          overflow-y: auto;
+          padding: 6px 8px 12px;
+          display: ${isProjectsTab ? 'block' : 'none'};
+        ">
+          <div style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; padding: 6px 8px 8px;">
+            ${t('rail.projects')}
+          </div>
+
+          ${
+            realProjects.length === 0
+              ? `
+            <div style="padding: 36px 12px; text-align: center; color: var(--text-muted); font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 8px;">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+              <span>${t('rail.projectsEmpty')}</span>
+              <span style="font-size: 11px; color: var(--text-faint);">${t('rail.projectsEmptySub')}</span>
+            </div>
+          `
+              : `
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              ${realProjects
+                .map((proj, idx) => {
+                  const isOpen = idx === 0;
+                  const nestedSessions = proj.sessions || [];
+                  return `
+                  <div class="project-accordion-unit ${isOpen ? 'open' : ''}" id="rail-proj-${escapeHtml(proj.id)}" style="
+                    border: 1px solid var(--border-subtle);
+                    border-radius: 8px;
+                    background: var(--bg-card);
+                    overflow: hidden;
+                  ">
+                    <div class="project-accordion-trigger" data-project-id="${escapeHtml(proj.id)}" style="
+                      padding: 8px 10px;
+                      display: flex;
+                      align-items: center;
+                      justify-content: space-between;
+                      cursor: pointer;
+                    ">
+                      <div style="font-size: 12px; font-weight: 600; color: var(--text-main); display: flex; align-items: center; gap: 6px;">
+                        <span>📁</span>
+                        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(proj.name)}</span>
+                      </div>
+                      <span style="font-size: 10px; color: var(--text-muted);">${nestedSessions.length}</span>
                     </div>
-                    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 2px;">
-                      <div style="display: flex; align-items: center; justify-content: space-between; line-height: 1.2;">
-                        <span style="font-size: 13px; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                          ${escapeHtml(p.displayName || p.name)}
-                        </span>
-                        ${timeStr ? `<span style="font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono); flex-shrink: 0; margin-left: 4px;">${escapeHtml(timeStr)}</span>` : ''}
-                      </div>
-                      <div style="font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3;">
-                        ${escapeHtml(snippet)}
-                      </div>
+                    <div class="project-accordion-body" style="padding: 0 8px 8px; display: ${isOpen ? 'block' : 'none'};">
+                      ${
+                        nestedSessions.length > 0
+                          ? `<div style="display: flex; flex-direction: column; gap: 2px;">
+                              ${nestedSessions.map((s) => renderSessionRow(s, currentFocus, true)).join('')}
+                            </div>`
+                          : `<div style="padding: 10px 4px; text-align: center; color: var(--text-muted); font-size: 11px;">${t('rail.projectNoSessions')}</div>`
+                      }
                     </div>
                   </div>
                 `;
                 })
                 .join('')}
             </div>
-          </div>
-        `
-            : ''
-        }
-
-        <!-- Collapsible Multi-Agent Groups Section (Flat Minimal Style, Always Present) -->
-        <div class="group-section-wrap" style="margin-bottom: 10px;">
-          <div id="rail-groups-accordion-trigger" style="display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; cursor: pointer; user-select: none;">
-            <div style="display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-              <span>${t('rail.groups')} (${filteredGroups.length})</span>
-            </div>
-            <svg class="group-chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--text-muted); transform: ${isGroupsOpen ? 'rotate(90deg)' : 'rotate(0deg)'}; transition: transform 0.2s ease;"><polyline points="9 18 15 12 9 6"/></svg>
-          </div>
-
-          <div id="rail-groups-nested-list" style="display: ${isGroupsOpen ? 'flex' : 'none'}; flex-direction: column; gap: 2px; padding: 2px 0 4px;">
-            ${
-              filteredGroups.length === 0
-                ? `<div style="padding: 6px 12px; font-size: 11px; color: var(--text-muted); text-align: left;">${t('rail.groupsEmpty')}</div>`
-                : filteredGroups
-                    .map((g) => {
-                      const isGroupActive = currentFocus.type === 'group' && currentFocus.roomId === g.roomId;
-                      return `
-                      <div class="rail-group-item ${isGroupActive ? 'active' : ''}" data-room-id="${escapeHtml(g.roomId)}" style="
-                        min-height: 38px;
-                        padding: 5px 8px;
-                        border-radius: 6px;
-                        display: flex;
-                        align-items: center;
-                        gap: 8px;
-                        cursor: pointer;
-                        background: ${isGroupActive ? 'var(--bg-card-active)' : 'transparent'};
-                        border: 1px solid ${isGroupActive ? 'var(--accent)' : 'transparent'};
-                        transition: background 0.12s ease;
-                        position: relative;
-                      ">
-                        <div style="position: relative; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                          ${renderGroupCollageAvatar(g.members, props.profiles, 28)}
-                          ${
-                            g.activityState === 'running'
-                              // gate-perf-allow: 群聊执行中指示器动画
-                              ? `<span class="activity-pulse-indicator" title="${t('rail.activityRunning')}" style="position: absolute; top: -1px; right: -1px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); animation: jadePulse 1.2s infinite; z-index: 2;"></span>`
-                              : g.activityState === 'unread'
-                              ? `<span class="activity-unread-badge" title="${t('rail.activityUnread')}" style="position: absolute; top: -1px; right: -1px; width: 7px; height: 7px; border-radius: 50%; background: var(--jade-pulse); box-shadow: 0 0 4px var(--jade-glow); z-index: 2;"></span>`
-                              : ''
-                          }
-                        </div>
-                        <div style="flex: 1; min-width: 0;">
-                          ${
-                            props.editingGroupRoomId === g.roomId
-                              ? `
-                            <div class="rail-group-inline-rename-wrap" style="display: flex; align-items: center; gap: 4px; width: 100%;">
-                              <input
-                                type="text"
-                                id="rail-group-rename-input-${g.roomId}"
-                                class="rail-group-rename-input"
-                                value="${escapeHtml(g.name)}"
-                                style="
-                                  flex: 1;
-                                  height: 22px;
-                                  padding: 0 5px;
-                                  font-size: 11.5px;
-                                  color: var(--text-main);
-                                  background: var(--bg-input);
-                                  border: 1px solid var(--accent);
-                                  border-radius: 4px;
-                                  outline: none;
-                                  min-width: 0;
-                                "
-                              />
-                              <button
-                                type="button"
-                                class="btn-confirm-group-rename"
-                                data-room-id="${g.roomId}"
-                                title="${t('common.confirm')}"
-                                style="
-                                  width: 20px;
-                                  height: 20px;
-                                  border: none;
-                                  border-radius: 3px;
-                                  background: var(--accent);
-                                  color: var(--text-main);
-                                  display: inline-flex;
-                                  align-items: center;
-                                  justify-content: center;
-                                  cursor: pointer;
-                                  flex-shrink: 0;
-                                "
-                              >
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                              </button>
-                              <button
-                                type="button"
-                                class="btn-cancel-group-rename"
-                                data-room-id="${g.roomId}"
-                                title="${t('common.cancel')}"
-                                style="
-                                  width: 20px;
-                                  height: 20px;
-                                  border: 1px solid var(--border-medium);
-                                  border-radius: 3px;
-                                  background: transparent;
-                                  color: var(--text-muted);
-                                  display: inline-flex;
-                                  align-items: center;
-                                  justify-content: center;
-                                  cursor: pointer;
-                                  flex-shrink: 0;
-                                "
-                              >
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                              </button>
-                            </div>
-                          `
-                              : `
-                            <div style="display: flex; align-items: center; justify-content: space-between;">
-                              <span style="font-size: 12px; font-weight: 500; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;">
-                                ${escapeHtml(g.name)}
-                              </span>
-                            </div>
-                            <div style="font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3;">
-                              ${escapeHtml(formatMessageSnippet(g.lastMessage, 36) || t('rail.groupsMembers', { count: String(g.members.length) }))}
-                            </div>
-                          `
-                          }
-                        </div>
-                      </div>
-                    `;
-                    })
-                    .join('')
-            }
-          </div>
+          `
+          }
         </div>
-
-        <!-- Collapsible Sessions Section (Flat Minimal Style, NO ugly card background) -->
-        <div class="sessions-section-wrap" style="margin-bottom: 8px;">
-          <div id="rail-sessions-accordion-trigger" style="display: flex; align-items: center; justify-content: space-between; padding: 6px 8px 4px; cursor: pointer; user-select: none;">
-            <div style="display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-              <span>${t('rail.conversations')} (${activeSessions.length})</span>
-            </div>
-            <svg class="sessions-chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--text-muted); transform: ${isSessionsOpen ? 'rotate(90deg)' : 'rotate(0deg)'}; transition: transform 0.2s ease;"><polyline points="9 18 15 12 9 6"/></svg>
-          </div>
-
-          <div id="rail-sessions-nested-list" style="display: ${isSessionsOpen ? 'flex' : 'none'}; flex-direction: column; gap: 2px; padding: 2px 0 4px;">
-            ${
-              props.sessions.length === 0
-                ? `
-              <div style="padding: 24px 12px; text-align: center; color: var(--text-muted); font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 6px;">
-                <span>${railError ? t('rail.errorTitle') : t('rail.emptyTitle')}</span>
-                <span style="font-size: 11px; color: var(--text-faint);">${railError ? t('rail.errorSub') : t('rail.emptySub')}</span>
-              </div>
-            `
-                : activeSessions
-                    .map((s) => renderSessionRow(s, currentFocus))
-                    .join('')
-            }
-          </div>
-        </div>
-
-        ${
-          archivedSessions.length > 0
-            ? `
-          <div style="font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; padding: 10px 8px 4px;">${t('rail.archived')} (${archivedSessions.length})</div>
-          <div style="display: flex; flex-direction: column; gap: 2px;">
-            ${archivedSessions
-              .map((s) => {
-                const isActive = currentFocus.type === 'session' && currentFocus.sessionId === s.id;
-                return `
-                <div class="session-item ${isActive ? 'active' : ''}" data-id="${s.id}" style="
-                  min-height: 34px;
-                  height: 34px;
-                  padding: 0 8px;
-                  border-radius: 6px;
-                  background: ${isActive ? 'var(--bg-card-active)' : 'transparent'};
-                  border: 1px solid ${isActive ? 'var(--accent)' : 'transparent'};
-                  cursor: pointer;
-                  display: flex;
-                  align-items: center;
-                  opacity: 0.7;
-                ">
-                  <span style="font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(s.title)}</span>
-                </div>
-              `;
-              })
-              .join('')}
-          </div>
-        `
-            : ''
-        }
       </div>
 
-      <!-- View B: Projects In-Place Accordion Deck -->
-      <div id="rail-projects-deck" style="
-        flex: 1;
-        overflow-y: auto;
-        padding: 6px 8px 12px;
-        display: ${isProjectsTab ? 'block' : 'none'};
-      ">
-        <div style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; padding: 6px 8px 8px;">
-          ${t('rail.projects')}
-        </div>
-
-        ${
-          realProjects.length === 0
-            ? `
-          <div style="padding: 36px 12px; text-align: center; color: var(--text-muted); font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 8px;">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-            <span>${t('rail.projectsEmpty')}</span>
-            <span style="font-size: 11px; color: var(--text-faint);">${t('rail.projectsEmptySub')}</span>
-          </div>
-        `
-            : `
-          <div style="display: flex; flex-direction: column; gap: 6px;">
-            ${realProjects
-              .map((proj, idx) => {
-                const isOpen = idx === 0;
-                const nestedSessions = proj.sessions || [];
-                return `
-                <div class="project-accordion-unit ${isOpen ? 'open' : ''}" id="rail-proj-${escapeHtml(proj.id)}" style="
-                  border: 1px solid var(--border-subtle);
-                  border-radius: 8px;
-                  background: var(--bg-card);
-                  overflow: hidden;
-                ">
-                  <div class="project-accordion-trigger" data-project-id="${escapeHtml(proj.id)}" style="
-                    padding: 8px 10px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: space-between;
-                    cursor: pointer;
-                    user-select: none;
-                  ">
-                    <div style="display: flex; align-items: center; gap: 6px; min-width: 0;">
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--accent); flex-shrink: 0;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                      <span style="font-size: 12.5px; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(proj.name)}</span>
-                    </div>
-                    <svg class="proj-chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="
-                      color: var(--text-muted);
-                      transform: ${isOpen ? 'rotate(90deg)' : 'rotate(0deg)'};
-                      transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-                    "><polyline points="9 18 15 12 9 6"/></svg>
-                  </div>
-
-                  <!-- Nested Sessions In-Place Display -->
-                  <div class="project-accordion-nested" style="
-                    display: ${isOpen ? 'flex' : 'none'};
-                    flex-direction: column;
-                    gap: 2px;
-                    padding: 4px 6px 8px 14px;
-                    background: var(--bg-panel);
-                    border-top: 1px solid var(--border-subtle);
-                  ">
-                    ${
-                      nestedSessions.length > 0
-                        ? nestedSessions.map((s) => renderSessionRow(s, currentFocus, true)).join('')
-                        : `<div style="padding: 8px 6px; font-size: 11px; color: var(--text-muted);">${t('rail.projectNoSessions')}</div>`
-                    }
-                  </div>
-                </div>
-              `;
-              })
-              .join('')}
-          </div>
-        `
-        }
-      </div>
-
-      <!-- Bottom Switcher Table: [ 💬 会话 ] [ 📁 项目 ] -->
-      <div id="rail-bottom-switcher-tabs" style="
-        height: 36px;
-        border-top: 1px solid var(--border-subtle);
-        background: var(--bg-card);
-        display: flex;
-        padding: 3px 6px;
-        gap: 4px;
-        flex-shrink: 0;
-      ">
-        <button id="tab-btn-rail-chats" type="button" class="rail-tab-switch-btn ${!isProjectsTab ? 'active' : ''}" style="
-          flex: 1;
-          height: 100%;
-          border: 1px solid ${!isProjectsTab ? 'var(--border-medium)' : 'transparent'};
-          border-radius: 5px;
-          background: ${!isProjectsTab ? 'var(--bg-panel)' : 'transparent'};
-          color: ${!isProjectsTab ? 'var(--text-main)' : 'var(--text-muted)'};
-          font-size: 11.5px;
-          font-weight: 600;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 5px;
-          cursor: pointer;
-          transition: all 0.12s ease;
-        ">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-          <span>${t('rail.tabChats')}</span>
-        </button>
-
-        <button id="tab-btn-rail-projects" type="button" class="rail-tab-switch-btn ${isProjectsTab ? 'active' : ''}" style="
-          flex: 1;
-          height: 100%;
-          border: 1px solid ${isProjectsTab ? 'var(--border-medium)' : 'transparent'};
-          border-radius: 5px;
-          background: ${isProjectsTab ? 'var(--bg-panel)' : 'transparent'};
-          color: ${isProjectsTab ? 'var(--text-main)' : 'var(--text-muted)'};
-          font-size: 11.5px;
-          font-weight: 600;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 5px;
-          cursor: pointer;
-          transition: all 0.12s ease;
-        ">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-          <span>${t('rail.tabProjects')}</span>
-        </button>
-      </div>
+      <!-- 可拖拽把手 (右侧边缘，加宽物理拾取热区至 10px，配置 touch-action 与 pointer-events 确保即触即拖) -->
+      ${
+        !props.collapsed
+          ? `
+        <div class="rail-resize-handle" data-rail-handle="left" role="separator" aria-orientation="vertical" tabindex="0" title="拖拽调整左侧栏宽度" style="
+          position: absolute;
+          right: -5px;
+          top: 0;
+          bottom: 0;
+          width: 10px;
+          z-index: 90;
+          cursor: col-resize;
+          background: transparent;
+          touch-action: none;
+          pointer-events: auto;
+        "></div>
+      `
+          : ''
+      }
     </aside>
   `;
 }
 
 function renderSessionRow(s: LeftRailSession, currentFocus: LeftRailActiveFocus, isCompact: boolean = false): string {
   const isActive = currentFocus.type === 'session' && currentFocus.sessionId === s.id;
-  const avatarNode = renderBotAvatar(s.botName || 'default', s.botDisplayName, s.botAvatar, isCompact ? 20 : 26);
-  const botTag = s.botDisplayName || s.botName;
+  const avatarNode = renderBotAvatar(s.botName || 'default', s.botDisplayName, s.botAvatar, isCompact ? 18 : 24);
 
   return `
     <div class="session-item ${isActive ? 'active' : ''}" data-id="${s.id}" data-title="${escapeHtml(s.title)}" data-bot="${escapeHtml(s.botName || '')}" style="
-      min-height: ${isCompact ? '32px' : '40px'};
-      padding: ${isCompact ? '3px 8px' : '5px 8px'};
+      min-height: ${isCompact ? '30px' : '38px'};
+      padding: ${isCompact ? '2px 6px' : '4px 6px'};
       border-radius: 6px;
       background: ${isActive ? 'var(--bg-card-active)' : 'transparent'};
       border: 1px solid ${isActive ? 'var(--accent)' : 'transparent'};
       cursor: pointer;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       position: relative;
       transition: background 0.12s ease, border-color 0.12s ease;
     ">
       ${isActive ? '<div class="active-indicator" style="position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; background: var(--accent); border-radius: 0 2px 2px 0;"></div>' : ''}
       
-      <!-- Agent Avatar Badge with Status Dot -->
       <div style="position: relative; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;">
         ${avatarNode}
         ${
           s.activityState === 'running'
             // gate-perf-allow: 会话执行态脉冲动画
-            ? `<span class="activity-pulse-indicator" title="${t('rail.activityRunning')}" style="position: absolute; top: -1px; right: -1px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); animation: jadePulse 1.2s infinite; z-index: 2;"></span>`
+            ? `<span class="activity-pulse-indicator" title="${t('rail.activityRunning')}" style="position: absolute; top: -1px; right: -1px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); animation: jadePulse 1.2s infinite; z-index: 2;"></span>`
             : s.activityState === 'unread'
-            ? `<span class="activity-unread-badge" title="${t('rail.activityUnread')}" style="position: absolute; top: -1px; right: -1px; width: 7px; height: 7px; border-radius: 50%; background: var(--jade-pulse); box-shadow: 0 0 4px var(--jade-glow); z-index: 2;"></span>`
+            ? `<span class="activity-unread-badge" title="${t('rail.activityUnread')}" style="position: absolute; top: -1px; right: -1px; width: 6px; height: 6px; border-radius: 50%; background: var(--jade-pulse); box-shadow: 0 0 4px var(--jade-glow); z-index: 2;"></span>`
             : ''
         }
       </div>
 
-      <!-- 3-Element Content Stack -->
       <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center;">
         <div style="display: flex; justify-content: space-between; align-items: center; line-height: 1.2;">
           <span style="
-            font-size: 12.5px;
+            font-size: 12px;
             font-weight: ${isActive ? '600' : '400'};
             color: var(--text-main);
             white-space: nowrap;
@@ -704,14 +782,14 @@ function renderSessionRow(s: LeftRailSession, currentFocus: LeftRailActiveFocus,
             text-overflow: ellipsis;
             flex: 1;
           ">${escapeHtml(s.title)}</span>
-          ${s.time ? `<span style="font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); margin-left: 6px; flex-shrink: 0;">${escapeHtml(s.time)}</span>` : ''}
+          ${s.time ? `<span style="font-size: 9.5px; color: var(--text-muted); font-family: var(--font-mono); margin-left: 4px; flex-shrink: 0;">${escapeHtml(s.time)}</span>` : ''}
         </div>
         ${
           !isCompact
             ? `
           <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 1px;">
-            <span style="font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;">
-              ${escapeHtml(formatMessageSnippet(s.preview, 36) || formatMessageSnippet(s.title, 36))}
+            <span style="font-size: 10.5px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;">
+              ${escapeHtml(formatMessageSnippet(s.preview, 32) || formatMessageSnippet(s.title, 32))}
             </span>
           </div>
         `
@@ -728,10 +806,10 @@ const XIAOFAWANG_YELLOW = '#FACC15';
 const BOT_PUPIL_BLACK = '#18181B';
 
 /**
- * 1:1 Parity with Official Hermes Desktop Avatar:
- * 1. Photo Avatar (Data URL / Image) -> Rounded Rectangle
- * 2. Xiaofawang -> Yellow Triangle with Two Eyes (Official Deterministic Triangle)
- * 3. Default Shape -> Name-derived geometric sigil with pupils
+ * 1:1 消费 Gateway 真实自定义头像资产：
+ * 1. 优先消费 avatarUrl（Base64 Data URL / HTTP URL / Local File URL）渲染真实 <img>；
+ * 2. 仅在明确未提供 avatarUrl 且名称为 xiaofawang 时渲染确定性黄色三角形；
+ * 3. 其他兜底渲染基于名称生成的确定性几何图腾。
  */
 export function renderBotAvatar(name: string, displayName?: string, avatarUrl?: string, size = 36): string {
   if (avatarUrl) {
@@ -742,12 +820,12 @@ export function renderBotAvatar(name: string, displayName?: string, avatarUrl?: 
       object-fit: cover;
       flex-shrink: 0;
       border: 1px solid var(--border-subtle);
+      display: block;
     " alt="${escapeHtml(displayName || name)}" />`;
   }
 
   const cleanName = (name || 'agent').toLowerCase().trim();
 
-  // 官方标准散列算法: 散列到 7 种几何体
   let hash = 0;
   for (const ch of cleanName) {
     hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
@@ -755,9 +833,9 @@ export function renderBotAvatar(name: string, displayName?: string, avatarUrl?: 
   const shapes = ['circle', 'squircle', 'pill', 'triangle', 'hexagon', 'cloud', 'drop'];
   const pickedShape = shapes[hash % shapes.length];
 
-  if (pickedShape === 'triangle') {
+  if (cleanName.includes('xiaofawang') || pickedShape === 'triangle') {
     return `
-      <svg width="${size}" height="${size}" viewBox="0 0 36 36" fill="none" style="flex-shrink: 0;">
+      <svg width="${size}" height="${size}" viewBox="0 0 36 36" fill="none" style="flex-shrink: 0; display: block;">
         <path d="M18 4.5 C19.2 2.5 21.8 2.5 23 4.5 L34 26 C35.2 28.2 33.8 31 31.2 31 L6.8 31 C4.2 31 2.8 28.2 4 26 Z" fill="${XIAOFAWANG_YELLOW}" />
         <circle cx="15" cy="18" r="1.8" fill="${BOT_PUPIL_BLACK}" />
         <circle cx="23" cy="18" r="1.8" fill="${BOT_PUPIL_BLACK}" />
@@ -766,7 +844,7 @@ export function renderBotAvatar(name: string, displayName?: string, avatarUrl?: 
   }
 
   return `
-    <svg width="${size}" height="${size}" viewBox="0 0 36 36" fill="none" style="flex-shrink: 0;">
+    <svg width="${size}" height="${size}" viewBox="0 0 36 36" fill="none" style="flex-shrink: 0; display: block;">
       <rect width="36" height="36" rx="8" fill="var(--bg-panel)" />
       ${
         pickedShape === 'circle'
@@ -775,7 +853,6 @@ export function renderBotAvatar(name: string, displayName?: string, avatarUrl?: 
           ? `<path d="M10 24 a6 6 0 0 1 -1 -12 a7.5 7.5 0 0 1 14 -1 a5.5 5.5 0 0 1 5 13 Z" fill="var(--accent)" />`
           : `<rect x="5" y="5" width="26" height="26" rx="6" fill="var(--accent)" />`
       }
-      <!-- Eyes -->
       <circle cx="14" cy="17" r="1.8" fill="${BOT_PUPIL_BLACK}" />
       <circle cx="22" cy="17" r="1.8" fill="${BOT_PUPIL_BLACK}" />
     </svg>
@@ -804,7 +881,6 @@ function renderGroupCollageAvatar(
     return `<span style="width: ${size}px; height: ${size}px; border-radius: 6px; background: var(--bg-card); border: 1px solid var(--border-subtle); display: inline-flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0; color: var(--accent);">👥</span>`;
   }
 
-  // 微信式小宫格：2人左右半开双拼，3-4人四宫格微距头像
   const cellHtmls = cleanMembers.map((m) => {
     const lower = m.toLowerCase().trim();
     const avatar = profMap.get(lower);
@@ -817,7 +893,8 @@ function renderGroupCollageAvatar(
     }
     const shapes = ['circle', 'squircle', 'pill', 'triangle', 'hexagon', 'cloud', 'drop'];
     const pickedShape = shapes[hash % shapes.length];
-    if (pickedShape === 'triangle') {
+
+    if (lower.includes('xiaofawang') || pickedShape === 'triangle') {
       return `
         <svg viewBox="0 0 36 36" style="width: 100%; height: 100%; display: block;" fill="none">
           <path d="M18 4.5 C19.2 2.5 21.8 2.5 23 4.5 L34 26 C35.2 28.2 33.8 31 31.2 31 L6.8 31 C4.2 31 2.8 28.2 4 26 Z" fill="${XIAOFAWANG_YELLOW}" />
@@ -843,6 +920,20 @@ function renderGroupCollageAvatar(
       ${cellHtmls.map((cell) => `<div style="width: 100%; height: 100%; overflow: hidden; border-radius: 2px;">${cell}</div>`).join('')}
     </div>
   `;
+}
+
+function formatSessionTime(timestamp: number): string {
+  const norm = timestamp > 1e11 ? timestamp : timestamp * 1000;
+  const d = new Date(norm);
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) {
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${hh}:${mm}`;
+  }
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${m}/${day}`;
 }
 
 function escapeHtml(str: string): string {

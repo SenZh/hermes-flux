@@ -262,9 +262,9 @@ test('LeftRail - 状态独立性与三态互斥流转 (Running / Unread / Read)'
     assert.ok(!idleSessionRow.includes('activity-pulse-indicator'), '其他已读会话严禁受运行态污染');
     assert.ok(!idleSessionRow.includes('activity-unread-badge'), '其他已读会话严禁包含未读指示器');
 
-    // 3. Bot 区块独立性检验：Bot 头像严禁被普通会话运行态波及
-    const botChunk = html.slice(html.indexOf('data-profile="arch-bot"'));
-    const botRow = botChunk.slice(0, botChunk.indexOf('</div>\n                  </div>'));
+    // 3. Bot 区块独立性检验：微轨中未运行的 Bot 头像严禁被普通会话运行态波及
+    const botChunk = html.slice(html.indexOf('data-station-profile="arch-bot"'));
+    const botRow = botChunk.slice(0, botChunk.indexOf('</div>\n            '));
     assert.ok(!botRow.includes('activity-pulse-indicator'), '普通会话运行严禁把 Bot 也染成 running');
     assert.ok(!botRow.includes('activity-unread-badge'), '普通会话运行严禁把 Bot 染成未读');
 
@@ -347,8 +347,8 @@ test('LeftRail - 状态独立性与三态互斥流转 (Running / Unread / Read)'
     assert.ok(!unreadBotChunk.includes('activity-pulse-indicator'), '未读 Bot 严禁包含呼吸脉冲动效');
 
     // 已读 Bot 没有任何标识
-    const readBotChunk = html.slice(html.indexOf('data-profile="bot-read"'));
-    const readBotRow = readBotChunk.slice(0, readBotChunk.indexOf('</div>\n                  </div>'));
+    const readBotChunk = html.slice(html.indexOf('data-station-profile="bot-read"'));
+    const readBotRow = readBotChunk.slice(0, readBotChunk.indexOf('</div>\n            '));
     assert.ok(!readBotRow.includes('activity-unread-badge'), '已读 Bot 严禁包含未读小绿点');
     assert.ok(!readBotRow.includes('activity-pulse-indicator'), '已读 Bot 严禁包含呼吸脉冲动效');
 

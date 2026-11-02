@@ -371,14 +371,13 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
     assert.ok(modalHtml.includes('btn-cancel-agent-editor'), '必须包含取消按钮');
   });
 
-  await t.test('10. 左轨智能体折叠组、三态指示器与最新对话副标题联动', () => {
+  await t.test('10. 左轨双轨架构：微轨头像常驻与抽屉第一行大卡片三态与最新对话副标题联动', () => {
     const railHtml = renderLeftRail({
       collapsed: false,
       activeSessionId: 'sess-1',
       profileName: 'default',
       gatewayOnline: true,
       gatewayLatencyMs: 20,
-      isBotsGroupExpanded: true,
       sessions: [],
       profiles: [
         {
@@ -399,9 +398,10 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
       ],
     });
 
-    assert.ok(railHtml.includes('rail-bots-accordion-trigger'), '必须包含智能体折叠触发器');
-    assert.ok(railHtml.includes('智能体 (2)'), '必须展示智能体总数统计');
-    assert.ok(railHtml.includes('赫尔墨斯'), '必须展示智能体显示名称');
+    assert.ok(railHtml.includes('flux-station-rail'), '必须包含左侧常驻微轨');
+    assert.ok(!railHtml.includes('rail-bots-accordion-trigger'), '抽屉内严格禁止再出现智能体(N)折叠行');
+    assert.ok(railHtml.includes('rail-primary-agent-card'), '抽屉第一行必须渲染当前选中的核心 Agent 大卡片');
+    assert.ok(railHtml.includes('赫尔墨斯'), '必须展示当前智能体显示名称');
     assert.ok(railHtml.includes('已为您重构完架构模块'), '必须联动展示智能体名下最新一条真实对话记录');
     assert.ok(railHtml.includes('10分钟前'), '必须展示最新消息相对时间戳');
     assert.ok(railHtml.includes('jadePulse'), '运行中智能体必须包含呼吸脉冲动画');

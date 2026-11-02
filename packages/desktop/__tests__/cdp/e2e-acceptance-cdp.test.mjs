@@ -140,7 +140,7 @@ test('Hermes Flux Core Delivery - Real Headless Browser CDP Physical Acceptance 
   for (let i = 0; i < 30; i++) {
     try {
       const check = await cdpCall('Runtime.evaluate', {
-        expression: `Boolean(window.cdpApp && document.getElementById('rail-bots-accordion-trigger'))`,
+        expression: `Boolean(window.cdpApp && document.getElementById('flux-station-rail'))`,
         returnByValue: true,
       });
       if (check.result.value === true) break;
@@ -148,19 +148,19 @@ test('Hermes Flux Core Delivery - Real Headless Browser CDP Physical Acceptance 
     await new Promise((r) => setTimeout(r, 100));
   }
 
-  await t.test('1. CDP 物理验证: 顶栏 Workspace 徽章与智能体折叠组渲染', async () => {
+  await t.test('1. CDP 物理验证: 顶栏 Workspace 徽章、微轨头像与抽屉纯净架构渲染', async () => {
     const res = await cdpCall('Runtime.evaluate', {
       expression: `(() => {
         const badge = document.querySelector('.session-workspace-badge');
+        const stationRail = document.getElementById('flux-station-rail');
+        const primaryCard = document.querySelector('.rail-primary-agent-card');
         const botTrigger = document.getElementById('rail-bots-accordion-trigger');
-        const botList = document.getElementById('rail-bots-nested-list');
-        const botCount = botTrigger ? botTrigger.textContent : '';
         return {
           hasBadge: Boolean(badge),
           badgeText: badge ? badge.textContent.trim() : '',
-          hasBotTrigger: Boolean(botTrigger),
-          botListVisible: botList ? getComputedStyle(botList).display : 'none',
-          botCountText: botCount
+          hasStationRail: Boolean(stationRail),
+          hasPrimaryCard: Boolean(primaryCard),
+          hasOldBotTrigger: Boolean(botTrigger),
         };
       })()`,
       returnByValue: true,
@@ -169,9 +169,9 @@ test('Hermes Flux Core Delivery - Real Headless Browser CDP Physical Acceptance 
     const info = res.result.value;
     assert.equal(info.hasBadge, true, '标题栏必须渲染会话所属 Workspace 徽章');
     assert.ok(info.badgeText.includes('电商微服务工程'), '徽章必须展示项目名称');
-    assert.equal(info.hasBotTrigger, true, '左轨必须渲染智能体折叠组');
-    assert.equal(info.botListVisible, 'flex', '智能体列表默认必须展开');
-    assert.ok(info.botCountText.includes('智能体 (2)'), '智能体标题必须展示统计数量');
+    assert.equal(info.hasStationRail, true, '界面必须常驻 52px 物理微轨');
+    assert.equal(info.hasPrimaryCard, true, '抽屉第一行必须渲染当前选中的核心 Agent 大卡片');
+    assert.equal(info.hasOldBotTrigger, false, '抽屉内严格禁止存在旧有的智能体(N)折叠行');
   });
 
   await t.test('2. CDP 物理验证: 工具执行卡片命令实时高亮与杜绝 [object Object]', async () => {
@@ -278,12 +278,30 @@ test('Hermes Flux Core Delivery - Real Headless Browser CDP Physical Acceptance 
     assert.equal(inputState.pointerEvents, 'auto', '输入框指针事件必须为 auto');
     assert.ok(inputState.height >= 44, '输入框触控热区必须 >= 44px');
 
-    // 4.3 物理聚焦并通过 CDP 协议驱动真实硬件按键输入
-    await cdpCall('Runtime.evaluate', {
-      expression: `document.getElementById('dock-prompt-input').focus()`,
+    // 4.3 物理度量焦点自愈不变量：严禁手动调用 input.focus() 掩盖问题！
+    // 输入框必须通过双阶 rAF 与选区恢复机制自动恢复焦点
+    const activeElementRes = await cdpCall('Runtime.evaluate', {
+      expression: `(() => {
+        const active = document.activeElement;
+        const input = document.getElementById('dock-prompt-input');
+        return {
+          activeId: active ? active.id : '',
+          isInputActive: active === input,
+          selectionStart: input ? input.selectionStart : -1,
+          selectionEnd: input ? input.selectionEnd : -1,
+          valueLen: input ? input.value.length : -1,
+        };
+      })()`,
+      returnByValue: true,
     });
 
-    // 模拟真实键入 "Hello Hermes CDP"
+    const activeInfo = activeElementRes.result.value;
+    assert.equal(activeInfo.isInputActive, true, '删除会话后输入框必须自动获得焦点，严禁依赖手动二次点击');
+    assert.equal(activeInfo.activeId, 'dock-prompt-input', '当前活跃元素 ID 必须为 dock-prompt-input');
+    assert.equal(activeInfo.selectionStart, activeInfo.valueLen, '光标选区起点必须处于文本末尾以绘制闪烁光标');
+    assert.equal(activeInfo.selectionEnd, activeInfo.valueLen, '光标选区终点必须处于文本末尾以绘制闪烁光标');
+
+    // 4.4 模拟真实键盘硬件物理键入 "Hello Hermes CDP"（直接向页面派发，无需二次点击）
     const textToType = 'Hello Hermes CDP';
     for (const char of textToType) {
       await cdpCall('Input.dispatchKeyEvent', {
@@ -296,7 +314,7 @@ test('Hermes Flux Core Delivery - Real Headless Browser CDP Physical Acceptance 
       });
     }
 
-    // 4.4 读取输入框内部真实物理键入值
+    // 4.5 读取输入框内部真实物理键入值
     const typedValueRes = await cdpCall('Runtime.evaluate', {
       expression: `document.getElementById('dock-prompt-input').value`,
       returnByValue: true,

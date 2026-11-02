@@ -29,6 +29,8 @@ import {
   type ContextMenuProps,
   renderAgentProfileEditorModal,
   t,
+  hasDockSnapshotChanged,
+  type RenderInputDockSnapshot,
 } from '@hermes-flux/ui';
 
 import {
@@ -65,6 +67,11 @@ import {
   applyTurnFailed,
   applyEnteredRead,
   type ActivityState,
+  applyBotActivity,
+  syncBotProfiles,
+  syncActiveSessionToBot,
+  resolveTitlebarTitle,
+  type BotActivityRecord,
 } from '@hermes-flux/core';
 
 import type { HermesDesktopBridge } from '../preload/index.js';
@@ -85,7 +92,7 @@ declare global {
 interface AppState {
   platform: 'windows' | 'macos' | 'linux' | 'ios' | 'android' | 'web';
   theme: 'obsidian-gold' | 'suet-jade' | 'jade-white';
-  activeRailTab: 'chats' | 'projects';
+  activeRailTab: 'chats' | 'projects' | 'groups';
   lang: 'zh' | 'en';
   isMaximized: boolean;
   leftRailCollapsed: boolean;
@@ -401,24 +408,151 @@ const activeRunningGroupRoomIds = new Set<string>();
 const activeRunningSessionIds = new Set<string>();
 const activeRunningBotNames = new Set<string>();
 /** 全局头像资产缓存（name/displayName/id -> dataUrl），防重拉取与时序冲刷 */
+const AVATAR_PERSISTENCE_KEY = 'hermes_flux_avatar_cache';
 const profileAvatarCache = new Map<string, string>();
 
-/** 智能体本地最新活跃映射表（防止被网关冷启动时的旧快照 22:48 覆盖导致闪烁与时间错误） */
-const botLatestActivityMap = new Map<string, { lastMessage: string; timestamp: number }>();
+// 冷启动同步从持久化存储恢复头像，实现 0ms 瞬间带头像开屏，杜绝降级为几何方块
+// gate-degrade: 读取本地头像缓存失败时回落到实时拉取，属于可选性能加速
+try {
+  const persistedAvatars = localStorage.getItem(AVATAR_PERSISTENCE_KEY);
+  if (persistedAvatars) {
+    const parsed = JSON.parse(persistedAvatars);
+    if (parsed && typeof parsed === 'object') {
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v === 'string' && v.startsWith('data:image')) {
+          profileAvatarCache.set(k.toLowerCase(), v);
+        }
+      }
+    }
+  }
+} catch (e) {
+  console.warn('[Flux] Read avatar persistence error:', e);
+}
 
-/** 强力恢复输入舱光标与焦点（解决删除会话或模态弹窗后 Chromium 焦点丢失导致无法输入的问题） */
+function persistAvatarCache(): void {
+  // gate-degrade: localStorage 写满或无权限时静默忽略，不阻断主流程
+  try {
+    const obj: Record<string, string> = {};
+    for (const [k, v] of profileAvatarCache.entries()) {
+      obj[k] = v;
+    }
+    localStorage.setItem(AVATAR_PERSISTENCE_KEY, JSON.stringify(obj));
+  } catch (e) {
+    console.warn('[Flux] Persist avatar cache failed:', e);
+  }
+}
+
+/**
+ * 智能体主工位最新交互映射表（持久化存储 + 运行时内存）
+ *
+ * 【设计意图 (Why)】
+ * 专职 Bot 的主工位（Forever Chat）状态与普通旁聊会话严格正交。
+ * 持久化记录各 Bot 主工位的最后真实对话文本与时间戳，彻底杜绝冷启动与页面刷新时
+ * 因网络异步延迟而闪现旧时间戳（如 22:48）或被普通会话池串扰。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ * 历史上该 Map 仅为纯内存 Map，刷新页面后丢失，导致冷启动探查阶段回退到普通会话池，
+ * 把无关旁聊（如奥特曼短剧方案）的时间和副标题覆盖到专职 Bot 卡片上。
+ *
+ * 【约束与规则 (Rules)】
+ * 读写全部经由 updateBotLatestActivity 收敛，严禁在业务各处分散私自修改。
+ */
+const BOT_ACTIVITY_PERSISTENCE_KEY = 'hermes_flux_bot_activity';
+const botLatestActivityMap = new Map<string, BotActivityRecord>();
+
+interface PersistedBotActivityRecord {
+  lastMessage?: string;
+  timestamp?: number;
+}
+
+function initBotActivityFromStorage(): void {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(BOT_ACTIVITY_PERSISTENCE_KEY) : null;
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw);
+      if (typeof parsed === 'object' && parsed !== null) {
+        for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+          if (v && typeof v === 'object' && 'timestamp' in v) {
+            const rec = v as PersistedBotActivityRecord;
+            if (typeof rec.timestamp === 'number') {
+              botLatestActivityMap.set(k, {
+                lastMessage: String(rec.lastMessage || ''),
+                timestamp: rec.timestamp,
+              });
+            }
+          }
+        }
+      }
+    }
+  // gate-degrade: 本地存储损坏或不可用时不中断启动，平滑回退到网络状态
+  } catch {}
+}
+initBotActivityFromStorage();
+
+function persistBotActivityToStorage(): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const obj: Record<string, PersistedBotActivityRecord> = {};
+    for (const [k, v] of botLatestActivityMap.entries()) {
+      obj[k] = v;
+    }
+    localStorage.setItem(BOT_ACTIVITY_PERSISTENCE_KEY, JSON.stringify(obj));
+  // gate-degrade: 存储配额超限或无写权限时静默降级，不阻断主线程
+  } catch {}
+}
+
+/**
+ * 原子性更新指定 Bot 的主工位最新交互状态（委托给 Core 核心领域纯函数）
+ */
+function updateBotLatestActivity(botName: string, text: string, rawTimestamp: number | string): void {
+  const res = applyBotActivity({
+    profiles: state.profiles,
+    activityMap: botLatestActivityMap,
+    botName,
+    text,
+    timestamp: rawTimestamp,
+    formatTime: formatSessionTime,
+  });
+  state.profiles = res.profiles;
+  persistBotActivityToStorage();
+}
+
+/**
+ * 强力恢复输入舱光标与焦点
+ *
+ * 【设计意图 (Why)】
+ * 在会话删除、新建会话、或者由模态弹窗/确认框（confirm）交还控制权后，
+ * 重新激活 Chromium 窗口与输入舱文本框的聚焦状态，让光标显式闪烁并使键盘可直接键入。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ * 1. 历史代码调用了 `input.blur()`，这在 Chromium 事件循环交织中会主动派发失焦事件并将焦点移交至 body，若后续 focus 被丢弃则直接杀死光标；
+ * 2. 单纯调用 `input.focus()` 未设置选区时，Chromium 在某些排版帧中不会重绘光标闪烁，必须通过 `setSelectionRange(len, len)` 激活绘制；
+ * 3. 单帧执行可能与原生弹窗退回窗口的异步激活产生竞态，采用双阶 rAF 配合微任务与短定时器兜底。
+ *
+ * 【约束与规则 (Rules)】
+ * 仅在当前活动元素非目标 input 时进行重聚焦，避免对用户正在操作的光标选区造成强制跳动。
+ */
 function restoreComposerFocus(): void {
   const restore = () => {
     const input = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
     if (input) {
-      window.focus();
-      input.blur();
+      if (typeof window !== 'undefined' && typeof window.focus === 'function') {
+        window.focus();
+      }
       input.focus({ preventScroll: true });
+      const len = input.value.length;
+      input.setSelectionRange(len, len);
     }
   };
-  requestAnimationFrame(restore);
-  setTimeout(restore, 40);
-  setTimeout(restore, 160);
+  // 同步先尝试立即聚焦
+  restore();
+  // 双阶 rAF：首帧等待 DOM 几何排版收敛，次帧在系统窗口与样式激活稳定时执行聚焦
+  requestAnimationFrame(() => {
+    restore();
+    requestAnimationFrame(restore);
+  });
+  setTimeout(restore, 50);
+  setTimeout(restore, 200);
 }
 
 /** 健壮的 Agent 头像解析器：按 ID、实名、显示名、别名双向穿透查找缓存，避免单聊/群聊匹配丢失 */
@@ -571,16 +705,7 @@ const tokenCoalescer = new TokenCoalescer((flushedMap) => {
         }
         const curFocus = state.activeFocus;
         if (curFocus.type === 'bot') {
-          botLatestActivityMap.set(curFocus.botName, {
-            lastMessage: cachedTarget.content,
-            timestamp: Date.now(),
-          });
-          const currentBot = state.profiles.find((p) => p.name === curFocus.botName);
-          if (currentBot) {
-            currentBot.lastMessage = cachedTarget.content;
-            currentBot.timestamp = Date.now();
-            currentBot.lastTime = formatSessionTime(Date.now());
-          }
+          updateBotLatestActivity(curFocus.botName, cachedTarget.content, Date.now());
         }
       }
       if (entry.thought) cachedTarget.thought = (cachedTarget.thought || '') + entry.thought;
@@ -811,65 +936,6 @@ let activeFetchSessionsGeneration = 0;
  * 【防范的历史坑 (Pitfall)】
  *   曾经直接用 REST 的 preview 当副标题，AI 回复完仍是用户那句提问，用户看到"副标题没更新"。
  */
-const sessionPreviewCache = new Map<string, { lastActive: number; text: string }>();
-let enrichPreviewGeneration = 0;
-
-/** 拉取所有可见会话的真实最后一条消息，回填副标题（带缓存与并发上限） */
-async function enrichSessionPreviews(): Promise<void> {
-  const client = gatewayClient;
-  if (!client) return;
-  const gen = ++enrichPreviewGeneration;
-  // 缓存键用"网关权威时间"（REST last_active），不能用会被乐观推进的本地 timestamp：
-  // 流式期间本地时间每秒在变，用它做键会让缓存必然全 miss（每轮刷新都重拉 60 条）。
-  const targets = state.sessions
-    .filter((s) => !s.isArchived && !s.hidden)
-    .slice(0, 60)
-    // 缓存键必须是网关权威时间。运行中会话的 timestamp 已被 preserveRunningActivity
-    // 替换为本地乐观值，必须取 authoritativeTimestamp，否则每轮刷新缓存全 miss。
-    .map((s) => ({ id: s.id, authoritativeTs: s.authoritativeTimestamp ?? s.timestamp }));
-  const CONCURRENCY = 8;
-  const updates = new Map<string, string>();
-
-  for (let i = 0; i < targets.length; i += CONCURRENCY) {
-    if (gen !== enrichPreviewGeneration) return; // 有更新的一轮，放弃本轮
-    const batch = targets.slice(i, i + CONCURRENCY);
-    const results = await Promise.all(
-      batch.map(async (t) => {
-        const cached = sessionPreviewCache.get(t.id);
-        // 权威时间与缓存一致说明没有新消息，直接复用
-        if (cached && cached.lastActive === t.authoritativeTs) return { id: t.id, text: cached.text };
-        const last = await client.fetchLastMessage(t.id);
-        if (!last || !last.text) return { id: t.id, text: '' };
-        // 缓存键记"网关给的时间"，与下次刷新的 authoritativeTs 可比
-        sessionPreviewCache.set(t.id, { lastActive: t.authoritativeTs, text: last.text });
-        return { id: t.id, text: last.text };
-      })
-    );
-    for (const r of results) {
-      if (r.text) updates.set(r.id, r.text);
-    }
-  }
-
-  if (gen !== enrichPreviewGeneration || updates.size === 0) return;
-
-  // 【关键】必须按 id 写回"当前"state.sessions：对账会整体替换会话对象，
-  // 持有旧引用再赋值等于改了个孤儿对象，界面永远不更新（历史坑）。
-  let changed = false;
-  state.sessions = state.sessions.map((s) => {
-    const text = updates.get(s.id);
-    if (text && s.preview !== text) {
-      changed = true;
-      return { ...s, preview: text };
-    }
-    return s;
-  });
-
-  if (changed && gen === enrichPreviewGeneration) {
-    syncProfileLastMessages();
-    render();
-  }
-}
-
 // 空会话列表常量：避免在多处写 `[] as NormalizedSession[]` 类型断言（调用方只读，不会原地修改）
 const NO_SESSIONS: NormalizedSession[] = [];
 
@@ -985,8 +1051,7 @@ async function fetchSessions(): Promise<void> {
   if (state.projects.length > 0) {
     syncProjectSessions();
   }
-  // 副标题必须来自"真实最后一条消息"（REST 的 preview 只是最后一条用户消息）
-  void enrichSessionPreviews();
+  // 优化：彻底拔除 60 次额外轮询风暴，副标题直接消费网关自带的 preview 与本地活跃映射
   syncProfileLastMessages();
 
   if (!state.activeSessionId && state.sessions.length > 0) {
@@ -1012,81 +1077,30 @@ interface ProjectsListResponse {
   data?: ProjectRawRecord[];
 }
 
-/** 智能体副标题与时间联动：优先扫描会话池提取最新真实对话记录，兜底提取网关原生 last_session */
+/**
+ * 智能体副标题与时间联动（严格实体领域隔离与单一事实来源）
+ *
+ * 【设计意图 (Why)】
+ * 专职 Bot 的主工位（Forever Chat）与普通旁聊会话（Session）是相互正交的两个独立实体领域。
+ * 抽屉顶部的专职 Bot 卡片（rail-primary-agent-card）展现的时间和副标题，仅且必须代表
+ * 该 Bot 本身主工位（Forever Chat）的真实对话状态。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ * 历史上曾经在第 3 步扫描普通会话池（state.sessions）拿取最新普通会话覆盖 Bot 卡片，
+ * 导致用户在专职主工位聊天时，左上角卡片显示着另一个旁聊会话（如“奥特曼反差猫短剧方案 昨天 23:54”）
+ * 的时间和文案，造成严重的时间、副标题与内容不一致与闪烁回退。
+ *
+ * 【约束与规则 (Rules)】
+ * 严禁使用普通会话列表覆盖 Bot 属性；Bot 时间必须经过 formatSessionTime 统一格式化。
+ */
 function syncProfileLastMessages(): void {
-  for (const p of state.profiles) {
-    // 1. 本地最新交互最高优先（解决 Bot 聊天时间卡死在冷启动旧快照 22:48 与闪烁回退的核心死穴）
-    const localAct = botLatestActivityMap.get(p.name);
-    if (localAct) {
-      p.lastMessage = localAct.lastMessage;
-      p.timestamp = localAct.timestamp;
-      p.lastTime = formatSessionTime(localAct.timestamp);
-      continue;
-    }
-
-    // 2. 探查专职 Bot 终身主工位（Forever Chat）缓存中的真实最新对话
-    const foreverChatId = botForeverChatCache.get(p.name);
-    if (foreverChatId) {
-      const cachedMsgs = sessionMessagesCache.get(foreverChatId);
-      if (cachedMsgs && cachedMsgs.length > 0) {
-        const lastMsg = cachedMsgs[cachedMsgs.length - 1];
-        if (lastMsg.content) {
-          p.lastMessage = lastMsg.content.slice(0, 100).replace(/\s+/g, ' ').trim();
-        }
-        if (lastMsg.timestamp) {
-          p.lastTime = lastMsg.timestamp;
-        }
-        continue;
-      }
-    }
-
-    // 3. 匹配本地会话池中归属于该 Bot 的最新普通会话与消息
-    const botSessions = state.sessions
-      .filter((s) => s.botName === p.name || (p.displayName && s.botDisplayName === p.displayName) || (!s.botName && p.isDefault))
-      .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-
-    if (botSessions.length > 0) {
-      const latest = botSessions[0];
-      if (latest.timestamp && (!p.timestamp || latest.timestamp > p.timestamp)) {
-        p.timestamp = latest.timestamp;
-      }
-      const cachedMsgs = sessionMessagesCache.get(latest.id);
-      if (cachedMsgs && cachedMsgs.length > 0) {
-        const lastMsg = cachedMsgs[cachedMsgs.length - 1];
-        if (lastMsg.content) {
-          p.lastMessage = lastMsg.content.slice(0, 100).replace(/\s+/g, ' ').trim();
-        }
-        if (lastMsg.timestamp) {
-          p.lastTime = lastMsg.timestamp;
-        }
-      } else {
-        const snippet = latest.preview || latest.title;
-        if (snippet) {
-          p.lastMessage = snippet.replace(/\s+/g, ' ').trim();
-        }
-        if (latest.time) {
-          p.lastTime = latest.time;
-        }
-      }
-      continue;
-    }
-
-    // 4. 冷启动兜底：从网关原始返回的 last_session 提取（严格换算为毫秒，杜绝秒级浮点数导致年份错乱）
-    const lastSess = p.last_session;
-    if (lastSess) {
-      const preview = lastSess.preview || lastSess.title || '';
-      if (preview) p.lastMessage = preview.replace(/\s+/g, ' ').trim();
-      const rawActive = typeof lastSess.last_active === 'number' ? lastSess.last_active : typeof lastSess.started_at === 'number' ? lastSess.started_at : 0;
-      const lastActiveMs = rawActive > 1e11 ? rawActive : rawActive > 0 ? rawActive * 1000 : 0;
-      if (lastActiveMs > 0) {
-        p.lastTime = formatSessionTime(lastActiveMs);
-        p.timestamp = lastActiveMs;
-      }
-    }
-  }
-
-  // 5. 智能体列表严格按照时间从新到旧倒序排序（最新的排在前面）
-  state.profiles = [...state.profiles].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  state.profiles = syncBotProfiles({
+    profiles: state.profiles,
+    activityMap: botLatestActivityMap,
+    foreverChatCache: botForeverChatCache,
+    sessionMessagesCache,
+    formatTime: formatSessionTime,
+  });
 }
 
 const projectService = new ProjectService();
@@ -1371,6 +1385,7 @@ async function fetchProfiles(): Promise<void> {
             p.avatar = finalUrl;
             profileAvatarCache.set(p.name.toLowerCase(), finalUrl);
             if (p.displayName) profileAvatarCache.set(p.displayName.toLowerCase(), finalUrl);
+            persistAvatarCache();
 
             // 同步将真实头像回填到会话列表中对应 Bot 的所有会话项，彻底消除占位图腾
             for (const s of state.sessions) {
@@ -1385,27 +1400,24 @@ async function fetchProfiles(): Promise<void> {
           console.warn(`[Flux] profiles.get_asset failed for ${p.name}:`, e);
         }
 
-        // 3. 异步尝试探查该 Bot 的终生主工位最新一条消息摘要与时间
+        // 3. 异步探查该 Bot 的专职终身主工位最新真实对话（建立缓存与收敛状态）
         try {
           const forever = await profileService.getOrCreateForeverChat(p.name, client);
           if (forever && forever.sessionId) {
+            botForeverChatCache.set(p.name, forever.sessionId);
             const histRes = await client.fetchSessionMessages(forever.sessionId, { limit: 1, offset: 0, order: 'latest' });
             if (histRes.ok && histRes.messages && histRes.messages.length > 0) {
               const last = histRes.messages[0];
               const parts = Array.isArray(last.parts) ? (last.parts as Array<{ type?: string; text?: string }>) : [];
               const textPart = parts.find((pt) => pt.type === 'text');
               const previewText = textPart?.text || (typeof last.content === 'string' ? last.content : '');
-              if (previewText) p.lastMessage = previewText.replace(/\s+/g, ' ').trim();
               const ts = last.created_at || last.timestamp;
-              if (ts) {
-                const numTs = typeof ts === 'number' ? (ts > 1e11 ? ts : ts * 1000) : Date.parse(ts) || Date.now();
-                const diffMin = Math.max(1, Math.round((Date.now() - numTs) / 60000));
-                p.lastTime = diffMin < 60 ? t('time.minutesAgo', { count: String(diffMin) }) : diffMin < 1440 ? t('time.hoursAgo', { count: String(Math.round(diffMin / 60)) }) : t('time.daysAgo', { count: String(Math.round(diffMin / 1440)) });
-              }
+              const numTs = typeof ts === 'number' ? (ts > 1e11 ? ts : ts * 1000) : Date.parse(ts) || Date.now();
+              updateBotLatestActivity(p.name, previewText, numTs);
               render();
             }
           }
-        // gate-degrade: 单条消息解析失败按跳过处理，其余消息照常渲染
+        // gate-degrade: 单条主工位探测失败按跳过处理，不影响其余 Bot 资产渲染
         } catch {
           // 容错放行
         }
@@ -1593,13 +1605,16 @@ function parseRawMessages(list: any[]): MessageViewModel[] {
           continue;
         }
       } else if (synthesizedToolCall) {
+        const rawTs = m.timestamp ?? m.created_at;
+        const numTs = typeof rawTs === 'number' ? (rawTs > 1e11 ? rawTs : rawTs * 1000) : Date.parse(rawTs) || Date.now();
         parsedMessages.push({
           id: String(m.row_id ?? m.id ?? `msg-${idx}`),
           role: 'assistant',
           content: '',
           thought: '',
           toolCalls: [synthesizedToolCall],
-          timestamp: formatTimestamp(m.timestamp ?? m.created_at ?? Date.now()),
+          timestamp: formatTimestamp(numTs),
+          rawTimestamp: numTs,
         });
         continue;
       } else {
@@ -1619,6 +1634,9 @@ function parseRawMessages(list: any[]): MessageViewModel[] {
       continue;
     }
 
+    const rawTs = m.timestamp ?? m.created_at;
+    const numTs = typeof rawTs === 'number' ? (rawTs > 1e11 ? rawTs : rawTs * 1000) : Date.parse(rawTs) || Date.now();
+
     parsedMessages.push({
       id: String(m.row_id ?? m.id ?? `msg-${idx}`),
       role: (rawRole === 'user' || rawRole === 'system' ? rawRole : 'assistant') as MessageViewModel['role'],
@@ -1626,7 +1644,8 @@ function parseRawMessages(list: any[]): MessageViewModel[] {
       thought,
       thoughtDurationMs: m.thought_duration_ms,
       toolCalls,
-      timestamp: formatTimestamp(m.timestamp ?? m.created_at ?? Date.now()),
+      timestamp: formatTimestamp(numTs),
+      rawTimestamp: numTs,
     });
   }
 
@@ -1694,6 +1713,53 @@ async function loadOlderMessages(): Promise<void> {
   render();
 }
 
+/**
+ * 将当前活动会话的最新真实消息与时间反哺给左侧栏对应的卡片实体（专职 Bot 或普通会话）
+ *
+ * 【设计意图 (Why)】
+ * 无论是 0ms 内存秒开还是通过 REST 高速拉取完成，当前消息流中的最新一条消息
+ * 均为该会话权威的历史真值。在此处触发反哺，可彻底保证无论何时切换会话、刷新页面
+ * 或冷启动，左侧栏展示的副标题和时间与中间视口最新一条消息绝对 100% 强一致。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ * 历史上 loadMessages 拉取到最新历史后从未回填给 Profile，导致 Bot 卡片一直停留
+ * 在上次甚至先前被普通会话覆盖的错误时间（如 23:54），界面左右两端彻底割裂。
+ *
+ * 【约束与规则 (Rules)】
+ * 专职 Bot 与普通会话各归其位：仅当该 sessionId 属于 Bot 时更新 Bot，普通会话更新普通会话。
+ */
+function syncActiveSessionPreviewToRail(sessionId: string, messages: MessageViewModel[]): void {
+  if (!sessionId || messages.length === 0) return;
+
+  // 1. 若当前会话为专职 Bot 的 Forever Chat，委托 core 领域逻辑更新
+  const botRes = syncActiveSessionToBot({
+    sessionId,
+    messages,
+    foreverChatCache: botForeverChatCache,
+    activeFocusBotName: state.activeFocus.type === 'bot' ? state.activeFocus.botName : undefined,
+    profiles: state.profiles,
+    activityMap: botLatestActivityMap,
+    formatTime: formatSessionTime,
+  });
+  if (botRes) {
+    state.profiles = botRes.profiles;
+    persistBotActivityToStorage();
+  }
+
+  // 2. 若为普通会话，更新该普通会话的预览与时间戳
+  const sess = state.sessions.find((s) => s.id === sessionId);
+  if (sess) {
+    const lastMsg = messages[messages.length - 1];
+    const lastText = (lastMsg.content || lastMsg.thought || '').slice(0, 100).replace(/\s+/g, ' ').trim();
+    const rawTs = lastMsg.rawTimestamp ?? Date.now();
+    if (lastText) {
+      sess.preview = lastText;
+      sess.timestamp = rawTs;
+      sess.time = formatSessionTime(rawTs);
+    }
+  }
+}
+
 async function loadMessages(sessionId: string): Promise<void> {
   if (!sessionId || !gatewayClient) {
     state.messages = [];
@@ -1709,6 +1775,7 @@ async function loadMessages(sessionId: string): Promise<void> {
   const cached = sessionMessagesCache.get(sessionId);
   if (cached && cached.length > 0) {
     state.messages = [...cached];
+    syncActiveSessionPreviewToRail(sessionId, state.messages);
     state.hasOlderMessages = (sessionServerOffset.get(sessionId) || 0) >= INITIAL_WINDOW_PAGE_SIZE;
     pendingScrollToBottom = true;
     render();
@@ -1758,6 +1825,7 @@ async function loadMessages(sessionId: string): Promise<void> {
         }
       }
       sessionMessagesCache.set(sessionId, merged);
+      syncActiveSessionPreviewToRail(sessionId, merged);
       sessionServerOffset.set(sessionId, outcome.pagination?.returned || outcome.messages.length);
       state.messages = merged;
       state.hasOlderMessages = Boolean(outcome.pagination && outcome.pagination.returned >= INITIAL_WINDOW_PAGE_SIZE);
@@ -2300,6 +2368,17 @@ async function selectSession(id: string, options?: { preserveFocus?: boolean }):
   if (restoredInput) {
     restoredInput.value = sessionDraftMap.get(id) || '';
   }
+
+  // 【设计意图 (Why)】
+  // 会话切换完成（包含删除当前会话后自动移交至下一会话）后，必须立即恢复输入舱光标与焦点，
+  // 杜绝用户从列表切换进入会话后发现输入框无光标无法直接键入的痛点。
+  // 【防范的陷阱 (Pitfall)】
+  // 若未在此处主动聚焦，依赖外部可能丢失或时序未对齐的定时器，会导致输入框长期处于失焦脱敏态。
+  // 【约束与规则 (Rules)】
+  // 仅在当前会话未处于正在流式生成态时激活焦点。
+  if (!state.isStreaming) {
+    restoreComposerFocus();
+  }
 }
 
 /**
@@ -2825,17 +2904,7 @@ async function sendMessage(text: string): Promise<void> {
     applyTurnStarted(activeRunningBotNames, unreadBotNames, currentFocus.botName);
     const focusBotName = currentFocus.botName;
     const nowMs = Date.now();
-    botLatestActivityMap.set(focusBotName, {
-      lastMessage: trimmed.replace(/\s+/g, ' ').trim(),
-      timestamp: nowMs,
-    });
-    const currentBot = state.profiles.find((p) => p.name === focusBotName);
-    if (currentBot) {
-      currentBot.lastMessage = trimmed.replace(/\s+/g, ' ').trim();
-      currentBot.timestamp = nowMs;
-      currentBot.lastTime = formatSessionTime(nowMs);
-      state.profiles = [currentBot, ...state.profiles.filter((p) => p.name !== currentBot.name)];
-    }
+    updateBotLatestActivity(focusBotName, trimmed, nowMs);
   }
 
   const assistantMsg: MessageViewModel = {
@@ -3153,10 +3222,7 @@ function applyTurnActions(actions: TurnAction[]): void {
             ? (state.messages.length > 0 ? state.messages[state.messages.length - 1] : null)
             : (activeStreamingStoredSessionId ? sessionMessagesCache.get(activeStreamingStoredSessionId)?.slice(-1)[0] || null : null);
           if (finalMsg?.content) {
-            botLatestActivityMap.set(activeStreamingBotName, {
-              lastMessage: finalMsg.content.slice(0, 100).replace(/\s+/g, ' ').trim(),
-              timestamp: Date.now(),
-            });
+            updateBotLatestActivity(activeStreamingBotName, finalMsg.content, Date.now());
           }
           applyTurnCompleted(activeRunningBotNames, unreadBotNames, activeStreamingBotName, isBotFocused);
           activeStreamingBotName = null;
@@ -3507,6 +3573,7 @@ interface RenderMessagesSnapshot {
 }
 
 let lastMessagesSnapshot: RenderMessagesSnapshot | null = null;
+let lastInputDockSnapshot: RenderInputDockSnapshot | null = null;
 
 function render(): void {
   const root = document.getElementById('flux-app-root');
@@ -3530,23 +3597,36 @@ function render(): void {
   document.documentElement.setAttribute('data-theme', state.theme);
   document.documentElement.dataset.maximized = state.isMaximized ? 'true' : 'false';
 
+  let currentProjectName: string | undefined;
+  let currentProjectPath: string | undefined;
+
+  const currentTitle = resolveTitlebarTitle({
+    activeFocus: state.activeFocus,
+    profiles: state.profiles,
+    groupRooms: state.groupRooms,
+    sessions: state.sessions,
+    activeSessionId: state.activeSessionId,
+    defaultTitle: t('titlebar.defaultTitle'),
+    notConnectedTitle: t('titlebar.notConnected'),
+    defaultRoomName: t('group.defaultRoomName'),
+    isConnected: state.gatewayConnected,
+    profileName: state.profileName,
+  });
+
   const activeSession = state.sessions.find((s) => s.id === state.activeSessionId);
-  const rawTitle = activeSession ? activeSession.title : (state.gatewayConnected ? t('titlebar.defaultTitle') : t('titlebar.notConnected'));
-  const currentTitle = rawTitle === 'Bot Chat' ? `🤖 ${state.profileName} (Forever Chat)` : rawTitle;
+  if (activeSession) {
+    const currentProject = state.projects.find((p) => p.id === activeSession.projectId || (activeSession.projectName && p.name === activeSession.projectName) || doesSessionBelongToProject(activeSession, p));
+    currentProjectName = currentProject ? currentProject.name : activeSession?.projectName;
+    currentProjectPath = currentProject ? currentProject.path : undefined;
 
-  const currentProject = activeSession
-    ? state.projects.find((p) => p.id === activeSession.projectId || (activeSession.projectName && p.name === activeSession.projectName) || doesSessionBelongToProject(activeSession, p))
-    : undefined;
-  let currentProjectName = currentProject ? currentProject.name : activeSession?.projectName;
-  let currentProjectPath = currentProject ? currentProject.path : undefined;
-
-  // 兜底路径推断：若会话未关联项目实体，但拥有有效工作目录 cwd，从目录末端提取 Workspace 名称展示
-  if (!currentProjectName && activeSession?.cwd) {
-    const norm = activeSession.cwd.replace(/\\/g, '/').replace(/\/+$/, '');
-    const folderName = norm.split('/').pop() || norm;
-    if (folderName && folderName !== '/' && !folderName.endsWith(':')) {
-      currentProjectName = folderName;
-      currentProjectPath = norm;
+    // 兜底路径推断：若会话未关联项目实体，但拥有有效工作目录 cwd，从目录末端提取 Workspace 名称展示
+    if (!currentProjectName && activeSession?.cwd) {
+      const norm = activeSession.cwd.replace(/\\/g, '/').replace(/\/+$/, '');
+      const folderName = norm.split('/').pop() || norm;
+      if (folderName && folderName !== '/' && !folderName.endsWith(':')) {
+        currentProjectName = folderName;
+        currentProjectPath = norm;
+      }
     }
   }
 
@@ -3562,6 +3642,22 @@ function render(): void {
     hasOlder: state.hasOlderMessages,
     isLoadingOlder: state.isLoadingOlder,
     profileName: state.profileName,
+  };
+
+  const isStreamingCurrent = isStreamingActiveForCurrentSession();
+  const currentDockSnapshot: RenderInputDockSnapshot = {
+    selectedModel: state.selectedModel,
+    reasoningLevel: state.reasoningLevel,
+    approvalMode: state.approvalMode,
+    isStreaming: isStreamingCurrent,
+    disabled: !state.gatewayConnected,
+    modelMenuOpen: state.modelMenuOpen,
+    notice: state.dockNotice,
+    activityStatus: isStreamingCurrent ? state.agentActivityStatus : undefined,
+    modelCount: state.availableModels.length,
+    modelSearchQuery: state.modelSearchQuery,
+    recentModelsHash: state.recentModels.join(','),
+    favoriteModelsHash: state.favoriteModels.join(','),
   };
 
   const inOngoingStreamingTurn =
@@ -3615,10 +3711,15 @@ function render(): void {
     activityState: resolveGroupActivity(g.roomId),
   }));
 
-  const decoratedProfiles = state.profiles.map((p) => ({
-    ...p,
-    activityState: resolveBotActivity(p.name),
-  }));
+  const decoratedProfiles = state.profiles.map((p) => {
+    // 强制穿透：优先从全局头像缓存中解析真实头像资产，彻底消除时序冲刷导致的头像丢失
+    const resolvedAvatar = p.avatar || resolveAgentAvatar(p.name) || (p.displayName ? resolveAgentAvatar(p.displayName) : '') || '';
+    return {
+      ...p,
+      avatar: resolvedAvatar,
+      activityState: resolveBotActivity(p.name),
+    };
+  });
 
   const bodyContainer = root.querySelector('.flux-body-container');
 
@@ -3747,6 +3848,7 @@ function render(): void {
 
     root.innerHTML = html;
     lastMessagesSnapshot = currentMessagesSnapshot;
+    lastInputDockSnapshot = currentDockSnapshot;
     applyStreamAnchor(streamAnchor, pinBottom);
   } else {
     // 2. High-performance Subtree/Section Isolation Update (Zero DOM thrashing on conversation stream)
@@ -3829,8 +3931,18 @@ function render(): void {
       });
     }
 
-    // Input Dock update
+    // Input Dock update (Zero DOM thrashing & caret preservation)
+    // 【设计意图 (Why)】
+    // 保护输入舱在非输入舱相关状态演变（如会话切换、侧边栏收缩、未读点刷新）时不被破坏性全量替换，
+    // 保持真实的 <textarea> DOM 节点与 Blink Caret 选区拓扑 100% 物理稳定。
+    // 【防范的历史坑 (Pitfall)】
+    // 历史代码在每帧 render() 中无条件执行 existingDock.outerHTML = nextDockHtml，
+    // 导致输入框被连根拔除重建，刚获得的焦点与输入法状态瞬间清空，引发“无光标无法输入文字”。
+    // 【约束与规则 (Rules)】
+    // 仅在 dockChanged（模型/流式/通知/禁用态变化）或不存在 existingDock 时执行替换，否则原生节点绝对不动。
     const existingDock = root.querySelector('.input-dock-container');
+    const dockChanged = hasDockSnapshotChanged(lastInputDockSnapshot, currentDockSnapshot);
+
     const nextDockHtml = state.gatewayConnected
       ? renderInputDock({
           selectedModel: state.selectedModel,
@@ -3841,22 +3953,26 @@ function render(): void {
           modelSearchQuery: state.modelSearchQuery,
           reasoningLevel: state.reasoningLevel,
           approvalMode: state.approvalMode,
-          isStreaming: isStreamingActiveForCurrentSession(),
+          isStreaming: isStreamingCurrent,
           disabled: !state.gatewayConnected,
           modelMenuOpen: state.modelMenuOpen,
           notice: state.dockNotice,
-          activityStatus: isStreamingActiveForCurrentSession() ? state.agentActivityStatus : undefined,
+          activityStatus: isStreamingCurrent ? state.agentActivityStatus : undefined,
         })
       : '';
+
     if (existingDock) {
-      if (nextDockHtml) {
-        existingDock.outerHTML = nextDockHtml;
-      } else {
+      if (!nextDockHtml) {
         existingDock.remove();
+        lastInputDockSnapshot = null;
+      } else if (dockChanged) {
+        existingDock.outerHTML = nextDockHtml;
+        lastInputDockSnapshot = currentDockSnapshot;
       }
     } else if (nextDockHtml) {
       const middlePod = root.querySelector('.flux-middle-pod');
       if (middlePod) middlePod.insertAdjacentHTML('beforeend', nextDockHtml);
+      lastInputDockSnapshot = currentDockSnapshot;
     }
 
     // Settings Modal
@@ -4819,11 +4935,15 @@ function bindEvents(): void {
     };
   });
 
-  // Pinned Bot Row click & Context Menu in Left Rail
-  document.querySelectorAll('.rail-pinned-bot-row').forEach((row) => {
+  // Pinned Bot Row & Station Agent click: 统一支持微轨头像、抽屉第一行大卡片与列表行
+  document.querySelectorAll('.rail-pinned-bot-row, .station-agent-badge, .rail-primary-agent-card').forEach((row) => {
     (row as HTMLElement).onclick = (e) => {
-      const profile = (row as HTMLElement).dataset.profile;
+      const profile =
+        (row as HTMLElement).dataset.profile ||
+        (row as HTMLElement).dataset.stationProfile ||
+        (row as HTMLElement).dataset.primaryBot;
       if (profile) {
+        // 关键硬约束：点击仅切至该 Agent 的主工位对话流，绝不修改 leftRailCollapsed（绝不自动弹开抽屉）
         void openBotChat(profile);
       }
     };
@@ -4831,7 +4951,10 @@ function bindEvents(): void {
     (row as HTMLElement).oncontextmenu = (e) => {
       e.preventDefault();
       e.stopPropagation();
-      const profile = (row as HTMLElement).dataset.profile;
+      const profile =
+        (row as HTMLElement).dataset.profile ||
+        (row as HTMLElement).dataset.stationProfile ||
+        (row as HTMLElement).dataset.primaryBot;
       if (profile) {
         state.sessionContextMenu = {
           x: Math.min(e.clientX, window.innerWidth - 180),
@@ -4923,6 +5046,23 @@ function bindEvents(): void {
       }
     };
   });
+
+  // Station Rail Bottom Shortcuts (Groups & Projects)
+  const stationGroupsBtn = document.getElementById('rail-station-groups-btn');
+  if (stationGroupsBtn) {
+    stationGroupsBtn.onclick = () => {
+      state.activeRailTab = state.activeRailTab === 'groups' ? 'chats' : 'groups';
+      render();
+    };
+  }
+
+  const stationProjectsBtn = document.getElementById('rail-station-projects-btn');
+  if (stationProjectsBtn) {
+    stationProjectsBtn.onclick = () => {
+      state.activeRailTab = state.activeRailTab === 'projects' ? 'chats' : 'projects';
+      render();
+    };
+  }
 
   document.querySelectorAll('.session-item').forEach((item) => {
     (item as HTMLElement).onclick = (e) => {
@@ -5021,9 +5161,11 @@ function bindEvents(): void {
         void archiveSession(ctx.targetId);
       } else if (action === 'delete') {
         const confirmed = confirm(t('ctx.confirmDeleteSession', { name: ctx.targetName || ctx.targetId }));
-        restoreComposerFocus();
         if (confirmed) {
           void deleteSession(ctx.targetId);
+        } else {
+          // 用户取消删除：因原生 confirm 对话框关闭可能导致窗口脱敏，立即恢复输入舱光标与焦点
+          restoreComposerFocus();
         }
       }
     };
@@ -5034,9 +5176,11 @@ function bindEvents(): void {
       e.stopPropagation();
       const id = (btn as HTMLElement).dataset.id;
       const confirmed = id && confirm(t('ctx.confirmDeleteSession', { name: id }));
-      restoreComposerFocus();
       if (confirmed) {
         void deleteSession(id);
+      } else {
+        // 用户取消删除：因原生 confirm 对话框关闭可能导致窗口脱敏，立即恢复输入舱光标与焦点
+        restoreComposerFocus();
       }
     };
   });
@@ -5162,52 +5306,55 @@ function bindEvents(): void {
 
   if (sendBtn) sendBtn.onclick = () => handleSend('button');
   if (inputEl) {
-    const collapseBtn = document.getElementById('dock-input-collapse-toggle') as HTMLButtonElement | null;
-    let isManuallyCollapsed = false;
+    if (inputEl.dataset.dockEventsBound !== 'true') {
+      inputEl.dataset.dockEventsBound = 'true';
+      const collapseBtn = document.getElementById('dock-input-collapse-toggle') as HTMLButtonElement | null;
+      let isManuallyCollapsed = false;
 
-    const adjustHeight = () => {
-      if (isManuallyCollapsed) return;
-      inputEl.style.height = 'auto';
-      const scrollHeight = inputEl.scrollHeight;
-      const targetHeight = Math.min(Math.max(scrollHeight, 48), 240);
-      inputEl.style.height = `${targetHeight}px`;
+      const adjustHeight = () => {
+        if (isManuallyCollapsed) return;
+        inputEl.style.height = 'auto';
+        const scrollHeight = inputEl.scrollHeight;
+        const targetHeight = Math.min(Math.max(scrollHeight, 48), 240);
+        inputEl.style.height = `${targetHeight}px`;
+
+        if (collapseBtn) {
+          if (scrollHeight > 100) {
+            collapseBtn.style.display = 'inline-block';
+            collapseBtn.textContent = t('dock.collapse');
+          } else {
+            collapseBtn.style.display = 'none';
+          }
+        }
+      };
 
       if (collapseBtn) {
-        if (scrollHeight > 100) {
-          collapseBtn.style.display = 'inline-block';
-          collapseBtn.textContent = t('dock.collapse');
-        } else {
-          collapseBtn.style.display = 'none';
-        }
+        collapseBtn.onclick = (e) => {
+          e.preventDefault();
+          isManuallyCollapsed = !isManuallyCollapsed;
+          if (isManuallyCollapsed) {
+            inputEl.style.height = '64px';
+            collapseBtn.textContent = t('dock.showMore');
+          } else {
+            adjustHeight();
+            collapseBtn.textContent = t('dock.collapse');
+          }
+        };
       }
-    };
 
-    if (collapseBtn) {
-      collapseBtn.onclick = (e) => {
-        e.preventDefault();
-        isManuallyCollapsed = !isManuallyCollapsed;
-        if (isManuallyCollapsed) {
-          inputEl.style.height = '64px';
-          collapseBtn.textContent = t('dock.showMore');
-        } else {
-          adjustHeight();
-          collapseBtn.textContent = t('dock.collapse');
+      inputEl.addEventListener('input', adjustHeight);
+      // Initial auto adjustment for restored drafts
+      adjustHeight();
+
+      inputEl.addEventListener('compositionstart', () => { isComposing = true; });
+      inputEl.addEventListener('compositionend', () => { isComposing = false; });
+      inputEl.onkeydown = (e) => {
+        if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
+          e.preventDefault();
+          handleSend('enter');
         }
       };
     }
-
-    inputEl.addEventListener('input', adjustHeight);
-    // Initial auto adjustment for restored drafts
-    adjustHeight();
-
-    inputEl.addEventListener('compositionstart', () => { isComposing = true; });
-    inputEl.addEventListener('compositionend', () => { isComposing = false; });
-    inputEl.onkeydown = (e) => {
-      if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
-        e.preventDefault();
-        handleSend('enter');
-      }
-    };
   }
 
   // Scroll stream: Auto-load older messages on top reach with requestAnimationFrame & cooldown lock
@@ -5345,6 +5492,11 @@ function bindRailResizeEvents(): void {
       ev.preventDefault();
       ev.stopPropagation();
 
+      try {
+        handle.setPointerCapture(ev.pointerId);
+      // gate-degrade: PointerCapture 在某些无头环境或断开时抛错属正常现象
+      } catch {}
+
       const startX = ev.clientX;
       const startWidth = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(cssVar)) || defaultW;
       document.documentElement.setAttribute('data-rail-resizing', isLeft ? 'left' : 'right');
@@ -5358,6 +5510,10 @@ function bindRailResizeEvents(): void {
       };
 
       const onPointerUp = (upEv: PointerEvent) => {
+        try {
+          handle.releasePointerCapture(upEv.pointerId);
+        // gate-degrade: releasePointerCapture 容错处理
+        } catch {}
         window.removeEventListener('pointermove', onPointerMove);
         window.removeEventListener('pointerup', onPointerUp);
         window.removeEventListener('pointercancel', onPointerUp);
