@@ -42,7 +42,7 @@ export interface MinimalMessageLike {
  * 支持秒级时间戳（< 1e11）、毫秒级时间戳、ISO 字符串以及非法输入安全兜底
  */
 export function normalizeTimestamp(raw: number | string | undefined | null): number {
-  if (typeof raw === 'number' && !Number.isNaN(raw)) {
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
     if (raw <= 0) return 0;
     return raw > 1e11 ? raw : raw * 1000;
   }
