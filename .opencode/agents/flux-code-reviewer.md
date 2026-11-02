@@ -90,6 +90,18 @@ permissions:
 - 是否存在恒真断言（`assert.equal(1, 1)`）？
 - 定时器/监听器是否清理，有无资源泄漏？是否使用 Promise 契约而非脆弱硬 sleep？
 
+### 4.4 形式化安全定理与特征地图增量门禁（一票否决硬红线）
+
+审查者必须根据本次改动面严格执行二项必查：
+1. **触碰状态机/并发时序/数据对账**（如 core/src/rpc/*、core/src/session/*、core/src/profile/botActivitySync.ts）：
+   - 核查 packages/core/__tests__/formal/ 是否增量追加了对应定理证明（数学不变量，1000+ 次随机生成测试）；
+   - 亲自执行 npm run verify:formal，确认 7 大及新增定理全部获证无反例；
+   - **若修改了核心状态机或时序逻辑却未追加形式化定理证明，直接一票否决（FAIL）**。
+2. **引入全新用户可达独立功能/页面/工作流**：
+   - 核查 .opencode/skills/verify-hermes-flux/features/ 是否按 4 段式规范新增了 <feature-id>.md；
+   - 核查 artifacts/verification/<feature-id>/ 是否存在真实捕获的 screenshot.png 与 evidence.json；
+   - **若新增用户界面功能却未落位特征地图与物理截图，直接一票否决（FAIL）**。
+
 ### 5. 门禁不变量本身是否被削弱
 
 - 本次改动是否修改了 `scripts/gates/rules.mjs`？若是，必须审查规则是否被放宽。

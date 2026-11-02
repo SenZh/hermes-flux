@@ -35,6 +35,13 @@ import {
 } from '@hermes-flux/ui';
 
 import {
+  messageActionController,
+  resolveCopyContent,
+  calculateForkCount,
+  findPreviousUserPrompt,
+} from './messageActions.js';
+
+import {
   HermesGatewayClient,
   TokenCoalescer,
   reduceGatewayEvent,
@@ -5714,10 +5721,11 @@ function bindEvents(): void {
 }
 
 /**
- * 消息微距操作栏动作处理函数集
+ * 消息微距操作栏动作处理函数集（委托给 messageActions 核心领域模块）
  *
  * 【设计意图 (Why)】
  * 支撑对话流中每条消息的即时操作（复制纯文本/Markdown、回滚回填至输入框、基于消息节点分支会话、重新生成本轮回复）。
+ * 通过委派给独立 messageActionController 领域控制器，实现生产运行与单元测试 100% 共享相同逻辑。
  *
  * 【防范的历史坑 (Pitfall)】
  * - 复制内容防范 HTML 属性截断：优先从 state.messages 模型内存中根据 data-msg-id 提取完整 content，仅在内存缺失时回退 data-content；
@@ -5730,111 +5738,66 @@ function bindEvents(): void {
  * - 严格类型，严禁 as any。
  */
 async function handleCopyMessage(btn: HTMLElement): Promise<void> {
-  const contentAttr = btn.getAttribute('data-content') || '';
-  const rowEl = btn.closest<HTMLElement>('[data-msg-id]');
-  const msgId = btn.getAttribute('data-msg-id') || rowEl?.getAttribute('data-msg-id');
-  const targetMsg = msgId ? state.messages.find((m) => m.id === msgId) : undefined;
-  const copyText = targetMsg?.content || contentAttr;
-  if (!copyText) return;
-
-  const ok = await safeCopyText(copyText);
-  if (ok) {
-    const originalSvg = btn.innerHTML;
-    btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
-    setTimedDockNotice(t('common.copied'));
-    setTimeout(() => {
-      btn.innerHTML = originalSvg;
-    }, 1500);
-  }
+  await messageActionController.executeCopy(
+    btn,
+    state.messages,
+    safeCopyText,
+    setTimedDockNotice,
+    t('common.copied')
+  );
 }
 
 function handleRollbackMessage(btn: HTMLElement): void {
-  const contentAttr = btn.getAttribute('data-content') || '';
-  const rowEl = btn.closest<HTMLElement>('[data-msg-id]');
-  const msgId = btn.getAttribute('data-msg-id') || rowEl?.getAttribute('data-msg-id');
-  const targetMsg = msgId ? state.messages.find((m) => m.id === msgId) : undefined;
-  const rollbackText = targetMsg?.content || contentAttr;
-  if (!rollbackText) return;
-
   const textarea = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
-  if (textarea) {
-    textarea.value = rollbackText;
-    textarea.focus();
-    textarea.setSelectionRange(rollbackText.length, rollbackText.length);
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-    document.body.setAttribute('data-last-rollback', rollbackText);
-    setTimedDockNotice(t('chat.rollbackSuccess'));
-  }
+  messageActionController.executeRollback(
+    btn,
+    state.messages,
+    textarea,
+    setTimedDockNotice,
+    t('chat.rollbackSuccess')
+  );
 }
 
-let isForkPending = false;
-let isRegeneratePending = false;
-
 async function handleForkMessage(btn: HTMLElement): Promise<void> {
-  if (isForkPending) return;
-  if (!state.activeSessionId || !gatewayClient) {
+  if (!gatewayClient) {
     setTimedDockNotice(t('chat.gatewayNotConnected'));
     return;
   }
-  isForkPending = true;
-  const rowEl = btn.closest<HTMLElement>('[data-msg-id]');
-  const msgId = btn.getAttribute('data-msg-id') || rowEl?.getAttribute('data-msg-id');
-  const msgIdx = msgId ? state.messages.findIndex((m) => m.id === msgId) : -1;
-  const count = msgIdx >= 0 ? msgIdx + 1 : state.messages.length;
-
-  try {
-    setTimedDockNotice(t('chat.forking'));
-    const branchRes = await gatewayClient.call<Record<string, unknown>>('session.branch', {
-      session_id: state.activeSessionId,
-      count,
-      profile: state.profileName || 'default',
-    });
-    if (branchRes && (branchRes.session_id || branchRes.stored_session_id)) {
-      const newSessionId = String(branchRes.stored_session_id || branchRes.session_id);
+  await messageActionController.executeFork(btn, {
+    activeSessionId: state.activeSessionId,
+    profileName: state.profileName || 'default',
+    messages: state.messages,
+    callRpc: (method, params) => gatewayClient!.call<Record<string, unknown>>(method, params),
+    onSuccess: async (newSessionId) => {
       await scheduleSessionsRefresh();
       await selectSession(newSessionId);
-      setTimedDockNotice(t('chat.forkSuccess'));
-    } else {
-      setTimedDockNotice(t('chat.forkFailed'));
-    }
-  } catch (err) {
-    console.error('[Hermes Flux] session.branch failed:', err);
-    setTimedDockNotice(`${t('chat.forkFailed')}: ${describeRpcError(err)}`);
-  } finally {
-    isForkPending = false;
-  }
+    },
+    setNotice: setTimedDockNotice,
+    labels: {
+      notConnected: t('chat.gatewayNotConnected'),
+      forking: t('chat.forking'),
+      success: t('chat.forkSuccess'),
+      failed: t('chat.forkFailed'),
+    },
+  });
 }
 
 async function handleRegenerateMessage(btn: HTMLElement): Promise<void> {
-  if (isRegeneratePending) return;
-  if (!state.activeSessionId || !gatewayClient) {
-    setTimedDockNotice(t('chat.gatewayNotConnected'));
-    return;
-  }
-  if (isStreamingActiveForCurrentSession()) {
-    setTimedDockNotice(t('chat.streamBusyNotice'));
-    return;
-  }
-  isRegeneratePending = true;
-  const rowEl = btn.closest<HTMLElement>('[data-msg-id]');
-  const msgId = btn.getAttribute('data-msg-id') || rowEl?.getAttribute('data-msg-id');
-  const msgIdx = msgId ? state.messages.findIndex((m) => m.id === msgId) : -1;
-
-  const prevUserMsg = (msgIdx >= 0 ? state.messages.slice(0, msgIdx) : state.messages)
-    .slice()
-    .reverse()
-    .find((m) => m.role === 'user');
-
-  try {
-    if (prevUserMsg && prevUserMsg.content) {
-      setTimedDockNotice(t('chat.regenerating'));
-      await sendMessage(prevUserMsg.content);
-    } else {
-      setTimedDockNotice(t('chat.userPromptNotFound'));
-    }
-  } finally {
-    isRegeneratePending = false;
-  }
+  await messageActionController.executeRegenerate(btn, {
+    activeSessionId: state.activeSessionId,
+    isStreaming: isStreamingActiveForCurrentSession(),
+    messages: state.messages,
+    sendPrompt: async (text) => {
+      await sendMessage(text);
+    },
+    setNotice: setTimedDockNotice,
+    labels: {
+      notConnected: t('chat.gatewayNotConnected'),
+      streamingBusy: t('chat.streamBusyNotice'),
+      regenerating: t('chat.regenerating'),
+      promptNotFound: t('chat.userPromptNotFound'),
+    },
+  });
 }
 
 if (typeof window !== 'undefined') {

@@ -451,6 +451,11 @@ npm run verify                                  # 5. 交付前四位一体总体
        - 严禁「只改生产逻辑不写测试」，测试必须物理落盘（`packages/*/__tests__/**`）；
        - 逐行比对生产代码分支与测试断言，正向、边界、负向、时序四大象限不得存在任何未覆盖遗漏；
        - **测试有效性变异检验（把生产代码改错，测试必须变红；测试依然绿灯判定假测试一票否决）**；
+      - ⑤ **形式化定理与特征地图增量门禁（Formal & Feature-Map Mandate · 一票否决）**：
+        - **若改动触碰底层状态机、并发时序、数据对账或长连接**（如 core/src/rpc/*、core/src/session/*、core/src/profile/botActivitySync.ts）：
+          **必须**在 packages/core/__tests__/formal/ 增量追加一条形式化安全数学定理证明（基于 fast-check 在 1,000+ 次随机交错中证明）；遗漏直接打回！
+        - **若改动引入全新用户可达独立功能/页面/工作流**：
+          **必须**在 .opencode/skills/verify-hermes-flux/features/ 追加 <feature-id>.md，并在 scripts/verify/control-flux.mjs 中接入驱动捕获真实截图存盘至 artifacts/verification/；遗漏直接打回！
    - **裁决契约**：结论为 `FAIL` 时，必须修复所有阻塞项并重新过审。
 
 3. **遇到阻断修复 ➔ 委派 `flux-gate-fixer`**：

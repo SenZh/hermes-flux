@@ -58,6 +58,18 @@ async function buildAll() {
   });
   console.log('  ✔ Renderer script compiled');
 
+  // 3.1 Build Message Actions Module (for runtime & test execution)
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/messageActions.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/messageActions.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    sourcemap: true,
+  });
+  console.log('  ✔ Message actions module compiled');
+
   // 4. Copy static assets
   fs.copyFileSync(
     path.join(rootDir, 'src/renderer/index.html'),

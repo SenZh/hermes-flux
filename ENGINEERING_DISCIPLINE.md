@@ -253,6 +253,8 @@
 | **13. 真实网关全量 RPC 联调** | `npm run test:live-gateway`（真实拉起 Python 网关进程，覆盖 100% 涉及接口） | 仅靠 Mock 糊弄、遗漏任何公开接口、参数触发 Pydantic `Extra inputs` 阻断 |
 | **14. 真实浏览器 CDP 物理交互** | `npm run test:cdp`（真实无头 Edge/Chrome 驱动，物理点击与安全区度量） | 触控热区 $<44\text{pt}$、移动端视口产生横向溢出、遮罩背景点击无法关闭 |
 | **15. 动态时序闭环与非静态自愈** | 模拟触发/在途/完成/消费四阶时序迁移并物理断言 DOM 出现与销毁 | 仅向组件喂入静态数据做快照存在断言（静态假测试）、时钟未推进、状态机未完成闭环自愈 |
+| **16. 形式化安全定理增量证明** | 触碰状态机/时序/对账时，在 packages/core/__tests__/formal/ 追加定理证明 | 发生核心状态机变更但未追加 fast-check 形式化证明（一票否决） |
+| **17. 特征地图与物理截图留证** | 引入全新用户功能时，在 .opencode/skills/verify-hermes-flux/features/ 追加 md | 用户可达功能未记录特征契约或缺少 artifacts/verification/ 物理截图 |
 
 ### 强制交付验证全景闭环 (Mandatory Verification Pipeline)
 任何代码功能新增、抽象引入或缺陷修复，在声明完成或合并之前，必须在本地依次执行以下核心指令并实现 **100% 绿灯无报错通过**：

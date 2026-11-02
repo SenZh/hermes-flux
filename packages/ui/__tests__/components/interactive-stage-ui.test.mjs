@@ -23,6 +23,12 @@ test('Interactive Stage UI Components - 对话区交互操作栏、Token仪表�
     assert.ok(html.includes('data-action="rollback-msg"'), '普通会话必须渲染回滚按钮');
     assert.ok(html.includes('data-action="fork-msg"'), '普通会话必须渲染Fork按钮');
     assert.ok(html.includes('data-row-id="101"'), '回滚按钮必须带上目标 row_id');
+    // 纯图标与 hover 提示物理断言：禁止包含 span 文字，必须具备 title 与 aria-label
+    assert.ok(!html.includes('<span>复制</span>') && !html.includes('<span>Copy</span>'), '用户行复制按钮严禁内联文本标签');
+    assert.ok(!html.includes('<span>回滚</span>') && !html.includes('<span>Rollback</span>'), '用户行回滚按钮严禁内联文本标签');
+    assert.ok(!html.includes('<span>Fork 分支</span>') && !html.includes('<span>Fork Branch</span>'), '用户行Fork按钮严禁内联文本标签');
+    assert.ok(html.includes('title='), '用户行按钮必须具备 title 悬浮说明');
+    assert.ok(html.includes('aria-label='), '用户行按钮必须具备 aria-label 无障碍说明');
   });
 
   await t.test('2. 场景边界隔离：Bot 会话与群聊房间绝对禁止渲染回滚和Fork', () => {
@@ -65,6 +71,67 @@ test('Interactive Stage UI Components - 对话区交互操作栏、Token仪表�
     assert.ok(ordinaryHtml.includes('data-action="fork-msg"'), '普通会话助手行必须渲染 Fork 按钮');
     assert.ok(ordinaryHtml.includes('data-action="regenerate-msg"'), '普通会话助手行必须渲染重新生成按钮');
     assert.ok(ordinaryHtml.includes('data-action="copy-msg"'), '普通会话助手行必须渲染复制按钮');
+    // 助手行纯图标化物理断言：禁止包含 span 文字，必须具备 title 与 aria-label 说明
+    assert.ok(!ordinaryHtml.includes('<span>Fork 分支</span>') && !ordinaryHtml.includes('<span>Fork Branch</span>'), '助手行Fork按钮严禁内联文本标签');
+    assert.ok(!ordinaryHtml.includes('<span>重新生成</span>') && !ordinaryHtml.includes('<span>Regenerate</span>'), '助手行重新生成按钮严禁内联文本标签');
+    assert.ok(!ordinaryHtml.includes('<span>复制</span>') && !ordinaryHtml.includes('<span>Copy</span>'), '助手行复制按钮严禁内联文本标签');
+    assert.ok(ordinaryHtml.includes('title='), '助手行按钮必须具备 title 悬浮说明');
+    assert.ok(ordinaryHtml.includes('aria-label='), '助手行按钮必须具备 aria-label 无障碍说明');
+
+    // 3.1.1 核心边界断言：非回合末尾（isLastInTurn: false，如中间步骤/工具调用）坚决隐藏底部操作栏与时间戳
+    const stepHtml = renderMessage(
+      {
+        id: 'msg-step-1',
+        role: 'assistant',
+        content: '这是思考过程或工具调用中间步骤',
+        timestamp: '14:32:00',
+        isGroupRoom: false,
+      },
+      'HERMES AGENT',
+      { isFirstInTurn: true, isLastInTurn: false, isStreaming: false }
+    );
+    assert.ok(!stepHtml.includes('assistant-footer-bar'), '中间步骤绝不能渲染底部操作栏');
+    assert.ok(!stepHtml.includes('data-action="copy-msg"'), '中间步骤禁止渲染复制按钮');
+    assert.ok(!stepHtml.includes('data-action="fork-msg"'), '中间步骤禁止渲染Fork按钮');
+    assert.ok(!stepHtml.includes('data-action="regenerate-msg"'), '中间步骤禁止渲染重新生成按钮');
+    assert.ok(!stepHtml.includes('time-tag'), '中间步骤禁止渲染完成时间戳');
+
+    // 3.1.2 核心边界断言：流式生成进行中（isStreaming: true），末尾行也坚决隐藏底部操作栏与完成时间戳
+    const streamingHtml = renderMessage(
+      {
+        id: 'msg-stream-active',
+        role: 'assistant',
+        content: '正在生成最终回答的 token 流...',
+        timestamp: '14:33:00',
+        isGroupRoom: false,
+      },
+      'HERMES AGENT',
+      { isFirstInTurn: true, isLastInTurn: true, isStreaming: true }
+    );
+    assert.ok(!streamingHtml.includes('assistant-footer-bar'), '流式生成过程中禁止渲染底部操作栏');
+    assert.ok(!streamingHtml.includes('data-action="copy-msg"'), '流式生成中禁止渲染复制按钮');
+    assert.ok(!streamingHtml.includes('time-tag'), '流式生成中禁止渲染完成时间戳');
+
+    // 3.1.3 核心正向断言：仅当最终生成完成（isLastInTurn: true && isStreaming: false）时，才完整渲染操作栏与时间戳
+    const completedHtml = renderMessage(
+      {
+        id: 'msg-completed',
+        role: 'assistant',
+        content: '这是最终完成的回答内容',
+        model: 'deepseek-chat',
+        timestamp: '14:34:00',
+        durationMs: 3200,
+        isGroupRoom: false,
+      },
+      'HERMES AGENT',
+      { isFirstInTurn: true, isLastInTurn: true, isStreaming: false }
+    );
+    assert.ok(completedHtml.includes('assistant-footer-bar'), '最终生成完成必须渲染操作栏');
+    assert.ok(completedHtml.includes('data-action="copy-msg"'), '最终生成完成必须包含复制');
+    assert.ok(completedHtml.includes('data-action="fork-msg"'), '最终生成完成必须包含Fork');
+    assert.ok(completedHtml.includes('data-action="regenerate-msg"'), '最终生成完成必须包含重新生成');
+    assert.ok(completedHtml.includes('time-tag'), '最终生成完成必须展示完成时间');
+    assert.ok(completedHtml.includes('14:34:00'), '最终生成完成必须展示精确时间');
 
     // 3.2 群聊助手行：禁止 Fork/重新生成，但强显 Agent 昵称
     const html = renderMessage({

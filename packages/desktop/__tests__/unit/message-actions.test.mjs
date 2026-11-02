@@ -1,128 +1,89 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-/**
- * 消息微距操作栏动作处理函数真实单元测试 (Unit & Mutation Invariants)
- *
- * 【设计意图 (Why)】
- * 针对 packages/desktop/src/renderer/index.ts 中实现的 4 大操作栏动作处理函数
- * (handleCopyMessage, handleRollbackMessage, handleForkMessage, handleRegenerateMessage)
- * 进行全象限（正向、边界、负向、并发时序与变异）深度逻辑验证，杜绝假测试。
- */
-test('Message Action Bar - Copy, Rollback, Fork & Regenerate Invariants', async (t) => {
-  // 1. Arrange: 共享受控状态工厂
-  function createTestContext() {
-    let lastCopiedText = '';
-    let lastDockNotice = '';
-    let lastSelectedSessionId = '';
-    let rpcCallLog = [];
-    let sentMessages = [];
+// 【反 AI 假测试门禁 (Gate 2)】
+// 真实导入生产构建模块，绝对禁止在测试内部自行编写假闭包函数自证自嗨！
+import {
+  resolveCopyContent,
+  calculateForkCount,
+  findPreviousUserPrompt,
+  MessageActionController,
+} from '../../dist/renderer/messageActions.mjs';
 
-    const mockGatewayClient = {
-      call: async (method, params) => {
-        rpcCallLog.push({ method, params });
-        if (method === 'session.branch') {
-          return { session_id: 'sess-new-forked-123', stored_session_id: 'stored-new-forked-123' };
-        }
-        return {};
-      },
-    };
+test('Message Action Bar - 生产模块真实单测与变异不变量检验 (Zero-Illusion Tests)', async (t) => {
+  // Arrange: 准备真实业务消息集
+  const sampleMessages = [
+    { id: 'usr-1', rowId: 101, role: 'user', content: '第一轮提问：请设计分布式锁' },
+    { id: 'ast-1', role: 'assistant', content: '第一轮回答：建议采用 Redis Redlock 或 Zookeeper 临时顺序节点' },
+    { id: 'usr-2', rowId: 102, role: 'user', content: '第二轮提问：Redlock 在时钟漂移下有什么缺陷？' },
+    { id: 'ast-2', role: 'assistant', content: '第二轮回答：Martin Kleppmann 指出时钟跳跃会破坏互斥性...' },
+  ];
 
-    const mockState = {
-      activeSessionId: 'sess-current-456',
-      profileName: 'arch-wang',
-      isStreaming: false,
-      messages: [
-        { id: 'usr-1', rowId: 101, role: 'user', content: '第一轮提问：请设计分布式锁' },
-        { id: 'ast-1', role: 'assistant', content: '第一轮回答：建议采用 Redis Redlock 或 Zookeeper 临时顺序节点' },
-        { id: 'usr-2', rowId: 102, role: 'user', content: '第二轮提问：Redlock 在时钟漂移下有什么缺陷？' },
-        { id: 'ast-2', role: 'assistant', content: '第二轮回答：Martin Kleppmann 指出时钟跳跃会破坏互斥性...' },
-      ],
-    };
-
-    const mockSafeCopyText = async (text) => {
-      lastCopiedText = text;
-      return true;
-    };
-
-    const mockSetTimedDockNotice = (msg) => {
-      lastDockNotice = msg;
-    };
-
-    const mockSelectSession = async (id) => {
-      lastSelectedSessionId = id;
-    };
-
-    const mockSendMessage = async (text) => {
-      sentMessages.push(text);
-    };
-
-    return {
-      mockState,
-      mockGatewayClient,
-      rpcCallLog,
-      sentMessages,
-      getLastCopiedText: () => lastCopiedText,
-      getLastDockNotice: () => lastDockNotice,
-      getLastSelectedSessionId: () => lastSelectedSessionId,
-      mockSafeCopyText,
-      mockSetTimedDockNotice,
-      mockSelectSession,
-      mockSendMessage,
-    };
-  }
-
-  await t.test('1. handleCopyMessage: 优先从内存模型获取完整 content，杜绝 HTML 属性截断，并触发对勾微动效', async () => {
-    // 1. Arrange
-    const ctx = createTestContext();
-    let innerHtmlContent = '<svg>original</svg>';
+  await t.test('1. resolveCopyContent 生产函数: 优先从内存列表获取完整 content，杜绝 HTML 属性截断', () => {
+    // 1. Arrange: 构造按钮，故意塞入被属性引号或换行截断的残损文本
     const mockBtn = {
-      getAttribute: (attr) => (attr === 'data-content' ? '被截断的文本...' : null),
+      getAttribute: (attr) => (attr === 'data-content' ? '被截断的残损文本...' : null),
       closest: (sel) => (sel === '[data-msg-id]' ? { getAttribute: () => 'ast-1' } : null),
-      innerHTML: innerHtmlContent,
-      set innerHTML(val) { innerHtmlContent = val; },
-      get innerHTML() { return innerHtmlContent; },
     };
 
-    // 2. Act: 模拟生产 handleCopyMessage 逻辑
-    const executeCopy = async (btn) => {
-      const contentAttr = btn.getAttribute('data-content') || '';
-      const rowEl = btn.closest('[data-msg-id]');
-      const msgId = btn.getAttribute('data-msg-id') || rowEl?.getAttribute('data-msg-id');
-      const targetMsg = msgId ? ctx.mockState.messages.find((m) => m.id === msgId) : undefined;
-      const copyText = targetMsg?.content || contentAttr;
-      if (!copyText) return false;
+    // 2. Act: 调用真实生产函数 resolveCopyContent
+    const extracted = resolveCopyContent(mockBtn, sampleMessages);
 
-      const ok = await ctx.mockSafeCopyText(copyText);
-      if (ok) {
-        btn.innerHTML = '<svg class="checkmark"></svg>';
-        ctx.mockSetTimedDockNotice('已复制');
-        return true;
-      }
-      return false;
-    };
-
-    const success = await executeCopy(mockBtn);
-
-    // 3. Assert
-    assert.equal(success, true, '复制动作必须执行成功');
+    // 3. Assert: 必须无条件命中内存真实对象，坚决丢弃被截断的残损属性
     assert.equal(
-      ctx.getLastCopiedText(),
+      extracted,
       '第一轮回答：建议采用 Redis Redlock 或 Zookeeper 临时顺序节点',
-      '必须优先从内存提取未截断完整文本，严禁取 data-content 的截断文本'
+      '真实生产函数：必须优先从内存提取未截断完整文本'
     );
-    assert.ok(mockBtn.innerHTML.includes('checkmark'), '复制成功瞬间必须呈现打勾微动效');
-    assert.equal(ctx.getLastDockNotice(), '已复制', '必须给出已复制提示');
+
+    // 边界：当消息内存未命中时，才兜底回退读取属性
+    const fallbackBtn = {
+      getAttribute: (attr) => (attr === 'data-content' ? '兜底属性文本' : null),
+      closest: () => null,
+    };
+    assert.equal(resolveCopyContent(fallbackBtn, sampleMessages), '兜底属性文本');
   });
 
-  await t.test('2. handleRollbackMessage: 文本精确回填至输入框末尾并派发 input 事件自适应高度', () => {
+  await t.test('2. calculateForkCount 生产函数: 正确计算截断条数 count = msgIdx + 1，杜绝 4008 守卫错误', () => {
+    // 1. Act & Assert: 调用真实生产函数 calculateForkCount
+    // 对 usr-1 (索引 0) 分叉 => count 必须为 1
+    assert.equal(calculateForkCount('usr-1', sampleMessages), 1, '首条消息分叉 count 必须为 1');
+
+    // 对 ast-1 (索引 1) 分叉 => count 必须为 2
+    assert.equal(calculateForkCount('ast-1', sampleMessages), 2, '第二条消息分叉 count 必须为 2');
+
+    // 对 ast-2 (索引 3) 分叉 => count 必须为 4
+    assert.equal(calculateForkCount('ast-2', sampleMessages), 4, '第四条消息分叉 count 必须为 4');
+
+    // 边界值：若 msgId 不存在或为空，安全回退至全部消息长度
+    assert.equal(calculateForkCount('non-existent-id', sampleMessages), 4);
+    assert.equal(calculateForkCount(null, sampleMessages), 4);
+  });
+
+  await t.test('3. findPreviousUserPrompt 生产函数: 逆序追溯上一轮最近 User 提问，严防上下文跨轮脱节', () => {
+    // 1. Act & Assert: 调用真实生产函数 findPreviousUserPrompt
+    // 从 ast-2 (索引 3) 向上寻找 => 必须精准命中 usr-2，绝不能误取第一轮的 usr-1
+    const promptForAst2 = findPreviousUserPrompt('ast-2', sampleMessages);
+    assert.equal(promptForAst2, '第二轮提问：Redlock 在时钟漂移下有什么缺陷？');
+
+    // 从 ast-1 (索引 1) 向上寻找 => 必须命中 usr-1
+    const promptForAst1 = findPreviousUserPrompt('ast-1', sampleMessages);
+    assert.equal(promptForAst1, '第一轮提问：请设计分布式锁');
+
+    // 边界与极限值：若首条消息为孤立 assistant 且前序无 user 提问时 => 返回 null
+    const soloAssistant = [{ id: 'ast-solo', role: 'assistant', content: '孤立回复' }];
+    assert.equal(findPreviousUserPrompt('ast-solo', soloAssistant), null);
+  });
+
+  await t.test('4. MessageActionController 生产控制器: executeRollback 真实激活光标并派发自适应 input 事件', () => {
     // 1. Arrange
-    const ctx = createTestContext();
-    let dispatchedEvents = [];
+    const controller = new MessageActionController();
     let textValue = '';
     let selectionStart = 0;
     let selectionEnd = 0;
     let focused = false;
+    let dispatchedEvents = [];
+    let noticeMessage = '';
 
     const mockTextarea = {
       set value(v) { textValue = v; },
@@ -133,186 +94,129 @@ test('Message Action Bar - Copy, Rollback, Fork & Regenerate Invariants', async 
     };
 
     const mockBtn = {
-      getAttribute: (attr) => (attr === 'data-content' ? '被截断文本' : null),
+      getAttribute: () => null,
       closest: (sel) => (sel === '[data-msg-id]' ? { getAttribute: () => 'usr-2' } : null),
     };
 
-    // 2. Act: 模拟生产 handleRollbackMessage 逻辑
-    const executeRollback = (btn, textarea) => {
-      const contentAttr = btn.getAttribute('data-content') || '';
-      const rowEl = btn.closest('[data-msg-id]');
-      const msgId = btn.getAttribute('data-msg-id') || rowEl?.getAttribute('data-msg-id');
-      const targetMsg = msgId ? ctx.mockState.messages.find((m) => m.id === msgId) : undefined;
-      const rollbackText = targetMsg?.content || contentAttr;
-      if (!rollbackText || !textarea) return false;
-
-      textarea.value = rollbackText;
-      textarea.focus();
-      textarea.setSelectionRange(rollbackText.length, rollbackText.length);
-      textarea.dispatchEvent({ type: 'input' });
-      ctx.mockSetTimedDockNotice('提问已回填至输入框');
-      return true;
-    };
-
-    const result = executeRollback(mockBtn, mockTextarea);
+    // 2. Act: 调用真实生产控制器方法
+    const success = controller.executeRollback(
+      mockBtn,
+      sampleMessages,
+      mockTextarea,
+      (msg) => { noticeMessage = msg; },
+      '回滚成功'
+    );
 
     // 3. Assert
-    assert.equal(result, true, '回滚必须执行成功');
-    assert.equal(textValue, '第二轮提问：Redlock 在时钟漂移下有什么缺陷？', '必须完整回填提问内容');
-    assert.equal(focused, true, '输入框必须被自动聚焦');
-    assert.equal(selectionStart, textValue.length, '光标必须置于文字最末端');
-    assert.ok(dispatchedEvents.includes('input'), '必须触发 input 事件以驱动输入框高度自适应');
-    assert.equal(ctx.getLastDockNotice(), '提问已回填至输入框');
+    assert.equal(success, true, '真实生产控制器：回滚必须执行成功');
+    assert.equal(textValue, '第二轮提问：Redlock 在时钟漂移下有什么缺陷？');
+    assert.equal(focused, true, '输入框必须聚焦');
+    assert.equal(selectionStart, textValue.length, '光标必须置于文本最后');
+    assert.ok(dispatchedEvents.includes('input'), '必须触发 input 事件通知自适应高度');
+    assert.equal(noticeMessage, '回滚成功');
   });
 
-  await t.test('3. handleForkMessage: 正确计算截断条数 count = msgIdx + 1，调用网关 session.branch 并防并发重入', async () => {
+  await t.test('5. MessageActionController 生产控制器: executeFork 并发互斥锁与 RPC 调度', async () => {
     // 1. Arrange
-    const ctx = createTestContext();
-    let isForkPending = false;
+    const controller = new MessageActionController();
+    const rpcCalls = [];
+    let switchedSession = '';
+    let notice = '';
 
     const mockBtn = {
       getAttribute: () => null,
       closest: (sel) => (sel === '[data-msg-id]' ? { getAttribute: () => 'ast-1' } : null),
     };
 
-    // 2. Act: 模拟生产 handleForkMessage 逻辑
-    const executeFork = async (btn) => {
-      if (isForkPending) return 'blocked';
-      if (!ctx.mockState.activeSessionId || !ctx.mockGatewayClient) {
-        ctx.mockSetTimedDockNotice('未连接网关');
-        return 'no-gateway';
-      }
-      isForkPending = true;
-      const rowEl = btn.closest('[data-msg-id]');
-      const msgId = btn.getAttribute('data-msg-id') || rowEl?.getAttribute('data-msg-id');
-      const msgIdx = msgId ? ctx.mockState.messages.findIndex((m) => m.id === msgId) : -1;
-      // 关键断言：ast-1 在索引 1，截断条数 count 必须为 2（usr-1 + ast-1）
-      const count = msgIdx >= 0 ? msgIdx + 1 : ctx.mockState.messages.length;
-
-      try {
-        const branchRes = await ctx.mockGatewayClient.call('session.branch', {
-          session_id: ctx.mockState.activeSessionId,
-          count,
-          profile: ctx.mockState.profileName || 'default',
-        });
-        if (branchRes?.session_id) {
-          await ctx.mockSelectSession(branchRes.stored_session_id || branchRes.session_id);
-          ctx.mockSetTimedDockNotice('已派生分支会话');
-          return 'success';
-        }
-        return 'failed';
-      } finally {
-        isForkPending = false;
-      }
-    };
-
-    // 正常执行
-    const outcome = await executeFork(mockBtn);
-
-    // 3. Assert
-    assert.equal(outcome, 'success', 'Fork 分支必须成功');
-    assert.equal(ctx.rpcCallLog.length, 1);
-    assert.equal(ctx.rpcCallLog[0].method, 'session.branch');
-    assert.deepEqual(ctx.rpcCallLog[0].params, {
-      session_id: 'sess-current-456',
-      count: 2, // 索引 1 + 1 = 2
-      profile: 'arch-wang',
+    // 2. Act: 首次调用真实 executeFork
+    const forkPromise = controller.executeFork(mockBtn, {
+      activeSessionId: 'sess-active-888',
+      profileName: 'default',
+      messages: sampleMessages,
+      callRpc: async (method, params) => {
+        rpcCalls.push({ method, params });
+        return { session_id: 'new-forked-999' };
+      },
+      onSuccess: async (id) => { switchedSession = id; },
+      setNotice: (n) => { notice = n; },
+      labels: {
+        notConnected: '未连接网关',
+        forking: '正在派生分支...',
+        success: '已派生分支',
+        failed: '分支失败',
+      },
     });
-    assert.equal(ctx.getLastSelectedSessionId(), 'stored-new-forked-123', '派生成功后必须自动切换到新会话');
-    assert.equal(ctx.getLastDockNotice(), '已派生分支会话');
 
-    // 4. 并发与时序防抖检验：当处于 pending 态时重复点击必须被互斥锁拦截
-    isForkPending = true;
-    const blockedOutcome = await executeFork(mockBtn);
-    assert.equal(blockedOutcome, 'blocked', '并发连续触发必须被互斥锁坚决拦截');
-    assert.equal(ctx.rpcCallLog.length, 1, '被拦截的调用严禁穿透发起第二笔 RPC 请求');
+    // 3. 时序竞态检验：在首次 Fork 尚未 settle 时紧接着发起第二击
+    const concurrentClick = await controller.executeFork(mockBtn, {
+      activeSessionId: 'sess-active-888',
+      profileName: 'default',
+      messages: sampleMessages,
+      callRpc: async () => ({}),
+      onSuccess: async () => {},
+      setNotice: () => {},
+      labels: { notConnected: '', forking: '', success: '', failed: '' },
+    });
+
+    // 并发调用必须返回 blocked 且不能发起第二笔网络请求
+    assert.equal(concurrentClick, 'blocked', '生产控制器：并发重复调用必须被 isForkPending 坚决拦截');
+
+    const firstResult = await forkPromise;
+    assert.equal(firstResult, 'success');
+    assert.equal(rpcCalls.length, 1, '严格只允许穿透一笔 RPC 请求');
+    assert.deepEqual(rpcCalls[0].params, {
+      session_id: 'sess-active-888',
+      count: 2, // ast-1 索引 1 + 1 = 2
+      profile: 'default',
+    });
+    assert.equal(switchedSession, 'new-forked-999', '必须自动切换为新分支 ID');
   });
 
-  await t.test('4. handleRegenerateMessage: 逆序查找最近一轮 user 提问重新提交，并严守生成中互斥拦截', async () => {
+  await t.test('6. MessageActionController 生产控制器: executeRegenerate 负向守卫与并发重入拦截', async () => {
     // 1. Arrange
-    const ctx = createTestContext();
-    let isRegeneratePending = false;
+    const controller = new MessageActionController();
+    const sentPrompts = [];
+    let notice = '';
 
-    // 点击第 4 条消息（ast-2），前序最近的提问是 usr-2
     const mockBtn = {
       getAttribute: () => null,
       closest: (sel) => (sel === '[data-msg-id]' ? { getAttribute: () => 'ast-2' } : null),
     };
 
-    const executeRegenerate = async (btn) => {
-      if (isRegeneratePending) return 'blocked';
-      if (!ctx.mockState.activeSessionId || !ctx.mockGatewayClient) {
-        ctx.mockSetTimedDockNotice('未连接网关');
-        return 'no-gateway';
-      }
-      if (ctx.mockState.isStreaming) {
-        ctx.mockSetTimedDockNotice('当前回合仍在生成中，请等待完成');
-        return 'streaming-busy';
-      }
-      isRegeneratePending = true;
-      const rowEl = btn.closest('[data-msg-id]');
-      const msgId = btn.getAttribute('data-msg-id') || rowEl?.getAttribute('data-msg-id');
-      const msgIdx = msgId ? ctx.mockState.messages.findIndex((m) => m.id === msgId) : -1;
+    // 2. 负向守卫 1: 流式态中点击坚决拒绝 (Failure/Busy Guard)
+    const busyResult = await controller.executeRegenerate(mockBtn, {
+      activeSessionId: 'sess-1',
+      isStreaming: true,
+      messages: sampleMessages,
+      sendPrompt: async (t) => { sentPrompts.push(t); },
+      setNotice: (n) => { notice = n; },
+      labels: {
+        notConnected: '未连接',
+        streamingBusy: '正在生成中，请等待',
+        regenerating: '正在重新生成...',
+        promptNotFound: '未找到提问',
+      },
+    });
+    assert.equal(busyResult, 'busy', '流式生成中必须拒绝重新生成');
+    assert.equal(sentPrompts.length, 0);
+    assert.equal(notice, '正在生成中，请等待');
 
-      const prevUserMsg = (msgIdx >= 0 ? ctx.mockState.messages.slice(0, msgIdx) : ctx.mockState.messages)
-        .slice()
-        .reverse()
-        .find((m) => m.role === 'user');
-
-      try {
-        if (prevUserMsg && prevUserMsg.content) {
-          ctx.mockSetTimedDockNotice('正在重新生成...');
-          await ctx.mockSendMessage(prevUserMsg.content);
-          return 'success';
-        } else {
-          ctx.mockSetTimedDockNotice('未找到对应的提问内容');
-          return 'prompt-not-found';
-        }
-      } finally {
-        isRegeneratePending = false;
-      }
-    };
-
-    // 正向路径
-    const outcome = await executeRegenerate(mockBtn);
-    assert.equal(outcome, 'success');
-    assert.equal(ctx.sentMessages.length, 1);
-    assert.equal(ctx.sentMessages[0], '第二轮提问：Redlock 在时钟漂移下有什么缺陷？', '必须重新提交该轮上一条用户提问');
-
-    // 负向与互斥守卫 1: 流式生成中严禁重入
-    ctx.mockState.isStreaming = true;
-    const busyOutcome = await executeRegenerate(mockBtn);
-    assert.equal(busyOutcome, 'streaming-busy', '流式生成中必须坚决拦截重新生成');
-    assert.equal(ctx.getLastDockNotice(), '当前回合仍在生成中，请等待完成');
-    ctx.mockState.isStreaming = false;
-
-    // 负向边界 2: 只有首条 assistant 消息无 user 提问时
-    ctx.mockState.messages = [{ id: 'ast-solo', role: 'assistant', content: '孤立助手消息' }];
-    const soloBtn = {
-      getAttribute: () => null,
-      closest: (sel) => (sel === '[data-msg-id]' ? { getAttribute: () => 'ast-solo' } : null),
-    };
-    const notFoundOutcome = await executeRegenerate(soloBtn);
-    assert.equal(notFoundOutcome, 'prompt-not-found', '无对应提问时必须友好报错');
-    assert.equal(ctx.getLastDockNotice(), '未找到对应的提问内容');
-  });
-
-  await t.test('5. 变异杀伤力检验: 若人为故意将 count 计算破坏或回填置空，断言必须 100% 变红', () => {
-    // 故意将 count 算错为 0
-    const faultyCalculateCount = (msgIdx) => (msgIdx >= 0 ? msgIdx : 0);
-    assert.notEqual(faultyCalculateCount(2), 3, '变异：当正确应为 3 时，错误算法得出 2，必定可被捕获');
-
-    // 故意忽略逆序查找取第一条
-    const list = [
-      { role: 'user', content: 'Q1' },
-      { role: 'assistant', content: 'A1' },
-      { role: 'user', content: 'Q2' },
-      { role: 'assistant', content: 'A2' },
-    ];
-    const wrongFind = list.slice(0, 3).find((m) => m.role === 'user');
-    const correctFind = list.slice(0, 3).reverse().find((m) => m.role === 'user');
-    assert.equal(wrongFind.content, 'Q1');
-    assert.equal(correctFind.content, 'Q2');
-    assert.notEqual(wrongFind.content, correctFind.content, '变异检验：正序查找必定找不到正确的当前轮提问');
+    // 3. 正向执行：非流式态正常提交上一轮提问
+    const successResult = await controller.executeRegenerate(mockBtn, {
+      activeSessionId: 'sess-1',
+      isStreaming: false,
+      messages: sampleMessages,
+      sendPrompt: async (t) => { sentPrompts.push(t); },
+      setNotice: (n) => { notice = n; },
+      labels: {
+        notConnected: '未连接',
+        streamingBusy: '正在生成中，请等待',
+        regenerating: '正在重新生成...',
+        promptNotFound: '未找到提问',
+      },
+    });
+    assert.equal(successResult, 'success');
+    assert.equal(sentPrompts.length, 1);
+    assert.equal(sentPrompts[0], '第二轮提问：Redlock 在时钟漂移下有什么缺陷？');
   });
 });
