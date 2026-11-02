@@ -654,7 +654,7 @@ export class HermesGatewayClient {
    */
   public async fetchSessionMessages(
     sessionId: string,
-    options: { limit?: number; offset?: number; order?: 'latest' | 'oldest' } = {}
+    options: { limit?: number; offset?: number; order?: 'latest' | 'oldest'; profile?: string } = {}
   ): Promise<{ messages: any[]; pagination?: any; ok: boolean; error?: string }> {
     if (!this.restFallbackHandler) {
       return { messages: [], ok: false, error: '未注入 REST 通信代理处理器' };
@@ -669,6 +669,7 @@ export class HermesGatewayClient {
             limit: options.limit ?? 50,
             offset: options.offset ?? 0,
             order: options.order ?? 'latest',
+            ...(options.profile ? { profile: options.profile } : {}),
           },
         }
       );
@@ -701,13 +702,22 @@ export class HermesGatewayClient {
    *   - 返回文本统一压平换行，便于直接做副标题。
    */
   public async fetchLastMessage(
-    sessionId: string
+    sessionId: string,
+    options?: { profile?: string }
   ): Promise<{ text: string; timestamp: number; role: string } | null> {
     if (!this.restFallbackHandler || !sessionId) return null;
     try {
       const res = await this.restFallbackHandler(
         `/api/sessions/${encodeURIComponent(sessionId)}/messages`,
-        { method: 'GET', params: { limit: 1, offset: 0, order: 'latest' } }
+        {
+          method: 'GET',
+          params: {
+            limit: 1,
+            offset: 0,
+            order: 'latest',
+            ...(options?.profile ? { profile: options.profile } : {}),
+          },
+        }
       );
       const resObj = res && typeof res === 'object' ? (res as Record<string, unknown>) : null;
       const messages = Array.isArray(resObj?.messages) ? resObj!.messages as Array<Record<string, unknown>> : [];

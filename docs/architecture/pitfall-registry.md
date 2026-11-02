@@ -104,6 +104,15 @@
 | 真实约束 | 先 `session.close` 再删除；或删除由 `stored id` 指向的、非活跃的会话 |
 | 守卫 | ① 探针把 4023/4007 作为预期守卫记录；② 单测断言空会话删除只能走守卫分支；③ `docs/gateway/sessions.md` 标注前置条件 |
 
+## P-011 网关 preview 仅为用户初始提问导致副标题闪烁，与切会话缺乏代际令牌导致副标题串扰
+
+| 项目 | 内容 |
+|---|---|
+| 症状 | 会话副标题闪来闪去、变来变去（初次显示"你好"，点击后变成真实回复"哎呀，小仙女可不能挨饿！"，一刷新又退回"你好"）；点击另外一个会话时，其副标题也被错位篡改成前一会话的内容 |
+| 根因 | 1. 网关 `GET /api/sessions` 返回的 `preview` 字段仅记录首句用户提问，刷新对账时冲刷覆盖了本地已由真实消息流修正的回复；<br>2. `fetchSessionMessages` 未传 `profile`，专职 Agent（xiaofawang）请求报 404；<br>3. `loadMessages` 缺乏 `generation` 竞态令牌，异步迟滞响应错位写入当前会话的 `state.messages` 与缓存 |
+| 识别特征 | 列表初次渲染为用户第一句话，点击进入后短暂变对，定时刷新对账后打回原形；快速切会话时多个会话副标题完全一致 |
+| 守卫 | ① `reconcileSessionList` 防倒退守卫（时间戳未推进时保留本地真实回复）；<br>② `sessionPreviewCache` 持久化真实副标题（localStorage）；<br>③ `fetchSessionMessages` 与 `fetchLastMessage` 显式携带 `profile`；<br>④ `activeLoadMessagesGeneration` 严格代际令牌阻断迟滞响应；<br>⑤ 单测 `packages/core/__tests__/session/sessionMerge.test.mjs` (用例 15)；<br>⑥ 真实网关 CDP 端到端测试 `packages/desktop/__tests__/e2e/session-subtitles-live-cdp.test.mjs` |
+
 ---
 
 ## 守卫总览
@@ -119,3 +128,4 @@
 | 真实网关探针 | `npm run probe:gateway` | P-001、P-002、P-005、P-009、P-010 |
 | fixture 回归 | `npm test` | P-003、P-007、P-009 |
 | 去重对账 | `npm test` + debug 日志 | P-004 |
+| 会话副标题防闪烁守卫 | `npm test` + CDP live E2E | P-011 |

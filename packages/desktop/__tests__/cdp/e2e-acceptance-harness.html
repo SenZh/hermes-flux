@@ -121,10 +121,19 @@
         const activeSess = this.sessions.find(s => s.id === this.activeSessionId);
         const currentProject = activeSess ? this.projects[0] : null;
 
+        let displayTitle = activeSess ? activeSess.title : '赫尔墨斯';
+        if (this.activeFocus?.type === 'bot') {
+          const bot = this.profiles.find(p => p.name === this.activeFocus.botName);
+          displayTitle = `🤖 ${bot?.displayName || this.activeFocus.botName} (Forever Chat)`;
+        } else if (this.activeFocus?.type === 'group') {
+          const grp = this.groupRooms.find(g => g.roomId === this.activeFocus.roomId);
+          displayTitle = `👥 ${grp?.name || '多智能体研讨室'}`;
+        }
+
         const html = `
           ${renderTitlebar({
             platform: 'windows',
-            title: activeSess ? activeSess.title : '赫尔墨斯',
+            title: displayTitle,
             projectName: currentProject?.name,
             projectPath: currentProject?.path,
             isMaximized: false,
@@ -261,6 +270,26 @@
             this.render();
           };
         });
+
+        const sendBtn = document.getElementById('dock-send-btn');
+        if (sendBtn) {
+          sendBtn.onclick = () => {
+            const input = document.getElementById('dock-prompt-input');
+            const val = input ? input.value.trim() : '';
+            if (val) {
+              if (this.activeFocus.type === 'bot') {
+                const bot = this.profiles.find(p => p.name === this.activeFocus.botName);
+                if (bot) {
+                  bot.activityState = 'running';
+                  bot.lastMessage = val;
+                  bot.timestamp = Date.now();
+                }
+              }
+              this.lastActions.push(`send_message:${val}`);
+              this.render();
+            }
+          };
+        }
       },
 
       deleteSession(id) {

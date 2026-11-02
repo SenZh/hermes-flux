@@ -269,6 +269,47 @@ export function reconcileSessionList(input: SessionReconcileInput): SessionRecon
 
   const visible = allMerged.filter(isVisibleSession);
 
+  // 构建本地历史会话索引表（以 profile::id 为主键，裸 id 为兜底辅助键）
+  const previousMap = new Map<string, NormalizedSession>();
+  for (const p of previous) {
+    previousMap.set(`${p.botName || 'default'}::${p.id}`, p);
+    if (!previousMap.has(p.id)) {
+      previousMap.set(p.id, p);
+    }
+  }
+
+  /**
+   * 【设计意图 (Why)】
+   * 网关 REST /api/sessions 与 WS session.list 返回的 preview 字段，在持久化层面
+   * 仅记录了用户会话的首条提问（如"你好"）或上轮输入，并非 Agent 刚回复的最新输出。
+   * 本地 previous 会话中的 preview 已经经过真实消息流或 fetchLastMessage 反哺为真实最后一条 Agent 消息。
+   * 
+   * 【防范的历史坑 (Pitfall)】
+   * 每次定时器触发 fetchSessions 重新对账时，网关拉回来的"你好"直接覆盖了本地刚修正的
+   * "哎呀，小仙女可不能挨饿！"，导致用户看到小标题闪来闪去、反复变来变去。
+   * 
+   * 【约束与规则 (Rules)】
+   * 若两者时间戳未推进（表明没有更新的交互发生），坚决保留本地已确认的真实副标题。
+   */
+  const protectedVisible = visible.map((s) => {
+    const prev = previousMap.get(`${s.botName || 'default'}::${s.id}`) || previousMap.get(s.id);
+    if (!prev) return s;
+
+    let finalPreview = s.preview;
+    if (prev.preview && prev.preview !== s.preview) {
+      const tsDiff = Math.abs((s.timestamp || 0) - (prev.timestamp || 0));
+      if (tsDiff < 1000 || (prev.timestamp || 0) >= (s.timestamp || 0)) {
+        finalPreview = prev.preview;
+      }
+    }
+
+    return {
+      ...s,
+      preview: finalPreview,
+      time: (prev.time && Math.abs((s.timestamp || 0) - (prev.timestamp || 0)) < 1000) ? prev.time : s.time,
+    };
+  });
+
   // pending 是新建会话的乐观占位（必定有标题），始终可见；不与归档/子代理的可见性规则对齐
   const stillPending = previous.filter((s) => pendingIds.includes(s.id) && !isSeen(s));
   // 按 id 清理：已落盘的 pending 无论落在哪个 Profile，都不该继续留在待落盘集合里
@@ -292,7 +333,7 @@ export function reconcileSessionList(input: SessionReconcileInput): SessionRecon
         }))
     : [];
 
-  const sessions = [...stillPending, ...visible];
+  const sessions = [...stillPending, ...protectedVisible];
   for (const oldS of retained) {
     if (!sessions.some((cur) => cur.id === oldS.id && cur.botName === oldS.botName)) {
       sessions.push(oldS);

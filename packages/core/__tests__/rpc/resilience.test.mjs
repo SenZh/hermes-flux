@@ -191,13 +191,40 @@ test('HermesGatewayClient Resilience - Dual-Channel Fallback', async (t) => {
       return { messages: [{ role: 'assistant', content: '  已收到\n自动化验证消息  ', timestamp: 1793540000 }] };
     });
 
-    const last = await client.fetchLastMessage('ses-x');
+    const last = await client.fetchLastMessage('ses-x', { profile: 'xiaofawang' });
 
     assert.equal(capturedPath, '/api/sessions/ses-x/messages');
     assert.equal(capturedParams.limit, 1, '只取 1 条，避免拉全量历史');
     assert.equal(capturedParams.order, 'latest');
+    assert.equal(capturedParams.profile, 'xiaofawang', '必须透传 profile 参数，确保专职 Agent 会话不报 404');
     assert.equal(last.text, '已收到 自动化验证消息', '换行必须压平为空格');
     assert.equal(last.timestamp, 1793540000000, '秒级时间戳必须换算为毫秒');
+  });
+
+  await t.test('fetchSessionMessages 必须透传 limit/offset/order 与 profile 参数', async () => {
+    const client = new HermesGatewayClient({ url: 'ws://127.0.0.1:99999', autoConnect: false });
+    let capturedPath = '';
+    let capturedParams = null;
+    client.setRestFallbackHandler(async (path, options) => {
+      capturedPath = path;
+      capturedParams = options?.params;
+      return { messages: [{ id: 1, role: 'user', content: '你好' }], pagination: { returned: 1 } };
+    });
+
+    const outcome = await client.fetchSessionMessages('ses-msg-1', {
+      limit: 20,
+      offset: 5,
+      order: 'latest',
+      profile: 'xiaofawang',
+    });
+
+    assert.equal(capturedPath, '/api/sessions/ses-msg-1/messages');
+    assert.equal(capturedParams.limit, 20);
+    assert.equal(capturedParams.offset, 5);
+    assert.equal(capturedParams.order, 'latest');
+    assert.equal(capturedParams.profile, 'xiaofawang', '必须向 REST query params 透传 profile');
+    assert.equal(outcome.ok, true);
+    assert.equal(outcome.messages.length, 1);
   });
 
   await t.test('fetchLastMessage 在无 REST 通道时返回 null（失败 ≠ 空字符串）', async () => {

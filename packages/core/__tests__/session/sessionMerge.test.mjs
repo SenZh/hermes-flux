@@ -459,4 +459,81 @@ test('sessionMerge - 跨 Profile 会话合并与去重', async (t) => {
     });
     assert.deepEqual(switched.pendingIds, [], '切换 Profile 后 pending 也必须按 id 清理');
   });
+
+  await t.test('15. 网关刷新时 preview 防退化保护：本地已确认的真实 Agent 回复不得被网关初始提问冲刷覆盖', () => {
+    // A. 时间戳未推进：保留本地已确认的真实回复，杜绝闪烁回退到初始提问
+    const localSess = {
+      ...session('20261014_154856_f8f47877', 'xiaofawang', '友好问候', 1793589960000),
+      preview: '哎呀，小仙女可不能挨饿！肚肚抗议了可不行 🥺 今天买菜备料辛苦了',
+      time: '11:26',
+    };
+    const gatewayFetched = {
+      ...session('20261014_154856_f8f47877', 'xiaofawang', '友好问候', 1793589960000),
+      preview: '你好',
+      time: '10/14',
+    };
+
+    const res = reconcileSessionList({
+      previous: [localSess],
+      fetched: [gatewayFetched],
+      authoritative: true,
+      pendingIds: [],
+      profileName: 'xiaofawang',
+    });
+
+    assert.equal(res.sessions.length, 1);
+    assert.equal(
+      res.sessions[0].preview,
+      '哎呀，小仙女可不能挨饿！肚肚抗议了可不行 🥺 今天买菜备料辛苦了',
+      '时间戳未推进时必须保留本地真实回复，杜绝副标题闪烁变回用户首句提问'
+    );
+    assert.equal(res.sessions[0].time, '11:26', '保留本地精准的时间');
+
+    // B. 正向推进路径（变异防御）：当时间戳实质推进（产生新对话轮次，tsDiff >= 1000 且网关更新）时，放行网关最新 preview
+    const advancedGatewayFetched = {
+      ...session('20261014_154856_f8f47877', 'xiaofawang', '友好问候', 1793599990000), // 新增交互：时间前进了 10030 秒
+      preview: '好的，今晚大厨辛苦啦！',
+      time: '14:13',
+    };
+    const advancedRes = reconcileSessionList({
+      previous: [localSess],
+      fetched: [advancedGatewayFetched],
+      authoritative: true,
+      pendingIds: [],
+      profileName: 'xiaofawang',
+    });
+    assert.equal(
+      advancedRes.sessions[0].preview,
+      '好的，今晚大厨辛苦啦！',
+      '时间戳实质推进时必须正常采纳新一轮对话的 preview，严禁死锁在旧副标题'
+    );
+    assert.equal(advancedRes.sessions[0].time, '14:13', '时间戳推进时采纳新时间');
+
+    // C. 跨 Profile 复合键隔离：不同 Profile 下的同名 ID 会话，防退化守卫严格按 profile::id 独立匹配，互不串扰
+    const auraLocal = {
+      ...session('same-id-cross', 'aura', 'Aura 会话', 1793500000000),
+      preview: 'Aura 本地已确认回复',
+      time: '10:00',
+    };
+    const xfwLocal = {
+      ...session('same-id-cross', 'xiaofawang', '小法王会话', 1793500000000),
+      preview: '小法王本地已确认回复',
+      time: '10:00',
+    };
+    const crossFetched = [
+      { ...session('same-id-cross', 'aura', 'Aura 会话', 1793500000000), preview: 'Aura 首句提问', time: '09:00' },
+      { ...session('same-id-cross', 'xiaofawang', '小法王会话', 1793500000000), preview: '小法王首句提问', time: '09:00' },
+    ];
+    const crossRes = reconcileSessionList({
+      previous: [auraLocal, xfwLocal],
+      fetched: crossFetched,
+      authoritative: true,
+      pendingIds: [],
+      profileName: 'aura',
+    });
+    const resAura = crossRes.sessions.find(s => s.botName === 'aura');
+    const resXfw = crossRes.sessions.find(s => s.botName === 'xiaofawang');
+    assert.equal(resAura.preview, 'Aura 本地已确认回复', 'Aura 必须保留自身的本地回复');
+    assert.equal(resXfw.preview, '小法王本地已确认回复', '小法王必须保留自身的本地回复，绝不跨 Profile 串扰');
+  });
 });

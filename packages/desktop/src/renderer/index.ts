@@ -86,6 +86,8 @@ declare global {
     };
     /** Native & fallback safe clipboard copy helper. */
     __fluxCopyText?: (text: string) => Promise<boolean>;
+    /** E2E / CDP 对账触发器：全量刷新并对账会话列表 */
+    __fluxFetchSessions?: () => Promise<void>;
   }
 }
 
@@ -385,6 +387,7 @@ const logScroll = createLogger('scroll');
 
 (window as any).__fluxState = state;
 (window as any).__fluxConnect = connect;
+window.__fluxFetchSessions = fetchSessions;
 
 let gatewayClient: HermesGatewayClient | null = null;
 let currentTicket: string | undefined = undefined;
@@ -925,17 +928,122 @@ function formatSessionTime(timestamp: number): string {
 let activeFetchSessionsGeneration = 0;
 
 /**
- * 副标题缓存：sessionId -> { lastActive, text }。
+ * 会话真实副标题缓存：sessionId -> { lastActive, text, botName }。
  *
  * 【设计意图 (Why)】
- *   左侧栏副标题必须是"真实最后一条消息"，而 REST 列表的 preview 只是最后一条用户消息。
- *   真实最后一条要从 `/api/sessions/:id/messages?limit=1` 取，成本约 20ms/条，
- *   全量 50+ 会话并发约 1.1s，不能每次刷新都重拉。
- *   用 `sessionId::lastActive` 做失效键：会话没有新消息时直接命中缓存，零请求。
+ *   左侧栏副标题必须是"真实最后一条消息"，而网关 REST 列表的 preview 只是最后一条用户提问输入。
+ *   持久化缓存记录经过真实消息流或 fetchLastMessage 确认的 Agent 最新真实回复，
+ *   避免每次刷新都重新发起大量网络拉取，并彻底阻断网关陈旧 preview 的冲刷覆盖。
  *
  * 【防范的历史坑 (Pitfall)】
- *   曾经直接用 REST 的 preview 当副标题，AI 回复完仍是用户那句提问，用户看到"副标题没更新"。
+ *   历史上曾经直接用网关自带的 preview，导致用户点击会话后修正的高清回复被下次列表刷新
+ *   重新冲刷成"你好"，用户看到副标题反复闪烁、变来变去。
+ *
+ * 【约束与规则 (Rules)】
+ *   - 冷启动同步从 localStorage 恢复，实现 0ms 瞬间带副标题开屏；
+ *   - 更新统一落盘到 localStorage (SESSION_PREVIEW_PERSISTENCE_KEY)。
  */
+const SESSION_PREVIEW_PERSISTENCE_KEY = 'hermes_flux_session_previews';
+interface PersistedSessionPreview {
+  lastActive: number;
+  text: string;
+  botName?: string;
+}
+const sessionPreviewCache = new Map<string, PersistedSessionPreview>();
+
+// 冷启动从 localStorage 恢复会话副标题缓存，实现 0ms 瞬间带副标题开屏
+// gate-degrade: 读取本地副标题缓存失败时回落到网络拉取，属于可选加速
+try {
+  const rawPrev = typeof localStorage !== 'undefined' ? localStorage.getItem(SESSION_PREVIEW_PERSISTENCE_KEY) : null;
+  if (rawPrev) {
+    const parsed: unknown = JSON.parse(rawPrev);
+    if (parsed && typeof parsed === 'object') {
+      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+        if (v && typeof v === 'object' && 'text' in v && 'lastActive' in v) {
+          const rec = v as PersistedSessionPreview;
+          if (typeof rec.text === 'string' && typeof rec.lastActive === 'number') {
+            sessionPreviewCache.set(k, {
+              lastActive: rec.lastActive,
+              text: rec.text,
+              botName: typeof rec.botName === 'string' ? rec.botName : undefined,
+            });
+          }
+        }
+      }
+    }
+  }
+// gate-degrade: 本地副标题持久化读取失败时平滑回退，属于冷启动可选加速
+} catch {}
+
+function persistSessionPreviewCache(): void {
+  // gate-degrade: localStorage 写满或无权限时静默降级，不阻断主流程
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const obj: Record<string, PersistedSessionPreview> = {};
+    for (const [k, v] of sessionPreviewCache.entries()) {
+      obj[k] = v;
+    }
+    localStorage.setItem(SESSION_PREVIEW_PERSISTENCE_KEY, JSON.stringify(obj));
+  // gate-degrade: 存储配额超限或无写权限时静默降级，不阻断主线程
+  } catch {}
+}
+
+let enrichPreviewGeneration = 0;
+
+/** 轻量级按需回补当前 Agent 抽屉中可见的真实最后一条消息（带缓存与并发上限，杜绝 60 次全量轮询风暴） */
+async function enrichVisibleSessionPreviews(): Promise<void> {
+  const client = gatewayClient;
+  if (!client) return;
+  const gen = ++enrichPreviewGeneration;
+
+  const currentBot = state.profileName || 'default';
+  const targets = state.sessions
+    .filter((s) => !s.isArchived && !s.hidden && (s.botName === currentBot || (!s.botName && currentBot === 'default')))
+    .filter((s) => {
+      const cached = sessionPreviewCache.get(s.id);
+      return !cached || Math.abs((s.timestamp || 0) - cached.lastActive) >= 1000;
+    })
+    .slice(0, 10);
+
+  if (targets.length === 0) return;
+
+  const updates = new Map<string, { text: string; ts: number }>();
+  await Promise.all(
+    targets.map(async (t) => {
+      try {
+        const last = await client.fetchLastMessage(t.id, { profile: t.botName || currentBot });
+        if (last && last.text) {
+          updates.set(t.id, { text: last.text, ts: last.timestamp || t.timestamp });
+          sessionPreviewCache.set(t.id, {
+            lastActive: t.timestamp,
+            text: last.text,
+            botName: t.botName,
+          });
+        }
+      // gate-degrade: 单条会话真实最后一条消息获取失败时保留网关原始副标题，不阻断其余会话
+      } catch {}
+    })
+  );
+
+  if (gen !== enrichPreviewGeneration || updates.size === 0) return;
+  persistSessionPreviewCache();
+
+  let changed = false;
+  state.sessions = state.sessions.map((s) => {
+    const upd = updates.get(s.id);
+    if (upd && s.preview !== upd.text) {
+      changed = true;
+      return { ...s, preview: upd.text };
+    }
+    return s;
+  });
+
+  if (changed && gen === enrichPreviewGeneration) {
+    syncProfileLastMessages();
+    render();
+  }
+}
+
 // 空会话列表常量：避免在多处写 `[] as NormalizedSession[]` 类型断言（调用方只读，不会原地修改）
 const NO_SESSIONS: NormalizedSession[] = [];
 
@@ -1047,12 +1155,23 @@ async function fetchSessions(): Promise<void> {
     state.sessionListError = t('rail.errorSub');
   }
 
+  // 消费持久化真实副标题缓存，彻底杜绝网关陈旧 preview 覆盖
+  for (const s of state.sessions) {
+    const cachedPrev = sessionPreviewCache.get(s.id);
+    if (cachedPrev && cachedPrev.text) {
+      const tsDiff = Math.abs((s.timestamp || 0) - (cachedPrev.lastActive || 0));
+      if (tsDiff < 1000 || (cachedPrev.lastActive || 0) >= (s.timestamp || 0)) {
+        s.preview = cachedPrev.text;
+      }
+    }
+  }
+
   // 4. 同步刷新工程项目的关联会话与智能体最新对话副标题
   if (state.projects.length > 0) {
     syncProjectSessions();
   }
-  // 优化：彻底拔除 60 次额外轮询风暴，副标题直接消费网关自带的 preview 与本地活跃映射
   syncProfileLastMessages();
+  void enrichVisibleSessionPreviews();
 
   if (!state.activeSessionId && state.sessions.length > 0) {
     await selectSession(state.sessions[0].id);
@@ -1722,13 +1841,16 @@ async function loadOlderMessages(): Promise<void> {
  * 或冷启动，左侧栏展示的副标题和时间与中间视口最新一条消息绝对 100% 强一致。
  *
  * 【防范的历史坑 (Pitfall)】
- * 历史上 loadMessages 拉取到最新历史后从未回填给 Profile，导致 Bot 卡片一直停留
- * 在上次甚至先前被普通会话覆盖的错误时间（如 23:54），界面左右两端彻底割裂。
+ * 1. 历史上 loadMessages 拉取到最新历史后从未回填给 Profile，导致 Bot 卡片一直停留在错误时间；
+ * 2. 匹配会话时仅按裸 id 匹配，跨 Profile 同名 ID 时串扰改错其他 Profile 下的同名会话；
+ * 3. 内存更新后未落盘，导致下次列表刷新被网关首句提问冲刷。
  *
  * 【约束与规则 (Rules)】
- * 专职 Bot 与普通会话各归其位：仅当该 sessionId 属于 Bot 时更新 Bot，普通会话更新普通会话。
+ * - 专职 Bot 与普通会话各归其位：仅当该 sessionId 属于 Bot 时更新 Bot，普通会话更新普通会话；
+ * - 普通会话优先按 botName + sessionId 精准匹配；
+ * - 更新同步写入 sessionPreviewCache 并持久化。
  */
-function syncActiveSessionPreviewToRail(sessionId: string, messages: MessageViewModel[]): void {
+function syncActiveSessionPreviewToRail(sessionId: string, messages: MessageViewModel[], botName?: string): void {
   if (!sessionId || messages.length === 0) return;
 
   // 1. 若当前会话为专职 Bot 的 Forever Chat，委托 core 领域逻辑更新
@@ -1746,8 +1868,9 @@ function syncActiveSessionPreviewToRail(sessionId: string, messages: MessageView
     persistBotActivityToStorage();
   }
 
-  // 2. 若为普通会话，更新该普通会话的预览与时间戳
-  const sess = state.sessions.find((s) => s.id === sessionId);
+  // 2. 若为普通会话，更新该普通会话的预览与时间戳（优先双重约束，防跨 Profile 串扰）
+  const sess = state.sessions.find((s) => s.id === sessionId && (!botName || s.botName === botName))
+    || state.sessions.find((s) => s.id === sessionId);
   if (sess) {
     const lastMsg = messages[messages.length - 1];
     const lastText = (lastMsg.content || lastMsg.thought || '').slice(0, 100).replace(/\s+/g, ' ').trim();
@@ -1756,11 +1879,20 @@ function syncActiveSessionPreviewToRail(sessionId: string, messages: MessageView
       sess.preview = lastText;
       sess.timestamp = rawTs;
       sess.time = formatSessionTime(rawTs);
+      sessionPreviewCache.set(sessionId, {
+        lastActive: rawTs,
+        text: lastText,
+        botName: sess.botName,
+      });
+      persistSessionPreviewCache();
     }
   }
 }
 
-async function loadMessages(sessionId: string): Promise<void> {
+/** 消息拉取代际计数器：彻底阻断切会话时迟滞慢响应串染当前视口与缓存的致命竞态 */
+let activeLoadMessagesGeneration = 0;
+
+async function loadMessages(sessionId: string, targetBotName?: string): Promise<void> {
   if (!sessionId || !gatewayClient) {
     state.messages = [];
     state.hasOlderMessages = false;
@@ -1768,14 +1900,21 @@ async function loadMessages(sessionId: string): Promise<void> {
     return;
   }
 
+  const currentGen = ++activeLoadMessagesGeneration;
   const loadStartedAt = performance.now();
   state.activeSessionId = sessionId;
+
+  // 精准解析当前会话归属的 Profile（解决专职 Agent 会话请求缺 profile 报 404 根因）
+  const resolvedBotName = targetBotName
+    || state.sessions.find((s) => s.id === sessionId)?.botName
+    || (state.activeFocus.type === 'bot' ? state.activeFocus.botName : state.profileName)
+    || 'default';
 
   // 1. Instant Cache Hit (0ms)
   const cached = sessionMessagesCache.get(sessionId);
   if (cached && cached.length > 0) {
     state.messages = [...cached];
-    syncActiveSessionPreviewToRail(sessionId, state.messages);
+    syncActiveSessionPreviewToRail(sessionId, state.messages, resolvedBotName);
     state.hasOlderMessages = (sessionServerOffset.get(sessionId) || 0) >= INITIAL_WINDOW_PAGE_SIZE;
     pendingScrollToBottom = true;
     render();
@@ -1804,7 +1943,14 @@ async function loadMessages(sessionId: string): Promise<void> {
     const outcome = await gatewayClient.fetchSessionMessages(sessionId, {
       limit: INITIAL_WINDOW_PAGE_SIZE,
       order: 'latest',
+      profile: resolvedBotName,
     });
+
+    // 竞态守卫：若在网络异步等待期间用户已切到其他会话，坚决终止，绝对禁止污染当前视口与缓存！
+    if (currentGen !== activeLoadMessagesGeneration || state.activeSessionId !== sessionId) {
+      logSession.debug('discarded stale REST history due to session switch', { sessionId, currentGen });
+      return;
+    }
 
     if (outcome.ok && outcome.messages.length > 0) {
       const parsed = parseRawMessages(outcome.messages);
@@ -1825,7 +1971,7 @@ async function loadMessages(sessionId: string): Promise<void> {
         }
       }
       sessionMessagesCache.set(sessionId, merged);
-      syncActiveSessionPreviewToRail(sessionId, merged);
+      syncActiveSessionPreviewToRail(sessionId, merged, resolvedBotName);
       sessionServerOffset.set(sessionId, outcome.pagination?.returned || outcome.messages.length);
       state.messages = merged;
       state.hasOlderMessages = Boolean(outcome.pagination && outcome.pagination.returned >= INITIAL_WINDOW_PAGE_SIZE);
@@ -1854,7 +2000,7 @@ async function loadMessages(sessionId: string): Promise<void> {
       try {
         res = await gatewayClient.call<any>('session.resume', {
           session_id: sessionId,
-          profile: state.profileName || 'default',
+          profile: resolvedBotName,
         });
       } catch (firstErr: any) {
         const firstMsg = describeRpcError(firstErr);
@@ -1863,6 +2009,11 @@ async function loadMessages(sessionId: string): Promise<void> {
         } else {
           throw firstErr;
         }
+      }
+
+      // 竞态守卫：核验代际与活跃会话 ID
+      if (currentGen !== activeLoadMessagesGeneration || state.activeSessionId !== sessionId) {
+        return;
       }
 
       const handles = readSessionHandles(res, sessionId);
@@ -1878,7 +2029,8 @@ async function loadMessages(sessionId: string): Promise<void> {
       const resumedProjId = typeof rawInfo.project_id === 'string' ? rawInfo.project_id : typeof rawInfo.projectId === 'string' ? rawInfo.projectId : undefined;
       const resumedProjName = typeof rawInfo.project_name === 'string' ? rawInfo.project_name : typeof rawInfo.projectName === 'string' ? rawInfo.projectName : undefined;
       
-      const currentActive = state.sessions.find((s) => s.id === sessionId);
+      const currentActive = state.sessions.find((s) => s.id === sessionId && (!resolvedBotName || s.botName === resolvedBotName))
+        || state.sessions.find((s) => s.id === sessionId);
       if (currentActive) {
         let changed = false;
         if (resumedCwd && !currentActive.cwd) {
@@ -1910,6 +2062,7 @@ async function loadMessages(sessionId: string): Promise<void> {
             merged = [...existing];
           }
           sessionMessagesCache.set(sessionId, merged);
+          syncActiveSessionPreviewToRail(sessionId, merged, resolvedBotName);
           if (merged.length > INITIAL_WINDOW_PAGE_SIZE) {
             state.messages = merged.slice(-INITIAL_WINDOW_PAGE_SIZE);
             state.hasOlderMessages = true;
@@ -1936,7 +2089,7 @@ async function loadMessages(sessionId: string): Promise<void> {
         ms: Math.round((performance.now() - rpcStartedAt) * 10) / 10,
       });
     } catch (e) {
-      if (!fastLoaded) {
+      if (!fastLoaded && currentGen === activeLoadMessagesGeneration && state.activeSessionId === sessionId) {
         console.warn('[Hermes Gateway] Failed to load messages via RPC fallback:', e);
         const errText = describeRpcError(e);
         state.messages = [];
@@ -2328,7 +2481,7 @@ async function archiveSession(id: string): Promise<void> {
   render();
 }
 
-async function selectSession(id: string, options?: { preserveFocus?: boolean }): Promise<void> {
+async function selectSession(id: string, options?: { preserveFocus?: boolean; botName?: string }): Promise<void> {
   if (!id) return;
   if (state.activeSessionId === id && state.activeLiveSessionId && state.messages.length > 0) return;
 
@@ -2361,7 +2514,7 @@ async function selectSession(id: string, options?: { preserveFocus?: boolean }):
   // Force reset messages snapshot to re-bind reactive DOM for streaming
   lastMessagesSnapshot = null;
 
-  await loadMessages(id);
+  await loadMessages(id, options?.botName);
 
   // Restore draft for incoming session
   const restoredInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
@@ -5068,7 +5221,8 @@ function bindEvents(): void {
     (item as HTMLElement).onclick = (e) => {
       if ((e.target as HTMLElement).classList.contains('btn-delete-session')) return;
       const id = (item as HTMLElement).dataset.id;
-      if (id) selectSession(id);
+      const botName = (item as HTMLElement).dataset.bot;
+      if (id) selectSession(id, { botName });
     };
 
     (item as HTMLElement).oncontextmenu = (e) => {

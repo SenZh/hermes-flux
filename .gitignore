@@ -26,6 +26,8 @@ credentials.json
 
 # Test & Logs
 coverage/
+artifacts/
+.agents/
 *.log
 npm-debug.log*
 .tsbuildinfo
