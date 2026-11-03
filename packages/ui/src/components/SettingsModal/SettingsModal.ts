@@ -345,7 +345,7 @@ function renderTabPane(props: SettingsModalProps): string {
                 justify-content: center;
                 gap: 4px;
               ">
-                <span class="theme-preview-title" style="font-size: 13px; font-weight: 600;">${t('settings.themeAyuTitle')}</span>
+                <span class="theme-preview-title" style="font-size: 13px; font-weight: 600;">${t('common.theme.ayuLightLabel')}</span>
                 <span class="theme-preview-sub" style="font-size: 10px;">${t('settings.themeAyuSub')}</span>
               </button>
 
@@ -360,7 +360,7 @@ function renderTabPane(props: SettingsModalProps): string {
                 justify-content: center;
                 gap: 4px;
               ">
-                <span class="theme-preview-title" style="font-size: 13px; font-weight: 600;">${t('settings.themeLightTitle')}</span>
+                <span class="theme-preview-title" style="font-size: 13px; font-weight: 600;">${t('common.theme.jadeWhiteLabel')}</span>
                 <span class="theme-preview-sub" style="font-size: 10px;">${t('settings.themeLightSub')}</span>
               </button>
 
@@ -375,7 +375,7 @@ function renderTabPane(props: SettingsModalProps): string {
                 justify-content: center;
                 gap: 4px;
               ">
-                <span class="theme-preview-title" style="font-size: 13px; font-weight: 600;">${t('settings.themeObsidianTitle')}</span>
+                <span class="theme-preview-title" style="font-size: 13px; font-weight: 600;">${t('common.theme.obsidianLabel')}</span>
                 <span class="theme-preview-sub" style="font-size: 10px;">${t('settings.themeObsidianSub')}</span>
               </button>
 
@@ -390,7 +390,7 @@ function renderTabPane(props: SettingsModalProps): string {
                 justify-content: center;
                 gap: 4px;
               ">
-                <span class="theme-preview-title" style="font-size: 13px; font-weight: 600;">${t('settings.themeCyberTitle')}</span>
+                <span class="theme-preview-title" style="font-size: 13px; font-weight: 600;">${t('common.theme.cyberMatrixLabel')}</span>
                 <span class="theme-preview-sub" style="font-size: 10px;">${t('settings.themeCyberSub')}</span>
               </button>
             </div>

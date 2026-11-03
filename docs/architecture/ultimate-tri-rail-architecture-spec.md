@@ -71,9 +71,9 @@
 +------------------------------------------------------------------------------------------------------------------------------------------+
 | Titlebar (42px) [Mac 窗控三色灯] [项目: hermes-flux ▾]              [中枢: 默认助理 (Profile: default)]   [─  □  ✕] (Win 窗控按钮)          |
 +------------------------------------------------------------------------------------------------------------------------------------------+
-| ◀ LeftRail (260px 双轨) ▶   || ◀──────────────────── MiddlePod (Fluid Canvas) ───────────────────▶ || ◀────── InspectionPod (380px) ───────▶ |
+| ◀ LeftRail (264px 双轨) ▶   || ◀──────────────────── MiddlePod (Fluid Canvas) ───────────────────▶ || ◀────── InspectionPod (410px) ───────▶ |
 | ├───────┬─────────────────┤ ||                                                                     || (可折叠至 0px, 快捷键 Cmd+\)             |
-| │ 48px  │ 212px           │ || 顶栏: 🤖 架构师 · 老王 (Claude 3.7 - Forever Chat)       [👥 原地拉群] || Tabs: [ 📋 看板(3) | ⚡ 穿透终端 | 🔍 Diff ]|
+| │ 52px  │ 212px           │ || 顶栏: 🤖 架构师 · 老王 (Claude 3.7 - Forever Chat)       [👥 原地拉群] || Tabs: [ 📋 看板(3) | ⚡ 穿透终端 | 🔍 Diff ]|
 | │Station│Context Drawer   │ || ─────────────────────────────────────────────────────────────────── || ──────────────────────────────────────── |
 | │       │                 │ || [User]: 请将 Hermes Flux 的 OAuth 回调机制重构，派生任务去项目执行。|| 【看板视图 (Active)】                     |
 | │ [✦]   │ [+ 新建旁聊]    │ ||                                                                     || 待办 (TODO · 2)    执行中 (DOING · 1)  |
@@ -93,11 +93,11 @@
 +------------------------------------------------------------------------------------------------------------------------------------------+
 ```
 
-### 2.1 左侧双轨中枢 (LeftRail: 48px Station Rail + 212px Context Drawer = 260px)
+### 2.1 左侧双轨中枢 (LeftRail: 52px Station Rail + 212px Context Drawer = 264px)
 
 彻底摒弃死板的左上角单点下拉与 4 层手风琴堆叠，以 **Station（实体）+ Drawer（投影）** 双轨化解信息爆炸：
 
-1. **48px Station Rail（物理中枢微轨）**：
+1. **52px Station Rail（物理中枢微轨）**：
    - **恒定置顶位**：`✦ 个人主助理 (Default Soul)`，带翡翠微光呼吸点，永远是用户的全局总台；
    - **专职数字员工位**：垂直排布具名 Bot 头像徽章（32×32px 超椭圆），具备专属色彩指纹（架构师靛青 `#4F46E5`、前端洋红 `#DB2777`、审查员琥珀 `#D97706`），带有后台运行状态指示点；
    - **协同会议室位**：`👥 群组`（展示叠落头像）；
@@ -118,8 +118,8 @@
 3. **通道三（中舱面包屑回退）**：中间主舱顶栏完整呈现血缘链路：`顶栏: 🤖 架构老王 ➔ ⑂ [旁聊] 锁冲突排查  [⮌ 回到主工位]`，点击左侧父级面包屑或回退胶囊即可瞬切归位。
 
 3. **三态极客折叠**：
-   - `Default (260px)`：双轨全开；
-   - `Compact (48px)`：按快捷键 `Cmd+\`，收起 212px 抽屉，仅留微轨，悬停图标弹出 Floating Flyout；
+   - `Default (264px)`：双轨全开；
+   - `Compact (52px)`：按快捷键 `Cmd+\`，收起 212px 抽屉，仅留微轨，悬停图标弹出 Floating Flyout；
    - `Zen (0px)`：按快捷键 `Cmd+B`，侧栏全隐藏，专注全屏协作。
 
 ### 2.2 中间主工作舱 (MiddlePod) 与 740px 悬浮输入舱
@@ -134,7 +134,7 @@
    - 支持 IME 输入法组合态保护（输入中文按 Enter 绝不误发送）；
    - 支持键盘流快速触发：键入 `@` 呼叫专家，键入 `/task` 派发工单，键入 `/btw` 临时外援问答。
 
-### 2.3 右侧多模态工具舱 (RightPod / InspectionPod: 380px)
+### 2.3 右侧多模态工具舱 (RightPod / InspectionPod: 410px)
 
 定位为**“确定性状态收敛与工程交付”**，通过顶部分段 Tab 承载三大模态并实现丝滑互通：
 
@@ -192,8 +192,8 @@
 | `packages/core/src/rpc/types.ts` | 增强 | 定义 `StationMode`、`InspectorTab`、`WorkspaceLayoutState` 严谨类型 |
 | `packages/core/src/terminal/ptyBuffer.ts` | 新增 | 实现 5000 行 Headless 环形缓冲区，隔离后台 Worker 日志吞吐 |
 | `packages/core/src/rpc/promotionPipeline.ts` | 新增 | 封装 `promoteSessionToGroup` 四阶拉群与种子注入管道 |
-| `packages/ui/src/components/LeftRail/LeftRail.ts` | 重构 | 实现 48px Station Rail + 212px Drawer 双轨布局与 3 态折叠 |
-| `packages/ui/src/components/InspectionPod/InspectionPod.ts` | 重构 | 实现 380px 右侧看板、终端穿透与 Diff 门禁三模态无缝切换 |
+| `packages/ui/src/components/LeftRail/LeftRail.ts` | 重构 | 实现 52px Station Rail + 212px Drawer 双轨布局与 3 态折叠 |
+| `packages/ui/src/components/InspectionPod/InspectionPod.ts` | 重构 | 实现 410px 右侧看板、终端穿透与 Diff 门禁三模态无缝切换 |
 | `packages/ui/src/components/MiddlePod/MiddlePod.ts` | 增强 | 720px 居中流式渲染，支持挂载派生任务卡片与 BTW 外援胶囊 |
 | `packages/ui/src/components/InputDock/InputDock.ts` | 增强 | 740px 黄金限宽输入舱，集成 @ 联想与 IME Composition 保护 |
 | `packages/desktop/src/renderer/index.ts` | 增强 | 组装双轨状态机、快捷键监听（Cmd+B / Cmd+\）与端到端事件联动 |
@@ -207,5 +207,5 @@
 2. **Gate 1: 全栈严格类型** —— `npm run typecheck` 保持 100% 零错误，禁止 `any` 与隐式类型降级；
 3. **Gate 2: 反 AI 假测试** —— 单元测试严禁假 Mock，必须真实导入生产模块（零 Mock）；
 4. **Gate 3: 正确性不变量** —— 显式失败检验，网络中断或任务异常必须给出明确错误指示，禁止吞错展示空列表；
-5. **Gate 4: 物理规范契约** —— Titlebar 42px、StatusBar 22px、InputDock 740px、LeftRail 260px、InspectionPod 380px 像素级精准一致；
+5. **Gate 4: 物理规范契约** —— Titlebar 42px、StatusBar 22px、InputDock 740px、LeftRail 264px、InspectionPod 410px 像素级精准一致；
 6. **Gate 5: 全量回归** —— `npm test && npm run build` 全包编译与单测 100% 全绿。
