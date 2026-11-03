@@ -6813,9 +6813,12 @@ function bindRailResizeEvents(): void {
   document.querySelectorAll<HTMLElement>('.rail-resize-handle').forEach((handle) => {
     const isLeft = handle.dataset.railHandle === 'left';
     const cssVar = isLeft ? '--rail-w-left' : '--rail-w-right';
-    const minW = isLeft ? 200 : 260;
-    const maxW = isLeft ? 500 : Math.round(window.innerWidth * 0.85);
-    const defaultW = isLeft ? 260 : 420;
+    // 设计意图(Why)：左轨宽度按 tri-rail 规范锁定 52+212=264 为下限，拖拽只允许适度加宽。
+    // 防范的历史坑(Pitfall)：原上限 500 与规范漂移，且 localStorage 恢复路径不夹取，旧宽档永久残留（用户实测"蓝色太宽"）。
+    // 约束与规则(Rules)：左轨 [264,400]，默认 264；右轨维持现值待波③与 410 规范一并对齐。
+    const minW = isLeft ? 264 : 260;
+    const maxW = isLeft ? 400 : Math.round(window.innerWidth * 0.85);
+    const defaultW = isLeft ? 264 : 420;
     const storageKey = isLeft ? 'hermes_flux_rail_w_left' : 'hermes_flux_rail_w_right';
 
     handle.ondblclick = (e) => {
@@ -7006,11 +7009,19 @@ async function init(): Promise<void> {
   });
   installLayoutShiftDiagnostics();
 
-  // Restore persisted rail widths
-  const savedLeft = localStorage.getItem('hermes_flux_rail_w_left') || localStorage.getItem('hermes_aura_rail_w_left');
-  if (savedLeft) document.documentElement.style.setProperty('--rail-w-left', `${savedLeft}px`);
-  const savedRight = localStorage.getItem('hermes_flux_rail_w_right') || localStorage.getItem('hermes_aura_rail_w_right');
-  if (savedRight) document.documentElement.style.setProperty('--rail-w-right', `${savedRight}px`);
+  // Restore persisted rail widths — 夹取后才允许注入，防止历史越界存档复活（坑：恢复路径曾无 clamp）
+  const clampRail = (raw: string | null, minW: number, maxW: number, fallback: number): number => {
+    const parsed = raw ? Number.parseFloat(raw) : NaN;
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.round(Math.max(minW, Math.min(maxW, parsed)));
+  };
+  const railMaxW = Math.round(window.innerWidth * 0.85);
+  const restoredLeft = clampRail(localStorage.getItem('hermes_flux_rail_w_left') || localStorage.getItem('hermes_aura_rail_w_left'), 264, 400, 264);
+  document.documentElement.style.setProperty('--rail-w-left', `${restoredLeft}px`);
+  localStorage.setItem('hermes_flux_rail_w_left', String(restoredLeft));
+  const restoredRight = clampRail(localStorage.getItem('hermes_flux_rail_w_right') || localStorage.getItem('hermes_aura_rail_w_right'), 260, railMaxW, 420);
+  document.documentElement.style.setProperty('--rail-w-right', `${restoredRight}px`);
+  localStorage.setItem('hermes_flux_rail_w_right', String(restoredRight));
 
   if (desktopApi) {
     try {
