@@ -1,6 +1,5 @@
 import * as React from 'react';
-import { ChevronLeft, Folder, MessageSquare, MoreHorizontal, Plus, Search, Users } from 'lucide-react';
-import { t } from '../i18n/index.js';
+import { ChevronLeft, Folder, MessageSquare, MoreHorizontal, Plus, Search, Users } from 'lucide-react';import { t } from '../i18n/index.js';
 import { Badge } from './primitives/Badge.js';
 import { Button } from './primitives/Button.js';
 import { Input } from './primitives/Input.js';

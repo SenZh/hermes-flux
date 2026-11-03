@@ -44,6 +44,17 @@
   --radius-inner: 6px;
   --radius-pill: 9999px;
 
+  /* 几何单源。设计意图(Why)：微轨/抽屉/检查舱/状态栏的尺寸被 TS(DIMENSIONS)、CSS fallback
+     与组件 utility 三处引用；不定义真值就会永远走 fallback，改一处不生效。
+     约束与规则(Rules)：本段是 CSS 侧唯一定义面，数值必须与 tokens.ts 的 DIMENSIONS 一致。 */
+  --geo-titlebar: 42px;
+  --geo-micro-rail: 52px;
+  --geo-context-drawer: 212px;
+  --geo-left-rail: 264px;
+  --geo-inspector-pod: 410px;
+  --geo-statusbar: 22px;
+  --geo-input-dock: 740px;
+
   --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
   --duration-fast: 140ms;
   --duration-normal: 240ms;

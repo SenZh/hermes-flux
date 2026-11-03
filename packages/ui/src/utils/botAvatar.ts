@@ -99,6 +99,13 @@ export function renderGroupCollageAvatar(
  * 2. 名称含 xiaofawang 或哈希落到 triangle 时渲染官方黄色三角形；
  * 3. 其余按名称哈希给出确定性几何图腾，保证同一 Bot 每次渲染一致。
  */
+/**
+ * 无头像时的确定性几何图腾。
+ * 【设计意图】同一 Bot 每次渲染必须一致，不同 Bot 必须可区分。
+ * 【防范的历史坑】早期只用 7 种形状，但 7 种里 5 种都落到同一个 rect 兜底分支，
+ *   实测 3 个 Bot 全部渲染成同一块橙色方块，微轨完全无法辨认（真实截图取证）。
+ * 【约束与规则】形状 × 色调二维组合，色调只取皮肤语义槽，禁止硬编码色值。
+ */
 export function renderBotAvatar(name: string, displayName?: string, avatarUrl?: string, size = 36): string {
   if (avatarUrl) {
     return `<img src="${escapeHtml(avatarUrl)}" style="
@@ -118,10 +125,8 @@ export function renderBotAvatar(name: string, displayName?: string, avatarUrl?: 
   for (const ch of cleanName) {
     hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
   }
-  const shapes = ['circle', 'squircle', 'pill', 'triangle', 'hexagon', 'cloud', 'drop'];
-  const pickedShape = shapes[hash % shapes.length];
 
-  if (cleanName.includes('xiaofawang') || pickedShape === 'triangle') {
+  if (cleanName.includes('xiaofawang')) {
     return `
       <svg width="${size}" height="${size}" viewBox="0 0 36 36" fill="none" style="flex-shrink: 0; display: block;">
         <path d="M18 4.5 C19.2 2.5 21.8 2.5 23 4.5 L34 26 C35.2 28.2 33.8 31 31.2 31 L6.8 31 C4.2 31 2.8 28.2 4 26 Z" fill="${XIAOFAWANG_YELLOW}" />
@@ -131,16 +136,24 @@ export function renderBotAvatar(name: string, displayName?: string, avatarUrl?: 
     `;
   }
 
+  // 4 种形状 × 3 种色调 = 12 种可辨识组合，足以区分常见 Bot 数量
+  const shapes = ['circle', 'squircle', 'hexagon', 'pill'] as const;
+  const tones = ['--primary', '--success', '--warning'] as const;
+  const pickedShape = shapes[hash % shapes.length];
+  const pickedTone = tones[Math.floor(hash / shapes.length) % tones.length];
+
+  const body = pickedShape === 'circle'
+    ? `<circle cx="18" cy="18" r="13" fill="var(${pickedTone})" />`
+    : pickedShape === 'hexagon'
+      ? `<path d="M18 5 L30 12 L30 25 L18 32 L6 25 L6 12 Z" fill="var(${pickedTone})" />`
+      : pickedShape === 'pill'
+        ? `<rect x="6" y="9" width="24" height="18" rx="9" fill="var(${pickedTone})" />`
+        : `<rect x="5" y="5" width="26" height="26" rx="7" fill="var(${pickedTone})" />`;
+
   return `
     <svg width="${size}" height="${size}" viewBox="0 0 36 36" fill="none" style="flex-shrink: 0; display: block;">
-      <rect width="36" height="36" rx="8" fill="var(--bg-panel)" />
-      ${
-        pickedShape === 'circle'
-          ? `<circle cx="18" cy="18" r="13" fill="var(--accent)" />`
-          : pickedShape === 'cloud'
-          ? `<path d="M10 24 a6 6 0 0 1 -1 -12 a7.5 7.5 0 0 1 14 -1 a5.5 5.5 0 0 1 5 13 Z" fill="var(--accent)" />`
-          : `<rect x="5" y="5" width="26" height="26" rx="6" fill="var(--accent)" />`
-      }
+      <rect width="36" height="36" rx="8" fill="var(--panel)" />
+      ${body}
       <circle cx="14" cy="17" r="1.8" fill="${BOT_PUPIL_BLACK}" />
       <circle cx="22" cy="17" r="1.8" fill="${BOT_PUPIL_BLACK}" />
     </svg>

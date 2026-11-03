@@ -241,6 +241,24 @@ test('头像资产：自定义头像渲染真实 img，无资产时回退确定�
     assert.ok(zhang.includes('<svg') || zhang.includes('viewBox'), '必须回退几何图腾');
   });
 
+  await t.test('多个无资产 Bot 必须可区分（形状×色调二维指纹，不得全部同形同色）', () => {
+    const markup = renderRail({
+      profiles: [
+        { name: 'default', displayName: 'Default', isDefault: true, activityState: 'read' },
+        { name: 'bot-alpha', displayName: 'Alpha', activityState: 'read' },
+        { name: 'bot-beta', displayName: 'Beta', activityState: 'read' },
+        { name: 'bot-gamma', displayName: 'Gamma', activityState: 'read' },
+      ],
+    });
+    const signatures = ['bot-alpha', 'bot-beta', 'bot-gamma'].map((name) => {
+      const chunk = between(markup, `data-station-profile="${name}"`, 'data-station-profile=');
+      const fill = /fill="var\((--[a-z-]+)\)"/.exec(chunk.split('alt=')[0]) || [];
+      const shape = /<(circle|rect|path|polygon)\b/.exec(chunk.split('fill="var(--panel)"')[1] || chunk);
+      return `${shape ? shape[1] : '?'}|${fill[1] || '?'}`;
+    });
+    assert.equal(new Set(signatures).size, 3, `三个无资产 Bot 必须得到三种不同指纹，实际=${JSON.stringify(signatures)}`);
+  });
+
   await t.test('群聊行必须渲染拼图头像（多人身份签名，不得退化成纯文字）', () => {
     const markup = renderRail({
       groups: [

@@ -64,14 +64,18 @@
   --radius-full: 9999px;
   --font-ui: var(--font-sans);
   --font-code: var(--font-mono);
-  --text-hero: 20px;
-  --text-title: 16px;
-  --text-section: 14px;
-  --text-body: 13px;
-  --text-aux: 12px;
-  --text-caption: 11px;
-  --text-overline: 10px;
-  --text-micro: 9px;
+  /* 字号档位引用节奏层 --fs-*，使 Tailwind 的 text-* 与 styles.css 同源。
+     设计意图(Why)：若在这里再写一遍 20/16/14/13/12/11/10/9px，就等于第二套字号真值；
+     引用变量后改 --fs-* 一处，组件 utility 与状态栏等直接消费者同时生效。
+     约束与规则(Rules)：禁止在此写死 px；--fs-* 的唯一真值面在 styles.css :root 节奏层。 */
+  --text-hero: var(--fs-hero, 20px);
+  --text-title: var(--fs-title, 16px);
+  --text-section: var(--fs-section, 14px);
+  --text-body: var(--fs-body, 13px);
+  --text-aux: var(--fs-aux, 12px);
+  --text-caption: var(--fs-caption, 11px);
+  --text-overline: var(--fs-overline, 10px);
+  --text-micro: var(--fs-micro, 9px);
   /* 时长与缓动不在此定义：--duration-fast/--duration-normal 由 :root 节奏层（styles.css）单一来源持有，同名定义会造成隐式覆盖 */
 }
 
