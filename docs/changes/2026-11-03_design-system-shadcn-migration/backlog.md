@@ -11,9 +11,16 @@
 | A2 | P1 | 右上角 profile 名称+下拉框要删除 | 产品裁决，覆盖 PR-3a 复审"恢复 profile 下拉"那条（operator 决定优先于审查建议）。处置：Titlebar 移除 profile 展示与下拉；快照字段/回调/样式/单测/CDP 断言同步清理；profile 切换入口去向明日问 operator 一句话或默认只保留设置弹窗内。登记进 PR-3b 任务书一并做。 |
 | A3 | P1 | 左下角状态栏延迟读数：字体太大、颜色丑 | 恰好是设计系统的第一块实战：改用节奏层 token（fs-caption 11px 档 + --muted-foreground + --font-mono），具体数值明日按截图定。属 PR-3b StatusBar 顺带项。 |
 
+## A4. 收工后追加（commit push 轮发现，随 PR-3b 处理）
+
+| # | 优先级 | 问题 | 处置 |
+|---|---|---|---|
+| A4-1 | **P0** | **shadcn 六件 primitives（Button/Input/Dialog/Menu/Badge/Switch）生产零消费**（grep components-react 全域无 import 已证）。入库即死代码，将重演 accordion/tabs/avatar 三死文件的历史 | ①PR-3b LeftRail 强制消费语义吻合控件：图标按钮→Button variant=ghost、右键菜单→Menu、重命名输入→Input，不许再造轮子；②新增守卫：primitives 必须有生产消费者且消费者计数只增不减（门禁探针或单测，随 1b 探针批次落）；③预期管理：每舱视觉变化在迁移完成后才可见，当前窗口观感不变属正常 |
+| A4-2 | P2 | react-shell 编译探针测试读 `desktop/dist/renderer/tailwind.css`，改 @theme 后不重跑 build:desktop 会 stale 假红（本夜实际踩中一次） | test-plan 补一行："改 tailwind-entry/@theme 或组件类名后，必须先 build:desktop 再 npm test"；或测试内部自触发编译（择一，PR-3b 顺带） |
+
 ## B. 在途：PR-3b（LeftRail 舱迁移）
 
-**停线现场（代理回报，2026-11-03 夜）**：工作树仅一个未跟踪草稿文件 `packages/ui/src/components-react/LeftRail.tsx`（含无头像行/摘要/时间格式函数的组件草稿），零提交、零 push、其余未动。明日恢复第一步=审这份草稿后续做（保留勿清）。任务书范围不变：
+**停线现场（已更新）**：草稿与 i18n 键、@theme 四补映射已随 `4539110` 提交推送，工作树干净无未提交改动。明日恢复第一步=从已入库的 `packages/ui/src/components-react/LeftRail.tsx` 草稿续做接线（挂载桥、renderer 消费、旧模板覆写移除），并按 A4-1 强制 primitives 消费。任务书范围不变：
 1. LeftRail 873 行模板 → React（mount 桥照抄 StatusBar/Titlebar 形状，禁空转包装）；S4 不变量逐点核实（宿主不得再被模板覆写）。
 2. 会话行重设计（用户定案）：去头像 / 标题主体 / 副标题 12px muted 单行截断 / 时间紧凑化（当日 HH:mm、跨日 M/D、跨年带年）钉右缘 / 行高 48px。**主工位卡数据管道 updateBotLatestActivity/syncBotProfiles 一字不动**（定理 1/3/4 守护）。
 3. PR-3a 双审登记七项清偿：SKIN_IDS 派生守卫、`:has([title="在线"])` 改 data-status、gatewayLatencyMs 死字段清除、session-live-pulse 孤儿 keyframes 裁决（集中时钟或删孤儿，禁裸 infinite）、react-shell 测试文案锁改 data 属性、tailwind @source 白名单收紧、barrel 裸导入门禁探针。
@@ -40,3 +47,5 @@
 2. "PR-3b 已开工"虚报一次（实际未派单，下一轮已补派）——**声明动作前必须已执行动作**。
 3. A1 教训：clamp 修复只有单测证据没有运行时证据，用户实测直接推翻"已修复"声明。规则：**面向用户可见行为的修复，验收证据必须是运行时复现，写进明日 A1 执行标准**。
 4. 两个执行代理先后以不实理由中断（"环境无法写入"实为已写大半），现场接管流程有效，但派单书应加"失败必须贴原始报错"条款。
+5. "PR-3b 已开工"虚报一次后已真实派单；同日打包答复里"左栏夹取已修复"仅凭代码在案即定性，被用户实测推翻——已入 A1 并立规矩：用户可见行为的修复，验收证据必须是运行时复现。
+6. 提交钩连炸两次的同根问题：验证链内部各步有产物依赖（dist 编译产物 vs 源码改动），改样式映射/组件类名后必须 build 再 test。派单书与本地习惯都要把 build:desktop 放在 test 前。
