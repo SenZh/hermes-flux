@@ -604,18 +604,18 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     assert.ok(html.includes('var(--chat-user-message-bg, var(--bg-card))'), 'User bubble must support chat-user-message-bg token');
   });
 
-  await t.test('getNextToggleTheme must deterministically transition between dark and primary light theme', async () => {
-    const { getNextToggleTheme } = await import('../dist/tokens/themeRegistry.js');
+  await t.test('getToggleTheme must deterministically transition between dark and primary light theme', async () => {
+    const { getToggleTheme } = await import('../dist/tokens/skins.js');
 
     // All light themes must transition to obsidian-gold
-    assert.equal(getNextToggleTheme('ayu-light'), 'obsidian-gold');
-    assert.equal(getNextToggleTheme('warm-paper'), 'obsidian-gold');
-    assert.equal(getNextToggleTheme('jade-white'), 'obsidian-gold');
-    assert.equal(getNextToggleTheme('suet-jade'), 'obsidian-gold');
+    assert.equal(getToggleTheme('ayu-light'), 'obsidian-gold');
+    assert.equal(getToggleTheme('warm-paper'), 'obsidian-gold');
+    assert.equal(getToggleTheme('jade-white'), 'obsidian-gold');
+    assert.equal(getToggleTheme('suet-jade'), 'obsidian-gold');
 
     // Dark themes must transition to ayu-light
-    assert.equal(getNextToggleTheme('obsidian-gold'), 'ayu-light');
-    assert.equal(getNextToggleTheme('cyber-matrix'), 'ayu-light');
+    assert.equal(getToggleTheme('obsidian-gold'), 'ayu-light');
+    assert.equal(getToggleTheme('cyber-matrix'), 'ayu-light');
   });
 
   await t.test('Gate 4e: MiddlePod long session performance benchmark (5000 synthetic messages)', async () => {

@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {
   renderWorkerDelegationCard,
   renderSubagentTerminalView,
-  THEME_OBSIDIAN_GOLD,
 } from '../../dist/index.js';
 
 // 从官方皮肤中提取所有合法的 CSS 变量名

@@ -12,7 +12,7 @@ import path from 'node:path';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
 const CSS_PATH = path.join(ROOT, 'packages/desktop/src/renderer/styles.css');
-const REG_PATH = path.join(ROOT, 'packages/ui/src/tokens/themeRegistry.ts');
+const SKINS_PATH = path.join(ROOT, 'packages/ui/src/tokens/skins.ts');
 const rel = (p) => path.relative(ROOT, p).replace(/\\/g, '/');
 const kebab = (s) => s.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
 
@@ -25,22 +25,11 @@ const walk = (dir, out = []) => {
   return out;
 };
 
-/* ── 源1：themeRegistry ── */
-const regSrc = fs.readFileSync(REG_PATH, 'utf8');
-const registrySlots = [...new Set([...regSrc.matchAll(/(--[a-z0-9-]+):\s*\$\{/g)].map((m) => m[1]))];
-const regRegion = regSrc.slice(regSrc.indexOf('BUILTIN_SKINS'), regSrc.indexOf('generateSkinCssVariables'));
-const idPos = [...regRegion.matchAll(/^ {2}'([a-z0-9-]+)': \{/gm)];
+/* ── 源1：skins.ts（原旧表已于 PR-1c 废弃，由 skins.ts 接管） ── */
+const skinsSrc = fs.readFileSync(SKINS_PATH, 'utf8');
+const slotMatch = skinsSrc.match(/export const SLOT_IDS = \[(.*?)\]/s);
+const registrySlots = slotMatch ? [...slotMatch[1].matchAll(/'(--[a-z0-9-]+)'/g)].map((m) => m[1]) : [];
 const registrySkins = {};
-idPos.forEach((m, i) => {
-  const end = i + 1 < idPos.length ? idPos[i + 1].index : regRegion.length;
-  const section = regRegion.slice(m.index, end);
-  const vars = {};
-  for (const p of section.matchAll(/(\w+):\s*'([^']+)'/g)) {
-    const key = '--' + kebab(p[1]);
-    if (registrySlots.includes(key)) vars[key] = p[2];
-  }
-  registrySkins[m[1]] = vars;
-});
 
 /* ── 源2：styles.css 块（选择器文本判型，不看值） ── */
 const cssSrc = fs.readFileSync(CSS_PATH, 'utf8');

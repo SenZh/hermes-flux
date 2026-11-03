@@ -31,7 +31,7 @@
 | 技能名称 | 目录路径 | 核心能力与适用场景 |
 |---|---|---|
 | **verify-hermes-flux** | [`.opencode/skills/verify-hermes-flux/`](.opencode/skills/verify-hermes-flux/) | 驱动真实 Blink 浏览器内核对工作台进行端到端物理行为验证，捕获真实截图存盘至 `artifacts/verification/` |
-| **verify-formal-invariants** | [`.opencode/skills/verify-formal-invariants/`](.opencode/skills/verify-formal-invariants/) | 基于 `fast-check` 的形式化安全不变量检验器，在数万次随机并发交错中证明 7 大核心数学定理 |
+| **verify-formal-invariants** | [`.opencode/skills/verify-formal-invariants/`](.opencode/skills/verify-formal-invariants/) | 基于 `fast-check` 的形式化安全不变量检验器，在数万次随机并发交错中证明 11 大核心数学定理 |
 
 ---
 
@@ -40,8 +40,8 @@
 ### 1. Monorepo 单向分层职责
 $$\text{packages/desktop} \mid \text{packages/mobile} \mid \text{packages/web} \longrightarrow \text{packages/ui} \longrightarrow \text{packages/core}$$
 - **`packages/core`**：纯 TypeScript 无界逻辑层，零 DOM/React/Electron 依赖。承载 JSON-RPC 2.0 Client、WebSocket 5态 FSM、TokenCoalescer 合流引擎、PlatformBridge 接口规范与纯领域状态机。
-- **`packages/ui`**：纯 UI 表现层与组件库。承载全端共享的 DOM 模板组件、暗黑主题变量、设计系统 Tokens 与 Markdown 渲染器。禁止调用原生网络与平台私有 IPC。
-- **`packages/desktop` / `packages/mobile` / `packages/web`**：轻量薄壳容器（Thin Shells）。仅包含平台入口、原生 Bridge 注入与系统窗口生命周期管理，**严禁在壳内编写应用级状态机与业务路由编排**。
+- **`packages/ui`**：纯 UI 表现层与组件库。承载全端共享的 React 组件库（迁移波次进行中，现状为字符串模板）、暗黑主题变量、设计系统 Tokens 与 Markdown 渲染器。禁止调用原生网络与平台私有 IPC。
+- **`packages/desktop` / `packages/mobile`**（`packages/web` 标注未落地本期范围外）：轻量薄壳容器（Thin Shells）。仅包含平台入口、原生 Bridge 注入与系统窗口生命周期管理，**严禁在壳内编写应用级状态机与业务路由编排**。
 
 ### 2. 专职智能体主工位（Forever Chat）物理领域隔离原则
 - **实体正交性**：抽屉顶部的专职 Bot 卡片（`rail-primary-agent-card`）展示的时间和副标题，仅且必须代表该 Bot 的专职终身主工位（`title: 'Bot Chat', hidden: true`）或人设描述；
@@ -49,6 +49,7 @@ $$\text{packages/desktop} \mid \text{packages/mobile} \mid \text{packages/web} \
 - **原子反哺管道**：会话加载完成、用户发信、流式接收与冷启动探测均通过 `updateBotLatestActivity` 统一收敛更新，确保内存 Map、Profile 模型、LocalStorage 0ms 持久化与自然日时间格式化（`formatSessionTime`）强一致。
 
 ### 3. 核心几何规范与设计约束
+- **左侧双轨（Left Rail）**：宽度锁定 `264px`（`52px` 物理微轨 + `212px` 抽屉工作区）；
 - **输入舱（Input Dock）**：底部悬浮居中，**严格锁定黄金限宽 `max-width: 740px`**，内嵌模型选择器、思考深度与审批策略；
 - **场景检查舱（Inspection Pod）**：贴靠右侧窗边双列布局，详情工作舱 + 竖向场景轨，宽度锁定 `410px`（规范基线）；
 - **极简状态栏（Status Bar）**：固定高度 `22px`，拔除调试冗余，仅保留翡翠绿微光点与网关延迟读数；
@@ -106,7 +107,7 @@ $$\text{packages/desktop} \mid \text{packages/mobile} \mid \text{packages/web} \
 ```bash
 npm run gates:changed                           # 1. 静态门禁断言：新增违规数严格为 0
 npm run typecheck                               # 2. 静态类型断言：全工作区 0 错误
-npm run verify:formal                           # 3. 形式化安全定理断言：7 大数学定理获证，零反例逃逸
+npm run verify:formal                           # 3. 形式化安全定理断言：11 大数学定理获证，零反例逃逸
 node scripts/verify/control-flux.mjs run <feat> # 4. Blink CDP 真实物理渲染验证：捕获截图存盘至 artifacts/verification/
 npm run verify                                  # 5. 交付前全量总体验收：门禁 + 契约 + 类型 + 单测 + 形式化 100% 绿灯
 ```
@@ -128,7 +129,7 @@ npm run verify                                  # 5. 交付前全量总体验收
 | **全量静态门禁** | `npm run gates` | 扫描 Monorepo 全量源码，断言无新增架构/换肤/i18n/性能违规，存量债务自动放行 |
 | **全栈严格类型** | `npm run typecheck` | 执行 core、ui、desktop 递归类型推导，**0 TS 报错，严禁任何 as any** |
 | **全量单测回归** | `npm test` | 执行全工作区单元测试与架构守卫测试，**100% 绿灯，单测用例必须具可证伪性** |
-| **形式化不变量证明** | `npm run verify:formal` | **状态机必跑**：基于 fast-check 在 8,500+ 次随机并发交错中证明 7 大数学定理获证 |
+| **形式化不变量证明** | `npm run verify:formal` | **状态机必跑**：基于 fast-check 在 8,500+ 次随机并发交错中证明 11 大数学定理获证 |
 | **物理CDP验证与截图** | `node scripts/verify/control-flux.mjs run <feature-id>` | **用户特征必跑**：驱动真实 Blink 内核，捕获物理截图存盘至 `artifacts/verification/` |
 | **交付前全量四位一体** | `npm run verify` | **落盘前必跑**：链式执行 `gates` + `contract` + `typecheck` + `test` + `formal`，一键确定交付准入 |
 | **网关接口文档同步** | `npm run contract:doc` | 根据 RPC 真实探针重新生成 `docs/gateway/` 契约文档（严禁手改） |

@@ -1,5 +1,7 @@
 # 跨端设计系统与 Token 规范 (Design Tokens Spec)
 
+> ⚠️ **规范迁移说明**：本规范中的旧版色彩 Token 定义已被 [`docs/architecture/theme-engine-spec.md`](../architecture/theme-engine-spec.md)（43 槽单一真值表 `skins.ts` 版）权威取代。关于皮肤定义、CSS 变量生成链与槽位契约请以最新规范为准。空间、网格与排版等通用几何 Token 继续作为基础参考。
+
 > 本规范定义跨端产品（Web、iOS、Android、macOS、Windows）共享的设计 Token 字典与实现代码映射，支持 Tailwind CSS、CSS Variables、SwiftUI 与 React Native / Compose 快速装配。
 
 ---

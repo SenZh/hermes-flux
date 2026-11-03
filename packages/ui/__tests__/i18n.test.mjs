@@ -62,20 +62,20 @@ test('i18n standard dictionary parity and placeholder interpolation', async (t) 
 });
 
 test('Theme System standard skin definition validation', async (t) => {
-  const { BUILTIN_SKINS, generateSkinCssVariables } = await import('../dist/tokens/themeRegistry.js');
+  const { SKINS, SLOT_IDS } = await import('../dist/tokens/skins.js');
 
-  await t.test('Built-in skins must include dark and light variants and generate CSS variables', () => {
-    const darkSkin = BUILTIN_SKINS['obsidian-gold'];
-    const lightSkin = BUILTIN_SKINS['jade-white'];
+  await t.test('Built-in skins must include dark and light variants with complete slot contract', () => {
+    const darkSkin = SKINS['obsidian-gold'];
+    const lightSkin = SKINS['jade-white'];
 
     assert.ok(darkSkin, 'Must contain obsidian-gold dark skin');
     assert.ok(lightSkin, 'Must contain jade-white light skin');
     assert.equal(darkSkin.variant, 'dark');
     assert.equal(lightSkin.variant, 'light');
+    assert.equal(SLOT_IDS.length, 43, 'Must define exactly 43 slots');
 
-    const cssVars = generateSkinCssVariables(darkSkin);
-    assert.ok(cssVars.includes('--bg-window:'), 'Must generate --bg-window');
-    assert.ok(cssVars.includes('--bg-code:'), 'Must generate --bg-code');
-    assert.ok(cssVars.includes('--text-main:'), 'Must generate --text-main');
+    assert.ok(darkSkin.slots['--background'], 'Must define --background');
+    assert.ok(darkSkin.slots['--code'], 'Must define --code');
+    assert.ok(darkSkin.slots['--foreground'], 'Must define --foreground');
   });
 });

@@ -121,7 +121,8 @@ function buildBadgePalettes(perSkin) {
 }
 
 const cssSrc = fs.readFileSync(CSS_PATH, 'utf8');
-const regSrc = fs.readFileSync(path.join(ROOT, 'packages/ui/src/tokens/themeRegistry.ts'), 'utf8');
+const regPath = path.join(ROOT, 'packages/ui/src/tokens/themeRegistry.ts');
+const regSrc = fs.existsSync(regPath) ? fs.readFileSync(regPath, 'utf8') : '';
 const hasMarker = cssSrc.includes(MARK_START);
 
 if (mode === 'extract') {

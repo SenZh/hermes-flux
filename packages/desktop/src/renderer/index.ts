@@ -40,7 +40,7 @@ import {
   type InputAttachmentItem,
   type SlashCommandOption,
   type MentionReferenceOption,
-  getNextToggleTheme,
+  getToggleTheme,
 } from '@hermes-flux/ui';
 
 import {
@@ -5753,7 +5753,7 @@ function bindEvents(): void {
   const themeToggleBtn = document.getElementById('titlebar-theme-toggle-btn');
   if (themeToggleBtn) {
     themeToggleBtn.onclick = () => {
-      const nextTheme = getNextToggleTheme(state.theme);
+      const nextTheme = getToggleTheme(state.theme);
       state.theme = nextTheme;
       localStorage.setItem('hermes_flux_theme', nextTheme);
       localStorage.setItem('hermes_aura_theme', nextTheme);
