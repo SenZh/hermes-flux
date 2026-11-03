@@ -573,6 +573,13 @@ export const SKINS: Record<string, SkinDefinition> = {
 };
 export const LEGACY_VAR_NAMES = ["--bg-window","--bg-card","--bg-card-hover","--bg-card-active","--bg-elevated","--bg-rail","--bg-panel","--bg-input","--bg-code","--bg-backdrop","--text-main","--text-secondary","--text-muted","--text-faint","--accent","--accent-hover","--accent-dim","--accent-glow","--accent-subtle","--accent-border","--accent-text","--jade-pulse","--jade-glow","--danger-color","--border-medium","--badge-ts-bg","--badge-ts-text","--badge-ts-border","--badge-js-bg","--badge-js-text","--badge-js-border","--badge-py-bg","--badge-py-text","--badge-py-border","--badge-html-bg","--badge-html-text","--badge-html-border","--badge-css-bg","--badge-css-text","--badge-css-border"] as const;
 export const SKIN_ALIASES: Record<string, string> = {"suet-jade":"jade-white"};
+export type SkinId = 'obsidian-gold' | 'suet-jade' | 'jade-white' | 'warm-paper' | 'ayu-light' | 'cyber-matrix';
+const SKIN_IDS: readonly SkinId[] = ['obsidian-gold', 'suet-jade', 'jade-white', 'warm-paper', 'ayu-light', 'cyber-matrix'];
+
+export function resolveSkinId(savedTheme: string | null | undefined): SkinId {
+  if (!savedTheme) return 'obsidian-gold';
+  return SKIN_IDS.find((skinId) => skinId === savedTheme) ?? 'obsidian-gold';
+}
 
 /**
  * Resolves the next theme when toggling the quick theme button.
