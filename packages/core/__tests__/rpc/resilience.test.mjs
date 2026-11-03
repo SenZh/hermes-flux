@@ -223,7 +223,7 @@ test('HermesGatewayClient Resilience - Dual-Channel Fallback', async (t) => {
     assert.equal(capturedParams.offset, 5);
     assert.equal(capturedParams.order, 'latest');
     assert.equal(capturedParams.profile, 'xiaofawang', '必须向 REST query params 透传 profile');
-    assert.equal(outcome.ok, true);
+    assert.equal(outcome.status, 'success');
     assert.equal(outcome.messages.length, 1);
   });
 
@@ -308,7 +308,7 @@ test('HermesGatewayClient Resilience - Dual-Channel Fallback', async (t) => {
     // 3. Assert
     assert.equal(capturedPath, '/api/sessions/s-android-01/messages');
     assert.deepEqual(capturedOptions?.params, { limit: 50, offset: 0, order: 'latest' });
-    assert.equal(res.ok, true);
+    assert.equal(res.status, 'success');
     assert.equal(res.messages.length, 1);
     assert.equal(res.pagination.returned, 1);
   });
@@ -324,8 +324,7 @@ test('HermesGatewayClient Resilience - Dual-Channel Fallback', async (t) => {
     const res = await client.fetchSessionMessages('s-err-01');
 
     // 3. Assert
-    assert.equal(res.ok, false);
-    assert.equal(res.messages.length, 0);
-    assert.ok(res.error.includes('401'));
+    assert.equal(res.status, 'error');
+    if (res.status === 'error') assert.ok(res.error.includes('401'));
   });
 });

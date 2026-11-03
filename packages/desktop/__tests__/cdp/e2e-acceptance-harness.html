@@ -84,7 +84,7 @@
     window.cdpApp = {
       sessions: [
         { id: 'sess-1', title: '电商支付重构方案', time: '14:20', botName: 'default', botDisplayName: '赫尔墨斯', activityState: 'read' },
-        { id: 'sess-2', title: '门禁规则不变量核验', time: '14:35', botName: 'arch-wang', botDisplayName: '架构王', activityState: 'unread' }
+        { id: 'sess-2', title: '门禁规则不变量核验', time: '14:35', botName: 'default', botDisplayName: '赫尔墨斯', activityState: 'unread' }
       ],
       profiles: [
         { name: 'default', displayName: '赫尔墨斯', description: '全能助手', lastMessage: '已完成方案排版', lastTime: '10分钟前', activityState: 'read', isDefault: true },
@@ -97,6 +97,7 @@
         { id: 'proj-1', name: '电商微服务工程', path: 'D:/workspace/shop', sessions: [] }
       ],
       activeSessionId: 'sess-1',
+      sessionDrafts: new Map(),
       activeFocus: { type: 'session', sessionId: 'sess-1' },
       isBotsGroupExpanded: true,
       editingGroupRoomId: null,
@@ -391,6 +392,8 @@
       },
 
       selectSession(sessionId) {
+        const input = document.getElementById('dock-prompt-input');
+        if (this.activeSessionId && input) this.sessionDrafts.set(this.activeSessionId, input.value);
         this.activeSessionId = sessionId;
         this.activeFocus = { type: 'session', sessionId };
         const sess = this.sessions.find(s => s.id === sessionId);
@@ -399,6 +402,8 @@
         }
         this.lastActions.push(`session_entered_read:${sessionId}`);
         this.render();
+        const restoredInput = document.getElementById('dock-prompt-input');
+        if (restoredInput) restoredInput.value = this.sessionDrafts.get(sessionId) || '';
       },
 
       openGroupRoom(roomId) {

@@ -96,6 +96,14 @@ export interface SessionListOutcome {
   error?: string;
 }
 
+export type SessionMessagesOutcome =
+  | { status: 'success'; messages: SessionMessageRecord[]; pagination?: { returned?: number; total?: number } }
+  | { status: 'error'; error: string };
+
+export interface SessionMessageRecord {
+  [key: string]: unknown;
+}
+
 /** Models plus the provider that owns the currently active one. */
 export interface ModelCatalog {
   models: string[];
@@ -655,9 +663,9 @@ export class HermesGatewayClient {
   public async fetchSessionMessages(
     sessionId: string,
     options: { limit?: number; offset?: number; order?: 'latest' | 'oldest'; profile?: string } = {}
-  ): Promise<{ messages: any[]; pagination?: any; ok: boolean; error?: string }> {
+  ): Promise<SessionMessagesOutcome> {
     if (!this.restFallbackHandler) {
-      return { messages: [], ok: false, error: '未注入 REST 通信代理处理器' };
+      return { status: 'error', error: '未注入 REST 通信代理处理器' };
     }
 
     try {
@@ -674,16 +682,18 @@ export class HermesGatewayClient {
         }
       );
 
-      const resObj = res && typeof res === 'object' ? (res as Record<string, unknown>) : null;
-      const messages = Array.isArray(resObj?.messages) ? resObj.messages : [];
+      const resObj = res && typeof res === 'object' ? res as { messages?: unknown; pagination?: unknown } : null;
+      if (!resObj || !Array.isArray(resObj.messages)) return { status: 'error', error: '消息响应格式无效' };
+      const messages = resObj.messages.filter((message): message is SessionMessageRecord => Boolean(message && typeof message === 'object'));
+      if (messages.length !== resObj.messages.length) return { status: 'error', error: '消息记录格式无效' };
       return {
+        status: 'success',
         messages,
-        pagination: resObj?.pagination,
-        ok: true,
+        ...(resObj.pagination && typeof resObj.pagination === 'object' ? { pagination: normalizeSessionPagination(resObj.pagination) } : {}),
       };
     } catch (err) {
       const errorMsg = describeError(err);
-      return { messages: [], ok: false, error: errorMsg };
+      return { status: 'error', error: errorMsg };
     }
   }
 
@@ -862,4 +872,12 @@ export class HermesGatewayClient {
       console.warn('[HermesGatewayClient] JSON parse error on message:', e);
     }
   }
+}
+
+function normalizeSessionPagination(value: object): { returned?: number; total?: number } {
+  const pagination = value as { returned?: unknown; total?: unknown };
+  return {
+    ...(typeof pagination.returned === 'number' ? { returned: pagination.returned } : {}),
+    ...(typeof pagination.total === 'number' ? { total: pagination.total } : {}),
+  };
 }
