@@ -21,3 +21,7 @@ export * from './components/Modal/ConfirmModal.js';
 export * from './components/ContextMenu/ContextMenu.js';
 export * from './components/Bot/AgentProfileEditorModal.js';
 export * from './utils/imagePreprocessor.js';
+export * from './components-react/primitives/index.js';
+export { StatusBar, type StatusBarProps } from './components-react/StatusBar.js';
+export { Titlebar, type TitlebarProps as ReactTitlebarProps } from './components-react/Titlebar.js';
+export { mountStatusBar, mountTitlebar, type StatusBarSnapshot, type TitlebarSnapshot } from './components-react/mount-shell-components.js';
