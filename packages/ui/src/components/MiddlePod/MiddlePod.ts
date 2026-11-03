@@ -55,12 +55,6 @@ export interface ContextGaugeUsage {
   percent: number;
 }
 
-/** 回滚待发送横幅：乐观截断后的可撤销状态条（用户可随时取消恢复历史） */
-export interface RollbackBannerView {
-  removedCount: number;
-  anchorLabel: string;
-}
-
 /** @Agent 旁路呼叫胶囊：BTW 只读外援与子代理委派共用的独立渲染域，严禁混入主消息流 */
 export interface SideAgentCapsuleView {
   id: string;
@@ -86,7 +80,6 @@ export interface MiddlePodProps {
   isLoadingOlder?: boolean;
   contextUsage?: ContextGaugeUsage;
   isStreaming?: boolean;
-  rollbackBanner?: RollbackBannerView | null;
   sideAgentCapsules?: SideAgentCapsuleView[];
 }
 
@@ -140,11 +133,6 @@ export function renderConversationCanvas(props: MiddlePodProps): string {
     <div class="content-fluid-canvas" style="width: 100%; max-width: 100%; margin: 0; display: flex; flex-direction: column; gap: 8px; position: relative;">
       ${renderContextGauge(props.contextUsage)}
       ${
-        props.rollbackBanner
-          ? `<div style="position: sticky; bottom: 6px; z-index: 5;">${renderRollbackBanner(props.rollbackBanner)}</div>`
-          : ''
-      }
-      ${
         props.gatewayConnecting
           ? `<div style="max-width: 480px; margin: 120px auto 0; text-align: center; color: var(--text-muted); font-size: 13px; display: flex; flex-direction: column; align-items: center; gap: 10px;">
               <span style="font-size: 20px; animation: pulse 1.5s infinite;">⚡</span>
@@ -189,41 +177,6 @@ export function renderConversationCanvas(props: MiddlePodProps): string {
             ${(props.sideAgentCapsules || []).map(renderSideAgentCapsule).join('')}
           `
       }
-    </div>
-  `;
-}
-
-/** 回滚待发送横幅：纯展示组件，取消按钮走 data-action=rollback-cancel 委托 */
-export function renderRollbackBanner(banner?: RollbackBannerView | null): string {
-  if (!banner) return '';
-  return `
-    <div class="rollback-pending-banner" data-rollback-pending="true" data-count="${banner.removedCount}" style="
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      margin: 0 0 2px;
-      padding: 6px 10px;
-      background: var(--accent-subtle);
-      border: 1px solid var(--border-medium);
-      border-radius: 8px;
-      font-size: 11.5px;
-      color: var(--text-main);
-    ">
-      <span style="display: inline-flex; align-items: center; gap: 6px; min-width: 0;">
-        <span aria-hidden="true" style="color: var(--accent); font-weight: 700;">↺</span>
-        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${t('chat.rollbackArmed', { count: banner.removedCount, anchor: banner.anchorLabel })}</span>
-      </span>
-      <button class="rollback-banner-cancel" data-action="rollback-cancel" style="
-        background: transparent;
-        border: 1px solid var(--border-subtle);
-        border-radius: 6px;
-        color: var(--text-muted);
-        font-size: 10.5px;
-        padding: 2px 8px;
-        cursor: pointer;
-        white-space: nowrap;
-      ">${t('chat.rollbackCancel')}</button>
     </div>
   `;
 }
@@ -295,14 +248,6 @@ export function renderMiddlePod(props: MiddlePodProps): string {
       ">
         ${renderConversationCanvas(props)}
       </div>
-
-      ${
-        props.rollbackBanner
-          ? `<div style="position: absolute; bottom: 92px; left: 0; right: 0; display: flex; justify-content: center; z-index: 41; pointer-events: none;">
-              <div style="pointer-events: auto; width: 100%; max-width: 740px; padding: 0 24px; box-sizing: border-box;">${renderRollbackBanner(props.rollbackBanner)}</div>
-            </div>`
-          : ''
-      }
 
       <!-- Dock Scrim Fade (Bottom gradient to prevent card collision) -->
       <div class="dock-scrim-fade" style="

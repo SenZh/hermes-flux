@@ -63,4 +63,9 @@ test('交互区接线源码守卫（server-priority 消费 / armed 解除 / 单�
       '断线必须丢弃挂起回滚，防重连后横幅跨会话泄漏'
     );
   });
+
+  await t.test('7. input-dock-container 必须包含 rollback-cancel 事件分发，杜绝横幅移位后取消失效', () => {
+    const dockCancelBound = countMatches(/dockContainer\.addEventListener\(\s*['"]click['"][\s\S]*?rollback-cancel/);
+    assert.ok(dockCancelBound >= 1, 'input-dock-container 必须建立 rollback-cancel 事件委托');
+  });
 });

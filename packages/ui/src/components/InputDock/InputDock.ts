@@ -45,6 +45,11 @@ export interface MentionReferenceOption {
   avatar?: string;
 }
 
+export interface RollbackBannerView {
+  removedCount: number;
+  anchorLabel: string;
+}
+
 export interface InputDockProps {
   selectedModel: string;
   models?: string[];
@@ -73,6 +78,93 @@ export interface InputDockProps {
   slashItems?: SlashCommandOption[];
   mentionPopperOpen?: boolean;
   mentionItems?: MentionReferenceOption[];
+  rollbackBanner?: RollbackBannerView | null;
+}
+
+export function renderRollbackNoticeBar(banner?: RollbackBannerView | null): string {
+  if (!banner) return '';
+  return `
+    <div class="rollback-pending-banner" data-rollback-pending="true" data-count="${banner.removedCount}" style="
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 7px 12px;
+      background: var(--bg-backdrop);
+      border: 1px solid var(--border-medium);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-radius: 10px;
+      font-size: 11.5px;
+      color: var(--text-main);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+      animation: flux-fade-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    ">
+      <span style="display: inline-flex; align-items: center; gap: 8px; min-width: 0;">
+        <span aria-hidden="true" style="color: var(--accent); font-weight: 700; font-size: 13px;">↺</span>
+        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500;">${t('chat.rollbackArmed', { count: banner.removedCount, anchor: banner.anchorLabel })}</span>
+      </span>
+      <button class="rollback-banner-cancel" data-action="rollback-cancel" type="button" style="
+        background: transparent;
+        border: none;
+        border-radius: 4px;
+        color: var(--accent);
+        font-size: 11.5px;
+        font-weight: 600;
+        padding: 4px 8px;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: opacity 0.15s ease;
+      ">${t('chat.rollbackCancel')}</button>
+    </div>
+  `;
+}
+
+export function renderDockNoticeBar(notice?: string): string {
+  const clean = (notice || '').trim();
+  if (!clean) return '';
+  return `
+    <div id="dock-notice" role="status" style="
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 11.5px;
+      line-height: 1.4;
+      color: var(--text-secondary);
+      background: var(--bg-backdrop);
+      border: 1px solid var(--border-medium);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-radius: 10px;
+      padding: 7px 12px;
+      word-break: break-word;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+      animation: flux-fade-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    ">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="color: var(--accent); font-size: 12px;">ℹ</span>
+        <span style="font-weight: 500;">${escapeHtml(clean)}</span>
+      </div>
+      <button id="dock-notice-close" type="button" aria-label="${t('dock.noticeClose')}" title="${t('dock.noticeClose')}" style="
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        color: var(--text-muted);
+        opacity: 0.75;
+        padding: 4px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 24px;
+        min-height: 24px;
+        border-radius: 4px;
+        font-size: 14px;
+        line-height: 1;
+        transition: opacity 0.15s ease;
+      ">×</button>
+    </div>
+  `;
 }
 
 export function renderInputDock(props: InputDockProps): string {
@@ -121,6 +213,10 @@ export function renderInputDock(props: InputDockProps): string {
     `
     : '';
 
+  const rollbackBarHtml = renderRollbackNoticeBar(props.rollbackBanner);
+  const dockNoticeHtml = renderDockNoticeBar(notice);
+  const hasNotices = Boolean(rollbackBarHtml || dockNoticeHtml);
+
   const reasoningLabels: Record<string, string> = {
     default: '默认',
     none: 'None',
@@ -154,6 +250,25 @@ export function renderInputDock(props: InputDockProps): string {
 
       <!-- Queue Tray (if any queued messages) -->
       ${renderQueueTray(props.queuedMessages)}
+
+      <!-- Notice Stack (Rollback Banner & Timed Dock Notices strictly above composer box) -->
+      ${
+        hasNotices
+          ? `<div class="dock-notice-stack" style="
+              width: 100%;
+              max-width: 740px;
+              display: flex;
+              flex-direction: column;
+              gap: 6px;
+              margin-bottom: 8px;
+              pointer-events: auto;
+              box-sizing: border-box;
+            ">
+              ${rollbackBarHtml}
+              ${dockNoticeHtml}
+            </div>`
+          : ''
+      }
 
       <div class="input-card-box composer-dock" style="
         pointer-events: auto;
@@ -213,33 +328,6 @@ export function renderInputDock(props: InputDockProps): string {
             transition: all 0.12s ease;
           ">${t('dock.collapse')}</button>
         </div>
-
-        ${
-          notice
-            ? `<div id="dock-notice" role="status" style="
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 8px;
-          font-size: 11px;
-          line-height: 1.4;
-          color: var(--text-secondary);
-          background: var(--bg-surface-2, rgba(255, 255, 255, 0.04));
-          border: 1px solid var(--border-medium);
-          border-radius: 8px;
-          padding: 6px 10px;
-          word-break: break-word;
-          backdrop-filter: blur(12px);
-          animation: flux-fade-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-        ">
-          <div style="display: flex; align-items: center; gap: 6px;">
-            <span style="color: var(--accent); font-size: 12px;">ℹ</span>
-            <span>${escapeHtml(notice)}</span>
-          </div>
-          <span id="dock-notice-close" style="cursor: pointer; opacity: 0.6; padding: 2px 4px; font-size: 13px;" title="关闭提示">×</span>
-        </div>`
-            : ''
-        }
 
         <!-- Embedded Micro-Control Strip (Height: 28px) -->
         <div class="input-control-strip" style="
@@ -971,6 +1059,7 @@ export interface RenderInputDockSnapshot {
   favoriteModelsHash: string;
   attachmentsCount?: number;
   attachmentsHash?: string;
+  rollbackArmedHash?: string;
 }
 
 /**
@@ -1008,6 +1097,7 @@ export function hasDockSnapshotChanged(
     last.recentModelsHash !== curr.recentModelsHash ||
     last.favoriteModelsHash !== curr.favoriteModelsHash ||
     last.attachmentsCount !== curr.attachmentsCount ||
-    last.attachmentsHash !== curr.attachmentsHash
+    last.attachmentsHash !== curr.attachmentsHash ||
+    last.rollbackArmedHash !== curr.rollbackArmedHash
   );
 }

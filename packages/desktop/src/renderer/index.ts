@@ -48,7 +48,7 @@ import {
   calculateForkCount,
   findPreviousUserPrompt,
 } from './messageActions.js';
-import { applyOptimisticCut, planSessionLoadMerge, planRollbackLeaveRestore, takeServerPriority } from './rollbackTransaction.js';
+import { applyOptimisticCut, planSessionLoadMerge, planRollbackLeaveRestore, takeServerPriority, extractDurableRowId, bindTurnRowIds, resolveRollbackTarget } from './rollbackTransaction.js';
 import { createToolPatchQueue } from './toolPatchQueue.js';
 
 import {
@@ -2040,7 +2040,7 @@ function parseRawMessages(list: any[]): MessageViewModel[] {
     const rawTs = m.timestamp ?? m.created_at;
     const numTs = typeof rawTs === 'number' ? (rawTs > 1e11 ? rawTs : rawTs * 1000) : Date.parse(rawTs) || Date.now();
 
-    const rowIdNum = typeof m.row_id === 'number' && Number.isInteger(m.row_id) && m.row_id > 0 ? m.row_id : undefined;
+    const rowIdNum = extractDurableRowId(m);
     const scopedMsg: MessageViewModel = {
       id: String(m.row_id ?? m.id ?? `msg-${idx}`),
       rowId: rowIdNum,
@@ -3481,6 +3481,11 @@ async function sendMessage(text: string): Promise<void> {
     // 截断/新轮成功后立刻把网关签发的权威 rowId 绑定回本地乐观用户行，形成下次回滚锚点
     if (typeof submitResult?.user_row_id === 'number' && submitResult.user_row_id > 0) {
       userMsg.rowId = submitResult.user_row_id;
+      if (state.activeSessionId) {
+        const cached = sessionMessagesCache.get(state.activeSessionId);
+        const cachedUser = cached?.find((m) => m.id === userMsg.id);
+        if (cachedUser) cachedUser.rowId = submitResult.user_row_id;
+      }
     }
     if (armedRowId !== null && state.activeSessionId) {
       // 截断成功：本会话历史以服务端为准，禁用“本地更长则保留”合并守卫，防已删消息复活
@@ -3908,25 +3913,30 @@ function applyTurnActions(actions: TurnAction[]): void {
       case 'persisted-turn': {
         // 回合落盘权威行地址：把网关 rowId 绑定回本地乐观的 user / assistant 行，
         // 使下一轮回滚拥有可信持久锚点（D1 半环，杜绝把 usr- 临时 id 当锚点触发 4018）。
-        const bindRow = (id: string | undefined, rowId: number | null) => {
-          if (!id || rowId === null) return;
-          const m = state.messages.find((x) => x.id === id);
-          if (m) m.rowId = rowId;
-          if (activeStreamingStoredSessionId) {
-            const c = sessionMessagesCache.get(activeStreamingStoredSessionId)?.find((x) => x.id === id);
-            if (c) c.rowId = rowId;
+        let changed = bindTurnRowIds({
+          messages: state.messages,
+          assistantMessageId: action.messageId,
+          userRowId: action.userRowId,
+          assistantRowId: action.assistantRowId,
+          rowIds: action.rowIds,
+        });
+
+        if (activeStreamingStoredSessionId) {
+          const cached = sessionMessagesCache.get(activeStreamingStoredSessionId);
+          if (cached && cached !== state.messages) {
+            const cachedChanged = bindTurnRowIds({
+              messages: cached,
+              assistantMessageId: action.messageId,
+              userRowId: action.userRowId,
+              assistantRowId: action.assistantRowId,
+              rowIds: action.rowIds,
+            });
+            if (cachedChanged) changed = true;
           }
-        };
-        // 助手行 id 已知，user 行为该助手行之前最近的一条 user 消息
-        bindRow(action.messageId, action.assistantRowId);
-        const asstIdx = state.messages.findIndex((x) => x.id === action.messageId);
-        if (asstIdx > 0 && action.userRowId !== null) {
-          for (let i = asstIdx - 1; i >= 0; i--) {
-            if (state.messages[i].role === 'user') {
-              bindRow(state.messages[i].id, action.userRowId);
-              break;
-            }
-          }
+        }
+
+        if (changed) {
+          needsRender = true;
         }
         break;
       }
@@ -4462,6 +4472,9 @@ function render(): void {
     favoriteModelsHash: state.favoriteModels.join(','),
     attachmentsCount: state.attachments.length,
     attachmentsHash: state.attachments.map((a) => `${a.id}:${a.name}`).join(','),
+    rollbackArmedHash: state.rollbackArmed
+      ? `${state.rollbackArmed.targetId}:${state.rollbackArmed.removedCount}`
+      : '',
   };
 
   const inOngoingStreamingTurn =
@@ -4601,6 +4614,9 @@ function render(): void {
                 slashItems: state.slashItems,
                 mentionPopperOpen: state.mentionPopperOpen,
                 mentionItems: state.mentionItems,
+                rollbackBanner: state.rollbackArmed
+                  ? { removedCount: state.rollbackArmed.removedCount, anchorLabel: state.rollbackArmed.anchorLabel }
+                  : null,
               })
             : '',
         })}
@@ -4786,6 +4802,9 @@ function render(): void {
           slashItems: state.slashItems,
           mentionPopperOpen: state.mentionPopperOpen,
           mentionItems: state.mentionItems,
+          rollbackBanner: state.rollbackArmed
+            ? { removedCount: state.rollbackArmed.removedCount, anchorLabel: state.rollbackArmed.anchorLabel }
+            : null,
         })
       : '';
 
@@ -4906,9 +4925,6 @@ function render(): void {
         isLoadingOlder: state.isLoadingOlder,
         isStreaming: isStreamingActiveForCurrentSession(),
         sideAgentCapsules: state.sideAgentCapsules,
-        rollbackBanner: state.rollbackArmed
-          ? { removedCount: state.rollbackArmed.removedCount, anchorLabel: state.rollbackArmed.anchorLabel }
-          : null,
       });
       canvasStructureDirty = false;
       applyStreamAnchor(streamAnchor, pinBottom);
@@ -6194,6 +6210,30 @@ function bindEvents(): void {
     };
   }
 
+  // Rollback cancel button inside dock notice stack
+  const rollbackCancelBtn = document.querySelector<HTMLElement>('.rollback-banner-cancel[data-action="rollback-cancel"]');
+  if (rollbackCancelBtn) {
+    rollbackCancelBtn.onclick = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      handleRollbackCancel();
+    };
+  }
+
+  // Event delegation on input-dock-container for notices and rollback cancel
+  const dockContainer = document.querySelector<HTMLElement>('.input-dock-container');
+  if (dockContainer && !dockContainer.dataset.dockClickBound) {
+    dockContainer.dataset.dockClickBound = 'true';
+    dockContainer.addEventListener('click', (e) => {
+      const cancelAction = (e.target as HTMLElement).closest<HTMLElement>('[data-action="rollback-cancel"]');
+      if (cancelAction) {
+        e.stopPropagation();
+        e.preventDefault();
+        handleRollbackCancel();
+      }
+    });
+  }
+
   // Send message & IME Composition defense
   const sendBtn = document.getElementById('dock-send-btn');
   const inputEl = document.getElementById('dock-prompt-input') as HTMLTextAreaElement;
@@ -6608,10 +6648,21 @@ async function handleCopyMessage(btn: HTMLElement): Promise<void> {
 function handleRollbackMessage(btn: HTMLElement): void {
   const rowEl = btn.closest<HTMLElement>('[data-msg-id]');
   const msgId = btn.getAttribute('data-msg-id') || rowEl?.getAttribute('data-msg-id') || '';
+  const rawRowId = btn.getAttribute('data-row-id') || rowEl?.getAttribute('data-row-id');
+  const btnRowId = rawRowId ? parseInt(rawRowId, 10) : undefined;
+
+  // 自愈与定位：提取目标提问，若按钮持有有效持久 rowId 且内存丢失，安全回填自愈
+  const resolvedTarget = resolveRollbackTarget({
+    messages: state.messages,
+    msgId,
+    btnRowId,
+  });
+
+  const effectiveTargetId = resolvedTarget?.targetMsg.id || msgId;
 
   const plan = planTruncate({
     messages: state.messages,
-    targetId: msgId,
+    targetId: effectiveTargetId,
     sessionKind: deriveSessionKind(state.activeFocus),
     isStreaming: isStreamingActiveForCurrentSession(),
   });

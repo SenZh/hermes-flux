@@ -129,4 +129,49 @@ test('InputDock Enhanced - 队列托盘、附件托盘、手风琴模型器与Po
     assert.ok(dockHtml.includes('composer-attachment-tray'), '宿主必须自动挂载附件暂存托盘');
     assert.ok(dockHtml.includes('dock-prompt-input'), '必须包含核心输入框');
   });
+
+  await t.test('7. renderInputDock 通知栈 (Notice Stack)：回滚横幅与操作提示统一于输入框上方依次排列，杜绝内嵌与顶端漂移', () => {
+    // 场景 A: 仅有回滚横幅
+    const rollbackOnlyHtml = renderInputDock({
+      selectedModel: 'anthropic/claude-3-7-sonnet',
+      reasoningLevel: 'default',
+      approvalMode: 'auto',
+      isStreaming: false,
+      rollbackBanner: { removedCount: 2, anchorLabel: '09:39:17' },
+    });
+    assert.ok(rollbackOnlyHtml.includes('dock-notice-stack'), '必须包含输入框上方通知栈');
+    assert.ok(rollbackOnlyHtml.includes('rollback-pending-banner'), '渲染回滚横幅条');
+    assert.ok(rollbackOnlyHtml.includes('data-action="rollback-cancel"'), '包含取消回滚动作');
+    assert.ok(rollbackOnlyHtml.indexOf('dock-notice-stack') < rollbackOnlyHtml.indexOf('composer-dock'), '通知栈必须严格位于 composer-dock 输入框上方');
+
+    // 场景 B: 仅有操作提醒（例如“提问已回填至输入框”）
+    const noticeOnlyHtml = renderInputDock({
+      selectedModel: 'anthropic/claude-3-7-sonnet',
+      reasoningLevel: 'default',
+      approvalMode: 'auto',
+      isStreaming: false,
+      notice: '提问已回填至输入框',
+    });
+    assert.ok(noticeOnlyHtml.includes('dock-notice-stack'), '必须包含输入框上方通知栈');
+    assert.ok(noticeOnlyHtml.includes('id="dock-notice"'), '渲染提示条');
+    assert.ok(noticeOnlyHtml.includes('提问已回填至输入框'), '包含提示文本');
+    assert.ok(noticeOnlyHtml.indexOf('id="dock-notice"') < noticeOnlyHtml.indexOf('composer-dock'), '提示条必须严格位于 composer-dock 输入框上方');
+    // 确认 composer-dock 内部不再包含 dock-notice
+    const composerIndex = noticeOnlyHtml.indexOf('composer-dock');
+    const composerSubstr = noticeOnlyHtml.slice(composerIndex);
+    assert.ok(!composerSubstr.includes('id="dock-notice"'), 'composer-dock 输入框卡片内部绝不可再内嵌 dock-notice');
+
+    // 场景 C: 多提醒并存（回滚横幅 + 操作提示）：依次上下排列
+    const dualHtml = renderInputDock({
+      selectedModel: 'anthropic/claude-3-7-sonnet',
+      reasoningLevel: 'default',
+      approvalMode: 'auto',
+      isStreaming: false,
+      notice: '提问已回填至输入框',
+      rollbackBanner: { removedCount: 3, anchorLabel: '10:00:00' },
+    });
+    assert.ok(dualHtml.includes('dock-notice-stack'), '必须包含输入框上方通知栈');
+    assert.ok(dualHtml.indexOf('rollback-pending-banner') < dualHtml.indexOf('id="dock-notice"'), '回滚条与提示条在通知栈内依次上下排列');
+    assert.ok(dualHtml.indexOf('id="dock-notice"') < dualHtml.indexOf('composer-dock'), '两者均位于输入框上方');
+  });
 });

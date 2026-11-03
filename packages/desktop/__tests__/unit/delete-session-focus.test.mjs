@@ -52,6 +52,7 @@ test('Delete Session Focus & InputDock Snapshot Invariants', async (t) => {
     assert.equal(hasDockSnapshotChanged(baseSnapshot, { ...baseSnapshot, modelSearchQuery: 'claude' }), true, '检索词变化必须触发更新');
     assert.equal(hasDockSnapshotChanged(baseSnapshot, { ...baseSnapshot, recentModelsHash: 'model-c' }), true, '最近模型变化必须触发更新');
     assert.equal(hasDockSnapshotChanged(baseSnapshot, { ...baseSnapshot, favoriteModelsHash: 'model-b' }), true, '收藏模型变化必须触发更新');
+    assert.equal(hasDockSnapshotChanged(baseSnapshot, { ...baseSnapshot, rollbackArmedHash: 'msg-1:2' }), true, '回滚挂起状态变化必须触发更新');
   });
 
   await t.test('2. 生产 renderInputDock 结构完整性断言: 保持黄金限宽与输入框属性', () => {

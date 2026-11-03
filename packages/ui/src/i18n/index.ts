@@ -160,6 +160,7 @@ export const zhDict = {
   // Input Dock & Expansion
   'dock.collapse': '收起',
   'dock.showMore': '显示更多',
+  'dock.noticeClose': '关闭提示',
 
   // Status Indicators
   'rail.activityRunning': '正在生成回答...',
@@ -496,6 +497,7 @@ export const enDict: Record<I18nKey, string> = {
   // Input Dock & Expansion
   'dock.collapse': 'Collapse',
   'dock.showMore': 'Show more',
+  'dock.noticeClose': 'Dismiss notice',
 
   // Status Indicators
   'rail.activityRunning': 'Generating response...',
