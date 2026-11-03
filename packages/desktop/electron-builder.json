@@ -4,6 +4,8 @@
   "productName": "Hermes Flux",
   "copyright": "Copyright © 2026 Nous Research / Hermes Flux Team",
   "electronVersion": "34.2.0",
+  "npmRebuild": false,
+  "nodeGypRebuild": false,
   "directories": {
     "output": "release",
     "buildResources": "build"

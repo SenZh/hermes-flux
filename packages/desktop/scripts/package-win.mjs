@@ -39,7 +39,16 @@ buildProcess.on('close', (code) => {
 
   console.log('[Hermes Flux Windows Packager] Invoking electron-builder for win-x64...');
 
-  const builderArgs = ['electron-builder', '--win', '--x64'];
+  const outputDir = path.join(rootDir, 'release/app-win');
+  try {
+    if (fs.existsSync(outputDir)) {
+      fs.rmSync(outputDir, { recursive: true, force: true });
+    }
+  } catch (_e) {
+    // ignore
+  }
+
+  const builderArgs = ['electron-builder', '--win', '--x64', `-c.directories.output=${outputDir}`];
   if (isDirOnly || !isNsis) {
     builderArgs.push('--dir');
   }
@@ -47,7 +56,10 @@ buildProcess.on('close', (code) => {
   const builder = spawn('npx', builderArgs, {
     cwd: rootDir,
     stdio: 'inherit',
-    env: process.env,
+    env: {
+      ...process.env,
+      NODE_OPTIONS: '--max-old-space-size=8192',
+    },
     shell: true,
   });
 
@@ -60,7 +72,7 @@ buildProcess.on('close', (code) => {
     // 2. Generate portable zip archive from win-unpacked if not dir-only
     if (!isDirOnly) {
       console.log('\n[Hermes Flux Windows Packager] Compressing win-unpacked into portable green package...');
-      const unpackedDir = path.join(rootDir, 'release/win-unpacked');
+      const unpackedDir = path.join(outputDir, 'win-unpacked');
       const zipOutput = path.join(rootDir, 'release/Hermes-Flux-0.1.0-win-x64-portable.zip');
       const zipScript = path.join(rootDir, 'scripts/make-zip.py');
 
@@ -74,7 +86,7 @@ buildProcess.on('close', (code) => {
 
     console.log('\n======================================================');
     console.log('✔ Hermes Flux Desktop Windows delivery build ready!');
-    console.log('  1. Unpacked Binary: packages/desktop/release/win-unpacked/Hermes Flux.exe');
+    console.log(`  1. Unpacked Binary: packages/desktop/release/app-win/win-unpacked/Hermes Flux.exe`);
     console.log('  2. Portable Green Zip: packages/desktop/release/Hermes-Flux-0.1.0-win-x64-portable.zip');
     console.log('======================================================\n');
   });

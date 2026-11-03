@@ -7,6 +7,8 @@
  * - About Hermes Flux
  */
 
+import { t } from '../../i18n/index.js';
+
 export interface SettingsModalProps {
   isOpen: boolean;
   activeTab: 'gateway' | 'appearance' | 'about';
@@ -14,7 +16,7 @@ export interface SettingsModalProps {
   username?: string;
   password?: string;
   profileName: string;
-  theme: 'obsidian-gold' | 'suet-jade' | 'jade-white';
+  theme: 'obsidian-gold' | 'suet-jade' | 'jade-white' | 'warm-paper' | 'ayu-light' | 'cyber-matrix';
   lang: 'zh' | 'en';
   connectionStatus: 'disconnected' | 'connecting' | 'connected' | 'error';
   latencyMs: number;
@@ -332,40 +334,64 @@ function renderTabPane(props: SettingsModalProps): string {
           <div style="display: flex; flex-direction: column; gap: 8px;">
             <label style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">${isZh ? '外观主题 (Color Theme)' : 'Appearance Theme'}</label>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-              <button class="settings-theme-btn ${isObsidian ? 'active' : ''}" data-theme="obsidian-gold" style="
+              <button class="settings-theme-btn theme-preview-card-ayu ${(props.theme === 'ayu-light' || props.theme === 'warm-paper') ? 'active' : ''}" data-theme="ayu-light" style="
                 height: 64px;
                 border-radius: 8px;
-                border: 1px solid ${isObsidian ? 'var(--accent)' : 'var(--border-medium)'};
-                background: #090A0F;
-                color: #F8FAFC;
+                border: 1px solid ${(props.theme === 'ayu-light' || props.theme === 'warm-paper') ? 'var(--accent)' : 'var(--border-medium)'};
                 cursor: pointer;
                 display: flex;
                 flex-direction: column;
                 align-items: center;
                 justify-content: center;
                 gap: 4px;
-                box-shadow: ${isObsidian ? '0 0 10px rgba(245, 158, 11, 0.25)' : 'none'};
               ">
-                <span style="font-size: 13px; font-weight: 600; color: #F59E0B;">☾ 黑曜琥珀 (深色)</span>
-                <span style="font-size: 10px; color: #94A3B8;">Obsidian Gold · 纯粹玄黑高奢</span>
+                <span class="theme-preview-title" style="font-size: 13px; font-weight: 600;">${t('settings.themeAyuTitle')}</span>
+                <span class="theme-preview-sub" style="font-size: 10px;">${t('settings.themeAyuSub')}</span>
               </button>
 
-              <button class="settings-theme-btn ${!isObsidian ? 'active' : ''}" data-theme="suet-jade" style="
+              <button class="settings-theme-btn theme-preview-card-light ${(props.theme === 'jade-white' || props.theme === 'suet-jade') ? 'active' : ''}" data-theme="jade-white" style="
                 height: 64px;
                 border-radius: 8px;
-                border: 1px solid ${!isObsidian ? 'var(--accent)' : 'var(--border-medium)'};
-                background: #F4F6F9;
-                color: #0F172A;
+                border: 1px solid ${(props.theme === 'jade-white' || props.theme === 'suet-jade') ? 'var(--accent)' : 'var(--border-medium)'};
                 cursor: pointer;
                 display: flex;
                 flex-direction: column;
                 align-items: center;
                 justify-content: center;
                 gap: 4px;
-                box-shadow: ${!isObsidian ? '0 0 10px rgba(13, 122, 94, 0.20)' : 'none'};
               ">
-                <span style="font-size: 13px; font-weight: 600; color: #0D7A5E;">☼ 羊脂白玉 (浅色)</span>
-                <span style="font-size: 10px; color: #64748B;">Suet Jade · 凝碧温润纸感</span>
+                <span class="theme-preview-title" style="font-size: 13px; font-weight: 600;">${t('settings.themeLightTitle')}</span>
+                <span class="theme-preview-sub" style="font-size: 10px;">${t('settings.themeLightSub')}</span>
+              </button>
+
+              <button class="settings-theme-btn theme-preview-card-dark ${props.theme === 'obsidian-gold' ? 'active' : ''}" data-theme="obsidian-gold" style="
+                height: 64px;
+                border-radius: 8px;
+                border: 1px solid ${props.theme === 'obsidian-gold' ? 'var(--accent)' : 'var(--border-medium)'};
+                cursor: pointer;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 4px;
+              ">
+                <span class="theme-preview-title" style="font-size: 13px; font-weight: 600;">${t('settings.themeObsidianTitle')}</span>
+                <span class="theme-preview-sub" style="font-size: 10px;">${t('settings.themeObsidianSub')}</span>
+              </button>
+
+              <button class="settings-theme-btn theme-preview-card-cyber ${props.theme === 'cyber-matrix' ? 'active' : ''}" data-theme="cyber-matrix" style="
+                height: 64px;
+                border-radius: 8px;
+                border: 1px solid ${props.theme === 'cyber-matrix' ? 'var(--accent)' : 'var(--border-medium)'};
+                cursor: pointer;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 4px;
+              ">
+                <span class="theme-preview-title" style="font-size: 13px; font-weight: 600;">${t('settings.themeCyberTitle')}</span>
+                <span class="theme-preview-sub" style="font-size: 10px;">${t('settings.themeCyberSub')}</span>
               </button>
             </div>
           </div>

@@ -439,6 +439,185 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     assert.ok(!renderedPlain.includes('tool-file-link'), 'Plain variable code must not have tool-file-link class');
   });
 
+  await t.test('renderSettingsModal appearance tab renders correctly without comment leaks', () => {
+    const htmlOpen = renderSettingsModal({
+      isOpen: true,
+      activeTab: 'appearance',
+      gatewayUrl: 'ws://127.0.0.1:9119',
+      profileName: 'default',
+      theme: 'jade-white',
+      lang: 'zh',
+      connectionStatus: 'connected',
+      latencyMs: 12,
+    });
+
+    assert.ok(htmlOpen.includes('data-theme="obsidian-gold"'), 'Must render obsidian-gold button');
+    assert.ok(htmlOpen.includes('data-theme="ayu-light"'), 'Must render ayu-light button');
+    assert.ok(htmlOpen.includes('data-theme="jade-white"'), 'Must render jade-white button');
+    assert.ok(htmlOpen.includes('data-theme="cyber-matrix"'), 'Must render cyber-matrix button');
+    assert.ok(htmlOpen.includes('theme-preview-card-dark'), 'Must use theme-preview-card-dark class');
+    assert.ok(htmlOpen.includes('theme-preview-card-ayu'), 'Must use theme-preview-card-ayu class');
+    assert.ok(htmlOpen.includes('theme-preview-card-light'), 'Must use theme-preview-card-light class');
+    assert.ok(htmlOpen.includes('theme-preview-card-cyber'), 'Must use theme-preview-card-cyber class');
+    assert.ok(htmlOpen.includes('theme-preview-title'), 'Must use theme-preview-title class');
+    assert.ok(htmlOpen.includes('theme-preview-sub'), 'Must use theme-preview-sub class');
+    // Invariant: No gate comments must ever leak into the rendered HTML output
+    assert.ok(!htmlOpen.includes('gate-theme-allow'), 'HTML output must NOT contain gate-theme-allow comment text');
+    assert.ok(!htmlOpen.includes('/*'), 'HTML output must NOT contain raw CSS comment markers');
+
+    const htmlClosed = renderSettingsModal({
+      isOpen: false,
+      activeTab: 'appearance',
+      gatewayUrl: 'ws://127.0.0.1:9119',
+      profileName: 'default',
+      theme: 'jade-white',
+      lang: 'zh',
+      connectionStatus: 'connected',
+      latencyMs: 12,
+    });
+    assert.ok(htmlClosed.includes('display: none'), 'Closed modal must render hidden shell');
+  });
+
+  await t.test('renderSettingsModal active theme selection must be mutually exclusive and accurate', () => {
+    // 1. ayu-light active
+    const htmlAyu = renderSettingsModal({
+      isOpen: true,
+      activeTab: 'appearance',
+      gatewayUrl: 'ws://127.0.0.1:9119',
+      profileName: 'default',
+      theme: 'ayu-light',
+      lang: 'zh',
+      connectionStatus: 'connected',
+      latencyMs: 12,
+    });
+    assert.ok(htmlAyu.includes('theme-preview-card-ayu active'), 'ayu-light must be marked active');
+    assert.ok(!htmlAyu.includes('theme-preview-card-dark active'), 'obsidian-gold must NOT be active when ayu-light is selected');
+    assert.ok(!htmlAyu.includes('theme-preview-card-light active'), 'jade-white must NOT be active when ayu-light is selected');
+    assert.ok(!htmlAyu.includes('theme-preview-card-cyber active'), 'cyber-matrix must NOT be active when ayu-light is selected');
+
+    // 2. obsidian-gold active
+    const htmlDark = renderSettingsModal({
+      isOpen: true,
+      activeTab: 'appearance',
+      gatewayUrl: 'ws://127.0.0.1:9119',
+      profileName: 'default',
+      theme: 'obsidian-gold',
+      lang: 'zh',
+      connectionStatus: 'connected',
+      latencyMs: 12,
+    });
+    assert.ok(htmlDark.includes('theme-preview-card-dark active'), 'obsidian-gold must be marked active');
+    assert.ok(!htmlDark.includes('theme-preview-card-ayu active'), 'ayu-light must NOT be active');
+
+    // 3. cyber-matrix active
+    const htmlCyber = renderSettingsModal({
+      isOpen: true,
+      activeTab: 'appearance',
+      gatewayUrl: 'ws://127.0.0.1:9119',
+      profileName: 'default',
+      theme: 'cyber-matrix',
+      lang: 'zh',
+      connectionStatus: 'connected',
+      latencyMs: 12,
+    });
+    assert.ok(htmlCyber.includes('theme-preview-card-cyber active'), 'cyber-matrix must be marked active');
+    assert.ok(!htmlCyber.includes('theme-preview-card-ayu active'), 'ayu-light must NOT be active');
+  });
+
+  await t.test('highlightCodeSyntax must accurately highlight JSX tags, attributes, and block comments', async () => {
+    const { highlightCodeSyntax } = await import('../dist/components/MiddlePod/MiddlePod.js');
+
+    const sample = '<article className="flex flex-col gap-4">\n  <header ...>{header}</header>\n  {children} {/* body + comments */}\n</article>';
+    const highlighted = highlightCodeSyntax(sample);
+
+    // 1. Tags
+    assert.ok(highlighted.includes('--hl-keyword'), 'JSX tags like <article and <header must be highlighted with var(--hl-keyword)');
+    assert.ok(highlighted.includes('&lt;article'), 'Tags must be properly escaped');
+    assert.ok(highlighted.includes('&lt;/article'), 'Closing tags must be properly escaped');
+
+    // 2. Attributes
+    assert.ok(highlighted.includes('className'), 'Attributes must be present');
+    assert.ok(highlighted.includes('--hl-number'), 'JSX attribute names must be highlighted with attribute token');
+
+    // 3. Strings
+    assert.ok(highlighted.includes('--hl-string'), 'String literals must be highlighted with var(--hl-string)');
+    assert.ok(highlighted.includes('&quot;flex flex-col gap-4&quot;'), 'String literals must be HTML escaped');
+
+    // 4. JSX Comments
+    assert.ok(highlighted.includes('--hl-comment'), 'JSX block comments {/* ... */} must be highlighted with var(--hl-comment)');
+    assert.ok(highlighted.includes('font-style: italic'), 'Comments must have italic styling');
+  });
+
+  await t.test('Ayu Light CSS styles must strictly enforce neutral dock border and sunken surface layers', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+    const stylesPath = path.resolve(__dirname, '../../desktop/src/renderer/styles.css');
+    assert.ok(fs.existsSync(stylesPath), 'styles.css must physically exist');
+    const cssContent = fs.readFileSync(stylesPath, 'utf8');
+
+    // 1. Invariant: Conversation stream in ayu-light must use var(--bg-window) rather than pure white
+    assert.ok(
+      cssContent.includes('[data-theme="ayu-light"] #conversation-stream'),
+      'Must define ayu-light conversation-stream selector'
+    );
+    assert.ok(
+      cssContent.includes('background: var(--bg-window) !important'),
+      'Conversation stream must use var(--bg-window) instead of hardcoded white'
+    );
+
+    // 2. Invariant: Left rail in ayu-light must use var(--bg-rail)
+    assert.ok(
+      cssContent.includes('[data-theme="ayu-light"] #flux-left-rail'),
+      'Must define ayu-left-rail selector'
+    );
+
+    // 3. Invariant: Composer dock in ayu-light MUST NOT use accent border
+    const dockMatch = cssContent.match(/\[data-theme="ayu-light"\]\s+\.composer-dock\s*\{([\s\S]*?)\}/);
+    assert.ok(dockMatch, 'Must define [data-theme="ayu-light"] .composer-dock');
+    const dockBlock = dockMatch[1];
+    assert.ok(dockBlock.includes('var(--border-medium)'), 'Composer dock must use var(--border-medium)');
+    assert.ok(!dockBlock.includes('var(--accent)'), 'Composer dock container must NOT use accent border');
+
+    // 4. Invariant: Composer dock focus-within in ayu-light MUST NOT use accent border
+    const focusMatch = cssContent.match(/\[data-theme="ayu-light"\]\s+\.composer-dock:focus-within\s*\{([\s\S]*?)\}/);
+    assert.ok(focusMatch, 'Must define [data-theme="ayu-light"] .composer-dock:focus-within');
+    const focusBlock = focusMatch[1];
+    assert.ok(focusBlock.includes('border-color: var(--border-strong)'), 'Composer dock focus must use var(--border-strong)');
+    assert.ok(!focusBlock.includes('var(--accent-border)'), 'Composer dock focus must NOT use accent-border');
+    assert.ok(!focusBlock.includes('var(--accent)'), 'Composer dock focus must NOT use accent');
+  });
+
+  await t.test('MiddlePod user-bubble must consume var(--chat-user-message-bg)', async () => {
+    const { renderMessage } = await import('../dist/components/MiddlePod/MiddlePod.js');
+    const html = renderMessage(
+      {
+        id: 'msg-u-1',
+        role: 'user',
+        content: 'Hello world test bubble',
+        timestamp: '12:00',
+      },
+      {}
+    );
+    assert.ok(html.includes('var(--chat-user-message-bg, var(--bg-card))'), 'User bubble must support chat-user-message-bg token');
+  });
+
+  await t.test('getNextToggleTheme must deterministically transition between dark and primary light theme', async () => {
+    const { getNextToggleTheme } = await import('../dist/tokens/themeRegistry.js');
+
+    // All light themes must transition to obsidian-gold
+    assert.equal(getNextToggleTheme('ayu-light'), 'obsidian-gold');
+    assert.equal(getNextToggleTheme('warm-paper'), 'obsidian-gold');
+    assert.equal(getNextToggleTheme('jade-white'), 'obsidian-gold');
+    assert.equal(getNextToggleTheme('suet-jade'), 'obsidian-gold');
+
+    // Dark themes must transition to ayu-light
+    assert.equal(getNextToggleTheme('obsidian-gold'), 'ayu-light');
+    assert.equal(getNextToggleTheme('cyber-matrix'), 'ayu-light');
+  });
+
   await t.test('Gate 4e: MiddlePod long session performance benchmark (5000 synthetic messages)', async () => {
     const { runLongSessionPerfBenchmark } = await import('../../../scripts/gates/perf-benchmark.mjs');
     const result = await runLongSessionPerfBenchmark();

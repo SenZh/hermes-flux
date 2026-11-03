@@ -340,6 +340,16 @@ export const zhDict = {
   'mention.fileArch': '架构设计',
   'mention.recentFile': '最近打开',
   'common.remove': '移除',
+  'settings.themeObsidianTitle': '☾ 黑曜琥珀 (深色)',
+  'settings.themeObsidianSub': 'Obsidian Gold · 纯粹玄黑高奢',
+  'settings.themeAyuTitle': '☼ Ayu 晨曦 (浅色)',
+  'settings.themeAyuSub': 'Ayu Light · 晴空天青与羊皮纸暖白',
+  'settings.themeWarmPaperTitle': '☼ 经典暖白 (浅色)',
+  'settings.themeWarmPaperSub': 'Warm Paper · 温润象牙纸感',
+  'settings.themeLightTitle': '☼ 极简冷灰 (浅色)',
+  'settings.themeLightSub': 'Clean Slate · 现代微冷灰度',
+  'settings.themeCyberTitle': '☾ 赛博冷翠 (深色)',
+  'settings.themeCyberSub': 'Cyber Matrix · 极客冷翠荧光',
 } as const;
 
 export type I18nKey = keyof typeof zhDict;
@@ -674,6 +684,16 @@ export const enDict: Record<I18nKey, string> = {
   'mention.fileArch': 'Architecture design',
   'mention.recentFile': 'Recently opened',
   'common.remove': 'Remove',
+  'settings.themeObsidianTitle': '☾ Obsidian Gold (Dark)',
+  'settings.themeObsidianSub': 'Obsidian Gold · Pure Dark Luxury',
+  'settings.themeAyuTitle': '☼ Ayu Light (Light)',
+  'settings.themeAyuSub': 'Ayu Light · Sky Azure & Warm Parchment',
+  'settings.themeWarmPaperTitle': '☼ Warm Paper (Light)',
+  'settings.themeWarmPaperSub': 'Warm Paper · Warm Ivory Aesthetic',
+  'settings.themeLightTitle': '☼ Clean Slate (Light)',
+  'settings.themeLightSub': 'Clean Slate · Minimalist Cool Slate',
+  'settings.themeCyberTitle': '☾ Cyber Matrix (Dark)',
+  'settings.themeCyberSub': 'Cyber Matrix · Neon Matrix Green',
 };
 
 export type Locale = 'zh-CN' | 'en-US';

@@ -99,16 +99,28 @@ test('Design System Tokens & Architectural Invariant Guardrails (Gate 4)', async
   await t.test('Color contrast polarity invariant (dark skins use light text, light skins use dark text)', () => {
     const darkSkin = BUILTIN_SKINS['obsidian-gold'];
     const lightSkin = BUILTIN_SKINS['jade-white'];
+    const ayuLight = BUILTIN_SKINS['ayu-light'];
+    const warmPaper = BUILTIN_SKINS['warm-paper'];
+    const cyberMatrix = BUILTIN_SKINS['cyber-matrix'];
 
     // Dark skin text should be light hex
     assert.match(darkSkin.colors.textMain, /^#(F|E|D)/i, 'Dark skin textMain must be light high-contrast color');
     // Dark skin window background should be dark hex
     assert.match(darkSkin.colors.bgWindow, /^#(0|1)/i, 'Dark skin bgWindow must be deep dark color');
 
+    assert.match(cyberMatrix.colors.textMain, /^#(F|E|D)/i, 'Cyber matrix textMain must be light high-contrast color');
+    assert.match(cyberMatrix.colors.bgWindow, /^#(0|1)/i, 'Cyber matrix bgWindow must be deep dark color');
+
     // Light skin text should be dark hex
     assert.match(lightSkin.colors.textMain, /^#(0|1|2)/i, 'Light skin textMain must be dark high-contrast color');
     // Light skin window background should be light hex
     assert.match(lightSkin.colors.bgWindow, /^#(F|E)/i, 'Light skin bgWindow must be light paper color');
+
+    assert.match(ayuLight.colors.textMain, /^#(0|1|2)/i, 'Ayu light textMain must be dark high-contrast color');
+    assert.match(ayuLight.colors.bgWindow, /^#(F|E)/i, 'Ayu light bgWindow must be light porcelain color');
+
+    assert.match(warmPaper.colors.textMain, /^#(0|1|2)/i, 'Warm paper textMain must be dark high-contrast color');
+    assert.match(warmPaper.colors.bgWindow, /^#(F|E)/i, 'Warm paper bgWindow must be light ivory color');
   });
 
   await t.test('InspectionPod must strictly adhere to Design Tokens (zero hardcoded theme colors)', async () => {

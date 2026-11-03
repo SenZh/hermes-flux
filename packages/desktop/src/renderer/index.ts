@@ -40,6 +40,7 @@ import {
   type InputAttachmentItem,
   type SlashCommandOption,
   type MentionReferenceOption,
+  getNextToggleTheme,
 } from '@hermes-flux/ui';
 
 import {
@@ -126,7 +127,7 @@ declare global {
 
 interface AppState {
   platform: 'windows' | 'macos' | 'linux' | 'ios' | 'android' | 'web';
-  theme: 'obsidian-gold' | 'suet-jade' | 'jade-white';
+  theme: 'obsidian-gold' | 'suet-jade' | 'jade-white' | 'warm-paper' | 'ayu-light' | 'cyber-matrix';
   activeRailTab: 'chats' | 'projects' | 'groups';
   lang: 'zh' | 'en';
   isMaximized: boolean;
@@ -5752,7 +5753,7 @@ function bindEvents(): void {
   const themeToggleBtn = document.getElementById('titlebar-theme-toggle-btn');
   if (themeToggleBtn) {
     themeToggleBtn.onclick = () => {
-      const nextTheme = state.theme === 'obsidian-gold' ? 'jade-white' : 'obsidian-gold';
+      const nextTheme = getNextToggleTheme(state.theme);
       state.theme = nextTheme;
       localStorage.setItem('hermes_flux_theme', nextTheme);
       localStorage.setItem('hermes_aura_theme', nextTheme);

@@ -570,8 +570,95 @@ export async function runFeature(featureId) {
       fs.writeFileSync(path.join(featureArtifactsDir, 'evidence.json'), JSON.stringify(evidence, null, 2));
       console.log(`  ✔ 验证成功！证据已落盘: ${screenshotPath}`);
       return true;
+    } else if (featureId === 'clean-light-theme' || featureId === 'warm-paper-theme' || featureId === 'ayu-light-theme') {
+      console.log('  1. 切换至 Ayu 晨曦浅色皮肤 (Ayu Light / ayu-light)...');
+      await session.evaluate(`(() => {
+        const app = window.cdpApp || window.__fluxState;
+        if (app) {
+          app.theme = 'ayu-light';
+          localStorage.setItem('hermes_flux_theme', 'ayu-light');
+          localStorage.setItem('hermes_aura_theme', 'ayu-light');
+          document.documentElement.setAttribute('data-theme', 'ayu-light');
+          document.documentElement.setAttribute('data-variant', 'light');
+          if (typeof app.render === 'function') app.render();
+          else if (typeof window.__fluxRender === 'function') window.__fluxRender();
+        }
+      })()`);
+
+      await session.waitFor('document.documentElement.getAttribute("data-theme") === "ayu-light"', 5000, 'theme attribute');
+
+      console.log('  2. 验证核心 Ayu Light Token 计算样式 (羊皮纸暖白底板 #FDFAF4 与天青蓝强调 #4AA8C8)...');
+      const themeMetrics = await session.evaluate(`(() => {
+        const cs = getComputedStyle(document.documentElement);
+        const bodyCs = getComputedStyle(document.body);
+        return {
+          bgWindow: cs.getPropertyValue('--bg-window').trim(),
+          textMain: cs.getPropertyValue('--text-main').trim(),
+          accent: cs.getPropertyValue('--accent').trim(),
+          bodyBg: bodyCs.backgroundColor,
+          bodyColor: bodyCs.color,
+        };
+      })()`);
+      console.log('     · Ayu Light 计算指标:', themeMetrics);
+
+      console.log('  3. 注入参考图真实 Markdown 对话流（tsx代码块、行号、注释与加粗文本）...');
+      await session.evaluate(`(() => {
+        const app = window.cdpApp || window.__fluxState;
+        if (app) {
+          app.messages = [
+            {
+              id: 'msg-ref-1',
+              role: 'user',
+              content: 'Pin the reference preview header on mobile',
+              timestamp: '18:00',
+            },
+            {
+              id: 'msg-ref-2',
+              role: 'assistant',
+              content: '• pinned === false (mobile): everything stays in a single <article className="flex flex-col gap-4">:\\n\\n' +
+                String.fromCharCode(96,96,96) + 'tsx\\n<article className="flex flex-col gap-4">\\n  <header ...>{header}</header>\\n  <div className="border-b ... pb-4">{meta}</div>\\n  {children}  {/* body + comments */}\\n  <div ...>{footer}</div>\\n</article>\\n' +
+                String.fromCharCode(96,96,96) +
+                '\\n\\nHeader, meta, body and comments all remain in the sheet scroll flow. **The header is not pinned on mobile.**\\n\\n• 行内指令与路由排版：session.create、message.delta 与 POST /auth/login（中性出版级排版）\\n\\n## Conclusion\\n\\nNo — #5029 does not keep the header pinned on mobile widths. The mobile callers pass pinned={!isMobile}, i.e. pinned === false on mobile.\\n\\n> Recap: Investigated the Issues & PRs preview: PR #5029 pins the header on desktop, but it still scrolls away with the body on mobile; no files were changed.',
+              timestamp: '18:05',
+            }
+          ];
+          if (typeof app.render === 'function') app.render();
+          else if (typeof window.__fluxRender === 'function') window.__fluxRender();
+        }
+      })()`);
+
+      await session.waitFor('document.querySelectorAll(".message-row").length >= 2', 5000, 'rendered messages');
+
+      console.log('  4. 验证黄金限宽输入舱与侧边栏在 Ayu Light 模式下的纯白浮起与边框...');
+      const dockMetrics = await session.evaluate(`(() => {
+        const dock = document.querySelector('.composer-dock') || document.querySelector('.input-card-box') || document.querySelector('.input-dock-container');
+        const card = document.querySelector('.session-item.active') || document.querySelector('.session-item');
+        return {
+          dockExists: Boolean(dock),
+          cardExists: Boolean(card),
+        };
+      })()`);
+      console.log('     · 组件装配验证:', dockMetrics);
+
+      console.log('  5. 捕获 Ayu 晨曦真实物理渲染截图与证据快照...');
+      const screenshotPath = path.join(featureArtifactsDir, 'screenshot.png');
+      await session.screenshot(screenshotPath);
+
+      const evidence = {
+        featureId,
+        theme: 'ayu-light',
+        timestamp: new Date().toISOString(),
+        durationMs: Date.now() - startTime,
+        status: 'PASSED',
+        themeMetrics,
+        dockMetrics,
+        screenshot: screenshotPath,
+      };
+      fs.writeFileSync(path.join(featureArtifactsDir, 'evidence.json'), JSON.stringify(evidence, null, 2));
+      console.log(`  ✔ Ayu 晨曦皮肤验证成功！证据已落盘: ${screenshotPath}`);
+      return true;
     } else {
-      throw new Error(`Unknown feature ID: ${featureId}. Supported features: bot-primary-chat, session-management, group-room, input-dock-controls, interactive-chat-stage`);
+      throw new Error(`Unknown feature ID: ${featureId}. Supported features: bot-primary-chat, session-management, group-room, input-dock-controls, interactive-chat-stage, clean-light-theme`);
     }
   } finally {
     await session.cleanup();

@@ -580,7 +580,7 @@ export function renderMessage(
       <div class="message-row user-row" data-msg-id="${m.id}" data-row-id="${m.rowId ?? ''}" style="display: flex; flex-direction: column; align-items: flex-end; width: 100%; margin: 4px 0;">
         <div class="user-bubble" style="
           max-width: 85%;
-          background: var(--bg-card);
+          background: var(--chat-user-message-bg, var(--bg-card));
           border: 1px solid var(--border-medium);
           border-radius: 12px 12px 3px 12px;
           padding: 8px 14px;
@@ -1763,7 +1763,7 @@ export function formatInlineCodeOrLink(escapedContent: string): string {
   const isFile = isLikelyFilePath(unescaped);
 
   if (!isHttp && !isFile) {
-    return `<code style="background: rgba(255, 255, 255, 0.06); border: 1px solid var(--border-subtle); padding: 1.5px 5.5px; border-radius: 4px; font-family: var(--font-mono); font-size: 12px; color: var(--accent);">${escapedContent}</code>`;
+    return `<code style="background: var(--bg-panel); border: 1px solid var(--border-subtle); padding: 1.5px 5.5px; border-radius: 4px; font-family: var(--font-mono); font-size: 11.5px; color: var(--text-main); font-weight: 500;">${escapedContent}</code>`;
   }
 
   const tip = isHttp
@@ -1782,7 +1782,7 @@ export function formatInlineCodeOrLink(escapedContent: string): string {
 
   return `<code class="tool-file-link content-interactive-link" data-preview-file="${escapeHtml(unescaped)}" ${
     isHttp ? `data-preview-url="${escapeHtml(unescaped)}"` : ''
-  } title="${escapeHtml(tip)}" style="background: rgba(255, 255, 255, 0.06); border: 1px solid var(--border-subtle); padding: 1.5px 6px; border-radius: 4px; font-family: var(--font-mono); font-size: 12px; color: var(--accent); cursor: pointer; display: inline-flex; align-items: baseline; gap: 4px; text-decoration: underline; text-decoration-color: var(--border-medium); text-underline-offset: 2px;">${iconSvg}<span>${escapedContent}</span><span style="font-size: 9px; opacity: 0.65; margin-left: 1px;">↗</span></code>`;
+  } title="${escapeHtml(tip)}" style="background: var(--bg-panel); border: 1px solid var(--border-subtle); padding: 1.5px 6px; border-radius: 4px; font-family: var(--font-mono); font-size: 11.5px; color: var(--text-main); cursor: pointer; display: inline-flex; align-items: baseline; gap: 4px; text-decoration: underline; text-decoration-color: var(--border-medium); text-underline-offset: 2px;">${iconSvg}<span>${escapedContent}</span><span style="font-size: 9px; opacity: 0.65; margin-left: 1px;">↗</span></code>`;
 }
 
 const markdownRenderCache = new Map<string, string>();
@@ -1826,7 +1826,7 @@ export function renderMarkdown(md: string): string {
           align-items: center;
           user-select: none;
         ">
-          <span style="text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; color: #94A3B8;">${lang || 'TEXT'}</span>
+          <span style="text-transform: lowercase; font-weight: 500; letter-spacing: 0.02em; color: var(--text-muted);">${lang || 'text'}</span>
           <button class="btn-copy-code" onclick="(window.__fluxCopyText ? window.__fluxCopyText(this.closest('.code-block-wrapper').querySelector('code').innerText) : navigator.clipboard.writeText(this.closest('.code-block-wrapper').querySelector('code').innerText)); this.innerText='${escapeHtml(t('common.copied'))}'; this.style.color='var(--accent)'; setTimeout(() => { this.innerText='${escapeHtml(t('common.copy'))}'; this.style.color=''; }, 1500);" style="
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid var(--border-subtle);
@@ -1941,8 +1941,8 @@ export function renderMarkdown(md: string): string {
 export function highlightCodeSyntax(code: string): string {
   if (!code) return '';
 
-  // Token definition regex: Comments, Strings, Keywords, Numbers
-  const tokenRegex = /(\/\/[^\n]*)|(["'`][\s\S]*?["'`])|\b(const|let|var|function|return|if|else|for|while|import|from|export|default|class|async|await|try|catch|type|interface|extends|implements)\b|\b(\d+)\b/g;
+  // Token definition regex: Comments, Strings, JSX Tags, JSX Attribute Names, Keywords, Numbers
+  const tokenRegex = /(\/\/[^\n]*|\{\/\*[\s\S]*?\*\/\}|\/\*[\s\S]*?\*\/)|(["'`][\s\S]*?["'`])|(<\/?[a-zA-Z0-9_-]+)|(\b[a-zA-Z0-9_-]+(?==))|\b(const|let|var|function|return|if|else|for|while|import|from|export|default|class|async|await|try|catch|type|interface|extends|implements)\b|\b(\d+)\b/g;
 
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -1954,12 +1954,16 @@ export function highlightCodeSyntax(code: string): string {
       output += escapeHtml(code.slice(lastIndex, match.index));
     }
 
-    const [fullMatch, comment, stringLit, keyword, numberLit] = match;
+    const [fullMatch, comment, stringLit, jsxTag, jsxAttr, keyword, numberLit] = match;
 
     if (comment) {
       output += `<span style="color: var(--hl-comment, var(--text-muted)); font-style: italic;">${escapeHtml(comment)}</span>`;
     } else if (stringLit) {
       output += `<span style="color: var(--hl-string, var(--accent));">${escapeHtml(stringLit)}</span>`;
+    } else if (jsxTag) {
+      output += `<span style="color: var(--hl-keyword, var(--accent)); font-weight: 600;">${escapeHtml(jsxTag)}</span>`;
+    } else if (jsxAttr) {
+      output += `<span style="color: var(--hl-type, var(--hl-number, var(--text-secondary)));">${escapeHtml(jsxAttr)}</span>`;
     } else if (keyword) {
       output += `<span style="color: var(--hl-keyword, var(--accent-dim)); font-weight: 600;">${escapeHtml(keyword)}</span>`;
     } else if (numberLit) {
