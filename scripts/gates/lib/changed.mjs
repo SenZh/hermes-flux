@@ -88,6 +88,7 @@ export function isStyleSurface(rel) {
   if (posix.endsWith('.css') || posix.endsWith('.scss') || posix.endsWith('.less')) return true;
   if (posix.includes('packages/ui/src/tokens/')) return true;
   if (posix.includes('packages/ui/src/components/')) return true;
+  if (posix.includes('packages/ui/src/components-react/')) return true;
   // 渲染层直接拼装 HTML/CSS，视觉回归同样落在它身上
   if (posix.includes('packages/desktop/src/renderer/')) return true;
   return false;

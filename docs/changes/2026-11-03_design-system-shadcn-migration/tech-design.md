@@ -79,6 +79,18 @@ AGENTS.md：ui 层描述"DOM 模板组件"→"React 组件库"；"7 大定理"�
 - **波①（设计系统地基，PR-1a/1b/1c）**：1a **三源真值面全量审计 + 皮肤表**：干跑输入=themeRegistry 29 值 + styles.css 逐皮肤块全变量 + 组件 var() 引用面三方交集（含 :679-928 约 20 条皮肤专属规则的逐条归槽/删除/diff 声明，消 suet-jade 幽灵）；skins.ts 生成链替换 styles.css 手写皮肤块；5 皮肤全值表；Inter 拉丁子集实测报告（≤400KB 预算）；SLOT_IDS 数目对账单测。1b 门禁 4 探针上线（warning-only）。1c 文档订正 + BUILTIN_SKINS/THEME_* 双僵尸表废弃。
 - **波②（core 下沉与并发 P0，PR-2a/2b，与①无文件交集）**：2a SessionLifecycleService（按 S6 拆分口径：core 编排段 + DeleteOutcome，壳侧订阅副作用）+ runGuarded 四路守卫补齐（R-01/R-02/R-03/R-04）+ RpcErrorCode + S5b auth 链路归位；2b FSM 转移表 + 看门狗语义 + 其余编排 + 形式化定理增量（判定树强制项）。前置：synthesized.md 快照进本变更目录并固定哈希（审查 #14）。
 - **波③（desktop React 化，PR-3x 按舱分单）**：build.mjs S1 改造（六入口）→ shadcn 基座（Button/Input/Dialog/Menu/Badge/Switch）→ 舱序 Titlebar/StatusBar → SettingsModal/Modal 族 → LeftRail（含双实现收编，附"不改数据源管道"准入注）→ InspectionPod → **InputDock+MiddlePod 同 PR**（审查 #9：dockHtml 字符串插槽 :4598-4622 使 InputDock 位于 MiddlePod 重建子树内，拆开迁移违反 S4 不变量；或前置独立 PR 先把 dock 宿主移出插槽依赖）→ MiddlePod 域收尾（流式写权切换）。每舱 PR 附 CDP 截图基线 + 节点同一性断言 + 门禁转阻断。**"renderer≤1,500 行"判据在本波末验收**（审查 #3）。波③准入三项（三轮复审登记）：theme 初始化按 SKINS 键白名单回退 obsidian-gold（消 state.theme 的 as any 幽灵存档塌陷面，renderer:4522 附近）；enDict 皮肤名补登；删除 THEME B/C/E/D 过渡注释头。LeftRail 会话行重设计（用户实测反馈定案，随波③ LeftRail 迁移 PR 交付）：行内头像移除（微轨已承载 Bot 身份，行内重复且拥挤）；标题保留为第一行主体；副标题保留但降为 12px muted 单行截断（扫描价值=快速定位聊到哪）；时间保留但紧凑化（当日只显 HH:mm，跨日 M/D，跨年带年份），钉行右缘；行高目标 48px。左轨拖拽越界 bug 已于波③前独立修复（clamp [264,400] + 恢复强制夹取）。
+
+### PR-3a 双审返工记录
+
+- 双审驳回项目：CDP harness 从 UI barrel 裸导入导致浏览器解析裸依赖失败；React shell 桥、快照与皮肤存档白名单缺行为测试；Inspector 按钮回调缺失且事件所有权重复；Tailwind 遮罩和前景槽映射遗漏；React 顶栏与状态栏出现硬编码中文；macOS 窗口灯和 profile 选择器未迁移。
+- 返工处置：按 P0 清单补齐直路径导入、桥与皮肤行为测试、React 回调、槽映射、字典键和平台控件。`npm run test:cdp` 的既有失败逐项区分本次回归与原有失败，不以总数下降替代原因归属。
+- S4 约束：InputDock 与 MiddlePod 必须同 PR 迁移，除非先把 dock 宿主移出 MiddlePod 字符串插槽。
+- Harness 边界：`@hermes-flux/ui` barrel 仅供 esbuild 等打包消费者使用；裸浏览器模块不得直接导入 barrel，必须使用组件或模块直路径。
+- 状态面裁决：状态栏是唯一网关延迟读数面；顶栏只保留连接脉冲，不显示第二份延迟数字。
+- 动效待办：翡翠呼吸动效本轮不恢复，待集中时钟任务接入后再恢复。
+- 尺寸豁免：28×28 图标按钮限定桌面壳使用；mobile 不渲染窗控，沿用既有移动热区测试作为依据。
+- 构建清理：保留 index.html 的 Tailwind 样式直链，删除 build.mjs 的重复替换逻辑；Dialog 删除无实际动画定义的 animate-in/out 类名。
+- 兼容与遗留：主题写入同时更新 `hermes_flux_theme` 和 `hermes_aura_theme`。`lang as any` 若不属于本轮清偿基线，登记至波③处理。
 - **波④（mobile 独立壳，PR-4x）**：app-mobile.tsx+capacitor 资源管道替换 cpSync、bridge 真 implements IPlatformBridge、触控热区/键盘避让按 ENGINEERING_DISCIPLINE 二.5 视口矩阵回归、CSS 全局 44px 补丁废除。
 
 遗留验证项（非阻断，进测试计划）：I2 React 岛屿与覆写路径共存由波③逐舱 live lane 实证；mobile WebView 字体/包体首帧预算波④ perf 基线测定。

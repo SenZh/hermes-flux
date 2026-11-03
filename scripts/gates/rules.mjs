@@ -23,6 +23,7 @@ import { hasInlineAllowance, matchAll, REPO_ROOT } from './lib/scanner.mjs';
 export function isSkinSurface(rel) {
   return (
     rel.startsWith('packages/ui/src/components/') ||
+    rel.startsWith('packages/ui/src/components-react/') ||
     rel.startsWith('packages/desktop/src/renderer/') ||
     rel.startsWith('packages/ui/src/i18n/')
   );
