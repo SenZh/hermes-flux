@@ -11,6 +11,12 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import { SessionListGeneration } from '../../../core/dist/index.js';
+
+const rendererSource = readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src/renderer/index.ts'), 'utf8');
 
 test('Session Subtitles & Generation Race Guard (Offline Invariants)', async (t) => {
   await t.test('1. 代际令牌 (Generation Token)：迟滞异步响应绝不能写入已切换的当前会话', async () => {
@@ -51,6 +57,22 @@ test('Session Subtitles & Generation Race Guard (Offline Invariants)', async (t)
     assert.equal(r2.discarded, false, 'S2 的响应必须成功挂载');
     assert.equal(activeSessionId, 'session-2');
     assert.equal(currentMountedMessages[0].content, 'S2 的最新消息', '当前视口严禁被 S1 消息串扰');
+  });
+
+  await t.test('3. 删除开始作废旧列表快照，旧全量响应不得复活被删会话', async () => {
+    const generation = new SessionListGeneration();
+    let sessions = [{ id: 'deleted-target' }, { id: 'keep-target' }];
+    const requestGeneration = generation.beginFetch();
+    const oldListResponse = [...sessions];
+    generation.invalidateForDelete();
+    sessions = sessions.filter((session) => session.id !== 'deleted-target');
+
+    const canCommit = generation.mayCommit(requestGeneration);
+    if (canCommit) sessions = oldListResponse;
+
+    assert.equal(canCommit, false, '删除必须使删除前的列表请求代际过期');
+    assert.deepEqual(sessions, [{ id: 'keep-target' }], '旧列表快照不能把已删 id 写回列表');
+    assert.match(rendererSource, /sessionListGeneration\.invalidateForDelete\(\)/, 'renderer 删除入口必须调用生产代际作废原语');
   });
 
   await t.test('2. 会话副标题匹配隔离：必须按 botName + sessionId 联合寻址，杜绝跨 Profile 篡改', () => {
