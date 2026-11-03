@@ -448,14 +448,68 @@
 
 
 
-/* THEME B/C/E/D 注释头已随皮肤块迁入生成区（skins.ts），此处仅保留原组件规则 */
-
-
 /* Consolidated Minimal Desktop Layout: Status consolidated in Titlebar */
 .flux-status-bar,
 #app-status-bar {
-  display: none !important;
+  height: var(--geo-statusbar, 22px);
+  min-height: var(--geo-statusbar, 22px);
+  padding: 0 var(--space-4, 16px);
+  display: flex;
+  align-items: center;
+  background: var(--sidebar);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
 }
+.status-bar-server-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--destructive);
+}
+.status-dot[data-status="connected"] { background: var(--success); }
+.status-dot[data-status="connecting"] { background: var(--warning); }
+.status-location, .status-latency { color: var(--secondary-foreground); }
+.status-latency { color: var(--primary); }
+.flux-titlebar {
+  height: calc(42px + env(safe-area-inset-top, 0px));
+  min-height: 42px;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) 0 env(safe-area-inset-left, 0px);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--sidebar);
+  user-select: none;
+  -webkit-app-region: drag;
+  position: relative;
+  z-index: 50;
+}
+.titlebar-left, .titlebar-right { display: flex; align-items: center; gap: 8px; height: 100%; }
+.titlebar-left { flex: 1; min-width: 0; }
+.titlebar-right { justify-content: flex-end; flex-shrink: 0; z-index: 2; }
+.titlebar-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 8px; max-width: calc(100% - 320px); pointer-events: none; z-index: 1; }
+.titlebar-session-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground); }
+.titlebar-latency-pill { color: var(--secondary-foreground); font-family: var(--font-mono); }
+.session-live-pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--destructive); }
+.session-live-pulse[data-connected="true"] { background: var(--success); }
+.win-caption-controls { display: flex; align-items: center; height: 100%; -webkit-app-region: no-drag; }
+.win-cap-btn { width: 46px; height: 100%; border: 0; background: transparent; color: var(--secondary-foreground); display: flex; align-items: center; justify-content: center; cursor: pointer; -webkit-app-region: no-drag; }
+.win-cap-btn:hover { background: var(--card-hover); }
+.win-cap-close:hover { background: var(--destructive); color: var(--foreground); }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; flex: 0 0 auto; border: 1px solid var(--border-subtle); border-radius: 6px; background: transparent; color: var(--secondary-foreground); cursor: pointer; -webkit-app-region: no-drag; }
+.icon-btn:hover { background: var(--card-hover); color: var(--foreground); }
 
 * {
   box-sizing: border-box;
@@ -470,8 +524,8 @@ html, body {
   padding: 0;
   overflow: hidden;
   font-family: var(--font-sans);
-  background: var(--bg-window);
-  color: var(--text-main);
+  background: var(--background);
+  color: var(--foreground);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

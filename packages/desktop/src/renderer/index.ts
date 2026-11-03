@@ -7,7 +7,6 @@
 import type { IRpcCaller } from '@hermes-flux/core';
 
 import {
-  renderTitlebar,
   renderLeftRail,
   renderMiddlePod,
   renderConversationCanvas,
@@ -16,7 +15,8 @@ import {
   renderMentionPopper,
   renderToolCapsuleSlot,
   renderInspectionPod,
-  renderStatusBar,
+  mountStatusBar,
+  mountTitlebar,
   renderSettingsModal,
   renderModelPickerMenu,
   renderModelPickerTree,
@@ -41,6 +41,10 @@ import {
   type SlashCommandOption,
   type MentionReferenceOption,
   getToggleTheme,
+  SKINS,
+  SKIN_ALIASES,
+  type StatusBarSnapshot,
+  type TitlebarSnapshot,
 } from '@hermes-flux/ui';
 
 import {
@@ -380,7 +384,12 @@ const groupRoomStore = new GroupRoomStore();
 
 const state: AppState = {
   platform: detectInitialPlatform(),
-  theme: (localStorage.getItem('hermes_flux_theme') || localStorage.getItem('hermes_aura_theme') as any) || 'obsidian-gold',
+  theme: (() => {
+    const savedTheme = localStorage.getItem('hermes_flux_theme') || localStorage.getItem('hermes_aura_theme');
+    // SAFETY: [narrowed-by] 白名单成员校验——savedTheme 必须命中 SKINS 键或 SKIN_ALIASES 别名键才允许透传，否则回退默认皮肤，杜绝幽灵存档值令全套 token 塌陷（波③准入项）
+    const knownThemes: readonly string[] = [...Object.keys(SKINS), ...Object.keys(SKIN_ALIASES)];
+    return savedTheme && knownThemes.includes(savedTheme) ? savedTheme as AppState['theme'] : 'obsidian-gold';
+  })(),
   activeRailTab: 'chats',
   lang: (localStorage.getItem('hermes_flux_lang') || localStorage.getItem('hermes_aura_lang') as any) || 'zh',
   isMaximized: false,
@@ -4342,6 +4351,8 @@ interface RenderMessagesSnapshot {
 
 let lastMessagesSnapshot: RenderMessagesSnapshot | null = null;
 let lastInputDockSnapshot: RenderInputDockSnapshot | null = null;
+let updateReactStatusBar: (() => void) | null = null;
+let updateReactTitlebar: (() => void) | null = null;
 
 /**
  * 斜杠与智能引用 Popper 的独立子树同步。
@@ -4354,6 +4365,68 @@ function syncComposerPoppers(): void {
   mount.innerHTML =
     renderSlashPopper(state.slashItems, state.slashPopperOpen) +
     renderMentionPopper(state.mentionItems, state.mentionPopperOpen);
+}
+
+function getTitlebarSnapshot(): TitlebarSnapshot {
+  return {
+    platform: state.platform,
+    title: resolveTitlebarTitle({
+      activeFocus: state.activeFocus,
+      profiles: state.profiles,
+      groupRooms: state.groupRooms,
+      sessions: state.sessions,
+      activeSessionId: state.activeSessionId,
+      defaultTitle: t('titlebar.defaultTitle'),
+      notConnectedTitle: t('titlebar.notConnected'),
+      defaultRoomName: t('group.defaultRoomName'),
+      isConnected: state.gatewayConnected,
+      profileName: state.profileName,
+    }),
+    isMaximized: state.isMaximized,
+    gatewayConnected: state.gatewayConnected,
+    gatewayLatencyMs: state.gatewayLatencyMs,
+  };
+}
+
+function getStatusBarSnapshot(): StatusBarSnapshot {
+  return {
+    connectionStatus: state.gatewayConnected ? 'connected' : state.gatewayConnecting ? 'connecting' : 'disconnected',
+    latencyMs: state.gatewayLatencyMs,
+  };
+}
+
+function mountReactShellComponents(): void {
+  const titlebarHost = document.getElementById('react-titlebar-host');
+  const statusHost = document.getElementById('react-statusbar-host');
+  if (titlebarHost && !updateReactTitlebar) {
+    updateReactTitlebar = mountTitlebar(titlebarHost, getTitlebarSnapshot, {
+      onMinimize: () => desktopApi?.minimize(),
+      onMaximize: async () => {
+        if (!desktopApi) return;
+        const result = await desktopApi.maximize();
+        state.isMaximized = typeof result === 'boolean' ? result : await desktopApi.isMaximized();
+        render();
+      },
+      onClose: () => desktopApi?.close(),
+      onToggleLeftRail: () => { state.leftRailCollapsed = !state.leftRailCollapsed; render(); },
+      onOpenSettings: () => { state.isSettingsOpen = true; state.settingsTab = 'gateway'; render(); },
+      onSwitchProfile: (profileName: string) => { void switchProfile(profileName); },
+      onToggleTheme: () => {
+        state.theme = getToggleTheme(state.theme);
+        localStorage.setItem('hermes_flux_theme', state.theme);
+        render();
+      },
+    });
+  }
+  if (statusHost && !updateReactStatusBar) {
+    updateReactStatusBar = mountStatusBar(statusHost, getStatusBarSnapshot, () => {
+      state.isSettingsOpen = true;
+      state.settingsTab = 'gateway';
+      render();
+    });
+  }
+  updateReactTitlebar?.();
+  updateReactStatusBar?.();
 }
 
 function render(): void {
@@ -4517,18 +4590,7 @@ function render(): void {
   if (!bodyContainer) {
     // 1. Initial full skeleton mount
     const html = `
-      ${renderTitlebar({
-        platform: state.platform,
-        title: currentTitle,
-        projectName: currentProjectName,
-        projectPath: currentProjectPath,
-        isMaximized: state.isMaximized,
-        gatewayConnected: state.gatewayConnected,
-        gatewayLatencyMs: state.gatewayLatencyMs,
-        theme: state.theme,
-        profileName: state.profileName,
-        profiles: state.profiles,
-      })}
+      <div id="react-titlebar-host"></div>
 
       <div class="flux-body-container" style="flex: 1; display: flex; position: relative; overflow: hidden; width: 100%;">
         ${renderLeftRail({
@@ -4610,10 +4672,7 @@ function render(): void {
         })}
       </div>
 
-      ${renderStatusBar({
-        connectionStatus: state.gatewayConnected ? 'connected' : state.gatewayConnecting ? 'connecting' : 'disconnected',
-        latencyMs: state.gatewayLatencyMs,
-      })}
+      <div id="react-statusbar-host"></div>
 
       ${renderSettingsModal({
         isOpen: state.isSettingsOpen,
@@ -4656,26 +4715,13 @@ function render(): void {
     `;
 
     root.innerHTML = html;
+    mountReactShellComponents();
     lastMessagesSnapshot = currentMessagesSnapshot;
     lastInputDockSnapshot = currentDockSnapshot;
     applyStreamAnchor(streamAnchor, pinBottom);
   } else {
     // 2. High-performance Subtree/Section Isolation Update (Zero DOM thrashing on conversation stream)
-    const titlebarEl = root.querySelector('.flux-titlebar');
-    if (titlebarEl) {
-      titlebarEl.outerHTML = renderTitlebar({
-        platform: state.platform,
-        title: currentTitle,
-        projectName: currentProjectName,
-        projectPath: currentProjectPath,
-        isMaximized: state.isMaximized,
-        gatewayConnected: state.gatewayConnected,
-        gatewayLatencyMs: state.gatewayLatencyMs,
-        theme: state.theme,
-        profileName: state.profileName,
-        profiles: state.profiles,
-      });
-    }
+    mountReactShellComponents();
 
     const railEl = root.querySelector('#flux-left-rail') || root.querySelector('.flux-left-rail');
     if (railEl) {
@@ -4732,13 +4778,6 @@ function render(): void {
       });
     }
 
-    const statusEl = root.querySelector('.flux-status-bar');
-    if (statusEl) {
-      statusEl.outerHTML = renderStatusBar({
-        connectionStatus: state.gatewayConnected ? 'connected' : state.gatewayConnecting ? 'connecting' : 'disconnected',
-        latencyMs: state.gatewayLatencyMs,
-      });
-    }
 
     // Input Dock update (Zero DOM thrashing & caret preservation)
     // 【设计意图 (Why)】
@@ -5029,47 +5068,7 @@ async function handleOpenFilePreview(filePath: string, previewUrl?: string): Pro
 }
 
 function bindEvents(): void {
-  // Caption Buttons
-  const minBtn = document.getElementById('win-min-btn');
-  const maxBtn = document.getElementById('win-max-btn');
-  const closeBtn = document.getElementById('win-close-btn');
-
-  if (minBtn) minBtn.onclick = () => desktopApi?.minimize();
-  if (maxBtn) {
-    maxBtn.onclick = async () => {
-      if (desktopApi) {
-        const res = await desktopApi.maximize();
-        state.isMaximized = typeof res === 'boolean' ? res : await desktopApi.isMaximized();
-        render();
-      }
-    };
-  }
-  if (closeBtn) closeBtn.onclick = () => desktopApi?.close();
-
-  // Traffic lights
-  const macClose = document.querySelector('.traffic-close') as HTMLElement;
-  const macMin = document.querySelector('.traffic-min') as HTMLElement;
-  const macMax = document.querySelector('.traffic-max') as HTMLElement;
-  if (macClose) macClose.onclick = () => desktopApi?.close();
-  if (macMin) macMin.onclick = () => desktopApi?.minimize();
-  if (macMax) {
-    macMax.onclick = async () => {
-      if (desktopApi) {
-        const res = await desktopApi.maximize();
-        state.isMaximized = typeof res === 'boolean' ? res : await desktopApi.isMaximized();
-        render();
-      }
-    };
-  }
-
-  // Toggles
-  const toggleLeftRail = document.getElementById('toggle-left-rail-btn');
-  if (toggleLeftRail) {
-    toggleLeftRail.onclick = () => {
-      state.leftRailCollapsed = !state.leftRailCollapsed;
-      render();
-    };
-  }
+  // Titlebar controls are bound through React props at mount time.
 
   const toggleInspector = document.getElementById('toggle-inspector-btn');
   const toggleInspectorClose = document.getElementById('toggle-inspector-close-btn');
@@ -5312,26 +5311,6 @@ function bindEvents(): void {
   }
 
   // Settings
-  const btnOpenSettings = document.getElementById('btn-open-settings');
-  if (btnOpenSettings) {
-    btnOpenSettings.onclick = () => {
-      state.isSettingsOpen = true;
-      state.settingsTab = 'gateway';
-      render();
-    };
-  }
-
-  // Status Bar Toolbar & Node
-  const statusServerNode = document.getElementById('status-bar-server-node');
-  if (statusServerNode) {
-    statusServerNode.onclick = (e) => {
-      e.stopPropagation();
-      state.isSettingsOpen = true;
-      state.settingsTab = 'gateway';
-      render();
-    };
-  }
-
   const btnCloseSettings = document.getElementById('btn-close-settings');
   if (btnCloseSettings) {
     btnCloseSettings.onclick = () => {
@@ -5715,19 +5694,6 @@ function bindEvents(): void {
           render();
         }
       }
-    };
-  }
-
-  // Quick theme toggle from Titlebar (Linear Dark <-> Linear Light)
-  const themeToggleBtn = document.getElementById('titlebar-theme-toggle-btn');
-  if (themeToggleBtn) {
-    themeToggleBtn.onclick = () => {
-      const nextTheme = getToggleTheme(state.theme);
-      state.theme = nextTheme;
-      localStorage.setItem('hermes_flux_theme', nextTheme);
-      localStorage.setItem('hermes_aura_theme', nextTheme);
-      document.documentElement.setAttribute('data-theme', nextTheme);
-      render();
     };
   }
 

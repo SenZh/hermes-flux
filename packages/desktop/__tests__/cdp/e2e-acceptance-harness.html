@@ -72,14 +72,12 @@
   <div id="flux-app-root"></div>
 
   <script type="module">
-    import {
-      renderTitlebar,
-      renderLeftRail,
-      renderMiddlePod,
-      renderInputDock,
-      renderContextMenu,
-      renderAgentProfileEditorModal
-    } from '/packages/ui/dist/index.js';
+    import { renderTitlebar } from '/packages/ui/dist/components/Titlebar/Titlebar.js';
+    import { renderLeftRail } from '/packages/ui/dist/components/LeftRail/LeftRail.js';
+    import { renderMiddlePod } from '/packages/ui/dist/components/MiddlePod/MiddlePod.js';
+    import { renderInputDock } from '/packages/ui/dist/components/InputDock/InputDock.js';
+    import { renderContextMenu } from '/packages/ui/dist/components/ContextMenu/ContextMenu.js';
+    import { renderAgentProfileEditorModal } from '/packages/ui/dist/components/Bot/AgentProfileEditorModal.js';
 
     window.cdpApp = {
       sessions: [
