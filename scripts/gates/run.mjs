@@ -72,6 +72,7 @@ const flags = {
   json: argv.includes('--json'),
   strict: argv.includes('--strict'),
   updateBaseline: argv.includes('--update-baseline'),
+  updateBaselineDry: argv.includes('--update-baseline-dry'),
 };
 
 /* ---------------- 目标文件集合 ---------------- */
@@ -107,17 +108,21 @@ function debtKey(v) {
   return `${v.ruleId}::${v.file}::${shortHash(v.snippet ?? '')}`;
 }
 
-function saveBaseline(violations) {
+function buildEntries(violations) {
   const entries = {};
   for (const v of violations) {
     const key = debtKey(v);
     entries[key] = (entries[key] ?? 0) + 1;
   }
+  return entries;
+}
+
+function saveBaseline(violations) {
   const payload = {
     version: 1,
     frozenAt: new Date().toISOString().slice(0, 10),
     note: '存量债务冻结清单。新增违规一律阻断；本文件只允许收缩（--update-baseline 仅在人工确认清偿后使用）。',
-    entries,
+    entries: buildEntries(violations),
   };
   fs.writeFileSync(BASELINE_PATH, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
   return payload;
@@ -137,9 +142,9 @@ function run() {
     let ctx;
     try {
       // 当处于 --staged 模式时，强制通过 Git Index (git show :<file>) 流式抽取暂存快照
-      const parsed = readSource(file, { fromIndex: flags.staged });
+      const parsed = makeScanCtx(file, { fromIndex: flags.staged });
       // warnings 通道用于「必须可见但不阻断」的已登记偏差
-      ctx = { ...parsed, warnings: [] };
+      ctx = parsed;
     } catch (err) {
       console.error(warnLine(`无法读取 ${file}: ${err.message}`));
       continue;
@@ -316,19 +321,30 @@ function run() {
   return;
 }
 
+/* 扫描上下文工厂：主扫描与 freeze 路径共用（二轮审查 P2：两路径各造 ctx 曾致 warnings 缺省崩溃） */
+function makeScanCtx(file, opts) {
+  return { ...readSource(file, opts), warnings: [] };
+}
+
 /* ---------------- 基线模式 ---------------- */
-if (flags.updateBaseline) {
+if (flags.updateBaseline || flags.updateBaselineDry) {
   const targets = SCAN_ROOTS.flatMap((root) => listSourceFiles(root));
   const all = [];
   for (const file of targets) {
-    const ctx = readSource(file);
+    const ctx = makeScanCtx(file, {});
     for (const rule of RULES) all.push(...rule.check(file, ctx));
   }
-  const payload = saveBaseline(all);
-  const total = Object.values(payload.entries).reduce((a, b) => a + b, 0);
-  console.log(okLine(`债务基线已刷新：${total} 条存量违规已冻结（${Object.keys(payload.entries).length} 个指纹）`));
-  console.log(warnLine('该操作会吸收当前所有违规，仅可在人工确认「当前违规均为存量债务」后执行。'));
-  process.exitCode = 0;
+  const total = Object.keys(buildEntries(all)).length;
+  if (flags.updateBaselineDry) {
+    console.log(okLine(`[dry] 冻结试算完成：当前树实扫违规指纹 ${total} 个，未写入基线（守卫 --update-baseline 路径无崩溃且不触文件）`));
+    process.exitCode = 0;
+  } else {
+    const payload = saveBaseline(all);
+    const sum = Object.values(payload.entries).reduce((a, b) => a + b, 0);
+    console.log(okLine(`债务基线已刷新：${sum} 条存量违规已冻结（${Object.keys(payload.entries).length} 个指纹）`));
+    console.log(warnLine('该操作会吸收当前所有违规，仅可在人工确认「当前违规均为存量债务」后执行。'));
+    process.exitCode = 0;
+  }
 } else {
   run();
 }

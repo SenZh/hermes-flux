@@ -544,7 +544,7 @@ export function renderLeftRail(props: LeftRailProps): string {
                           padding: 0 6px;
                           outline: none;
                         " />
-                        <button class="btn-confirm-group-rename" data-room-id="${escapeHtml(g.roomId)}" title="${t('common.confirm')}" style="background: var(--accent); border: none; border-radius: 4px; color: var(--bg-main); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer;">✓</button>
+                        <button class="btn-confirm-group-rename" data-room-id="${escapeHtml(g.roomId)}" title="${t('common.confirm')}" style="background: var(--accent); border: none; border-radius: 4px; color: var(--background); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer;">✓</button>
                         <button class="btn-cancel-group-rename" data-room-id="${escapeHtml(g.roomId)}" title="${t('common.cancel')}" style="background: transparent; border: 1px solid var(--border-subtle); border-radius: 4px; color: var(--text-muted); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer;">✕</button>
                       </div>
                     `;

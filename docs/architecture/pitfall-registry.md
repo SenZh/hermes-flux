@@ -169,6 +169,26 @@
 | 识别特征 | 高频 UI 状态触发了容器级 DOM 重建 |
 | 守卫 | ① 四个 popper 字段移出 dock 快照；② 固定 `#composer-popper-mount` 占位，`syncComposerPoppers()` 只写该子树；③ 键盘时序军规 |
 
+## P-018 静态存在≠运行时生效（皮肤三源漂移 + 同行 %ERRORLEVEL% 假绿）
+
+| 项目 | 内容 |
+|---|---|
+| 症状 | registry 有 29 槽与 applySkinToDom 注入函数，但改值不生效、改肤无响应；审计一度误把 registry 当运行时真值；typecheck 曾被验证命令谎报为绿 |
+| 根因 | `applySkinToDom`/`BUILTIN_SKINS` 生产调用点为 0（仅单测消费），运行时皮肤唯一生效源是 styles.css 手写 `[data-theme]` 块，tokens.ts THEME_* 为僵尸表；验证侧 cmd 同行 `& echo %ERRORLEVEL%` 在解析期展开，打印的是上一条命令的退出码 |
+| 识别特征 | "存在定义+存在消费文件"≠"存在调用链"；带 `&` 拼接的 cmd 验证输出与日志内容矛盾 |
+| 守卫 | ① `skins-sot.test.mjs`：标记区外零皮肤槽定义 + git HEAD 双向对账（sources 来源符号精确等值）+ 幂等 check；② 验证一律 `&&` 短路/日志尾部双证，禁同行 ERRORLEVEL；③ emit-skins `--check` 逐字节再生成 |
+| 复现命令 | `node --test packages/ui/__tests__/skins-sot.test.mjs`；`cmd /c "node x.js && echo OK"`（对照 `& echo %ERRORLEVEL%` 的行为差异） |
+
+## P-019 styles.css 整体不在门禁扫描面（色值盲区）
+
+| 项目 | 内容 |
+|---|---|
+| 症状 | 往 styles.css 写任意裸 hex，`npm run gates` 恒报 0 新增 |
+| 根因 | `listSourceFiles` 扩展名白名单只有 .ts/.tsx/.js/.mjs，CSS 文件历史上从未进入扫描面；基线"清欠 100 条"的真实构成是组件改名清偿+过期指纹清理，与 CSS 无关 |
+| 识别特征 | 门禁 scannedFiles 数字里找不到 css 文件 |
+| 守卫 | ① 皮肤块由 `skins-sot` 字节级 check 兜底（当前唯一防线）；② 波③给 styles.css 新增组件级色值规则前，必须先把 css 接入扫描面或以守卫测试逐条兜底（tech-design §5 波③准入项） |
+| 复现命令 | `node scripts/gates/run.mjs --json` 观察 scannedFiles 集合 |
+
 ---
 
 ## 守卫总览
@@ -191,3 +211,5 @@
 | @Agent 路由守卫 | `npm run verify:formal`（定理 11） | P-015 |
 | 斜杠/文件真实契约守卫 | `npm run contract:coverage` + CDP | P-016 |
 | Popper DOM 稳定性守卫 | CDP 场景 + 快照字段约束 | P-017 |
+| 皮肤单一真值守卫 | `npm test`（skins-sot 10 用例 + emit check） | P-018 |
+| CSS 扫描盲区兜底 | `npm test`（skins-sot 幂等/对账）+ 波③接扫描面 | P-019 |

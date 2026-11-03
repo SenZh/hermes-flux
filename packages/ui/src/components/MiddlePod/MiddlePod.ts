@@ -1261,7 +1261,7 @@ function renderSingleToolCapsule(parsed: ParsedToolItem): string {
         border-bottom-left-radius: 6px;
         border-bottom-right-radius: 6px;
         overflow: hidden;
-        background: var(--bg-surface-1, var(--bg-card));
+        background: var(--popover);
         border: 1px solid var(--border-subtle);
         border-top: none;
       ">
@@ -1326,7 +1326,7 @@ function renderReadOnlyToolGroup(items: ParsedToolItem[]): string {
         border-bottom-left-radius: 6px;
         border-bottom-right-radius: 6px;
         overflow: hidden;
-        background: var(--bg-surface-1, var(--bg-card));
+        background: var(--popover);
         border: 1px solid var(--border-subtle);
         border-top: none;
         display: flex;

@@ -377,7 +377,7 @@ export function renderInputDock(props: InputDockProps): string {
                 user-select: none;
               ">
                 <!-- Top Action & Search Bar -->
-                <div style="padding: 10px 10px 6px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-surface-1);">
+                <div style="padding: 10px 10px 6px; border-bottom: 1px solid var(--border-subtle); background: var(--popover);">
                   <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
                     <span id="btn-add-provider" style="font-size: 11.5px; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; gap: 4px;">
                       <span style="font-size: 13px;">+</span> 添加新提供商
@@ -410,7 +410,7 @@ export function renderInputDock(props: InputDockProps): string {
                 <div style="
                   padding: 6px 12px;
                   border-top: 1px solid var(--border-subtle);
-                  background: var(--bg-surface-1);
+                  background: var(--popover);
                   font-size: 10.5px;
                   color: var(--text-muted);
                   display: flex;
@@ -602,7 +602,7 @@ export function renderQueueTray(queued?: InputQueuedItem[]): string {
               <div style="display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;">
                 <span style="color: var(--text-muted); font-size: 10px;">#${idx + 1}</span>
                 <span style="overflow: hidden; text-overflow: ellipsis;">${escapeHtml(shortText)}</span>
-                ${item.model ? `<span style="font-size: 9.5px; padding: 0 4px; background: var(--bg-surface-1); border-radius: 3px; color: var(--text-muted);">${escapeHtml(item.model)}</span>` : ''}
+                ${item.model ? `<span style="font-size: 9.5px; padding: 0 4px; background: var(--popover); border-radius: 3px; color: var(--text-muted);">${escapeHtml(item.model)}</span>` : ''}
               </div>
               <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
                 <button class="queue-action-btn" data-action="queue-up" data-queue-id="${item.id}" title="${t('queue.moveUp')}" style="background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 1px 3px;">▲</button>
@@ -779,7 +779,7 @@ export function renderSlashPopper(items?: SlashCommandOption[], open = false): s
             font-size: 11.5px;
             color: var(--text-main);
             transition: background 0.1s ease;
-          " onmouseenter="this.style.background='var(--bg-hover)'" onmouseleave="this.style.background='transparent'">
+          " onmouseenter="this.style.background='var(--card-hover)'" onmouseleave="this.style.background='transparent'">
             <div style="display: flex; align-items: center; gap: 6px;">
               <span style="color: var(--accent); font-weight: 600; font-family: var(--font-mono);">${escapeHtml(cmd.name)}</span>
               ${cmd.isSkill ? '<span style="font-size: 9px; padding: 1px 4px; background: var(--accent-subtle); color: var(--accent); border-radius: 3px;">SKILL</span>' : ''}
@@ -833,7 +833,7 @@ export function renderMentionPopper(items?: MentionReferenceOption[], open = fal
             font-size: 11.5px;
             color: var(--text-main);
             transition: background 0.1s ease;
-          " onmouseenter="this.style.background='var(--bg-hover)'" onmouseleave="this.style.background='transparent'">
+          " onmouseenter="this.style.background='var(--card-hover)'" onmouseleave="this.style.background='transparent'">
             <div style="display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis;">
               <span style="color: ${isFile ? 'var(--text-muted)' : 'var(--accent)'}; font-size: 12px;">${isFile ? '📄' : '🤖'}</span>
               <span style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(m.name)}</span>
@@ -969,7 +969,7 @@ export function renderModelPickerTree(props: InputDockProps): string {
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
-                background: var(--bg-surface-1);
+                background: var(--popover);
                 cursor: pointer;
                 user-select: none;
               ">
@@ -1017,7 +1017,7 @@ function renderModelItemRow(
       align-items: center;
       justify-content: space-between;
       transition: background 0.1s ease;
-    " onmouseenter="if (!this.classList.contains('active')) this.style.background='var(--bg-hover)'" onmouseleave="if (!this.classList.contains('active')) this.style.background='transparent'">
+    " onmouseenter="if (!this.classList.contains('active')) this.style.background='var(--card-hover)'" onmouseleave="if (!this.classList.contains('active')) this.style.background='transparent'">
       <div style="display: flex; align-items: center; gap: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
         <span class="btn-toggle-favorite" data-model="${escapeHtml(item.id)}" style="
           color: ${isFav ? 'var(--accent)' : 'var(--text-faint)'};
