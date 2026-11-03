@@ -1,3 +1,4 @@
+// 此 barrel 仅供打包消费者使用（例如 esbuild bundle）。裸浏览器模块环境禁止直接导入，避免解析 react/jsx-runtime 等裸依赖失败。
 export * from './tokens/tokens.js';
 export * from './tokens/types.js';
 export * from './tokens/skins.js';
@@ -25,3 +26,4 @@ export * from './components-react/primitives/index.js';
 export { StatusBar, type StatusBarProps } from './components-react/StatusBar.js';
 export { Titlebar, type TitlebarProps as ReactTitlebarProps } from './components-react/Titlebar.js';
 export { mountStatusBar, mountTitlebar, type StatusBarSnapshot, type TitlebarSnapshot } from './components-react/mount-shell-components.js';
+export { getStatusBarSnapshot, getTitlebarSnapshot } from './components-react/mount-shell-components.js';

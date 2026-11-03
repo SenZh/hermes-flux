@@ -94,17 +94,15 @@
     <div id="group-dialog-slot"></div>
   </div>
 
-  <script type="module">
-    import {
-      renderWorkerDelegationCard,
-      renderSubagentTerminalView,
-      renderBotProfileCard,
-      renderGroupRoomView,
-      renderGroupPromotionDialog,
-      renderProjectTreeViewer,
-      renderBtwCapsule,
-      setLocale
-    } from '/packages/ui/dist/index.js';
+    <script type="module">
+    import { renderWorkerDelegationCard } from '/packages/ui/dist/components/MiddlePod/WorkerDelegationCard.js';
+    import { renderSubagentTerminalView } from '/packages/ui/dist/components/InspectionPod/SubagentTerminalView.js';
+    import { renderBotProfileCard } from '/packages/ui/dist/components/Bot/BotProfileCard.js';
+    import { renderGroupRoomView } from '/packages/ui/dist/components/Group/GroupRoomView.js';
+    import { renderGroupPromotionDialog } from '/packages/ui/dist/components/Group/GroupPromotionDialog.js';
+    import { renderProjectTreeViewer } from '/packages/ui/dist/components/Project/ProjectTreeViewer.js';
+    import { renderBtwCapsule } from '/packages/ui/dist/components/MiddlePod/BtwCapsule.js';
+    import { setLocale } from '/packages/ui/dist/i18n/index.js';
 
     import {
       SubagentStore,
