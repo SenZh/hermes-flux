@@ -100,6 +100,10 @@ import {
   isDurableRowId,
   deriveSessionKind,
   planSendRoute,
+  runGuarded,
+  SessionLifecycleService,
+  RpcErrorCode,
+  SessionListGeneration,
 } from '@hermes-flux/core';
 
 import type { HermesDesktopBridge } from '../preload/index.js';
@@ -920,82 +924,23 @@ async function testConnection(
   username: string,
   pass: string
 ): Promise<{ ok: boolean; message: string; latency: number; ticket?: string }> {
-  if (desktopApi?.authenticateGateway) {
-    try {
-      const res = await desktopApi.authenticateGateway({
-        url,
-        username,
-        password: pass,
-      });
-      return res;
-    } catch (e: any) {
-      console.warn('[Desktop PAL] authenticateGateway fallback:', e);
-    }
-  }
-
-  const baseUrl = getEffectiveUrl(url);
-  const startTime = Date.now();
-
   try {
-    const statusRes = await fetch(`${baseUrl}/api/status`, {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-    });
-    const latency = Date.now() - startTime;
-    if (!statusRes.ok) {
-      return { ok: false, message: `网关返回异常 HTTP ${statusRes.status}`, latency };
-    }
-
-    // gate-degrade: 剪贴板次选通道失败后仍有 execCommand 保底，属于降级链的一环
-    const statusData = await statusRes.json().catch(() => ({}));
-    if (statusData.auth_required) {
-      if (!username || !pass) {
-        return { ok: false, message: '该网关开启了安全拦截，必须输入用户名与密码', latency };
-      }
-      const loginRes = await fetch(`${baseUrl}/auth/password-login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ username, password: pass, provider: 'basic' }),
-      });
-      if (!loginRes.ok) {
-        return { ok: false, message: `认证失败: HTTP ${loginRes.status}`, latency };
-      }
-
-      let ticket: string | undefined;
-      try {
-        const tRes = await fetch(`${baseUrl}/api/auth/ws-ticket`, {
-          method: 'POST',
-          headers: { Accept: 'application/json' },
-          credentials: 'include',
-        });
-        if (tRes.ok) {
-          const td = await tRes.json();
-          ticket = td.ticket;
-        }
-      // gate-degrade: 探测网关状态失败时按未连接处理，由连接流程给出明确提示
-      } catch {}
-
-      return {
-        ok: true,
-        ticket,
-        message: `认证成功 · 延迟 ${latency}ms · Gateway v${statusData.version || '0.22.5'}`,
-        latency,
-      };
-    }
-
-    return {
-      ok: true,
-      message: `连接成功 (免密通道) · 延迟 ${latency}ms · Gateway v${statusData.version || '0.22.5'}`,
-      latency,
-    };
-  } catch (err: any) {
+    if (!desktopApi?.authenticateGateway) return { ok: false, message: t('chat.gatewayNotConnected'), latency: 0 };
+    return await desktopApi.authenticateGateway({ url, username, password: pass });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : t('chat.gatewayNotConnected');
     return {
       ok: false,
-      message: `无法连接网关: ${err.message || '网络连接超时或被拒绝'}`,
+      message: `${t('chat.gatewayNotConnected')}: ${message}`,
       latency: 0,
     };
   }
+}
+
+function rpcErrorCode(error: unknown): number | null {
+  if (error instanceof Error && 'code' in error && typeof error.code === 'number') return error.code;
+  if (error && typeof error === 'object' && 'code' in error && typeof error.code === 'number') return error.code;
+  return null;
 }
 
 /**
@@ -1056,7 +1001,7 @@ function formatSessionTime(timestamp: number): string {
   return `${target.getFullYear()}/${month}/${date}`;
 }
 
-let activeFetchSessionsGeneration = 0;
+const sessionListGeneration = new SessionListGeneration();
 
 /**
  * 会话真实副标题缓存：sessionId -> { lastActive, text, botName }。
@@ -1182,7 +1127,7 @@ async function fetchSessions(): Promise<void> {
   const client = gatewayClient;
   if (!client) return;
 
-  const currentGen = ++activeFetchSessionsGeneration;
+  const currentGen = sessionListGeneration.beginFetch();
 
   // 1. 若 profiles 尚未拉取，先动态拉取全量网关 Profile 列表
   if (state.profiles.length === 0) {
@@ -1232,7 +1177,7 @@ async function fetchSessions(): Promise<void> {
   );
 
   // 竞态守卫：如果本轮拉取期间已有更新的请求发出，放弃当前结果
-  if (currentGen !== activeFetchSessionsGeneration) return;
+  if (!sessionListGeneration.mayCommit(currentGen)) return;
 
   const settled = results.map((r) =>
     r.status === 'fulfilled'
@@ -1474,6 +1419,9 @@ async function openGroupRoom(roomId: string): Promise<void> {
 
   state.activeSessionId = roomId;
   state.activeLiveSessionId = roomId;
+  state.isLoadingOlder = false;
+  const generation = ++activeLoadMessagesGeneration;
+  const guard = { sessionId: roomId, generation };
 
   // 切换房间时重置线程上下文，避免跨房间误用同一 thread_id
   activeGroupThreadId = null;
@@ -1481,7 +1429,15 @@ async function openGroupRoom(roomId: string): Promise<void> {
 
   // 从 groups.log 拉取官方事件流
   try {
-    const logs = await groupRoomStore.fetchLogs(roomId, gatewayClient);
+    const guarded = await runGuarded(
+      guard,
+      () => ({ sessionId: state.activeSessionId, generation: activeLoadMessagesGeneration }),
+      () => undefined,
+      () => groupRoomStore.fetchLogs(roomId, gatewayClient!),
+      logSession,
+    );
+    if (guarded.status === 'discarded') return;
+    const logs = guarded.value;
     if (logs && logs.length > 0) {
       state.messages = logs.map((entry, idx) => {
         const senderName = entry.senderProfile || 'Agent';
@@ -1507,6 +1463,7 @@ async function openGroupRoom(roomId: string): Promise<void> {
       ];
     }
   } catch {
+    if (state.activeSessionId !== guard.sessionId || activeLoadMessagesGeneration !== guard.generation) return;
     const roomName = targetRoom?.name || t('group.defaultRoomName');
     const membersText = targetRoom?.members?.join('、') || '';
     state.messages = [
@@ -1540,6 +1497,8 @@ async function openBotChat(botProfile: string): Promise<void> {
   // 切入 Bot 专职工位前解除普通会话挂起回滚，防跨域泄漏
   disarmRollbackOnLeave();
   state.activeFocus = { type: 'bot', botName: botProfile };
+  const generation = ++activeLoadMessagesGeneration;
+  const guard = { sessionId: `bot:${botProfile}`, generation };
   localStorage.setItem('hermes_flux_profile', botProfile);
   localStorage.setItem('hermes_aura_profile', botProfile);
 
@@ -1559,7 +1518,15 @@ async function openBotChat(botProfile: string): Promise<void> {
 
   try {
     // 2. 首次探查并建立缓存
-    const foreverChat = await profileService.getOrCreateForeverChat(botProfile, client);
+    const guarded = await runGuarded(
+      guard,
+      () => ({ sessionId: `bot:${state.activeFocus.type === 'bot' ? state.activeFocus.botName : ''}`, generation: activeLoadMessagesGeneration }),
+      () => undefined,
+      () => profileService.getOrCreateForeverChat(botProfile, client),
+      logSession,
+    );
+    if (guarded.status === 'discarded') return;
+    const foreverChat = guarded.value;
     botForeverChatCache.set(botProfile, foreverChat.sessionId);
 
     state.activeFocus = { type: 'bot', botName: botProfile };
@@ -1567,6 +1534,7 @@ async function openBotChat(botProfile: string): Promise<void> {
     state.activeFocus = { type: 'bot', botName: botProfile };
     render();
   } catch (err) {
+    if (activeLoadMessagesGeneration !== guard.generation || state.activeFocus.type !== 'bot' || state.activeFocus.botName !== botProfile) return;
     console.error('[Flux] Failed to resolve Forever Chat for bot:', botProfile, err);
     state.dockNotice = t('dock.enterBotChatFailed', { name: botProfile, error: describeRpcError(err) });
     render();
@@ -1660,13 +1628,13 @@ async function fetchProfiles(): Promise<void> {
           if (forever && forever.sessionId) {
             botForeverChatCache.set(p.name, forever.sessionId);
             const histRes = await client.fetchSessionMessages(forever.sessionId, { limit: 1, offset: 0, order: 'latest' });
-            if (histRes.ok && histRes.messages && histRes.messages.length > 0) {
+            if (histRes.status === 'success' && histRes.messages.length > 0) {
               const last = histRes.messages[0];
               const parts = Array.isArray(last.parts) ? (last.parts as Array<{ type?: string; text?: string }>) : [];
               const textPart = parts.find((pt) => pt.type === 'text');
               const previewText = textPart?.text || (typeof last.content === 'string' ? last.content : '');
               const ts = last.created_at || last.timestamp;
-              const numTs = typeof ts === 'number' ? (ts > 1e11 ? ts : ts * 1000) : Date.parse(ts) || Date.now();
+              const numTs = typeof ts === 'number' ? (ts > 1e11 ? ts : ts * 1000) : typeof ts === 'string' ? Date.parse(ts) || Date.now() : Date.now();
               updateBotLatestActivity(p.name, previewText, numTs);
               render();
             }
@@ -2066,6 +2034,7 @@ async function loadOlderMessages(): Promise<void> {
   if (!sessionId || state.isLoadingOlder || !gatewayClient) return;
 
   const currentOffset = sessionServerOffset.get(sessionId) || 0;
+  const guard = { sessionId, generation: activeLoadMessagesGeneration };
   state.isLoadingOlder = true;
   const startedAt = performance.now();
   const stream = document.getElementById('conversation-stream');
@@ -2073,13 +2042,24 @@ async function loadOlderMessages(): Promise<void> {
   const prevScrollTop = stream ? stream.scrollTop : 0;
 
   try {
-    const outcome = await gatewayClient.fetchSessionMessages(sessionId, {
-      limit: OLDER_BATCH_PAGE_SIZE,
-      offset: currentOffset,
-      order: 'latest',
-    });
+    const guarded = await runGuarded(
+      guard,
+      () => ({ sessionId: state.activeSessionId, generation: activeLoadMessagesGeneration }),
+      () => undefined,
+      () => gatewayClient!.fetchSessionMessages(sessionId, {
+        limit: OLDER_BATCH_PAGE_SIZE,
+        offset: currentOffset,
+        order: 'latest',
+      }),
+      logSession,
+    );
+    if (guarded.status === 'discarded') {
+      state.isLoadingOlder = false;
+      return;
+    }
+    const outcome = guarded.value;
 
-    if (outcome.ok && outcome.messages.length > 0) {
+    if (outcome.status === 'success' && outcome.messages.length > 0) {
       const batch = parseRawMessages(outcome.messages);
       sessionServerOffset.set(sessionId, currentOffset + outcome.messages.length);
       state.hasOlderMessages = outcome.messages.length >= OLDER_BATCH_PAGE_SIZE;
@@ -2242,7 +2222,7 @@ async function loadMessages(sessionId: string, targetBotName?: string): Promise<
       return;
     }
 
-    if (outcome.ok && outcome.messages.length > 0) {
+    if (outcome.status === 'success' && outcome.messages.length > 0) {
       const parsed = parseRawMessages(outcome.messages);
       const existing = sessionMessagesCache.get(sessionId);
       // 【防范丢数据核心不变量 (Failure Is Not Empty) 与 P0-1 防复活】
@@ -2254,7 +2234,7 @@ async function loadMessages(sessionId: string, targetBotName?: string): Promise<
       syncActiveSessionPreviewToRail(sessionId, merged, resolvedBotName);
       sessionServerOffset.set(sessionId, outcome.pagination?.returned || outcome.messages.length);
       state.messages = merged;
-      state.hasOlderMessages = Boolean(outcome.pagination && outcome.pagination.returned >= INITIAL_WINDOW_PAGE_SIZE);
+      state.hasOlderMessages = Boolean((outcome.pagination?.returned ?? outcome.messages.length) >= INITIAL_WINDOW_PAGE_SIZE);
       state.dockNotice = '';
       pendingScrollToBottom = true;
       render();
@@ -2394,19 +2374,24 @@ async function ensureLiveSessionId(): Promise<string> {
   if (state.activeLiveSessionId) return state.activeLiveSessionId;
   if (!gatewayClient || !state.activeSessionId) return '';
 
+  const guard = { sessionId: state.activeSessionId, generation: activeLoadMessagesGeneration };
   try {
     const sess = state.sessions.find((s) => s.id === state.activeSessionId);
     const prof = sess?.botName || state.profileName || 'default';
     let res: Record<string, unknown> | null = null;
     try {
-      res = await gatewayClient.call<Record<string, unknown>>('session.resume', { session_id: state.activeSessionId, profile: prof });
+      res = await gatewayClient.call<Record<string, unknown>>('session.resume', { session_id: guard.sessionId, profile: prof });
     } catch {
-      res = await gatewayClient.call<Record<string, unknown>>('session.resume', { session_id: state.activeSessionId });
+      res = await gatewayClient.call<Record<string, unknown>>('session.resume', { session_id: guard.sessionId });
     }
-    const handles = readSessionHandles(res, state.activeSessionId);
+    const handles = readSessionHandles(res, guard.sessionId);
     if (handles) {
-      state.activeLiveSessionId = handles.liveId;
-      return handles.liveId;
+      let liveId = '';
+      await runGuarded(guard, () => ({ sessionId: state.activeSessionId, generation: activeLoadMessagesGeneration }), () => {
+        state.activeLiveSessionId = handles.liveId;
+        liveId = handles.liveId;
+      }, async () => undefined, logSession);
+      return liveId;
     }
   } catch (e) {
     console.warn('[Flux] Failed to resolve live session id:', e);
@@ -2518,6 +2503,7 @@ async function createNewSession(options?: { profile?: string; projectId?: string
 
 async function deleteSession(id: string): Promise<void> {
   if (!gatewayClient || !id) return;
+  sessionListGeneration.invalidateForDelete();
 
   const targetSession = state.sessions.find((s) => s.id === id);
   const targetProfiles = new Set<string>();
@@ -2529,48 +2515,30 @@ async function deleteSession(id: string): Promise<void> {
   }
 
   try {
-    // 1. 先关闭与中断可能处于活跃状态的句柄
-    try {
-      await gatewayClient.call('session.close', { session_id: id });
-    // gate-degrade: 删除后刷新列表失败不影响删除结果，下次刷新会自愈
-    } catch {}
-    try {
-      await gatewayClient.call('session.interrupt', { session_id: id });
-    // gate-degrade: 渲染层可选增强（本地偏好）读取失败时回落默认值
-    } catch {}
-
-    // 2. 遍历可能归属的 Profile 库物理执行真实 session.delete
-    let deleteSucceeded = false;
-    for (const prof of targetProfiles) {
-      try {
-        await gatewayClient.call('session.delete', { session_id: id, profile: prof });
-        deleteSucceeded = true;
-      } catch (delErr: unknown) {
-        const delMsg = describeRpcError(delErr);
-        if (delMsg.includes('4023') || delMsg.includes('active session')) {
-          try {
-            await gatewayClient.call('session.set_hidden', { session_id: id, hidden: true, profile: prof });
-            deleteSucceeded = true;
-          } catch (hideErr) {
-            // gate-degrade: 会话被占用时 set_hidden 是尽力而为的兜底，失败仍继续走 REST 物理删除
-            console.warn('[Flux] session.set_hidden fallback failed:', hideErr);
-          }
-        }
-      }
-
-      // REST 通道同步执行删除
-      if (desktopApi?.httpProxy) {
-        const baseUrl = getEffectiveUrl(state.gatewayUrl);
-        await desktopApi.httpProxy({
-          baseUrl,
-          path: `/api/sessions/${encodeURIComponent(id)}?profile=${encodeURIComponent(prof)}`,
-          method: 'DELETE',
+    const lifecycle = new SessionLifecycleService({
+      rpc: gatewayClient,
+      platformBridge: desktopApi,
+      restFallback: async (path, options) => {
+        if (!desktopApi?.httpProxy) throw new Error('Desktop REST proxy is unavailable');
+        return await desktopApi.httpProxy({
+          baseUrl: getEffectiveUrl(state.gatewayUrl),
+          path,
+          method: options?.method,
           ticket: currentTicket,
-        }).catch(() => null);
-      }
+          params: options?.params,
+          body: options?.body,
+        });
+      },
+      baseUrl: () => getEffectiveUrl(state.gatewayUrl),
+      ticket: () => currentTicket,
+    });
+    const outcome = await lifecycle.deleteSession(id, [...targetProfiles]);
+    for (const failedProfile of outcome.failedProfiles) {
+      console.warn('[Flux] Session deletion failed for profile:', failedProfile);
     }
+    if (outcome.status === 'failed') throw new Error(`Delete failed for profiles: ${outcome.failedProfiles.join(', ')}`);
 
-    state.sessions = state.sessions.filter((s) => s.id !== id);
+    state.sessions = state.sessions.filter((s) => !outcome.pruneIds.includes(s.id));
     state.pendingSessionIds = state.pendingSessionIds.filter((pid) => pid !== id);
     sessionMessagesCache.delete(id);
     sessionServerOffset.delete(id);
@@ -2611,7 +2579,7 @@ async function deleteSession(id: string): Promise<void> {
   } catch (e: unknown) {
     console.error('[Hermes Gateway] Delete session failed:', e);
     const msg = describeRpcError(e);
-    if (msg.includes('4007') || msg.includes('not found')) {
+    if (rpcErrorCode(e) === RpcErrorCode.SessionMissing) {
       state.sessions = state.sessions.filter((s) => s.id !== id);
       state.pendingSessionIds = state.pendingSessionIds.filter((pid) => pid !== id);
       sessionMessagesCache.delete(id);
@@ -2809,6 +2777,7 @@ async function selectSession(id: string, options?: { preserveFocus?: boolean; bo
 
   state.activeSessionId = id;
   state.activeLiveSessionId = ''; // must be re-resolved through session.resume
+  activeLoadMessagesGeneration += 1;
   applyEnteredRead(unreadSessionIds, id);
   state.modelMenuOpen = false;
 
