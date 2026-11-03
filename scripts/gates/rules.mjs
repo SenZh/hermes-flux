@@ -8,7 +8,9 @@
  * 违规对象统一形状：{ file, line, ruleId, message, snippet }
  */
 
-import { hasInlineAllowance, matchAll } from './lib/scanner.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import { hasInlineAllowance, matchAll, REPO_ROOT } from './lib/scanner.mjs';
 
 /* ------------------------------------------------------------------ *
  * 共用判定原语
@@ -527,6 +529,296 @@ function lineAt(text, offset) {
   return line;
 }
 
-export const RULES = [architectureRules, integrityRules, themeRules, i18nRules, perfRules, layoutRules];
+/* ------------------------------------------------------------------ *
+ * Gate 4 · PR-1b 新增设计系统迁移警示探针（Warning-Only，零阻断不扩基线）
+ * ------------------------------------------------------------------ */
+
+/**
+ * 探针 ①：ui/no-new-template-export
+ * 设计意图 (Why):
+ *   前端向 React / shadcn / Tailwind (波③) 迁移期间，严禁向 ui/src/components 增添
+ *   新的字符串模板组件与导出。存量清单冻结在 .template-inventory.json 中。
+ * 历史坑 (Pitfall):
+ *   若不限制 renderXxx 导出，开发者会在既有文件里大量扩写模板函数，延误迁移。
+ * 约束与规则 (Rules):
+ *   Warning-only 探针，不进入阻断池，不修改基线文件。
+ */
+const INVENTORY_FILE = path.join(REPO_ROOT, 'scripts/gates/.template-inventory.json');
+let cachedInventory = null;
+function getTemplateInventory() {
+  if (!cachedInventory) {
+    if (fs.existsSync(INVENTORY_FILE)) {
+      try {
+        cachedInventory = JSON.parse(fs.readFileSync(INVENTORY_FILE, 'utf8'));
+      // gate-degrade: 清单文件损坏或读取失败时优雅降级为空清单，由门禁探针拦截
+      } catch {
+        cachedInventory = { files: {} };
+      }
+    } else {
+      cachedInventory = { files: {} };
+    }
+  }
+  return cachedInventory;
+}
+
+const templateExportRules = {
+  id: 'ui-template',
+  gate: 'Gate 4',
+  title: '模板导出冻结（ui/no-new-template-export，只减不增）',
+  check(file, ctx) {
+    if (!file.startsWith('packages/ui/src/components/')) return [];
+    if (!file.endsWith('.ts') || file.endsWith('.d.ts') || file.includes('/components/ui/')) return [];
+
+    const inventory = getTemplateInventory();
+    const knownFiles = inventory.files ?? {};
+    if (!ctx.warnings) ctx.warnings = [];
+
+    if (!knownFiles[file]) {
+      if (!hasInlineAllowance(ctx.rawLines, 0, 'template')) {
+        ctx.warnings.push({
+          file,
+          line: 1,
+          ruleId: 'ui/no-new-template-export',
+          message: `[ui/no-new-template-export] 禁止新增模板组件文件（当前处于波③ React/shadcn 迁移期，新组件必须使用 .tsx）：${file}`,
+        });
+      }
+      return [];
+    }
+
+    const knownExports = new Set(knownFiles[file] ?? []);
+    const stripped = ctx.stripped;
+
+    // 匹配 export function renderXxx
+    for (const m of stripped.matchAll(/export\s+(?:async\s+)?function\s+(render[A-Za-z0-9_]+)/g)) {
+      const fnName = m[1];
+      if (!knownExports.has(fnName)) {
+        const lineNo = lineAt(stripped, m.index);
+        if (hasInlineAllowance(ctx.rawLines, lineNo - 1, 'template')) continue;
+        ctx.warnings.push({
+          file,
+          line: lineNo,
+          ruleId: 'ui/no-new-template-export',
+          message: `[ui/no-new-template-export] :${lineNo} 禁止新增模板函数导出 ${fnName}（存量清单已冻结，新逻辑必须使用 React 组件）`,
+        });
+      }
+    }
+
+    // 匹配 export const renderXxx =
+    for (const m of stripped.matchAll(/export\s+const\s+(render[A-Za-z0-9_]+)\s*=/g)) {
+      const fnName = m[1];
+      if (!knownExports.has(fnName)) {
+        const lineNo = lineAt(stripped, m.index);
+        if (hasInlineAllowance(ctx.rawLines, lineNo - 1, 'template')) continue;
+        ctx.warnings.push({
+          file,
+          line: lineNo,
+          ruleId: 'ui/no-new-template-export',
+          message: `[ui/no-new-template-export] :${lineNo} 禁止新增模板函数导出 ${fnName}（存量清单已冻结，新逻辑必须使用 React 组件）`,
+        });
+      }
+    }
+
+    return [];
+  },
+};
+
+/**
+ * 探针 ②：theme/no-inline-hex
+ * 设计意图 (Why):
+ *   现规则漏检了模板字符串内联 style 中的十六进制色（如跨行或模板内联属性），
+ *   使局部死色值无法随皮肤切换。
+ * 历史坑 (Pitfall):
+ *   单行正则容易漏检跨行 style="..." 内联样式。本探针全文扫描内联 style 属性。
+ */
+const inlineHexRules = {
+  id: 'theme-inline-hex',
+  gate: 'Gate 4',
+  title: '模板内联色相审计（theme/no-inline-hex）',
+  check(file, ctx) {
+    if (!isSkinSurface(file) || file.includes('/tokens/')) return [];
+    if (!ctx.warnings) ctx.warnings = [];
+
+    const inlineStyleRe = /style\s*=\s*(["'])([\s\S]*?)\1/gi;
+    let m;
+    while ((m = inlineStyleRe.exec(ctx.stripped)) !== null) {
+      const styleBlock = m[2];
+      const hexMatches = styleBlock.match(/#[0-9a-fA-F]{3,8}\b/g);
+      if (!hexMatches) continue;
+
+      const matchStart = m.index;
+      for (const hex of hexMatches) {
+        const hexOffset = matchStart + m[0].indexOf(hex);
+        const lineNo = lineAt(ctx.stripped, hexOffset);
+        const lineIdx = lineNo - 1;
+        if (hasInlineAllowance(ctx.rawLines, lineIdx, 'theme')) continue;
+
+        ctx.warnings.push({
+          file,
+          line: lineNo,
+          ruleId: 'theme/no-inline-hex',
+          message: `[theme/no-inline-hex] :${lineNo} 模板字符串内联 style 包含十六进制色 ${hex}，无法随皮肤切换，必须改用 var(--*) 语义 Token`,
+        });
+      }
+    }
+
+    return [];
+  },
+};
+
+/**
+ * 探针 ③：theme/no-raw-monospace
+ * 设计意图 (Why):
+ *   字重和排版必须收敛至 Token，禁止绕过 --font-mono 变量直接裸写 font-family: monospace。
+ */
+const rawMonospaceRules = {
+  id: 'theme-monospace',
+  gate: 'Gate 4',
+  title: '等宽字体变量收敛（theme/no-raw-monospace）',
+  check(file, ctx) {
+    if (!isSkinSurface(file) || file.includes('/tokens/')) return [];
+    if (!ctx.warnings) ctx.warnings = [];
+
+    ctx.codeLines.forEach((line, i) => {
+      const m = /font-family\s*:\s*([^;`"'>]+)/i.exec(line);
+      if (!m) return;
+      const val = m[1];
+      if (/\bmonospace\b/i.test(val) && !/var\(--font-mono/i.test(val)) {
+        if (hasInlineAllowance(ctx.rawLines, i, 'theme')) return;
+        ctx.warnings.push({
+          file,
+          line: i + 1,
+          ruleId: 'theme/no-raw-monospace',
+          message: `[theme/no-raw-monospace] :${i + 1} 禁止裸写 font-family: monospace，必须改用 var(--font-mono)`,
+        });
+      }
+    });
+
+    return [];
+  },
+};
+
+/**
+ * 探针 ④：typo/no-literal-font-size
+ * 设计意图 (Why):
+ *   收敛散落字号（如 9.5px、10.5px、11.5px），强制组件使用设计系统 8 档节奏层变量（--fs-*）。
+ * 白名单：
+ *   ui/src/tokens/、styles.css 的 :root 节奏段。
+ */
+const literalFontSizeRules = {
+  id: 'typo-font-size',
+  gate: 'Gate 4',
+  title: '字面量字号审计（typo/no-literal-font-size）',
+  check(file, ctx) {
+    if (!isSkinSurface(file) || file.includes('/tokens/')) return [];
+    if (!ctx.warnings) ctx.warnings = [];
+
+    ctx.codeLines.forEach((line, i) => {
+      const fsMatches = line.match(/font-size\s*:\s*(\d+(?:\.\d+)?px)\b/gi);
+      if (!fsMatches) return;
+      if (
+        hasInlineAllowance(ctx.rawLines, i, 'theme') ||
+        hasInlineAllowance(ctx.rawLines, i, 'typo')
+      ) {
+        return;
+      }
+      for (const matchText of fsMatches) {
+        ctx.warnings.push({
+          file,
+          line: i + 1,
+          ruleId: 'typo/no-literal-font-size',
+          message: `[typo/no-literal-font-size] :${i + 1} 发现字面量字号「${matchText.trim()}」，必须收敛至设计系统 8 档变量（--fs-*）`,
+        });
+      }
+    });
+
+    return [];
+  },
+};
+
+/**
+ * 探针 ⑤：theme/ghost-token
+ * 设计意图 (Why):
+ *   引用面 var(--x) ⊆ 定义面（皮肤块 + :root + 组件内联定义 + setProperty）。
+ *   严防开发者手滑引用不存在或已更名的 CSS 变量导致界面样式悬空坍塌。
+ * 口径复用：
+ *   复用 packages/ui/__tests__/skins-sot.test.mjs（剥块注释/行尾注释、无回退才计）。
+ */
+let cachedDefinedCssVars = null;
+function getDefinedCssVars() {
+  if (!cachedDefinedCssVars) {
+    cachedDefinedCssVars = new Set();
+    const walk = (dir, out = []) => {
+      if (!fs.existsSync(dir)) return out;
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (e.name === 'node_modules' || e.name === 'dist' || e.name.startsWith('.')) continue;
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) walk(p, out);
+        else if (/\.(ts|tsx|js|mjs|css)$/.test(e.name)) out.push(p);
+      }
+      return out;
+    };
+    const stripCommentsForVars = (s) =>
+      s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"\\])\/\/[^\n]*/g, '$1');
+
+    const dirs = [
+      path.join(REPO_ROOT, 'packages/ui/src'),
+      path.join(REPO_ROOT, 'packages/desktop/src'),
+    ];
+    for (const dir of dirs) {
+      for (const f of walk(dir)) {
+        try {
+          const src = stripCommentsForVars(fs.readFileSync(f, 'utf8'));
+          for (const m of src.matchAll(/(--[a-z0-9-]+)\s*:/gi)) cachedDefinedCssVars.add(m[1]);
+          for (const m of src.matchAll(/setProperty\(\s*['"](--[a-z0-9-]+)['"]/g)) cachedDefinedCssVars.add(m[1]);
+        // gate-degrade: 单个文件读取或解析失败时跳过该文件，不中断全量 CSS 变量收集
+        } catch {}
+      }
+    }
+  }
+  return cachedDefinedCssVars;
+}
+
+const ghostTokenRules = {
+  id: 'theme-ghost-token',
+  gate: 'Gate 4',
+  title: '幽灵令牌审计（theme/ghost-token 引用面⊆定义面）',
+  check(file, ctx) {
+    if (!isSkinSurface(file) || file.includes('/tokens/')) return [];
+    if (!ctx.warnings) ctx.warnings = [];
+
+    const definedVars = getDefinedCssVars();
+    ctx.codeLines.forEach((line, i) => {
+      for (const m of line.matchAll(/var\(\s*(--[a-z0-9-]+)\s*(,)?/gi)) {
+        const varName = m[1];
+        const hasFallback = Boolean(m[2]);
+        if (!hasFallback && !definedVars.has(varName)) {
+          if (hasInlineAllowance(ctx.rawLines, i, 'theme')) continue;
+          ctx.warnings.push({
+            file,
+            line: i + 1,
+            ruleId: 'theme/ghost-token',
+            message: `[theme/ghost-token] :${i + 1} 引用未定义 CSS 变量 var(${varName}) 且无回退值，存在样式坍塌风险`,
+          });
+        }
+      }
+    });
+
+    return [];
+  },
+};
+
+export const RULES = [
+  architectureRules,
+  integrityRules,
+  themeRules,
+  templateExportRules,
+  inlineHexRules,
+  rawMonospaceRules,
+  literalFontSizeRules,
+  ghostTokenRules,
+  i18nRules,
+  perfRules,
+  layoutRules,
+];
 
 export { KNOWN_LAYOUT_DEVIATIONS };

@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "frozenAt": "2026-11-03",
+  "note": "ui/src/components 模板导出存量清单。波③迁移过程中只减不增，严禁新增模板文件或新增 renderXxx 导出。",
+  "files": {
+    "packages/ui/src/components/Bot/AgentProfileEditorModal.ts": [
+      "renderAgentProfileEditorModal"
+    ],
+    "packages/ui/src/components/Bot/BotProfileCard.ts": [
+      "renderBotProfileCard"
+    ],
+    "packages/ui/src/components/ContextMenu/ContextMenu.ts": [
+      "renderContextMenu"
+    ],
+    "packages/ui/src/components/Group/GroupPromotionDialog.ts": [
+      "renderGroupPromotionDialog"
+    ],
+    "packages/ui/src/components/Group/GroupRoomView.ts": [
+      "renderGroupRoomView"
+    ],
+    "packages/ui/src/components/InputDock/InputDock.ts": [
+      "renderAttachmentTray",
+      "renderDockNoticeBar",
+      "renderInputDock",
+      "renderMentionPopper",
+      "renderModelPickerMenu",
+      "renderModelPickerTree",
+      "renderQueueTray",
+      "renderRollbackNoticeBar",
+      "renderSlashPopper"
+    ],
+    "packages/ui/src/components/InspectionPod/InspectionPod.ts": [
+      "renderInspectionPod"
+    ],
+    "packages/ui/src/components/InspectionPod/SubagentTerminalView.ts": [
+      "renderSubagentTerminalView"
+    ],
+    "packages/ui/src/components/LeftRail/LeftRail.ts": [
+      "renderBotAvatar",
+      "renderLeftRail"
+    ],
+    "packages/ui/src/components/MiddlePod/BtwCapsule.ts": [
+      "renderBtwCapsule"
+    ],
+    "packages/ui/src/components/MiddlePod/MiddlePod.ts": [
+      "renderContextGauge",
+      "renderConversationCanvas",
+      "renderMarkdown",
+      "renderMessage",
+      "renderMiddlePod",
+      "renderSideAgentCapsule",
+      "renderTokenMetrics",
+      "renderToolCapsuleSlot"
+    ],
+    "packages/ui/src/components/MiddlePod/WorkerDelegationCard.ts": [
+      "renderWorkerDelegationCard"
+    ],
+    "packages/ui/src/components/Modal/ConfirmModal.ts": [
+      "renderConfirmModal"
+    ],
+    "packages/ui/src/components/Project/ProjectTreeViewer.ts": [
+      "renderProjectTreeViewer"
+    ],
+    "packages/ui/src/components/SettingsModal/SettingsModal.ts": [
+      "renderSettingsModal"
+    ],
+    "packages/ui/src/components/StatusBar/StatusBar.ts": [
+      "renderStatusBar"
+    ],
+    "packages/ui/src/components/TaskModal/NewTaskModal.ts": [
+      "renderNewTaskModal"
+    ],
+    "packages/ui/src/components/Titlebar/Titlebar.ts": [
+      "renderTitlebar"
+    ]
+  }
+}
