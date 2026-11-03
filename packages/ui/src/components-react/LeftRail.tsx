@@ -4,7 +4,7 @@ import { t } from '../i18n/index.js';
 import { Badge } from './primitives/Badge.js';
 import { Button } from './primitives/Button.js';
 import { Input } from './primitives/Input.js';
-import { renderBotAvatar } from '../utils/botAvatar.js';
+import { renderBotAvatar, renderGroupCollageAvatar } from '../utils/botAvatar.js';
 import {
   formatLeftRailTime,
   isBotFocused,
@@ -24,6 +24,8 @@ export interface LeftRailProps {
   collapsed: boolean;
   searchQuery: string;
   editingGroupRoomId?: string;
+  /** 群聊拼图头像的成员资产来源；缺省时回退确定性字母块，不影响行可用性。 */
+  groupAvatars?: LeftRailProfile[];
   onToggleDrawer: () => void;
   onSelectSession: (sessionId: string, botName?: string) => void;
   onSelectBot: (profileName: string) => void;
@@ -45,6 +47,15 @@ export interface LeftRailProps {
 /** 头像只复用既有资产管线（真实 <img> / 几何图腾 SVG），避免第二套身份渲染分叉。 */
 function Avatar({ profile, size }: { profile: Pick<LeftRailProfile, 'name' | 'displayName' | 'avatar'>; size: number }): React.ReactElement {
   return <span aria-hidden="true" className="inline-flex shrink-0" dangerouslySetInnerHTML={{ __html: renderBotAvatar(profile.name, profile.displayName, profile.avatar, size) }} />;
+}
+
+/**
+ * 群聊拼图头像。
+ * 【设计意图】群聊没有单一身份，多人拼贴是它唯一可辨识的视觉签名，必须与其它行区分开。
+ * 【约束与规则】资产管线复用 botAvatar 的单一实现，组件内不自造第二套头像逻辑。
+ */
+function CollageAvatar({ members, profiles, size }: { members: string[]; profiles: LeftRailProfile[]; size: number }): React.ReactElement {
+  return <span aria-hidden="true" className="inline-flex shrink-0" dangerouslySetInnerHTML={{ __html: renderGroupCollageAvatar(members, profiles, size) }} />;
 }
 
 /**
@@ -111,8 +122,9 @@ function SessionRow({ session, active, compact, onSelect, onMenu }: {
   </button>;
 }
 
-function GroupRow({ group, active, editing, onSelect, onMenu, onStartRename, onConfirmRename, onCancelRename }: {
+function GroupRow({ group, profiles, active, editing, onSelect, onMenu, onStartRename, onConfirmRename, onCancelRename }: {
   group: LeftRailGroupRoom;
+  profiles: LeftRailProfile[];
   active: boolean;
   editing: boolean;
   onSelect: () => void;
@@ -131,6 +143,7 @@ function GroupRow({ group, active, editing, onSelect, onMenu, onStartRename, onC
     className={`rail-group-item group flex min-h-10 items-center gap-2 rounded-md border px-2 py-1 ${active ? 'active border-primary bg-card-active' : 'border-transparent hover:bg-card-hover'}`}
     data-room-id={group.roomId}
   >
+    <CollageAvatar members={group.members} profiles={profiles} size={28} />
     <button type="button" className="flex min-w-0 flex-1 flex-col gap-0.5 text-left" onClick={onSelect} onContextMenu={(event) => { event.preventDefault(); onMenu(event.clientX, event.clientY); }}>
       <span className="flex min-w-0 items-center gap-2">
         <span className="truncate text-body leading-tight text-foreground">{group.name}</span>
@@ -174,7 +187,7 @@ function ProjectCard({ project, focus, onSelectSession, onSessionMenu }: {
   onSessionMenu: (session: LeftRailSession, x: number, y: number) => void;
 }): React.ReactElement {
   const sessions = project.sessions || [];
-  return <details className="project-accordion-unit overflow-hidden rounded-lg border border-border-subtle bg-card">
+  return <details id={`rail-proj-${project.id}`} className="project-accordion-unit overflow-hidden rounded-lg border border-border-subtle bg-card" data-project-id={project.id}>
     <summary className="project-accordion-trigger flex cursor-pointer items-center gap-2 p-2 text-body font-semibold text-foreground">
       <Folder size={14} className="shrink-0 text-muted-foreground" />
       <span className="truncate">{project.name}</span>
@@ -303,6 +316,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
             {model.visibleGroups.map((group) => <GroupRow
               key={group.roomId}
               group={group}
+              profiles={props.groupAvatars || []}
               active={isGroupFocused(focus, group.roomId)}
               editing={props.editingGroupRoomId === group.roomId}
               onSelect={() => props.onSelectGroup(group.roomId)}

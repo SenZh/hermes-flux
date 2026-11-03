@@ -4427,6 +4427,7 @@ async function confirmGroupRename(roomId: string, name: string): Promise<void> {
     render();
     return;
   }
+  const previousName = state.groupRooms.find((r) => r.roomId === roomId)?.name;
   state.groupRooms = state.groupRooms.map((r) => (r.roomId === roomId ? { ...r, name: newName } : r));
   render();
   try {
@@ -4434,6 +4435,11 @@ async function confirmGroupRename(roomId: string, name: string): Promise<void> {
     showToast(t('toast.groupRenamed'));
     await fetchGroupRooms();
   } catch (err) {
+    // 乐观改名失败必须显式回滚，否则界面显示"改好了"而服务端还是旧名，刷新后打脸
+    if (previousName !== undefined) {
+      state.groupRooms = state.groupRooms.map((r) => (r.roomId === roomId ? { ...r, name: previousName } : r));
+      render();
+    }
     showToast(t('ctx.groupRenameFailed', { error: describeRpcError(err) }));
   }
 }
@@ -4527,6 +4533,7 @@ function getLeftRailSnapshot(): LeftRailSnapshot {
     collapsed: state.leftRailCollapsed,
     searchQuery: state.sessionSearchQuery,
     editingGroupRoomId: state.editingGroupRoomId,
+    groupAvatars: profiles,
   };
 }
 

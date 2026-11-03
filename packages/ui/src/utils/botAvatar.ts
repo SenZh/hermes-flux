@@ -22,6 +22,78 @@ export function escapeHtml(str: string): string {
 }
 
 /**
+ * 群聊拼图头像：2 人左右分栏、3-4 人 2x2 网格。
+ *
+ * 设计意图 (Why)：群聊没有单一身份，多人头像拼贴是它唯一可辨识的视觉签名；
+ *   成员头像优先取真实资产，缺失时回退确定性图腾字母块。
+ * 防范的历史坑 (Pitfall)：该函数曾寄生在左轨模板文件里，模板迁 React 时被连带删除，
+ *   群聊行静默退化成纯文字（本次双审 P0）。现在它是独立导出，任何渲染路径都可复用。
+ * 约束与规则 (Rules)：最多展示 4 个成员；0 成员时给固定占位，不得渲染空容器。
+ */
+export function renderGroupCollageAvatar(
+  members: string[],
+  profiles?: Array<{ name: string; avatar?: string; displayName?: string }>,
+  size = 28,
+): string {
+  const profMap = new Map<string, string>();
+  if (profiles) {
+    for (const p of profiles) {
+      if (p.avatar) {
+        profMap.set(p.name.toLowerCase(), p.avatar);
+        if (p.displayName) profMap.set(p.displayName.toLowerCase(), p.avatar);
+      }
+    }
+  }
+
+  const cleanMembers = (members || []).slice(0, 4);
+  const count = cleanMembers.length;
+
+  if (count === 0) {
+    return `<span style="width: ${size}px; height: ${size}px; border-radius: 6px; background: var(--bg-card); border: 1px solid var(--border-subtle); display: inline-flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0; color: var(--accent);">👥</span>`;
+  }
+
+  const cellHtmls = cleanMembers.map((member) => {
+    const lower = member.toLowerCase().trim();
+    const avatar = profMap.get(lower);
+    if (avatar) {
+      return `<img src="${escapeHtml(avatar)}" style="width: 100%; height: 100%; object-fit: cover; display: block;" alt="${escapeHtml(member)}" />`;
+    }
+    let hash = 0;
+    for (const ch of lower) {
+      hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+    }
+    const shapes = ['circle', 'squircle', 'pill', 'triangle', 'hexagon', 'cloud', 'drop'];
+    const pickedShape = shapes[hash % shapes.length];
+
+    if (lower.includes('xiaofawang') || pickedShape === 'triangle') {
+      return `
+        <svg viewBox="0 0 36 36" style="width: 100%; height: 100%; display: block;" fill="none">
+          <path d="M18 4.5 C19.2 2.5 21.8 2.5 23 4.5 L34 26 C35.2 28.2 33.8 31 31.2 31 L6.8 31 C4.2 31 2.8 28.2 4 26 Z" fill="${XIAOFAWANG_YELLOW}" />
+          <circle cx="15" cy="18" r="2.2" fill="${BOT_PUPIL_BLACK}" />
+          <circle cx="23" cy="18" r="2.2" fill="${BOT_PUPIL_BLACK}" />
+        </svg>
+      `;
+    }
+    return `<span style="width: 100%; height: 100%; background: var(--primary-subtle); color: var(--primary); font-size: 8px; font-weight: 700; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono);">${escapeHtml(lower.slice(0, 1).toUpperCase())}</span>`;
+  });
+
+  if (count === 2) {
+    return `
+      <div style="width: ${size}px; height: ${size}px; border-radius: 6px; background: var(--panel); border: 1px solid var(--border-subtle); display: flex; gap: 1px; padding: 1.5px; overflow: hidden; box-sizing: border-box; flex-shrink: 0;">
+        <div style="flex: 1; height: 100%; overflow: hidden; border-radius: 2px;">${cellHtmls[0]}</div>
+        <div style="flex: 1; height: 100%; overflow: hidden; border-radius: 2px;">${cellHtmls[1]}</div>
+      </div>
+    `;
+  }
+
+  return `
+    <div style="width: ${size}px; height: ${size}px; border-radius: 6px; background: var(--panel); border: 1px solid var(--border-subtle); display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 1px; padding: 1.5px; overflow: hidden; box-sizing: border-box; flex-shrink: 0;">
+      ${cellHtmls.map((cell) => `<div style="width: 100%; height: 100%; overflow: hidden; border-radius: 2px;">${cell}</div>`).join('')}
+    </div>
+  `;
+}
+
+/**
  * 1:1 消费网关真实自定义头像资产：
  * 1. 有 avatarUrl 优先渲染真实 <img>；
  * 2. 名称含 xiaofawang 或哈希落到 triangle 时渲染官方黄色三角形；

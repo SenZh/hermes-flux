@@ -28,6 +28,7 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 ## Features
 
 - [Bot primary chat](./bot-primary-chat.md) covers dedicated agent forever chat, atomic activity reflection, titlebar sync, and session pool physical isolation.
+- [Left rail cockpit](./left-rail-cockpit.md) covers the React island left rail: micro rail, primary card, agent scoping, session row shape, group collage and width clamping.
 - [Session management](./session-management.md) covers creating sessions, switching between them, draft preservation, deleting sessions, and focus restoration.
 - [Group room collaboration](./group-room-collaboration.md) covers multi-agent group rooms, collage avatars, and collaborative discussion flows.
 - [Interactive input dock](./interactive-input-dock.md) covers the 740px golden width container, model tree accordion picker, and thinking depth controls.

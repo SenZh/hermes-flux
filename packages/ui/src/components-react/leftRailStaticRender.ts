@@ -29,6 +29,7 @@ export function renderLeftRailHtml(snapshot: LeftRailHtmlSnapshot): string {
     collapsed: snapshot.collapsed,
     searchQuery: snapshot.searchQuery,
     editingGroupRoomId: snapshot.editingGroupRoomId,
+    groupAvatars: snapshot.profiles,
     onToggleDrawer: noop,
     onSelectSession: noop,
     onSelectBot: noop,

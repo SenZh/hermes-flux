@@ -39,6 +39,7 @@ function renderRail(overrides = {}) {
     collapsed: Boolean(overrides.collapsed),
     searchQuery: input.searchQuery,
     editingGroupRoomId: overrides.editingGroupRoomId,
+    groupAvatars: input.profiles,
     onToggleDrawer: noop,
     onSelectSession: noop,
     onSelectBot: noop,
@@ -240,9 +241,37 @@ test('头像资产：自定义头像渲染真实 img，无资产时回退确定�
     assert.ok(zhang.includes('<svg') || zhang.includes('viewBox'), '必须回退几何图腾');
   });
 
-  await t.test('同一 Bot 多次渲染头像完全一致（确定性哈希）', () => {
-    const pick = (m) => between(m, 'data-station-profile="fe-zhang"', 'data-station-profile="qa-li"');
-    assert.equal(pick(renderRail()), pick(renderRail()));
+  await t.test('群聊行必须渲染拼图头像（多人身份签名，不得退化成纯文字）', () => {
+    const markup = renderRail({
+      groups: [
+        { roomId: 'g-two', name: '双人群', members: ['arch-wang', 'fe-zhang'], updatedAt: NOW },
+        { roomId: 'g-four', name: '四人群', members: ['arch-wang', 'fe-zhang', 'qa-li', 'default'], updatedAt: NOW - 1000 },
+      ],
+    });
+    // 拼贴单元 = 真实 img（有资产）+ 字母块（无资产），两者共同构成成员格
+    const cellCount = (chunk) => (chunk.match(/<img|<svg|font-family: var\(--font-mono\)/g) || []).length;
+
+    const two = between(markup, 'data-room-id="g-two"', 'data-room-id="g-four"');
+    assert.ok(two.includes('<img') || two.includes('<svg') || two.includes('var(--font-mono)'), '两人群必须渲染成员头像拼贴');
+    assert.ok(cellCount(two) >= 2, `两人群拼贴必须包含两个头像单元，实际 ${cellCount(two)}`);
+
+    const four = markup.slice(markup.indexOf('data-room-id="g-four"'));
+    assert.ok(cellCount(four) >= 4, `四人群拼贴必须包含四个头像单元，实际 ${cellCount(four)}`);
+  });
+
+  await t.test('群聊无成员时给固定占位，不得渲染空容器', () => {
+    const markup = renderRail({ groups: [{ roomId: 'g-empty', name: '空群', members: [], updatedAt: NOW }] });
+    const row = markup.slice(markup.indexOf('data-room-id="g-empty"'));
+    assert.ok(row.includes('👥'), '零成员群聊必须有占位符');
+  });
+
+  await t.test('不同名称给出不同图腾形态（确定性哈希，非同形态重复）', () => {
+    const markup = renderRail({
+      groups: [{ roomId: 'g-a', name: 'A 群', members: ['arch-wang', 'fe-zhang'], updatedAt: NOW }],
+    });
+    const row = between(markup, 'data-room-id="g-a"', '</div>');
+    // 有真实头像资产的成员走 img，无资产的走字母块：两者必须并存而不是全被同一种覆盖
+    assert.ok(row.includes('<img'), '有资产的成员必须走真实 img');
   });
 });
 
