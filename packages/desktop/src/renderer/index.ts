@@ -43,6 +43,9 @@ import {
   getToggleTheme,
   SKINS,
   SKIN_ALIASES,
+  resolveSkinId,
+  getTitlebarSnapshot as createTitlebarSnapshot,
+  getStatusBarSnapshot as createStatusBarSnapshot,
   type StatusBarSnapshot,
   type TitlebarSnapshot,
 } from '@hermes-flux/ui';
@@ -386,9 +389,7 @@ const state: AppState = {
   platform: detectInitialPlatform(),
   theme: (() => {
     const savedTheme = localStorage.getItem('hermes_flux_theme') || localStorage.getItem('hermes_aura_theme');
-    // SAFETY: [narrowed-by] 白名单成员校验——savedTheme 必须命中 SKINS 键或 SKIN_ALIASES 别名键才允许透传，否则回退默认皮肤，杜绝幽灵存档值令全套 token 塌陷（波③准入项）
-    const knownThemes: readonly string[] = [...Object.keys(SKINS), ...Object.keys(SKIN_ALIASES)];
-    return savedTheme && knownThemes.includes(savedTheme) ? savedTheme as AppState['theme'] : 'obsidian-gold';
+    return resolveSkinId(savedTheme);
   })(),
   activeRailTab: 'chats',
   lang: (localStorage.getItem('hermes_flux_lang') || localStorage.getItem('hermes_aura_lang') as any) || 'zh',
@@ -4368,7 +4369,7 @@ function syncComposerPoppers(): void {
 }
 
 function getTitlebarSnapshot(): TitlebarSnapshot {
-  return {
+  return createTitlebarSnapshot({
     platform: state.platform,
     title: resolveTitlebarTitle({
       activeFocus: state.activeFocus,
@@ -4385,14 +4386,16 @@ function getTitlebarSnapshot(): TitlebarSnapshot {
     isMaximized: state.isMaximized,
     gatewayConnected: state.gatewayConnected,
     gatewayLatencyMs: state.gatewayLatencyMs,
-  };
+    profileName: state.profileName,
+    profiles: state.profiles,
+  });
 }
 
 function getStatusBarSnapshot(): StatusBarSnapshot {
-  return {
+  return createStatusBarSnapshot({
     connectionStatus: state.gatewayConnected ? 'connected' : state.gatewayConnecting ? 'connecting' : 'disconnected',
     latencyMs: state.gatewayLatencyMs,
-  };
+  });
 }
 
 function mountReactShellComponents(): void {
@@ -4409,11 +4412,13 @@ function mountReactShellComponents(): void {
       },
       onClose: () => desktopApi?.close(),
       onToggleLeftRail: () => { state.leftRailCollapsed = !state.leftRailCollapsed; render(); },
+      onToggleInspector: () => { state.inspectorCollapsed = !state.inspectorCollapsed; render(); },
       onOpenSettings: () => { state.isSettingsOpen = true; state.settingsTab = 'gateway'; render(); },
       onSwitchProfile: (profileName: string) => { void switchProfile(profileName); },
       onToggleTheme: () => {
         state.theme = getToggleTheme(state.theme);
         localStorage.setItem('hermes_flux_theme', state.theme);
+        localStorage.setItem('hermes_aura_theme', state.theme);
         render();
       },
     });
@@ -5070,15 +5075,8 @@ async function handleOpenFilePreview(filePath: string, previewUrl?: string): Pro
 function bindEvents(): void {
   // Titlebar controls are bound through React props at mount time.
 
-  const toggleInspector = document.getElementById('toggle-inspector-btn');
   const toggleInspectorClose = document.getElementById('toggle-inspector-close-btn');
   const toggleInspectorFullscreen = document.getElementById('toggle-inspector-fullscreen-btn');
-  if (toggleInspector) {
-    toggleInspector.onclick = () => {
-      state.inspectorCollapsed = !state.inspectorCollapsed;
-      render();
-    };
-  }
   if (toggleInspectorClose) {
     toggleInspectorClose.onclick = () => {
       state.inspectorCollapsed = true;

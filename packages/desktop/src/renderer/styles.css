@@ -510,6 +510,16 @@
 .win-cap-close:hover { background: var(--destructive); color: var(--foreground); }
 .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; flex: 0 0 auto; border: 1px solid var(--border-subtle); border-radius: 6px; background: transparent; color: var(--secondary-foreground); cursor: pointer; -webkit-app-region: no-drag; }
 .icon-btn:hover { background: var(--card-hover); color: var(--foreground); }
+/* gate-theme-allow: macOS traffic-light controls use the platform-standard fixed control colors. */
+.mac-traffic-lights { display: flex; align-items: center; gap: 7px; padding-left: 12px; -webkit-app-region: no-drag; }
+.traffic-btn { width: 12px; height: 12px; padding: 0; border: 0; border-radius: 50%; cursor: pointer; }
+.traffic-close { background: #FF5F56; }
+.traffic-min { background: #FFBD2E; }
+.traffic-max { background: #27C93F; }
+.titlebar-profile-select { max-width: 140px; height: 28px; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--card); color: var(--foreground); }
+.titlebar-connection-indicator { width: 7px; height: 7px; border-radius: 50%; background: var(--muted-foreground); }
+.flux-titlebar:has(.titlebar-connection-indicator[title="在线"]) .titlebar-connection-indicator,
+.flux-titlebar:has(.titlebar-connection-indicator[title="Online"]) .titlebar-connection-indicator { background: var(--success); }
 
 * {
   box-sizing: border-box;

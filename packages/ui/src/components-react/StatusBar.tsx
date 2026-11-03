@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { t } from '../i18n/index.js';
 
 export interface StatusBarProps {
   connectionStatus: 'disconnected' | 'connecting' | 'connected' | 'error';
@@ -13,7 +14,7 @@ export function StatusBar({ connectionStatus, latencyMs, serverLocation = 'Local
   return <footer className="flux-status-bar" id="app-status-bar">
     <button className="status-bar-server-node" id="status-bar-server-node" type="button" onClick={onClickStatus}>
       <span id="status-dot" className="status-dot" data-status={connectionStatus} />
-      <span>{connected ? '已连接' : connecting ? '连接中...' : '未连接'}</span>
+      <span>{connected ? t('status.connected') : connecting ? t('status.connecting') : t('status.disconnected')}</span>
       <span className="status-location">{serverLocation}</span>
       {connected && <span id="latency" className="status-latency">{latencyMs}ms</span>}
     </button>

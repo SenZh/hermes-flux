@@ -116,9 +116,6 @@ async function buildAll() {
     path.join(rootDir, 'src/renderer/index.html'),
     path.join(rootDir, 'dist/renderer/index.html')
   );
-  const rendererHtml = path.join(rootDir, 'dist/renderer/index.html');
-  const html = fs.readFileSync(rendererHtml, 'utf8');
-  fs.writeFileSync(rendererHtml, html.replace('<link rel="stylesheet" href="styles.css">', '<link rel="stylesheet" href="tailwind.css">\n  <link rel="stylesheet" href="styles.css">'));
   fs.copyFileSync(
     path.join(rootDir, 'src/renderer/styles.css'),
     path.join(rootDir, 'dist/renderer/styles.css')

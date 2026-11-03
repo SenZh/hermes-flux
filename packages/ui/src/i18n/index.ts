@@ -15,6 +15,13 @@ export const zhDict = {
   'titlebar.offline': '离线',
   'titlebar.toggleTheme': '切换深色/浅色皮肤',
   'titlebar.newChatTooltip': '新建会话 (+)',
+  'titlebar.windowControls': '窗口控制',
+  'titlebar.close': '关闭',
+  'titlebar.minimize': '最小化',
+  'titlebar.fullscreen': '全屏',
+  'titlebar.switchProfile': '切换智能体',
+  'titlebar.restore': '向下还原',
+  'titlebar.maximize': '最大化',
 
   // Left Rail
   'rail.newChat': '新建会话',
@@ -370,6 +377,13 @@ export const enDict: Record<I18nKey, string> = {
   'titlebar.offline': 'Offline',
   'titlebar.toggleTheme': 'Toggle Dark/Light Theme',
   'titlebar.newChatTooltip': 'New Session (+)',
+  'titlebar.windowControls': 'Window controls',
+  'titlebar.close': 'Close',
+  'titlebar.minimize': 'Minimize',
+  'titlebar.fullscreen': 'Full screen',
+  'titlebar.switchProfile': 'Switch profile',
+  'titlebar.restore': 'Restore down',
+  'titlebar.maximize': 'Maximize',
 
   'rail.newChat': 'New Session',
   'rail.searchPlaceholder': 'Search sessions...',

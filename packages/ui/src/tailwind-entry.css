@@ -18,12 +18,15 @@
   --color-sidebar: var(--sidebar);
   --color-panel: var(--panel);
   --color-input: var(--input);
+  --color-backdrop: var(--backdrop);
   --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--primary-subtle);
   --color-accent-foreground: var(--foreground);
   --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
   --color-primary-foreground: var(--primary-foreground);
   --color-destructive: var(--destructive);
   --color-success: var(--success);
