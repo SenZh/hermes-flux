@@ -382,21 +382,24 @@ export async function runFeature(featureId) {
       return true;
     } else if (featureId === 'session-management') {
       console.log('  1. 验证会话列表挂载与会话切换...');
-      await session.waitFor('document.querySelectorAll(".session-item").length > 0', 10000, 'session list');
+      await session.waitFor('document.querySelectorAll(".session-item").length > 1', 10000, 'two sessions for draft round trip');
 
       console.log('  2. 模拟草稿文本输入...');
       await session.fill('#dock-prompt-input', '[Draft] 待发送草稿内容');
 
       console.log('  3. 切换会话并切回，验证草稿状态保全...');
       const firstSess = await session.evaluate('document.querySelector(".session-item")?.dataset?.id');
+      const secondSess = await session.evaluate('document.querySelectorAll(".session-item")[1]?.dataset?.id');
       console.log(`     · 选中会话: ${firstSess}`);
-      await session.click('.session-item');
+      await session.click(`.session-item[data-id="${secondSess}"]`);
+      await session.click(`.session-item[data-id="${firstSess}"]`);
 
       const draftPreserved = await session.evaluate(`(() => {
         const input = document.getElementById('dock-prompt-input');
         return input ? Boolean(input.value) : false;
       })()`);
       console.log(`     · 草稿与焦点保持: ${draftPreserved}`);
+      if (!draftPreserved) throw new Error('会话切换往返后输入草稿丢失');
 
       console.log('  4. 捕获会话管理物理渲染截图与证据快照...');
       const screenshotPath = path.join(featureArtifactsDir, 'screenshot.png');
@@ -408,6 +411,7 @@ export async function runFeature(featureId) {
         durationMs: Date.now() - startTime,
         status: 'PASSED',
         targetSessionId: firstSess,
+        draftPreserved,
         screenshot: screenshotPath,
       };
       fs.writeFileSync(path.join(featureArtifactsDir, 'evidence.json'), JSON.stringify(evidence, null, 2));

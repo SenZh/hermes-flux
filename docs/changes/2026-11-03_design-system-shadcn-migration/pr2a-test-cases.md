@@ -34,6 +34,17 @@
 | TC-C6 | 壳侧订阅面解耦 | 正常 | service 仅返回 outcome | 源码审查 + 单测：core 模块 import 面 0 处 render()/DOM | core 内无 document/window 引用（新增文件） | 主路径·下沉 |
 | TC-C7 | 属性：删除幂等（重复 deleteSession 收敛同一终态） | 边界 | fast-check stub 随机失败位置（≥800 runs） | formal/session-lifecycle-formal.test.mjs | 任意交错/重复调用后 prune 集稳定、无隐藏态残留 | formal 判定树分支A |
 
+### 本次执行结果（PR-2a）
+
+- TC-A1 至 A4：`guarded-run.test.mjs` 先因 dist 缺少 `runGuarded` 导出失败；实现后 3 条行为断言通过，快照变更用例覆盖调用中代际改变。
+- TC-C1 至 C3：`session-lifecycle.test.mjs` 首轮 REST 注入点不符合 bridge 契约而失败；按既有 `IPlatformBridge.httpProxy` 修正后 2 条用例通过，覆盖成功顺序、4023 降级与部分失败。
+- TC-C5 / R-09：**可达**。发出旧 `fetchSessions` 请求，删除开始前其 generation 尚有效；若删除期间没有更新列表请求，删除 prune 后旧响应仍可能通过 generation 检查并把会话写回。删除入口现于首个 await 前递增列表 generation，旧响应由既有守卫丢弃。未引入墓碑。
+- TC-C5 补充证据：`session-subtitles-offline.test.mjs` 以生产 `SessionListGeneration` 执行旧请求快照→删除作废→旧快照恢复交错，断言 `mayCommit=false` 且已删除 id 不在会话列表；并断言 renderer 删除入口接线调用 `invalidateForDelete`。`session-lifecycle-formal.test.mjs` 再以 1,000 个随机旧列表快照证明删除代际后不可提交。
+- TC-A5 / TC-C7：runGuard 采样 1,200 次；删除终态与部分失败采样 850 次；删除期间旧列表快照失效采样 1,000 次，合计 3,050 次。
+- TC-D1 至 D4：状态探测、登录和 ws-ticket 原已由桌面 preload `authenticateGateway` 在主进程通过 fetch 执行；renderer 的三处裸 fetch 位于不可达回退路径。已删除回退路径，认证失败显式返回未连接结果。未新增 renderer 网络代理 API。
+- TC-E3：live-gateway 需凭证；本环境未配置 `HERMES_GATEWAY_URL`、`HERMES_USERNAME`、`HERMES_PASSWORD`，按工程纪律离线豁免，运行结果为 skip。
+- TC-E4 草稿 lane 归因：`control-flux.mjs` 驱动的是 `e2e-acceptance-harness.html`；该 harness 自己定义 `window.cdpApp.selectSession()`，不调用 renderer 的生产 `selectSession()`。原 lane 只点击当前 `.session-item` 一次，且 harness `selectSession()` 重渲染输入框时不保存或恢复 production 的 `sessionDraftMap`，因此原 `false` 来自验证夹具缺少草稿模型，不能作为 production 回归证据。补齐 harness 的两会话往返和草稿模型后，lane 输出 `草稿与焦点保持: true`。该 CDP 结果证明 harness 行为，不宣称物理驱动 production renderer。
+
 ## D. S5b auth 链路归位（renderer:940/:955/:967 三处裸 fetch）
 
 | 用例ID | 场景 | 类别 | 前置条件 | 测试步骤 | 预期结果 | 关联契约 |
