@@ -5,6 +5,7 @@
 import esbuild from 'esbuild';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -19,6 +20,25 @@ async function buildAll() {
   fs.mkdirSync(path.join(rootDir, 'dist/main'), { recursive: true });
   fs.mkdirSync(path.join(rootDir, 'dist/preload'), { recursive: true });
   fs.mkdirSync(path.join(rootDir, 'dist/renderer'), { recursive: true });
+
+  // Tailwind v4 从 UI 组件源码扫描类名，并保留皮肤变量的运行时解析。
+  // 设计意图(Why)：bun 把 workspace 依赖就近装在 packages/ui/node_modules，跨包管理器稳健的调用方式是直接 spawn CLI 的 JS 入口，不依赖 .bin shim 的平台后缀。
+  // 防范的历史坑(Pitfall)：初版写死根 node_modules/.bin/tailwindcss.cmd，该路径在本仓库布局下根本不存在，build 必炸。
+  const repoDir = path.resolve(rootDir, '..', '..');
+  const tailwindCliCandidates = [
+    path.join(repoDir, 'packages', 'ui', 'node_modules', '@tailwindcss', 'cli', 'dist', 'index.mjs'),
+    path.join(repoDir, 'node_modules', '@tailwindcss', 'cli', 'dist', 'index.mjs'),
+  ];
+  const tailwindCli = tailwindCliCandidates.find((p) => fs.existsSync(p));
+  if (!tailwindCli) throw new Error('未找到 @tailwindcss/cli 入口，请先在仓库根执行 bun install');
+  const tailwind = spawnSync(process.execPath, [
+    tailwindCli,
+    '-i', path.join(repoDir, 'packages/ui/src/tailwind-entry.css'),
+    '-o', path.join(rootDir, 'dist/renderer/tailwind.css'),
+    '--minify',
+  ], { cwd: repoDir, encoding: 'utf8' });
+  if (tailwind.status !== 0) throw new Error(tailwind.stderr || 'Tailwind CSS build failed');
+  console.log('  ✔ Tailwind design tokens compiled');
 
   // 1. Build Main Process
   await esbuild.build({
@@ -96,6 +116,9 @@ async function buildAll() {
     path.join(rootDir, 'src/renderer/index.html'),
     path.join(rootDir, 'dist/renderer/index.html')
   );
+  const rendererHtml = path.join(rootDir, 'dist/renderer/index.html');
+  const html = fs.readFileSync(rendererHtml, 'utf8');
+  fs.writeFileSync(rendererHtml, html.replace('<link rel="stylesheet" href="styles.css">', '<link rel="stylesheet" href="tailwind.css">\n  <link rel="stylesheet" href="styles.css">'));
   fs.copyFileSync(
     path.join(rootDir, 'src/renderer/styles.css'),
     path.join(rootDir, 'dist/renderer/styles.css')
