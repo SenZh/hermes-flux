@@ -10,7 +10,7 @@
  */
 
 import { t } from '../../i18n/index.js';
-import { renderBotAvatar } from '../LeftRail/LeftRail.js';
+import { renderBotAvatar } from '../../utils/botAvatar.js';
 
 export interface MessageTokenMetrics {
   total?: number;

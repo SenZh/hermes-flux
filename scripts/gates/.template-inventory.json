@@ -35,10 +35,7 @@
     "packages/ui/src/components/InspectionPod/SubagentTerminalView.ts": [
       "renderSubagentTerminalView"
     ],
-    "packages/ui/src/components/LeftRail/LeftRail.ts": [
-      "renderBotAvatar",
-      "renderLeftRail"
-    ],
+    "packages/ui/src/components/LeftRail/types.ts": [],
     "packages/ui/src/components/MiddlePod/BtwCapsule.ts": [
       "renderBtwCapsule"
     ],

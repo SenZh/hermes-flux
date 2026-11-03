@@ -8,7 +8,8 @@
  */
 
 import { t } from '../../i18n/index.js';
-import { renderBotAvatar, type LeftRailProject } from '../LeftRail/LeftRail.js';
+import { renderBotAvatar } from '../../utils/botAvatar.js';
+import type { LeftRailProject } from '../LeftRail/types.js';
 
 export interface NewTaskModalProps {
   isOpen: boolean;

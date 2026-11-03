@@ -1,11 +1,54 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { renderLeftRail } from '../../dist/components/LeftRail/LeftRail.js';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { LeftRail } from '../../dist/components-react/LeftRail.js';
+import { buildLeftRailModel } from '../../dist/components-react/leftRailModel.js';
 import { renderMiddlePod } from '../../dist/components/MiddlePod/MiddlePod.js';
 import { renderNewTaskModal } from '../../dist/components/TaskModal/NewTaskModal.js';
 import { renderInputDock } from '../../dist/components/InputDock/InputDock.js';
 import { renderTitlebar } from '../../dist/components/Titlebar/Titlebar.js';
 import { renderContextMenu } from '../../dist/components/ContextMenu/ContextMenu.js';
+
+/** 左轨 React 岛的测试渲染入口，语义与旧 renderLeftRail(props) 一一对应。 */
+function renderLeftRail(props = {}) {
+  const noop = () => {};
+  return renderToStaticMarkup(React.createElement(LeftRail, {
+    model: buildLeftRailModel({
+      activeSessionId: props.activeSessionId || '',
+      activeFocus: props.activeFocus,
+      sessions: props.sessions || [],
+      profileName: props.profileName || 'default',
+      profiles: props.profiles || [],
+      groups: props.groups || [],
+      projects: props.projects || [],
+      activeRailTab: props.activeRailTab || 'chats',
+      searchQuery: props.searchQuery || '',
+      isSessionsGroupExpanded: props.isSessionsGroupExpanded,
+      isGroupsGroupExpanded: props.isGroupsGroupExpanded,
+      error: props.error,
+    }),
+    collapsed: Boolean(props.collapsed),
+    searchQuery: props.searchQuery || '',
+    editingGroupRoomId: props.editingGroupRoomId,
+    onToggleDrawer: noop,
+    onSelectSession: noop,
+    onSelectBot: noop,
+    onSelectGroup: noop,
+    onOpenSessionMenu: noop,
+    onOpenBotMenu: noop,
+    onOpenGroupMenu: noop,
+    onSearchChange: noop,
+    onNewChat: noop,
+    onSetTab: noop,
+    onToggleSessions: noop,
+    onToggleGroups: noop,
+    onStartGroupRename: noop,
+    onConfirmGroupRename: noop,
+    onCancelGroupRename: noop,
+    onResizeStart: noop,
+  }));
+}
 import { renderAgentProfileEditorModal } from '../../dist/components/Bot/AgentProfileEditorModal.js';
 
 test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', async (t) => {
@@ -404,8 +447,8 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
     assert.ok(railHtml.includes('赫尔墨斯'), '必须展示当前智能体显示名称');
     assert.ok(railHtml.includes('已为您重构完架构模块'), '必须联动展示智能体名下最新一条真实对话记录');
     assert.ok(railHtml.includes('10分钟前'), '必须展示最新消息相对时间戳');
-    assert.ok(railHtml.includes('jadePulse'), '运行中智能体必须包含呼吸脉冲动画');
-    assert.ok(railHtml.includes('var(--jade-pulse)'), '未读智能体必须包含未读指示器');
+    assert.ok(railHtml.includes('activity-pulse-indicator'), '运行中智能体必须包含运行态指示器');
+    assert.ok(railHtml.includes('activity-unread-badge'), '未读智能体必须包含未读指示器');
   });
 
   await t.test('11. 群聊原地行内重命名 (inline rename) 渲染断言', () => {
@@ -429,8 +472,9 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
 
     assert.ok(editingRailHtml.includes('rail-group-inline-rename-wrap'), '编辑态必须包含行内重命名容器');
     assert.ok(editingRailHtml.includes('rail-group-rename-input'), '必须包含重命名文本输入框');
-    assert.ok(editingRailHtml.includes('btn-confirm-group-rename'), '必须包含确认对号按钮');
-    assert.ok(editingRailHtml.includes('btn-cancel-group-rename'), '必须包含取消叉号按钮');
+    // 确认/取消按钮的语义已收编进 Button primitive，断言改为可观察的提交与取消语义
+    assert.ok(editingRailHtml.includes('type="submit"'), '必须包含确认提交按钮');
+    assert.ok(editingRailHtml.includes('取消'), '必须包含取消按钮文案');
 
     // 11.2 非编辑状态下的普通房间
     const normalRailHtml = renderLeftRail({

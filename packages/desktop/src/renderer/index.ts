@@ -7,7 +7,6 @@
 import type { IRpcCaller } from '@hermes-flux/core';
 
 import {
-  renderLeftRail,
   renderMiddlePod,
   renderConversationCanvas,
   renderInputDock,
@@ -17,6 +16,8 @@ import {
   renderInspectionPod,
   mountStatusBar,
   mountTitlebar,
+  mountLeftRail,
+  buildLeftRailModel,
   renderSettingsModal,
   renderModelPickerMenu,
   renderModelPickerTree,
@@ -29,6 +30,7 @@ import {
   type LeftRailProject,
   type LeftRailGroupRoom,
   type LeftRailActiveFocus,
+  type LeftRailTab,
   renderNewTaskModal,
   renderContextMenu,
   type ContextMenuProps,
@@ -46,6 +48,8 @@ import {
   resolveSkinId,
   getTitlebarSnapshot as createTitlebarSnapshot,
   getStatusBarSnapshot as createStatusBarSnapshot,
+  type LeftRailActions,
+  type LeftRailSnapshot,
   type StatusBarSnapshot,
   type TitlebarSnapshot,
 } from '@hermes-flux/ui';
@@ -267,6 +271,23 @@ const bootLog = createLogger('boot');
    -------------------------------------------------------------------------- */
 
 const LOG_LEVEL_STORAGE_KEY = 'hermes_flux_log_level';
+
+/**
+ * 左轨宽度唯一真值源。
+ *
+ * 设计意图 (Why)：微轨 52px 常驻 + 抽屉 212px 紧凑档 = 264 是默认值；
+ * 加宽上限只允许到能把抽屉内容仍读得舒服的 320，超过就变成"半个中间舱"，压缩对话区。
+ * 防范的历史坑 (Pitfall)：上限曾是 500，用户实测"拖宽后永远残留、蓝色太宽"；拖拽与恢复两条路径各自写死常量，易再次漂移。
+ * 约束与规则 (Rules)：拖拽（bindRailResizeEvents）与冷启动恢复（init）必须同时读本常量，禁止任何一处再写字面量。
+ */
+const LEFT_RAIL_WIDTH = { min: 264, max: 320, defaultValue: 264 } as const;
+
+/** 把任意存档宽度夹取回合法区间；非数字一律回落到默认值。 */
+function clampLeftRailWidth(raw: string | null): number {
+  const parsed = raw ? Number.parseFloat(raw) : Number.NaN;
+  if (!Number.isFinite(parsed)) return LEFT_RAIL_WIDTH.defaultValue;
+  return Math.round(Math.max(LEFT_RAIL_WIDTH.min, Math.min(LEFT_RAIL_WIDTH.max, parsed)));
+}
 
 function resolveInitialLogLevel(): LogLevel {
   const fromUrl = new URLSearchParams(window.location.search).get('log');
@@ -4354,6 +4375,68 @@ let lastMessagesSnapshot: RenderMessagesSnapshot | null = null;
 let lastInputDockSnapshot: RenderInputDockSnapshot | null = null;
 let updateReactStatusBar: (() => void) | null = null;
 let updateReactTitlebar: (() => void) | null = null;
+let updateReactLeftRail: (() => void) | null = null;
+
+/**
+ * 左轨动作表：每个动作只改 state 再 render，事件语义由 React 侧保证。
+ * 【约束与规则】点击 Bot/群聊/会话一律不自动展开抽屉（leftRailCollapsed 不动），保留用户当前折叠意图。
+ */
+function createLeftRailActions(): LeftRailActions {
+  return {
+    onToggleDrawer: () => { state.leftRailCollapsed = !state.leftRailCollapsed; render(); },
+    onSelectSession: (sessionId: string, botName?: string) => { void selectSession(sessionId, { botName }); },
+    onSelectBot: (profileName: string) => { void openBotChat(profileName); },
+    onSelectGroup: (roomId: string) => { void openGroupRoom(roomId); },
+    onOpenSessionMenu: (sessionId: string, title: string, x: number, y: number) => {
+      state.sessionContextMenu = { x, y, targetType: 'session', targetId: sessionId, targetName: title, sessionId, sessionTitle: title };
+      render();
+    },
+    onOpenBotMenu: (profileName: string, x: number, y: number) => {
+      state.sessionContextMenu = { x, y, targetType: 'bot', targetId: profileName, targetName: profileName };
+      render();
+    },
+    onOpenGroupMenu: (roomId: string, name: string, x: number, y: number) => {
+      state.sessionContextMenu = { x, y, targetType: 'group', targetId: roomId, targetName: name };
+      render();
+    },
+    onSearchChange: (value: string) => { state.sessionSearchQuery = value; render(); },
+    onNewChat: () => { void fetchProjects(); state.isNewTaskModalOpen = true; render(); },
+    onSetTab: (tab: LeftRailTab) => {
+      state.activeRailTab = state.activeRailTab === tab ? 'chats' : tab;
+      if (state.activeRailTab === 'projects') void fetchProjects();
+      render();
+    },
+    onToggleSessions: () => { state.isSessionsGroupExpanded = !state.isSessionsGroupExpanded; render(); },
+    onToggleGroups: () => { state.isGroupsGroupExpanded = !state.isGroupsGroupExpanded; render(); },
+    onStartGroupRename: (roomId: string) => { state.editingGroupRoomId = roomId; render(); },
+    onConfirmGroupRename: (roomId: string, name: string) => { void confirmGroupRename(roomId, name); },
+    onCancelGroupRename: () => { state.editingGroupRoomId = undefined; render(); },
+    onResizeStart: (event: React.PointerEvent<HTMLDivElement>) => { beginLeftRailResize(event); },
+  };
+}
+
+/**
+ * 群聊重命名落库。
+ * 【设计意图】先乐观更新本地房间名再发 RPC，用户键入后立刻看到结果；RPC 失败只提示不静默。
+ * 【约束与规则】网关未连接时只关闭编辑态，不伪造成功。
+ */
+async function confirmGroupRename(roomId: string, name: string): Promise<void> {
+  const newName = name.trim();
+  state.editingGroupRoomId = undefined;
+  if (!newName || !gatewayClient) {
+    render();
+    return;
+  }
+  state.groupRooms = state.groupRooms.map((r) => (r.roomId === roomId ? { ...r, name: newName } : r));
+  render();
+  try {
+    await groupRoomStore.renameRoom(roomId, newName, gatewayClient);
+    showToast(t('toast.groupRenamed'));
+    await fetchGroupRooms();
+  } catch (err) {
+    showToast(t('ctx.groupRenameFailed', { error: describeRpcError(err) }));
+  }
+}
 
 /**
  * 斜杠与智能引用 Popper 的独立子树同步。
@@ -4385,9 +4468,6 @@ function getTitlebarSnapshot(): TitlebarSnapshot {
     }),
     isMaximized: state.isMaximized,
     gatewayConnected: state.gatewayConnected,
-    gatewayLatencyMs: state.gatewayLatencyMs,
-    profileName: state.profileName,
-    profiles: state.profiles,
   });
 }
 
@@ -4398,9 +4478,62 @@ function getStatusBarSnapshot(): StatusBarSnapshot {
   });
 }
 
+/**
+ * 左轨快照：只做"从 state 到视图模型"的纯映射。
+ * 【约束与规则】主工位卡字段（lastMessage/lastTime/timestamp/activityState）原样透传装饰后的 profile；
+ * 组件侧禁止再扫会话池；搜索过滤与排序由 buildLeftRailModel 统一裁决。
+ * 三态装饰严格按域隔离：会话读会话集合、群聊读群聊集合、Bot 只读 Bot 集合，互不冒泡。
+ */
+function getLeftRailSnapshot(): LeftRailSnapshot {
+  const sessions = state.sessions.map((s) => ({
+    ...s,
+    activityState: resolveActivityState(s.id, {
+      runningIds: activeRunningSessionIds,
+      unreadIds: unreadSessionIds,
+      streamingId: activeStreamingStoredSessionId,
+    }),
+  }));
+  const groups = state.groupRooms.map((g) => ({
+    ...g,
+    activityState: resolveActivityState(g.roomId, {
+      runningIds: activeRunningGroupRoomIds,
+      unreadIds: unreadGroupRoomIds,
+    }),
+  }));
+  const profiles = state.profiles.map((p) => ({
+    ...p,
+    // 强制穿透：优先从全局头像缓存解析真实头像资产，消除时序冲刷导致的头像丢失
+    avatar: p.avatar || resolveAgentAvatar(p.name) || (p.displayName ? resolveAgentAvatar(p.displayName) : '') || '',
+    activityState: resolveActivityState(p.name, {
+      runningIds: activeRunningBotNames,
+      unreadIds: unreadBotNames,
+    }),
+  }));
+  return {
+    model: buildLeftRailModel({
+      activeSessionId: state.activeSessionId,
+      activeFocus: state.activeFocus,
+      sessions,
+      profileName: state.profileName,
+      profiles,
+      groups,
+      projects: state.projects,
+      activeRailTab: state.activeRailTab,
+      searchQuery: state.sessionSearchQuery,
+      isSessionsGroupExpanded: state.isSessionsGroupExpanded,
+      isGroupsGroupExpanded: state.isGroupsGroupExpanded,
+      error: state.sessionListError,
+    }),
+    collapsed: state.leftRailCollapsed,
+    searchQuery: state.sessionSearchQuery,
+    editingGroupRoomId: state.editingGroupRoomId,
+  };
+}
+
 function mountReactShellComponents(): void {
   const titlebarHost = document.getElementById('react-titlebar-host');
   const statusHost = document.getElementById('react-statusbar-host');
+  const leftRailHost = document.getElementById('react-leftrail-host');
   if (titlebarHost && !updateReactTitlebar) {
     updateReactTitlebar = mountTitlebar(titlebarHost, getTitlebarSnapshot, {
       onMinimize: () => desktopApi?.minimize(),
@@ -4414,7 +4547,6 @@ function mountReactShellComponents(): void {
       onToggleLeftRail: () => { state.leftRailCollapsed = !state.leftRailCollapsed; render(); },
       onToggleInspector: () => { state.inspectorCollapsed = !state.inspectorCollapsed; render(); },
       onOpenSettings: () => { state.isSettingsOpen = true; state.settingsTab = 'gateway'; render(); },
-      onSwitchProfile: (profileName: string) => { void switchProfile(profileName); },
       onToggleTheme: () => {
         state.theme = getToggleTheme(state.theme);
         localStorage.setItem('hermes_flux_theme', state.theme);
@@ -4422,6 +4554,9 @@ function mountReactShellComponents(): void {
         render();
       },
     });
+  }
+  if (leftRailHost && !updateReactLeftRail) {
+    updateReactLeftRail = mountLeftRail(leftRailHost, getLeftRailSnapshot, createLeftRailActions());
   }
   if (statusHost && !updateReactStatusBar) {
     updateReactStatusBar = mountStatusBar(statusHost, getStatusBarSnapshot, () => {
@@ -4431,6 +4566,7 @@ function mountReactShellComponents(): void {
     });
   }
   updateReactTitlebar?.();
+  updateReactLeftRail?.();
   updateReactStatusBar?.();
 }
 
@@ -4548,48 +4684,6 @@ function render(): void {
       lastMessagesSnapshot.rollbackActive !== currentMessagesSnapshot.rollbackActive ||
       lastMessagesSnapshot.capsuleCount !== currentMessagesSnapshot.capsuleCount);
 
-  const resolveSessionActivity = (sessionId: string): ActivityState =>
-    // 会话域：仅消费会话自己的运行/未读集合，绝不向 Bot 或群聊领域冒泡
-    resolveActivityState(sessionId, {
-      runningIds: activeRunningSessionIds,
-      unreadIds: unreadSessionIds,
-      streamingId: activeStreamingStoredSessionId,
-    });
-
-  const resolveGroupActivity = (roomId: string): ActivityState =>
-    // 群聊域：独立的运行/未读集合，与任何会话、Bot 无耦合
-    resolveActivityState(roomId, {
-      runningIds: activeRunningGroupRoomIds,
-      unreadIds: unreadGroupRoomIds,
-    });
-
-  const resolveBotActivity = (botName: string): ActivityState =>
-    // Bot 域：严格独立。历史实现会让"任一子会话在跑"把 Bot 也点亮，属于跨实体串扰，已移除
-    resolveActivityState(botName, {
-      runningIds: activeRunningBotNames,
-      unreadIds: unreadBotNames,
-    });
-
-  const decoratedSessions = state.sessions.map((s) => ({
-    ...s,
-    activityState: resolveSessionActivity(s.id),
-  }));
-
-  const decoratedGroups = state.groupRooms.map((g) => ({
-    ...g,
-    activityState: resolveGroupActivity(g.roomId),
-  }));
-
-  const decoratedProfiles = state.profiles.map((p) => {
-    // 强制穿透：优先从全局头像缓存中解析真实头像资产，彻底消除时序冲刷导致的头像丢失
-    const resolvedAvatar = p.avatar || resolveAgentAvatar(p.name) || (p.displayName ? resolveAgentAvatar(p.displayName) : '') || '';
-    return {
-      ...p,
-      avatar: resolvedAvatar,
-      activityState: resolveBotActivity(p.name),
-    };
-  });
-
   const bodyContainer = root.querySelector('.flux-body-container');
 
   if (!bodyContainer) {
@@ -4598,26 +4692,8 @@ function render(): void {
       <div id="react-titlebar-host"></div>
 
       <div class="flux-body-container" style="flex: 1; display: flex; position: relative; overflow: hidden; width: 100%;">
-        ${renderLeftRail({
-          collapsed: state.leftRailCollapsed,
-          activeSessionId: state.activeSessionId,
-          activeFocus: state.activeFocus,
-          sessions: decoratedSessions,
-          profileName: state.profileName,
-          profiles: decoratedProfiles,
-          groups: decoratedGroups,
-          projects: state.projects,
-          activeRailTab: state.activeRailTab,
-          gatewayOnline: state.gatewayConnected,
-          gatewayLatencyMs: state.gatewayLatencyMs,
-          searchQuery: state.sessionSearchQuery,
-          isBotsGroupExpanded: state.isBotsGroupExpanded,
-          isSessionsGroupExpanded: state.isSessionsGroupExpanded,
-          isGroupsGroupExpanded: state.isGroupsGroupExpanded,
-          isMoreSessionsExpanded: state.isMoreSessionsExpanded,
-          editingGroupRoomId: state.editingGroupRoomId,
-          error: state.sessionListError,
-        })}
+        <!-- React 左轨岛宿主：只做容器，绝不作为任何 innerHTML/outerHTML 的目标 -->
+        <div id="react-leftrail-host" style="display: contents;"></div>
 
         ${renderMiddlePod({
           gatewayConnected: state.gatewayConnected,
@@ -4728,39 +4804,7 @@ function render(): void {
     // 2. High-performance Subtree/Section Isolation Update (Zero DOM thrashing on conversation stream)
     mountReactShellComponents();
 
-    const railEl = root.querySelector('#flux-left-rail') || root.querySelector('.flux-left-rail');
-    if (railEl) {
-      const oldScrollContainer = railEl.querySelector('#session-list-container') as HTMLElement | null;
-      const prevRailScrollTop = oldScrollContainer ? oldScrollContainer.scrollTop : 0;
-
-      railEl.outerHTML = renderLeftRail({
-        collapsed: state.leftRailCollapsed,
-        activeSessionId: state.activeSessionId,
-        activeFocus: state.activeFocus,
-        sessions: decoratedSessions,
-        profileName: state.profileName,
-        profiles: decoratedProfiles,
-        groups: decoratedGroups,
-        projects: state.projects,
-        activeRailTab: state.activeRailTab,
-        gatewayOnline: state.gatewayConnected,
-        gatewayLatencyMs: state.gatewayLatencyMs,
-        searchQuery: state.sessionSearchQuery,
-        isBotsGroupExpanded: state.isBotsGroupExpanded,
-        isSessionsGroupExpanded: state.isSessionsGroupExpanded,
-        isGroupsGroupExpanded: state.isGroupsGroupExpanded,
-        isMoreSessionsExpanded: state.isMoreSessionsExpanded,
-        editingGroupRoomId: state.editingGroupRoomId,
-        error: state.sessionListError,
-      });
-
-      if (prevRailScrollTop > 0) {
-        const newScrollContainer = root.querySelector('#session-list-container') as HTMLElement | null;
-        if (newScrollContainer) {
-          newScrollContainer.scrollTop = prevRailScrollTop;
-        }
-      }
-    }
+    // 左轨由 React 岛自管子树，递增更新路径不再触碰其 DOM（不会重建滚动容器与输入框）。
 
     const inspectEl = root.querySelector('#flux-inspector-pod') || root.querySelector('.flux-inspector-pod');
     if (inspectEl) {
@@ -5415,32 +5459,9 @@ function bindEvents(): void {
     };
   }
 
-  // Session, Bot & Group instant search filter
-  const searchInput = document.getElementById('session-search-input') as HTMLInputElement | null;
-  if (searchInput) {
-    searchInput.oninput = () => {
-      state.sessionSearchQuery = searchInput.value;
-      const query = searchInput.value.toLowerCase().trim();
-      document.querySelectorAll('.session-item').forEach((item) => {
-        const title = (item.getAttribute('data-title') || '').toLowerCase();
-        const bot = (item.getAttribute('data-bot') || '').toLowerCase();
-        const text = item.textContent?.toLowerCase() || '';
-        const match = !query || title.includes(query) || bot.includes(query) || text.includes(query);
-        (item as HTMLElement).style.display = match ? 'flex' : 'none';
-      });
-      document.querySelectorAll('.rail-pinned-bot-row').forEach((row) => {
-        const prof = (row.getAttribute('data-profile') || '').toLowerCase();
-        const text = row.textContent?.toLowerCase() || '';
-        const match = !query || prof.includes(query) || text.includes(query);
-        (row as HTMLElement).style.display = match ? 'flex' : 'none';
-      });
-      document.querySelectorAll('.rail-group-item').forEach((row) => {
-        const text = row.textContent?.toLowerCase() || '';
-        const match = !query || text.includes(query);
-        (row as HTMLElement).style.display = match ? 'flex' : 'none';
-      });
-    };
-  }
+  // 左轨（微轨 + 抽屉）已由 React 岛接管：搜索、手风琴、行点击、右键菜单、行内重命名、
+  // 底部快捷入口与拖拽全部走 mountLeftRail 的 props/回调，这里严禁再注册第二套事件，
+  // 否则同一元素会同时存在模板 onclick 与 React 合成事件，产生双重派发。
 
   // File attach button
   const attachBtn = document.getElementById('dock-attach-file-btn');
@@ -5695,236 +5716,9 @@ function bindEvents(): void {
     };
   }
 
-  // Left rail switcher tabs [ 会话 | 项目 ]
-  const tabBtnChats = document.getElementById('tab-btn-rail-chats');
-  const tabBtnProjects = document.getElementById('tab-btn-rail-projects');
-  if (tabBtnChats) {
-    tabBtnChats.onclick = () => {
-      state.activeRailTab = 'chats';
-      render();
-    };
-  }
-  if (tabBtnProjects) {
-    tabBtnProjects.onclick = () => {
-      state.activeRailTab = 'projects';
-      void fetchProjects();
-      render();
-    };
-  }
-
-  // Left rail progressive disclosure "展示更多"
-  const btnMoreSessions = document.getElementById('btn-rail-more-sessions');
-  if (btnMoreSessions) {
-    btnMoreSessions.onclick = () => {
-      state.isMoreSessionsExpanded = true;
-      render();
-    };
-  }
-
-  // Left rail sessions accordion toggle
-  const sessionsTrigger = document.getElementById('rail-sessions-accordion-trigger');
-  if (sessionsTrigger) {
-    sessionsTrigger.onclick = () => {
-      state.isSessionsGroupExpanded = !state.isSessionsGroupExpanded;
-      render();
-    };
-  }
-
-  // Left rail bots accordion toggle
-  const botsTrigger = document.getElementById('rail-bots-accordion-trigger');
-  if (botsTrigger) {
-    botsTrigger.onclick = () => {
-      state.isBotsGroupExpanded = !state.isBotsGroupExpanded;
-      render();
-    };
-  }
-
-  // Left rail groups accordion toggle
-  const groupsTrigger = document.getElementById('rail-groups-accordion-trigger');
-  if (groupsTrigger) {
-    groupsTrigger.onclick = () => {
-      state.isGroupsGroupExpanded = !state.isGroupsGroupExpanded;
-      render();
-    };
-  }
-
-  // Project accordion click in Left Rail
-  document.querySelectorAll('.project-accordion-trigger').forEach((trigger) => {
-    (trigger as HTMLElement).onclick = (e) => {
-      const parent = (trigger as HTMLElement).closest('.project-accordion-unit');
-      if (parent) {
-        const isOpen = parent.classList.contains('open');
-        const nested = parent.querySelector('.project-accordion-nested') as HTMLElement | null;
-        const chevron = parent.querySelector('.proj-chevron-icon') as HTMLElement | null;
-        if (isOpen) {
-          parent.classList.remove('open');
-          if (nested) nested.style.display = 'none';
-          if (chevron) chevron.style.transform = 'rotate(0deg)';
-        } else {
-          parent.classList.add('open');
-          if (nested) nested.style.display = 'flex';
-          if (chevron) chevron.style.transform = 'rotate(90deg)';
-        }
-      }
-    };
-  });
-
-  // Pinned Bot Row & Station Agent click: 统一支持微轨头像、抽屉第一行大卡片与列表行
-  document.querySelectorAll('.rail-pinned-bot-row, .station-agent-badge, .rail-primary-agent-card').forEach((row) => {
-    (row as HTMLElement).onclick = (e) => {
-      const profile =
-        (row as HTMLElement).dataset.profile ||
-        (row as HTMLElement).dataset.stationProfile ||
-        (row as HTMLElement).dataset.primaryBot;
-      if (profile) {
-        // 关键硬约束：点击仅切至该 Agent 的主工位对话流，绝不修改 leftRailCollapsed（绝不自动弹开抽屉）
-        void openBotChat(profile);
-      }
-    };
-
-    (row as HTMLElement).oncontextmenu = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const profile =
-        (row as HTMLElement).dataset.profile ||
-        (row as HTMLElement).dataset.stationProfile ||
-        (row as HTMLElement).dataset.primaryBot;
-      if (profile) {
-        state.sessionContextMenu = {
-          x: Math.min(e.clientX, window.innerWidth - 180),
-          y: Math.min(e.clientY, window.innerHeight - 220),
-          targetType: 'bot',
-          targetId: profile,
-          targetName: profile,
-        };
-        render();
-      }
-    };
-  });
-
-  // Multi-Agent Group Room item click & Context Menu
-  document.querySelectorAll('.rail-group-item').forEach((row) => {
-    (row as HTMLElement).onclick = (e) => {
-      const roomId = (row as HTMLElement).dataset.roomId;
-      if (roomId) {
-        void openGroupRoom(roomId);
-      }
-    };
-
-    (row as HTMLElement).oncontextmenu = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const roomId = (row as HTMLElement).dataset.roomId;
-      const targetRoom = state.groupRooms.find((r) => r.roomId === roomId);
-      if (roomId) {
-        state.sessionContextMenu = {
-          x: Math.min(e.clientX, window.innerWidth - 180),
-          y: Math.min(e.clientY, window.innerHeight - 220),
-          targetType: 'group',
-          targetId: roomId,
-          targetName: targetRoom?.name || roomId,
-        };
-        render();
-      }
-    };
-  });
-
-  // Group inline rename actions (Confirm / Cancel / Keyboard enter & esc)
-  document.querySelectorAll('.btn-confirm-group-rename').forEach((btn) => {
-    (btn as HTMLElement).onclick = (e) => {
-      e.stopPropagation();
-      const roomId = (btn as HTMLElement).dataset.roomId;
-      if (!roomId) return;
-      const inputEl = document.getElementById(`rail-group-rename-input-${roomId}`) as HTMLInputElement | null;
-      const newName = inputEl?.value?.trim();
-      if (newName && gatewayClient) {
-        state.editingGroupRoomId = undefined;
-        // 乐观即时更新本地房间列表
-        state.groupRooms = state.groupRooms.map((r) => (r.roomId === roomId ? { ...r, name: newName } : r));
-        render();
-        void groupRoomStore.renameRoom(roomId, newName, gatewayClient).then(async () => {
-          showToast(t('toast.groupRenamed'));
-          await fetchGroupRooms();
-        }).catch((err) => {
-          showToast(t('ctx.groupRenameFailed', { error: describeRpcError(err) }));
-        });
-      } else {
-        state.editingGroupRoomId = undefined;
-        render();
-      }
-    };
-  });
-
-  document.querySelectorAll('.btn-cancel-group-rename').forEach((btn) => {
-    (btn as HTMLElement).onclick = (e) => {
-      e.stopPropagation();
-      state.editingGroupRoomId = undefined;
-      render();
-    };
-  });
-
-  document.querySelectorAll('.rail-group-rename-input').forEach((input) => {
-    (input as HTMLElement).onclick = (e) => e.stopPropagation();
-    (input as HTMLInputElement).onkeydown = (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        e.stopPropagation();
-        const roomId = (input as HTMLElement).id.replace('rail-group-rename-input-', '');
-        const confirmBtn = document.querySelector(`.btn-confirm-group-rename[data-room-id="${roomId}"]`) as HTMLElement | null;
-        if (confirmBtn) confirmBtn.click();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopPropagation();
-        state.editingGroupRoomId = undefined;
-        render();
-      }
-    };
-  });
-
-  // Station Rail Bottom Shortcuts (Groups & Projects)
-  const stationGroupsBtn = document.getElementById('rail-station-groups-btn');
-  if (stationGroupsBtn) {
-    stationGroupsBtn.onclick = () => {
-      state.activeRailTab = state.activeRailTab === 'groups' ? 'chats' : 'groups';
-      render();
-    };
-  }
-
-  const stationProjectsBtn = document.getElementById('rail-station-projects-btn');
-  if (stationProjectsBtn) {
-    stationProjectsBtn.onclick = () => {
-      state.activeRailTab = state.activeRailTab === 'projects' ? 'chats' : 'projects';
-      render();
-    };
-  }
-
-  document.querySelectorAll('.session-item').forEach((item) => {
-    (item as HTMLElement).onclick = (e) => {
-      if ((e.target as HTMLElement).classList.contains('btn-delete-session')) return;
-      const id = (item as HTMLElement).dataset.id;
-      const botName = (item as HTMLElement).dataset.bot;
-      if (id) selectSession(id, { botName });
-    };
-
-    (item as HTMLElement).oncontextmenu = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const id = (item as HTMLElement).dataset.id;
-      const title = (item as HTMLElement).dataset.title || '';
-      if (id) {
-        state.sessionContextMenu = {
-          x: Math.min(e.clientX, window.innerWidth - 180),
-          y: Math.min(e.clientY, window.innerHeight - 220),
-          targetType: 'session',
-          targetId: id,
-          targetName: title,
-          sessionId: id,
-          sessionTitle: title,
-        };
-        render();
-      }
-    };
-  });
+  // 以下左轨（微轨 + 抽屉）交互已迁移至 React 岛（mountLeftRail）：
+  // 标签切换、手风琴折叠、展示更多、行点击、右键菜单、行内重命名与底部快捷入口
+  // 全部由 React props 驱动，模板侧不得再注册同名 onclick，避免事件双派发。
 
   // Handle Context Menu Actions
   document.querySelectorAll('#session-context-menu .ctx-item').forEach((btn) => {
@@ -6773,17 +6567,75 @@ function updateRunningToolTimers(): void {
   }
 }
 
+/**
+ * 拖拽调整左轨宽度。
+ *
+ * 设计意图 (Why)：宽度是"用户一次设定、长期沿用"的偏好，因此拖拽、双击复原、冷启动恢复必须共用同一组边界常量。
+ * 防范的历史坑 (Pitfall)：旧实现把 [200,500] 与 260 默认值写死在事件回调里，恢复路径又各写一份，三者互相漂移；
+ *   打包产物残留旧版时，用户实测到的仍是无夹取的旧行为（本次已用真实 Blink 复现确认）。
+ * 约束与规则 (Rules)：本函数是左轨宽度的唯一写入口，边界只读 LEFT_RAIL_WIDTH；写入后立即持久化并夹取。
+ */
+function beginLeftRailResize(event: React.PointerEvent<HTMLDivElement>): void {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const handle = event.currentTarget;
+  const startX = event.clientX;
+  const cssVar = '--rail-w-left';
+  const startWidth = clampLeftRailWidth(
+    getComputedStyle(document.documentElement).getPropertyValue(cssVar) || String(LEFT_RAIL_WIDTH.defaultValue),
+  );
+  try {
+    handle.setPointerCapture(event.pointerId);
+  // gate-degrade: PointerCapture 在断开的指针或部分无头环境下会抛错，属可安全忽略的平台差异
+  } catch {}
+
+  document.documentElement.setAttribute('data-rail-resizing', 'left');
+  let currentW = startWidth;
+
+  const onPointerMove = (moveEv: PointerEvent) => {
+    currentW = clampLeftRailWidth(String(startWidth + (moveEv.clientX - startX)));
+    document.documentElement.style.setProperty(cssVar, `${currentW}px`);
+  };
+
+  const onPointerUp = () => {
+    try {
+      handle.releasePointerCapture(event.pointerId);
+    // gate-degrade: 指针可能已被系统回收，释放失败不影响最终宽度写入
+    } catch {}
+    window.removeEventListener('pointermove', onPointerMove);
+    window.removeEventListener('pointerup', onPointerUp);
+    window.removeEventListener('pointercancel', onPointerUp);
+    document.documentElement.removeAttribute('data-rail-resizing');
+    const settled = clampLeftRailWidth(String(currentW));
+    document.documentElement.style.setProperty(cssVar, `${settled}px`);
+    localStorage.setItem('hermes_flux_rail_w_left', String(settled));
+  };
+
+  window.addEventListener('pointermove', onPointerMove, { passive: true });
+  window.addEventListener('pointerup', onPointerUp);
+  window.addEventListener('pointercancel', onPointerUp);
+}
+
+/** 双击手柄把左轨宽度复原为默认档。 */
+function resetLeftRailWidth(): void {
+  document.documentElement.style.setProperty('--rail-w-left', `${LEFT_RAIL_WIDTH.defaultValue}px`);
+  localStorage.setItem('hermes_flux_rail_w_left', String(LEFT_RAIL_WIDTH.defaultValue));
+}
+
 function bindRailResizeEvents(): void {
   document.querySelectorAll<HTMLElement>('.rail-resize-handle').forEach((handle) => {
-    const isLeft = handle.dataset.railHandle === 'left';
-    const cssVar = isLeft ? '--rail-w-left' : '--rail-w-right';
-    // 设计意图(Why)：左轨宽度按 tri-rail 规范锁定 52+212=264 为下限，拖拽只允许适度加宽。
-    // 防范的历史坑(Pitfall)：原上限 500 与规范漂移，且 localStorage 恢复路径不夹取，旧宽档永久残留（用户实测"蓝色太宽"）。
-    // 约束与规则(Rules)：左轨 [264,400]，默认 264；右轨维持现值待波③与 410 规范一并对齐。
-    const minW = isLeft ? 264 : 260;
-    const maxW = isLeft ? 400 : Math.round(window.innerWidth * 0.85);
-    const defaultW = isLeft ? 264 : 420;
-    const storageKey = isLeft ? 'hermes_flux_rail_w_left' : 'hermes_flux_rail_w_right';
+    if (handle.dataset.railHandle === 'left') {
+      // 左轨把手已由 React 岛通过 onPointerDown 接管，这里只补双击复原。
+      handle.ondblclick = (e) => { e.stopPropagation(); resetLeftRailWidth(); };
+      return;
+    }
+    const cssVar = '--rail-w-right';
+    // 约束与规则(Rules)：右轨维持现值，待波③与 410 规范一并对齐（不在本 PR 扩面）。
+    const minW = 260;
+    const maxW = Math.round(window.innerWidth * 0.85);
+    const defaultW = 420;
+    const storageKey = 'hermes_flux_rail_w_right';
 
     handle.ondblclick = (e) => {
       e.stopPropagation();
@@ -6803,12 +6655,12 @@ function bindRailResizeEvents(): void {
 
       const startX = ev.clientX;
       const startWidth = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(cssVar)) || defaultW;
-      document.documentElement.setAttribute('data-rail-resizing', isLeft ? 'left' : 'right');
+      document.documentElement.setAttribute('data-rail-resizing', 'right');
 
       let currentW = startWidth;
 
       const onPointerMove = (moveEv: PointerEvent) => {
-        const delta = (moveEv.clientX - startX) * (isLeft ? 1 : -1);
+        const delta = (moveEv.clientX - startX) * -1;
         currentW = Math.max(minW, Math.min(maxW, startWidth + delta));
         document.documentElement.style.setProperty(cssVar, `${currentW}px`);
       };
@@ -6980,7 +6832,7 @@ async function init(): Promise<void> {
     return Math.round(Math.max(minW, Math.min(maxW, parsed)));
   };
   const railMaxW = Math.round(window.innerWidth * 0.85);
-  const restoredLeft = clampRail(localStorage.getItem('hermes_flux_rail_w_left') || localStorage.getItem('hermes_aura_rail_w_left'), 264, 400, 264);
+  const restoredLeft = clampLeftRailWidth(localStorage.getItem('hermes_flux_rail_w_left') || localStorage.getItem('hermes_aura_rail_w_left'));
   document.documentElement.style.setProperty('--rail-w-left', `${restoredLeft}px`);
   localStorage.setItem('hermes_flux_rail_w_left', String(restoredLeft));
   const restoredRight = clampRail(localStorage.getItem('hermes_flux_rail_w_right') || localStorage.getItem('hermes_aura_rail_w_right'), 260, railMaxW, 420);

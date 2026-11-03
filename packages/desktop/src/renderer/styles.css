@@ -26,6 +26,18 @@
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: "JetBrains Mono", Consolas, "SF Mono", monospace;
 
+  /* 节奏层字号 8 档（整数阶梯，消灭 9.5/10.5/11.5px 散落值）。
+     设计意图(Why)：排版必须由单一节奏源驱动，组件只能引用变量，禁止裸 font-size 字面量。
+     约束与规则(Rules)：本段是 --fs-* 的唯一真值面，新增档位必须先改这里再改消费方。 */
+  --fs-hero: 20px;
+  --fs-title: 16px;
+  --fs-section: 14px;
+  --fs-body: 13px;
+  --fs-aux: 12px;
+  --fs-caption: 11px;
+  --fs-overline: 10px;
+  --fs-micro: 9px;
+
   --radius-window: 14px;
   --radius-panel: 10px;
   --radius-card: 10px;
@@ -460,6 +472,12 @@
   border-top: 1px solid var(--border-subtle);
   color: var(--muted-foreground);
   font-family: var(--font-mono);
+  /* 设计意图(Why)：状态栏是 22px 极简条，读数必须落在 caption 档，否则 11px+ 的等宽数字会顶满高度显笨重。
+     防范的历史坑(Pitfall)：曾用继承字号（13px body 档）且延迟数字取 --primary 品牌色，视觉重量压过内容区。
+     约束与规则(Rules)：字号只走 --fs-caption；读数颜色取 --muted-foreground，禁止用品牌色抢注意力。 */
+  font-size: var(--fs-caption);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
 }
 .status-bar-server-node {
   display: inline-flex;
@@ -479,8 +497,10 @@
 }
 .status-dot[data-status="connected"] { background: var(--success); }
 .status-dot[data-status="connecting"] { background: var(--warning); }
-.status-location, .status-latency { color: var(--secondary-foreground); }
-.status-latency { color: var(--primary); }
+.status-location, .status-latency { color: var(--muted-foreground); }
+.status-location { opacity: 0.7; }
+/* 延迟读数走 caption 档 muted 前景：同字号同色系，只靠等宽数字与间距区分层级 */
+.status-latency { font-variant-numeric: tabular-nums; }
 .flux-titlebar {
   height: calc(42px + env(safe-area-inset-top, 0px));
   min-height: 42px;
@@ -516,10 +536,9 @@
 .traffic-close { background: #FF5F56; }
 .traffic-min { background: #FFBD2E; }
 .traffic-max { background: #27C93F; }
-.titlebar-profile-select { max-width: 140px; height: 28px; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--card); color: var(--foreground); }
 .titlebar-connection-indicator { width: 7px; height: 7px; border-radius: 50%; background: var(--muted-foreground); }
-.flux-titlebar:has(.titlebar-connection-indicator[title="在线"]) .titlebar-connection-indicator,
-.flux-titlebar:has(.titlebar-connection-indicator[title="Online"]) .titlebar-connection-indicator { background: var(--success); }
+/* 连接态由 data-connected 属性驱动：文案(title)随语言切换，用它做选择器会在英文界面直接失效。 */
+.titlebar-connection-indicator[data-connected="true"] { background: var(--success); }
 
 * {
   box-sizing: border-box;
@@ -623,6 +642,8 @@ html[data-rail-resizing] * {
 }
 
 /* Animations */
+/* jadePulse 已删除：唯一消费者是已移除的左舵模板；其无休止 CSS 动画与集中时钟军规冲突，
+   呼吸动效待 useDurationTicker 接入后以 JS 驱动恢复。flux-pulse 仍被存量模板消费，保留待该舱迁移时一并处理。 */
 @keyframes flux-pulse {
   0%, 100% {
     transform: scale(1);
@@ -630,17 +651,6 @@ html[data-rail-resizing] * {
   }
   50% {
     transform: scale(1.3);
-    opacity: 1;
-  }
-}
-
-@keyframes jadePulse {
-  0%, 100% {
-    transform: scale(1);
-    opacity: 0.85;
-  }
-  50% {
-    transform: scale(1.35);
     opacity: 1;
   }
 }

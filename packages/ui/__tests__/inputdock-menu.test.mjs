@@ -1,7 +1,50 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { renderInputDock } from '../dist/components/InputDock/InputDock.js';
-import { renderLeftRail } from '../dist/components/LeftRail/LeftRail.js';
+import { LeftRail } from '../dist/components-react/LeftRail.js';
+import { buildLeftRailModel } from '../dist/components-react/leftRailModel.js';
+
+/** 左舵 React 岛测试渲染入口，语义与旧 renderLeftRail(props) 一一对应。 */
+function renderLeftRail(props = {}) {
+  const noop = () => {};
+  return renderToStaticMarkup(React.createElement(LeftRail, {
+    model: buildLeftRailModel({
+      activeSessionId: props.activeSessionId || '',
+      activeFocus: props.activeFocus,
+      sessions: props.sessions || [],
+      profileName: props.profileName || 'default',
+      profiles: props.profiles || [],
+      groups: props.groups || [],
+      projects: props.projects || [],
+      activeRailTab: props.activeRailTab || 'chats',
+      searchQuery: props.searchQuery || '',
+      isSessionsGroupExpanded: props.isSessionsGroupExpanded,
+      isGroupsGroupExpanded: props.isGroupsGroupExpanded,
+      error: props.error,
+    }),
+    collapsed: Boolean(props.collapsed),
+    searchQuery: props.searchQuery || '',
+    editingGroupRoomId: props.editingGroupRoomId,
+    onToggleDrawer: noop,
+    onSelectSession: noop,
+    onSelectBot: noop,
+    onSelectGroup: noop,
+    onOpenSessionMenu: noop,
+    onOpenBotMenu: noop,
+    onOpenGroupMenu: noop,
+    onSearchChange: noop,
+    onNewChat: noop,
+    onSetTab: noop,
+    onToggleSessions: noop,
+    onToggleGroups: noop,
+    onStartGroupRename: noop,
+    onConfirmGroupRename: noop,
+    onCancelGroupRename: noop,
+    onResizeStart: noop,
+  }));
+}
 
 function dockHtml(overrides = {}) {
   return renderInputDock({
@@ -152,7 +195,7 @@ test('LeftRail - an empty rail is not the same as a failed rail', async (t) => {
 
     // 3. Assert
     assert.ok(html.indexOf('data-id="s-new"') < html.indexOf('data-id="s-old"'), 'Newest session must lead');
-    assert.ok(html.includes('class="session-item active" data-id="s-new"'), 'Active session must be highlighted');
+    assert.ok(/class="session-item [^"]*\bactive\b/.test(html), 'Active session must be highlighted');
     assert.ok(html.includes('(2)'), 'Header must count the real sessions');
   });
 });

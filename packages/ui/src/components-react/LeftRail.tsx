@@ -1,67 +1,29 @@
 import * as React from 'react';
-import { Folder, MessageSquare, MoreHorizontal, Plus, Search, Users } from 'lucide-react';
+import { ChevronLeft, Folder, MessageSquare, MoreHorizontal, Plus, Search, Users } from 'lucide-react';
 import { t } from '../i18n/index.js';
-
-export interface LeftRailSession {
-  id: string;
-  title: string;
-  preview?: string;
-  timestamp?: number;
-  isArchived?: boolean;
-  isPinned?: boolean;
-  botName?: string;
-  botDisplayName?: string;
-  activityState?: 'running' | 'unread' | 'read';
-}
-
-export interface LeftRailGroupRoom {
-  roomId: string;
-  name: string;
-  members: string[];
-  lastMessage?: string;
-  updatedAt?: number;
-  createdAt?: number;
-  activityState?: 'running' | 'unread' | 'read';
-}
-
-export interface LeftRailProject {
-  id: string;
-  name: string;
-  sessions?: LeftRailSession[];
-}
-
-export interface LeftRailProfile {
-  name: string;
-  displayName: string;
-  avatar?: string;
-  description?: string;
-  lastMessage?: string;
-  lastTime?: string;
-  timestamp?: number;
-  isDefault?: boolean;
-  activityState?: 'running' | 'unread' | 'read';
-}
-
-export type LeftRailActiveFocus =
-  | { type: 'bot'; botName: string }
-  | { type: 'session'; sessionId: string }
-  | { type: 'group'; roomId: string };
+import { Badge } from './primitives/Badge.js';
+import { Button } from './primitives/Button.js';
+import { Input } from './primitives/Input.js';
+import { renderBotAvatar } from '../utils/botAvatar.js';
+import {
+  formatLeftRailTime,
+  isBotFocused,
+  isGroupFocused,
+  isSessionFocused,
+  toSnippet,
+  type LeftRailGroupRoom,
+  type LeftRailModel,
+  type LeftRailProfile,
+  type LeftRailProject,
+  type LeftRailSession,
+  type LeftRailTab,
+} from './leftRailModel.js';
 
 export interface LeftRailProps {
+  model: LeftRailModel;
   collapsed: boolean;
-  activeSessionId: string;
-  activeFocus: LeftRailActiveFocus;
-  sessions: LeftRailSession[];
-  profileName: string;
-  profiles: LeftRailProfile[];
-  groups: LeftRailGroupRoom[];
-  projects: LeftRailProject[];
-  activeRailTab: 'chats' | 'projects' | 'groups';
   searchQuery: string;
-  isSessionsGroupExpanded: boolean;
-  isGroupsGroupExpanded: boolean;
   editingGroupRoomId?: string;
-  error?: string;
   onToggleDrawer: () => void;
   onSelectSession: (sessionId: string, botName?: string) => void;
   onSelectBot: (profileName: string) => void;
@@ -71,7 +33,7 @@ export interface LeftRailProps {
   onOpenGroupMenu: (roomId: string, name: string, x: number, y: number) => void;
   onSearchChange: (value: string) => void;
   onNewChat: () => void;
-  onSetTab: (tab: 'chats' | 'projects' | 'groups') => void;
+  onSetTab: (tab: LeftRailTab) => void;
   onToggleSessions: () => void;
   onToggleGroups: () => void;
   onStartGroupRename: (roomId: string) => void;
@@ -80,30 +42,48 @@ export interface LeftRailProps {
   onResizeStart: (event: React.PointerEvent<HTMLDivElement>) => void;
 }
 
-export function formatLeftRailTime(timestamp?: number, now = new Date()): string {
-  if (!timestamp || !Number.isFinite(timestamp)) return '';
-  const date = new Date(timestamp > 1e11 ? timestamp : timestamp * 1000);
-  if (!Number.isFinite(date.getTime())) return '';
-  if (date.getFullYear() !== now.getFullYear()) return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
-  if (date.toDateString() !== now.toDateString()) return `${date.getMonth() + 1}/${date.getDate()}`;
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+/** 头像只复用既有资产管线（真实 <img> / 几何图腾 SVG），避免第二套身份渲染分叉。 */
+function Avatar({ profile, size }: { profile: Pick<LeftRailProfile, 'name' | 'displayName' | 'avatar'>; size: number }): React.ReactElement {
+  return <span aria-hidden="true" className="inline-flex shrink-0" dangerouslySetInnerHTML={{ __html: renderBotAvatar(profile.name, profile.displayName, profile.avatar, size) }} />;
 }
 
-function snippet(text: string | undefined): string {
-  return (text || '').replace(/```[\s\S]*?```/g, t('common.codeBlock')).replace(/^#+\s+/gm, '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+/**
+ * 活动指示点：running 呼吸点 / unread 翡翠点 / read 不渲染。
+ * 设计意图 (Why)：会话行已去掉头像，指示器改为钉在时间列左侧的独立圆点，位置稳定不随标题长度漂移。
+ * 约束与规则 (Rules)：class 语义与探针/测试约定一致（activity-pulse-indicator / activity-unread-badge），不得改名。
+ */
+function ActivityDot({ state }: { state?: LeftRailSession['activityState'] }): React.ReactElement | null {
+  if (state === 'running') {
+    return <span className="activity-pulse-indicator size-2 shrink-0 rounded-full bg-primary" title={t('rail.activityRunning')} data-status="running" />;
+  }
+  if (state === 'unread') {
+    return <span className="activity-unread-badge size-1.5 shrink-0 rounded-full bg-success" title={t('rail.activityUnread')} data-status="unread" />;
+  }
+  return null;
 }
 
-function avatar(profile: Pick<LeftRailProfile, 'name' | 'displayName' | 'avatar'>, size: 'sm' | 'lg' = 'sm'): React.ReactElement {
-  return profile.avatar
-    ? <img className={size === 'lg' ? 'size-8 rounded-md object-cover' : 'size-7 rounded-md object-cover'} src={profile.avatar} alt={profile.displayName || profile.name} />
-    : <span aria-hidden="true" className="flex size-7 items-center justify-center rounded-md bg-primary-subtle text-primary">✦</span>;
+/**
+ * 行内时间。
+ * 【设计意图】优先展示上游已经格式化好的时间串（core 的 syncBotProfiles 产出 lastTime，
+ *   壳层 fetchSessions 产出 time），只有在完全没有字符串时才用本地紧凑格式兜底。
+ * 【防范的历史坑】曾无条件用本地格式覆盖上游时间，导致主工位卡显示的"昨天 22:49"
+ *   被改写成"10/28"，与生产同步产物对不上，也让同一时刻在不同舱位显示成两种时间。
+ * 【约束与规则】时间是纯展示，禁止在这里做 Intl 或时区换算。
+ */
+function RowTime({ timestamp, fallback }: { timestamp?: number; fallback?: string }): React.ReactElement | null {
+  const provided = (fallback || '').trim();
+  const value = provided || formatLeftRailTime(timestamp);
+  if (!value) return null;
+  const iso = timestamp ? new Date(timestamp > 1e11 ? timestamp : timestamp * 1000).toISOString() : undefined;
+  return <time className="shrink-0 font-code text-caption text-muted-foreground tabular-nums" dateTime={iso}>{value}</time>;
 }
 
-function RowTime({ timestamp }: { timestamp?: number }): React.ReactElement | null {
-  const value = formatLeftRailTime(timestamp);
-  return value ? <time className="shrink-0 pl-2 font-code text-micro text-muted-foreground" dateTime={timestamp ? new Date(timestamp > 1e11 ? timestamp : timestamp * 1000).toISOString() : undefined}>{value}</time> : null;
-}
-
+/**
+ * 会话行（用户定案形态）。
+ * 【设计意图】去掉行内头像：微轨与主工位卡已承载 Bot 身份，行内重复且挤压标题；主体=标题，副标题=12px muted 单行截断；
+ *   时间紧凑化后钉右缘，行高 48px 保持触控与扫描节奏。
+ * 【约束与规则】只消费传进来的快照，绝不改写数据管道；点击与右键一律交回壳层。
+ */
 function SessionRow({ session, active, compact, onSelect, onMenu }: {
   session: LeftRailSession;
   active: boolean;
@@ -111,104 +91,290 @@ function SessionRow({ session, active, compact, onSelect, onMenu }: {
   onSelect: () => void;
   onMenu: (x: number, y: number) => void;
 }): React.ReactElement {
-  const preview = snippet(session.preview) || session.title;
-  return <button type="button" className={`group relative flex ${compact ? 'min-h-8' : 'h-12'} w-full items-center rounded-md border px-2 text-left transition-colors ${active ? 'border-primary bg-card-active' : 'border-transparent hover:bg-card-hover'}`} data-session-row="true" data-session-id={session.id} data-session-key={session.id} onClick={onSelect} onContextMenu={(event) => { event.preventDefault(); onMenu(event.clientX, event.clientY); }}>
+  const subtitle = toSnippet(session.preview) || toSnippet(session.title);
+  return <button
+    type="button"
+    className={`session-item group relative flex w-full items-center gap-2 rounded-md border px-2 text-left transition-colors ${compact ? 'min-h-8' : 'min-h-12'} ${active ? 'active border-primary bg-card-active' : 'border-transparent hover:bg-card-hover'}`}
+    data-id={session.id}
+    data-title={session.title}
+    data-bot={session.botName || ''}
+    onClick={onSelect}
+    onContextMenu={(event) => { event.preventDefault(); onMenu(event.clientX, event.clientY); }}
+  >
     {active && <span aria-hidden="true" className="absolute inset-y-2 left-0 w-0.5 rounded-r bg-primary" />}
-    <span className="flex min-w-0 flex-1 flex-col justify-center">
-      <span className={`truncate text-aux ${active ? 'font-semibold text-foreground' : 'text-foreground'}`}>{session.title}</span>
-      {!compact && <span className="truncate text-aux text-muted-foreground">{preview}</span>}
+    <span className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
+      <span className={`truncate text-body leading-tight ${active ? 'font-semibold text-foreground' : 'text-foreground'}`}>{session.title}</span>
+      {!compact && <span className="truncate text-aux leading-tight text-muted-foreground">{subtitle}</span>}
     </span>
-    <RowTime timestamp={session.timestamp} />
-    {!compact && <span className="ml-1 hidden shrink-0 text-muted-foreground group-hover:inline-flex" aria-hidden="true"><MoreHorizontal size={14} /></span>}
+    <ActivityDot state={session.activityState} />
+    <RowTime timestamp={session.timestamp} fallback={session.time} />
   </button>;
 }
 
-/** 左轨只呈现 renderer 提供的快照，所有状态变更经回调返回壳层。 */
-export function LeftRail(props: LeftRailProps): React.ReactElement {
-  const query = props.searchQuery.trim().toLocaleLowerCase();
-  const focusedBot = props.activeFocus.type === 'bot' ? props.activeFocus.botName : props.profileName || 'default';
-  const profile = props.profiles.find((item) => item.name.toLowerCase() === focusedBot.toLowerCase())
-    || props.profiles.find((item) => item.isDefault)
-    || { name: focusedBot, displayName: focusedBot, lastMessage: '', activityState: 'read' as const };
-  const isDefault = profile.name.toLowerCase() === 'default';
-  const visibleSessions = props.sessions.filter((item) => !item.isArchived && (!item.botName || item.botName.toLowerCase() === profile.name.toLowerCase()) && (!query || `${item.title} ${item.preview || ''} ${item.botName || ''}`.toLowerCase().includes(query)));
-  const visibleGroups = props.groups.filter((item) => (isDefault || item.members.some((member) => member.toLowerCase() === profile.name.toLowerCase() || member.toLowerCase() === profile.displayName.toLowerCase())) && (!query || `${item.name} ${item.lastMessage || ''}`.toLowerCase().includes(query)));
-  const agents = props.profiles.filter((item) => !item.isDefault && item.name.toLowerCase() !== 'default' && (!query || `${item.displayName} ${item.name} ${item.description || ''}`.toLowerCase().includes(query)));
-  const sessionActive = (id: string): boolean => props.activeFocus.type === 'session' && props.activeFocus.sessionId === id;
-  const onMenu = (event: React.MouseEvent, callback: (x: number, y: number) => void): void => {
-    event.preventDefault();
-    callback(event.clientX, event.clientY);
-  };
-
-  return <aside id="flux-left-rail" className={`flux-left-rail flex h-full flex-row border-r border-border-subtle bg-sidebar ${props.collapsed ? 'w-[var(--geo-micro-rail)]' : 'w-[var(--rail-w-left,264px)]'}`} data-testid="react-left-rail">
-    <div className="flex w-[var(--geo-micro-rail)] shrink-0 flex-col items-center gap-2 border-r border-border-subtle bg-card py-2">
-      <button type="button" className={`flex size-9 items-center justify-center rounded-md border ${focusedBot.toLowerCase() === 'default' ? 'border-primary bg-primary-subtle' : 'border-border-subtle bg-card'}`} data-profile="default" data-station-profile="default" title={t('rail.enterBotChat', { name: t('rail.defaultAssistant') })} onClick={() => props.onSelectBot('default')} onContextMenu={(event) => onMenu(event, (x, y) => props.onOpenBotMenu('default', x, y))}>
-        {avatar(props.profiles.find((item) => item.isDefault || item.name === 'default') || { name: 'default', displayName: t('rail.defaultAssistant') })}
-      </button>
-      <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-2 overflow-y-auto py-1">
-        {agents.map((agent) => <button key={agent.name} type="button" className={`relative flex size-9 shrink-0 items-center justify-center rounded-md border ${focusedBot.toLowerCase() === agent.name.toLowerCase() ? 'border-primary bg-primary-subtle' : 'border-border-subtle bg-card'}`} data-profile={agent.name} data-station-profile={agent.name} title={t('rail.enterBotChat', { name: agent.displayName })} onClick={() => props.onSelectBot(agent.name)} onContextMenu={(event) => onMenu(event, (x, y) => props.onOpenBotMenu(agent.name, x, y))}>
-          {avatar(agent)}{agent.activityState === 'unread' && <span className="absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-success" data-status="unread" />}
-        </button>)}
-      </div>
-      <div className="flex w-full flex-col items-center gap-2 border-t border-border-subtle pt-2">
-        <button type="button" className="flex size-9 items-center justify-center rounded-md bg-panel text-secondary-foreground" title={t('rail.groups')} onClick={() => props.onSetTab(props.activeRailTab === 'groups' ? 'chats' : 'groups')}><Users size={15} /></button>
-        <button type="button" className="flex size-9 items-center justify-center rounded-md bg-panel text-secondary-foreground" title={t('rail.projects')} onClick={() => props.onSetTab(props.activeRailTab === 'projects' ? 'chats' : 'projects')}><Folder size={15} /></button>
-        <button type="button" className="flex size-9 items-center justify-center rounded-md border border-dashed border-border text-foreground" title={t('rail.newChat')} onClick={props.onNewChat}><Plus size={15} /></button>
-        <button type="button" className="flex size-8 items-center justify-center text-muted-foreground" title={t('titlebar.toggleLeftRail')} onClick={props.onToggleDrawer} aria-label={t('titlebar.toggleLeftRail')}>›</button>
-      </div>
-    </div>
-    {!props.collapsed && <div className="flux-context-drawer flex min-w-0 flex-1 flex-col overflow-hidden bg-sidebar">
-      <div className="flex flex-col gap-2 p-2.5 pb-1.5">
-        <label className="relative block">
-          <Search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" size={13} />
-          <input id="session-search-input" className="h-8 w-full rounded-md border border-border-subtle bg-panel pl-7 pr-2 text-aux text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring" placeholder={t('rail.searchPlaceholder')} value={props.searchQuery} onChange={(event) => props.onSearchChange(event.currentTarget.value)} />
-        </label>
-        <button type="button" className={`rail-primary-agent-card flex min-h-12 items-center gap-2 rounded-lg border px-2 text-left ${props.activeFocus.type === 'bot' && props.activeFocus.botName === profile.name ? 'active border-primary bg-card-active' : 'border-border-subtle bg-panel'}`} data-primary-bot={profile.name} data-profile={profile.name} title={t('rail.enterBotChat', { name: profile.displayName })} onClick={() => props.onSelectBot(profile.name)} onContextMenu={(event) => onMenu(event, (x, y) => props.onOpenBotMenu(profile.name, x, y))}>
-          {avatar(profile, 'lg')}
-          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="truncate text-aux font-semibold text-foreground">{profile.displayName || profile.name}</span>
-            <span className="truncate text-aux text-muted-foreground">{snippet(profile.lastMessage || profile.description) || t('rail.defaultBotSnippet')}</span>
-          </span>
-          <RowTime timestamp={profile.timestamp} />
-        </button>
-      </div>
-      <div className="session-scroll-area min-h-0 flex-1 overflow-y-auto px-1.5 pb-3" id="session-list-container">
-        {(props.activeRailTab === 'chats' || props.activeRailTab === 'groups') && <>
-          {props.error && <div role="alert" className="m-1 rounded-md border border-border-strong bg-panel p-2 text-aux text-foreground">{props.error}</div>}
-          {visibleGroups.length > 0 && <section className="mb-2">
-            <button type="button" id="rail-groups-accordion-trigger" className="flex w-full items-center justify-between px-1.5 py-1 text-overline font-bold uppercase tracking-wide text-muted-foreground" onClick={props.onToggleGroups}><span>{t('rail.groups')} ({visibleGroups.length})</span><span>{props.isGroupsGroupExpanded ? '⌄' : '›'}</span></button>
-            {props.isGroupsGroupExpanded && <div className="flex flex-col gap-0.5">{visibleGroups.map((group) => <div key={group.roomId} className={`rail-group-item group flex min-h-10 items-center rounded-md border px-2 ${props.activeFocus.type === 'group' && props.activeFocus.roomId === group.roomId ? 'active border-primary bg-card-active' : 'border-transparent hover:bg-card-hover'}`} data-room-id={group.roomId}>
-              {props.editingGroupRoomId === group.roomId ? <RenameGroup initialName={group.name} roomId={group.roomId} onConfirm={props.onConfirmGroupRename} onCancel={props.onCancelGroupRename} /> : <>
-                <button type="button" className="flex min-w-0 flex-1 flex-col text-left" onClick={() => props.onSelectGroup(group.roomId)} onContextMenu={(event) => onMenu(event, (x, y) => props.onOpenGroupMenu(group.roomId, group.name, x, y))}>
-                  <span className="truncate text-aux text-foreground">{group.name}<RowTime timestamp={group.updatedAt || group.createdAt} /></span>
-                  <span className="truncate text-aux text-muted-foreground">{snippet(group.lastMessage) || t('rail.groupsMembers', { count: String(group.members.length) })}</span>
-                </button>
-                <button type="button" className="rounded p-1 text-muted-foreground hover:text-foreground" aria-label={t('rail.groupActions')} onClick={() => props.onStartGroupRename(group.roomId)}><MoreHorizontal size={14} /></button>
-              </>}
-            </div>)}</div>}
-          </section>}
-          {props.activeRailTab !== 'groups' && <section className="mb-2">
-            <button type="button" id="rail-sessions-accordion-trigger" className="flex w-full items-center justify-between px-1.5 py-1 text-overline font-bold uppercase tracking-wide text-muted-foreground" onClick={props.onToggleSessions}><span>{t('rail.conversations')} ({visibleSessions.length})</span><span>{props.isSessionsGroupExpanded ? '⌄' : '›'}</span></button>
-            {props.isSessionsGroupExpanded && <div className="flex flex-col gap-0.5">{visibleSessions.length ? visibleSessions.map((session) => <SessionRow key={session.id} session={session} active={sessionActive(session.id)} onSelect={() => props.onSelectSession(session.id, { botName: session.botName } as never)} onMenu={(x, y) => props.onOpenSessionMenu(session.id, session.title, x, y)} />) : <p className="px-2 py-5 text-center text-aux text-muted-foreground">{props.error || t('rail.emptyTitle')}</p>}</div>}
-          </section>}
-        </>}
-        {props.activeRailTab === 'projects' && <section className="flex flex-col gap-1.5 p-1">{props.projects.map((project) => <details key={project.id} className="project-accordion-unit overflow-hidden rounded-lg border border-border-subtle bg-card"><summary className="project-accordion-trigger flex cursor-pointer items-center gap-2 p-2 text-aux font-semibold"><Folder size={14} /><span className="truncate">{project.name}</span><span className="ml-auto text-muted-foreground">{project.sessions?.length || 0}</span></summary><div className="project-accordion-nested flex flex-col gap-0.5 px-2 pb-2">{project.sessions?.map((session) => <SessionRow key={session.id} session={session} compact active={sessionActive(session.id)} onSelect={() => props.onSelectSession(session.id)} onMenu={(x, y) => props.onOpenSessionMenu(session.id, session.title, x, y)} />)}</div></details>)}{props.projects.length === 0 && <p className="p-6 text-center text-aux text-muted-foreground">{t('rail.projectsEmpty')}</p>}</section>}
-      </div>
-      <div className="rail-resize-handle absolute -right-1 top-0 z-50 h-full w-2 cursor-col-resize touch-none" data-rail-handle="left" role="separator" aria-orientation="vertical" tabIndex={0} onPointerDown={props.onResizeStart} />
-    </div>}
-  </aside>;
+function GroupRow({ group, active, editing, onSelect, onMenu, onStartRename, onConfirmRename, onCancelRename }: {
+  group: LeftRailGroupRoom;
+  active: boolean;
+  editing: boolean;
+  onSelect: () => void;
+  onMenu: (x: number, y: number) => void;
+  onStartRename: () => void;
+  onConfirmRename: (name: string) => void;
+  onCancelRename: () => void;
+}): React.ReactElement {
+  if (editing) {
+    return <div className="rail-group-item rail-group-inline-rename-wrap active min-h-10 rounded-md border border-primary bg-card-active px-2" data-room-id={group.roomId}>
+      <RenameGroup initialName={group.name} roomId={group.roomId} onConfirm={onConfirmRename} onCancel={onCancelRename} />
+    </div>;
+  }
+  const subtitle = toSnippet(group.lastMessage) || t('rail.groupsMembers', { count: String(group.members.length) });
+  return <div
+    className={`rail-group-item group flex min-h-10 items-center gap-2 rounded-md border px-2 py-1 ${active ? 'active border-primary bg-card-active' : 'border-transparent hover:bg-card-hover'}`}
+    data-room-id={group.roomId}
+  >
+    <button type="button" className="flex min-w-0 flex-1 flex-col gap-0.5 text-left" onClick={onSelect} onContextMenu={(event) => { event.preventDefault(); onMenu(event.clientX, event.clientY); }}>
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="truncate text-body leading-tight text-foreground">{group.name}</span>
+        <ActivityDot state={group.activityState} />
+        <RowTime timestamp={group.updatedAt || group.createdAt} />
+      </span>
+      <span className="truncate text-aux leading-tight text-muted-foreground">{subtitle}</span>
+    </button>
+    <Button variant="ghost" size="icon" className="size-6 shrink-0 rounded p-0 text-muted-foreground hover:text-foreground" aria-label={t('rail.groupActions')} onClick={onStartRename}>
+      <MoreHorizontal size={14} />
+    </Button>
+  </div>;
 }
 
 function RenameGroup({ initialName, roomId, onConfirm, onCancel }: {
   initialName: string;
   roomId: string;
-  onConfirm: (roomId: string, name: string) => void;
+  onConfirm: (name: string) => void;
   onCancel: () => void;
 }): React.ReactElement {
   const [value, setValue] = React.useState(initialName);
-  return <form className="flex min-w-0 flex-1 items-center gap-1" onSubmit={(event) => { event.preventDefault(); onConfirm(roomId, value.trim()); }}>
-    <input id={`rail-group-rename-input-${roomId}`} className="h-7 min-w-0 flex-1 rounded border border-primary bg-panel px-1.5 text-aux text-foreground outline-none" value={value} onChange={(event) => setValue(event.currentTarget.value)} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); onCancel(); } }} autoFocus />
-    <button type="submit" className="rounded bg-primary px-2 py-1 text-micro text-primary-foreground" title={t('common.confirm')}>{t('common.confirm')}</button>
-    <button type="button" className="rounded px-1 py-1 text-micro text-muted-foreground" title={t('common.cancel')} onClick={onCancel}>{t('common.cancel')}</button>
+  return <form className="flex min-w-0 flex-1 items-center gap-1" onSubmit={(event) => { event.preventDefault(); onConfirm(value.trim()); }}>
+    <Input
+      id={`rail-group-rename-input-${roomId}`}
+      className="rail-group-rename-input h-7 min-w-0 flex-1 rounded-sm border-primary bg-panel px-1.5 text-aux"
+      value={value}
+      onChange={(event) => setValue(event.currentTarget.value)}
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); onCancel(); } }}
+      autoFocus
+    />
+    <Button type="submit" size="sm" className="h-6 rounded-sm px-2 text-micro" title={t('common.confirm')}>{t('common.confirm')}</Button>
+    <Button type="button" variant="ghost" size="sm" className="h-6 rounded-sm px-1 text-micro text-muted-foreground" title={t('common.cancel')} onClick={onCancel}>{t('common.cancel')}</Button>
   </form>;
+}
+
+function ProjectCard({ project, focus, onSelectSession, onSessionMenu }: {
+  project: LeftRailProject;
+  focus: LeftRailModel['currentFocus'];
+  onSelectSession: (session: LeftRailSession) => void;
+  onSessionMenu: (session: LeftRailSession, x: number, y: number) => void;
+}): React.ReactElement {
+  const sessions = project.sessions || [];
+  return <details className="project-accordion-unit overflow-hidden rounded-lg border border-border-subtle bg-card">
+    <summary className="project-accordion-trigger flex cursor-pointer items-center gap-2 p-2 text-body font-semibold text-foreground">
+      <Folder size={14} className="shrink-0 text-muted-foreground" />
+      <span className="truncate">{project.name}</span>
+      <Badge variant="secondary" className="ml-auto">{sessions.length}</Badge>
+    </summary>
+    <div className="project-accordion-nested flex flex-col gap-0.5 px-2 pb-2">
+      {sessions.length > 0
+        ? sessions.map((session) => <SessionRow key={session.id} session={session} compact active={isSessionFocused(focus, session.id)} onSelect={() => onSelectSession(session)} onMenu={(x, y) => onSessionMenu(session, x, y)} />)
+        : <p className="py-2 text-center text-aux text-muted-foreground">{t('rail.projectNoSessions')}</p>}
+    </div>
+  </details>;
+}
+
+/**
+ * 左轨（微轨 + 上下文抽屉）。
+ * 【设计意图】只呈现壳层给出的快照，所有状态变更经回调返回；抽屉内容严格按当前 Agent 隔离。
+ * 【防范的历史坑】模板时代整个左轨每帧 outerHTML 重建，搜索、滚动位置、行内重命名输入全部被连根拔起。
+ * 【约束与规则】主工位卡的数据（lastMessage/lastTime/timestamp/activityState）原样取自 profiles 快照，
+ *   组件内不得再扫描普通会话池，杜绝"旁聊会话覆盖 Bot 卡片"的冒名污染。
+ */
+export function LeftRail(props: LeftRailProps): React.ReactElement {
+  const { model } = props;
+  const focus = model.currentFocus;
+  const profile = model.selectedAgent;
+  const railWidth = props.collapsed ? 'var(--geo-micro-rail, 52px)' : 'var(--rail-w-left, 264px)';
+
+  const openBotMenu = (event: React.MouseEvent, name: string): void => {
+    event.preventDefault();
+    props.onOpenBotMenu(name, event.clientX, event.clientY);
+  };
+
+  return <aside
+    id="flux-left-rail"
+    className={`flux-left-rail relative flex h-full flex-row border-r border-border-subtle bg-sidebar ${props.collapsed ? 'rail-collapsed' : ''}`}
+    style={{ flex: `0 0 ${railWidth}`, width: railWidth, minWidth: railWidth, maxWidth: railWidth }}
+    data-testid="react-left-rail"
+  >
+    <div id="flux-station-rail" className="flex w-[var(--geo-micro-rail,52px)] shrink-0 flex-col items-center gap-2 border-r border-border-subtle bg-card py-2">
+      <Button
+        variant="ghost"
+        size="icon"
+        className={`size-9 rounded-md border ${isBotFocused(focus, model.defaultAgent.name) ? 'border-primary bg-primary-subtle' : 'border-border-subtle bg-card'}`}
+        data-profile="default"
+        data-station-profile="default"
+        title={t('rail.enterBotChat', { name: model.defaultAgent.displayName || t('rail.defaultAssistant') })}
+        onClick={() => props.onSelectBot('default')}
+        onContextMenu={(event) => openBotMenu(event, 'default')}
+      >
+        <Avatar profile={model.defaultAgent} size={30} />
+      </Button>
+      <div className="station-agents-scroll flex min-h-0 w-full flex-1 flex-col items-center gap-2 overflow-y-auto py-1 [scrollbar-width:none]">
+        {model.otherAgents.map((agent) => <Button
+          key={agent.name}
+          variant="ghost"
+          size="icon"
+          className={`station-agent-badge rail-pinned-bot-row relative size-9 shrink-0 rounded-md border p-0 ${isBotFocused(focus, agent.name) ? 'active border-primary bg-primary-subtle' : 'border-border-subtle bg-card'}`}
+          data-profile={agent.name}
+          data-station-profile={agent.name}
+          title={t('rail.enterBotChat', { name: agent.displayName || agent.name })}
+          onClick={() => props.onSelectBot(agent.name)}
+          onContextMenu={(event) => openBotMenu(event, agent.name)}
+        >
+          <Avatar profile={agent} size={30} />
+          {agent.activityState === 'running' && <span className="activity-pulse-indicator absolute -right-0.5 -top-0.5 size-2 rounded-full bg-primary" title={t('rail.activityRunning')} data-status="running" />}
+          {agent.activityState === 'unread' && <span className="activity-unread-badge absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-success" title={t('rail.activityUnread')} data-status="unread" />}
+        </Button>)}
+      </div>
+      <div className="flex w-full flex-col items-center gap-2 border-t border-border-subtle pt-2">
+        <Button id="rail-station-groups-btn" variant="ghost" size="icon" className="relative size-9 rounded-md bg-panel text-secondary-foreground" title={t('rail.groups')} onClick={() => props.onSetTab('groups')}>
+          <Users size={15} />
+          {model.hasRunningGroup && <span className="activity-pulse-indicator absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-primary" data-status="running" />}
+          {!model.hasRunningGroup && model.hasUnreadGroup && <span className="activity-unread-badge absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-success" data-status="unread" />}
+        </Button>
+        <Button id="rail-station-projects-btn" variant="ghost" size="icon" className="size-9 rounded-md bg-panel text-secondary-foreground" title={t('rail.projects')} onClick={() => props.onSetTab('projects')}>
+          <Folder size={15} />
+        </Button>
+        <Button id="new-chat-btn" variant="ghost" size="icon" className="size-9 rounded-md border border-dashed border-border bg-card text-foreground" title={t('rail.newChat')} onClick={props.onNewChat}>
+          <Plus size={15} />
+        </Button>
+        <Button variant="ghost" size="icon" className="size-8 rounded-md p-0 text-muted-foreground" title={t('titlebar.toggleLeftRail')} aria-label={t('titlebar.toggleLeftRail')} onClick={props.onToggleDrawer}>
+          <ChevronLeft size={14} />
+        </Button>
+      </div>
+    </div>
+
+    {!props.collapsed && <div className="flux-context-drawer flex min-w-0 flex-1 flex-col overflow-hidden bg-sidebar">
+      <div className="flex flex-col gap-2 p-2.5 pb-1.5">
+        <label className="relative block">
+          <Search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" size={13} />
+          <Input
+            id="session-search-input"
+            className="h-8 rounded-md border border-border-subtle bg-panel pl-7 pr-2 text-aux"
+            placeholder={t('rail.searchPlaceholder')}
+            value={props.searchQuery}
+            onChange={(event) => props.onSearchChange(event.currentTarget.value)}
+          />
+        </label>
+        <Button
+          variant="ghost"
+          className={`rail-pinned-bot-row rail-primary-agent-card flex min-h-12 items-center justify-start gap-2 rounded-lg border px-2 text-left ${isBotFocused(focus, profile.name) ? 'active border-primary bg-card-active' : 'border-border-subtle bg-panel'}`}
+          data-primary-bot={profile.name}
+          data-profile={profile.name}
+          title={t('rail.enterBotChat', { name: profile.displayName || profile.name })}
+          onClick={() => props.onSelectBot(profile.name)}
+          onContextMenu={(event) => openBotMenu(event, profile.name)}
+        >
+          <Avatar profile={profile} size={32} />
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="truncate text-aux font-semibold text-foreground">{profile.displayName || profile.name}</span>
+            <span className="truncate text-aux text-muted-foreground">{toSnippet(profile.lastMessage || profile.description) || t('rail.defaultBotSnippet')}</span>
+          </span>
+          <ActivityDot state={profile.activityState} />
+          <RowTime timestamp={profile.timestamp} fallback={profile.lastTime} />
+        </Button>
+      </div>
+
+      {model.showChatDeck && <div className="session-scroll-area min-h-0 flex-1 overflow-y-auto px-1.5 pb-3" id="session-list-container">
+        {model.error && <div id="session-list-error" role="alert" className="m-1 rounded-md border border-border-strong bg-panel p-2 text-aux text-foreground">{model.error}</div>}
+
+        {model.visibleGroups.length > 0 && <section className="mb-2">
+          <button type="button" id="rail-groups-accordion-trigger" className="flex w-full items-center justify-between px-1.5 py-1 text-overline font-bold uppercase tracking-wide text-muted-foreground" onClick={props.onToggleGroups}>
+            <span className="flex items-center gap-1.5"><Users size={12} />{t('rail.groups')} ({model.visibleGroups.length})</span>
+            <span aria-hidden="true">{model.isGroupsOpen ? '⌄' : '›'}</span>
+          </button>
+          <div id="rail-groups-nested-list" className="flex flex-col gap-0.5" style={{ display: model.isGroupsOpen ? 'flex' : 'none' }}>
+            {model.visibleGroups.map((group) => <GroupRow
+              key={group.roomId}
+              group={group}
+              active={isGroupFocused(focus, group.roomId)}
+              editing={props.editingGroupRoomId === group.roomId}
+              onSelect={() => props.onSelectGroup(group.roomId)}
+              onMenu={(x, y) => props.onOpenGroupMenu(group.roomId, group.name, x, y)}
+              onStartRename={() => props.onStartGroupRename(group.roomId)}
+              onConfirmRename={(name) => props.onConfirmGroupRename(group.roomId, name)}
+              onCancelRename={props.onCancelGroupRename}
+            />)}
+          </div>
+        </section>}
+
+        <section className="mb-2">
+          <button type="button" id="rail-sessions-accordion-trigger" className="flex w-full items-center justify-between px-1.5 py-1 text-overline font-bold uppercase tracking-wide text-muted-foreground" onClick={props.onToggleSessions}>
+            <span className="flex items-center gap-1.5"><MessageSquare size={12} />{t('rail.conversations')} ({model.activeSessions.length})</span>
+            <span aria-hidden="true">{model.isSessionsOpen ? '⌄' : '›'}</span>
+          </button>
+          <div id="rail-sessions-nested-list" className="flex flex-col gap-0.5" style={{ display: model.isSessionsOpen ? 'flex' : 'none' }}>
+            {model.activeSessions.length > 0
+              ? model.activeSessions.map((session) => <SessionRow
+                key={session.id}
+                session={session}
+                active={isSessionFocused(focus, session.id)}
+                onSelect={() => props.onSelectSession(session.id, session.botName)}
+                onMenu={(x, y) => props.onOpenSessionMenu(session.id, session.title, x, y)}
+              />)
+              : <div className="flex flex-col items-center gap-1 px-2 py-5 text-center">
+                <span className="text-aux text-muted-foreground">{model.error ? t('rail.errorTitle') : t('rail.emptyTitle')}</span>
+                <span className="text-caption text-faint">{model.error ? t('rail.errorSub') : t('rail.emptySub')}</span>
+              </div>}
+          </div>
+        </section>
+
+        {model.archivedSessions.length > 0 && <section>
+          <div className="px-1.5 pb-0.5 pt-2 text-overline font-bold uppercase tracking-wide text-muted-foreground">{t('rail.archived')} ({model.archivedSessions.length})</div>
+          <div className="flex flex-col gap-0.5 opacity-65">
+            {model.archivedSessions.map((session) => <button
+              key={session.id}
+              type="button"
+              className={`session-item flex min-h-8 items-center rounded-md border px-2 text-left ${isSessionFocused(focus, session.id) ? 'active border-primary bg-card-active' : 'border-transparent hover:bg-card-hover'}`}
+              data-id={session.id}
+              data-title={session.title}
+              data-bot={session.botName || ''}
+              onClick={() => props.onSelectSession(session.id, session.botName)}
+              onContextMenu={(event) => { event.preventDefault(); props.onOpenSessionMenu(session.id, session.title, event.clientX, event.clientY); }}
+            >
+              <span className="truncate text-aux text-muted-foreground">{session.title}</span>
+            </button>)}
+          </div>
+        </section>}
+      </div>}
+
+      {model.showProjectsDeck && <div id="rail-projects-deck" className="flex flex-1 flex-col gap-1.5 overflow-y-auto px-2 py-1.5">
+        <div className="px-1.5 pb-1 text-overline font-bold uppercase tracking-wide text-muted-foreground">{t('rail.projects')}</div>
+        {model.visibleProjects.length > 0
+          ? model.visibleProjects.map((project) => <ProjectCard
+            key={project.id}
+            project={project}
+            focus={focus}
+            onSelectSession={(session) => props.onSelectSession(session.id, session.botName)}
+            onSessionMenu={(session, x, y) => props.onOpenSessionMenu(session.id, session.title, x, y)}
+          />)
+          : <div className="flex flex-col items-center gap-1 px-3 py-8 text-center">
+            <Folder size={24} className="text-muted-foreground" />
+            <span className="text-body text-muted-foreground">{t('rail.projectsEmpty')}</span>
+            <span className="text-caption text-faint">{t('rail.projectsEmptySub')}</span>
+          </div>}
+      </div>}
+
+    </div>}
+
+    {/* 拖拽把手挂在 aside 直属层级：抽屉自身 overflow: hidden，放在抽屉内会被裁掉，
+        导致命中测试落到抽屉上、物理拖拽完全失效（本次实测确认）。 */}
+    {!props.collapsed && <div className="rail-resize-handle absolute -right-1 top-0 z-50 h-full w-2 cursor-col-resize touch-none" data-rail-handle="left" role="separator" aria-orientation="vertical" tabIndex={0} title={t('rail.resizeHandleTitle')} onPointerDown={props.onResizeStart} />}
+  </aside>;
 }

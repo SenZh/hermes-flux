@@ -4,7 +4,23 @@ export * from './tokens/types.js';
 export * from './tokens/skins.js';
 export * from './i18n/index.js';
 export * from './components/Titlebar/Titlebar.js';
-export * from './components/LeftRail/LeftRail.js';
+export {
+  buildLeftRailModel,
+  toSnippet,
+  formatLeftRailTime,
+  isSessionFocused,
+  isGroupFocused,
+  isBotFocused,
+  type LeftRailTab,
+  type LeftRailModel,
+  type LeftRailModelInput,
+  type LeftRailSession,
+  type LeftRailGroupRoom,
+  type LeftRailProject,
+  type LeftRailProfile,
+  type LeftRailActiveFocus,
+  type ActivityState as LeftRailActivityState,
+} from './components-react/leftRailModel.js';
 export * from './components/MiddlePod/MiddlePod.js';
 export * from './components/InputDock/InputDock.js';
 export * from './components/InspectionPod/InspectionPod.js';
@@ -25,5 +41,8 @@ export * from './utils/imagePreprocessor.js';
 export * from './components-react/primitives/index.js';
 export { StatusBar, type StatusBarProps } from './components-react/StatusBar.js';
 export { Titlebar, type TitlebarProps as ReactTitlebarProps } from './components-react/Titlebar.js';
-export { mountStatusBar, mountTitlebar, type StatusBarSnapshot, type TitlebarSnapshot } from './components-react/mount-shell-components.js';
+export { LeftRail as ReactLeftRail, type LeftRailProps as ReactLeftRailProps } from './components-react/LeftRail.js';
+export { renderLeftRailHtml, type LeftRailHtmlSnapshot } from './components-react/leftRailStaticRender.js';
+export { renderBotAvatar, escapeHtml } from './utils/botAvatar.js';
+export { mountStatusBar, mountTitlebar, mountLeftRail, type StatusBarSnapshot, type TitlebarSnapshot, type LeftRailSnapshot, type LeftRailActions } from './components-react/mount-shell-components.js';
 export { getStatusBarSnapshot, getTitlebarSnapshot } from './components-react/mount-shell-components.js';

@@ -178,6 +178,7 @@ export const zhDict = {
   // Status Indicators
   'rail.activityRunning': '正在生成回答...',
   'rail.activityUnread': '有新回答未读',
+  'rail.resizeHandleTitle': '拖拽调整左侧栏宽度',
 
   // Tool Packages
   'tool.executingSummary': '正在执行 ({running}/{total}) · 已完成 {completed}',
@@ -538,6 +539,7 @@ export const enDict: Record<I18nKey, string> = {
   // Status Indicators
   'rail.activityRunning': 'Generating response...',
   'rail.activityUnread': 'Unread response',
+  'rail.resizeHandleTitle': 'Drag to resize the left rail',
 
   // Tool Packages
   'tool.executingSummary': 'Running ({running}/{total}) · {completed} completed',

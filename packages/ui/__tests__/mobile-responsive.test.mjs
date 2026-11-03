@@ -13,8 +13,51 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { renderTitlebar } from '../dist/components/Titlebar/Titlebar.js';
-import { renderLeftRail } from '../dist/components/LeftRail/LeftRail.js';
+import { LeftRail } from '../dist/components-react/LeftRail.js';
+import { buildLeftRailModel } from '../dist/components-react/leftRailModel.js';
+
+/** 左轨 React 岛测试渲染入口，语义与旧 renderLeftRail(props) 一一对应。 */
+function renderLeftRail(props = {}) {
+  const noop = () => {};
+  return renderToStaticMarkup(React.createElement(LeftRail, {
+    model: buildLeftRailModel({
+      activeSessionId: props.activeSessionId || '',
+      activeFocus: props.activeFocus,
+      sessions: props.sessions || [],
+      profileName: props.profileName || 'default',
+      profiles: props.profiles || [],
+      groups: props.groups || [],
+      projects: props.projects || [],
+      activeRailTab: props.activeRailTab || 'chats',
+      searchQuery: props.searchQuery || '',
+      isSessionsGroupExpanded: props.isSessionsGroupExpanded,
+      isGroupsGroupExpanded: props.isGroupsGroupExpanded,
+      error: props.error,
+    }),
+    collapsed: Boolean(props.collapsed),
+    searchQuery: props.searchQuery || '',
+    editingGroupRoomId: props.editingGroupRoomId,
+    onToggleDrawer: noop,
+    onSelectSession: noop,
+    onSelectBot: noop,
+    onSelectGroup: noop,
+    onOpenSessionMenu: noop,
+    onOpenBotMenu: noop,
+    onOpenGroupMenu: noop,
+    onSearchChange: noop,
+    onNewChat: noop,
+    onSetTab: noop,
+    onToggleSessions: noop,
+    onToggleGroups: noop,
+    onStartGroupRename: noop,
+    onConfirmGroupRename: noop,
+    onCancelGroupRename: noop,
+    onResizeStart: noop,
+  }));
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -133,7 +176,7 @@ test('Mobile & Cross-Platform Responsive Layout Invariants', async (t) => {
     });
 
     assert.ok(collapsedHtml.includes('rail-collapsed'), '折叠态必须带有 rail-collapsed 类');
-    assert.match(collapsedHtml, /display:\s*none/, '折叠态必须包含 display: none 样式');
-    assert.match(collapsedHtml, /width:\s*0px/, '折叠态必须宽度收敛为 0px');
+    assert.ok(collapsedHtml.includes('var(--geo-micro-rail, 52px)'), '折叠态总宽必须收敛到 52px 微轨');
+    assert.equal(collapsedHtml.includes('flux-context-drawer'), false, '折叠态抽屉整体不渲染，不留空占位');
   });
 });

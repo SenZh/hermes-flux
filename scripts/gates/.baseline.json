@@ -45,8 +45,6 @@
     "theme/no-hardcoded-color::packages/ui/src/components/InspectionPod/InspectionPod.ts::552bcdf42f4c": 1,
     "theme/no-hardcoded-color::packages/ui/src/components/InspectionPod/InspectionPod.ts::a99943c9184e": 1,
     "theme/no-hardcoded-color::packages/ui/src/components/InspectionPod/InspectionPod.ts::560626023c76": 1,
-    "i18n/no-hardcoded-text::packages/ui/src/components/LeftRail/LeftRail.ts::e106fb0436ed": 1,
-    "i18n/no-hardcoded-text::packages/ui/src/components/LeftRail/LeftRail.ts::823d1f53527f": 1,
     "theme/no-hardcoded-color::packages/ui/src/components/MiddlePod/MiddlePod.ts::c30c02df5295": 1,
     "theme/no-hardcoded-color::packages/ui/src/components/MiddlePod/MiddlePod.ts::31fe21637238": 1,
     "theme/no-hardcoded-color::packages/ui/src/components/MiddlePod/MiddlePod.ts::8af8b1dfdba1": 1,

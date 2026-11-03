@@ -8,7 +8,25 @@ import {
   normalizeTimestamp,
   extractMessagePreview,
 } from '../../../../packages/core/dist/index.js';
-import { renderLeftRail, renderTitlebar } from '../../../../packages/ui/dist/index.js';
+import { renderLeftRailHtml, renderTitlebar } from '../../../../packages/ui/dist/index.js';
+
+/** 左轨静态渲染入口（React 实现），语义与旧 renderLeftRail(props) 一一对应。 */
+function renderLeftRail(props = {}) {
+  return renderLeftRailHtml({
+    activeSessionId: props.activeSessionId || '',
+    activeFocus: props.activeFocus,
+    sessions: props.sessions || [],
+    profileName: props.profileName || 'default',
+    profiles: props.profiles || [],
+    groups: props.groups || [],
+    projects: props.projects || [],
+    activeRailTab: props.activeRailTab || 'chats',
+    searchQuery: props.searchQuery || '',
+    error: props.error,
+    collapsed: Boolean(props.collapsed),
+    editingGroupRoomId: props.editingGroupRoomId,
+  });
+}
 
 /**
  * 专职 Bot 主工位（Forever Chat）与普通会话池物理隔离及时间对齐单元测试
@@ -285,14 +303,21 @@ test('Bot Primary Station & Session Isolation Invariants', async (t) => {
       gatewayLatencyMs: 12,
     });
 
-    // 3. Assert
+    // 3. Assert：主工位卡区间以抽屉内下一个区块（群聊或会话手风琴）为界
     const cardStartIndex = html.indexOf('rail-primary-agent-card');
-    const cardEndIndex = html.indexOf('<!-- 群聊会议室组', cardStartIndex);
-    const cardHtml = html.slice(cardStartIndex, cardEndIndex !== -1 ? cardEndIndex : cardStartIndex + 3000);
+    assert.ok(cardStartIndex > -1, '必须渲染主工位卡');
+    const boundaries = ['rail-groups-accordion-trigger', 'rail-sessions-accordion-trigger']
+      .map((marker) => html.indexOf(marker, cardStartIndex))
+      .filter((index) => index > -1);
+    const cardEndIndex = boundaries.length > 0 ? Math.min(...boundaries) : html.length;
+    const cardHtml = html.slice(cardStartIndex, cardEndIndex);
 
     assert.ok(cardHtml.includes('已收到 Flux E2E 第 2 轮自动化验证消息。'), '主卡片副标题必须匹配生产同步产物');
     assert.ok(cardHtml.includes('昨天 22:49'), '主卡片时间必须匹配生产同步产物「昨天 22:49」');
-    assert.equal(cardHtml.includes('23:54'), false, '主卡片绝对未被普通会话池污染');
+    // 主工位卡的时间只来自 profile 快照；普通会话的 23:54 若出现在卡片区间即为污染
+    const cardTime = /<time[^>]*>([^<]*)<\/time>/.exec(cardHtml);
+    assert.ok(cardTime, '主卡片必须渲染时间元素');
+    assert.equal(cardTime[1].includes('23:54'), false, '主卡片时间绝对未被普通会话池覆盖');
     assert.equal(cardHtml.includes('奥特曼反差猫'), false, '主卡片绝对未包含普通会话标题');
   });
 });

@@ -7,20 +7,21 @@ export interface TitlebarProps {
   title: string;
   isMaximized: boolean;
   gatewayConnected: boolean;
-  gatewayLatencyMs: number;
-  profileName?: string;
-  profiles?: Array<{ name: string; displayName?: string }>;
   onMinimize: () => void;
   onMaximize: () => void;
   onClose: () => void;
   onToggleLeftRail: () => void;
   onToggleInspector: () => void;
   onOpenSettings: () => void;
-  onSwitchProfile: (profileName: string) => void;
   onToggleTheme: () => void;
 }
 
-export function Titlebar({ platform, title, isMaximized, gatewayConnected, profileName = '', profiles = [], onMinimize, onMaximize, onClose, onToggleLeftRail, onToggleInspector, onOpenSettings, onSwitchProfile, onToggleTheme }: TitlebarProps): React.ReactElement {
+/**
+ * 设计意图 (Why)：顶栏只承担窗口控制、全局开关与会话标题；身份切换入口收在左轨专职 Bot 卡片与设置弹窗内。
+ * 防范的历史坑 (Pitfall)：顶栏曾同时挂 profile 下拉与状态栏延迟读数，出现三处身份/延迟真值面互相漂移。
+ * 约束与规则 (Rules)：本组件不持有任何 profile 状态，也不再渲染第二份网关延迟数字。
+ */
+export function Titlebar({ platform, title, isMaximized, gatewayConnected, onMinimize, onMaximize, onClose, onToggleLeftRail, onToggleInspector, onOpenSettings, onToggleTheme }: TitlebarProps): React.ReactElement {
   const isWindows = platform === 'windows';
   return <header className="flux-titlebar" data-testid="react-titlebar">
     <div className="titlebar-left">
@@ -33,13 +34,10 @@ export function Titlebar({ platform, title, isMaximized, gatewayConnected, profi
     </div>
       <div className="titlebar-center"><span className="session-live-pulse" data-connected={gatewayConnected} /><span className="titlebar-session-title">{title}</span></div>
     <div className="titlebar-right">
-      <span className="titlebar-connection-indicator" title={gatewayConnected ? t('titlebar.online') : t('titlebar.offline')} />
+      <span className="titlebar-connection-indicator" data-connected={gatewayConnected} title={gatewayConnected ? t('titlebar.online') : t('titlebar.offline')} />
       <button id="titlebar-theme-toggle-btn" className="icon-btn" title={t('titlebar.toggleTheme')} type="button" onClick={onToggleTheme}><Sun size={14} /></button>
       <button id="btn-open-settings" className="icon-btn" title={t('titlebar.settings')} type="button" onClick={onOpenSettings}><Settings2 size={14} /></button>
       <button id="toggle-inspector-btn" className="icon-btn" title={t('titlebar.toggleInspector')} type="button" onClick={onToggleInspector}><PanelRight size={14} /></button>
-      {onSwitchProfile && profiles.length > 0 && <select className="titlebar-profile-select" aria-label={t('titlebar.switchProfile')} value={profileName} onChange={(event) => onSwitchProfile(event.currentTarget.value)}>
-        {profiles.map((profile) => <option key={profile.name} value={profile.name}>{profile.displayName || profile.name}</option>)}
-      </select>}
       {isWindows && <div className="win-caption-controls">
         <button className="win-cap-btn" id="win-min-btn" title={t('titlebar.minimize')} type="button" onClick={onMinimize}><Minus size={12} /></button>
         <button className="win-cap-btn" id="win-max-btn" title={isMaximized ? t('titlebar.restore') : t('titlebar.maximize')} type="button" onClick={onMaximize}><Square size={11} /></button>

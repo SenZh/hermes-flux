@@ -2,12 +2,32 @@
  * Tailwind v4 基座入口（PR-3a）。
  * 设计意图(Why)：43 槽皮肤变量经 @theme inline 映射为 Tailwind 工具色板，React 组件自动换肤。
  * 防范的历史坑(Pitfall)：完整 preflight 会把未迁移的存量模板（占全 UI 99%）的 h1 字号/margin/border 等
- *   基础样式整体重置，违反"新基座不得触碰遗留视觉"的共存不变量，故只 import utilities 不 import preflight；
+ *   基础样式整体重置，违反"新基座不得触碰遗留视觉"的共存不变量，故只 import theme 与 utilities，不 import preflight；
  *   --duration-* 与 :root 节奏层同名会造成隐式覆盖，移出 @theme。
  * 约束与规则(Rules)：皮肤变量名必须与 skins.ts SLOT_IDS 同源，此文件禁止出现任何色值字面量；
  *   已知取舍：无 preflight 则无全局 border-box，React 岛屿内如需 border-box 由组件自带工具类逐元素声明，禁止全局补。
+ *   扫描域只包含 React 组件目录与入口样式，禁止宽 glob 扫全仓（会让存量模板的任意值 class 混进产物）。
  */
-@import "tailwindcss/utilities";
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities" source(none);
+
+/* 只扫 React 组件目录。
+   设计意图(Why)：Tailwind v4 默认自动检测会扫全仓，把 docs/prototypes 里的任意值 class
+     （w-[220px]、text-[22px] 等）一并编进生产产物，违反"基座只服务 React 岛"的边界。
+   约束与规则(Rules)：路径相对本文件；新增扫描面必须显式列出具体目录，禁止用 `**` 宽 glob 扫全仓。 */
+@source "./components-react/**/*.tsx";
+
+/*
+ * 间距尺度说明。
+ * 设计意图(Why)：默认主题层提供 --spacing 基数（4px），gap-*/px-*/h-*/size-* 才有人生成；
+ *   只 import utilities 会让这些工具类整体缺失（实测 gap-2/size-9 全部为空，行高与间距全部塌陷）。
+ * 约束与规则(Rules)：间距基数锁定 4px；需要新档位只改这里，禁止组件内写 arbitrary px 绕过。
+ */
+@theme inline {
+  --leading-tight: 1.25;
+  --leading-normal: 1.6;
+  --tracking-wide: 0.025em;
+}
 
 @theme inline {
   --color-background: var(--background);
@@ -23,6 +43,7 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+  --color-faint: var(--faint);
   --color-accent: var(--primary-subtle);
   --color-accent-foreground: var(--foreground);
   --color-primary: var(--primary);
@@ -52,4 +73,47 @@
   --text-overline: 10px;
   --text-micro: 9px;
   /* 时长与缓动不在此定义：--duration-fast/--duration-normal 由 :root 节奏层（styles.css）单一来源持有，同名定义会造成隐式覆盖 */
+}
+
+/*
+ * React 岛控件基线（preflight 的最小替代）。
+ *
+ * 设计意图(Why)：本入口刻意不引入 preflight（它会重置未迁移模板的 h1/margin/border），
+ *   但原生 <button>/<input> 因此保留 UA 默认的白色背景与边框，React 岛内的会话行、
+ *   群聊行、手风琴按钮全部渲染成白方块（本次真实截图取证确认）。
+ * 防范的历史坑(Pitfall)：只在个别组件上覆盖背景，会让"新写一个按钮又变白"反复发生；
+ *   把基线写在 layer 之外又会压过 utilities（实测搜索框丢失面板底色与边框）。
+ * 约束与规则(Rules)：必须落在 base 层，让组件自身的 utility 永远赢；
+ *   作用域严格限定在 .flux-left-rail 宿主内，绝不声明到全局元素选择器。
+ */
+@layer base {
+  .flux-left-rail button,
+  .flux-left-rail input,
+  .flux-left-rail textarea,
+  .flux-left-rail select {
+    font: inherit;
+    color: inherit;
+    letter-spacing: inherit;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    margin: 0;
+  }
+
+  .flux-left-rail button {
+    cursor: pointer;
+    text-align: inherit;
+    appearance: none;
+  }
+
+  .flux-left-rail :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  .flux-left-rail *,
+  .flux-left-rail *::before,
+  .flux-left-rail *::after {
+    box-sizing: border-box;
+  }
 }

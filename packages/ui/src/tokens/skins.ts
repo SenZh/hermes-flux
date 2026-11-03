@@ -574,7 +574,17 @@ export const SKINS: Record<string, SkinDefinition> = {
 export const LEGACY_VAR_NAMES = ["--bg-window","--bg-card","--bg-card-hover","--bg-card-active","--bg-elevated","--bg-rail","--bg-panel","--bg-input","--bg-code","--bg-backdrop","--text-main","--text-secondary","--text-muted","--text-faint","--accent","--accent-hover","--accent-dim","--accent-glow","--accent-subtle","--accent-border","--accent-text","--jade-pulse","--jade-glow","--danger-color","--border-medium","--badge-ts-bg","--badge-ts-text","--badge-ts-border","--badge-js-bg","--badge-js-text","--badge-js-border","--badge-py-bg","--badge-py-text","--badge-py-border","--badge-html-bg","--badge-html-text","--badge-html-border","--badge-css-bg","--badge-css-text","--badge-css-border"] as const;
 export const SKIN_ALIASES: Record<string, string> = {"suet-jade":"jade-white"};
 export type SkinId = 'obsidian-gold' | 'suet-jade' | 'jade-white' | 'warm-paper' | 'ayu-light' | 'cyber-matrix';
-const SKIN_IDS: readonly SkinId[] = ['obsidian-gold', 'suet-jade', 'jade-white', 'warm-paper', 'ayu-light', 'cyber-matrix'];
+
+/**
+ * 皮肤 ID 全集。
+ * 【设计意图】从 SKINS 与 SKIN_ALIASES 派生，杜绝"第三份手写注册表"漂移：
+ *   新增皮肤只要进 SKINS 或 SKIN_ALIASES，解析、校验、切换三条路径自动同时生效。
+ * 【防范的历史坑】此处曾是手写字面量数组，与 SKINS 各自演化，导致 suet-jade 幽灵别名长期对不上。
+ */
+export const SKIN_IDS: readonly SkinId[] = Object.freeze([
+  ...Object.keys(SKINS),
+  ...Object.keys(SKIN_ALIASES),
+]) as readonly SkinId[];
 
 export function resolveSkinId(savedTheme: string | null | undefined): SkinId {
   if (!savedTheme) return 'obsidian-gold';

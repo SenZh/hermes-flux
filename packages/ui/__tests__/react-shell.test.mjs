@@ -9,44 +9,45 @@ import { StatusBar } from '../dist/components-react/StatusBar.js';
 import { createShellMountUpdater, getStatusBarSnapshot, getTitlebarSnapshot } from '../dist/components-react/mount-shell-components.js';
 import { resolveSkinId } from '../dist/tokens/skins.js';
 
-test('Titlebar renders platform controls, profile selector and inspector action', () => {
+test('Titlebar renders window controls, global toggles and no profile switcher', () => {
   const calls = [];
   const markup = renderToStaticMarkup(React.createElement(Titlebar, {
-    platform: 'macos', title: 'Session', isMaximized: false, gatewayConnected: true, gatewayLatencyMs: 18,
-    profileName: 'aura', profiles: [{ name: 'aura', displayName: 'Aura' }],
+    platform: 'macos', title: 'Session', isMaximized: false, gatewayConnected: true,
     onMinimize: () => calls.push('minimize'), onMaximize: () => calls.push('maximize'), onClose: () => calls.push('close'),
     onToggleLeftRail: () => calls.push('rail'), onToggleInspector: () => calls.push('inspector'),
-    onOpenSettings: () => calls.push('settings'), onSwitchProfile: (name) => calls.push(name), onToggleTheme: () => calls.push('theme'),
+    onOpenSettings: () => calls.push('settings'), onToggleTheme: () => calls.push('theme'),
   }));
   assert.match(markup, /traffic-close/);
-  assert.match(markup, /titlebar-profile-select/);
+  assert.match(markup, /data-testid="react-titlebar"/);
   assert.match(markup, /toggle-inspector-btn/);
-  assert.match(markup, /title="折叠\/展开检查舱/);
+  // 产品裁决：顶栏不再承载身份切换与第二份延迟读数
+  assert.doesNotMatch(markup, /titlebar-profile-select/);
   assert.doesNotMatch(markup, /titlebar-latency-pill|18ms/);
   assert.deepEqual(calls, []);
 });
 
 test('Titlebar omits macOS traffic controls on Windows', () => {
   const markup = renderToStaticMarkup(React.createElement(Titlebar, {
-    platform: 'windows', title: 'Session', isMaximized: false, gatewayConnected: false, gatewayLatencyMs: 0,
-    onMinimize() {}, onMaximize() {}, onClose() {}, onToggleLeftRail() {}, onToggleInspector() {}, onOpenSettings() {}, onSwitchProfile() {}, onToggleTheme() {},
+    platform: 'windows', title: 'Session', isMaximized: false, gatewayConnected: false,
+    onMinimize() {}, onMaximize() {}, onClose() {}, onToggleLeftRail() {}, onToggleInspector() {}, onOpenSettings() {}, onToggleTheme() {},
   }));
   assert.match(markup, /win-caption-controls/);
   assert.doesNotMatch(markup, /traffic-close/);
 });
 
-test('StatusBar renders the state label and keeps latency in the status area', () => {
+test('StatusBar renders the state via data-status and keeps latency in the status area', () => {
   const markup = renderToStaticMarkup(React.createElement(StatusBar, {
     connectionStatus: 'connected', latencyMs: 27, serverLocation: 'Local', onClickStatus() {},
   }));
   assert.match(markup, /status-bar-server-node/);
   assert.match(markup, /27ms/);
-  assert.match(markup, /已连接/);
+  // 连接态断言落在 data-status 上：文案随语言变化，属性不会
+  assert.match(markup, /data-status="connected"/);
 });
 
-test('shell snapshot readers preserve current platform, profile, connection and latency values', () => {
-  assert.deepEqual(getTitlebarSnapshot({ platform: 'macos', title: 'Session', isMaximized: false, gatewayConnected: true, gatewayLatencyMs: 18, profileName: 'aura', profiles: [{ name: 'aura' }] }), {
-    platform: 'macos', title: 'Session', isMaximized: false, gatewayConnected: true, gatewayLatencyMs: 18, profileName: 'aura', profiles: [{ name: 'aura' }],
+test('shell snapshot readers preserve platform, title, connection and status latency values', () => {
+  assert.deepEqual(getTitlebarSnapshot({ platform: 'macos', title: 'Session', isMaximized: false, gatewayConnected: true }), {
+    platform: 'macos', title: 'Session', isMaximized: false, gatewayConnected: true,
   });
   assert.deepEqual(getStatusBarSnapshot({ connectionStatus: 'connected', latencyMs: 18 }), { connectionStatus: 'connected', latencyMs: 18 });
 });

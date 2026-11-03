@@ -112,18 +112,22 @@ test('与 git HEAD 双向对账：旧名逐值等 + 新名按来源符号精确�
   }
 });
 
-test('改名锚点：幽灵旧名在三个组件文件清零，新槽名计数=7/2/1（波③舱重写时随删）', () => {
+test('改名锚点：幽灵旧名在组件文件清零，新槽名计数稳定（波③舱重写时随删）', () => {
   const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
   const dock = read('packages/ui/src/components/InputDock/InputDock.ts');
   const mid = read('packages/ui/src/components/MiddlePod/MiddlePod.ts');
-  const rail = read('packages/ui/src/components/LeftRail/LeftRail.ts');
-  for (const [name, src] of [['--bg-hover', dock], ['--bg-surface-1', dock], ['--bg-surface-1', mid], ['--bg-main', rail]]) {
+  // 左舵迁 React 后模板文件已删除，锚点改到新组件与其视图模型
+  const railReact = read('packages/ui/src/components-react/LeftRail.tsx');
+  const railModel = read('packages/ui/src/components-react/leftRailModel.ts');
+  for (const [name, src] of [['--bg-hover', dock], ['--bg-surface-1', dock], ['--bg-surface-1', mid], ['--bg-main', railReact], ['--bg-main', railModel]]) {
     assert.equal((src.match(new RegExp('var\\(' + name, 'g')) ?? []).length, 0, `幽灵旧名 ${name} 复活`);
   }
   assert.equal((dock.match(/var\(--card-hover\)/g) ?? []).length, 3);
   assert.equal((dock.match(/var\(--popover\)/g) ?? []).length, 4);
   assert.equal((mid.match(/var\(--popover\)/g) ?? []).length, 2);
-  assert.equal((rail.match(/var\(--background\)/g) ?? []).length, 1);
+  // 旧模板曾直接内联消费 var(--background) 作为行底色；React 版改用语义 Token（bg-sidebar / bg-panel）
+  assert.equal((railReact.match(/var\(--background\)/g) ?? []).length, 0, 'React 左轨不得直接消费 --background');
+  assert.ok((railReact.match(/bg-sidebar|bg-panel|bg-card/g) ?? []).length > 0, 'React 左轨必须走语义背景 Token');
 });
 
 test('组件 var() 全部可解析：引用面 ⊆ 定义面（剥块注释/行尾注释；防新增悬空引用）', () => {
