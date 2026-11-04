@@ -550,6 +550,56 @@ const unreadBotNames = new Set<string>();
 const activeRunningGroupRoomIds = new Set<string>();
 const activeRunningSessionIds = new Set<string>();
 const activeRunningBotNames = new Set<string>();
+
+/**
+ * 传输层会话句柄全局双向映射表（Live ID ↔ Stored ID）。
+ *
+ * 设计意图 (Why)：网关 WebSocket 下行事件帧全量携带传输层 liveId，
+ *   而前端抽屉、会话池（state.sessions）与运行集合（activeRunningSessionIds）
+ *   必须且只能以持久化 storedId 作为唯一键。建立双向映射彻底消除 liveId 与 storedId 错配。
+ * 防范的历史坑 (Pitfall)：message.complete 携带 liveId 导致 applyTurnCompleted 无法从
+ *   存放 storedId 的 activeRunningSessionIds 中移除会话，引发未读会话永久呈 running 闪烁。
+ * 约束与规则 (Rules)：只要解析出 handles 必须同步注册；多级 fallback 确保永远解析出合法的 storedId。
+ */
+const sessionLiveToStoredMap = new Map<string, string>();
+const sessionStoredToLiveMap = new Map<string, string>();
+
+function registerSessionHandles(handles: { liveId: string; storedId: string } | null | undefined): void {
+  if (!handles?.liveId || !handles?.storedId) return;
+  sessionLiveToStoredMap.set(handles.liveId, handles.storedId);
+  sessionStoredToLiveMap.set(handles.storedId, handles.liveId);
+}
+
+function toStoredSessionId(id: string | null | undefined): string | null {
+  if (!id) return null;
+  if (sessionLiveToStoredMap.has(id)) {
+    return sessionLiveToStoredMap.get(id)!;
+  }
+  if (state.sessions.some((s) => s.id === id)) {
+    return id;
+  }
+  if (activeStreamingLiveId && id === activeStreamingLiveId && activeStreamingStoredSessionId) {
+    return activeStreamingStoredSessionId;
+  }
+  if (state.activeLiveSessionId && id === state.activeLiveSessionId && state.activeSessionId) {
+    return state.activeSessionId;
+  }
+  return id;
+}
+
+function toLiveSessionId(storedId: string | null | undefined): string | null {
+  if (!storedId) return null;
+  if (sessionStoredToLiveMap.has(storedId)) {
+    return sessionStoredToLiveMap.get(storedId)!;
+  }
+  if (activeStreamingStoredSessionId && storedId === activeStreamingStoredSessionId && activeStreamingLiveId) {
+    return activeStreamingLiveId;
+  }
+  if (state.activeSessionId && storedId === state.activeSessionId && state.activeLiveSessionId) {
+    return state.activeLiveSessionId;
+  }
+  return storedId;
+}
 /** 全局头像资产缓存（name/displayName/id -> dataUrl），防重拉取与时序冲刷 */
 const AVATAR_PERSISTENCE_KEY = 'hermes_flux_avatar_cache';
 const profileAvatarCache = new Map<string, string>();
@@ -2283,6 +2333,7 @@ async function loadMessages(sessionId: string, targetBotName?: string): Promise<
 
       const handles = readSessionHandles(res, sessionId);
       if (handles) {
+        registerSessionHandles(handles);
         state.activeLiveSessionId = handles.liveId;
       } else {
         state.activeLiveSessionId = sessionId;
@@ -2408,6 +2459,7 @@ async function ensureLiveSessionId(): Promise<string> {
     }
     const handles = readSessionHandles(res, guard.sessionId);
     if (handles) {
+      registerSessionHandles(handles);
       let liveId = '';
       await runGuarded(guard, () => ({ sessionId: state.activeSessionId, generation: activeLoadMessagesGeneration }), () => {
         state.activeLiveSessionId = handles.liveId;
@@ -2470,6 +2522,7 @@ async function createNewSession(options?: { profile?: string; projectId?: string
       render();
       return;
     }
+    registerSessionHandles(handles);
 
     // 切到新会话前解除旧会话挂起回滚（P0-2 防横幅泄漏与快照丢失），必须在改写 activeSessionId 之前
     disarmRollbackOnLeave(state.activeSessionId);
@@ -3388,6 +3441,9 @@ async function sendMessage(text: string): Promise<void> {
   activeStreamingMessageId = assistantMsgId;
   activeStreamingStoredSessionId = state.activeSessionId;
   activeStreamingLiveId = liveId;
+  if (liveId && state.activeSessionId) {
+    registerSessionHandles({ liveId, storedId: state.activeSessionId });
+  }
   if (state.activeSessionId) {
     // 回合开始：进入 running 并当场清除该会话的历史未读残留（禁止"运行中 + 未读绿点"并存）
     applyTurnStarted(activeRunningSessionIds, unreadSessionIds, state.activeSessionId);
@@ -3965,7 +4021,8 @@ function applyTurnActions(actions: TurnAction[]): void {
             }
           }
         }
-        const completedTargetId = action.sessionId || activeStreamingStoredSessionId;
+        const rawTargetId = action.sessionId || activeStreamingStoredSessionId;
+        const completedTargetId = toStoredSessionId(rawTargetId);
         if (completedTargetId) {
           // 回合完成：退出 running；焦点不在该会话时置未读（显式传入焦点判定，禁止函数内从全局反推）
           const isFocused = completedTargetId === state.activeSessionId;
@@ -4021,9 +4078,11 @@ function applyTurnActions(actions: TurnAction[]): void {
         if (pendingMsg && !pendingMsg.content) {
           pendingMsg.content = `[回合中断] ${action.message}`;
         }
-        if (activeStreamingStoredSessionId) {
+        const rawFailedId = action.sessionId || activeStreamingStoredSessionId;
+        const failedTargetId = toStoredSessionId(rawFailedId);
+        if (failedTargetId) {
           // 回合失败：退出 running，但绝不置未读（失败没有可查看的成果）
-          applyTurnFailed(activeRunningSessionIds, activeStreamingStoredSessionId);
+          applyTurnFailed(activeRunningSessionIds, failedTargetId);
         }
         if (activeStreamingBotName) {
           applyTurnFailed(activeRunningBotNames, activeStreamingBotName);
@@ -4176,12 +4235,18 @@ async function connect(): Promise<void> {
 
     // Register event listeners for streaming
     gatewayClient.onNotification('event', (params: unknown) => {
+      const runningStoredIds = Array.from(activeRunningSessionIds);
+      const runningLiveIds = runningStoredIds
+        .map((sid) => sessionStoredToLiveMap.get(sid))
+        .filter((id): id is string => Boolean(id));
+
       const activeIds = [
         state.activeLiveSessionId,
         state.activeSessionId,
         activeStreamingLiveId,
         activeStreamingStoredSessionId,
-        ...Array.from(activeRunningSessionIds),
+        ...runningStoredIds,
+        ...runningLiveIds,
       ].filter((id): id is string => Boolean(id));
 
       const actions = reduceGatewayEvent(params, {

@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hermes Flux 设置中心三大交互原型对比</title>
+<style>
+  :root {
+    --bg-base: #080808;
+    --bg-card: #0F0F0F;
+    --bg-surface: #141414;
+    --bg-surface-hover: #1A1A1A;
+    --border: rgba(255, 255, 255, 0.08);
+    --border-subtle: rgba(255, 255, 255, 0.05);
+    --accent: #D97706; /* 琥珀暖金 */
+    --accent-glow: rgba(217, 119, 6, 0.15);
+    --emerald: #10B981;
+    --text-primary: #EDEDED;
+    --text-secondary: #999999;
+    --text-muted: #666666;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
+    --font-mono: "JetBrains Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg-base);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    padding: 16px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .proto-container {
+    max-width: 1100px;
+    margin: 0 auto;
+    background: #0A0A0A;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.8);
+  }
+  /* 顶部切换栏 */
+  .proto-header {
+    background: #111111;
+    border-bottom: 1px solid var(--border);
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .proto-title {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .proto-badge {
+    background: var(--accent-glow);
+    color: var(--accent);
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid rgba(217, 119, 6, 0.3);
+    font-family: var(--font-mono);
+  }
+  .proto-tabs {
+    display: flex;
+    background: #0A0A0A;
+    padding: 3px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    gap: 2px;
+  }
+  .proto-tab-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 500;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .proto-tab-btn:hover {
+    color: var(--text-primary);
+    background: rgba(255,255,255,0.04);
+  }
+  .proto-tab-btn.active {
+    background: #1E1E1E;
+    color: #FFF;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+  .proto-tab-btn.active .dot {
+    background: var(--accent);
+  }
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-muted);
+  }
+
+  /* 方案视口模拟舞台 */
+  .viewport-stage {
+    position: relative;
+    height: 560px;
+    background: #050505;
+    overflow: hidden;
+  }
+
+  /* 通用模拟窗体顶栏 (40px) */
+  .mock-titlebar {
+    height: 40px;
+    background: #0E0E0E;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    user-select: none;
+  }
+  .mac-lights {
+    display: flex;
+    gap: 6px;
+  }
+  .mac-light {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+  .mac-red { background: #FF5F56; }
+  .mac-yellow { background: #FFBD2E; }
+  .mac-green { background: #27C93F; }
+
+  /* 底层模拟的三舱工作台背景 */
+  .tri-rail-bg {
+    display: flex;
+    height: calc(100% - 40px);
+    width: 100%;
+    position: absolute;
+    top: 40px;
+    left: 0;
+  }
+  .mock-leftrail {
+    width: 220px;
+    background: #0B0B0B;
+    border-right: 1px solid var(--border);
+    display: flex;
+  }
+  .mock-station-52 {
+    width: 52px;
+    background: #080808;
+    border-right: 1px solid var(--border-subtle);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 0;
+    gap: 12px;
+  }
+  .station-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+    background: #181818;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    border: 1px solid var(--border);
+    color: #CCC;
+    position: relative;
+    cursor: pointer;
+  }
+  .station-avatar.active {
+    border-color: var(--accent);
+    box-shadow: 0 0 10px var(--accent-glow);
+    color: #FFF;
+  }
+  .station-avatar .status-dot {
+    position: absolute;
+    bottom: -1px;
+    right: -1px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--emerald);
+    border: 1px solid #080808;
+  }
+  .station-bottom {
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .mock-drawer {
+    flex: 1;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 12px;
+  }
+  .drawer-item {
+    padding: 6px 8px;
+    border-radius: 6px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .drawer-item.active {
+    background: #161616;
+    color: var(--text-primary);
+  }
+  .mock-middlepod {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    position: relative;
+  }
+  .chat-bubble {
+    background: #121212;
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 12.5px;
+    line-height: 1.6;
+    max-width: 680px;
+    margin-bottom: 12px;
+  }
+  .chat-bubble.user {
+    align-self: flex-end;
+    background: #1A1612;
+    border-color: rgba(217, 119, 6, 0.2);
+  }
+  .mock-inputdock {
+    position: absolute;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 90%;
+    max-width: 600px;
+    background: rgba(20, 20, 20, 0.85);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .mock-rightpod {
+    width: 340px;
+    background: #0B0B0B;
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+  }
+  .rightpod-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    background: #0F0F0F;
+  }
+  .rightpod-tab {
+    flex: 1;
+    padding: 8px;
+    text-align: center;
+    font-size: 11px;
+    color: var(--text-muted);
+    border-bottom: 2px solid transparent;
+  }
+  .rightpod-tab.active {
+    color: var(--text-primary);
+    border-bottom-color: var(--accent);
+    background: #141414;
+  }
+
+  /* ── 方案 A: 浮层模态 (Modal) ── */
+  .view-modal {
+    position: absolute;
+    top: 40px;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(14px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+  }
+  .modal-dialog {
+    width: 760px;
+    height: 460px;
+    background: #0D0D0D;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 14px;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.06);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: popIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes popIn {
+    from { opacity: 0; transform: scale(0.97); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  .modal-top {
+    height: 44px;
+    background: #111111;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 14px;
+  }
+  .modal-body {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+  .modal-sidebar {
+    width: 200px;
+    background: #0A0A0A;
+    border-right: 1px solid var(--border);
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .nav-item {
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .nav-item:hover { background: #141414; color: var(--text-primary); }
+  .nav-item.active { background: #1C1C1C; color: #FFF; font-weight: 500; }
+  .modal-content {
+    flex: 1;
+    padding: 16px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .setting-card {
+    background: #121212;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .setting-info { display: flex; flex-direction: column; gap: 3px; }
+  .setting-label { font-size: 12px; font-weight: 500; color: #EEE; }
+  .setting-desc { font-size: 10.5px; color: var(--text-muted); }
+
+  /* 模拟控件 */
+  .switch-mock {
+    width: 34px;
+    height: 18px;
+    background: var(--accent);
+    border-radius: 12px;
+    position: relative;
+    cursor: pointer;
+  }
+  .switch-mock::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 14px;
+    height: 14px;
+    background: #FFF;
+    border-radius: 50%;
+  }
+  .switch-mock.off {
+    background: #2A2A2A;
+  }
+  .switch-mock.off::after {
+    left: 2px;
+    right: auto;
+  }
+  .badge-tag {
+    font-size: 9.5px;
+    padding: 2px 5px;
+    border-radius: 3px;
+    font-family: var(--font-mono);
+  }
+  .badge-amber { background: rgba(217, 119, 6, 0.2); color: #F59E0B; }
+  .badge-gray { background: rgba(255, 255, 255, 0.08); color: #888; }
+
+  /* ── 方案 B: 全页工作区 (Full Canvas) ── */
+  .view-fullpage {
+    position: absolute;
+    top: 40px;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: #080808;
+    display: flex;
+    z-index: 5;
+  }
+  .fullpage-left-rail {
+    width: 52px;
+    background: #060606;
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 0;
+    gap: 12px;
+  }
+  .fullpage-sidebar {
+    width: 220px;
+    background: #0B0B0B;
+    border-right: 1px solid var(--border);
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .fullpage-main {
+    flex: 1;
+    padding: 24px 32px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .fullpage-yaml-pane {
+    width: 320px;
+    background: #070707;
+    border-left: 1px solid var(--border);
+    padding: 14px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: #AAA;
+    line-height: 1.5;
+  }
+
+  /* ── 方案 C: 三舱原生抽屉 (Tri-Rail In-Place) ── */
+  .view-trirail {
+    display: flex;
+    height: calc(100% - 40px);
+    width: 100%;
+    position: absolute;
+    top: 40px;
+    left: 0;
+  }
+  .rightpod-content {
+    flex: 1;
+    padding: 14px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  /* 底部解释说明卡片 */
+  .proto-footer {
+    background: #0D0D0D;
+    border-top: 1px solid var(--border);
+    padding: 12px 16px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .feature-pills {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .pill {
+    background: #181818;
+    border: 1px solid var(--border-subtle);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    color: #DDD;
+  }
+</style>
+</head>
+<body>
+
+<div class="proto-container">
+  <!-- 顶部 Tab 切换控制器 -->
+  <div class="proto-header">
+    <div class="proto-title">
+      <span>Hermes Flux 设置中心交互原型</span>
+      <span class="proto-badge">竞技流派实时演示</span>
+    </div>
+    <div class="proto-tabs">
+      <button class="proto-tab-btn active" onclick="switchView('A', this)">
+        <span class="dot"></span>
+        <span>方案 A：居中沉浸模态派</span>
+      </button>
+      <button class="proto-tab-btn" onclick="switchView('B', this)">
+        <span class="dot"></span>
+        <span>方案 B：头等公民全页派</span>
+      </button>
+      <button class="proto-tab-btn" onclick="switchView('C', this)">
+        <span class="dot"></span>
+        <span>方案 C：三舱原生抽屉派</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- 视口模拟区域 -->
+  <div class="viewport-stage" id="stage">
+    <!-- 模拟工作台顶栏 -->
+    <div class="mock-titlebar">
+      <div class="mac-lights">
+        <span class="mac-light mac-red"></span>
+        <span class="mac-light mac-yellow"></span>
+        <span class="mac-light mac-green"></span>
+      </div>
+      <div id="bar-title">Hermes Flux ── 项目: hermes-aura</div>
+      <div style="font-family: var(--font-mono); font-size: 11px; color: var(--emerald);">🟢 12ms · v0.22.5</div>
+    </div>
+
+    <!-- 方案 A：居中浮层模态 (默认展示) -->
+    <div id="view-A" class="view-modal">
+      <!-- 底层工作台被压暗虚化 -->
+      <div class="modal-dialog">
+        <!-- 模态顶栏 -->
+        <div class="modal-top">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <div style="background:#1C1C1C; border:1px solid var(--border); padding:3px 8px; border-radius:6px; font-size:11px; color:#EEE; cursor:pointer;">
+              🌐 全局配置 ▾
+            </div>
+            <div style="font-size:11px; color:var(--text-muted); background:#141414; padding:3px 10px; border-radius:6px; border:1px solid var(--border-subtle); display:flex; align-items:center; gap:4px;">
+              <span>🔍</span><span>快速搜索配置... (Cmd+F)</span>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <div style="display:flex; background:#080808; border:1px solid var(--border); border-radius:6px; padding:2px;">
+              <span style="font-size:10px; background:#1E1E1E; color:#FFF; padding:2px 6px; border-radius:4px; font-weight:500;">📋 表单</span>
+              <span style="font-size:10px; color:var(--text-muted); padding:2px 6px;">⚙ YAML</span>
+            </div>
+            <span style="font-size:11px; color:var(--text-muted); padding:2px 6px; background:#161616; border-radius:4px; border:1px solid var(--border-subtle);">ESC</span>
+          </div>
+        </div>
+        <!-- 模态双栏内容 -->
+        <div class="modal-body">
+          <div class="modal-sidebar">
+            <div class="nav-item"><span>🎨</span><span>通用外观与交互</span></div>
+            <div class="nav-item active"><span>🧠</span><span>模型路由与算力</span></div>
+            <div class="nav-item"><span>🛡️</span><span>自治安全与审批</span></div>
+            <div class="nav-item"><span>🤖</span><span>专职员工与档案</span></div>
+            <div class="nav-item"><span>🔌</span><span>MCP 服务器与扩展</span></div>
+            <div class="nav-item"><span>⚡</span><span>技能库与插件生态</span></div>
+            <div class="nav-item"><span>📁</span><span>工作区与时光机</span></div>
+            <div class="nav-item"><span>🖥️</span><span>沙箱与虚拟桌面</span></div>
+            <div class="nav-item"><span>🔐</span><span>凭据保险库</span></div>
+          </div>
+          <div class="modal-content">
+            <div style="font-size:11px; color:var(--text-secondary); margin-bottom:4px;">
+              模型路由与算力 > 提供商与默认 Pin
+            </div>
+            <div class="setting-card">
+              <div class="setting-info">
+                <div class="setting-label">默认推理模型 (Model Pin)</div>
+                <div class="setting-desc">为新建会话与通用助理分配的全局主模型</div>
+              </div>
+              <div style="background:#1E1E1E; border:1px solid var(--border); padding:4px 10px; border-radius:6px; font-size:11px; color:#EEE;">
+                Claude 3.7 Sonnet ▾
+              </div>
+            </div>
+            <div class="setting-card">
+              <div class="setting-info">
+                <div class="setting-label">推理深度预算 (Reasoning Effort)</div>
+                <div class="setting-desc">控制深度思考模型的思考 Token 预算上限</div>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <div style="display:flex; background:#161616; border:1px solid var(--border); border-radius:6px; padding:2px;">
+                  <span style="font-size:10.5px; padding:2px 6px; color:#888;">Low</span>
+                  <span style="font-size:10.5px; padding:2px 6px; color:#888;">Med</span>
+                  <span style="font-size:10.5px; padding:2px 6px; background:#2A2A2A; color:#FFF; border-radius:4px; font-weight:500;">High</span>
+                  <span style="font-size:10.5px; padding:2px 6px; color:#888;">Max</span>
+                </div>
+                <span class="badge-tag badge-amber">⚡Bot已覆写</span>
+              </div>
+            </div>
+            <div class="setting-card">
+              <div class="setting-info">
+                <div class="setting-label">昂贵模型调用阻断预警</div>
+                <div class="setting-desc">当调用单价超出 $15/M Token 时强制弹窗二次确认</div>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <div class="switch-mock"></div>
+                <span class="badge-tag badge-gray">继承自全局</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 方案 B：头等公民全页派 (隐藏态) -->
+    <div id="view-B" class="view-fullpage" style="display:none;">
+      <!-- 52px 微轨 -->
+      <div class="fullpage-left-rail">
+        <div class="station-avatar">✦</div>
+        <div class="station-avatar">🤖<span class="status-dot"></span></div>
+        <div class="station-avatar">🎨</div>
+        <div class="station-bottom">
+          <div class="station-avatar active" style="color:var(--accent);">⚙</div>
+        </div>
+      </div>
+      <!-- 220px 设置大类 -->
+      <div class="fullpage-sidebar">
+        <div style="font-size:12px; font-weight:600; color:#FFF; margin-bottom:8px; display:flex; justify-content:space-between;">
+          <span>系统设置中心</span>
+          <span style="font-size:10px; color:var(--accent);">v4.5</span>
+        </div>
+        <div class="nav-item"><span>🎨</span><span>通用外观与极客交互</span></div>
+        <div class="nav-item active"><span>🧠</span><span>模型路由与推理算力</span></div>
+        <div class="nav-item"><span>🛡️</span><span>智能体行为与自治安全</span></div>
+        <div class="nav-item"><span>🤖</span><span>专职员工与数字档案</span></div>
+        <div class="nav-item"><span>🔌</span><span>MCP 服务器与扩展生态</span></div>
+        <div class="nav-item"><span>⚡</span><span>技能库与插件中心</span></div>
+        <div class="nav-item"><span>📁</span><span>工作区与代码时光机</span></div>
+        <div class="nav-item"><span>🖥️</span><span>沙箱与虚拟桌面</span></div>
+        <div class="nav-item"><span>🔐</span><span>凭据保险库与连接器</span></div>
+      </div>
+      <!-- 中间平铺表单 -->
+      <div class="fullpage-main">
+        <div style="font-size:14px; font-weight:600; color:#FFF; border-bottom:1px solid var(--border); padding-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
+          <span>模型路由与推理算力</span>
+          <div style="display:flex; gap:8px;">
+            <button style="background:#181818; border:1px solid var(--border); color:#CCC; font-size:11px; padding:4px 10px; border-radius:6px; cursor:pointer;">重置当前段</button>
+            <button style="background:var(--accent); border:none; color:#000; font-size:11px; font-weight:600; padding:4px 12px; border-radius:6px; cursor:pointer;">已自动落盘 ✓</button>
+          </div>
+        </div>
+        <div class="setting-card">
+          <div class="setting-info">
+            <div class="setting-label">Anthropic 官方 API Key</div>
+            <div class="setting-desc">凭据将安全加密写入 ~/.hermes/.env 中，界面仅显示掩码</div>
+          </div>
+          <div style="font-family:var(--font-mono); font-size:11px; background:#080808; border:1px solid var(--border); padding:4px 10px; border-radius:6px; color:#888;">
+            sk-ant-api03-***w9A [已验证 🟢]
+          </div>
+        </div>
+        <div class="setting-card">
+          <div class="setting-info">
+            <div class="setting-label">DeepSeek 自定义 Base URL</div>
+            <div class="setting-desc">聚合网关或 OneAPI 反向代理路由</div>
+          </div>
+          <div style="font-family:var(--font-mono); font-size:11px; background:#080808; border:1px solid var(--border); padding:4px 10px; border-radius:6px; color:#DDD;">
+            https://api.deepseek.com/v1
+          </div>
+        </div>
+        <div class="setting-card">
+          <div class="setting-info">
+            <div class="setting-label">快速模式通道 (Fast Mode)</div>
+            <div class="setting-desc">开启高优先级服务通道，在低拥堵时获取极致打字速度</div>
+          </div>
+          <div class="switch-mock"></div>
+        </div>
+      </div>
+      <!-- 右侧实时 YAML 预览 -->
+      <div class="fullpage-yaml-pane">
+        <div style="font-size:10.5px; color:var(--text-muted); margin-bottom:8px; border-bottom:1px solid var(--border-subtle); padding-bottom:4px;">
+          # config.yaml (实时同步)
+        </div>
+        <div>model:</div>
+        <div style="color:var(--accent);">&nbsp;&nbsp;default: "claude-3-7-sonnet"</div>
+        <div>&nbsp;&nbsp;fallback: "deepseek-r1"</div>
+        <div>&nbsp;&nbsp;reasoning_effort: "high"</div>
+        <div>&nbsp;&nbsp;fast: true</div>
+        <div>providers:</div>
+        <div>&nbsp;&nbsp;anthropic:</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;configured: true</div>
+        <div>&nbsp;&nbsp;deepseek:</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;base_url: "https://api..."</div>
+      </div>
+    </div>
+
+    <!-- 方案 C：三舱原生抽屉派 (隐藏态) -->
+    <div id="view-C" class="view-trirail" style="display:none;">
+      <!-- 左侧双轨 -->
+      <div class="mock-leftrail">
+        <div class="mock-station-52">
+          <div class="station-avatar">✦</div>
+          <div class="station-avatar active">🤖<span class="status-dot"></span></div>
+          <div class="station-avatar">🎨</div>
+          <div class="station-bottom">
+            <div class="station-avatar">⚙</div>
+          </div>
+        </div>
+        <div class="mock-drawer">
+          <div style="font-size:11px; font-weight:600; color:var(--text-secondary); margin-bottom:4px;">架构师 · 老王</div>
+          <div class="drawer-item active">👑 核心主工位</div>
+          <div class="drawer-item">⑂ 锁排查旁聊</div>
+          <div class="drawer-item">⑂ 接口幂等旁聊</div>
+        </div>
+      </div>
+      <!-- 中间主对话舱 (仍然可见，没有被遮挡) -->
+      <div class="mock-middlepod">
+        <div class="chat-bubble user">
+          请帮我把网关的重连机制改成带全抖动退避，现在就跑测试。
+        </div>
+        <div class="chat-bubble">
+          好的，我已经在工作区创建了 Worktree 分支，正在修改 `WebSocketFSM.ts` 并准备跑形式化验证。
+        </div>
+        <div class="mock-inputdock">
+          <span>@ 呼叫专家 /task 看板工单 # 引用代码...</span>
+          <span style="background:var(--accent); color:#000; font-weight:600; padding:2px 8px; border-radius:4px;">发送</span>
+        </div>
+      </div>
+      <!-- 右侧 340px 检查舱 (直接切到配置 Tab) -->
+      <div class="mock-rightpod">
+        <div class="rightpod-tabs">
+          <div class="rightpod-tab">📋 看板(2)</div>
+          <div class="rightpod-tab">⚡ 终端</div>
+          <div class="rightpod-tab">🔍 Diff</div>
+          <div class="rightpod-tab active">⚙ 当前配置</div>
+        </div>
+        <div class="rightpod-content">
+          <div style="font-size:11px; color:var(--text-muted);">
+            当前工位: 架构师 · 老王 (实时生效)
+          </div>
+          <div class="setting-card">
+            <div class="setting-info">
+              <div class="setting-label">YOLO 自治执行</div>
+              <div class="setting-desc">命令执行无需逐条审批</div>
+            </div>
+            <div class="switch-mock"></div>
+          </div>
+          <div class="setting-card">
+            <div class="setting-info">
+              <div class="setting-label">推理深度</div>
+              <div class="setting-desc">当前会话预算</div>
+            </div>
+            <div style="font-size:11px; background:#1C1C1C; padding:2px 8px; border-radius:4px; color:var(--accent);">
+              xhigh
+            </div>
+          </div>
+          <div class="setting-card">
+            <div class="setting-info">
+              <div class="setting-label">绑定模型</div>
+              <div class="setting-desc">Pin 独立生效</div>
+            </div>
+            <div style="font-size:11px; color:#EEE;">
+              Claude 3.7
+            </div>
+          </div>
+          <div style="margin-top:auto; padding-top:10px; border-top:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:10.5px; color:var(--text-muted);">更多全局配置 ➔</span>
+            <span style="font-size:10.5px; color:var(--accent); cursor:pointer;">打开完整面板</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 底部解释与交互说明 -->
+  <div class="proto-footer">
+    <div id="footer-desc">
+      <strong style="color:#FFF;">方案 A (浮层模态派) 特点：</strong> 遵循 Raycast / Cursor 体验，按快捷键瞬间呼出，不破坏当前会话，适合快速修改并返回。
+    </div>
+    <div class="feature-pills" id="footer-pills">
+      <span class="pill">Cmd+, 瞬间呼出</span>
+      <span class="pill">毛玻璃背景打底</span>
+      <span class="pill">三级级联指示徽章</span>
+      <span class="pill">移动端自动变全屏</span>
+    </div>
+  </div>
+</div>
+
+<script>
+  function switchView(type, btn) {
+    // 切换 Tab 激活态
+    document.querySelectorAll('.proto-tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    // 隐藏所有视图
+    document.getElementById('view-A').style.display = 'none';
+    document.getElementById('view-B').style.display = 'none';
+    document.getElementById('view-C').style.display = 'none';
+
+    const barTitle = document.getElementById('bar-title');
+    const footerDesc = document.getElementById('footer-desc');
+    const footerPills = document.getElementById('footer-pills');
+
+    if (type === 'A') {
+      document.getElementById('view-A').style.display = 'flex';
+      barTitle.textContent = 'Hermes Flux ── 项目: hermes-aura (设置模态开启)';
+      footerDesc.innerHTML = '<strong style="color:#FFF;">方案 A (浮层模态派) 特点：</strong> 遵循 Raycast / Cursor 极客体验，按 Cmd+, 瞬间呼出居中卡片，ESC 一键退回，绝不冲淡工作台上下文。';
+      footerPills.innerHTML = `
+        <span class="pill">Cmd+, 呼出 / ESC 退回</span>
+        <span class="pill">毛玻璃打底 (24px Blur)</span>
+        <span class="pill">三级级联指示徽章</span>
+        <span class="pill">移动端自适应 iOS 栈</span>
+      `;
+    } else if (type === 'B') {
+      document.getElementById('view-B').style.display = 'flex';
+      barTitle.textContent = 'Hermes Flux ── 系统设置工作区 (Full Canvas)';
+      footerDesc.innerHTML = '<strong style="color:#FFF;">方案 B (头等公民全页派) 特点：</strong> 类似 Linear / Slack，设置是微轨底部的独立工作台页面，拥有 3 栏无限空间，左边分类、中间表单、右边实时 YAML 源码。';
+      footerPills.innerHTML = `
+        <span class="pill">头等公民 Station</span>
+        <span class="pill">三栏超宽画布</span>
+        <span class="pill">实时 YAML 代码镜像</span>
+        <span class="pill">适合重度配置编辑</span>
+      `;
+    } else if (type === 'C') {
+      document.getElementById('view-C').style.display = 'flex';
+      barTitle.textContent = 'Hermes Flux ── 三舱工作台 (右舱就地配置生效)';
+      footerDesc.innerHTML = '<strong style="color:#FFF;">方案 C (三舱原生抽屉派) 特点：</strong> 深度融入三舱架构，左边看 Bot 跑代码，右边 410px 检查舱直接就地调节当前 Bot / 当前会话的高频参数，零切屏、零模态打断。';
+      footerPills.innerHTML = `
+        <span class="pill">零模态打断</span>
+        <span class="pill">410px 检查舱就地调节</span>
+        <span class="pill">边看聊天边调参</span>
+        <span class="pill">低频项二阶段呼出</span>
+      `;
+    }
+  }
+</script>
+
+</body>
+</html>

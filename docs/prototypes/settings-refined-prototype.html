@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hermes Flux 设置中心定稿原型 —— 全局设置与 Agent 专属配置舱</title>
+<style>
+  :root {
+    --bg-base: #080808;
+    --bg-card: #0D0D0D;
+    --bg-surface: #141414;
+    --bg-surface-hover: #1A1A1A;
+    --border: rgba(255, 255, 255, 0.08);
+    --border-subtle: rgba(255, 255, 255, 0.05);
+    --accent: #D97706; /* 琥珀暖金 */
+    --accent-glow: rgba(217, 119, 6, 0.2);
+    --emerald: #10B981;
+    --indigo: #4F46E5;
+    --magenta: #DB2777;
+    --amber: #D97706;
+    --text-primary: #EDEDED;
+    --text-secondary: #999999;
+    --text-muted: #666666;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
+    --font-mono: "JetBrains Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg-base);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    padding: 12px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .proto-container {
+    width: 100%;
+    background: #0A0A0A;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 16px 40px rgba(0,0,0,0.8);
+  }
+  .proto-header {
+    background: #111111;
+    border-bottom: 1px solid var(--border);
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .proto-title {
+    font-size: 13px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .proto-badge {
+    background: var(--accent-glow);
+    color: var(--accent);
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid rgba(217, 119, 6, 0.3);
+    font-family: var(--font-mono);
+  }
+  .proto-tabs {
+    display: flex;
+    background: #0A0A0A;
+    padding: 3px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    gap: 2px;
+  }
+  .proto-tab-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    padding: 6px 14px;
+    font-size: 11.5px;
+    font-weight: 500;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .proto-tab-btn:hover {
+    color: var(--text-primary);
+    background: rgba(255,255,255,0.04);
+  }
+  .proto-tab-btn.active {
+    background: #1E1E1E;
+    color: #FFF;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-muted);
+  }
+  .proto-tab-btn.active .dot {
+    background: var(--accent);
+  }
+
+  .viewport-stage {
+    position: relative;
+    height: 520px;
+    background: #050505;
+    overflow: hidden;
+  }
+
+  .mock-titlebar {
+    height: 36px;
+    background: #0E0E0E;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 14px;
+    font-size: 11.5px;
+    color: var(--text-secondary);
+  }
+  .mac-lights { display: flex; gap: 5px; }
+  .mac-light { width: 9px; height: 9px; border-radius: 50%; }
+  .mac-red { background: #FF5F56; }
+  .mac-yellow { background: #FFBD2E; }
+  .mac-green { background: #27C93F; }
+
+  /* 遮罩背景 */
+  .modal-overlay {
+    position: absolute;
+    top: 36px;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.72);
+    backdrop-filter: blur(14px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+  }
+
+  /* ── 视图 1: 纯净全局系统设置舱 ── */
+  .global-dialog {
+    width: 90%;
+    max-width: 680px;
+    height: 420px;
+    background: #0D0D0D;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.9);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .global-top {
+    height: 42px;
+    background: #111111;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 14px;
+  }
+  .search-input-mock {
+    font-size: 11px;
+    color: var(--text-muted);
+    background: #141414;
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 260px;
+  }
+  .global-body { flex: 1; display: flex; overflow: hidden; }
+  .global-sidebar {
+    width: 180px;
+    background: #090909;
+    border-right: 1px solid var(--border);
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .nav-item {
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.1s;
+  }
+  .nav-item:hover { background: #141414; color: var(--text-primary); }
+  .nav-item.active { background: #1C1C1C; color: #FFF; font-weight: 500; }
+  .global-content {
+    flex: 1;
+    padding: 16px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .setting-card {
+    background: #121212;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .setting-info { display: flex; flex-direction: column; gap: 2px; }
+  .setting-label { font-size: 11.5px; font-weight: 500; color: #EEE; }
+  .setting-desc { font-size: 10px; color: var(--text-muted); }
+
+  .switch-mock {
+    width: 30px;
+    height: 16px;
+    background: var(--accent);
+    border-radius: 10px;
+    position: relative;
+    cursor: pointer;
+  }
+  .switch-mock::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 12px;
+    height: 12px;
+    background: #FFF;
+    border-radius: 50%;
+  }
+
+  /* ── 视图 2: 专职 Agent 独立配置舱 ── */
+  .agent-dialog {
+    width: 90%;
+    max-width: 700px;
+    height: 440px;
+    background: #0D0D0D;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.95);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  /* 顶部 Agent 滑动切换条 */
+  .agent-switcher-bar {
+    background: #111111;
+    border-bottom: 1px solid var(--border);
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .agent-slider {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    overflow-x: auto;
+    padding: 2px 0;
+  }
+  .agent-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: #161616;
+    border: 1px solid var(--border-subtle);
+    font-size: 11px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+  }
+  .agent-pill:hover {
+    background: #1F1F1F;
+    color: var(--text-primary);
+  }
+  .agent-pill.active {
+    background: #242424;
+    color: #FFF;
+    border-color: rgba(255, 255, 255, 0.2);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  }
+  .pill-avatar {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    color: #FFF;
+  }
+
+  .agent-body {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+  .agent-sidebar {
+    width: 150px;
+    background: #090909;
+    border-right: 1px solid var(--border);
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .agent-content {
+    flex: 1;
+    padding: 16px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* 灵魂编辑器文本框 */
+  .soul-textarea-mock {
+    width: 100%;
+    height: 90px;
+    background: #080808;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: #CCC;
+    line-height: 1.5;
+    resize: none;
+  }
+
+  .proto-footer {
+    background: #0D0D0D;
+    border-top: 1px solid var(--border);
+    padding: 10px 14px;
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .pill {
+    background: #161616;
+    border: 1px solid var(--border-subtle);
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 10.5px;
+    color: #CCC;
+  }
+</style>
+</head>
+<body>
+
+<div class="proto-container">
+  <div class="proto-header">
+    <div class="proto-title">
+      <span>Hermes Flux 设置体系架构定稿原型</span>
+      <span class="proto-badge">两套专属悬浮舱正交解耦</span>
+    </div>
+    <div class="proto-tabs">
+      <button class="proto-tab-btn active" onclick="switchView('global', this)">
+        <span class="dot"></span>
+        <span>① 系统全局设置舱 (Cmd+, 呼出)</span>
+      </button>
+      <button class="proto-tab-btn" onclick="switchView('agent', this)">
+        <span class="dot"></span>
+        <span>② 专职 Agent 独立配置舱 (右键呼出·带滑动条)</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="viewport-stage">
+    <div class="mock-titlebar">
+      <div class="mac-lights">
+        <span class="mac-light mac-red"></span>
+        <span class="mac-light mac-yellow"></span>
+        <span class="mac-light mac-green"></span>
+      </div>
+      <div id="bar-title">Hermes Flux ── 全局设置中心 (无多余下拉·无YAML噪音)</div>
+      <div style="font-family: var(--font-mono); font-size: 10.5px; color: var(--emerald);">🟢 12ms · v0.22.5</div>
+    </div>
+
+    <!-- ── 视图 1: 纯净全局设置舱 ── -->
+    <div id="view-global" class="modal-overlay">
+      <div class="global-dialog">
+        <!-- 顶栏：只有标题、全局搜索与 ESC，没有任何切人下拉与 YAML -->
+        <div class="global-top">
+          <div style="font-size:12px; font-weight:600; color:#FFF; display:flex; align-items:center; gap:6px;">
+            <span>⚙</span><span>系统全局设置</span>
+          </div>
+          <div class="search-input-mock">
+            <span>🔍</span><span>搜索全局设置项... (Cmd+F)</span>
+          </div>
+          <div style="font-size:10px; color:var(--text-muted); padding:2px 6px; background:#181818; border-radius:4px; border:1px solid var(--border-subtle);">
+            ESC ✕
+          </div>
+        </div>
+
+        <div class="global-body">
+          <div class="global-sidebar">
+            <div class="nav-item"><span>🎨</span><span>外观与极客交互</span></div>
+            <div class="nav-item active"><span>🧠</span><span>模型与 API Key 池</span></div>
+            <div class="nav-item"><span>🛡️</span><span>全局安全与自治审批</span></div>
+            <div class="nav-item"><span>🔌</span><span>全局 MCP 市场</span></div>
+            <div class="nav-item"><span>📁</span><span>工作区与时光机</span></div>
+            <div class="nav-item"><span>🖥️</span><span>沙箱与虚拟桌面</span></div>
+            <div class="nav-item"><span>🔐</span><span>本地凭据保险库</span></div>
+            <div class="nav-item"><span>🌐</span><span>网络代理与网关</span></div>
+            <div class="nav-item"><span>📊</span><span>遥测隐私与系统维护</span></div>
+          </div>
+
+          <div class="global-content">
+            <div style="font-size:10.5px; color:var(--text-muted);">模型提供商与 API Key 池 (全局真值源)</div>
+
+            <div class="setting-card">
+              <div class="setting-info">
+                <div class="setting-label">全局默认主模型 (Default Model Pin)</div>
+                <div class="setting-desc">新建普通会话与未单独 Pin 模型的 Bot 默认继承该模型</div>
+              </div>
+              <div style="background:#1C1C1C; border:1px solid var(--border); padding:3px 8px; border-radius:5px; font-size:10.5px;">
+                Claude 3.7 Sonnet (Thinking) ▾
+              </div>
+            </div>
+
+            <div class="setting-card">
+              <div class="setting-info">
+                <div class="setting-label">Anthropic API Key</div>
+                <div class="setting-desc">加密持久化在 ~/.hermes/.env 中，界面仅显示脱敏掩码</div>
+              </div>
+              <div style="font-family:var(--font-mono); font-size:10.5px; background:#080808; border:1px solid var(--border); padding:3px 8px; border-radius:4px; color:#888;">
+                sk-ant-api03-***w9A [已连通 🟢]
+              </div>
+            </div>
+
+            <div class="setting-card">
+              <div class="setting-info">
+                <div class="setting-label">DeepSeek 自定义 Base URL</div>
+                <div class="setting-desc">聚合网关或 OneAPI 反向代理地址</div>
+              </div>
+              <div style="font-family:var(--font-mono); font-size:10.5px; background:#080808; border:1px solid var(--border); padding:3px 8px; border-radius:4px; color:#CCC;">
+                https://api.deepseek.com/v1
+              </div>
+            </div>
+
+            <div class="setting-card">
+              <div class="setting-info">
+                <div class="setting-label">高额模型调用阻断告警</div>
+                <div class="setting-desc">调用单价超出 $15/M Token 时强制弹窗二次确认</div>
+              </div>
+              <div class="switch-mock"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 视图 2: 专职 Agent 独立配置舱 ── -->
+    <div id="view-agent" class="modal-overlay" style="display:none;">
+      <div class="agent-dialog">
+        <!-- 顶部 Agent 快速切换滑动条 (横向滚动胶囊) -->
+        <div class="agent-switcher-bar">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:11px; font-weight:600; color:var(--text-muted);">专职员工:</span>
+            <div class="agent-slider">
+              <!-- 老王 -->
+              <div class="agent-pill active" onclick="switchAgent('wang', this)">
+                <div class="pill-avatar" style="background:var(--indigo);">王</div>
+                <span>架构师 · 老王</span>
+              </div>
+              <!-- 小张 -->
+              <div class="agent-pill" onclick="switchAgent('zhang', this)">
+                <div class="pill-avatar" style="background:var(--magenta);">张</div>
+                <span>前端专家 · 小张</span>
+              </div>
+              <!-- 李审计 -->
+              <div class="agent-pill" onclick="switchAgent('li', this)">
+                <div class="pill-avatar" style="background:var(--amber);">李</div>
+                <span>审查专员 · 老李</span>
+              </div>
+              <!-- 新增 Bot -->
+              <div class="agent-pill" style="border-style:dashed; color:var(--text-muted);">
+                <span>+ 新建员工</span>
+              </div>
+            </div>
+          </div>
+          <div style="font-size:10px; color:var(--text-muted); padding:2px 6px; background:#181818; border-radius:4px; border:1px solid var(--border-subtle); cursor:pointer;">
+            ESC ✕
+          </div>
+        </div>
+
+        <div class="agent-body">
+          <div class="agent-sidebar">
+            <div class="nav-item active"><span>📜</span><span>灵魂人设 (Soul)</span></div>
+            <div class="nav-item"><span>🎯</span><span>专属模型绑定</span></div>
+            <div class="nav-item"><span>⚡</span><span>专属技能与MCP</span></div>
+            <div class="nav-item"><span>🧠</span><span>长期记忆 (Memory)</span></div>
+            <div class="nav-item"><span>🎨</span><span>视觉指纹与头像</span></div>
+          </div>
+
+          <div class="agent-content">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span id="agent-target-title" style="font-size:11.5px; font-weight:600; color:#FFF;">
+                架构师 · 老王 ── 灵魂人设 (SOUL.md)
+              </span>
+              <span style="font-size:10px; color:var(--emerald);">自动保存至 profiles/arch-wang/ ✓</span>
+            </div>
+
+            <!-- SOUL.md 可视化文本编辑 -->
+            <div>
+              <div style="font-size:10.5px; color:var(--text-muted); margin-bottom:4px;">人设提示词 (System Prompt):</div>
+              <textarea id="agent-soul-text" class="soul-textarea-mock">你是一名严苛的资深架构师“老王”。
+【设计铁律】
+1. 涉及动代码必须先输出架构设计，严禁带着未验证假设编码；
+2. 任何底层状态机变更必须编写 fast-check 形式化证明；
+3. 输出高密度技术语言，严禁低幼比喻。</textarea>
+            </div>
+
+            <!-- 专属模型绑定 -->
+            <div class="setting-card">
+              <div class="setting-info">
+                <div class="setting-label">专属模型绑定 (Model Pin)</div>
+                <div class="setting-desc" id="agent-model-desc">独立覆盖全局，为该角色指定最适配的推理引擎</div>
+              </div>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <div style="background:#1C1C1C; border:1px solid var(--border); padding:3px 8px; border-radius:5px; font-size:10.5px;" id="agent-model-val">
+                  Claude 3.7 Sonnet (Thinking) ▾
+                </div>
+                <span style="font-size:9px; background:rgba(217,119,6,0.2); color:#F59E0B; padding:2px 4px; border-radius:3px;">已独立Pin</span>
+              </div>
+            </div>
+
+            <!-- 专属思考深度 -->
+            <div class="setting-card">
+              <div class="setting-info">
+                <div class="setting-label">思考预算等级 (Reasoning Effort)</div>
+                <div class="setting-desc">该专职员工执行复杂任务时的默认思考深度</div>
+              </div>
+              <div style="display:flex; background:#181818; border:1px solid var(--border); border-radius:5px; padding:2px;">
+                <span style="font-size:9.5px; padding:2px 5px; color:#777;">Low</span>
+                <span style="font-size:9.5px; padding:2px 5px; color:#777;">Med</span>
+                <span style="font-size:9.5px; padding:2px 5px; color:#777;">High</span>
+                <span style="font-size:9.5px; padding:2px 5px; background:#2A2A2A; color:#FFF; border-radius:3px; font-weight:500;" id="agent-effort-val">xhigh</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="proto-footer">
+    <div id="footer-desc">
+      <strong style="color:#FFF;">架构定稿特点：</strong> 全局设置纯净无噪音；专职 Agent 配置做到每个 Agent 右键呼出，顶部带滑动条可无缝切换不同专家，正交解耦！
+    </div>
+    <div style="display:flex; gap:6px;">
+      <span class="pill">零下拉混淆</span>
+      <span class="pill">去除 YAML 噪音</span>
+      <span class="pill">Agent 右键呼出</span>
+      <span class="pill">顶部滑动条秒切</span>
+    </div>
+  </div>
+</div>
+
+<script>
+  function switchView(mode, btn) {
+    document.querySelectorAll('.proto-tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    const viewGlobal = document.getElementById('view-global');
+    const viewAgent = document.getElementById('view-agent');
+    const barTitle = document.getElementById('bar-title');
+    const footerDesc = document.getElementById('footer-desc');
+
+    if (mode === 'global') {
+      viewGlobal.style.display = 'flex';
+      viewAgent.style.display = 'none';
+      barTitle.textContent = 'Hermes Flux ── 全局系统设置中心 (按 Cmd+, 呼出 · 无切人下拉)';
+      footerDesc.innerHTML = '<strong style="color:#FFF;">① 系统全局设置舱：</strong> 纯粹配置网关全局底座、外观、API Key 池、网络代理等。无 YAML 噪音，无切人混淆下拉。';
+    } else {
+      viewGlobal.style.display = 'none';
+      viewAgent.style.display = 'flex';
+      barTitle.textContent = 'Hermes Flux ── 专职 Agent 独立配置舱 (从微轨右键老王进入)';
+      footerDesc.innerHTML = '<strong style="color:#FFF;">② 专职 Agent 配置舱：</strong> 右键微轨或抽屉的 Agent 进入。顶部提供横向滑动条，可秒切选择老王、小张、老李，独立配人设、模型与记忆！';
+    }
+  }
+
+  function switchAgent(name, el) {
+    document.querySelectorAll('.agent-pill').forEach(p => p.classList.remove('active'));
+    el.classList.add('active');
+
+    const title = document.getElementById('agent-target-title');
+    const soul = document.getElementById('agent-soul-text');
+    const model = document.getElementById('agent-model-val');
+    const effort = document.getElementById('agent-effort-val');
+
+    if (name === 'wang') {
+      title.textContent = '架构师 · 老王 ── 灵魂人设 (SOUL.md)';
+      soul.value = '你是一名严苛的资深架构师“老王”。\n【设计铁律】\n1. 动代码先做架构审查，严禁带着假设开跑；\n2. 底层状态机必加 fast-check 证明；\n3. 高密度技术语言。';
+      model.textContent = 'Claude 3.7 Sonnet (Thinking) ▾';
+      effort.textContent = 'xhigh';
+    } else if (name === 'zhang') {
+      title.textContent = '前端专家 · 小张 ── 灵魂人设 (SOUL.md)';
+      soul.value = '你是一名极致追求体验与动效的前端架构师“小张”。\n【样式铁律】\n1. 100% 严守 29-color Tokens 与 shadcn 规范；\n2. 移动端触控热区严格锁定 >= 44pt；\n3. 零 hardcoded hex。';
+      model.textContent = 'GPT-4o (Visual Polish) ▾';
+      effort.textContent = 'high';
+    } else if (name === 'li') {
+      title.textContent = '审查专员 · 老李 ── 灵魂人设 (SOUL.md)';
+      soul.value = '你是代码门禁最高裁判“老李”，拥有一票否决权。\n【审查铁律】\n1. 严禁类型逃逸 (as any)；\n2. 失败不可致空 (Failure Is Not Empty)；\n3. 门禁红线零容忍。';
+      model.textContent = 'DeepSeek R1 (Audit) ▾';
+      effort.textContent = 'high';
+    }
+  }
+</script>
+
+</body>
+</html>
