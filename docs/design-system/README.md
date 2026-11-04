@@ -13,6 +13,7 @@
 | [`02-aesthetic-philosophy-and-standards.md`](02-aesthetic-philosophy-and-standards.md) | **美学哲学与鉴赏标准** | 深度解构“什么叫高级（克制与降噪）”、“什么叫美（数学比例与呼吸感）”、“什么叫漂亮（精细质感与灵动微交互）”。 |
 | [`03-director-design-workflow.md`](03-director-design-workflow.md) | **总监级跨端全流程设计工作流 (SOP)** | 从心智模型解构、信息架构、Token 架构、跨端界面打磨、动效物理学到 8 大交付验收门禁的 6 阶段标准 SOP。 |
 | [`04-tokens-and-design-system-spec.md`](04-tokens-and-design-system-spec.md) | **跨端设计系统与 Token 规范** | 空间栅格体系、语义化色彩 Token、字体阶梯垂直韵律、双光源物理阴影层级、Spring 弹性动效与平台差异化触控参数。 |
+| [`settings-interaction-and-ui-spec.md`](settings-interaction-and-ui-spec.md) | **设置中心交互与 UI 终极设计规范** | 居中沉浸式指挥模态、极客双模（表单↔YAML）、三级作用域级联指示器、0延迟全文检索与移动端下钻栈。 |
 | [`visual-directions.md`](visual-directions.md) | **Aura 首批 4 套顶级美学视觉方向** | 黑曜琥珀 (Obsidian Gold)、赛博银翼 (Titanium Frost)、深邃紫域 (Astral Void)、纸墨微光 (Mono Minimal)。 |
 
 ---
