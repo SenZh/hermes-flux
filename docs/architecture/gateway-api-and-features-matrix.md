@@ -26,11 +26,15 @@ Hermes 网关（Gateway）采用标准的 **JSON-RPC 2.0 over WebSocket** 双向
 
 ---
 
-## 二、客户端功能模块现状全景（48 个路由与核心组件）
+## 二、客户端功能模块与跨端容器架构对照
 
-客户端基于 Expo Router 架构，包含 **48 个物理页面路由**（位于 `src/app/`）及 2 个核心系统级交互组件（`AppLock`、`GatewayBridge`），划分为 10 大功能板块：
+> **架构实据与跨端说明**：  
+> 本节所列 10 大功能板块与页面映射，是上游 Nous 官方功能全景的对照基线。在 **Hermes Flux** 的 Monorepo 体系中：  
+> 1. **移动端架构 (Mobile)**：彻底废弃 React Native / Expo Router，采用 **Capacitor 8 原生容器**（`packages/mobile`，依赖 `@capacitor/android: ^8.6.0`），直接包裹 `packages/ui` 的同构 Web 产物，实现 $\ge 85\%$ 的跨端代码纯净复用；  
+> 2. **桌面端架构 (Desktop)**：采用 Electron 纯薄壳容器（`packages/desktop`），业务逻辑 100% 下沉至 `packages/core` 与 `packages/ui`；  
+> 3. **接口实调现状**：官方网关契约虽定义了 258 个 RPC 方法与 72 个事件，但在生产客户端中，当前经真实探针（`npm run probe:gateway`）严格通过并激活的核心接口为 10 大模块（会话、配置、项目、群聊、回滚、系统等，详见 `docs/gateway/README.md`），其他长尾领域方法（如 `pets.*`、`journey.*`）未接入当前桌面端生产调用链。
 
-| 模块板块 | 对应路由/文件 | 业务功能说明 |
+| 模块板块 | 对应业务功能说明与路由映射（上游基线） | Hermes Flux 实际落位与跨端支持 |
 |---|---|---|
 | **1. 底部核心 Tab 组** | `(tabs)/chat.tsx`<br>`(tabs)/sessions.tsx`<br>`(tabs)/automate.tsx`<br>`(tabs)/agent.tsx`<br>`(tabs)/more.tsx` | • **Chat**：流式对话、思维链展开、工具胶囊、语音/图片输入<br>• **Sessions**：会话检索、归档、分支派生、删除与快速切换<br>• **Automate**：定时任务监控、蓝图查看、Kanban 看板入口<br>• **Agent**：当前画像画像、提示词、分身切换中枢<br>• **More**：全局系统扩展与高阶管理导航 |
 | **2. 会话纵深管理** | `session/usage.tsx`<br>`session/rollback.tsx`<br>`session/goals.tsx`<br>`session/agents.tsx`<br>`import.tsx` | • **Usage**：Token 消耗分解图、上下文占用量（Context Breakdown）<br>• **Rollback**：版本时光机回退与文件 Diff 对比查看<br>• **Goals**：会话长程目标与 12 种循环/心跳检查点控制<br>• **Agents**：查看当前会话派生出的子 Agent 树与后台长进程<br>• **Import**：从 Claude Code / Codex / OpenClaw 物理迁移历史会话 |
@@ -446,7 +450,7 @@ Hermes 网关（Gateway）采用标准的 **JSON-RPC 2.0 over WebSocket** 双向
 | **RPC 实际调用数** | 96 个 | **139 个** | **严重漏统 43 个**：原统计仅统计了命令式 `gw.request()` 调用（102 个），完全漏掉了以 `useRpc` 响应式 Hook 驱动的 37 个数据检索接口（如 `billing.state`, `free_tier.status`, `projects.list`, `mcp.catalog` 等）与三元运算符动态派发接口。 |
 | **下行事件监听数** | 65 个 | **51 个** | **虚增/错统 14 个**：原统计将 `app/session/goals.tsx` 中向 `session.control` 传递的 12 个长程控制动作枚举（`goal.pause`, `goal.resume`, `heartbeat.clear`, `loop.stop` 等点分字符串）误记为了下行 WebSocket 事件。真实被客户端消费的事件为 51 个。 |
 | **反向干预请求** | 7 个 | **13 个** | **严重缺漏 6 个**：原文档仅列出 7 个手机端弹窗卡片，遗漏了 `display.install.sudo` 交互卡片与 5 个基于 `WINDOW_ONLY` 机制优雅阻断的桌面视口请求。 |
-| **页面路由总数** | 50 个 | **48 个** | **混淆组件与路由**：原统计将 `src/components/AppLock.tsx` 模态卡片误当做 Expo Router 路由页面，且漏登记了 `billing.tsx`、`memory.tsx`、`import.tsx`、`settings.tsx`、`projects.tsx` 页面。 |
+| **页面路由总数** | 50 个 | **48 个** | **上游 Nous 原型基线**：原统计系上游独立 App 路由基线。Hermes Flux 实际已迁移为 Capacitor 8 原生外壳，直接挂载 `packages/ui` 纯 Web 表现层。 |
 
 ### 2. Hermes Flux 跨端攻坚清单
 针对目前移动端尚未实现的 113 个高级 RPC 与 26 个下行事件，Aura 将按以下梯队攻坚：

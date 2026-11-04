@@ -93,7 +93,7 @@
 │   │   ├── 工具调用与委派展示 (Tool Invocations & Delegations)
 │   │   │   ├── 读类工具：执行完毕自动折叠为单行 28px 紧凑胶囊（工具名、用时、绿点）
 │   │   │   ├── 写类工具：保持展开或内联显示精简 Diff，支持跳至右侧检查舱深入查看
-│   │   │   └── 委派子任务：显示父子拓扑卡片、呼吸态与 `subagent.interrupt` 紧急打断
+│   │   │   └── 委派子任务：显示父子拓扑卡片、呼吸态与 `subagent.interrupt` 紧急打断（注：子代理由模型在回合内通过 `delegate_task` 工具派生，客户端仅有观察与干预权，网关契约不存在 `subagent.spawn`）
 │   │   └── 底部综合元数据与操作条 (Footer & Telemetry)
 │   │       ├── 基础动作：复制 Markdown、基于当前节点 Fork 会话、重新生成
 │   │       ├── 基础指标：模型名称、首字响应耗时 (TTFT)、整轮回答耗时、完成时间戳
@@ -138,7 +138,8 @@
         │   ├── `@file`：模糊搜索本地 Project 树与知识库，以相对路径形式嵌入 Prompt
         │   └── `@agent`：拉取已配置 Profile 清单，支持单次定向委派专家 Agent
         ├── Bot 专职工位模式：
-        │   └── 禁用 `@agent`（防止上下文污染），仅保留 `@file` 本地文档引用
+        │   ├── `@file`：模糊搜索本地 Project 树与知识库，以相对路径形式嵌入 Prompt
+        │   └── `@agent`：自动分流为 `prompt.btw` 旁路只读外援胶囊（`mention-btw`），零 Token 污染当前 Bot 长期记忆
         └── 群聊房间模式 (Group Chat)：
             ├── `@agent`：仅拉取本房间已入驻成员，支持精准单点唤醒（未提及成员静默旁听）
             └── `@all` / `@everyone`：唤醒全员，交由群聊 driver 自治协同讨论
