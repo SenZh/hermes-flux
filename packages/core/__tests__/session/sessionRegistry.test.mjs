@@ -5,6 +5,7 @@ import {
   toPendingSession,
   upsertSession,
   applySessionTitle,
+  SessionHandleRegistry,
 } from '../../dist/session/sessionRegistry.js';
 
 // Shapes below were captured from a live Hermes Gateway v0.22.5.
@@ -130,5 +131,66 @@ test('Session registry - rail list maintenance', async (t) => {
     // 2. Act & Assert
     assert.equal(applySessionTitle(existing, 'missing', '新标题'), existing, 'No match must not allocate a new list');
     assert.equal(applySessionTitle(existing, 's1', '   '), existing, 'Blank titles must be ignored');
+  });
+});
+
+test('SessionHandleRegistry - Live/Stored 句柄双向注册与归一化全象限验证', async (t) => {
+  await t.test('1. 正向双向解析：liveId 映射回 storedId，storedId 映射到 liveId', () => {
+    const reg = new SessionHandleRegistry();
+    reg.register({ liveId: 'live-100', storedId: 'stored-20261104' });
+
+    assert.equal(reg.toStoredId('live-100'), 'stored-20261104', 'liveId 必须精确解析为 storedId');
+    assert.equal(reg.toLiveId('stored-20261104'), 'live-100', 'storedId 必须精确解析为 liveId');
+  });
+
+  await t.test('2. 已知 storedId 直通与未知 ID 降级保真', () => {
+    const reg = new SessionHandleRegistry();
+    reg.register({ liveId: 'live-1', storedId: 'stored-1' });
+
+    // 传入自身就是 storedId 的情况
+    assert.equal(reg.toStoredId('stored-1'), 'stored-1');
+    assert.equal(reg.toStoredId('stored-unknown', ['stored-unknown']), 'stored-unknown');
+
+    // 既不是 live 也不在已知列表中的未知 ID 原样返回，不崩溃
+    assert.equal(reg.toStoredId('unregistered-id'), 'unregistered-id');
+  });
+
+  await t.test('3. 边界值：null、undefined、空串安全防御', () => {
+    const reg = new SessionHandleRegistry();
+    reg.register(null);
+    reg.register(undefined);
+    reg.register({ liveId: '', storedId: '' });
+
+    assert.equal(reg.toStoredId(null), null);
+    assert.equal(reg.toStoredId(undefined), null);
+    assert.equal(reg.toStoredId(''), null);
+    assert.equal(reg.toLiveId(null), null);
+    assert.equal(reg.toLiveId(undefined), null);
+  });
+
+  await t.test('4. 批量获取 getLiveIds：从一组 running storedId 获取全部绑定的 liveId', () => {
+    const reg = new SessionHandleRegistry();
+    reg.register({ liveId: 'l1', storedId: 's1' });
+    reg.register({ liveId: 'l2', storedId: 's2' });
+
+    const liveIds = reg.getLiveIds(['s1', 's2', 's3-no-live']);
+    assert.deepEqual(liveIds, ['l1', 'l2'], '必须只提取已知绑定的 liveId');
+  });
+
+  await t.test('5. 生命周期注销 unregister：删除会话时双向清理，杜绝内存泄漏', () => {
+    const reg = new SessionHandleRegistry();
+    reg.register({ liveId: 'live-del', storedId: 'stored-del' });
+
+    assert.equal(reg.toStoredId('live-del'), 'stored-del');
+
+    // 通过 storedId 注销
+    reg.unregister('stored-del');
+    assert.equal(reg.toStoredId('live-del'), 'live-del', '注销后不再具有映射');
+    assert.equal(reg.toLiveId('stored-del'), 'stored-del', '注销后 liveId 回退自身');
+
+    // 再次注册，并通过 liveId 注销
+    reg.register({ liveId: 'live-del-2', storedId: 'stored-del-2' });
+    reg.unregister('live-del-2');
+    assert.equal(reg.toStoredId('live-del-2'), 'live-del-2');
   });
 });
