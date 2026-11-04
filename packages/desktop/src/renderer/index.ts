@@ -18,6 +18,7 @@ import {
   mountTitlebar,
   mountLeftRail,
   buildLeftRailModel,
+  formatLeftRailTime,
   renderSettingsModal,
   renderModelPickerMenu,
   renderModelPickerTree,
@@ -131,6 +132,7 @@ declare global {
     __fluxCopyText?: (text: string) => Promise<boolean>;
     /** E2E / CDP 对账触发器：全量刷新并对账会话列表 */
     __fluxFetchSessions?: () => Promise<void>;
+    __fluxRender?: () => void;
     /** E2E / CDP 消息微操作栏动作派发器 */
     __fluxMessageActions?: {
       handleCopyMessage: (btn: HTMLElement) => Promise<void>;
@@ -168,6 +170,8 @@ interface AppState {
   isGroupsGroupExpanded: boolean;
   isMoreSessionsExpanded: boolean;
   isNewTaskModalOpen: boolean;
+  /** PR-3d：新建弹窗初始甲板（会话 header 的 + 传 solo，群聊 header 的 + 传 group），入队即快照、出队不重推。 */
+  newTaskModalTab: 'solo' | 'group';
   selectedNewTaskProjectId?: string;
   isAgentEditorOpen: boolean;
   editingAgentProfileName?: string;
@@ -276,11 +280,12 @@ const LOG_LEVEL_STORAGE_KEY = 'hermes_flux_log_level';
  * 左轨宽度唯一真值源。
  *
  * 设计意图 (Why)：微轨 52px 常驻 + 抽屉 212px 紧凑档 = 264 是默认值；
- * 加宽上限只允许到能把抽屉内容仍读得舒服的 320，超过就变成"半个中间舱"，压缩对话区。
- * 防范的历史坑 (Pitfall)：上限曾是 500，用户实测"拖宽后永远残留、蓝色太宽"；拖拽与恢复两条路径各自写死常量，易再次漂移。
- * 约束与规则 (Rules)：拖拽（bindRailResizeEvents）与冷启动恢复（init）必须同时读本常量，禁止任何一处再写字面量。
+ * 上限 480 为 2026-11-04 用户定案（"左栏最大宽度太窄，要调大"），可容纳长标题会话行完整扫描；
+ * 防范的历史坑 (Pitfall)：上限曾是 500 无夹取残留、后收紧到 320 又被实测判为过窄——宽度是产品决策，必须走定案而非拍脑袋；
+ *   拖拽与恢复两条路径各自写死常量会漂移。
+ * 约束与规则 (Rules)：拖拽（beginLeftRailResize/bindRailResizeEvents）与冷启动恢复（clampLeftRailWidth）必须同时读本常量，禁止任何一处再写字面量；CDP 回归 rail-handle-symmetry 的夹取断言随本值联动。
  */
-const LEFT_RAIL_WIDTH = { min: 264, max: 320, defaultValue: 264 } as const;
+const LEFT_RAIL_WIDTH = { min: 264, max: 480, defaultValue: 264 } as const;
 
 /** 把任意存档宽度夹取回合法区间；非数字一律回落到默认值。 */
 function clampLeftRailWidth(raw: string | null): number {
@@ -434,6 +439,7 @@ const state: AppState = {
   isGroupsGroupExpanded: true,
   isMoreSessionsExpanded: false,
   isNewTaskModalOpen: false,
+  newTaskModalTab: 'solo',
   isAgentEditorOpen: false,
   editingAgentProfileName: undefined,
   editingGroupRoomId: undefined,
@@ -520,6 +526,9 @@ const logScroll = createLogger('scroll');
 (window as any).__fluxState = state;
 (window as any).__fluxConnect = connect;
 window.__fluxFetchSessions = fetchSessions;
+/** CDP 验证钩子：与 __fluxState/__fluxConnect 同一调试面。verify-hermes-flux harness 已声明依赖 window.__fluxRender；
+ *  禁止业务代码调用，仅测试驱动"注入快照 → 重绘 → 出图"取证链路使用。 */
+window.__fluxRender = render;
 
 let gatewayClient: HermesGatewayClient | null = null;
 let currentTicket: string | undefined = undefined;
@@ -988,48 +997,14 @@ function scheduleSessionsRefresh(delayMs = 180): void {
 }
 
 /**
- * 纯算术安全日期时间格式化 (遵守 Gate 4c: 零 Intl 污染热路径)
- * 当天: "19:15"
- * 昨天: "昨天 16:20"
- * 前天: "前天 14:10"
- * 当年其他: "10/28 16:20"
- * 跨年: "2025/10/28"
+ * 时间格式化委托 ui 单一真值源 formatLeftRailTime（PR-3d 收敛）。
+ * 设计意图 (Why)：本函数曾是第二份"昨天 23:30"两段式实现，行组件优先上游字符串导致长格式永远赢。
+ * 防范的历史坑 (Pitfall)：两份格式化器漂移（本坑）；曾无条件本地覆盖上游时间致主工位卡与产物对不上。
+ * 约束与规则 (Rules)：禁止在此再写任何日期分支；规格只改 leftRailModel.formatLeftRailTime 并同步其形式化定理。
  */
 function formatSessionTime(timestamp: number): string {
   if (!timestamp || timestamp <= 0) return '';
-  const now = new Date();
-  const target = new Date(timestamp);
-
-  const pad = (n: number) => (n < 10 ? `0${n}` : String(n));
-  const timeStr = `${pad(target.getHours())}:${pad(target.getMinutes())}`;
-
-  const isSameDay =
-    now.getFullYear() === target.getFullYear() &&
-    now.getMonth() === target.getMonth() &&
-    now.getDate() === target.getDate();
-  if (isSameDay) return timeStr;
-
-  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-  const isYesterday =
-    yesterday.getFullYear() === target.getFullYear() &&
-    yesterday.getMonth() === target.getMonth() &&
-    yesterday.getDate() === target.getDate();
-  if (isYesterday) return `${t('time.yesterday')} ${timeStr}`;
-
-  const dayBefore = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 2);
-  const isDayBefore =
-    dayBefore.getFullYear() === target.getFullYear() &&
-    dayBefore.getMonth() === target.getMonth() &&
-    dayBefore.getDate() === target.getDate();
-  if (isDayBefore) return `${t('time.dayBefore')} ${timeStr}`;
-
-  const month = target.getMonth() + 1;
-  const date = target.getDate();
-  if (now.getFullYear() === target.getFullYear()) {
-    return `${month}/${date} ${timeStr}`;
-  }
-
-  return `${target.getFullYear()}/${month}/${date}`;
+  return formatLeftRailTime(timestamp);
 }
 
 const sessionListGeneration = new SessionListGeneration();
@@ -4383,7 +4358,6 @@ let updateReactLeftRail: (() => void) | null = null;
  */
 function createLeftRailActions(): LeftRailActions {
   return {
-    onToggleDrawer: () => { state.leftRailCollapsed = !state.leftRailCollapsed; render(); },
     onSelectSession: (sessionId: string, botName?: string) => { void selectSession(sessionId, { botName }); },
     onSelectBot: (profileName: string) => { void openBotChat(profileName); },
     onSelectGroup: (roomId: string) => { void openGroupRoom(roomId); },
@@ -4400,7 +4374,7 @@ function createLeftRailActions(): LeftRailActions {
       render();
     },
     onSearchChange: (value: string) => { state.sessionSearchQuery = value; render(); },
-    onNewChat: () => { void fetchProjects(); state.isNewTaskModalOpen = true; render(); },
+    onNewChat: (kind: 'session' | 'group') => { void fetchProjects(); state.newTaskModalTab = kind === 'group' ? 'group' : 'solo'; state.isNewTaskModalOpen = true; render(); },
     onSetTab: (tab: LeftRailTab) => {
       state.activeRailTab = state.activeRailTab === tab ? 'chats' : tab;
       if (state.activeRailTab === 'projects') void fetchProjects();
@@ -4782,6 +4756,7 @@ function render(): void {
         projects: state.projects,
         selectedProfile: state.profileName || 'default',
         selectedProjectId: state.selectedNewTaskProjectId,
+        initialType: state.newTaskModalTab,
       })}
 
       ${renderContextMenu(state.sessionContextMenu)}
@@ -4916,6 +4891,7 @@ function render(): void {
       projects: state.projects,
       selectedProfile: state.profileName || 'default',
       selectedProjectId: state.selectedNewTaskProjectId,
+      initialType: state.newTaskModalTab,
     });
     if (taskModalRoot) {
       if (nextTaskModalHtml) {
@@ -5536,14 +5512,8 @@ function bindEvents(): void {
   }
 
   // Session items & Context Menu
-  const newChatBtn = document.getElementById('new-chat-btn');
-  if (newChatBtn) {
-    newChatBtn.onclick = () => {
-      void fetchProjects();
-      state.isNewTaskModalOpen = true;
-      render();
-    };
-  }
+  // PR-3d：#new-chat-btn 旧 DOM 死绑定清除——React 岛经 onNewChat 回调接管，此处再留一套
+  // 就是第二个写入口（5470 注释已声明迁移完毕，此段是漏删的残肢）。
 
   // New Task & Group Modal Events
   const closeTaskModalBtn = document.getElementById('btn-close-task-modal');
@@ -5641,7 +5611,7 @@ function bindEvents(): void {
     };
   }
 
-  let activeModalType: 'solo' | 'group' = 'solo';
+  let activeModalType: 'solo' | 'group' = state.newTaskModalTab;
   const modalTabSolo = document.getElementById('modal-tab-solo');
   const modalTabGroup = document.getElementById('modal-tab-group');
   const secSolo = document.getElementById('modal-section-solo-agent');
@@ -5649,7 +5619,7 @@ function bindEvents(): void {
 
   if (modalTabSolo && modalTabGroup) {
     modalTabSolo.onclick = () => {
-      activeModalType = 'solo';
+      activeModalType = 'solo'; state.newTaskModalTab = 'solo';
       modalTabSolo.classList.add('active');
       modalTabSolo.style.background = 'var(--bg-card)';
       modalTabSolo.style.borderColor = 'var(--border-medium)';
@@ -5662,7 +5632,7 @@ function bindEvents(): void {
       if (secGroup) secGroup.style.display = 'none';
     };
     modalTabGroup.onclick = () => {
-      activeModalType = 'group';
+      activeModalType = 'group'; state.newTaskModalTab = 'group';
       modalTabGroup.classList.add('active');
       modalTabGroup.style.background = 'var(--bg-card)';
       modalTabGroup.style.borderColor = 'var(--border-medium)';

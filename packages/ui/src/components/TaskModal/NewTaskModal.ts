@@ -17,6 +17,8 @@ export interface NewTaskModalProps {
   projects: LeftRailProject[];
   selectedProfile: string;
   selectedProjectId?: string;
+  /** PR-3d：左轨 header 的 + 按甲板传入初始态；缺省 solo。入队即快照，渲染不反推。 */
+  initialType?: 'solo' | 'group';
   onClose?: () => void;
   onSubmit?: (data: {
     type: 'solo' | 'group';
@@ -29,6 +31,7 @@ export interface NewTaskModalProps {
 
 export function renderNewTaskModal(props: NewTaskModalProps): string {
   if (!props.isOpen) return '';
+  const isGroup = props.initialType === 'group';
 
   return `
     <div id="new-task-modal-overlay" style="
@@ -86,13 +89,13 @@ export function renderNewTaskModal(props: NewTaskModalProps): string {
         <div style="padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; max-height: 75vh; overflow-y: auto;">
           <!-- 1. Task Mode Switcher [ 单会话 | 群聊 ] -->
           <div style="display: flex; background: var(--bg-panel); padding: 3px; border-radius: 8px; border: 1px solid var(--border-subtle); gap: 4px;">
-            <button id="modal-tab-solo" type="button" class="modal-type-btn active" data-type="solo" style="
+            <button id="modal-tab-solo" type="button" class="modal-type-btn ${isGroup ? '' : 'active'}" data-type="solo" style="
               flex: 1;
               height: 32px;
               border-radius: 6px;
-              border: 1px solid var(--border-medium);
-              background: var(--bg-card);
-              color: var(--text-main);
+              border: 1px solid ${isGroup ? 'transparent' : 'var(--border-medium)'};
+              background: ${isGroup ? 'transparent' : 'var(--bg-card)'};
+              color: ${isGroup ? 'var(--text-muted)' : 'var(--text-main)'};
               font-size: 12px;
               font-weight: 600;
               display: flex;
@@ -106,13 +109,13 @@ export function renderNewTaskModal(props: NewTaskModalProps): string {
               <span>${t('modal.taskTypeSolo')}</span>
             </button>
 
-            <button id="modal-tab-group" type="button" class="modal-type-btn" data-type="group" style="
+            <button id="modal-tab-group" type="button" class="modal-type-btn ${isGroup ? 'active' : ''}" data-type="group" style="
               flex: 1;
               height: 32px;
               border-radius: 6px;
-              border: 1px solid transparent;
-              background: transparent;
-              color: var(--text-muted);
+              border: 1px solid ${isGroup ? 'var(--border-medium)' : 'transparent'};
+              background: ${isGroup ? 'var(--bg-card)' : 'transparent'};
+              color: ${isGroup ? 'var(--text-main)' : 'var(--text-muted)'};
               font-size: 12px;
               font-weight: 600;
               display: flex;
@@ -128,7 +131,7 @@ export function renderNewTaskModal(props: NewTaskModalProps): string {
           </div>
 
           <!-- 2. Target Agent Selection (For Solo Mode) -->
-          <div id="modal-section-solo-agent" style="display: flex; flex-direction: column; gap: 6px;">
+          <div id="modal-section-solo-agent" style="display: ${isGroup ? 'none' : 'flex'}; flex-direction: column; gap: 6px;">
             <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">${t('modal.selectAgent')}</label>
             <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px;">
               ${props.profiles
@@ -160,7 +163,7 @@ export function renderNewTaskModal(props: NewTaskModalProps): string {
           </div>
 
           <!-- 2b. Multi-Agent Group Members Selection (For Group Mode) -->
-          <div id="modal-section-group-members" style="display: none; flex-direction: column; gap: 6px;">
+          <div id="modal-section-group-members" style="display: ${isGroup ? 'flex' : 'none'}; flex-direction: column; gap: 6px;">
             <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">${t('modal.selectMembers')}</label>
             <div style="display: flex; flex-direction: column; gap: 4px; background: var(--bg-panel); padding: 8px; border-radius: 8px; border: 1px solid var(--border-subtle);">
               ${props.profiles

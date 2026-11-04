@@ -178,7 +178,7 @@ test('rail-handle-symmetry: 左右拖拽把手几何同源且不被裁剪', asyn
     })()`);
     await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: box.x + 240, y: box.y, button: 'left' });
     assert.ok(Math.abs(during.width - (await evaluate(`document.querySelector(${JSON.stringify(HANDLE('left'))}).getBoundingClientRect().width`))) < 0.5, '拖拽期间把手宽度不得漂移');
-    assert.ok(during.railVar === '320px', `拖满必须夹取到上限 320px，实测 ${during.railVar}`);
+    assert.ok(during.railVar === '480px', `拖满必须夹取到上限 480px（LEFT_RAIL_WIDTH 用户定案），实测 ${during.railVar}`);
     assert.notEqual(during.bg, 'rgba(0, 0, 0, 0)', '拖拽（hover 锁定）期间必须有高亮反馈');
   });
 });

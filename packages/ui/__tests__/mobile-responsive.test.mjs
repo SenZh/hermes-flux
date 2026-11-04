@@ -40,7 +40,6 @@ function renderLeftRail(props = {}) {
     collapsed: Boolean(props.collapsed),
     searchQuery: props.searchQuery || '',
     editingGroupRoomId: props.editingGroupRoomId,
-    onToggleDrawer: noop,
     onSelectSession: noop,
     onSelectBot: noop,
     onSelectGroup: noop,

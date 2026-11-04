@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { ChevronLeft, Folder, MessageSquare, MoreHorizontal, Plus, Search, Users } from 'lucide-react';import { t } from '../i18n/index.js';
+import { Folder, MessageSquare, MoreHorizontal, Plus, Search, Users } from 'lucide-react';import { t } from '../i18n/index.js';
 import { Badge } from './primitives/Badge.js';
 import { Button } from './primitives/Button.js';
 import { Input } from './primitives/Input.js';
@@ -25,7 +25,6 @@ export interface LeftRailProps {
   editingGroupRoomId?: string;
   /** 群聊拼图头像的成员资产来源；缺省时回退确定性字母块，不影响行可用性。 */
   groupAvatars?: LeftRailProfile[];
-  onToggleDrawer: () => void;
   onSelectSession: (sessionId: string, botName?: string) => void;
   onSelectBot: (profileName: string) => void;
   onSelectGroup: (roomId: string) => void;
@@ -33,7 +32,8 @@ export interface LeftRailProps {
   onOpenBotMenu: (profileName: string, x: number, y: number) => void;
   onOpenGroupMenu: (roomId: string, name: string, x: number, y: number) => void;
   onSearchChange: (value: string) => void;
-  onNewChat: () => void;
+  /** PR-3d：新建入口按甲板分型，会话 header 传 session、群聊 header 传 group。 */
+  onNewChat: (kind: 'session' | 'group') => void;
   onSetTab: (tab: LeftRailTab) => void;
   onToggleSessions: () => void;
   onToggleGroups: () => void;
@@ -85,13 +85,14 @@ function RowTime({ timestamp, fallback }: { timestamp?: number; fallback?: strin
   const value = provided || formatLeftRailTime(timestamp);
   if (!value) return null;
   const iso = timestamp ? new Date(timestamp > 1e11 ? timestamp : timestamp * 1000).toISOString() : undefined;
-  return <time className="shrink-0 font-code text-caption text-muted-foreground tabular-nums" dateTime={iso}>{value}</time>;
+  return <time className="ml-auto shrink-0 font-code text-caption text-muted-foreground tabular-nums" dateTime={iso}>{value}</time>;
 }
 
 /**
- * 会话行（用户定案形态）。
+ * 会话行（用户定案形态，PR-3d 修订）。
  * 【设计意图】去掉行内头像：微轨与主工位卡已承载 Bot 身份，行内重复且挤压标题；主体=标题，副标题=12px muted 单行截断；
- *   时间紧凑化后钉右缘，行高 48px 保持触控与扫描节奏。
+ *   时间与活动点内联在标题行右缘（与 GroupRow 同构），不再作为双行块的兄弟列——
+ *   旧结构让长日期串同时挤占标题与副标题宽度（2026-11-04 用户实测"时间太宽"根因之一）。
  * 【约束与规则】只消费传进来的快照，绝不改写数据管道；点击与右键一律交回壳层。
  */
 function SessionRow({ session, active, compact, onSelect, onMenu }: {
@@ -112,12 +113,14 @@ function SessionRow({ session, active, compact, onSelect, onMenu }: {
     onContextMenu={(event) => { event.preventDefault(); onMenu(event.clientX, event.clientY); }}
   >
     {active && <span aria-hidden="true" className="absolute inset-y-2 left-0 w-0.5 rounded-r bg-primary" />}
-    <span className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
-      <span className={`truncate text-body leading-tight ${active ? 'font-semibold text-foreground' : 'text-foreground'}`}>{session.title}</span>
+    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <span className="flex min-w-0 items-center gap-2">
+        <span className={`truncate text-body leading-tight ${active ? 'font-semibold text-foreground' : 'text-foreground'}`}>{session.title}</span>
+        <ActivityDot state={session.activityState} />
+        <RowTime timestamp={session.timestamp} fallback={session.time} />
+      </span>
       {!compact && <span className="truncate text-aux leading-tight text-muted-foreground">{subtitle}</span>}
     </span>
-    <ActivityDot state={session.activityState} />
-    <RowTime timestamp={session.timestamp} fallback={session.time} />
   </button>;
 }
 
@@ -263,12 +266,9 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
         <Button id="rail-station-projects-btn" variant="ghost" size="icon" className="size-9 rounded-md bg-panel text-secondary-foreground" title={t('rail.projects')} onClick={() => props.onSetTab('projects')}>
           <Folder size={15} />
         </Button>
-        <Button id="new-chat-btn" variant="ghost" size="icon" className="size-9 rounded-md border border-dashed border-border bg-card text-foreground" title={t('rail.newChat')} onClick={props.onNewChat}>
-          <Plus size={15} />
-        </Button>
-        <Button variant="ghost" size="icon" className="size-8 rounded-md p-0 text-muted-foreground" title={t('titlebar.toggleLeftRail')} aria-label={t('titlebar.toggleLeftRail')} onClick={props.onToggleDrawer}>
-          <ChevronLeft size={14} />
-        </Button>
+        {/* PR-3d 用户定案：微轨底部"新建会话 +"与"‹ 折叠"两按钮删除。
+            新建入口收编到会话/群聊 header 右侧 +；折叠入口保留顶栏 PanelLeft 与 Ctrl+B，
+            二者本就是这个状态的第二、第三个重复实现（renderer 5539 的旧 DOM 死绑定同步清除）。 */}
       </div>
     </div>
 
@@ -307,10 +307,16 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
         {model.error && <div id="session-list-error" role="alert" className="m-1 rounded-md border border-border-strong bg-panel p-2 text-aux text-foreground">{model.error}</div>}
 
         {model.visibleGroups.length > 0 && <section className="mb-2">
-          <button type="button" id="rail-groups-accordion-trigger" className="flex w-full items-center justify-between px-1.5 py-1 text-overline font-bold uppercase tracking-wide text-muted-foreground" onClick={props.onToggleGroups}>
-            <span className="flex items-center gap-1.5"><Users size={12} />{t('rail.groups')} ({model.visibleGroups.length})</span>
-            <span aria-hidden="true">{model.isGroupsOpen ? '⌄' : '›'}</span>
-          </button>
+          {/* PR-3d 用户定案：header 字号行高放大一档，删 ⌄/› 文本箭头（折叠态由列表显隐与点击整行表达），
+              右侧 + 为新建群聊入口；计数徽标沿用既有 visibleGroups.length，非新增数据面。 */}
+          <div className="flex w-full items-center gap-1 pr-1">
+            <button type="button" id="rail-groups-accordion-trigger" className="flex min-w-0 flex-1 items-center gap-1.5 px-1.5 py-2 text-left text-body font-semibold text-muted-foreground" onClick={props.onToggleGroups}>
+              <Users size={13} />{t('rail.groups')} ({model.visibleGroups.length})
+            </button>
+            <Button variant="ghost" size="icon" className="rail-new-group-btn relative size-6 shrink-0 rounded p-0 text-muted-foreground hover:text-foreground after:absolute after:-inset-1.5 after:content-['']" title={t('rail.newGroup')} aria-label={t('rail.newGroup')} onClick={() => props.onNewChat('group')}>
+              <Plus size={13} />
+            </Button>
+          </div>
           <div id="rail-groups-nested-list" className="flex flex-col gap-0.5" style={{ display: model.isGroupsOpen ? 'flex' : 'none' }}>
             {model.visibleGroups.map((group) => <GroupRow
               key={group.roomId}
@@ -328,10 +334,15 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
         </section>}
 
         <section className="mb-2">
-          <button type="button" id="rail-sessions-accordion-trigger" className="flex w-full items-center justify-between px-1.5 py-1 text-overline font-bold uppercase tracking-wide text-muted-foreground" onClick={props.onToggleSessions}>
-            <span className="flex items-center gap-1.5"><MessageSquare size={12} />{t('rail.conversations')} ({model.activeSessions.length})</span>
-            <span aria-hidden="true">{model.isSessionsOpen ? '⌄' : '›'}</span>
-          </button>
+          {/* 会话 header 同构：放大字号、删箭头、右侧 + 新建会话（复用 NewTaskModal solo 态）。 */}
+          <div className="flex w-full items-center gap-1 pr-1">
+            <button type="button" id="rail-sessions-accordion-trigger" className="flex min-w-0 flex-1 items-center gap-1.5 px-1.5 py-2 text-left text-body font-semibold text-muted-foreground" onClick={props.onToggleSessions}>
+              <MessageSquare size={13} />{t('rail.conversations')} ({model.activeSessions.length})
+            </button>
+            <Button variant="ghost" size="icon" className="rail-new-session-btn relative size-6 shrink-0 rounded p-0 text-muted-foreground hover:text-foreground after:absolute after:-inset-1.5 after:content-['']" title={t('rail.newChat')} aria-label={t('rail.newChat')} onClick={() => props.onNewChat('session')}>
+              <Plus size={13} />
+            </Button>
+          </div>
           <div id="rail-sessions-nested-list" className="flex flex-col gap-0.5" style={{ display: model.isSessionsOpen ? 'flex' : 'none' }}>
             {model.activeSessions.length > 0
               ? model.activeSessions.map((session) => <SessionRow

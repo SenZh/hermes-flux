@@ -81,22 +81,34 @@ export function toSnippet(text: string | undefined, maxLen = 32): string {
 }
 
 /**
- * 紧凑时间：当日 HH:mm、同年跨日 M/D、跨年 YYYY/M/D。
- * 设计意图 (Why)：行内时间只承担"多久以前"的定位，钉在右缘后宽度必须可预测。
- * 防范的历史坑 (Pitfall)：曾用"昨天 16:20"这类两段式，把右侧时间列撑宽到挤掉标题。
- * 约束与规则 (Rules)：纯算术格式化，禁止 Intl / toLocaleString（渲染热路径）。
+ * 行内时间唯一真值格式化器（PR-3d 收敛）。
+ * 规格：当日 HH:mm；昨天="昨天"；前天="前天"；同年更早 M/D；跨年 YYYY/M/D。
+ * 设计意图 (Why)：时间只承担"多久以前"的定位，昨日/前日已含足够语义，时分是噪音；
+ *   renderer 的 formatSessionTime 与 core 管道的 formatTime 注入全部委托本函数，
+ *   全链路（session.time、profile.lastTime、行内兜底）从此同形。
+ * 防范的历史坑 (Pitfall)：曾有两份格式化器（renderer 两段式"昨天 23:30" vs 本函数紧凑式），
+ *   行组件优先上游字符串导致长格式永远赢、时间列撑宽挤标题（2026-11-04 用户实测）；
+ *   也曾无条件本地覆盖上游时间，导致主工位卡与生产产物对不上。
+ * 约束与规则 (Rules)：纯算术格式化，禁止 Intl / toLocaleString（渲染热路径）；
+ *   修改输出规格必须同步 packages/core/__tests__/formal/rail-time-format-formal.test.mjs 定理。
  */
 export function formatLeftRailTime(timestamp?: number, now: Date = new Date()): string {
-  if (!timestamp || !Number.isFinite(timestamp)) return '';
+  if (!timestamp || !Number.isFinite(timestamp) || timestamp <= 0) return '';
+  if (!Number.isFinite(now?.getTime())) return '';
   const date = new Date(timestamp > 1e11 ? timestamp : timestamp * 1000);
   if (!Number.isFinite(date.getTime())) return '';
   if (date.getFullYear() !== now.getFullYear()) {
     return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
   }
-  if (date.toDateString() !== now.toDateString()) {
-    return `${date.getMonth() + 1}/${date.getDate()}`;
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  const dayBefore = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 2);
+  const sameDay = (a: Date, b: Date): boolean => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  if (sameDay(date, now)) {
+    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
   }
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  if (sameDay(date, yesterday)) return t('time.yesterday');
+  if (sameDay(date, dayBefore)) return t('time.dayBefore');
+  return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
 /** 会话归属判定：Default 中枢持有通用会话，专职 Bot 只持有自身名下会话。 */

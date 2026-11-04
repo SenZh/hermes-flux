@@ -4,7 +4,7 @@
  * 【为什么放在 core 之外却仍可测】夹取是纯函数，但它的调用点在 renderer。
  *   这里通过 esbuild 产物 `dist/renderer/index.js` 的真实代码路径验证，
  *   并用最小的 DOM/事件替身驱动拖拽状态机，避免"只有类型绿、行为没测"。
- * 【变异杀伤力】把上限 320 改回 400、把 null 兜底改成 NaN、把 pointercancel 清理删掉，
+ * 【变异杀伤力】把上限 480 改回 400、把 null 兜底改成 NaN、把 pointercancel 清理删掉，
  *   下列任一断言都会变红。
  */
 import test from 'node:test';
@@ -30,10 +30,10 @@ function clamp(raw, { min, max, defaultValue }) {
   return Math.round(Math.max(min, Math.min(max, parsed)));
 }
 
-test('左轨宽度契约：上限收紧到紧凑区间，默认值等于规范值', () => {
+test('左轨宽度契约：上限为 2026-11-04 用户定案的 480，默认值等于规范值', () => {
   const contract = readRailWidthContract();
   assert.equal(contract.min, 264, '下限必须是 52 微轨 + 212 抽屉');
-  assert.equal(contract.max, 320, '上限必须收敛到抽屉仍紧凑的 320；超过就压缩对话区');
+  assert.equal(contract.max, 480, '上限必须等于用户定案的 480（曾 500→320→480，全部走定案，禁止再拍脑袋改动）');
   assert.equal(contract.defaultValue, 264, '默认值必须等于规范值');
   assert.ok(contract.max > contract.min, '上限必须大于下限');
 });
@@ -47,10 +47,10 @@ test('clampLeftRailWidth：越界、脏值、小数全部被精确收口', async
     assert.equal(clamp('-999', contract), 264);
   });
 
-  await t.test('高于上限夹到 320（旧版 400/500 存档必须被纠正）', () => {
-    assert.equal(clamp('400', contract), 320);
-    assert.equal(clamp('500', contract), 320);
-    assert.equal(clamp('9999', contract), 320);
+  await t.test('高于上限夹到 480；区间内的 400 旧存档原样保留（PR-3d 定案）', () => {
+    assert.equal(clamp('400', contract), 400);
+    assert.equal(clamp('500', contract), 480);
+    assert.equal(clamp('9999', contract), 480);
   });
 
   await t.test('区间内原样保留并四舍五入', () => {

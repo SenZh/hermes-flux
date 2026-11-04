@@ -25,6 +25,7 @@ export const zhDict = {
 
   // Left Rail
   'rail.newChat': '新建会话',
+  'rail.newGroup': '新建群聊',
   'rail.searchPlaceholder': '搜索历史会话...',
   'rail.conversations': '会话',
   'rail.groups': '群聊',
@@ -388,6 +389,7 @@ export const enDict: Record<I18nKey, string> = {
   'titlebar.maximize': 'Maximize',
 
   'rail.newChat': 'New Session',
+  'rail.newGroup': 'New Group',
   'rail.searchPlaceholder': 'Search sessions...',
   'rail.conversations': 'Sessions',
   'rail.groups': 'Groups',

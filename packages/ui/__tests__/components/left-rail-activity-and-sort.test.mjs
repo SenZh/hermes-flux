@@ -40,7 +40,6 @@ function renderRail(overrides = {}) {
     searchQuery: input.searchQuery,
     editingGroupRoomId: overrides.editingGroupRoomId,
     groupAvatars: input.profiles,
-    onToggleDrawer: noop,
     onSelectSession: noop,
     onSelectBot: noop,
     onSelectGroup: noop,

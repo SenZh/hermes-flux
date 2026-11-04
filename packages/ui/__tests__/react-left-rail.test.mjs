@@ -54,7 +54,6 @@ function render(overrides = {}, propOverrides = {}) {
     collapsed: false,
     searchQuery: '',
     editingGroupRoomId: overrides.editingGroupRoomId,
-    onToggleDrawer: noop,
     onSelectSession: noop,
     onSelectBot: noop,
     onSelectGroup: noop,
@@ -81,6 +80,15 @@ test('紧凑时间：当日 HH:mm、跨日 M/D、跨年 YYYY/M/D，非数字一�
 
   await t.test('同年跨日给 M/D 且不带时分', () => {
     assert.equal(formatLeftRailTime(new Date(2026, 9, 28, 16, 20).getTime(), new Date(NOW)), '10/28');
+  });
+
+  await t.test('昨天/前天只给日名，不带时分（PR-3d 收敛规格）', () => {
+    assert.equal(formatLeftRailTime(new Date(2026, 10, 2, 23, 30).getTime(), new Date(NOW)), '昨天');
+    assert.equal(formatLeftRailTime(new Date(2026, 10, 1, 8, 0).getTime(), new Date(NOW)), '前天');
+    assert.equal(formatLeftRailTime(new Date(2026, 10, 2, 0, 1).getTime(), new Date(NOW)), '昨天');
+    const now2 = new Date(2026, 10, 3, 9, 5);
+    assert.equal(formatLeftRailTime(new Date(2026, 10, 2, 23, 59).getTime(), now2), '昨天');
+    assert.equal(formatLeftRailTime(new Date(2026, 10, 1, 0, 0).getTime(), now2), '前天');
   });
 
   await t.test('跨年带年份', () => {
@@ -302,6 +310,15 @@ test('React 岛控件基线：原生控件不得继承 UA 白底，且不压过�
     const sources = [...entry.matchAll(/@source\s+["']([^"']+)["']/g)].map((m) => m[1]);
     assert.deepEqual(sources, ['./components-react/**/*.tsx'], '扫描面只允许 React 组件目录白名单');
   });
+});
+
+test('PR-3d 形态静态守卫：微轨无新建/折叠按钮、header 无文本箭头且 + 在位（无浏览器也必须红）', () => {
+  const markup = render();
+  assert.ok(!markup.includes('new-chat-btn'), '微轨不得再渲染新建会话按钮（入口已收编到 header +）');
+  assert.ok(!markup.includes('lucide-chevron-left'), '微轨不得再渲染折叠 ChevronLeft（入口收编顶栏与 Ctrl+B）');
+  assert.ok(!markup.includes('⌄') && !markup.includes('›'), 'accordion header 禁止残留文本箭头');
+  assert.ok(markup.includes('rail-new-session-btn'), '会话 header 的 + 必须渲染');
+  assert.ok(markup.includes('rail-new-group-btn'), '群聊 header 的 + 必须渲染');
 });
 
 test('primitives 消费守卫：左轨必须真实使用 shadcn 基座而非继续造轮子', async (t) => {
