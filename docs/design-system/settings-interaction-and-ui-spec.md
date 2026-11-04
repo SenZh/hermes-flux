@@ -1,70 +1,73 @@
 # Hermes Flux 设置中心交互与 UI 终极设计规范 (Settings Interaction & Visual Design Spec)
 
-> **定位说明**：本文档确立了 **Hermes Flux**（全平台 Desktop / Web / iOS / Android）设置体系的终极定稿交互架构（UX Architecture）与高保真赛博极客美学视觉设计规范（UI Spec）。
-> 核心设计飞跃：彻底打破平庸的 CMS 表单刻板印象，将专职数字员工配置升华至**“全息赛博数字员工神经工位 (Neural Cyber-Core Persona)”**，全局配置升华为**“网关神经控制中枢 (Gateway Neural Grid)”**，实现令人惊艳的视觉深度与流动物理感。
+> **定位说明**：本文档确立了 **Hermes Flux**（全平台 Desktop / Web / iOS / Android）设置体系的终极定稿交互架构（UX Architecture）与高质感视觉设计规范（UI Spec）。
+> 核心原则：**文案 100% 务实克制，零中二花哨词汇；UI 与微交互追求极致的物理流动感、磁性滑块与触控手感**。
 
 ---
 
-## 零、 惊艳化重构设计哲学 (Astonishing Aesthetic Principles)
+## 零、 交互形态与空间定位 (Architecture & Ingress)
 
-1. **智能体生命实体感 (Agent Entity Immersion)**：
-   - 专职数字员工不是数据库里的一行记录，而是一个**“赛博全息实体 / 神经装甲核心”**；
-   - 每个 Agent 拥有专属的光谱能量波长（架构老王: 靛青冷萃 `#6366F1`、前端小张: 霓虹洋红 `#EC4899`、审查老李: 熔岩琥珀 `#F59E0B`）；
-   - 切换 Agent 时，整个视口背景的**微光环境色（Ambient Glow）与顶栏指示核（Pulsing Orb）**发生丝滑流光渐变。
-2. **微距物理质感与双光源微光 (Specular Rim Lights & Depth)**：
-   - 纯黑深邃宇宙底色（`#050507` ➔ `#0A0C10` ➔ `#10131A`），彻底消灭灰白平庸；
-   - 卡片边缘附带 1px 细微镜面高光边缘（Specular Highlights）与 3px 专属色彩能量光柱；
-   - 所有可点击组件遵循 Emil Kowalski 物理动效：按下带有 `transform: scale(0.97)` 弹簧反馈，拨动开关带有电容接通光效。
+设置体系由两个正交且独立的视图构成，通过顶栏的分段滑块（Capsule Track）或外部快捷入口呼出：
 
----
-
-## 一、 舱室一：专职 Agent 全息工位舱 (Neural Cyber-Core Persona)
-
-### 1.1 触发入口 (Multiple Fast Ingresses)
-- **微轨/抽屉右键**：在任意 Agent 头像上点击右键 ➔ 弹出上下文菜单 ➔ 选择 `⚙ 配置专职员工`；
-- **主工位顶栏入口**：处于该专职 Bot 工位时，点击顶栏名称旁的专属徽章；
-- **从哪个 Agent 进去，默认就点亮该 Agent 的全息卡牌**！
-
-### 1.2 顶部全息卡牌滑动器 (Holographic Persona Carousel)
-- 顶部固定一排精致的全息工卡卡牌（Persona Cards）：
-  - 架构师老王：`CHIEF ARCHITECT · S`，靛蓝渐变头像 + 在线翡翠微光点；
-  - 前端专家小张：`PIXEL DIRECTOR · S`，洋红渐变头像；
-  - 审查专员老李：`GATE GUARDIAN · S`，琥珀金渐变头像；
-- **点击或左右滑动即刻秒切**：点击小张，弹窗背景光瞬间转为霓虹洋红，右侧内容流 0 延迟无刷新切换为小张的人设、模型与记忆。
-
-### 1.3 核心组件模态
-1. **📜 神经灵魂人设代码舱 (SOUL.md Directives)**：
-   - 顶栏带快速指令胶囊：点击 `[+ 注入: 先行证明铁律]` 或 `[+ 注入: fast-check门禁]`，直接将专业架构指令无缝追加至底层提示词；
-   - 等宽字体与深黑终端底色，带微光聚焦边框。
-2. **⚛️ 算力核心反应堆 (Compute Core Reactor)**：
-   - 摒弃死板下拉框，采用反应堆参数网格；
-   - 呈现绑定的推理引擎与思考深度预算（Reasoning Effort: low / medium / high / xhigh）。
-3. **⚡ 赛博技能插槽 (Neural Skill Chips)**：
-   - 技能呈现为高科技插件芯片插槽；
-   - 带物理接通指示灯，点击拨动即实现热插拔开启与关闭。
-4. **💎 突触记忆体晶片 (Synaptic Memory Fragments)**：
-   - 查看该 Bot 沉淀在 `MEMORY.md` 中的历史记忆切片；
-   - 半透明微光晶体卡片，悬停微光浮现，支持一键单条修剪。
+```text
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           Hermes Flux 设置体系架构                               │
+├────────────────────────────────────────┬────────────────────────────────────────┤
+│ ① 专职数字员工配置 (Agent Persona)     │ ② 系统全局设置 (Global Settings)        │
+├────────────────────────────────────────┼────────────────────────────────────────┤
+│ • 呼出入口: 微轨/抽屉 Agent 右键 ➔ 配置 │ • 呼出入口: 微轨底部 ⚙ 设置 或 Cmd + ,  │
+│ • 核心定位: 专职数字员工独立人设与算力 │ • 核心定位: 网关底座参数、提供商与网络  │
+│ • 顶部组件: 磁性滑动胶囊轨 (秒切老王)   │ • 顶栏组件: 纯净主标题与即时检索框      │
+│ • 核心项: 系统提示词 (SOUL.md)、绑定   │ • 核心项: 外观、全局模型 Pin、API Key  │
+│   模型、思考预算推杆、私有技能与记忆   │   安全托管、HTTP/SOCKS5 代理通道        │
+└────────────────────────────────────────┴────────────────────────────────────────┘
+```
 
 ---
 
-## 二、 舱室二：系统全局设置中枢 (Gateway Neural Grid)
+## 一、 核心微交互设计与手感规范 (Micro-Interactions & Feel)
 
-### 2.1 触发入口
-- 微轨底部 `⚙ 设置` 图标或全局快捷键 `Cmd + ,` 呼出。
+### 1.1 顶部 Agent 磁性滑动选择轨 (Magnetic Slider Track)
+- **物理滑块背景 (Glider)**：
+  - 轨内常驻一个深色微浮雕滑块背景（`#20242E`，带 1px 半透明亮边与微阴影）；
+  - 当用户在老王、小张、老李之间点击切换时，滑块使用**弹簧物理缓动**（`transition: transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1)`）平滑横移对准目标；
+  - 按钮按下时附带 `transform: scale(0.97)` 物理按压反馈。
+- **内容区平滑十字交叉位移淡入 (Crossfade Animation)**：
+  - 切换 Agent 时，右侧表单内容**绝不生硬刷新**；
+  - 采用 `slideInFade 0.18s`：透明度从 0 变到 1，Y 轴产生 4px 的极其克制的微位移，视感如丝般顺滑。
 
-### 2.2 视觉与交互规范
-- **顶部实时遥测带 (Telemetry Ribbon)**：
-  - 呈现实时网关 RTT 延迟读数（如 `12ms`）、当前活跃会话数、今日 Token 吞吐量与网关版本号；
-- **模型与 API Key 安全保险库 (Cryptographic Key Vaults)**：
-  - 各提供商（Anthropic, OpenAI, DeepSeek, Bedrock）以金属保险箱卡片排布；
-  - 密钥严格脱敏，带实时连通呼吸灯（`在线就绪 🟢`）；
-- **全局网络代理通道**：
-  - 直观展示代理通道（HTTP/SOCKS5）与快速测速探针。
+### 1.2 思考预算 4 档触控式分段推杆 (Segmented Reasoning Stepper)
+- 摒弃死板下拉框，采用**触控式 4 档分段推杆**（Low / Med / High / Max）；
+- 内部带有物理推块，点击或拖动刻度时，推块即时滑动，右上方等宽数值实时刷新对应的 Token 预算（如 `48,000 Tokens`）。
+
+### 1.3 推理模型单选芯片组 (Radio Chips Matrix)
+- 每个候选模型为一个独立的圆角芯片（如 `Claude 3.7 Sonnet`、`GPT-4o`、`DeepSeek R1`）；
+- 芯片左侧带有一个小巧的单选指示环，点击时内部实心圆点带缩放动画浮现，外边框高亮。
+
+### 1.4 仿 iOS 微型精密 Switch 开关
+- 尺寸锁定为 `32px × 18px`，内部滑球 `14px`；
+- 开启时滑向右侧并点亮强调色，按下时圆球轻微横向拉伸（`width: 17px`），模拟真实物理触控回弹。
 
 ---
 
-## 三、 资产落盘与原型文件
+## 二、 视觉层次与 Design Tokens 规范
 
-- **高保真可交互惊艳原型**：[`docs/prototypes/settings-astonishing-prototype.html`](docs/prototypes/settings-astonishing-prototype.html)（支持在任意浏览器中打开体验全息卡牌切换、环境光流转、技能芯片插拔与记忆体修剪）；
-- **本规范文档**：[`docs/design-system/settings-interaction-and-ui-spec.md`](docs/design-system/settings-interaction-and-ui-spec.md)。
+所有界面元素严格基于纯黑与冷色阶梯构建：
+
+| UI 元素 | 颜色规范 | 视觉意图 |
+|---|---|---|
+| **窗口外底色 (Window Body)** | `#0D0E11` | 极度深邃克制的冷灰黑，消灭纯白的刺眼感 |
+| **侧边栏 (Sidebar)** | `#090A0D` | 次级深度，形成明确的层级分割 |
+| **卡片基底 (Section Card)** | `#13151A` | 悬浮卡片层级，hover 时微提亮至 `#181B22` |
+| **细微边框 (Borders)** | `rgba(255, 255, 255, 0.08)` | 1px 细线微光，界限分明但不喧宾夺主 |
+| **主操作色 (Brand Blue)** | `#3B82F6` | 单选圆点、激活开关与链接强调色 |
+| **在线与成功 (Emerald)** | `#10B981` | 延迟读数、落盘成功指示点 |
+| **高反差文字 (Text High)** | `#F8FAFC` | 标题与关键输入内容 |
+| **次要说明文字 (Text Mid)** | `#94A3B8` | 配置描述与辅助说明 |
+
+---
+
+## 三、 资产与原型落盘清单
+
+- **真机可交互原型文件**：[`docs/prototypes/settings-astonishing-prototype.html`](docs/prototypes/settings-astonishing-prototype.html)（可在浏览器中打开，亲手操作磁性滑块与分段推杆）
+- **本规范文档**：[`docs/design-system/settings-interaction-and-ui-spec.md`](docs/design-system/settings-interaction-and-ui-spec.md)
