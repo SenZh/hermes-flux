@@ -532,11 +532,17 @@
 .titlebar-left, .titlebar-right { display: flex; align-items: center; gap: 8px; height: 100%; }
 .titlebar-left { flex: 1; min-width: 0; }
 .titlebar-right { justify-content: flex-end; flex-shrink: 0; z-index: 2; }
-.titlebar-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 8px; max-width: calc(100% - 320px); pointer-events: none; z-index: 1; }
-.titlebar-session-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground); }
+.titlebar-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 6px; max-width: calc(100% - 320px); pointer-events: none; z-index: 1; }
+.titlebar-session-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--foreground);
+  font-size: var(--fs-aux, 12px);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
 .titlebar-latency-pill { color: var(--secondary-foreground); font-family: var(--font-mono); }
-.session-live-pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--destructive); }
-.session-live-pulse[data-connected="true"] { background: var(--success); }
 .win-caption-controls { display: flex; align-items: center; height: 100%; -webkit-app-region: no-drag; }
 .win-cap-btn { width: 46px; height: 100%; border: 0; background: transparent; color: var(--secondary-foreground); display: flex; align-items: center; justify-content: center; cursor: pointer; -webkit-app-region: no-drag; }
 .win-cap-btn:hover { background: var(--card-hover); }
@@ -941,19 +947,19 @@ button {
    Clean Light Theme Refinements (OpenChamber Light Mode Aesthetic Polish)
    ========================================================================== */
 
-/* Active session card elevated state in light mode */
+/* Active session card elevated state in light mode (对齐参考图：纯对比背景色，无边框无强加投影) */
 .session-item.active {
-  background: var(--bg-card) !important;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 0 0 1px var(--border-subtle) !important;
-  border-left: 2.5px solid var(--accent) !important;
+  background: var(--bg-card-active, var(--bg-card)) !important;
+  box-shadow: none !important;
+  border: none !important;
 }
 
 [data-theme="jade-white"] .session-item.active,
 [data-theme="suet-jade"] .session-item.active,
 [data-variant="light"] .session-item.active {
-  background: var(--bg-card) !important;
-  border-color: var(--border-subtle) !important;
-  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06), 0 0 0 1px var(--border-subtle) !important;
+  background: var(--bg-card-active) !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 
 [data-theme="jade-white"] .rail-primary-agent-card.active,
@@ -1134,10 +1140,9 @@ blockquote {
 }
 
 [data-theme="warm-paper"] .session-item.active {
-  background: var(--bg-card) !important;
-  border-color: var(--border-subtle) !important;
-  box-shadow: 0 1px 3px rgba(31, 35, 40, 0.04), 0 0 0 1px rgba(31, 35, 40, 0.06) !important;
-  border-left: none !important;
+  background: var(--bg-card-active) !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 
 [data-theme="warm-paper"] .rail-primary-agent-card.active {
@@ -1163,10 +1168,9 @@ blockquote {
 }
 
 [data-theme="ayu-light"] .session-item.active {
-  background: var(--bg-card) !important;
-  border-color: var(--border-subtle) !important;
-  box-shadow: 0 1px 3px rgba(57, 64, 73, 0.04), 0 0 0 1px var(--border-subtle) !important;
-  border-left: none !important;
+  background: var(--bg-card-active) !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 
 [data-theme="ayu-light"] .rail-primary-agent-card.active {

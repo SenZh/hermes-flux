@@ -228,7 +228,7 @@ test('Bot Primary Station & Session Isolation Invariants', async (t) => {
       defaultRoomName: '多智能体研讨室',
       isConnected: true,
     });
-    assert.equal(groupTitle, '👥 全栈研讨室', '处于群聊工位时必须展示群聊名称');
+    assert.equal(groupTitle, '全栈研讨室', '处于群聊工位时必须展示纯净群名，不得夹带 👥 伪 emoji');
 
     // 3. 普通会话工位
     const sessionTitle = resolveTitlebarTitle({
@@ -260,14 +260,26 @@ test('Bot Primary Station & Session Isolation Invariants', async (t) => {
       activeFocus: { type: 'bot', botName: 'aura' },
       profiles: [{ name: 'aura', displayName: 'Aura', avatar: 'data:image/png;base64,real' }],
     });
-    assert.deepEqual(botAvatar, { avatar: 'data:image/png;base64,real', name: 'Aura' }, '专职工位必须精准解析真实头像');
+    assert.deepEqual(botAvatar, { kind: 'bot', avatar: 'data:image/png;base64,real', name: 'Aura' }, '专职工位必须精准解析真实头像');
+
+    // 6. 群聊真实拼图微头像解析断言
+    const groupAvatar = resolveTitlebarAvatar({
+      activeFocus: { type: 'group', roomId: 'room-1' },
+      profiles: [{ name: 'aura', displayName: 'Aura', avatar: 'data:image/png;base64,real' }],
+      groupRooms: [{ roomId: 'room-1', name: '全栈研讨室', members: ['aura'] }],
+    });
+    assert.deepEqual(groupAvatar, {
+      kind: 'group',
+      members: ['aura'],
+      profiles: [{ name: 'aura', displayName: 'Aura', avatar: 'data:image/png;base64,real' }],
+    }, '群聊工位必须精准解析拼图微头像');
 
     const noAvatar = resolveTitlebarAvatar({
       activeFocus: { type: 'session', sessionId: 'sess-1' },
       profiles: [{ name: 'aura', displayName: 'Aura' }],
       sessions: [{ id: 'sess-1', title: '普通调研会话' }],
     });
-    assert.equal(noAvatar, undefined, '非 Bot 专属会话安全降级为 undefined');
+    assert.equal(noAvatar, undefined, '非 Bot/群聊专属会话安全降级为 undefined');
   });
 
   await t.test('5. 真实渲染消费端闭环验证：renderLeftRail 消费 syncBotProfiles 产物', () => {

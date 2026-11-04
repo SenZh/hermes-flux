@@ -39,7 +39,7 @@ test('② 连接绿灯由 data-status 驱动，禁止 :has([title="..."]) 文案
   const styles = read('packages/desktop/src/renderer/styles.css');
   assert.doesNotMatch(styles, /:has\([^)]*title\s*=/, ':has 依赖标题文案的样式选择器已废弃，必须改 data-status');
   assert.match(styles, /\.status-dot\[data-status="connected"\]/, '状态点必须由 data-status 属性着色');
-  assert.match(styles, /\.session-live-pulse\[data-connected="true"\]/, '顶栏脉冲必须由 data-connected 属性着色');
+  assert.match(styles, /\.titlebar-connection-indicator\[data-connected="true"\]/, '顶栏指示灯必须由 data-connected 属性着色');
 
   const titlebar = read('packages/ui/src/components-react/Titlebar.tsx');
   assert.match(titlebar, /data-connected=\{gatewayConnected\}/, 'React 顶栏必须输出 data-connected 属性');

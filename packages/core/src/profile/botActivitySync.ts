@@ -298,7 +298,7 @@ export function resolveTitlebarTitle(params: {
 
   if (activeFocus?.type === 'group') {
     const focusGroup = groupRooms.find((g) => g.roomId === activeFocus.roomId);
-    return `👥 ${focusGroup?.name || defaultRoomName}`;
+    return focusGroup?.name || defaultRoomName;
   }
 
   if (activeSessionId) {
@@ -312,20 +312,39 @@ export function resolveTitlebarTitle(params: {
   return isConnected ? defaultTitle : notConnectedTitle;
 }
 
+export type TitlebarAvatarDescriptor =
+  | { kind: 'bot'; avatar?: string; name: string }
+  | { kind: 'group'; members: string[]; profiles: Array<{ name: string; avatar?: string; displayName?: string }> };
+
 /**
- * 顶栏当前激活实体头像解析纯函数（PR-3e）。
- * 设计意图 (Why)：当焦点处于专职智能体（type === 'bot'）或当前会话属于专职 Bot 时，顶栏需要渲染该 Bot 的真实头像；
- * 防范的历史坑 (Pitfall)：历史版本在标题文字中内嵌假 emoji 🤖 假冒头像，违背零假冒工程哲学且破坏排版；
- * 约束与规则 (Rules)：纯函数无副作用，找不到匹配 profile 时安全降级返回 undefined。
+ * 顶栏当前激活实体头像解析纯函数（PR-3e 收敛：支持专职 Bot 真实头像与群聊真实拼图微头像）。
+ * 设计意图 (Why)：当焦点处于专职智能体（type === 'bot'）或多智能体群聊（type === 'group'）时，
+ *   顶栏需要渲染该实体的真实头像；彻底杜绝假 emoji 🤖/👥 假冒头像；
+ * 防范的历史坑 (Pitfall)：群聊曾完全降级无头像，导致标题栏在切换群聊时头像突兀闪烁消失并夹带伪 emoji；
+ * 约束与规则 (Rules)：纯函数无副作用，找不到匹配实体时安全降级返回 undefined。
  */
 export function resolveTitlebarAvatar(params: {
   activeFocus?: { type: 'bot'; botName: string } | { type: 'session'; sessionId: string } | { type: 'group'; roomId: string };
   profiles: AgentProfile[];
+  groupRooms?: Array<{ roomId: string; name: string; members?: string[] }>;
   profileName?: string;
   activeSessionId?: string;
   sessions?: Array<{ id: string; title: string; botName?: string }>;
-}): { avatar?: string; name: string } | undefined {
-  const { activeFocus, profiles, profileName, activeSessionId, sessions = [] } = params;
+}): TitlebarAvatarDescriptor | undefined {
+  const { activeFocus, profiles, groupRooms = [], profileName, activeSessionId, sessions = [] } = params;
+
+  if (activeFocus?.type === 'group') {
+    const focusGroup = groupRooms.find((g) => g.roomId === activeFocus.roomId);
+    if (focusGroup) {
+      return {
+        kind: 'group',
+        members: focusGroup.members || [],
+        profiles: profiles.map((p) => ({ name: p.name, avatar: p.avatar, displayName: p.displayName })),
+      };
+    }
+    return undefined;
+  }
+
   let targetName: string | undefined;
 
   if (activeFocus?.type === 'bot') {
@@ -346,6 +365,7 @@ export function resolveTitlebarAvatar(params: {
   );
 
   return {
+    kind: 'bot',
     avatar: found?.avatar,
     name: found?.displayName || targetName,
   };

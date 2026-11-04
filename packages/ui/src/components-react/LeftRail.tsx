@@ -89,10 +89,9 @@ function RowTime({ timestamp, fallback }: { timestamp?: number; fallback?: strin
 }
 
 /**
- * 会话行（用户定案形态，PR-3d 修订）。
- * 【设计意图】去掉行内头像：微轨与主工位卡已承载 Bot 身份，行内重复且挤压标题；主体=标题，副标题=12px muted 单行截断；
- *   时间与活动点内联在标题行右缘（与 GroupRow 同构），不再作为双行块的兄弟列；
- *   激活状态保留 2px 主色边框（未激活保持 2px 透明边框防止 layout shift），移除左内侧浮动高亮条。
+ * 会话行（用户定案形态，优化收敛）。
+ * 【设计意图】去边框纯对比色：对齐现代极简设计，激活态依靠 bg-card-active 纯对比背景色标定，
+ *   彻底消除 2px 实心边框的包围感与生硬感；时间列与群聊行同构钉在最右缘。
  * 【约束与规则】只消费传进来的快照，绝不改写数据管道；点击与右键一律交回壳层。
  */
 function SessionRow({ session, active, compact, onSelect, onMenu }: {
@@ -105,7 +104,7 @@ function SessionRow({ session, active, compact, onSelect, onMenu }: {
   const subtitle = toSnippet(session.preview) || toSnippet(session.title);
   return <button
     type="button"
-    className={`session-item group relative flex w-full items-center gap-2 rounded-md border-2 px-2 text-left transition-colors ${compact ? 'min-h-8' : 'min-h-12'} ${active ? 'active border-primary bg-card-active' : 'border-transparent hover:bg-card-hover'}`}
+    className={`session-item group relative flex w-full items-center gap-2 rounded-md px-2 text-left transition-colors ${compact ? 'min-h-8' : 'min-h-12'} ${active ? 'active bg-card-active font-medium' : 'hover:bg-card-hover'}`}
     data-id={session.id}
     data-title={session.title}
     data-bot={session.botName || ''}
@@ -123,7 +122,7 @@ function SessionRow({ session, active, compact, onSelect, onMenu }: {
   </button>;
 }
 
-function GroupRow({ group, profiles, active, editing, onSelect, onMenu, onStartRename, onConfirmRename, onCancelRename }: {
+function GroupRow({ group, profiles, active, editing, onSelect, onMenu, onConfirmRename, onCancelRename }: {
   group: LeftRailGroupRoom;
   profiles: LeftRailProfile[];
   active: boolean;
@@ -135,25 +134,28 @@ function GroupRow({ group, profiles, active, editing, onSelect, onMenu, onStartR
   onCancelRename: () => void;
 }): React.ReactElement {
   if (editing) {
-    return <div className="rail-group-item rail-group-inline-rename-wrap active min-h-10 rounded-md border border-primary bg-card-active px-2" data-room-id={group.roomId}>
+    return <div className="rail-group-item rail-group-inline-rename-wrap active min-h-10 rounded-md bg-card-active px-2" data-room-id={group.roomId}>
       <RenameGroup initialName={group.name} roomId={group.roomId} onConfirm={onConfirmRename} onCancel={onCancelRename} />
     </div>;
   }
   const subtitle = toSnippet(group.lastMessage) || t('rail.groupsMembers', { count: String(group.members.length) });
-  return <div
-    className={`rail-group-item group flex min-h-10 items-center gap-2 rounded-md border px-2 py-1 ${active ? 'active border-primary bg-card-active' : 'border-transparent hover:bg-card-hover'}`}
+  return <button
+    type="button"
+    className={`rail-group-item group flex w-full min-h-10 items-center gap-2 rounded-md px-2 py-1 text-left transition-colors ${active ? 'active bg-card-active' : 'hover:bg-card-hover'}`}
     data-room-id={group.roomId}
+    onClick={onSelect}
+    onContextMenu={(event) => { event.preventDefault(); onMenu(event.clientX, event.clientY); }}
   >
     <CollageAvatar members={group.members} profiles={profiles} size={28} />
-    <button type="button" className="flex min-w-0 flex-1 flex-col gap-0.5 text-left" onClick={onSelect} onContextMenu={(event) => { event.preventDefault(); onMenu(event.clientX, event.clientY); }}>
+    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
       <span className="flex min-w-0 items-center gap-2">
-        <span className="truncate text-body leading-tight text-foreground">{group.name}</span>
+        <span className={`truncate text-body leading-tight ${active ? 'font-semibold text-foreground' : 'text-foreground'}`}>{group.name}</span>
         <ActivityDot state={group.activityState} />
         <RowTime timestamp={group.updatedAt || group.createdAt} />
       </span>
       <span className="truncate text-aux leading-tight text-muted-foreground">{subtitle}</span>
-    </button>
-  </div>;
+    </span>
+  </button>;
 }
 
 function RenameGroup({ initialName, roomId, onConfirm, onCancel }: {
@@ -223,11 +225,11 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
     style={{ flex: `0 0 ${railWidth}`, width: railWidth, minWidth: railWidth, maxWidth: railWidth }}
     data-testid="react-left-rail"
   >
-    <div id="flux-station-rail" className="flex w-[var(--geo-micro-rail,52px)] shrink-0 flex-col items-center gap-2 border-r border-border-subtle bg-card py-2">
+    <div id="flux-station-rail" className="flex w-[var(--geo-micro-rail,52px)] shrink-0 flex-col items-center gap-2 border-r border-border-subtle bg-panel py-2">
       <Button
         variant="ghost"
         size="icon"
-        className={`size-9 rounded-md border ${isBotFocused(focus, model.defaultAgent.name) ? 'border-primary bg-primary-subtle' : 'border-border-subtle bg-card'}`}
+        className={`size-9 rounded-md border ${isBotFocused(focus, model.defaultAgent.name) ? 'border-primary bg-primary-subtle' : 'border-transparent bg-transparent hover:bg-card/60'}`}
         data-profile="default"
         data-station-profile="default"
         title={t('rail.enterBotChat', { name: model.defaultAgent.displayName || t('rail.defaultAssistant') })}
@@ -241,7 +243,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
           key={agent.name}
           variant="ghost"
           size="icon"
-          className={`station-agent-badge rail-pinned-bot-row relative size-9 shrink-0 rounded-md border p-0 ${isBotFocused(focus, agent.name) ? 'active border-primary bg-primary-subtle' : 'border-border-subtle bg-card'}`}
+          className={`station-agent-badge rail-pinned-bot-row relative size-9 shrink-0 rounded-md border p-0 ${isBotFocused(focus, agent.name) ? 'active border-primary bg-primary-subtle' : 'border-transparent bg-transparent hover:bg-card/60'}`}
           data-profile={agent.name}
           data-station-profile={agent.name}
           title={t('rail.enterBotChat', { name: agent.displayName || agent.name })}
@@ -361,7 +363,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
             {model.archivedSessions.map((session) => <button
               key={session.id}
               type="button"
-              className={`session-item flex min-h-8 items-center rounded-md border px-2 text-left ${isSessionFocused(focus, session.id) ? 'active border-primary bg-card-active' : 'border-transparent hover:bg-card-hover'}`}
+              className={`session-item flex min-h-8 items-center rounded-md px-2 text-left transition-colors ${isSessionFocused(focus, session.id) ? 'active bg-card-active font-medium' : 'hover:bg-card-hover'}`}
               data-id={session.id}
               data-title={session.title}
               data-bot={session.botName || ''}

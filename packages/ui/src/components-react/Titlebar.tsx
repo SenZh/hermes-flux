@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { Minus, Square, X, PanelLeft, Settings2, PanelRight, Sun } from 'lucide-react';
 import { t } from '../i18n/index.js';
-import { renderBotAvatar } from '../utils/botAvatar.js';
+import { renderBotAvatar, renderGroupCollageAvatar } from '../utils/botAvatar.js';
 
 export interface TitlebarProps {
   platform: 'windows' | 'macos' | 'linux' | 'ios' | 'android' | 'web';
@@ -10,8 +10,10 @@ export interface TitlebarProps {
   gatewayConnected: boolean;
   /** PR-3e：状态底栏拔除后，网关延迟低调移入顶栏右上角（不抢眼、仅作为指示）。 */
   latencyMs?: number;
-  /** PR-3e：处于专职智能体工位时，顶栏呈现 Bot 真实头像，彻底消除 🤖 emoji 占位。 */
-  activeAvatar?: { avatar?: string; name: string };
+  /** PR-3e：处于专职智能体工位或群聊工位时，顶栏呈现真实头像或拼图微头像。 */
+  activeAvatar?: 
+    | { kind: 'bot'; avatar?: string; name: string }
+    | { kind: 'group'; members: string[]; profiles: Array<{ name: string; avatar?: string; displayName?: string }> };
   onMinimize: () => void;
   onMaximize: () => void;
   onClose: () => void;
@@ -40,12 +42,16 @@ export function Titlebar({ platform, title, isMaximized, gatewayConnected, laten
       <button id="toggle-left-rail-btn" className="icon-btn" title={t('titlebar.toggleLeftRail')} type="button" onClick={onToggleLeftRail}><PanelLeft size={14} /></button>
     </div>
     <div className="titlebar-center">
-      {activeAvatar && <span
+      {activeAvatar?.kind === 'bot' && <span
         className="titlebar-bot-avatar mr-1.5 inline-flex shrink-0 items-center justify-center overflow-hidden rounded-sm"
         aria-hidden="true"
         dangerouslySetInnerHTML={{ __html: renderBotAvatar(activeAvatar.name, activeAvatar.name, activeAvatar.avatar, 16) }}
       />}
-      <span className="session-live-pulse" data-connected={gatewayConnected} />
+      {activeAvatar?.kind === 'group' && <span
+        className="titlebar-group-avatar mr-1.5 inline-flex shrink-0 items-center justify-center overflow-hidden rounded-sm"
+        aria-hidden="true"
+        dangerouslySetInnerHTML={{ __html: renderGroupCollageAvatar(activeAvatar.members, activeAvatar.profiles, 16) }}
+      />}
       <span className="titlebar-session-title">{title}</span>
     </div>
     <div className="titlebar-right">

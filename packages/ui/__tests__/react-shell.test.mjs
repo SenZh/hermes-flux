@@ -13,7 +13,7 @@ test('Titlebar renders window controls, global toggles and no profile switcher',
   const calls = [];
   const markup = renderToStaticMarkup(React.createElement(Titlebar, {
     platform: 'macos', title: 'Session', isMaximized: false, gatewayConnected: true, latencyMs: 18,
-    activeAvatar: { name: 'aura', avatar: 'data:image/png;base64,mock' },
+    activeAvatar: { kind: 'bot', name: 'aura', avatar: 'data:image/png;base64,mock' },
     onMinimize: () => calls.push('minimize'), onMaximize: () => calls.push('maximize'), onClose: () => calls.push('close'),
     onToggleLeftRail: () => calls.push('rail'), onToggleInspector: () => calls.push('inspector'),
     onOpenSettings: () => calls.push('settings'), onToggleTheme: () => calls.push('theme'),
@@ -21,8 +21,9 @@ test('Titlebar renders window controls, global toggles and no profile switcher',
   assert.match(markup, /traffic-close/);
   assert.match(markup, /data-testid="react-titlebar"/);
   assert.match(markup, /toggle-inspector-btn/);
-  // 产品裁决（PR-3e）：顶栏承载低调延迟与真实头像，不再承载 profile 下拉
+  // 产品裁决（PR-3e）：顶栏承载低调延迟与真实头像，不再承载 profile 下拉与 session-live-pulse
   assert.doesNotMatch(markup, /titlebar-profile-select/);
+  assert.doesNotMatch(markup, /session-live-pulse/);
   assert.match(markup, /titlebar-latency/);
   assert.match(markup, /18ms/);
   assert.match(markup, /titlebar-bot-avatar/);

@@ -4449,6 +4449,7 @@ function getTitlebarSnapshot(): TitlebarSnapshot {
     activeAvatar: resolveTitlebarAvatar({
       activeFocus: state.activeFocus,
       profiles: state.profiles,
+      groupRooms: state.groupRooms,
       profileName: state.profileName,
       activeSessionId: state.activeSessionId,
       sessions: state.sessions,

@@ -214,7 +214,7 @@ test('rail-cockpit-form: 微轨按钮收编、header 形态与时间内联（真
     await new Promise((r) => setTimeout(r, 300));
   });
 
-  await t.test('视觉净化细化：会话选中保留 2px 边框且无内侧高亮条、群聊移除 3 个点、左轨剥离滚动条', async () => {
+  await t.test('视觉净化细化：会话选中去边框采用纯对比色、群聊移除3点且时间靠右、左轨剥离滚动条与微轨沉底', async () => {
     // 激活第一个会话
     await evaluate(`document.querySelector('.session-item[data-id="s-today"]')?.click()`);
     await new Promise((r) => setTimeout(r, 200));
@@ -224,29 +224,43 @@ test('rail-cockpit-form: 微轨按钮收编、header 形态与时间内联（真
       const cs = activeSession ? getComputedStyle(activeSession) : null;
       const innerBar = activeSession ? activeSession.querySelector('span.absolute.inset-y-2') : null;
       const groupDots = document.querySelector('.rail-group-item svg.lucide-more-horizontal');
-      
+      const groupRow = document.querySelector('.rail-group-item');
+      const groupTime = groupRow ? groupRow.querySelector('time') : null;
+      const groupRight = groupRow ? groupRow.getBoundingClientRect().right : 0;
+      const groupTimeRight = groupTime ? groupTime.getBoundingClientRect().right : 0;
+
       const railEl = document.getElementById('flux-left-rail');
       const railCs = railEl ? getComputedStyle(railEl) : null;
+      const stationEl = document.getElementById('flux-station-rail');
+      const stationCs = stationEl ? getComputedStyle(stationEl) : null;
       const scrollArea = document.getElementById('session-list-container');
       const scrollCs = scrollArea ? getComputedStyle(scrollArea) : null;
 
       return {
         sessionBorderWidth: cs ? cs.borderLeftWidth : null,
+        sessionHasActiveBg: activeSession ? activeSession.classList.contains('bg-card-active') : false,
         innerBarExists: Boolean(innerBar),
         groupDotsExists: Boolean(groupDots),
+        groupIsButton: groupRow ? groupRow.tagName.toLowerCase() === 'button' : false,
+        groupTimeRightDiff: Math.round(groupRight - groupTimeRight),
         railScrollbarWidth: railCs ? railCs.scrollbarWidth : null,
         scrollAreaScrollbarWidth: scrollCs ? scrollCs.scrollbarWidth : null,
+        stationIsPanel: stationEl ? stationEl.classList.contains('bg-panel') : false,
       };
     })()`);
 
     assert.equal(check.innerBarExists, false, '选中会话必须彻底移除左内侧浮动高亮竖条');
-    assert.equal(check.sessionBorderWidth, '2px', '选中会话必须保留 2px 边框');
+    assert.equal(check.sessionBorderWidth, '0px', '选中会话不需要边框（对齐参考图：纯对比色无边框）');
+    assert.equal(check.sessionHasActiveBg, true, '选中会话必须采用 bg-card-active 对比背景色');
     assert.equal(check.groupDotsExists, false, '群聊右侧 3 个点操作入口必须彻底删除');
+    assert.equal(check.groupIsButton, true, '群聊列表项必须是单层 button 扁平化容器');
+    assert.ok(check.groupTimeRightDiff <= 16, `群聊时间必须靠右对齐（当前差 ${check.groupTimeRightDiff}px）`);
     assert.equal(check.railScrollbarWidth, 'none', '左轨容器 scrollbarWidth 必须为 none');
     assert.equal(check.scrollAreaScrollbarWidth, 'none', '会话列表容器 scrollbarWidth 必须为 none');
+    assert.equal(check.stationIsPanel, true, '微轨必须使用 bg-panel 沉底，修复浅色模式下纯白刺眼');
   });
 
-  await t.test('PR-3e 壳层真值面：底栏彻底拔除、延迟移至顶栏右上角、标题栏真实头像去 (Forever Chat)', async () => {
+  await t.test('PR-3e 壳层真值面：底栏彻底拔除、延迟移至顶栏右上角、标题栏真实头像去 (Forever Chat) 与小绿点', async () => {
     // 注入连接状态与网关延迟，切到专职 Bot 工位
     await evaluate(`(() => {
       window.__fluxState.gatewayConnected = true;
@@ -262,16 +276,21 @@ test('rail-cockpit-form: 微轨按钮收编、header 形态与时间内联（真
     const shellCheck = await evaluate(`(() => {
       const statusHost = document.getElementById('react-statusbar-host');
       const statusBar = document.getElementById('app-status-bar');
-      const titleText = document.querySelector('.titlebar-session-title')?.textContent ?? '';
+      const titleEl = document.querySelector('.titlebar-session-title');
+      const titleCs = titleEl ? getComputedStyle(titleEl) : null;
+      const titleText = titleEl?.textContent ?? '';
       const botAvatar = document.querySelector('.titlebar-center .titlebar-bot-avatar');
+      const greenDot = document.querySelector('.titlebar-center .session-live-pulse');
       const latencyEl = document.querySelector('.titlebar-right .titlebar-latency');
 
       return {
         statusHostExists: Boolean(statusHost),
         statusBarExists: Boolean(statusBar),
         titleText,
+        titleFontSize: titleCs ? titleCs.fontSize : '',
         hasForeverChat: titleText.includes('Forever Chat'),
         hasBotEmoji: titleText.includes('🤖'),
+        greenDotExists: Boolean(greenDot),
         botAvatarExists: Boolean(botAvatar),
         latencyText: latencyEl?.textContent ?? '',
       };
@@ -281,9 +300,32 @@ test('rail-cockpit-form: 微轨按钮收编、header 形态与时间内联（真
     assert.equal(shellCheck.statusBarExists, false, '状态底栏 app-status-bar 必须彻底删除');
     assert.equal(shellCheck.hasForeverChat, false, '标题栏禁止夹带 (Forever Chat) 冗余后缀');
     assert.equal(shellCheck.hasBotEmoji, false, '标题栏禁止使用 🤖 emoji 伪冒头像');
+    assert.equal(shellCheck.greenDotExists, false, '标题栏中心禁止插入 session-live-pulse 小绿点');
+    assert.equal(shellCheck.titleFontSize, '12px', '顶栏标题字号必须收敛至 12px 极简规范');
     assert.equal(shellCheck.titleText, 'Default 助理', '专职 Bot 标题必须直接呈现纯净 Bot 名称');
     assert.equal(shellCheck.botAvatarExists, true, '专职 Bot 工位顶栏必须渲染真实 Bot 头像组件');
     assert.equal(shellCheck.latencyText, '24ms', '顶栏右上角必须低调呈现 24ms 网关延迟');
+
+    // 切到群聊工位，验证群聊真实拼图微头像与纯净群名
+    await evaluate(`(() => {
+      window.__fluxState.activeFocus = { type: 'group', roomId: 'room-form-check' };
+      window.__fluxRender();
+    })()`);
+    await new Promise((r) => setTimeout(r, 200));
+
+    const groupCheck = await evaluate(`(() => {
+      const titleText = document.querySelector('.titlebar-session-title')?.textContent ?? '';
+      const groupAvatar = document.querySelector('.titlebar-center .titlebar-group-avatar');
+      return {
+        titleText,
+        hasGroupEmoji: titleText.includes('👥'),
+        groupAvatarExists: Boolean(groupAvatar),
+      };
+    })()`);
+
+    assert.equal(groupCheck.hasGroupEmoji, false, '群聊顶栏标题禁止包含 👥 伪 emoji');
+    assert.equal(groupCheck.titleText, '形态验证群', '群聊顶栏标题必须呈现纯净群名');
+    assert.equal(groupCheck.groupAvatarExists, true, '群聊工位顶栏必须渲染真实拼图微头像');
   });
 
   // 出图取证（artifacts 不入 Git，教训 D.4：凡触碰视觉必须出图）
