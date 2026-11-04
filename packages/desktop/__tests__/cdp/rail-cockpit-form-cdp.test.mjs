@@ -214,6 +214,38 @@ test('rail-cockpit-form: 微轨按钮收编、header 形态与时间内联（真
     await new Promise((r) => setTimeout(r, 300));
   });
 
+  await t.test('视觉净化细化：会话选中保留 2px 边框且无内侧高亮条、群聊移除 3 个点、左轨剥离滚动条', async () => {
+    // 激活第一个会话
+    await evaluate(`document.querySelector('.session-item[data-id="s-today"]')?.click()`);
+    await new Promise((r) => setTimeout(r, 200));
+
+    const check = await evaluate(`(() => {
+      const activeSession = document.querySelector('.session-item[data-id="s-today"]');
+      const cs = activeSession ? getComputedStyle(activeSession) : null;
+      const innerBar = activeSession ? activeSession.querySelector('span.absolute.inset-y-2') : null;
+      const groupDots = document.querySelector('.rail-group-item svg.lucide-more-horizontal');
+      
+      const railEl = document.getElementById('flux-left-rail');
+      const railCs = railEl ? getComputedStyle(railEl) : null;
+      const scrollArea = document.getElementById('session-list-container');
+      const scrollCs = scrollArea ? getComputedStyle(scrollArea) : null;
+
+      return {
+        sessionBorderWidth: cs ? cs.borderLeftWidth : null,
+        innerBarExists: Boolean(innerBar),
+        groupDotsExists: Boolean(groupDots),
+        railScrollbarWidth: railCs ? railCs.scrollbarWidth : null,
+        scrollAreaScrollbarWidth: scrollCs ? scrollCs.scrollbarWidth : null,
+      };
+    })()`);
+
+    assert.equal(check.innerBarExists, false, '选中会话必须彻底移除左内侧浮动高亮竖条');
+    assert.equal(check.sessionBorderWidth, '2px', '选中会话必须保留 2px 边框');
+    assert.equal(check.groupDotsExists, false, '群聊右侧 3 个点操作入口必须彻底删除');
+    assert.equal(check.railScrollbarWidth, 'none', '左轨容器 scrollbarWidth 必须为 none');
+    assert.equal(check.scrollAreaScrollbarWidth, 'none', '会话列表容器 scrollbarWidth 必须为 none');
+  });
+
   // 出图取证（artifacts 不入 Git，教训 D.4：凡触碰视觉必须出图）
   const shotDir = path.join(rootDir, 'artifacts', 'verification');
   fs.mkdirSync(shotDir, { recursive: true });

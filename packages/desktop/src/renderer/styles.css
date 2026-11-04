@@ -631,6 +631,24 @@ html[data-rail-resizing] * {
 }
 
 /* Scrollbar Customization */
+/* 左轨区域（微轨与抽屉）滚动条剥离：纯净视觉，仍保持平滑滚轮交互 */
+#flux-left-rail,
+.flux-left-rail,
+#flux-left-rail *,
+.flux-left-rail * {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+#flux-left-rail::-webkit-scrollbar,
+.flux-left-rail::-webkit-scrollbar,
+#flux-left-rail ::-webkit-scrollbar,
+.flux-left-rail ::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;

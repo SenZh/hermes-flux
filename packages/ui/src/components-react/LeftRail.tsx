@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Folder, MessageSquare, MoreHorizontal, Plus, Search, Users } from 'lucide-react';import { t } from '../i18n/index.js';
+import { Folder, MessageSquare, Plus, Search, Users } from 'lucide-react';import { t } from '../i18n/index.js';
 import { Badge } from './primitives/Badge.js';
 import { Button } from './primitives/Button.js';
 import { Input } from './primitives/Input.js';
@@ -91,8 +91,8 @@ function RowTime({ timestamp, fallback }: { timestamp?: number; fallback?: strin
 /**
  * 会话行（用户定案形态，PR-3d 修订）。
  * 【设计意图】去掉行内头像：微轨与主工位卡已承载 Bot 身份，行内重复且挤压标题；主体=标题，副标题=12px muted 单行截断；
- *   时间与活动点内联在标题行右缘（与 GroupRow 同构），不再作为双行块的兄弟列——
- *   旧结构让长日期串同时挤占标题与副标题宽度（2026-11-04 用户实测"时间太宽"根因之一）。
+ *   时间与活动点内联在标题行右缘（与 GroupRow 同构），不再作为双行块的兄弟列；
+ *   激活状态保留 2px 主色边框（未激活保持 2px 透明边框防止 layout shift），移除左内侧浮动高亮条。
  * 【约束与规则】只消费传进来的快照，绝不改写数据管道；点击与右键一律交回壳层。
  */
 function SessionRow({ session, active, compact, onSelect, onMenu }: {
@@ -105,14 +105,13 @@ function SessionRow({ session, active, compact, onSelect, onMenu }: {
   const subtitle = toSnippet(session.preview) || toSnippet(session.title);
   return <button
     type="button"
-    className={`session-item group relative flex w-full items-center gap-2 rounded-md border px-2 text-left transition-colors ${compact ? 'min-h-8' : 'min-h-12'} ${active ? 'active border-primary bg-card-active' : 'border-transparent hover:bg-card-hover'}`}
+    className={`session-item group relative flex w-full items-center gap-2 rounded-md border-2 px-2 text-left transition-colors ${compact ? 'min-h-8' : 'min-h-12'} ${active ? 'active border-primary bg-card-active' : 'border-transparent hover:bg-card-hover'}`}
     data-id={session.id}
     data-title={session.title}
     data-bot={session.botName || ''}
     onClick={onSelect}
     onContextMenu={(event) => { event.preventDefault(); onMenu(event.clientX, event.clientY); }}
   >
-    {active && <span aria-hidden="true" className="absolute inset-y-2 left-0 w-0.5 rounded-r bg-primary" />}
     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
       <span className="flex min-w-0 items-center gap-2">
         <span className={`truncate text-body leading-tight ${active ? 'font-semibold text-foreground' : 'text-foreground'}`}>{session.title}</span>
@@ -154,9 +153,6 @@ function GroupRow({ group, profiles, active, editing, onSelect, onMenu, onStartR
       </span>
       <span className="truncate text-aux leading-tight text-muted-foreground">{subtitle}</span>
     </button>
-    <Button variant="ghost" size="icon" className="size-6 shrink-0 rounded p-0 text-muted-foreground hover:text-foreground" aria-label={t('rail.groupActions')} onClick={onStartRename}>
-      <MoreHorizontal size={14} />
-    </Button>
   </div>;
 }
 
@@ -240,7 +236,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
       >
         <Avatar profile={model.defaultAgent} size={30} />
       </Button>
-      <div className="station-agents-scroll flex min-h-0 w-full flex-1 flex-col items-center gap-2 overflow-y-auto py-1 [scrollbar-width:none]">
+      <div className="station-agents-scroll flex min-h-0 w-full flex-1 flex-col items-center gap-2 overflow-y-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {model.otherAgents.map((agent) => <Button
           key={agent.name}
           variant="ghost"
@@ -303,7 +299,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
         </Button>
       </div>
 
-      {model.showChatDeck && <div className="session-scroll-area min-h-0 flex-1 overflow-y-auto px-1.5 pb-3 mr-[var(--geo-resize-handle)]" id="session-list-container">
+      {model.showChatDeck && <div className="session-scroll-area min-h-0 flex-1 overflow-y-auto px-1.5 pb-3 mr-[var(--geo-resize-handle)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" id="session-list-container">
         {model.error && <div id="session-list-error" role="alert" className="m-1 rounded-md border border-border-strong bg-panel p-2 text-aux text-foreground">{model.error}</div>}
 
         {model.visibleGroups.length > 0 && <section className="mb-2">
@@ -378,7 +374,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
         </section>}
       </div>}
 
-      {model.showProjectsDeck && <div id="rail-projects-deck" className="flex flex-1 flex-col gap-1.5 overflow-y-auto px-2 py-1.5 mr-[var(--geo-resize-handle)]">
+      {model.showProjectsDeck && <div id="rail-projects-deck" className="flex flex-1 flex-col gap-1.5 overflow-y-auto px-2 py-1.5 mr-[var(--geo-resize-handle)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div className="px-1.5 pb-1 text-overline font-bold uppercase tracking-wide text-muted-foreground">{t('rail.projects')}</div>
         {model.visibleProjects.length > 0
           ? model.visibleProjects.map((project) => <ProjectCard
