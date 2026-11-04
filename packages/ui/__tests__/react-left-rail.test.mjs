@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { LeftRail } from '../dist/components-react/LeftRail.js';
-import { buildLeftRailModel, formatLeftRailTime, toSnippet } from '../dist/components-react/leftRailModel.js';
+import { buildLeftRailModel, formatLeftRailTime, toSnippet, isAgentScopeActive } from '../dist/components-react/leftRailModel.js';
 
 const NOW = new Date(2026, 10, 3, 15, 30).getTime();
 
@@ -342,4 +342,49 @@ test('primitives 消费守卫：左轨必须真实使用 shadcn 基座而非继�
     assert.equal(rawInputs, 0, '输入框必须走 Input primitive，禁止裸 <input>');
     assert.ok(rawButtons <= 5, `只有需要原生按钮语义的行主体/手风琴标题可用原生 button，当前 ${rawButtons} 处`);
   });
+});
+
+test('isAgentScopeActive: 微轨 Agent 作用域活跃判定（覆盖 bot/session/group 三重焦点）', () => {
+  // 1. 直接命中专职 Bot 工位
+  assert.equal(isAgentScopeActive({
+    agentName: 'aura',
+    focus: { type: 'bot', botName: 'aura' },
+    selectedAgentName: 'aura',
+  }), true, '专职 Bot 工位必须命中');
+
+  // 2. 命中不同大小写
+  assert.equal(isAgentScopeActive({
+    agentName: 'Aura',
+    focus: { type: 'bot', botName: 'aura' },
+    selectedAgentName: 'aura',
+  }), true, '必须支持大小写不敏感匹配');
+
+  // 3. 焦点在普通会话且归属于该 Agent
+  assert.equal(isAgentScopeActive({
+    agentName: 'aura',
+    focus: { type: 'session', sessionId: 'sess-1' },
+    selectedAgentName: 'default',
+    activeSessionBotName: 'aura',
+  }), true, '点进属于该 Bot 的普通会话时微轨必须持续高亮保活');
+
+  // 4. 焦点在普通会话但未指定会话归属时，回退匹配当前抽屉上下文 selectedAgentName
+  assert.equal(isAgentScopeActive({
+    agentName: 'aura',
+    focus: { type: 'session', sessionId: 'sess-1' },
+    selectedAgentName: 'aura',
+  }), true, '会话无明确 botName 时必须回退当前抽屉 Agent 上下文');
+
+  // 5. 焦点在群聊时，微轨保持当前抽屉 selectedAgentName 选中态
+  assert.equal(isAgentScopeActive({
+    agentName: 'aura',
+    focus: { type: 'group', roomId: 'room-1' },
+    selectedAgentName: 'aura',
+  }), true, '群聊工位下当前抽屉所属 Agent 微轨必须持续高亮');
+
+  // 6. 其他 Agent 不得误报高亮
+  assert.equal(isAgentScopeActive({
+    agentName: 'other-bot',
+    focus: { type: 'bot', botName: 'aura' },
+    selectedAgentName: 'aura',
+  }), false, '无关 Agent 必须保持未激活');
 });

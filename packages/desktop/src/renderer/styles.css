@@ -685,6 +685,42 @@ html[data-rail-resizing] * {
 }
 
 /* Animations */
+/* ═══ 任务执行状态指示微动效（running 呼吸漫射 vs unread 静态翡翠绿） ═══ */
+/* gate-perf-allow: 运行中脉冲动效仅作用于活跃执行中的小圆点，规模受限，不破坏主线程性能 */
+.activity-pulse-indicator[data-status="running"] {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary) !important;
+  box-shadow: 0 0 6px color-mix(in srgb, var(--primary) 75%, transparent);
+  animation: fluxActivityPulse 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes fluxActivityPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--primary) 80%, transparent);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.8);
+    box-shadow: 0 0 2px color-mix(in srgb, var(--primary) 25%, transparent);
+  }
+}
+
+/* 任务执行完成未读：静态翡翠绿，静止无打扰 */
+.activity-unread-badge[data-status="unread"] {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success) !important;
+  box-shadow: none !important;
+  animation: none !important;
+}
+
 /* jadePulse 已删除：唯一消费者是已移除的左舵模板；其无休止 CSS 动画与集中时钟军规冲突，
    呼吸动效待 useDurationTicker 接入后以 JS 驱动恢复。flux-pulse 仍被存量模板消费，保留待该舱迁移时一并处理。 */
 @keyframes flux-pulse {
@@ -965,9 +1001,9 @@ button {
 [data-theme="jade-white"] .rail-primary-agent-card.active,
 [data-theme="suet-jade"] .rail-primary-agent-card.active,
 [data-variant="light"] .rail-primary-agent-card.active {
-  background: var(--bg-card) !important;
-  border-color: var(--accent-border) !important;
-  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06), 0 0 0 1px var(--border-subtle) !important;
+  background: var(--bg-card-active) !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 
 /* 抽屉搜索输入框在浅色模式下的纯净白底与精致微边框 */
@@ -1146,9 +1182,9 @@ blockquote {
 }
 
 [data-theme="warm-paper"] .rail-primary-agent-card.active {
-  background: var(--bg-card) !important;
-  border-color: var(--accent-border) !important;
-  box-shadow: 0 1px 3px rgba(31, 35, 40, 0.04), 0 0 0 1px rgba(31, 35, 40, 0.06) !important;
+  background: var(--bg-card-active) !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 
 [data-theme="warm-paper"] #session-search-input {
@@ -1174,9 +1210,9 @@ blockquote {
 }
 
 [data-theme="ayu-light"] .rail-primary-agent-card.active {
-  background: var(--bg-card) !important;
-  border-color: var(--accent-border) !important;
-  box-shadow: 0 1px 3px rgba(57, 64, 73, 0.04), 0 0 0 1px var(--border-subtle) !important;
+  background: var(--bg-card-active) !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 
 [data-theme="ayu-light"] #session-search-input {

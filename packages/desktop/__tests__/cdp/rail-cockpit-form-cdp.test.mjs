@@ -258,6 +258,29 @@ test('rail-cockpit-form: 微轨按钮收编、header 形态与时间内联（真
     assert.equal(check.railScrollbarWidth, 'none', '左轨容器 scrollbarWidth 必须为 none');
     assert.equal(check.scrollAreaScrollbarWidth, 'none', '会话列表容器 scrollbarWidth 必须为 none');
     assert.equal(check.stationIsPanel, true, '微轨必须使用 bg-panel 沉底，修复浅色模式下纯白刺眼');
+
+    // 状态指示点与时间同轴对齐、主工位卡去边框、微轨焦点保活
+    const dotAlignment = await evaluate(`(() => {
+      const primaryCard = document.querySelector('.rail-primary-agent-card');
+      const primaryCs = primaryCard ? getComputedStyle(primaryCard) : null;
+
+      const sessionRow = document.querySelector('.session-item[data-id="s-today"]');
+      const timeEl = sessionRow ? sessionRow.querySelector('time') : null;
+      const dotEl = sessionRow ? sessionRow.querySelector('.activity-pulse-indicator, .activity-unread-badge') : null;
+
+      const defaultStationBtn = document.querySelector('#flux-station-rail [data-profile="default"]');
+      const stationCs = defaultStationBtn ? getComputedStyle(defaultStationBtn) : null;
+
+      return {
+        primaryCardBorderWidth: primaryCs ? primaryCs.borderLeftWidth : null,
+        timeRight: timeEl ? Math.round(timeEl.getBoundingClientRect().right) : null,
+        dotRight: dotEl ? Math.round(dotEl.getBoundingClientRect().right) : null,
+        stationHasPrimaryBorder: defaultStationBtn ? defaultStationBtn.classList.contains('border-primary') : false,
+      };
+    })()`);
+
+    assert.equal(dotAlignment.primaryCardBorderWidth, '0px', '专职 Bot 主工位卡去边框纯对比色（对齐会话行）');
+    assert.equal(dotAlignment.stationHasPrimaryBorder, true, '切到普通会话时微轨对应的 Agent 头像必须持续保持高亮选中态');
   });
 
   await t.test('PR-3e 壳层真值面：底栏彻底拔除、延迟移至顶栏右上角、标题栏真实头像去 (Forever Chat) 与小绿点', async () => {

@@ -240,3 +240,39 @@ export function isGroupFocused(focus: LeftRailActiveFocus, roomId: string): bool
 export function isBotFocused(focus: LeftRailActiveFocus, botName: string): boolean {
   return focus.type === 'bot' && focus.botName.toLowerCase() === botName.toLowerCase();
 }
+
+/**
+ * 微轨 Agent 作用域活跃判定（纯函数）。
+ * 设计意图 (Why)：微轨代表当前工作台的 Agent 主权上下文。无论用户处于该 Agent 的专属工位、
+ *   该 Agent 名下的普通会话，还是在该 Agent 上下文下查看群聊，微轨对应的 Agent 头像必须持续保有选中高亮效果。
+ * 防范的历史坑 (Pitfall)：曾仅匹配 focus.type === 'bot'，用户一旦点开普通会话或群聊微轨高亮立即熄灭，视觉锚点丢失。
+ * 约束与规则 (Rules)：大小写不敏感匹配；找不到 session 时回退 selectedAgentName。
+ */
+export function isAgentScopeActive(params: {
+  agentName: string;
+  focus: LeftRailActiveFocus;
+  selectedAgentName: string;
+  activeSessionBotName?: string;
+}): boolean {
+  const target = params.agentName.toLowerCase();
+
+  // 1. 焦点直接落在专职 Bot 工位
+  if (params.focus.type === 'bot') {
+    return params.focus.botName.toLowerCase() === target;
+  }
+
+  // 2. 焦点在普通会话：优先匹配该会话所属的 botName，其次匹配当前抽屉上下文的 selectedAgent
+  if (params.focus.type === 'session') {
+    if (params.activeSessionBotName) {
+      return params.activeSessionBotName.toLowerCase() === target;
+    }
+    return params.selectedAgentName.toLowerCase() === target;
+  }
+
+  // 3. 焦点在群聊：微轨保持当前承载抽屉会话的 selectedAgent 选中态
+  if (params.focus.type === 'group') {
+    return params.selectedAgentName.toLowerCase() === target;
+  }
+
+  return params.selectedAgentName.toLowerCase() === target;
+}

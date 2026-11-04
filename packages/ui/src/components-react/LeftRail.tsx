@@ -7,6 +7,7 @@ import { renderBotAvatar, renderGroupCollageAvatar } from '../utils/botAvatar.js
 import {
   formatLeftRailTime,
   isBotFocused,
+  isAgentScopeActive,
   isGroupFocused,
   isSessionFocused,
   toSnippet,
@@ -63,6 +64,7 @@ function CollageAvatar({ members, profiles, size }: { members: string[]; profile
  * 约束与规则 (Rules)：class 语义与探针/测试约定一致（activity-pulse-indicator / activity-unread-badge），不得改名。
  */
 function ActivityDot({ state }: { state?: LeftRailSession['activityState'] }): React.ReactElement | null {
+  // 运行中指示点由 styles.css 定义的 fluxActivityPulse 关键帧提供微光呼吸动效
   if (state === 'running') {
     return <span className="activity-pulse-indicator size-2 shrink-0 rounded-full bg-primary" title={t('rail.activityRunning')} data-status="running" />;
   }
@@ -85,13 +87,13 @@ function RowTime({ timestamp, fallback }: { timestamp?: number; fallback?: strin
   const value = provided || formatLeftRailTime(timestamp);
   if (!value) return null;
   const iso = timestamp ? new Date(timestamp > 1e11 ? timestamp : timestamp * 1000).toISOString() : undefined;
-  return <time className="ml-auto shrink-0 font-code text-caption text-muted-foreground tabular-nums" dateTime={iso}>{value}</time>;
+  return <time className="shrink-0 font-code text-caption text-muted-foreground tabular-nums" dateTime={iso}>{value}</time>;
 }
 
 /**
  * 会话行（用户定案形态，优化收敛）。
- * 【设计意图】去边框纯对比色：对齐现代极简设计，激活态依靠 bg-card-active 纯对比背景色标定，
- *   彻底消除 2px 实心边框的包围感与生硬感；时间列与群聊行同构钉在最右缘。
+ * 【设计意图】去边框纯对比色：对齐现代极简设计，激活态依靠 bg-card-active 纯对比背景色标定；
+ *   状态指示点与时间绑定钉在右缘，形成垂直扫描基准线。
  * 【约束与规则】只消费传进来的快照，绝不改写数据管道；点击与右键一律交回壳层。
  */
 function SessionRow({ session, active, compact, onSelect, onMenu }: {
@@ -112,10 +114,12 @@ function SessionRow({ session, active, compact, onSelect, onMenu }: {
     onContextMenu={(event) => { event.preventDefault(); onMenu(event.clientX, event.clientY); }}
   >
     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-      <span className="flex min-w-0 items-center gap-2">
+      <span className="flex min-w-0 items-center justify-between gap-2">
         <span className={`truncate text-body leading-tight ${active ? 'font-semibold text-foreground' : 'text-foreground'}`}>{session.title}</span>
-        <ActivityDot state={session.activityState} />
-        <RowTime timestamp={session.timestamp} fallback={session.time} />
+        <span className="ml-auto flex shrink-0 items-center gap-1.5">
+          <ActivityDot state={session.activityState} />
+          <RowTime timestamp={session.timestamp} fallback={session.time} />
+        </span>
       </span>
       {!compact && <span className="truncate text-aux leading-tight text-muted-foreground">{subtitle}</span>}
     </span>
@@ -148,10 +152,12 @@ function GroupRow({ group, profiles, active, editing, onSelect, onMenu, onConfir
   >
     <CollageAvatar members={group.members} profiles={profiles} size={28} />
     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-      <span className="flex min-w-0 items-center gap-2">
+      <span className="flex min-w-0 items-center justify-between gap-2">
         <span className={`truncate text-body leading-tight ${active ? 'font-semibold text-foreground' : 'text-foreground'}`}>{group.name}</span>
-        <ActivityDot state={group.activityState} />
-        <RowTime timestamp={group.updatedAt || group.createdAt} />
+        <span className="ml-auto flex shrink-0 items-center gap-1.5">
+          <ActivityDot state={group.activityState} />
+          <RowTime timestamp={group.updatedAt || group.createdAt} />
+        </span>
       </span>
       <span className="truncate text-aux leading-tight text-muted-foreground">{subtitle}</span>
     </span>
@@ -214,6 +220,16 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
   const profile = model.selectedAgent;
   const railWidth = props.collapsed ? 'var(--geo-micro-rail, 52px)' : 'var(--rail-w-left, 264px)';
 
+  const activeSessionBotName = focus.type === 'session'
+    ? model.activeSessions.find((s) => s.id === focus.sessionId)?.botName
+    : undefined;
+  const isAgentActive = (name: string): boolean => isAgentScopeActive({
+    agentName: name,
+    focus,
+    selectedAgentName: model.selectedAgent.name,
+    activeSessionBotName,
+  });
+
   const openBotMenu = (event: React.MouseEvent, name: string): void => {
     event.preventDefault();
     props.onOpenBotMenu(name, event.clientX, event.clientY);
@@ -229,7 +245,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
       <Button
         variant="ghost"
         size="icon"
-        className={`size-9 rounded-md border ${isBotFocused(focus, model.defaultAgent.name) ? 'border-primary bg-primary-subtle' : 'border-transparent bg-transparent hover:bg-card/60'}`}
+        className={`size-9 rounded-md border ${isAgentActive(model.defaultAgent.name) ? 'border-primary bg-primary-subtle' : 'border-transparent bg-transparent hover:bg-card/60'}`}
         data-profile="default"
         data-station-profile="default"
         title={t('rail.enterBotChat', { name: model.defaultAgent.displayName || t('rail.defaultAssistant') })}
@@ -243,7 +259,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
           key={agent.name}
           variant="ghost"
           size="icon"
-          className={`station-agent-badge rail-pinned-bot-row relative size-9 shrink-0 rounded-md border p-0 ${isBotFocused(focus, agent.name) ? 'active border-primary bg-primary-subtle' : 'border-transparent bg-transparent hover:bg-card/60'}`}
+          className={`station-agent-badge rail-pinned-bot-row relative size-9 shrink-0 rounded-md border p-0 ${isAgentActive(agent.name) ? 'active border-primary bg-primary-subtle' : 'border-transparent bg-transparent hover:bg-card/60'}`}
           data-profile={agent.name}
           data-station-profile={agent.name}
           title={t('rail.enterBotChat', { name: agent.displayName || agent.name })}
@@ -284,7 +300,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
         </label>
         <Button
           variant="ghost"
-          className={`rail-pinned-bot-row rail-primary-agent-card flex min-h-12 items-center justify-start gap-2 rounded-lg border px-2 text-left ${isBotFocused(focus, profile.name) ? 'active border-primary bg-card-active' : 'border-border-subtle bg-panel'}`}
+          className={`rail-pinned-bot-row rail-primary-agent-card flex min-h-12 items-center justify-start gap-2 rounded-lg px-2 text-left transition-colors ${isBotFocused(focus, profile.name) ? 'active bg-card-active font-medium' : 'bg-panel hover:bg-card-hover'}`}
           data-primary-bot={profile.name}
           data-profile={profile.name}
           title={t('rail.enterBotChat', { name: profile.displayName || profile.name })}
@@ -296,8 +312,10 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
             <span className="truncate text-aux font-semibold text-foreground">{profile.displayName || profile.name}</span>
             <span className="truncate text-aux text-muted-foreground">{toSnippet(profile.lastMessage || profile.description) || t('rail.defaultBotSnippet')}</span>
           </span>
-          <ActivityDot state={profile.activityState} />
-          <RowTime timestamp={profile.timestamp} fallback={profile.lastTime} />
+          <span className="ml-auto flex shrink-0 items-center gap-1.5">
+            <ActivityDot state={profile.activityState} />
+            <RowTime timestamp={profile.timestamp} fallback={profile.lastTime} />
+          </span>
         </Button>
       </div>
 
