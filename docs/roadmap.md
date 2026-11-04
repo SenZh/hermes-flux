@@ -72,7 +72,7 @@
 
 ### 2.3 跨端流转与系统交互
 - ⚪ **中继模式与中继网络服务支持 (Relay Infrastructure Mode)**：长远支持去中心化或自建中继（公网安全穿透、离线队列暂存与跨端握手路由）；由于搭建与运维中继服务器工程量较大，当前架构先完成通道接口与退避降级预留，暂不落地服务端。
-- ⚪ **全功能 Agent 系统设置面板**：覆盖模型提供商凭据、系统提示词、温度值、上下文截断长度、工具调用权限白名单、工作区持久化路径
+- ⚪ **全功能 Agent & Gateway 系统设置中心 (Settings Hub)**：覆盖 12 大功能域（通用外观、模型路由与算力、自治安全与审批、专职 Bot 档案、MCP 生态、技能与插件、工作区与时光机、沙箱与虚拟桌面、凭据保险库与连接器、语音多模态与伴侣、网络代理与集群、遥测与维护），详见架构规范 [`docs/architecture/settings-architecture-and-implementation-map.md`](architecture/settings-architecture-and-implementation-map.md)
 - ⚪ **多设备局域网直连与会话无缝接力 (Session Handover)**：手机扫码即接力桌面端会话，长连接通道平滑流转
 - ⚪ **离线会话事件日志全量持久化 (Local Event Store)**：本地 SQLite 完整归档思考链与工具调用，补齐历史重放能力
 

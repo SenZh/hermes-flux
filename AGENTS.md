@@ -20,6 +20,7 @@
 | **三态对话** | [`docs/architecture/three-conversation-modes-spec.md`](docs/architecture/three-conversation-modes-spec.md) | 普通会话、专职 Bot 主工位、多 Agent 群聊三态模型、展示形态与 Gateway 接口单一真值源 |
 | **核心架构** | [`docs/architecture/core-architecture-and-data-flow-spec.md`](docs/architecture/core-architecture-and-data-flow-spec.md) | Monorepo 分层边界、PAL 平台抽象、WebSocket 5 态 FSM、Token 合流引擎 |
 | **终极三舱** | [`docs/architecture/ultimate-tri-rail-architecture-spec.md`](docs/architecture/ultimate-tri-rail-architecture-spec.md) | 实体定义(Folder/Workspace/Project/Bot/Group/Session)、左双轨(52px微轨+212px抽屉)、右侧工具舱 |
+| **设置中枢** | [`docs/architecture/settings-architecture-and-implementation-map.md`](docs/architecture/settings-architecture-and-implementation-map.md) | 12 大功能域全景设置树、三级级联继承状态机、258 RPC 映射与 4 阶段实施路线图 |
 | **协议基线** | [`docs/architecture/gateway-api-and-features-matrix.md`](docs/architecture/gateway-api-and-features-matrix.md) | 官方网关契约基线（258 RPC / 72 事件），客户端移动端 Capacitor 8 容器映射 |
 | **接口索引** | [`docs/gateway/README.md`](docs/gateway/README.md) | 自动生成的 10 个网关核心模块接口文档与真实探针状态（禁止手动修改） |
 | **设计系统** | [`docs/design-system/04-tokens-and-design-system-spec.md`](docs/design-system/04-tokens-and-design-system-spec.md) | 29-color Design Tokens、Border Radius、Shadow 物理层级规范 |
