@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hermes Flux 极客全息设置舱原型</title>
+<style>
+  :root {
+    --bg-void: #050507;
+    --bg-card: #0A0C10;
+    --bg-surface: #10131A;
+    --border-subtle: rgba(255, 255, 255, 0.07);
+    --border-active: rgba(255, 255, 255, 0.2);
+    
+    /* 专职 Bot 专属色彩能量波长 */
+    --wang-color: #6366F1;     /* 架构老王: 靛青冷萃 */
+    --wang-glow: rgba(99, 102, 241, 0.25);
+    --zhang-color: #EC4899;    /* 前端小张: 霓虹洋红 */
+    --zhang-glow: rgba(236, 72, 153, 0.25);
+    --li-color: #F59E0B;       /* 审查老李: 熔岩琥珀 */
+    --li-glow: rgba(245, 158, 11, 0.25);
+
+    --theme-active: var(--wang-color);
+    --theme-glow: var(--wang-glow);
+
+    --emerald: #10B981;
+    --text-pure: #FFFFFF;
+    --text-primary: #E2E8F0;
+    --text-muted: #64748B;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
+    --font-mono: "JetBrains Mono", SF Mono, Consolas, monospace;
+    --spring-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+  body {
+    background: #000;
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    padding: 10px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* 顶层主视口容器 */
+  .stage-shell {
+    width: 100%;
+    max-width: 960px;
+    margin: 0 auto;
+    background: var(--bg-void);
+    border-radius: 16px;
+    border: 1px solid var(--border-subtle);
+    overflow: hidden;
+    position: relative;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  }
+
+  /* 舱室顶控栏 */
+  .cockpit-header {
+    height: 48px;
+    background: rgba(10, 12, 16, 0.85);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+  }
+  .brand-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.8px;
+    color: var(--text-pure);
+  }
+  .pulsing-orb {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--theme-active);
+    box-shadow: 0 0 12px var(--theme-active);
+    transition: all 0.4s ease;
+  }
+  .view-switcher-dock {
+    display: flex;
+    background: #000;
+    padding: 3px;
+    border-radius: 10px;
+    border: 1px solid var(--border-subtle);
+    gap: 2px;
+  }
+  .switch-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 500;
+    padding: 5px 14px;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: all 0.2s var(--ease-out-expo);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .switch-btn:hover { color: var(--text-primary); }
+  .switch-btn.active {
+    background: var(--bg-surface);
+    color: #FFF;
+    border: 1px solid var(--border-active);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  }
+
+  /* 主工作区舞台 */
+  .viewport-core {
+    position: relative;
+    height: 540px;
+    overflow: hidden;
+    background: radial-gradient(circle at 50% 10%, rgba(15, 20, 30, 0.6) 0%, #050507 70%);
+  }
+
+  /* 动态环境辉光背景 */
+  .ambient-glow {
+    position: absolute;
+    top: -100px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 600px;
+    height: 280px;
+    background: var(--theme-glow);
+    filter: blur(90px);
+    opacity: 0.6;
+    pointer-events: none;
+    transition: all 0.5s ease;
+    z-index: 1;
+  }
+
+  /* ── 视图 1: 专职 Agent 全息工位舱 ── */
+  .persona-view {
+    position: relative;
+    z-index: 2;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* 顶部全息卡牌滑动器 */
+  .persona-carousel-strip {
+    height: 74px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: rgba(8, 10, 14, 0.6);
+    backdrop-filter: blur(16px);
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 12px;
+    overflow-x: auto;
+  }
+  .persona-card {
+    height: 52px;
+    min-width: 175px;
+    background: rgba(16, 20, 28, 0.7);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 6px 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    transition: all 0.25s var(--ease-out-expo);
+    position: relative;
+  }
+  .persona-card:hover {
+    background: rgba(22, 28, 40, 0.9);
+    border-color: rgba(255, 255, 255, 0.15);
+    transform: translateY(-2px);
+  }
+  .persona-card.active {
+    background: rgba(20, 26, 38, 0.95);
+    border-color: var(--theme-active);
+    box-shadow: 0 4px 20px var(--theme-glow), inset 0 0 12px var(--theme-glow);
+    transform: translateY(-2px);
+  }
+  .persona-card.active::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 16px; right: 16px; height: 1.5px;
+    background: var(--theme-active);
+    box-shadow: 0 0 8px var(--theme-active);
+  }
+  .holo-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    color: #FFF;
+    position: relative;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+  }
+  .holo-avatar .badge-dot {
+    position: absolute;
+    bottom: -2px;
+    right: -2px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--emerald);
+    border: 2px solid #0A0C10;
+  }
+  .card-meta { display: flex; flex-direction: column; gap: 1px; }
+  .card-name { font-size: 12px; font-weight: 600; color: #FFF; letter-spacing: 0.2px; }
+  .card-role { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
+
+  /* 悬浮内容双栏 */
+  .persona-workbench {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+  /* 左侧神经导航轨 */
+  .neuro-rail {
+    width: 190px;
+    background: rgba(8, 10, 14, 0.4);
+    border-right: 1px solid var(--border-subtle);
+    padding: 12px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .rail-node {
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 11.5px;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    transition: all 0.15s ease;
+  }
+  .rail-node:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.04); }
+  .rail-node.active {
+    color: #FFF;
+    background: rgba(255, 255, 255, 0.08);
+    font-weight: 600;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  }
+  .rail-node .icon { font-size: 13px; }
+
+  /* 右侧全息面板流 */
+  .neuro-canvas {
+    flex: 1;
+    padding: 18px 24px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  /* 玻璃拟物卡片 */
+  .glass-card {
+    background: rgba(14, 17, 24, 0.65);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 14px 16px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s ease;
+  }
+  .glass-card:hover {
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+  .glass-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; width: 3px; height: 100%;
+    background: var(--theme-active);
+    opacity: 0.8;
+  }
+  .card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .card-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: #FFF;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .card-caption { font-size: 11px; color: var(--text-muted); margin-bottom: 10px; line-height: 1.4; }
+
+  /* 提示词胶囊快速注入 */
+  .directive-pills {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .directive-tag {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    transition: all 0.15s;
+  }
+  .directive-tag:hover {
+    background: var(--theme-active);
+    color: #000;
+    font-weight: 600;
+    border-color: var(--theme-active);
+  }
+
+  /* 神经人设代码舱 */
+  .soul-matrix-box {
+    background: #060709;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: #CBD5E1;
+    line-height: 1.6;
+    height: 90px;
+    overflow-y: auto;
+    position: relative;
+  }
+  .soul-matrix-box:focus-within {
+    border-color: var(--theme-active);
+    box-shadow: 0 0 10px var(--theme-glow);
+  }
+
+  /* 反应堆模型选择器 */
+  .reactor-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .reactor-item {
+    background: #080A0E;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .reactor-label { font-size: 11px; color: var(--text-muted); }
+  .reactor-val { font-size: 11.5px; font-weight: 600; color: #FFF; font-family: var(--font-mono); }
+
+  /* 赛博技能芯片插槽 (Skill Chips) */
+  .chips-container {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  .skill-chip {
+    background: #090B0F;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 8px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .skill-chip:hover {
+    border-color: rgba(255, 255, 255, 0.15);
+    background: #11151D;
+  }
+  .skill-chip.installed {
+    border-color: rgba(99, 102, 241, 0.4);
+    background: rgba(99, 102, 241, 0.08);
+  }
+  .chip-name { font-size: 11px; font-weight: 500; color: #DDD; }
+  .chip-indicator {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #333;
+    transition: all 0.2s;
+  }
+  .skill-chip.installed .chip-indicator {
+    background: var(--theme-active);
+    box-shadow: 0 0 8px var(--theme-active);
+  }
+
+  /* 突触记忆体切片 (Synaptic Memory Crystals) */
+  .memory-crystal-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .memory-crystal {
+    background: rgba(10, 13, 18, 0.6);
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    padding: 6px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+    transition: all 0.15s;
+  }
+  .memory-crystal:hover {
+    background: rgba(20, 25, 36, 0.8);
+    border-color: rgba(255, 255, 255, 0.15);
+  }
+  .crystal-text { color: #BBB; flex: 1; margin-right: 8px; }
+  .crystal-tag {
+    font-size: 9.5px;
+    background: rgba(255, 255, 255, 0.06);
+    padding: 1px 6px;
+    border-radius: 3px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+  .crystal-del {
+    color: #64748B;
+    cursor: pointer;
+    margin-left: 6px;
+  }
+  .crystal-del:hover { color: #EF4444; }
+
+  /* ── 视图 2: 纯净全局系统设置舱 ── */
+  .global-view {
+    position: relative;
+    z-index: 2;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+  .global-top-ribbon {
+    height: 48px;
+    background: rgba(10, 12, 16, 0.6);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+  }
+  .telemetry-strip {
+    display: flex;
+    gap: 16px;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+  }
+  .telemetry-item span { color: #FFF; font-weight: 600; }
+
+  .global-workbench {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+  .global-sidebar {
+    width: 200px;
+    background: rgba(8, 10, 14, 0.4);
+    border-right: 1px solid var(--border-subtle);
+    padding: 12px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .global-content {
+    flex: 1;
+    padding: 20px 28px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  /* 底部控制栏 */
+  .cockpit-footer {
+    height: 38px;
+    background: #08090D;
+    border-top: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .status-pills { display: flex; gap: 8px; }
+  .p-pill {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-subtle);
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 10px;
+    color: #94A3B8;
+  }
+</style>
+</head>
+<body>
+
+<div class="stage-shell">
+  <!-- 顶控栏 -->
+  <div class="cockpit-header">
+    <div class="brand-badge">
+      <div class="pulsing-orb" id="hub-orb"></div>
+      <span id="hub-badge-text">HERMES FLUX · 神经设置指挥舱</span>
+    </div>
+    <div class="view-switcher-dock">
+      <button class="switch-btn active" onclick="switchMainView('persona', this)">
+        <span>🤖</span>
+        <span>专职 Agent 全息工位舱</span>
+      </button>
+      <button class="switch-btn" onclick="switchMainView('global', this)">
+        <span>🌐</span>
+        <span>系统全局设置中枢</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- 视口核心舞台 -->
+  <div class="viewport-core">
+    <!-- 动态微光环境色 -->
+    <div class="ambient-glow" id="ambient-glow"></div>
+
+    <!-- ── 视图 1: 专职 Agent 全息工位舱 ── -->
+    <div id="view-persona" class="persona-view">
+      <!-- 顶部全息卡牌滑动器 (Carousel) -->
+      <div class="persona-carousel-strip">
+        <!-- 老王 -->
+        <div class="persona-card active" onclick="selectPersona('wang', this)">
+          <div class="holo-avatar" style="background: linear-gradient(135deg, #4338CA, #6366F1);">
+            <span>王</span>
+            <span class="badge-dot"></span>
+          </div>
+          <div class="card-meta">
+            <div class="card-name">架构师 · 老王</div>
+            <div class="card-role">CHIEF ARCHITECT · S</div>
+          </div>
+        </div>
+
+        <!-- 小张 -->
+        <div class="persona-card" onclick="selectPersona('zhang', this)">
+          <div class="holo-avatar" style="background: linear-gradient(135deg, #BE185D, #EC4899);">
+            <span>张</span>
+            <span class="badge-dot"></span>
+          </div>
+          <div class="card-meta">
+            <div class="card-name">前端专家 · 小张</div>
+            <div class="card-role">PIXEL DIRECTOR · S</div>
+          </div>
+        </div>
+
+        <!-- 老李 -->
+        <div class="persona-card" onclick="selectPersona('li', this)">
+          <div class="holo-avatar" style="background: linear-gradient(135deg, #B45309, #F59E0B);">
+            <span>李</span>
+            <span class="badge-dot"></span>
+          </div>
+          <div class="card-meta">
+            <div class="card-name">审查专员 · 老李</div>
+            <div class="card-role">GATE GUARDIAN · S</div>
+          </div>
+        </div>
+
+        <!-- 新建 Bot -->
+        <div class="persona-card" style="min-width: 130px; border-style: dashed; justify-content: center; opacity: 0.6;">
+          <span style="font-size: 11px; color: #94A3B8;">+ 锻造新员工</span>
+        </div>
+      </div>
+
+      <!-- 下部全息工作区 -->
+      <div class="persona-workbench">
+        <!-- 左侧神经导轨 -->
+        <div class="neuro-rail">
+          <div class="rail-node active"><span class="icon">📜</span><span>神经灵魂人设</span></div>
+          <div class="rail-node"><span class="icon">⚛️</span><span>算力反应堆 Pin</span></div>
+          <div class="rail-node"><span class="icon">⚡</span><span>赛博技能插槽</span></div>
+          <div class="rail-node"><span class="icon">💎</span><span>突触记忆晶体</span></div>
+          <div class="rail-node"><span class="icon">🎨</span><span>光谱视觉指纹</span></div>
+        </div>
+
+        <!-- 右侧全息面板流 -->
+        <div class="neuro-canvas">
+          <!-- 1. 灵魂人设卡片 -->
+          <div class="glass-card">
+            <div class="card-head">
+              <div class="card-title">
+                <span>📜</span><span id="panel-persona-title">架构师 · 老王 ── 神经灵魂 (SOUL.md)</span>
+              </div>
+              <span style="font-size: 10px; color: var(--emerald); font-family: var(--font-mono);">
+                ● 权威物理落盘: profiles/arch-wang/
+              </span>
+            </div>
+            <div class="directive-pills">
+              <span class="directive-tag" onclick="injectDirective('严禁未验证假设')">+ 注入: 先行证明铁律</span>
+              <span class="directive-tag" onclick="injectDirective('形式化证明必跑')">+ 注入: fast-check门禁</span>
+              <span class="directive-tag" onclick="injectDirective('高密度技术语言')">+ 注入: 拒绝低幼比喻</span>
+            </div>
+            <textarea id="soul-editor" class="soul-matrix-box" spellcheck="false">你是一名严苛的资深系统架构师“老王”。
+【不变量】
+1. 动代码前必须完成分层架构设计，严禁带着假设推入实现；
+2. 触碰底层时序与状态机必须在 __tests__/formal/ 追加数学定理证明；
+3. 全程输出高密度工程 5W2H 语言，消灭低幼口水话。</textarea>
+          </div>
+
+          <!-- 2. 算力反应堆 (Model Pin) -->
+          <div class="glass-card">
+            <div class="card-head">
+              <div class="card-title"><span>⚛️</span><span>专属算力反应堆 (Model & Compute Reactor)</span></div>
+              <span style="font-size: 10px; background: rgba(99,102,241,0.2); color:#A5B4FC; padding:2px 6px; border-radius:4px; font-family:var(--font-mono);">
+                已独立覆盖全局
+              </span>
+            </div>
+            <div class="reactor-grid">
+              <div class="reactor-item">
+                <span class="reactor-label">绑定推理引擎:</span>
+                <span class="reactor-val" id="persona-model-name" style="color:var(--theme-active);">Claude 3.7 Sonnet (Thinking)</span>
+              </div>
+              <div class="reactor-item">
+                <span class="reactor-label">思考预算深度:</span>
+                <span class="reactor-val" id="persona-effort-val" style="color:#FFF;">xhigh (48k Tokens)</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 3. 赛博技能插槽 (Skill Chips) -->
+          <div class="glass-card">
+            <div class="card-head">
+              <div class="card-title"><span>⚡</span><span>赛博技能插槽 (Neural Skill Chips)</span></div>
+              <span style="font-size: 10px; color: var(--text-muted);">热插拔已就绪</span>
+            </div>
+            <div class="chips-container" id="chips-dock">
+              <div class="skill-chip installed" onclick="toggleChip(this)">
+                <span class="chip-name">arch-review</span>
+                <span class="chip-indicator"></span>
+              </div>
+              <div class="skill-chip installed" onclick="toggleChip(this)">
+                <span class="chip-name">formal-verify</span>
+                <span class="chip-indicator"></span>
+              </div>
+              <div class="skill-chip" onclick="toggleChip(this)">
+                <span class="chip-name">emil-design</span>
+                <span class="chip-indicator"></span>
+              </div>
+              <div class="skill-chip installed" onclick="toggleChip(this)">
+                <span class="chip-name">git-commit</span>
+                <span class="chip-indicator"></span>
+              </div>
+              <div class="skill-chip" onclick="toggleChip(this)">
+                <span class="chip-name">wrk-pressure</span>
+                <span class="chip-indicator"></span>
+              </div>
+              <div class="skill-chip installed" onclick="toggleChip(this)">
+                <span class="chip-name">service-log</span>
+                <span class="chip-indicator"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 4. 突触记忆体 (Synaptic Memory) -->
+          <div class="glass-card">
+            <div class="card-head">
+              <div class="card-title"><span>💎</span><span>突触记忆体晶片 (Long-Term Memory Fragments)</span></div>
+              <span style="font-size: 10px; color: var(--emerald); font-family: var(--font-mono);">
+                4 片记忆已固化
+              </span>
+            </div>
+            <div class="memory-crystal-list" id="memory-list">
+              <div class="memory-crystal">
+                <span class="crystal-text">“Windows 打包 app.asar 存在物理句柄锁死风险，必须前置退出”</span>
+                <span class="crystal-tag">P-018</span>
+                <span class="crystal-del" onclick="this.parentElement.remove()">✕</span>
+              </div>
+              <div class="memory-crystal">
+                <span class="crystal-text">“多 Agent 群聊必须走 groups.* 系列专用 RPC，严禁调用 prompt.submit”</span>
+                <span class="crystal-tag">P-002</span>
+                <span class="crystal-del" onclick="this.parentElement.remove()">✕</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 视图 2: 纯净全局系统设置中枢 ── -->
+    <div id="view-global" class="global-view" style="display:none;">
+      <!-- 极客实时遥测带 -->
+      <div class="global-top-ribbon">
+        <div style="font-size:12px; font-weight:600; color:#FFF; display:flex; align-items:center; gap:8px;">
+          <span>🌐</span><span>网关全局控制台</span>
+        </div>
+        <div class="telemetry-strip">
+          <div class="telemetry-item">RTT: <span>12ms</span></div>
+          <div class="telemetry-item">活跃会话: <span>6</span></div>
+          <div class="telemetry-item">今日消耗: <span>42,850 T</span></div>
+          <div class="telemetry-item">网关版本: <span>v0.22.5</span></div>
+        </div>
+      </div>
+
+      <div class="global-workbench">
+        <div class="global-sidebar">
+          <div class="rail-node active"><span class="icon">🎨</span><span>外观与 Token 引擎</span></div>
+          <div class="rail-node"><span class="icon">🧠</span><span>模型与 Key 池</span></div>
+          <div class="rail-node"><span class="icon">🛡️</span><span>自治安全与审批</span></div>
+          <div class="rail-node"><span class="icon">🔌</span><span>全局 MCP 市场</span></div>
+          <div class="rail-node"><span class="icon">📁</span><span>项目与时光机</span></div>
+          <div class="rail-node"><span class="icon">🖥️</span><span>沙箱与虚拟桌面</span></div>
+          <div class="rail-node"><span class="icon">🔐</span><span>凭据保险库</span></div>
+          <div class="rail-node"><span class="icon">🌐</span><span>网络代理通道</span></div>
+        </div>
+
+        <div class="global-content">
+          <div class="glass-card">
+            <div class="card-head">
+              <div class="card-title"><span>🧠</span><span>全局默认推理模型 (Global Model Pin)</span></div>
+              <span style="font-size:10px; color:var(--emerald);">权威兜底</span>
+            </div>
+            <div class="card-caption">新建会话或未单独绑定制裁模型的数字员工，默认由此模型驱动推理</div>
+            <div style="background:#080A0E; border:1px solid var(--border-subtle); border-radius:8px; padding:8px 12px; display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:12px; font-weight:600; color:#FFF;">Claude 3.7 Sonnet (Thinking)</span>
+              <span style="font-size:11px; color:var(--theme-active); cursor:pointer;">更换主模型 ▾</span>
+            </div>
+          </div>
+
+          <div class="glass-card">
+            <div class="card-head">
+              <div class="card-title"><span>🔐</span><span>模型提供商 API Key 安全保险库</span></div>
+              <span style="font-size:10px; color:var(--text-muted); font-family:var(--font-mono);">~/.hermes/.env 加密隔离</span>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:8px;">
+              <div style="background:#080A0E; border:1px solid var(--border-subtle); border-radius:8px; padding:8px 12px; display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                  <div style="font-size:11.5px; font-weight:600; color:#FFF;">Anthropic Claude 官方源</div>
+                  <div style="font-size:10px; color:var(--text-muted); font-family:var(--font-mono);">sk-ant-api03-***9wA</div>
+                </div>
+                <span style="font-size:10px; background:rgba(16,185,129,0.15); color:var(--emerald); padding:2px 8px; border-radius:4px;">在线就绪 🟢</span>
+              </div>
+              <div style="background:#080A0E; border:1px solid var(--border-subtle); border-radius:8px; padding:8px 12px; display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                  <div style="font-size:11.5px; font-weight:600; color:#FFF;">DeepSeek 聚合反向代理</div>
+                  <div style="font-size:10px; color:var(--text-muted); font-family:var(--font-mono);">https://api.deepseek.com/v1</div>
+                </div>
+                <span style="font-size:10px; background:rgba(16,185,129,0.15); color:var(--emerald); padding:2px 8px; border-radius:4px;">在线就绪 🟢</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="glass-card">
+            <div class="card-head">
+              <div class="card-title"><span>🌐</span><span>全局 HTTP / SOCKS5 代理通道</span></div>
+              <span style="font-size:10px; color:var(--text-muted);">解决海外 AI API 与 GitHub 连接</span>
+            </div>
+            <div style="background:#080A0E; border:1px solid var(--border-subtle); border-radius:8px; padding:8px 12px; display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:11px; font-family:var(--font-mono); color:#AAA;">http://127.0.0.1:7890</span>
+              <span style="font-size:10.5px; color:var(--theme-active); cursor:pointer;">测试连通性</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 底部状态指示条 -->
+  <div class="cockpit-footer">
+    <div style="display:flex; align-items:center; gap:8px;">
+      <span style="font-family:var(--font-mono); color:var(--emerald);">● LOCAL-FIRST RUNTIME</span>
+      <span>所有修改于微秒级自动增量同步，零卡顿</span>
+    </div>
+    <div class="status-pills">
+      <span class="p-pill">Spring 弹簧物理</span>
+      <span class="p-pill">全息赛博卡牌</span>
+      <span class="p-pill">光谱环境色流转</span>
+      <span class="p-pill">神经技能插槽</span>
+    </div>
+  </div>
+</div>
+
+<script>
+  // 切换专职员工卡片
+  function selectPersona(id, el) {
+    document.querySelectorAll('.persona-card').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+
+    const orb = document.getElementById('hub-orb');
+    const glow = document.getElementById('ambient-glow');
+    const title = document.getElementById('panel-persona-title');
+    const soul = document.getElementById('soul-editor');
+    const model = document.getElementById('persona-model-name');
+    const effort = document.getElementById('persona-effort-val');
+
+    if (id === 'wang') {
+      document.documentElement.style.setProperty('--theme-active', 'var(--wang-color)');
+      document.documentElement.style.setProperty('--theme-glow', 'var(--wang-glow)');
+      title.textContent = '架构师 · 老王 ── 神经灵魂 (SOUL.md)';
+      soul.value = '你是一名严苛的资深系统架构师“老王”。\n【不变量】\n1. 动代码前必须完成分层架构设计，严禁带着假设推入实现；\n2. 触碰底层时序与状态机必须在 __tests__/formal/ 追加数学定理证明；\n3. 全程输出高密度工程 5W2H 语言，消灭低幼口水话。';
+      model.textContent = 'Claude 3.7 Sonnet (Thinking)';
+      effort.textContent = 'xhigh (48k Tokens)';
+    } else if (id === 'zhang') {
+      document.documentElement.style.setProperty('--theme-active', 'var(--zhang-color)');
+      document.documentElement.style.setProperty('--theme-glow', 'var(--zhang-glow)');
+      title.textContent = '前端专家 · 小张 ── 神经灵魂 (SOUL.md)';
+      soul.value = '你是一名极致追求纯粹美学与流动触感的前端总监“小张”。\n【美学铁律】\n1. 严格遵守 29-color Tokens 体系，严禁硬编码色值；\n2. 移动端触控热区严格锁定 >= 44pt，软键盘避让防死锁；\n3. 每一个按键都有 scale(0.97) 触觉反馈，每一个动画都有物理弹簧。';
+      model.textContent = 'GPT-4o (Vision & Polish)';
+      effort.textContent = 'high (16k Tokens)';
+    } else if (id === 'li') {
+      document.documentElement.style.setProperty('--theme-active', 'var(--li-color)');
+      document.documentElement.style.setProperty('--theme-glow', 'var(--li-glow)');
+      title.textContent = '审查专员 · 老李 ── 神经灵魂 (SOUL.md)';
+      soul.value = '你是项目最高质量门禁裁判“老李”，结论绝对 Binding。\n【门禁红线】\n1. 严禁类型逃逸 (as any / unknown 拓宽)；\n2. 严禁失败静默致空 (Failure Is Not Empty)；\n3. 变异测试杀伤力必须 >= 85%，单测拒绝假通过。';
+      model.textContent = 'DeepSeek R1 (Audit & Proof)';
+      effort.textContent = 'high (32k Tokens)';
+    }
+  }
+
+  // 技能插槽拨动
+  function toggleChip(chip) {
+    chip.classList.toggle('installed');
+  }
+
+  // 快速注入指令
+  function injectDirective(text) {
+    const soul = document.getElementById('soul-editor');
+    soul.value += '\n- ' + text;
+    soul.scrollTop = soul.scrollHeight;
+  }
+
+  // 主视图切换 (全息工位 vs 全局中枢)
+  function switchMainView(mode, btn) {
+    document.querySelectorAll('.switch-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    const viewPersona = document.getElementById('view-persona');
+    const viewGlobal = document.getElementById('view-global');
+    const badge = document.getElementById('hub-badge-text');
+
+    if (mode === 'persona') {
+      viewPersona.style.display = 'flex';
+      viewGlobal.style.display = 'none';
+      badge.textContent = 'HERMES FLUX · 神经设置指挥舱';
+    } else {
+      viewPersona.style.display = 'none';
+      viewGlobal.style.display = 'flex';
+      badge.textContent = 'HERMES FLUX · 网关全局控制中枢';
+    }
+  }
+</script>
+
+</body>
+</html>

@@ -313,22 +313,20 @@ Hermes Flux Settings (设置中心)
 ```
 
 ### 里程碑 1 (Phase 1): 核心基座与模型连接
-1. **系统全局设置弹窗 (`SettingsModal.tsx`)**：
-   - 基于现有设计系统与 Token 规范，采用“左侧 180px 竖向导航 Tab + 右侧流式配置表单”经典双栏布局；
-   - 彻底去除切人下拉与 YAML 冗余代码，纯粹承载全局网关参数；
+1. **设置弹窗容器组件 (`SettingsModal.tsx`)**：
+   - 基于现有设计系统与 Token 规范，采用“左侧 200px 竖向导航 Tab + 右侧流式配置表单”经典布局；
    - 快捷键 `Cmd + ,`（Windows 为 `Ctrl + ,`）全局呼出，左侧微轨底部 `⚙ 设置` 按钮联动挂载。
 2. **设置状态机 (`settingsStore.ts`)**：
    - 封装 `useSettingsStore`，底层通过 `HermesGatewayClient` 统一调度 `config.get` 与 `config.set`；
-   - 实现全局与 Profile 配置的安全隔离与响应式刷新。
+   - 实现三级级联覆盖推导函数 `resolveEffectiveConfig(key, profile?, sessionId?)`。
 3. **模型与提供商配置面板 (`ProvidersSettingsPanel.tsx`)**：
    - 接入 `model.options` 与 `model.save_key`，实现主流提供商 API Key 录入、脱敏与 Base URL 映射；
    - 接入 `confirm_expensive_model` 费用阻断告警与 `yolo` 模式作用域选择。
 
 ### 里程碑 2 (Phase 2): 数字员工沙箱与工具生态
-1. **专职 Agent 独立配置舱 (`AgentPersonaModal.tsx`)**：
-   - 从微轨/抽屉任意 Agent 右键呼出（或工位顶栏入口），默认定位至当前 Agent；
-   - 顶部提供横向滑动条（Agent Pills Slider），支持在老王、小张、老李间秒切；
-   - 接入 `profiles.describe`、`profiles.configure`，集成 `SOUL.md` 编辑器与专属 Avatar 头像上传（`profiles.set_asset`）；
+1. **数字员工人设面板 (`ProfilesSettingsPanel.tsx`)**：
+   - 接入 `profiles.list`、`profiles.describe`、`profiles.configure`；
+   - 集成 `SOUL.md` 编辑器与专属 Avatar 头像上传（`profiles.set_asset`）；
    - 接入 `learning.detail` 与 `learning.delete` 实现长期记忆卡片修剪。
 2. **MCP 与技能管理面板 (`McpSkillsSettingsPanel.tsx`)**：
    - 接入 `mcp.catalog` 预设一键安装与自定义 Stdio/SSE 服务增删；

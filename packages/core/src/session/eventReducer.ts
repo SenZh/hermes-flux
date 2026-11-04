@@ -70,7 +70,7 @@ export interface TurnEventContext {
 export type TurnAction =
   | { type: 'turn-started' }
   | { type: 'turn-completed'; sessionId?: string; finalText?: string }
-  | { type: 'turn-failed'; sessionId?: string; message: string }
+  | { type: 'turn-failed'; message: string }
   | { type: 'append-content'; messageId: string; text: string }
   | { type: 'append-thought'; messageId: string; text: string }
   | { type: 'replace-content'; messageId: string; text: string }
@@ -174,9 +174,7 @@ export function reduceGatewayEvent(params: unknown, ctx: TurnEventContext): Turn
 
   if (type === 'error') {
     const message = asText(payload.message) || '网关返回了未标注内容的系统错误';
-    const action: TurnAction = { type: 'turn-failed', message };
-    if (frameSessionId) action.sessionId = frameSessionId;
-    return [action];
+    return [{ type: 'turn-failed', message }];
   }
 
   // --- Turn-scoped events: ignore streams belonging to other sessions ------
@@ -380,10 +378,7 @@ export function reduceGatewayEvent(params: unknown, ctx: TurnEventContext): Turn
       if (messageId && (userRowId !== null || assistantRowId !== null || rowIds.length > 0)) {
         actions.push({ type: 'persisted-turn', messageId, userRowId, assistantRowId, rowIds });
       }
-      const completeAction: TurnAction = { type: 'turn-completed' };
-      if (frameSessionId) completeAction.sessionId = frameSessionId;
-      if (finalText) completeAction.finalText = finalText;
-      actions.push(completeAction);
+      actions.push({ type: 'turn-completed', sessionId: frameSessionId || undefined, finalText: finalText || undefined });
       // The turn usually produced the first persisted message of a new session,
       // so the rail must be refreshed at the same moment the composer unlocks.
       actions.push({ type: 'refresh-sessions' });
