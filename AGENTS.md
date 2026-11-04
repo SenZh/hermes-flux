@@ -20,6 +20,7 @@
 |---|---|---|
 | **看板与计划** | [`docs/roadmap.md`](docs/roadmap.md) | 全局研发路线图、已落地特性看板、已知缺陷跟踪 |
 | **核心架构** | [`docs/architecture/core-architecture-and-data-flow-spec.md`](docs/architecture/core-architecture-and-data-flow-spec.md) | Monorepo 分层边界、PAL 平台抽象、WebSocket 5 态 FSM、Token 合流引擎 |
+| **三态对话** | [`docs/architecture/three-conversation-modes-spec.md`](docs/architecture/three-conversation-modes-spec.md) | 普通会话、专职 Bot 主工位、多 Agent 群聊三态模型、展示形态与 Gateway 接口单一真值源 |
 | **终极三舱** | [`docs/architecture/ultimate-tri-rail-architecture-spec.md`](docs/architecture/ultimate-tri-rail-architecture-spec.md) | 实体定义(Folder/Workspace/Project/Bot/Group/Session)、左双轨(52px微轨+212px抽屉)、右侧工具舱 |
 | **协议基线** | [`docs/architecture/gateway-api-and-features-matrix.md`](docs/architecture/gateway-api-and-features-matrix.md) | 252 个 RPC 方法、77 个下行推送事件、REST 辅助通道权威基线 |
 | **接口索引** | [`docs/gateway/README.md`](docs/gateway/README.md) | 自动生成的 10 个网关模块接口文档与真实探针状态（禁止手动修改） |

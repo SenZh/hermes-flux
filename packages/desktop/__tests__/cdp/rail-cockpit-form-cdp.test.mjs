@@ -268,6 +268,15 @@ test('rail-cockpit-form: 微轨按钮收编、header 形态与时间内联（真
       const timeEl = sessionRow ? sessionRow.querySelector('time') : null;
       const dotEl = sessionRow ? sessionRow.querySelector('.activity-pulse-indicator, .activity-unread-badge') : null;
 
+      const titleEl = sessionRow ? sessionRow.querySelector('.truncate.text-body') : null;
+      const titleCs = titleEl ? getComputedStyle(titleEl) : null;
+      const subtitleEl = sessionRow ? sessionRow.querySelector('.truncate.text-aux') : null;
+      const subtitleCs = subtitleEl ? getComputedStyle(subtitleEl) : null;
+
+      const unselectedRow = document.querySelector('.session-item[data-id="s-yesterday"]');
+      const unselectedTitleEl = unselectedRow ? unselectedRow.querySelector('.truncate.text-body') : null;
+      const unselectedTitleCs = unselectedTitleEl ? getComputedStyle(unselectedTitleEl) : null;
+
       const defaultStationBtn = document.querySelector('#flux-station-rail [data-profile="default"]');
       const stationCs = defaultStationBtn ? getComputedStyle(defaultStationBtn) : null;
 
@@ -275,12 +284,18 @@ test('rail-cockpit-form: 微轨按钮收编、header 形态与时间内联（真
         primaryCardBorderWidth: primaryCs ? primaryCs.borderLeftWidth : null,
         timeRight: timeEl ? Math.round(timeEl.getBoundingClientRect().right) : null,
         dotRight: dotEl ? Math.round(dotEl.getBoundingClientRect().right) : null,
+        titleFontWeight: titleCs ? titleCs.fontWeight : null,
+        unselectedTitleFontWeight: unselectedTitleCs ? unselectedTitleCs.fontWeight : null,
+        subtitleFontWeight: subtitleCs ? subtitleCs.fontWeight : null,
         stationHasPrimaryBorder: defaultStationBtn ? defaultStationBtn.classList.contains('border-primary') : false,
       };
     })()`);
 
     assert.equal(dotAlignment.primaryCardBorderWidth, '0px', '专职 Bot 主工位卡去边框纯对比色（对齐会话行）');
     assert.equal(dotAlignment.stationHasPrimaryBorder, true, '切到普通会话时微轨对应的 Agent 头像必须持续保持高亮选中态');
+    assert.equal(dotAlignment.titleFontWeight, '500', '激活会话大标题字重必须恒定为 500 (font-medium)');
+    assert.equal(dotAlignment.unselectedTitleFontWeight, '500', '未激活会话大标题字重必须恒定为 500 (font-medium)，杜绝粗细不一与布局抖动');
+    assert.equal(dotAlignment.subtitleFontWeight, '400', '副标题必须保持 400 字重，未被外层继承污染');
   });
 
   await t.test('PR-3e 壳层真值面：底栏彻底拔除、延迟移至顶栏右上角、标题栏真实头像去 (Forever Chat) 与小绿点', async () => {

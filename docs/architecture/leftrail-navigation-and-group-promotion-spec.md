@@ -14,8 +14,8 @@
    - 2.2 底层方案中的“三大死板教条”与工程破局
 3. [核心痛点 A 裁决：左侧导航（LeftRail）终极微架构设计](#三核心痛点-a-裁决左侧导航leftrail终极微架构设计)
    - 3.1 三大备选架构深入剖析与选型矩阵
-   - 3.2 终极裁决：极客美学双轨主从架构 (Dual-Rail Hub: 48px + 212px = 260px)
-   - 3.3 物理几何与三态折叠规范（全展开 / 紧凑微轨 / 纯净沉浸）
+   - 3.2 终极裁决：极客美学双轨主从架构 (Dual-Rail Hub: 52px + 212px = 264px)
+   - 3.3 物理几何与双轨折叠规范（全展开 / 紧凑微轨）
 4. [核心痛点 B 裁决：主对话切 Bot 与单聊一键拉群 (Promotion)](#四核心痛点-b-裁决主对话切-bot-与单聊一键拉群-promotion)
    - 4.1 主对话切 Bot 双模机制（旁聊提问 vs 全权接力）
    - 4.2 单聊一键拉群（Session-to-Group Promotion）四阶工程管道
@@ -34,7 +34,7 @@
 | **1. 个人助理<br>(Primary Hub)** | **全局最高核心中枢 (Soul/Default)**。<br>用户的日常数字分身、全局秘书与主时间线，承载用户偏好、跨项目统筹与全天候陪伴。 | 默认配置档 `profile: 'default'`<br>物理路径 `/opt/data/profiles/default` | 共享长效全局记忆库，挂载默认技能沙箱与全局调度能力。永不被折叠或淹没。 |
 | **2. 专职 Bot<br>(Dedicated Profile)** | **垂直业务专家实体 (Deep Specialist)**。<br>具备专属人格（Persona）、专属 System Prompt、独立技能/工具集及专有工作空间的专业 Agent（如架构老王、安全审计、前端开发）。 | 独立配置档 `profile: '<name>'`<br>物理路径 `/opt/data/profiles/<name>` | 专属沙箱隔离记忆库，完全独立的技能列表与工作目录挂载。 |
 | **3. 多 Agent 会议室<br>(Group Room)** | **群体智能协同研讨空间 (Swarm/Meeting)**。<br>多个 Agent（包含个人助理与若干专职 Bot）围绕同一议题展开轮询发言、对齐推演、交叉质检与集体决策。 | 官方房间实体 `room_id`<br>RPC `groups.*` 系列调度引擎 | 会议级时序上下文流，多 Agent 发言角色归集，支持实时投票、争议裁判与共识决议。 |
-| **4. 普通 Session / 旁聊<br>(Ephemeral / Sidechat)** | **临时沙盒、灵感草稿与旁路探索**。<br>轻量单次问答、代码片段临时调试，或在主对话流中的不打断提问（Sidechat / BTW）。 | `session.create(ephemeral=true)`<br>RPC `prompt.btw` 与 `btw.complete` | 随用随走或仅存留 24 小时；旁聊完全不写入主会话上下文窗口，零 Token 污染。 |
+| **4. 普通会话 / 旁聊<br>(Scratchpad / Side Session)** | **临时沙盒、特定攻坚与单点推演**。<br>随用随扔的攻坚排查、报错诊断与特定推演，单 Agent 独占不可篡改。注：主会话中不打断的轻量只读外援提问走 `prompt.btw` 胶囊，不生成独立会话实体。 | 独立 `session_id`<br>RPC `session.create` (`hidden=0`) | 独占归属于指定 Profile，对话仅留存在当前会话上下文中，严禁回写 Bot 的长期记忆（`MEMORY.md`）。支持自由归档、删除、回滚与分叉。 |
 
 ---
 
@@ -97,24 +97,24 @@
 | **底层 RPC 映射优雅度 (10%)**| ✅ 简单粗暴 (100分) | ❌ 全局混查导致 RPC 混乱 (40分) | ✅ **天然 1:1 映射 profile 入参 (100分)** |
 | **加权综合得分** | **39.5 分 (淘汰)** | **55.5 分 (淘汰)** | **98.75 分 (终极胜出)** |
 
-### 3.2 终极裁决：极客美学双轨主从架构 (Dual-Rail Hub: 48px + 212px = 260px)
+### 3.2 终极裁决：极客美学双轨主从架构 (Dual-Rail Hub: 52px + 212px = 264px)
 
-工作台左侧栏总宽严格维持在 **260px**（完美契合既有 `var(--rail-w-left, 260px)`），内部水平划分为两层物理轨：
+工作台左侧栏总宽默认基线维持在 **264px**（契合系统令牌 `var(--rail-w-left, 264px)`，支持在 264px ~ 480px 之间自由拉伸），内部水平划分为两层物理轨：
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
-│               Hermes Flux LeftRail 260px 双轨物理拓扑                   │
+│               Hermes Flux LeftRail 264px 双轨物理拓扑                   │
 ├────────────────────┬───────────────────────────────────────────────────┤
-│ 48px Station Rail  │ 212px Context Drawer (动态上下文抽屉)               │
+│ 52px Station Rail  │ 212px Context Drawer (动态上下文抽屉)               │
 │ (极窄物理中枢微轨)   │ (根据当前选中的 Station 动态映射渲染)                 │
 ├────────────────────┼───────────────────────────────────────────────────┤
 │                    │ ┌───────────────────────────────────────────────┐ │
 │ ✦ 主中枢 (Default) │ │ [+ 新建会话] (全宽胶囊, 32px 物理高度)        │ │
 │   (翡翠光晕，永恒首位) │ └───────────────────────────────────────────────┘ │
 │ ────────────────── │ ┌───────────────────────────────────────────────┐ │
-│ 🤖 架构老王 (Indigo)│ │ 🔍 搜索会话... (Cmd+F)                        │ │
-│ 🎨 设计小美 (Pink)  │ └───────────────────────────────────────────────┘ │
-│ ⚡ 运维阿强 (Amber) │ 【时间分组流】                                    │
+│ 架构老王 (Indigo)   │ │ 🔍 搜索会话... (Cmd+F)                        │ │
+│ 设计小美 (Pink)     │ └───────────────────────────────────────────────┘ │
+│ 运维阿强 (Amber)    │ 【时间分组流】                                    │
 │                    │ ▼ 今天 (Today)                                  │
 │ ────────────────── │   ├─ 核心系统架构重构 (Active, 3px翡翠指示线)      │
 │ 👥 多Agent群聊会议 │   └─ 微信公众号文章流水线排期                      │
@@ -134,19 +134,19 @@
 └────────────────────┴───────────────────────────────────────────────────┘
 ```
 
-### 3.3 物理几何与三态折叠规范
+### 3.3 物理几何与双轨折叠规范
 
-1. **Station Rail (48px 极窄中枢微轨)**：
-   - 宽度：固定 48px，背景色：`var(--bg-dock, #07080A)`，右侧有 1px `var(--border-subtle, rgba(255,255,255,0.06))` 分割线。
+1. **Station Rail (52px 极窄中枢微轨)**：
+   - 宽度：固定 52px，背景色：`var(--bg-dock, #07080A)`，右侧有 1px `var(--border-subtle, rgba(255,255,255,0.06))` 分割线。
    - 按钮尺寸：34px × 34px，圆角 8px，居中对齐，纵向间隔 8px。
    - 交互反馈：悬停微亮；选中项左侧出现 3px 纵向天光色条，背景呈现 12% 品牌柔和光晕。
 2. **Context Drawer (212px 上下文抽屉)**：
-   - 宽度：固定 212px（`260px - 48px = 212px`），背景色：`var(--bg-subrail, #12151C)`。
+   - 宽度：紧凑档基线 212px（`264px - 52px = 212px`），背景色：`var(--bg-subrail, #12151C)`。支持挂载把手向右拉伸。
    - 会话条目：高度 34px，文字截断单行展示，右侧浮现删除/重命名悬停动作。
-3. **三态物理折叠机制**：
-   - **Mode 1: 双轨全展开 (Default - 260px)**：日常高效作业，中枢与上下文一览无余。
-   - **Mode 2: 紧凑微轨模式 (Compact - 48px)**：按 `Cmd+\`，收起 212px 抽屉，保留 48px Station 坞。释放屏幕空间给长文和多栏代码；悬停 Station 图标时以 `Flyout Popover` 快速展示最近 3 个会话。
-   - **Mode 3: 纯净沉浸模式 (Zen - 0px)**：按 `Cmd+B`，整体全折叠为 0px，彻底消除侧栏干扰，沉浸于 MiddlePod 写作。
+3. **双轨物理折叠与快捷键规范**：
+   - **Mode 1: 双轨展开 (Default - 264px)**：日常高效作业，微轨与抽屉并排展开，支持 264px ~ 480px 范围自由拉伸；
+   - **Mode 2: 紧凑微轨模式 (Compact - 52px)**：按快捷键 `Ctrl+B`（macOS 为 `Cmd+B`），收起 212px 抽屉，仅保留 52px 物理微轨；
+   - **检查舱联动**：按快捷键 `Ctrl+\`（macOS 为 `Cmd+\`）单独折叠或展开右侧 410px 检查舱。
 
 ---
 
@@ -320,16 +320,14 @@ export interface PromoteSessionToGroupResult {
 
 ```typescript
 export interface LeftRailProps {
-  /** 整体折叠状态 (Mode 3: 0px) */
+  /** 抽屉折叠状态 (true 时收敛至 52px 物理微轨) */
   collapsed: boolean;
-  /** 紧凑微轨模式 (Mode 2: 仅保留 48px Station Rail) */
-  compactMode: boolean;
   
-  /** 48px 物理中枢微轨数据与当前选中项 */
+  /** 52px 物理中枢微轨数据与当前选中项 */
   activeStationId: string;
   stations: StationItem[];
   
-  /** 212px 上下文抽屉数据 */
+  /** 212px 上下文抽屉数据 (支持 264px~480px 拉伸) */
   activeSessionId: string;
   sessions: LeftRailSession[];
   groupRooms?: GroupRoomSummary[];
@@ -410,7 +408,7 @@ describe('TC-CORE-PROMOTE-001: Session-to-Group Promotion Pipeline', () => {
 
 // packages/ui/__tests__/components/LeftRail.test.mjs
 describe('TC-UI-LEFTRAIL-001: Dual-Rail Hub Layout Invariant', () => {
-  it('should strictly render 48px Station Rail and 212px Context Drawer inside 260px container', () => {
+  it('should strictly render 52px Station Rail and 212px Context Drawer inside 264px container', () => {
     const html = renderLeftRail({
       collapsed: false,
       compactMode: false,
@@ -433,7 +431,7 @@ describe('TC-UI-LEFTRAIL-001: Dual-Rail Hub Layout Invariant', () => {
 
 ## 八、裁决结论总结 (Architectural Verdict)
 
-1. **左侧栏结构**：确立 **48px 物理中枢微轨 + 212px 上下文抽屉** 的双轨主从架构。总宽严格锁定 260px，兼顾“个人主助理永恒置顶”、“专职 Bot 色彩指纹展示”与“群聊会议快速直达”，兼具 3 态平滑物理折叠。
+1. **左侧栏结构**：确立 **52px 物理中枢微轨 + 212px 上下文抽屉** 的双轨主从架构。总宽基线锁定 264px（支持拉伸至 480px），兼顾“个人主助理永恒置顶”、“专职 Bot 色彩指纹展示”与“群聊会议快速直达”，支持平滑微轨物理折叠。
 2. **Bot 切换与拉群**：主对话通过 `@Bot` 触发轻量 `prompt.btw` 胶囊（零 Context 污染）；全权交接走 `session.branch_whole` 无损派生；“原地拉群”通过 **四阶简报提取 ➔ Room 创建 ➔ 种子备忘录注入 ➔ 视口瞬切** 实现工程闭环。
 3. **临时任务**：引入带 24 小时自动回收的沙盒草稿模式，提供一键固化入库开关，彻底解决历史会话水化问题。
 4. **交付价值**：方案全面消除了 UX 方案中的伪多 Agent 串味空想，打破了底层协议的死板隔离限制，已转化为完整强类型契约与 TDD 门禁，直接供 Hermes Flux 编码落地！

@@ -106,7 +106,7 @@ function SessionRow({ session, active, compact, onSelect, onMenu }: {
   const subtitle = toSnippet(session.preview) || toSnippet(session.title);
   return <button
     type="button"
-    className={`session-item group relative flex w-full items-center gap-2 rounded-md px-2 text-left transition-colors ${compact ? 'min-h-8' : 'min-h-12'} ${active ? 'active bg-card-active font-medium' : 'hover:bg-card-hover'}`}
+    className={`session-item group relative flex w-full items-center gap-2 rounded-md px-2 text-left transition-colors ${compact ? 'min-h-8' : 'min-h-12'} ${active ? 'active bg-card-active' : 'hover:bg-card-hover'}`}
     data-id={session.id}
     data-title={session.title}
     data-bot={session.botName || ''}
@@ -115,13 +115,13 @@ function SessionRow({ session, active, compact, onSelect, onMenu }: {
   >
     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
       <span className="flex min-w-0 items-center justify-between gap-2">
-        <span className={`truncate text-body leading-tight ${active ? 'font-semibold text-foreground' : 'text-foreground'}`}>{session.title}</span>
+        <span className="truncate text-body font-medium leading-tight text-foreground">{session.title}</span>
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
           <ActivityDot state={session.activityState} />
           <RowTime timestamp={session.timestamp} fallback={session.time} />
         </span>
       </span>
-      {!compact && <span className="truncate text-aux leading-tight text-muted-foreground">{subtitle}</span>}
+      {!compact && <span className="truncate text-aux font-normal leading-tight text-muted-foreground">{subtitle}</span>}
     </span>
   </button>;
 }
@@ -153,13 +153,13 @@ function GroupRow({ group, profiles, active, editing, onSelect, onMenu, onConfir
     <CollageAvatar members={group.members} profiles={profiles} size={28} />
     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
       <span className="flex min-w-0 items-center justify-between gap-2">
-        <span className={`truncate text-body leading-tight ${active ? 'font-semibold text-foreground' : 'text-foreground'}`}>{group.name}</span>
+        <span className="truncate text-body font-medium leading-tight text-foreground">{group.name}</span>
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
           <ActivityDot state={group.activityState} />
           <RowTime timestamp={group.updatedAt || group.createdAt} />
         </span>
       </span>
-      <span className="truncate text-aux leading-tight text-muted-foreground">{subtitle}</span>
+      <span className="truncate text-aux font-normal leading-tight text-muted-foreground">{subtitle}</span>
     </span>
   </button>;
 }
@@ -300,7 +300,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
         </label>
         <Button
           variant="ghost"
-          className={`rail-pinned-bot-row rail-primary-agent-card flex min-h-12 items-center justify-start gap-2 rounded-lg px-2 text-left transition-colors ${isBotFocused(focus, profile.name) ? 'active bg-card-active font-medium' : 'bg-panel hover:bg-card-hover'}`}
+          className={`rail-pinned-bot-row rail-primary-agent-card flex min-h-12 items-center justify-start gap-2 rounded-lg px-2 text-left transition-colors ${isBotFocused(focus, profile.name) ? 'active bg-card-active' : 'bg-panel hover:bg-card-hover'}`}
           data-primary-bot={profile.name}
           data-profile={profile.name}
           title={t('rail.enterBotChat', { name: profile.displayName || profile.name })}
@@ -309,8 +309,8 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
         >
           <Avatar profile={profile} size={32} />
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="truncate text-aux font-semibold text-foreground">{profile.displayName || profile.name}</span>
-            <span className="truncate text-aux text-muted-foreground">{toSnippet(profile.lastMessage || profile.description) || t('rail.defaultBotSnippet')}</span>
+            <span className="truncate text-aux font-medium text-foreground">{profile.displayName || profile.name}</span>
+            <span className="truncate text-aux font-normal text-muted-foreground">{toSnippet(profile.lastMessage || profile.description) || t('rail.defaultBotSnippet')}</span>
           </span>
           <span className="ml-auto flex shrink-0 items-center gap-1.5">
             <ActivityDot state={profile.activityState} />
@@ -381,14 +381,14 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
             {model.archivedSessions.map((session) => <button
               key={session.id}
               type="button"
-              className={`session-item flex min-h-8 items-center rounded-md px-2 text-left transition-colors ${isSessionFocused(focus, session.id) ? 'active bg-card-active font-medium' : 'hover:bg-card-hover'}`}
+              className={`session-item flex min-h-8 items-center rounded-md px-2 text-left transition-colors ${isSessionFocused(focus, session.id) ? 'active bg-card-active' : 'hover:bg-card-hover'}`}
               data-id={session.id}
               data-title={session.title}
               data-bot={session.botName || ''}
               onClick={() => props.onSelectSession(session.id, session.botName)}
               onContextMenu={(event) => { event.preventDefault(); props.onOpenSessionMenu(session.id, session.title, event.clientX, event.clientY); }}
             >
-              <span className="truncate text-aux text-muted-foreground">{session.title}</span>
+              <span className={`truncate text-aux font-medium ${isSessionFocused(focus, session.id) ? 'text-foreground' : 'text-muted-foreground'}`}>{session.title}</span>
             </button>)}
           </div>
         </section>}

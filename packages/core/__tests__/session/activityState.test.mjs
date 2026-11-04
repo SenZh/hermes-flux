@@ -20,6 +20,7 @@ import {
   applyTurnFailed,
   applyEnteredRead,
   settleTurnTermination,
+  reconcileAuthoritativeActivity,
 } from '../../dist/session/activityState.js';
 
 test('resolveActivityState - 三态求值与优先级', async (t) => {
@@ -248,5 +249,59 @@ test('settleTurnTermination - 回合异常终止的统一收尾（中断 / 看�
     });
     assert.deepEqual([...runningSessions], ['s1']);
     assert.deepEqual([...runningBots], ['bot1']);
+  });
+});
+
+test('reconcileAuthoritativeActivity - 网关权威状态对账自愈（P0 级不变量证明）', async (t) => {
+  await t.test('1. 权威确认完结：无流式时，自愈剔除滞留的幽灵 running ID', () => {
+    const running = new Set(['bg_b5da59', 'sess_normal']);
+    const changed = reconcileAuthoritativeActivity({
+      runningIds: running,
+      entityId: 'bg_b5da59',
+      isGatewayRunning: false,
+      hasInflightStreaming: false,
+      currentStreamingId: null,
+    });
+    assert.equal(changed, true, '必须成功剔除');
+    assert.equal(running.has('bg_b5da59'), false, '滞留的后台 ID 必须被安全移除');
+    assert.equal(running.has('sess_normal'), true, '其它运行中会话不得被误伤');
+  });
+
+  await t.test('2. 防误杀核心不变量：服务端依然在 running 时，绝不可被剔除', () => {
+    const running = new Set(['bg_b5da59']);
+    const changed = reconcileAuthoritativeActivity({
+      runningIds: running,
+      entityId: 'bg_b5da59',
+      isGatewayRunning: true,
+      hasInflightStreaming: false,
+      currentStreamingId: 'other_session',
+    });
+    assert.equal(changed, false, '未完结任务禁止误剔除');
+    assert.equal(running.has('bg_b5da59'), true, '后台真实运行中会话必须保持 running');
+  });
+
+  await t.test('3. 本地活动流保护：若当前视口正在实时流式接收本会话，禁止提前剔除', () => {
+    const running = new Set(['sess_active']);
+    const changed = reconcileAuthoritativeActivity({
+      runningIds: running,
+      entityId: 'sess_active',
+      isGatewayRunning: false,
+      hasInflightStreaming: false,
+      currentStreamingId: 'sess_active',
+    });
+    assert.equal(changed, false, '本地正流式会话由流式 FSM 管理，禁止被 resume 提前误杀');
+    assert.equal(running.has('sess_active'), true);
+  });
+
+  await t.test('4. 边界处理：空 entityId 安全降级返回 false', () => {
+    const running = new Set(['s1']);
+    const changed = reconcileAuthoritativeActivity({
+      runningIds: running,
+      entityId: '',
+      isGatewayRunning: false,
+      hasInflightStreaming: false,
+    });
+    assert.equal(changed, false);
+    assert.equal(running.size, 1);
   });
 });

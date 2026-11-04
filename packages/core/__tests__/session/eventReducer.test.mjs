@@ -30,6 +30,7 @@ test('Gateway event reducer - turn lifecycle', async (t) => {
     assert.equal(replaced.text, '最终答复', 'Completion text is authoritative over coalesced deltas');
     const completed = actions.find((a) => a.type === 'turn-completed');
     assert.equal(completed.finalText, '最终答复', 'turn-completed must carry the final text');
+    assert.equal(completed.sessionId, 'live-42', 'turn-completed must carry the frame session id');
   });
 
   await t.test('legacy session.idle / agent.turn_end frames are NOT turn terminators', () => {
@@ -56,6 +57,7 @@ test('Gateway event reducer - turn lifecycle', async (t) => {
     // 3. Assert
     assert.deepEqual(actions.map((a) => a.type), ['turn-completed', 'refresh-sessions']);
     assert.equal(actions[0].finalText, undefined, 'Empty completion text must not overwrite the stream');
+    assert.equal(actions[0].sessionId, 'live-42', 'turn-completed must carry the frame session id even without text');
   });
 
   await t.test('message.start re-arms the busy state', () => {

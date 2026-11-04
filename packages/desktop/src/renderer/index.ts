@@ -94,6 +94,7 @@ import {
   applyTurnCompleted,
   applyTurnFailed,
   applyEnteredRead,
+  reconcileAuthoritativeActivity,
   type ActivityState,
   applyBotActivity,
   syncBotProfiles,
@@ -2287,6 +2288,23 @@ async function loadMessages(sessionId: string, targetBotName?: string): Promise<
         state.activeLiveSessionId = sessionId;
       }
 
+      // 权威状态对账自愈（P0 修复）：以网关权威返回 res.running 与 res.inflight 为准，彻底根治幽灵 running 锁死
+      if (res && typeof res === 'object') {
+        const isGwRunning = Boolean(res.running);
+        const hasInflight = Boolean(res.inflight && res.inflight.streaming);
+        const reconciled = reconcileAuthoritativeActivity({
+          runningIds: activeRunningSessionIds,
+          entityId: sessionId,
+          isGatewayRunning: isGwRunning,
+          hasInflightStreaming: hasInflight,
+          currentStreamingId: activeStreamingStoredSessionId,
+        });
+        if (reconciled) {
+          logSession.info('reconciled orphan running state via authoritative gateway status', { sessionId });
+          render();
+        }
+      }
+
       // 同步提取 session.resume 返回的 cwd / project_id / project_name 元数据，丰富当前会话对象
       const rawInfo = (res && typeof res === 'object' && res.info && typeof res.info === 'object' ? res.info : res) as Record<string, unknown>;
       const resumedCwd = typeof rawInfo.cwd === 'string' ? rawInfo.cwd : typeof rawInfo.path === 'string' ? rawInfo.path : undefined;
@@ -3947,20 +3965,21 @@ function applyTurnActions(actions: TurnAction[]): void {
             }
           }
         }
-        if (activeStreamingStoredSessionId) {
+        const completedTargetId = action.sessionId || activeStreamingStoredSessionId;
+        if (completedTargetId) {
           // 回合完成：退出 running；焦点不在该会话时置未读（显式传入焦点判定，禁止函数内从全局反推）
-          const isFocused = activeStreamingStoredSessionId === state.activeSessionId;
-          applyTurnCompleted(activeRunningSessionIds, unreadSessionIds, activeStreamingStoredSessionId, isFocused);
+          const isFocused = completedTargetId === state.activeSessionId;
+          applyTurnCompleted(activeRunningSessionIds, unreadSessionIds, completedTargetId, isFocused);
           // 【核心隔离固化】仅当当前焦点处于该会话时，state.messages 才属于该会话！
           // 若用户已切到其他会话，绝不能拿当前会话的 state.messages 去覆盖后台会话的缓存！
           if (isFocused) {
-            sessionMessagesCache.set(activeStreamingStoredSessionId, [...state.messages]);
+            sessionMessagesCache.set(completedTargetId, [...state.messages]);
           }
-          const completedSess = state.sessions.find((s) => s.id === activeStreamingStoredSessionId);
+          const completedSess = state.sessions.find((s) => s.id === completedTargetId);
           if (completedSess) {
             const finalMsg = isFocused
               ? (state.messages.length > 0 ? state.messages[state.messages.length - 1] : null)
-              : (sessionMessagesCache.get(activeStreamingStoredSessionId)?.slice(-1)[0] || null);
+              : (sessionMessagesCache.get(completedTargetId)?.slice(-1)[0] || null);
             if (finalMsg?.content) {
               completedSess.preview = finalMsg.content;
             }
@@ -4162,6 +4181,7 @@ async function connect(): Promise<void> {
         state.activeSessionId,
         activeStreamingLiveId,
         activeStreamingStoredSessionId,
+        ...Array.from(activeRunningSessionIds),
       ].filter((id): id is string => Boolean(id));
 
       const actions = reduceGatewayEvent(params, {
@@ -6015,7 +6035,11 @@ function bindEvents(): void {
 
           if (isGroupChat) {
             agentItems.push({ type: 'agent', name: 'all', detail: t('mention.allDetail') });
-            const currentRoom = state.groupRooms.find((r) => r.roomId === state.editingGroupRoomId);
+            // 设计意图 (Why): 群聊内 @ 成员补全必须匹配当前聚焦的群聊房间成员。
+            // 防范的历史坑 (Pitfall): 曾误用 editingGroupRoomId，导致常规打字时 currentRoom 恒为 undefined，参会 Bot 列表全部丢失。
+            // 规则 (Rules): 严格从 state.activeFocus 提取 activeRoomId。
+            const activeRoomId = state.activeFocus.type === 'group' ? state.activeFocus.roomId : undefined;
+            const currentRoom = state.groupRooms.find((r) => r.roomId === activeRoomId);
             if (currentRoom) {
               for (const member of currentRoom.members) {
                 agentItems.push({ type: 'agent', name: member, detail: t('mention.groupMember') });

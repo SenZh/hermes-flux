@@ -159,3 +159,33 @@ export function settleTurnTermination(params: {
   if (sessionId) runningSessionIds.delete(sessionId);
   if (botName) runningBotNames.delete(botName);
 }
+
+/**
+ * 网关权威状态对账自愈函数（纯函数，彻底根除幽灵 running 锁死）。
+ * 设计意图 (Why)：当网关 RPC（如 session.resume）权威返回当前实体的真实运行状态时，
+ *   若服务端确认未在运行且无未决流式，必须强制从 runningIds 集合中剔除滞留的幽灵 ID，彻底根除死锁闪烁；
+ * 防范的历史坑 (Pitfall)：曾仅凭客户端单槽位变量猜测或仅清除 unread，导致后台任务完成事件丢包后会话永久闪烁（bg_xxxx 缺陷）；
+ * 约束与规则 (Rules)：若当前实体正好属于本地活跃流式槽位（currentStreamingId === entityId），绝对禁止误杀。
+ */
+export function reconcileAuthoritativeActivity(params: {
+  runningIds: Set<string>;
+  entityId: string;
+  isGatewayRunning: boolean;
+  hasInflightStreaming?: boolean;
+  currentStreamingId?: string | null;
+}): boolean {
+  const { runningIds, entityId, isGatewayRunning, hasInflightStreaming = false, currentStreamingId } = params;
+  if (!entityId) return false;
+
+  // 1. 若当前视口正在对该会话进行实时流式接收，以本地实时流为准，禁止提前剔除
+  if (currentStreamingId && currentStreamingId === entityId) {
+    return false;
+  }
+
+  // 2. 若网关权威确认未在运行且无未决流式，执行自愈剔除
+  if (!isGatewayRunning && !hasInflightStreaming) {
+    return runningIds.delete(entityId);
+  }
+
+  return false;
+}
