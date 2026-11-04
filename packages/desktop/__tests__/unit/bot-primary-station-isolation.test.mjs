@@ -5,6 +5,7 @@ import {
   syncBotProfiles,
   syncActiveSessionToBot,
   resolveTitlebarTitle,
+  resolveTitlebarAvatar,
   normalizeTimestamp,
   extractMessagePreview,
 } from '../../../../packages/core/dist/index.js';
@@ -214,7 +215,7 @@ test('Bot Primary Station & Session Isolation Invariants', async (t) => {
       defaultRoomName: '多智能体研讨室',
       isConnected: true,
     });
-    assert.equal(botTitle, '🤖 Aura (Forever Chat)', '处于 Bot 工位时必须展示 Bot 专属标题');
+    assert.equal(botTitle, 'Aura', '处于 Bot 工位时标题必须呈现纯净名称，不得夹带 🤖 与 (Forever Chat) 冗余（PR-3e）');
 
     // 2. 群聊工位
     const groupTitle = resolveTitlebarTitle({
@@ -253,6 +254,20 @@ test('Bot Primary Station & Session Isolation Invariants', async (t) => {
       isConnected: false,
     });
     assert.equal(disconnectedTitle, '未连接网关');
+
+    // 5. 专职工位真实头像解析断言（PR-3e）
+    const botAvatar = resolveTitlebarAvatar({
+      activeFocus: { type: 'bot', botName: 'aura' },
+      profiles: [{ name: 'aura', displayName: 'Aura', avatar: 'data:image/png;base64,real' }],
+    });
+    assert.deepEqual(botAvatar, { avatar: 'data:image/png;base64,real', name: 'Aura' }, '专职工位必须精准解析真实头像');
+
+    const noAvatar = resolveTitlebarAvatar({
+      activeFocus: { type: 'session', sessionId: 'sess-1' },
+      profiles: [{ name: 'aura', displayName: 'Aura' }],
+      sessions: [{ id: 'sess-1', title: '普通调研会话' }],
+    });
+    assert.equal(noAvatar, undefined, '非 Bot 专属会话安全降级为 undefined');
   });
 
   await t.test('5. 真实渲染消费端闭环验证：renderLeftRail 消费 syncBotProfiles 产物', () => {

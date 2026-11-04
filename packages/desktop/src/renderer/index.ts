@@ -14,7 +14,6 @@ import {
   renderMentionPopper,
   renderToolCapsuleSlot,
   renderInspectionPod,
-  mountStatusBar,
   mountTitlebar,
   mountLeftRail,
   buildLeftRailModel,
@@ -48,10 +47,8 @@ import {
   SKIN_ALIASES,
   resolveSkinId,
   getTitlebarSnapshot as createTitlebarSnapshot,
-  getStatusBarSnapshot as createStatusBarSnapshot,
   type LeftRailActions,
   type LeftRailSnapshot,
-  type StatusBarSnapshot,
   type TitlebarSnapshot,
 } from '@hermes-flux/ui';
 
@@ -102,6 +99,7 @@ import {
   syncBotProfiles,
   syncActiveSessionToBot,
   resolveTitlebarTitle,
+  resolveTitlebarAvatar,
   type BotActivityRecord,
   type AttachedImageResult,
   InteractiveService,
@@ -4348,7 +4346,6 @@ interface RenderMessagesSnapshot {
 
 let lastMessagesSnapshot: RenderMessagesSnapshot | null = null;
 let lastInputDockSnapshot: RenderInputDockSnapshot | null = null;
-let updateReactStatusBar: (() => void) | null = null;
 let updateReactTitlebar: (() => void) | null = null;
 let updateReactLeftRail: (() => void) | null = null;
 
@@ -4448,13 +4445,14 @@ function getTitlebarSnapshot(): TitlebarSnapshot {
     }),
     isMaximized: state.isMaximized,
     gatewayConnected: state.gatewayConnected,
-  });
-}
-
-function getStatusBarSnapshot(): StatusBarSnapshot {
-  return createStatusBarSnapshot({
-    connectionStatus: state.gatewayConnected ? 'connected' : state.gatewayConnecting ? 'connecting' : 'disconnected',
     latencyMs: state.gatewayLatencyMs,
+    activeAvatar: resolveTitlebarAvatar({
+      activeFocus: state.activeFocus,
+      profiles: state.profiles,
+      profileName: state.profileName,
+      activeSessionId: state.activeSessionId,
+      sessions: state.sessions,
+    }),
   });
 }
 
@@ -4513,7 +4511,6 @@ function getLeftRailSnapshot(): LeftRailSnapshot {
 
 function mountReactShellComponents(): void {
   const titlebarHost = document.getElementById('react-titlebar-host');
-  const statusHost = document.getElementById('react-statusbar-host');
   const leftRailHost = document.getElementById('react-leftrail-host');
   if (titlebarHost && !updateReactTitlebar) {
     updateReactTitlebar = mountTitlebar(titlebarHost, getTitlebarSnapshot, {
@@ -4539,16 +4536,8 @@ function mountReactShellComponents(): void {
   if (leftRailHost && !updateReactLeftRail) {
     updateReactLeftRail = mountLeftRail(leftRailHost, getLeftRailSnapshot, createLeftRailActions());
   }
-  if (statusHost && !updateReactStatusBar) {
-    updateReactStatusBar = mountStatusBar(statusHost, getStatusBarSnapshot, () => {
-      state.isSettingsOpen = true;
-      state.settingsTab = 'gateway';
-      render();
-    });
-  }
   updateReactTitlebar?.();
   updateReactLeftRail?.();
-  updateReactStatusBar?.();
 }
 
 function render(): void {
@@ -4733,8 +4722,6 @@ function render(): void {
           memories: state.memories,
         })}
       </div>
-
-      <div id="react-statusbar-host"></div>
 
       ${renderSettingsModal({
         isOpen: state.isSettingsOpen,

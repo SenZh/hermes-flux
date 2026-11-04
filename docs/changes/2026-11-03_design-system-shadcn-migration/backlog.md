@@ -1,13 +1,19 @@
-# backlog — 遗留待办（2026-11-04 更新：PR-3d 左轨形态已交付）
+# backlog — 遗留待办（2026-11-04 更新：PR-3e 壳层真值面已交付）
 
 程序：设计系统 + shadcn 迁移 + 双壳拓扑（tech-design.md 波①②已完成，波③进行中，波④未动）。
 本文件是恢复工作的唯一入口清单。优先级 P0 最高。
 
-## 已交付（2026-11-04，PR-3c + PR-3d）
+## 已交付（2026-11-04，PR-3c + PR-3d + PR-3e）
 
 **PR-3c 把手几何单一真值源**（d916f88 红基线 → 9112ce9 修复）：用户实测左轨拖拽蓝带 8px、右轨 3px。运行时像素复现定根因：左 Tailwind w-2 骑跨边界、右模板内联 6px 被 pod overflow:hidden 裁半。修复：`--geo-resize-handle: 6px` 唯一真值源、双侧完整落轨内、高亮 `color-mix(var(--primary))` 随皮肤、≤768px 物理剥离、滚动容器 `mr` 让带消除把手/滚动条命中劫持（双审 P1）。守卫：`rail-handle-sot.test.mjs` + `rail-handle-symmetry-cdp.test.mjs`（真实 renderer 驱动）。
 
-**PR-3d 左轨形态收尾**（用户 7 项反馈中的 2/4/5）：微轨底部 +/‹ 删除（折叠入口收编顶栏与 Ctrl+B，renderer 5539 旧死绑定清除）；时间格式化器收敛为唯一真值源 `formatLeftRailTime`（当日 HH:mm / 昨天 / 前天 / M/D / YYYY/M/D，renderer formatSessionTime 委托），时间内联标题行不再挤副标题；左轨上限 320→480（用户定案，覆盖 A1 的 320）；会话/群聊 header 放大至 13px、删 ⌄/› 文本箭头、右侧 + 新建入口按甲板打开 NewTaskModal（新增 initialType，双调用点同参守卫防漂移）。守卫：`rail-cockpit-form-cdp.test.mjs`（注入快照物理点击 + 出图 artifacts/verification/pr3d-left-rail-form.png）+ formal 定理 18-21。
+**PR-3d 左轨形态收尾**（用户 7 项反馈中的 2/4/5）：微轨底部 +/‹ 删除（折叠入口收编顶栏与 Ctrl+B，renderer 5539 旧死绑定清除）；时间格式化器收敛为唯一真值源 `formatLeftRailTime`（当日 HH:mm / 昨天 / 前天 / M/D / YYYY/M/D，renderer formatSessionTime 委托），时间内联标题行不再挤副标题；左轨上限 320→480（用户定案，覆盖 A1 的 320）；会话/群聊 header 放大至 13px、删 ⌄/› 文本箭头、右侧 + 新建入口按甲板打开 NewTaskModal（新增 initialType，双调用点同参守卫防漂移）。守卫：`rail-cockpit-form-cdp.test.mjs`（注入快照物理点击 + 出图 artifacts/verification/pr3d-left-rail-form.png）+ formal 定理 18-21。后续微调：彻底移除会话内侧高亮竖条、规范为 2px 边框、群聊删除右侧 3 个点、左轨剥离原生滚动条。
+
+**PR-3e 壳层真值面**（用户 7 项反馈中的 3/6）：
+- 状态底栏拔除：彻底删除固定 22px 的 StatusBar 宿主与挂载，消除左下角视觉冗余，对话工作区占满垂直空间；
+- 网关延迟收拢：延迟读数（latencyMs）低调移入顶栏右上角（淡雅 11px 等宽读数，不夺视线，能指示即可）；
+- 标题栏身份重塑：移除 🤖 emoji 与 `(Forever Chat)` 冗余后缀；专职 Bot 工位呈现真实头像（`resolveTitlebarAvatar` 派生 + `renderBotAvatar`）与纯净 Bot 名称；
+- 规范与断言权威同步：订正 `AGENTS.md` 规范与 `bot-primary-station-isolation.test.mjs:217` 断言。
 
 ## 已交付（2026-11-04，三个提交）
 

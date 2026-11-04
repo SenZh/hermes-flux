@@ -52,8 +52,8 @@ $$\text{packages/desktop} \mid \text{packages/mobile} \mid \text{packages/web} \
 - **左侧双轨（Left Rail）**：宽度锁定 `264px`（`52px` 物理微轨 + `212px` 抽屉工作区）；
 - **输入舱（Input Dock）**：底部悬浮居中，**严格锁定黄金限宽 `max-width: 740px`**，内嵌模型选择器、思考深度与审批策略；
 - **场景检查舱（Inspection Pod）**：贴靠右侧窗边双列布局，详情工作舱 + 竖向场景轨，宽度锁定 `410px`（规范基线）；
-- **极简状态栏（Status Bar）**：固定高度 `22px`，拔除调试冗余，仅保留翡翠绿微光点与网关延迟读数；
-- **顶栏（Titlebar）**：固定高度 `42px`。处于专职 Bot 工位时标题必须呈现 `🤖 ${name} (Forever Chat)`，严禁显示默认占位语。
+- **状态底栏收敛（Status Bar Consolidated）**：状态底栏已从壳层彻底拔除，网关延迟与连接指示点收敛至顶栏右上角（淡雅 11px 等宽读数，不夺眼球），垂直空间全部归还对话工作区；
+- **顶栏（Titlebar）**：固定高度 `42px`。处于专职 Bot 工位时呈现 Bot 真实头像与 `${name}`，严禁携带 `(Forever Chat)` 冗余后缀与伪 emoji 占位。
 
 ### 4. 诊断日志与滚动不变量 (Diagnostics & Scroll)
 - 日志统一走 `packages/core/src/log/logger.ts` 的 `createLogger(scope)`，禁止在渲染层直接使用裸 `console.log`；

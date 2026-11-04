@@ -12,7 +12,8 @@ import { resolveSkinId } from '../dist/tokens/skins.js';
 test('Titlebar renders window controls, global toggles and no profile switcher', () => {
   const calls = [];
   const markup = renderToStaticMarkup(React.createElement(Titlebar, {
-    platform: 'macos', title: 'Session', isMaximized: false, gatewayConnected: true,
+    platform: 'macos', title: 'Session', isMaximized: false, gatewayConnected: true, latencyMs: 18,
+    activeAvatar: { name: 'aura', avatar: 'data:image/png;base64,mock' },
     onMinimize: () => calls.push('minimize'), onMaximize: () => calls.push('maximize'), onClose: () => calls.push('close'),
     onToggleLeftRail: () => calls.push('rail'), onToggleInspector: () => calls.push('inspector'),
     onOpenSettings: () => calls.push('settings'), onToggleTheme: () => calls.push('theme'),
@@ -20,9 +21,11 @@ test('Titlebar renders window controls, global toggles and no profile switcher',
   assert.match(markup, /traffic-close/);
   assert.match(markup, /data-testid="react-titlebar"/);
   assert.match(markup, /toggle-inspector-btn/);
-  // 产品裁决：顶栏不再承载身份切换与第二份延迟读数
+  // 产品裁决（PR-3e）：顶栏承载低调延迟与真实头像，不再承载 profile 下拉
   assert.doesNotMatch(markup, /titlebar-profile-select/);
-  assert.doesNotMatch(markup, /titlebar-latency-pill|18ms/);
+  assert.match(markup, /titlebar-latency/);
+  assert.match(markup, /18ms/);
+  assert.match(markup, /titlebar-bot-avatar/);
   assert.deepEqual(calls, []);
 });
 

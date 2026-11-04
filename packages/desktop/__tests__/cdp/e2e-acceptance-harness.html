@@ -129,7 +129,7 @@
         let displayTitle = activeSess ? activeSess.title : '赫尔墨斯';
         if (this.activeFocus?.type === 'bot') {
           const bot = this.profiles.find(p => p.name === this.activeFocus.botName);
-          displayTitle = `🤖 ${bot?.displayName || this.activeFocus.botName} (Forever Chat)`;
+          displayTitle = bot?.displayName || this.activeFocus.botName;
         } else if (this.activeFocus?.type === 'group') {
           const grp = this.groupRooms.find(g => g.roomId === this.activeFocus.roomId);
           displayTitle = `👥 ${grp?.name || '多智能体研讨室'}`;

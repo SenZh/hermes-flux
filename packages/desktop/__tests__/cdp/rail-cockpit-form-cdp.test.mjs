@@ -246,10 +246,50 @@ test('rail-cockpit-form: 微轨按钮收编、header 形态与时间内联（真
     assert.equal(check.scrollAreaScrollbarWidth, 'none', '会话列表容器 scrollbarWidth 必须为 none');
   });
 
+  await t.test('PR-3e 壳层真值面：底栏彻底拔除、延迟移至顶栏右上角、标题栏真实头像去 (Forever Chat)', async () => {
+    // 注入连接状态与网关延迟，切到专职 Bot 工位
+    await evaluate(`(() => {
+      window.__fluxState.gatewayConnected = true;
+      window.__fluxState.gatewayLatencyMs = 24;
+      window.__fluxState.activeFocus = { type: 'bot', botName: 'default' };
+      window.__fluxState.profiles = [
+        { name: 'default', displayName: 'Default 助理', avatar: 'data:image/png;base64,mockAvatar' }
+      ];
+      window.__fluxRender();
+    })()`);
+    await new Promise((r) => setTimeout(r, 300));
+
+    const shellCheck = await evaluate(`(() => {
+      const statusHost = document.getElementById('react-statusbar-host');
+      const statusBar = document.getElementById('app-status-bar');
+      const titleText = document.querySelector('.titlebar-session-title')?.textContent ?? '';
+      const botAvatar = document.querySelector('.titlebar-center .titlebar-bot-avatar');
+      const latencyEl = document.querySelector('.titlebar-right .titlebar-latency');
+
+      return {
+        statusHostExists: Boolean(statusHost),
+        statusBarExists: Boolean(statusBar),
+        titleText,
+        hasForeverChat: titleText.includes('Forever Chat'),
+        hasBotEmoji: titleText.includes('🤖'),
+        botAvatarExists: Boolean(botAvatar),
+        latencyText: latencyEl?.textContent ?? '',
+      };
+    })()`);
+
+    assert.equal(shellCheck.statusHostExists, false, '状态底栏宿主 react-statusbar-host 必须从 DOM 彻底删除');
+    assert.equal(shellCheck.statusBarExists, false, '状态底栏 app-status-bar 必须彻底删除');
+    assert.equal(shellCheck.hasForeverChat, false, '标题栏禁止夹带 (Forever Chat) 冗余后缀');
+    assert.equal(shellCheck.hasBotEmoji, false, '标题栏禁止使用 🤖 emoji 伪冒头像');
+    assert.equal(shellCheck.titleText, 'Default 助理', '专职 Bot 标题必须直接呈现纯净 Bot 名称');
+    assert.equal(shellCheck.botAvatarExists, true, '专职 Bot 工位顶栏必须渲染真实 Bot 头像组件');
+    assert.equal(shellCheck.latencyText, '24ms', '顶栏右上角必须低调呈现 24ms 网关延迟');
+  });
+
   // 出图取证（artifacts 不入 Git，教训 D.4：凡触碰视觉必须出图）
   const shotDir = path.join(rootDir, 'artifacts', 'verification');
   fs.mkdirSync(shotDir, { recursive: true });
   const shot = await send('Page.captureScreenshot', { format: 'png' });
-  fs.writeFileSync(path.join(shotDir, 'pr3d-left-rail-form.png'), Buffer.from(shot.data, 'base64'));
-  console.log(`  截图取证: ${path.join(shotDir, 'pr3d-left-rail-form.png')}`);
+  fs.writeFileSync(path.join(shotDir, 'pr3e-shell-truth.png'), Buffer.from(shot.data, 'base64'));
+  console.log(`  PR-3e 截图取证: ${path.join(shotDir, 'pr3e-shell-truth.png')}`);
 });

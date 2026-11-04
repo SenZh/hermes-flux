@@ -256,7 +256,10 @@ export function syncActiveSessionToBot(params: {
 }
 
 /**
- * 顶栏标题根据当前互斥焦点精准解析纯函数
+ * 顶栏标题根据当前互斥焦点精准解析纯函数（PR-3e 订正：移除 🤖 与 (Forever Chat) 冗余）。
+ * 设计意图 (Why)：顶栏标题只承担当前聚焦实体或会话的权威命名，视觉上由专用头像组件承载身份，文字不再夹带假 emoji；
+ * 防范的历史坑 (Pitfall)：曾硬编码 `🤖 ${name} (Forever Chat)` 导致标题冗长臃肿且与桌面端标题栏原生视觉割裂；
+ * 约束与规则 (Rules)：专职智能体返回其 displayName/name；群聊返回群名；会话返回会话标题；未连接返回 notConnectedTitle。
  */
 export function resolveTitlebarTitle(params: {
   activeFocus?: { type: 'bot'; botName: string } | { type: 'session'; sessionId: string } | { type: 'group'; roomId: string };
@@ -290,7 +293,7 @@ export function resolveTitlebarTitle(params: {
         (p.displayName && p.displayName.toLowerCase() === activeFocus.botName.toLowerCase())
     );
     const botDisplay = focusBot?.displayName || activeFocus.botName;
-    return `🤖 ${botDisplay} (Forever Chat)`;
+    return botDisplay;
   }
 
   if (activeFocus?.type === 'group') {
@@ -302,9 +305,48 @@ export function resolveTitlebarTitle(params: {
     const activeSession = sessions.find((s) => s.id === activeSessionId);
     if (activeSession) {
       const rawTitle = activeSession.title;
-      return rawTitle === 'Bot Chat' ? `🤖 ${profileName || 'default'} (Forever Chat)` : rawTitle;
+      return rawTitle === 'Bot Chat' ? (profileName || 'default') : rawTitle;
     }
   }
 
   return isConnected ? defaultTitle : notConnectedTitle;
+}
+
+/**
+ * 顶栏当前激活实体头像解析纯函数（PR-3e）。
+ * 设计意图 (Why)：当焦点处于专职智能体（type === 'bot'）或当前会话属于专职 Bot 时，顶栏需要渲染该 Bot 的真实头像；
+ * 防范的历史坑 (Pitfall)：历史版本在标题文字中内嵌假 emoji 🤖 假冒头像，违背零假冒工程哲学且破坏排版；
+ * 约束与规则 (Rules)：纯函数无副作用，找不到匹配 profile 时安全降级返回 undefined。
+ */
+export function resolveTitlebarAvatar(params: {
+  activeFocus?: { type: 'bot'; botName: string } | { type: 'session'; sessionId: string } | { type: 'group'; roomId: string };
+  profiles: AgentProfile[];
+  profileName?: string;
+  activeSessionId?: string;
+  sessions?: Array<{ id: string; title: string; botName?: string }>;
+}): { avatar?: string; name: string } | undefined {
+  const { activeFocus, profiles, profileName, activeSessionId, sessions = [] } = params;
+  let targetName: string | undefined;
+
+  if (activeFocus?.type === 'bot') {
+    targetName = activeFocus.botName;
+  } else if (activeSessionId) {
+    const activeSession = sessions.find((s) => s.id === activeSessionId);
+    if (activeSession && (activeSession.title === 'Bot Chat' || activeSession.botName)) {
+      targetName = activeSession.botName || profileName || 'default';
+    }
+  }
+
+  if (!targetName) return undefined;
+
+  const found = profiles.find(
+    (p) =>
+      p.name.toLowerCase() === targetName!.toLowerCase() ||
+      (p.displayName && p.displayName.toLowerCase() === targetName!.toLowerCase())
+  );
+
+  return {
+    avatar: found?.avatar,
+    name: found?.displayName || targetName,
+  };
 }
