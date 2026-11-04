@@ -4,6 +4,7 @@
  */
 
 import { spawn, execSync } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -39,13 +40,17 @@ buildProcess.on('close', (code) => {
 
   console.log('[Hermes Flux Windows Packager] Invoking electron-builder for win-x64...');
 
-  const outputDir = path.join(rootDir, 'release/app-win');
+  let outputDir = path.join(rootDir, 'release/app-win');
   try {
     if (fs.existsSync(outputDir)) {
       fs.rmSync(outputDir, { recursive: true, force: true });
     }
   } catch (_e) {
     // ignore
+  }
+  if (fs.existsSync(outputDir)) {
+    // 若旧目录被外部进程（如 app.asar）锁定导致删不掉，自动轮转新目录避开 Windows EBUSY
+    outputDir = path.join(rootDir, `release/app-win-${Date.now()}`);
   }
 
   const builderArgs = ['electron-builder', '--win', '--x64', `-c.directories.output=${outputDir}`];
@@ -86,8 +91,8 @@ buildProcess.on('close', (code) => {
 
     console.log('\n======================================================');
     console.log('✔ Hermes Flux Desktop Windows delivery build ready!');
-    console.log(`  1. Unpacked Binary: packages/desktop/release/app-win/win-unpacked/Hermes Flux.exe`);
-    console.log('  2. Portable Green Zip: packages/desktop/release/Hermes-Flux-0.1.0-win-x64-portable.zip');
+    console.log(`  1. Unpacked Binary: ${path.join(outputDir, 'win-unpacked/Hermes Flux.exe')}`);
+    console.log(`  2. Portable Green Zip: ${path.join(rootDir, 'release/Hermes-Flux-0.1.0-win-x64-portable.zip')}`);
     console.log('======================================================\n');
   });
 });
