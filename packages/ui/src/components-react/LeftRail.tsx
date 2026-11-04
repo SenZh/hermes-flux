@@ -303,7 +303,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
         </Button>
       </div>
 
-      {model.showChatDeck && <div className="session-scroll-area min-h-0 flex-1 overflow-y-auto px-1.5 pb-3" id="session-list-container">
+      {model.showChatDeck && <div className="session-scroll-area min-h-0 flex-1 overflow-y-auto px-1.5 pb-3 mr-[var(--geo-resize-handle)]" id="session-list-container">
         {model.error && <div id="session-list-error" role="alert" className="m-1 rounded-md border border-border-strong bg-panel p-2 text-aux text-foreground">{model.error}</div>}
 
         {model.visibleGroups.length > 0 && <section className="mb-2">
@@ -367,7 +367,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
         </section>}
       </div>}
 
-      {model.showProjectsDeck && <div id="rail-projects-deck" className="flex flex-1 flex-col gap-1.5 overflow-y-auto px-2 py-1.5">
+      {model.showProjectsDeck && <div id="rail-projects-deck" className="flex flex-1 flex-col gap-1.5 overflow-y-auto px-2 py-1.5 mr-[var(--geo-resize-handle)]">
         <div className="px-1.5 pb-1 text-overline font-bold uppercase tracking-wide text-muted-foreground">{t('rail.projects')}</div>
         {model.visibleProjects.length > 0
           ? model.visibleProjects.map((project) => <ProjectCard
@@ -387,7 +387,11 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
     </div>}
 
     {/* 拖拽把手挂在 aside 直属层级：抽屉自身 overflow: hidden，放在抽屉内会被裁掉，
-        导致命中测试落到抽屉上、物理拖拽完全失效（本次实测确认）。 */}
-    {!props.collapsed && <div className="rail-resize-handle absolute -right-1 top-0 z-50 h-full w-2 cursor-col-resize touch-none" data-rail-handle="left" role="separator" aria-orientation="vertical" tabIndex={0} title={t('rail.resizeHandleTitle')} onPointerDown={props.onResizeStart} />}
+        导致命中测试落到抽屉上、物理拖拽完全失效（本次实测确认）。
+        宽度与 hover 高亮一律由 styles.css 的 --geo-resize-handle 真值源驱动，组件内禁止再写宽度或偏移类；
+        right-0 让把手完整落在轨道内，与右轨对称（历史坑：骑跨边界使蓝带视觉加宽）。
+        滚动容器以 mr-[var(--geo-resize-handle)] 让出把手带：全局滚动条宽恰为 6px，若与把手全量重叠，
+        pointer capture 会劫走滑块拖拽（双审 P1 命中竞态），滚动条必须落在把手带之外。 */}
+    {!props.collapsed && <div className="rail-resize-handle absolute right-0 top-0 z-50 h-full cursor-col-resize touch-none" data-rail-handle="left" role="separator" aria-orientation="vertical" tabIndex={0} title={t('rail.resizeHandleTitle')} onPointerDown={props.onResizeStart} />}
   </aside>;
 }

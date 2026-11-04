@@ -128,13 +128,11 @@ export function renderInspectionPod(props: InspectionPodProps): string {
           ? `<!-- Draggable Resize Handle (Inspection Pod Left Edge) -->
              <div class="rail-resize-handle" data-rail-handle="right" role="separator" aria-orientation="vertical" tabindex="0" title="${t('inspector.resizeHandleTitle')}" style="
                position: absolute;
-               left: -3px;
+               left: 0;
                top: 0;
                bottom: 0;
-               width: 6px;
                z-index: 60;
                cursor: col-resize;
-               background: transparent;
              "></div>`
           : ''
       }

@@ -51,6 +51,8 @@
   --geo-micro-rail: 52px;
   --geo-context-drawer: 212px;
   --geo-left-rail: 264px;
+  /* 拖拽把手唯一几何真值源：左右把手共用同一宽度，杜绝两套实现各写各的（历史坑：左 8px 全可见、右 6px 被 pod overflow 裁成 3px）。 */
+  --geo-resize-handle: 6px;
   --geo-inspector-pod: 410px;
   --geo-statusbar: 22px;
   --geo-input-dock: 740px;
@@ -602,13 +604,19 @@ html[data-maximized="true"] #flux-app-root {
    while paging older messages. Windowed mounting (100 rows) is what keeps long
    sessions fast. */
 
-/* Draggable Rail Handles */
+/* Draggable Rail Handles
+   设计意图 (Why)：宽度由 --geo-resize-handle 唯一真值源驱动，左右把手共用同一条规则；
+     两侧均完整落在各自轨道内（左 right:0 / 右 left:0），杜绝 overflow 裁剪与骑跨边界两种失效模式。
+   防范的历史坑 (Pitfall)：左曾 Tailwind w-2 骑跨边界、右曾内联 6px 被 pod overflow:hidden 裁半，
+     用户实测蓝带 8px vs 3px；高亮曾硬编码天蓝色值，换肤不跟随。
+   约束与规则 (Rules)：组件内禁止再写把手宽度/偏移；高亮色必须经皮肤 Token 派生。 */
 .rail-resize-handle {
+  width: var(--geo-resize-handle);
   transition: background-color 150ms ease;
 }
 .rail-resize-handle:hover,
 .rail-resize-handle:focus-visible {
-  background: rgba(56, 189, 248, 0.4) !important;
+  background: color-mix(in srgb, var(--primary) 38%, transparent);
 }
 
 /* Dragging state: Disable transition & selections across entire window to maintain 120 FPS */
@@ -834,6 +842,12 @@ button {
     max-width: 80vw !important;
     z-index: 100;
     box-shadow: 4px 0 24px rgba(0, 0, 0, 0.6);
+  }
+
+  /* 拖拽把手是桌面专属控件：移动端宽度被媒体查询锁为 min(300px,80vw)，--rail-w-left 写入失效，
+     保留即"可见但不可用"的残影，物理剥离。桌面端维持 --geo-resize-handle: 6px。 */
+  .rail-resize-handle {
+    display: none !important;
   }
 
   /* 折叠态彻底隐藏 */
