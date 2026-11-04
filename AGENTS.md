@@ -1,13 +1,12 @@
 # AGENTS.md - Hermes Flux 全平台工程规范与主控操作指南
 
-本项目是 **Hermes Flux**（面向 Hermes Agent 全生态构建的旗舰级、全平台端到端极客美学工作台，覆盖 Desktop, Web, iOS, Android）的代码库根目录。
+本项目是 **Hermes Flux**（面向 Hermes Agent 全生态构建的全平台端到端极客美学工作台，覆盖 Desktop, Web, iOS, Android）的代码库根目录。
 
-> **核心设计哲学**：
-> 1. **美学即生产力（Aesthetic First）**：追求电影级暗黑极简视觉、微距物理受光质感、细腻物理动效与极致排版韵律；
-> 2. **代码共享与单向解耦（Monorepo Topology）**：`core`（无界协议与纯状态机）➔ `ui`（共享表现层与主题令牌）➔ `desktop / mobile / web`（轻量壳容器）；
-> 3. **零假冒工程与真实证伪（Zero-Illusion Engineering）**：业务逻辑必须有落盘测试且具备变异杀伤力，严禁假测试、弱断言与循环自证；
-> 4. **架构设计至高无上（Architecture-First）**：代码实现必须 100% 遵守架构分层与领域模型，严禁私自绕过 Core/PAL 编写临时胶水逻辑；
-> 5. **项目隔离铁律（Project Isolation）**：技术细节、架构规范与踩坑经验仅沉淀在本仓库内部，严禁污染中枢与全局。
+> **核心工程原则**：
+> 1. **代码共享与单向解耦**：`core`（无界协议与纯状态机）➔ `ui`（表现层、Token 与纯组件）➔ `desktop / mobile / web`（轻量薄壳容器）；
+> 2. **零假冒交付与实证杀伤力**：业务逻辑必须有落盘测试且具备变异杀伤力，严禁假测试、弱断言与循环自证；
+> 3. **架构分层至高无上**：业务实现 100% 遵守架构分层与领域模型，严禁私自绕过 Core/PAL 编写临时胶水逻辑；
+> 4. **项目隔离铁律**：技术细节、架构规范与踩坑经验仅沉淀在本仓库内部，严禁污染中枢与全局。
 
 ---
 
@@ -18,15 +17,15 @@
 ### 1. 架构与设计系统文档索引
 | 分类 | 文档路径 | 核心规范与约束 |
 |---|---|---|
-| **看板与计划** | [`docs/roadmap.md`](docs/roadmap.md) | 全局研发路线图、已落地特性看板、已知缺陷跟踪 |
-| **核心架构** | [`docs/architecture/core-architecture-and-data-flow-spec.md`](docs/architecture/core-architecture-and-data-flow-spec.md) | Monorepo 分层边界、PAL 平台抽象、WebSocket 5 态 FSM、Token 合流引擎 |
 | **三态对话** | [`docs/architecture/three-conversation-modes-spec.md`](docs/architecture/three-conversation-modes-spec.md) | 普通会话、专职 Bot 主工位、多 Agent 群聊三态模型、展示形态与 Gateway 接口单一真值源 |
+| **核心架构** | [`docs/architecture/core-architecture-and-data-flow-spec.md`](docs/architecture/core-architecture-and-data-flow-spec.md) | Monorepo 分层边界、PAL 平台抽象、WebSocket 5 态 FSM、Token 合流引擎 |
 | **终极三舱** | [`docs/architecture/ultimate-tri-rail-architecture-spec.md`](docs/architecture/ultimate-tri-rail-architecture-spec.md) | 实体定义(Folder/Workspace/Project/Bot/Group/Session)、左双轨(52px微轨+212px抽屉)、右侧工具舱 |
-| **协议基线** | [`docs/architecture/gateway-api-and-features-matrix.md`](docs/architecture/gateway-api-and-features-matrix.md) | 252 个 RPC 方法、77 个下行推送事件、REST 辅助通道权威基线 |
-| **接口索引** | [`docs/gateway/README.md`](docs/gateway/README.md) | 自动生成的 10 个网关模块接口文档与真实探针状态（禁止手动修改） |
-| **设计系统** | [`docs/design-system/04-tokens-and-design-system-spec.md`](docs/design-system/04-tokens-and-design-system-spec.md) | 全色板 Palette、Border Radius、Shadow 物理层级与 29-color Token 规范 |
-| **踩坑登记** | [`docs/architecture/pitfall-registry.md`](docs/architecture/pitfall-registry.md) | 踩坑记录 ➔ 根因 ➔ 守卫探针映射（每条坑必须绑定可变红的门禁/单测） |
+| **协议基线** | [`docs/architecture/gateway-api-and-features-matrix.md`](docs/architecture/gateway-api-and-features-matrix.md) | 官方网关契约基线（258 RPC / 72 事件），客户端移动端 Capacitor 8 容器映射 |
+| **接口索引** | [`docs/gateway/README.md`](docs/gateway/README.md) | 自动生成的 10 个网关核心模块接口文档与真实探针状态（禁止手动修改） |
+| **设计系统** | [`docs/design-system/04-tokens-and-design-system-spec.md`](docs/design-system/04-tokens-and-design-system-spec.md) | 29-color Design Tokens、Border Radius、Shadow 物理层级规范 |
+| **踩坑登记** | [`docs/architecture/pitfall-registry.md`](docs/architecture/pitfall-registry.md) | 踩坑记录 ➔ 根因 ➔ 守卫探针映射（P-001 ~ P-021，每条坑必须绑定可变红的门禁/单测） |
 | **工程纪律** | [`ENGINEERING_DISCIPLINE.md`](ENGINEERING_DISCIPLINE.md) | 工业级工程防御体系、AST 防 AI 糊弄 15 条棘轮、长会话性能预算与平台避坑军规 |
+| **路线图** | [`docs/roadmap.md`](docs/roadmap.md) | 全局研发路线图、已落地特性看板、已知缺陷跟踪 |
 
 ### 2. 项目专属本地技能索引 (`.opencode/skills/`)
 | 技能名称 | 目录路径 | 核心能力与适用场景 |
@@ -40,20 +39,33 @@
 
 ### 1. Monorepo 单向分层职责
 $$\text{packages/desktop} \mid \text{packages/mobile} \mid \text{packages/web} \longrightarrow \text{packages/ui} \longrightarrow \text{packages/core}$$
-- **`packages/core`**：纯 TypeScript 无界逻辑层，零 DOM/React/Electron 依赖。承载 JSON-RPC 2.0 Client、WebSocket 5态 FSM、TokenCoalescer 合流引擎、PlatformBridge 接口规范与纯领域状态机。
-- **`packages/ui`**：纯 UI 表现层与组件库。承载全端共享的 React 组件库（迁移波次进行中，现状为字符串模板）、暗黑主题变量、设计系统 Tokens 与 Markdown 渲染器。禁止调用原生网络与平台私有 IPC。
-- **`packages/desktop` / `packages/mobile`**（`packages/web` 标注未落地本期范围外）：轻量薄壳容器（Thin Shells）。仅包含平台入口、原生 Bridge 注入与系统窗口生命周期管理，**严禁在壳内编写应用级状态机与业务路由编排**。
+- **`packages/core`**：纯 TypeScript 无界逻辑层，零 DOM/React/Electron 依赖。承载 JSON-RPC 2.0 Client、WebSocket 5 态 FSM、TokenCoalescer 合流引擎、PlatformBridge 接口规范与纯领域状态机；
+- **`packages/ui`**：纯 UI 表现层与组件库。承载全端共享的 React 组件、设计系统 Tokens 与 Markdown 渲染器。禁止调用原生网络与平台私有 IPC；
+- **`packages/desktop` / `packages/mobile`**：轻量薄壳容器（Thin Shells）。Desktop 基于 Electron，Mobile 基于 **Capacitor 8 原生容器**（运行 Web 产物，配合原生 Bridge）。**严禁在壳内编写应用级状态机与业务路由编排**。
 
-### 2. 专职智能体主工位（Forever Chat）物理领域隔离原则
-- **实体正交性**：抽屉顶部的专职 Bot 卡片（`rail-primary-agent-card`）展示的时间和副标题，仅且必须代表该 Bot 的专职终身主工位（`title: 'Bot Chat', hidden: true`）或人设描述；
-- **严禁冒名覆盖**：**绝对禁止扫描普通会话池（`state.sessions`）拿旁聊会话覆盖 Bot 卡片**！两者必须物理隔离，杜绝时间与内容错乱；
-- **原子反哺管道**：会话加载完成、用户发信、流式接收与冷启动探测均通过 `updateBotLatestActivity` 统一收敛更新，确保内存 Map、Profile 模型、LocalStorage 0ms 持久化与自然日时间格式化（`formatSessionTime`）强一致。
+### 2. 三大会话模式物理正交隔离原则 (Three Conversation Modes Invariant)
+详见 [`docs/architecture/three-conversation-modes-spec.md`](docs/architecture/three-conversation-modes-spec.md)：
+1. **普通会话 (Scratchpad / Side Session)**：
+   - 随用随扔的攻坚排查会话，物理存在于各 Profile 的 `state.db`，`hidden=0`；
+   - 允许重命名、删除、归档、单步撤回 (`session.undo`)、历史截断回滚 (`prompt.submit + truncate_before_row_id`) 与分叉 (`session.branch`)；
+   - 键入 `@Agent` 分流为 `mention-subagent`（后台异步子任务），对话不写入 Bot 长期记忆（`MEMORY.md`）。
+2. **专职 Bot 终身主工位 (Bot Forever Chat / Canonical Chat)**：
+   - 专职数字员工唯一绑定的核心工位，固定 `title: 'Bot Chat'` 且 `hidden=1`（通过 `session.set_hidden` 物理保护）；
+   - **受物理保护实体**：前端严禁提供删除、归档、单步回滚与 Fork 按钮（由 `deriveSessionKind` 物理阻断）；
+   - **严禁冒名覆盖**：绝对禁止扫描普通会话池（`state.sessions`）拿旁聊会话覆盖 Bot 卡片；最新活动统一经 `updateBotLatestActivity` 反哺；
+   - **外援与记忆铁律**：键入 `@Agent` 自动分流为 `mention-btw`，走 `prompt.btw` 只读外援胶囊，零 Token 污染当前 Bot 记忆。本模式是全系统**唯一法定**允许更新该 Bot 长期记忆（`MEMORY.md`）的通道。
+3. **多 Agent 群聊研讨室 (Group Room / Hosted Room)**：
+   - 多 Bot 协同议事空间，存储在网关根层主数据库的 `hosted_rooms` 表中，独立于任何单一 Profile；
+   - **通信协议正交隔离**：必须且只能走 **`groups.*`** 系列专用 RPC（`groups.create`, `groups.list`, `groups.state`, `groups.send`, `groups.log`, `groups.stop`, `groups.disband`, `groups.rename`），**绝对禁止调用 `prompt.submit` 与 `session.*` 系列接口**；
+   - **发信与审批契约红线**：`groups.send` 必须传 `{ room_id, event_id, payload: { text, thread_id } }`（P-002）；群聊内安全审批必须走专用 **`groups.approve`** 并绑定 `member_id` 与 `execution_generation`（P-020）；
+   - **数据流驱动机制**：群聊网关无单会话逐 Token 的 `delta` 事件，多 Agent 回合发言必须通过 `pollGroupRoomUntilSettled` 实施有界轮询（上限 8 轮 × 2.5s），回读 `groups.log` 驱动增量上屏（P-021）；
+   - **记忆隔离铁律**：群聊记录仅保存在 `groups.log` 中，**绝对禁止反向回写任何单个参会 Bot 的 `MEMORY.md`**。
 
 ### 3. 核心几何规范与设计约束
-- **左侧双轨（Left Rail）**：宽度锁定 `264px`（`52px` 物理微轨 + `212px` 抽屉工作区）；
-- **输入舱（Input Dock）**：底部悬浮居中，**严格锁定黄金限宽 `max-width: 740px`**，内嵌模型选择器、思考深度与审批策略；
-- **场景检查舱（Inspection Pod）**：贴靠右侧窗边双列布局，详情工作舱 + 竖向场景轨，宽度锁定 `410px`（规范基线）；
-- **状态底栏收敛（Status Bar Consolidated）**：状态底栏已从壳层彻底拔除，网关延迟与连接指示点收敛至顶栏右上角（淡雅 11px 等宽读数，不夺眼球），垂直空间全部归还对话工作区；
+- **左侧双轨（Left Rail）**：宽度基线 `264px`（`52px` 物理微轨 + `212px` 抽屉工作区），支持通过把手在 264px ~ 480px 之间自由拉伸；快捷键 `Ctrl+B`（macOS 为 `Cmd+B`）收起抽屉收敛至 52px 微轨；
+- **悬浮输入舱（Composer Dock）**：底部悬浮居中，**严格锁定黄金限宽 `max-width: 740px`**；群聊模式下禁止发送会话级 `config.set`；群聊键入 `@` 必须精准匹配当前房间参会成员；
+- **场景检查舱（Inspection Pod）**：贴靠右侧窗边双列布局，详情工作舱 + 竖向场景轨，宽度基线锁定 `410px`；快捷键 `Ctrl+\`（macOS 为 `Cmd+\`）折叠展开；
+- **状态底栏收敛（Status Bar Consolidated）**：状态底栏已从壳层彻底拔除，网关延迟与连接指示点收敛至顶栏右上角（淡雅 11px 等宽读数），垂直空间全部归还对话工作区；
 - **顶栏（Titlebar）**：固定高度 `42px`。处于专职 Bot 工位时呈现 Bot 真实头像与 `${name}`，严禁携带 `(Forever Chat)` 冗余后缀与伪 emoji 占位。
 
 ### 4. 诊断日志与滚动不变量 (Diagnostics & Scroll)
@@ -78,8 +90,6 @@ $$\text{packages/desktop} \mid \text{packages/mobile} \mid \text{packages/web} \
 ```
 
 ### 1. 阶段一：范围确认与判定树（增量验证资产准入）
-在动手编码前，对照以下**判定树**明确本次任务必须追加的测试与规范资产：
-
 ```text
                                【本次改动范围判定】
                                         │
