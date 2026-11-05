@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="obsidian-gold">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hermes Flux — 真实 Desktop 暗色皮肤 1:1 还原</title>
+  <style>
+    /* ==========================================================================
+       HERMES FLUX DESKTOP 暗色皮肤单一真值 (OBSIDIAN-GOLD / DARK TOKENS)
+       完全对齐 packages/desktop/dist/renderer/styles.css 与 tailwind.css
+       ========================================================================== */
+    :root {
+      --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      --font-mono: "SF Mono", "JetBrains Mono", Consolas, "Fira Code", monospace;
+
+      /* 真实提取的暗色 Tokens (绝对零花哨杂色) */
+      --background: #0A0B0E;
+      --sidebar: #0E0F14;
+      --panel: #121319;
+      --card: #14151B;
+      --card-hover: #1C1E26;
+      --card-active: #242732;
+      --foreground: #F3F4F6;
+      --secondary-foreground: #9CA3AF;
+      --muted-foreground: #6B7280;
+      --border-subtle: rgba(255, 255, 255, 0.06);
+      --border: rgba(255, 255, 255, 0.10);
+      --border-strong: rgba(255, 255, 255, 0.20);
+      --border-medium: rgba(255, 255, 255, 0.12);
+
+      --bg-window: #0A0B0E;
+      --bg-backdrop: rgba(18, 19, 25, 0.88);
+      --text-main: #F3F4F6;
+      --text-secondary: #9CA3AF;
+      --text-muted: #6B7280;
+      --text-faint: #4B5563;
+
+      --h-titlebar: 42px;
+      --w-station: 52px;
+      --w-drawer: 212px;
+      --w-rail-total: 264px;
+      --max-w-composer: 740px;
+
+      --shadow-dock: 0 12px 32px rgba(0, 0, 0, 0.45);
+      --specular-line: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    html, body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      font-family: var(--font-sans);
+      background: var(--background);
+      color: var(--foreground);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    #flux-app-root {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* --------------------------------------------------------------------------
+       1. 顶栏 42px (flux-titlebar)
+       -------------------------------------------------------------------------- */
+    .flux-titlebar {
+      height: var(--h-titlebar);
+      background: var(--sidebar);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px;
+      flex-shrink: 0;
+      user-select: none;
+    }
+
+    .titlebar-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .icon-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      background: transparent;
+      border: none;
+      color: var(--muted-foreground);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .icon-btn:hover {
+      background: var(--card-hover);
+      color: var(--foreground);
+    }
+
+    .titlebar-center {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--foreground);
+    }
+
+    .titlebar-bot-avatar {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 4px;
+      background: var(--card);
+      border: 1px solid var(--border-subtle);
+    }
+
+    .titlebar-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .titlebar-connection-box {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border-subtle);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted-foreground);
+    }
+
+    .titlebar-connection-indicator {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #10B981; /* 真实在线绿点 */
+    }
+
+    /* --------------------------------------------------------------------------
+       2. 主体双轨骨架 (flux-body-container)
+       -------------------------------------------------------------------------- */
+    .flux-body-container {
+      flex: 1;
+      display: flex;
+      position: relative;
+      overflow: hidden;
+      width: 100%;
+    }
+
+    /* 264px 左侧双轨 */
+    .flux-left-rail {
+      width: var(--w-rail-total);
+      min-width: var(--w-rail-total);
+      max-width: var(--w-rail-total);
+      height: 100%;
+      display: flex;
+      flex-direction: row;
+      border-right: 1px solid var(--border-subtle);
+      background: var(--sidebar);
+      flex-shrink: 0;
+      user-select: none;
+    }
+
+    /* 52px 微轨 */
+    #flux-station-rail {
+      width: var(--w-station);
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      border-right: 1px solid var(--border-subtle);
+      background: var(--sidebar);
+      padding: 10px 0;
+      flex-shrink: 0;
+    }
+
+    .station-avatar-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      background: transparent;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      position: relative;
+      transition: all 0.15s ease;
+      color: var(--foreground);
+    }
+    .station-avatar-btn:hover {
+      background: var(--card-hover);
+    }
+    .station-avatar-btn.active {
+      background: var(--card-active);
+      border-color: var(--border-medium);
+    }
+
+    .station-avatar-img {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      object-fit: cover;
+      background: var(--card);
+      border: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--secondary-foreground);
+    }
+
+    .station-divider {
+      width: 24px;
+      height: 1px;
+      background: var(--border-subtle);
+      margin: 4px 0;
+    }
+
+    /* 212px 抽屉 */
+    .flux-drawer {
+      flex: 1;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--sidebar);
+    }
+
+    .drawer-top-card {
+      padding: 10px 8px 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    /* 专职 Bot 主工位卡片 */
+    .canonical-bot-card {
+      width: 100%;
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid var(--border-subtle);
+      background: rgba(255, 255, 255, 0.02);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      text-align: left;
+      transition: all 0.12s ease;
+    }
+    .canonical-bot-card:hover {
+      background: var(--card-hover);
+      border-color: var(--border);
+    }
+    .canonical-bot-card.active {
+      background: var(--card-active);
+      border-color: var(--border-medium);
+    }
+
+    .drawer-list-area {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 6px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      scrollbar-width: none;
+    }
+    .drawer-list-area::-webkit-scrollbar { display: none; }
+
+    .drawer-section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 6px 4px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted-foreground);
+    }
+
+    /* 会话行 (session-item) */
+    .session-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      width: 100%;
+      min-height: 48px;
+      padding: 7px 8px;
+      border-radius: 6px;
+      border: none;
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+      color: var(--secondary-foreground);
+      transition: all 0.12s ease;
+    }
+    .session-item:hover {
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--foreground);
+    }
+    .session-item.active {
+      background: var(--card-active);
+      color: var(--foreground);
+    }
+
+    .session-item-content {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .session-item-row1 {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 4px;
+    }
+
+    .session-item-title {
+      font-size: 12.5px;
+      font-weight: 500;
+      color: inherit;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .session-item-time {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      color: var(--muted-foreground);
+      flex-shrink: 0;
+    }
+
+    .session-item-sub {
+      font-size: 11px;
+      color: var(--muted-foreground);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      line-height: 1.3;
+    }
+
+    /* --------------------------------------------------------------------------
+       3. 中间对话舞台 (flux-middle-pod)
+       -------------------------------------------------------------------------- */
+    .flux-middle-pod {
+      flex: 1;
+      min-width: 0;
+      height: 100%;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-window);
+      overflow: hidden;
+    }
+
+    /* 真实消息滚动区域 */
+    .conversation-canvas {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 24px 140px; /* 底部留白给输入舱 */
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      max-width: 860px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    /* 用户气泡行 */
+    .user-turn-row {
+      display: flex;
+      justify-content: flex-end;
+      width: 100%;
+    }
+
+    .user-bubble {
+      max-width: 78%;
+      padding: 10px 14px;
+      border-radius: 10px;
+      background: #181920;
+      border: 1px solid var(--border-medium);
+      color: var(--foreground);
+      font-size: 13.5px;
+      line-height: 1.5;
+      word-break: break-word;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    }
+
+    /* 助手通栏卡片 */
+    .assistant-turn-row {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: 100%;
+    }
+
+    .assistant-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11.5px;
+      color: var(--muted-foreground);
+      font-family: var(--font-mono);
+    }
+    .assistant-tag {
+      font-weight: 600;
+      color: var(--foreground);
+    }
+
+    /* 思考过程折叠条 */
+    .reasoning-details {
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.01);
+      padding: 6px 10px;
+      font-size: 11.5px;
+      color: var(--secondary-foreground);
+    }
+    .reasoning-details summary {
+      cursor: pointer;
+      user-select: none;
+      outline: none;
+      color: var(--muted-foreground);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .reasoning-body {
+      margin-top: 8px;
+      padding-left: 10px;
+      border-left: 2px solid var(--border-subtle);
+      color: var(--secondary-foreground);
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+
+    /* 工具调用胶囊 */
+    .tool-capsule {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      background: var(--card);
+      border: 1px solid var(--border-subtle);
+      font-size: 11.5px;
+      color: var(--secondary-foreground);
+      width: fit-content;
+      margin: 2px 0;
+    }
+    .tool-icon {
+      color: #10B981;
+      font-size: 11px;
+    }
+
+    .assistant-content {
+      font-size: 13.5px;
+      line-height: 1.6;
+      color: var(--foreground);
+    }
+    .assistant-content p {
+      margin-bottom: 8px;
+    }
+    .assistant-content ul {
+      margin-left: 20px;
+      margin-bottom: 8px;
+    }
+    .assistant-content li {
+      margin-bottom: 4px;
+    }
+
+    .assistant-footer-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted-foreground);
+      padding-top: 4px;
+    }
+    .action-btn {
+      background: transparent;
+      border: none;
+      color: var(--muted-foreground);
+      font-size: 11px;
+      cursor: pointer;
+      padding: 2px 4px;
+      border-radius: 4px;
+    }
+    .action-btn:hover {
+      background: var(--card-hover);
+      color: var(--foreground);
+    }
+
+    /* --------------------------------------------------------------------------
+       4. 悬浮输入舱 740px (input-dock-container)
+       -------------------------------------------------------------------------- */
+    .input-dock-container {
+      position: absolute;
+      bottom: 20px;
+      left: 0;
+      right: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 0 24px;
+      pointer-events: none;
+      z-index: 40;
+    }
+
+    .input-card-box {
+      pointer-events: auto;
+      position: relative;
+      width: 100%;
+      max-width: var(--max-w-composer);
+      margin: 0 auto;
+      background: var(--bg-backdrop);
+      backdrop-filter: blur(28px);
+      -webkit-backdrop-filter: blur(28px);
+      border: 1px solid var(--border-medium);
+      box-shadow: var(--shadow-dock), var(--specular-line);
+      border-radius: 14px;
+      padding: 12px 16px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .dock-textarea {
+      width: 100%;
+      min-height: 48px;
+      max-height: 240px;
+      border: none;
+      background: transparent;
+      color: var(--text-main);
+      font-family: inherit;
+      font-size: 13.5px;
+      line-height: 1.5;
+      resize: none;
+      outline: none;
+    }
+    .dock-textarea::placeholder {
+      color: var(--text-muted);
+    }
+
+    .input-control-strip {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 28px;
+      padding-top: 6px;
+      border-top: 1px solid var(--border-subtle);
+    }
+
+    .control-strip-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .micro-pill {
+      height: 24px;
+      padding: 0 9px;
+      border-radius: 6px;
+      background: var(--card);
+      border: 1px solid var(--border-subtle);
+      color: var(--foreground);
+      font-size: 11px;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+    }
+
+    .control-strip-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .send-action-btn {
+      height: 26px;
+      width: 26px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--border-medium);
+      color: var(--foreground);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .send-action-btn:hover {
+      background: rgba(255, 255, 255, 0.16);
+    }
+  </style>
+</head>
+<body>
+
+  <div id="flux-app-root">
+    <!-- 1. 顶栏 (flux-titlebar) -->
+    <header class="flux-titlebar">
+      <div class="titlebar-left">
+        <button id="toggle-left-rail-btn" class="icon-btn" title="折叠/展开侧栏 (Ctrl+B)" type="button">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 3v18"></path></svg>
+        </button>
+      </div>
+
+      <div class="titlebar-center">
+        <span class="titlebar-bot-avatar">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path></svg>
+        </span>
+        <span class="titlebar-session-title">友好问候</span>
+      </div>
+
+      <div class="titlebar-right">
+        <div class="titlebar-connection-box" title="在线 (170ms)">
+          <span class="titlebar-connection-indicator"></span>
+          <span class="titlebar-latency">170ms</span>
+        </div>
+        <button class="icon-btn" title="设置 (Ctrl+,)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- 2. 主体骨架 (flux-body-container) -->
+    <div class="flux-body-container">
+      <!-- 左双轨 (flux-left-rail, 264px) -->
+      <aside class="flux-left-rail">
+        <!-- 52px 微轨 -->
+        <div id="flux-station-rail">
+          <!-- 真实 Bots -->
+          <button class="station-avatar-btn" title="进入 大总管 的专属对话">
+            <div class="station-avatar-img">管</div>
+          </button>
+          <button class="station-avatar-btn active" title="进入 xiaofawang 的专属对话">
+            <div class="station-avatar-img" style="border-color: rgba(255, 255, 255, 0.2);">法</div>
+          </button>
+          <button class="station-avatar-btn" title="进入 CodeBoy 的专属对话">
+            <div class="station-avatar-img">码</div>
+          </button>
+          <button class="station-avatar-btn" title="进入 flux-probe-bot 的专属对话">
+            <div class="station-avatar-img">探</div>
+          </button>
+          <button class="station-avatar-btn" title="进入 aura 的专属对话">
+            <div class="station-avatar-img">A</div>
+          </button>
+
+          <div class="station-divider"></div>
+
+          <button class="station-avatar-btn" title="群聊">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--muted-foreground);"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+          </button>
+          <button class="station-avatar-btn" title="工程项目矩阵 (Projects)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--muted-foreground);"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+          </button>
+        </div>
+
+        <!-- 212px 抽屉 -->
+        <div class="flux-drawer">
+          <div class="drawer-top-card">
+            <!-- 专职主工位卡片 -->
+            <div class="canonical-bot-card active">
+              <div class="station-avatar-img" style="width: 30px; height: 30px; font-size: 12px;">法</div>
+              <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
+                <div style="font-size: 12.5px; font-weight: 600; color: var(--foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">xiaofawang</div>
+                <div style="font-size: 11px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">任务已全部安排妥当，女主人放心忙...</div>
+              </div>
+              <span style="font-family: var(--font-mono); font-size: 10.5px; color: var(--muted-foreground); flex-shrink: 0;">11:35</span>
+            </div>
+          </div>
+
+          <div class="drawer-list-area">
+            <div class="drawer-section-header">
+              <span>会话 (13)</span>
+              <button class="icon-btn" style="width: 20px; height: 20px;" title="新建会话">+</button>
+            </div>
+
+            <!-- 13 个真实会话 -->
+            <button class="session-item active">
+              <div class="session-item-content">
+                <div class="session-item-row1">
+                  <span class="session-item-title">友好问候</span>
+                  <span class="session-item-time">11:35</span>
+                </div>
+                <div class="session-item-sub">任务已全部安排妥当，女主人放心忙别的去吧～周六上午 9:00 和...</div>
+              </div>
+            </button>
+
+            <button class="session-item">
+              <div class="session-item-content">
+                <div class="session-item-row1">
+                  <span class="session-item-title">评估 Relay 技术商业化可行性</span>
+                  <span class="session-item-time">10/31</span>
+                </div>
+                <div class="session-item-sub">Relay 技术的实现原理是，如果我们想在赫尔摩斯 Flux 这...</div>
+              </div>
+            </button>
+
+            <button class="session-item">
+              <div class="session-item-content">
+                <div class="session-item-row1">
+                  <span class="session-item-title">测试腾讯云连接 DeepRelay 路由延迟</span>
+                  <span class="session-item-time">10/31</span>
+                </div>
+                <div class="session-item-sub">去腾讯云vps 上验证一下https://api.deeprel...</div>
+              </div>
+            </button>
+
+            <button class="session-item">
+              <div class="session-item-content">
+                <div class="session-item-row1">
+                  <span class="session-item-title">提供 Markdown 示例文件</span>
+                  <span class="session-item-time">10/23</span>
+                </div>
+                <div class="session-item-sub">发我一个文件 随便找个 Markdown 发我。</div>
+              </div>
+            </button>
+
+            <button class="session-item">
+              <div class="session-item-content">
+                <div class="session-item-row1">
+                  <span class="session-item-title">装纸巾提醒 · Oct 22 12:00</span>
+                  <span class="session-item-time">10/22</span>
+                </div>
+                <div class="session-item-sub">[IMPORTANT: You are running as a...</div>
+              </div>
+            </button>
+
+            <button class="session-item">
+              <div class="session-item-content">
+                <div class="session-item-row1">
+                  <span class="session-item-title">用麦子生成一张图：一只白色小猫趴在蓝色抱枕上...</span>
+                  <span class="session-item-time">10/15</span>
+                </div>
+                <div class="session-item-sub">用麦子生成一张图：一只白色小猫趴在蓝色抱枕上。只打印绝对路径...</div>
+              </div>
+            </button>
+
+            <button class="session-item">
+              <div class="session-item-content">
+                <div class="session-item-row1">
+                  <span class="session-item-title">生成一张图：一只戴着红色围巾的橘猫...</span>
+                  <span class="session-item-time">10/14</span>
+                </div>
+                <div class="session-item-sub">生成一张图：一只戴着红色围巾的橘猫，坐在窗台上...</div>
+              </div>
+            </button>
+
+            <button class="session-item">
+              <div class="session-item-content">
+                <div class="session-item-row1">
+                  <span class="session-item-title">Use built-in image gen tool</span>
+                  <span class="session-item-time">10/14</span>
+                </div>
+                <div class="session-item-sub">Use the built-in image generation tool to draw...</div>
+              </div>
+            </button>
+
+            <button class="session-item">
+              <div class="session-item-content">
+                <div class="session-item-row1">
+                  <span class="session-item-title">画一只戴墨镜的橘猫</span>
+                  <span class="session-item-time">10/14</span>
+                </div>
+                <div class="session-item-sub">画一只戴墨镜的橘猫，用内置免费生图工具...</div>
+              </div>
+            </button>
+
+            <button class="session-item">
+              <div class="session-item-content">
+                <div class="session-item-row1">
+                  <span class="session-item-title">Run exact shell command</span>
+                  <span class="session-item-time">10/14</span>
+                </div>
+                <div class="session-item-sub">Run this exact shell command and print its raw...</div>
+              </div>
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <!-- 中间通栏对话舞台 (flux-middle-pod) -->
+      <main class="flux-middle-pod">
+        <div class="conversation-canvas">
+          <!-- 真实轮次 1: 用户询问 -->
+          <div class="user-turn-row">
+            <div class="user-bubble">
+              提醒我周六上午去西兴派出所换新的身份证
+            </div>
+          </div>
+
+          <!-- 真实轮次 2: 助手规划与工具执行 -->
+          <div class="assistant-turn-row">
+            <div class="assistant-header">
+              <span class="assistant-tag">xiaofawang</span>
+              <span>· 11:35</span>
+            </div>
+
+            <!-- 真实思考折叠 -->
+            <details class="reasoning-details" open>
+              <summary>已深度思考 (14s) ▾</summary>
+              <div class="reasoning-body">Converting CST times to UTC for scheduled tasks. Saturday 9:00 AM CST corresponds to 2026-11-07T01:00:00 UTC and Saturday 9:30 AM CST corresponds to 2026-11-07T01:30:00 UTC. The cron job manager needs to create two tasks for these times.</div>
+            </details>
+
+            <!-- 真实工具调用胶囊 -->
+            <div class="tool-capsule">
+              <span class="tool-icon">✓</span>
+              <span>cronjob_manage: create 2026-11-07 09:00 CST</span>
+            </div>
+            <div class="tool-capsule">
+              <span class="tool-icon">✓</span>
+              <span>cronjob_manage: create 2026-11-07 09:30 CST</span>
+            </div>
+
+            <!-- 真实助手正文 -->
+            <div class="assistant-content">
+              <p>遵命女主人！两个提醒都已经准时设好啦 ⏰</p>
+              <p>📅 <strong>提醒时间</strong>：本周六（11月7日）<br>
+              第一次：上午 09:00 准时提醒 💬<br>
+              第二次：上午 09:30 再次叮嘱 💬</p>
+              <p>📌 <strong>提醒内容</strong>：去【西兴派出所】换领新身份证 🪪</p>
+              <p>⚠️ <strong>温馨小提示</strong>：<br>
+              1. 我是在微信里准时给您发消息弹窗提醒，如果怕静音或没看微信，手机自带的“时钟闹钟”也可以顺手定一个，双保险不耽误事～<br>
+              2. <strong>去办证别忘带</strong>：旧身份证（到期换领必备）。<br>
+              3. <strong>拍照小建议</strong>：穿深色/有领子的上衣（背景通常是白底），不要戴美瞳或大首饰，简单淡妆即可，拍出来效果更自然好看哦！✨</p>
+            </div>
+
+            <div class="assistant-footer-bar">
+              <button class="action-btn">复制</button>
+              <button class="action-btn">回滚</button>
+              <button class="action-btn">Fork 分支</button>
+              <span style="margin-left: auto;">gemini-3.8-flash · 382 tokens</span>
+            </div>
+          </div>
+
+          <!-- 真实轮次 3: 用户确认 -->
+          <div class="user-turn-row">
+            <div class="user-bubble">
+              定两个闹钟提醒我，9点一次，9点半一次
+            </div>
+          </div>
+
+          <!-- 真实轮次 4: 助手最新确认消息 -->
+          <div class="assistant-turn-row">
+            <div class="assistant-header">
+              <span class="assistant-tag">xiaofawang</span>
+              <span>· 11:35</span>
+            </div>
+
+            <div class="assistant-content">
+              <p>任务已全部安排妥当，女主人放心忙别的去吧～周六上午 9:00 和 9:30 我准时在微信里喊您！😊✨</p>
+            </div>
+
+            <div class="assistant-footer-bar">
+              <button class="action-btn">复制</button>
+              <button class="action-btn">回滚</button>
+              <button class="action-btn">Fork 分支</button>
+              <span style="margin-left: auto;">gemini-3.8-flash · 128 tokens</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. 黄金限宽输入舱 (input-dock-container) -->
+        <div class="input-dock-container">
+          <div class="input-card-box">
+            <textarea class="dock-textarea" rows="2" placeholder="给 Hermes 下达任务... (Enter 发送, Shift+Enter 换行, / 命令, @ 引用)"></textarea>
+
+            <div class="input-control-strip">
+              <div class="control-strip-left">
+                <!-- 模型 Pill -->
+                <button class="micro-pill" title="点击切换模型">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"></rect><rect x="9" y="9" width="6" height="6"></rect><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2"></path></svg>
+                  <span>gemini-3.8-flash</span>
+                  <span style="font-size: 8px; color: var(--muted-foreground);">▾</span>
+                </button>
+              </div>
+
+              <div class="control-strip-right">
+                <button class="icon-btn" style="width: 24px; height: 24px;" title="附加文件">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>
+                </button>
+                <button class="send-action-btn" title="发送 (Enter)">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+</body>
+</html>

@@ -1,5 +1,6 @@
 import * as React from 'react';
-import { Folder, MessageSquare, Plus, Search, Users } from 'lucide-react';import { t } from '../i18n/index.js';
+import { Folder, Layers, Plus, Search, Users } from 'lucide-react';
+import { t } from '../i18n/index.js';
 import { Badge } from './primitives/Badge.js';
 import { Button } from './primitives/Button.js';
 import { Input } from './primitives/Input.js';
@@ -66,10 +67,10 @@ function CollageAvatar({ members, profiles, size }: { members: string[]; profile
 function ActivityDot({ state }: { state?: LeftRailSession['activityState'] }): React.ReactElement | null {
   // 运行中指示点由 styles.css 定义的 fluxActivityPulse 关键帧提供微光呼吸动效
   if (state === 'running') {
-    return <span className="activity-pulse-indicator size-2 shrink-0 rounded-full bg-primary" title={t('rail.activityRunning')} data-status="running" />;
+    return <span className="activity-pulse-indicator size-2 shrink-0 rounded-full bg-primary ring-2 ring-primary/20" title={t('rail.activityRunning')} data-status="running" />;
   }
   if (state === 'unread') {
-    return <span className="activity-unread-badge size-1.5 shrink-0 rounded-full bg-success" title={t('rail.activityUnread')} data-status="unread" />;
+    return <span className="activity-unread-badge size-1.5 shrink-0 rounded-full bg-success ring-2 ring-success/20" title={t('rail.activityUnread')} data-status="unread" />;
   }
   return null;
 }
@@ -90,6 +91,34 @@ function RowTime({ timestamp, fallback }: { timestamp?: number; fallback?: strin
   return <time className="shrink-0 font-code text-caption text-muted-foreground tabular-nums" dateTime={iso}>{value}</time>;
 }
 
+/** 微轨 Agent 按钮单一实现，消灭大总管与其他 Agent 的双标分裂 */
+function AgentStationItem({
+  agent,
+  active,
+  onClick,
+  onContextMenu,
+}: {
+  agent: LeftRailProfile;
+  active: boolean;
+  onClick: () => void;
+  onContextMenu: (event: React.MouseEvent) => void;
+}): React.ReactElement {
+  return <Button
+    variant="ghost"
+    size="icon"
+    className={`station-agent-badge rail-pinned-bot-row relative size-[42px] shrink-0 rounded-lg border p-0 transition-all duration-150 ${active ? 'active border-primary bg-primary-subtle' : 'border-transparent bg-transparent hover:bg-card-hover/70'}`}
+    data-profile={agent.name}
+    data-station-profile={agent.name}
+    title={t('rail.enterBotChat', { name: agent.displayName || agent.name })}
+    onClick={onClick}
+    onContextMenu={onContextMenu}
+  >
+    <Avatar profile={agent} size={36} />
+    {agent.activityState === 'running' && <span className="activity-pulse-indicator absolute -right-0.5 -top-0.5 size-2 rounded-full bg-primary ring-2 ring-primary/20" title={t('rail.activityRunning')} data-status="running" />}
+    {agent.activityState === 'unread' && <span className="activity-unread-badge absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-success ring-2 ring-success/20" title={t('rail.activityUnread')} data-status="unread" />}
+  </Button>;
+}
+
 /**
  * 会话行（用户定案形态，优化收敛）。
  * 【设计意图】去边框纯对比色：对齐现代极简设计，激活态依靠 bg-card-active 纯对比背景色标定；
@@ -106,22 +135,22 @@ function SessionRow({ session, active, compact, onSelect, onMenu }: {
   const subtitle = toSnippet(session.preview) || toSnippet(session.title);
   return <button
     type="button"
-    className={`session-item group relative flex w-full items-center gap-2 rounded-md px-2 text-left transition-colors ${compact ? 'min-h-8' : 'min-h-12'} ${active ? 'active bg-card-active' : 'hover:bg-card-hover'}`}
+    className={`session-item group relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors duration-150 ${compact ? 'min-h-8' : 'min-h-12'} ${active ? 'active bg-card-active text-foreground' : 'hover:bg-card-hover/80 text-secondary-foreground hover:text-foreground'}`}
     data-id={session.id}
     data-title={session.title}
     data-bot={session.botName || ''}
     onClick={onSelect}
     onContextMenu={(event) => { event.preventDefault(); onMenu(event.clientX, event.clientY); }}
   >
-    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+    <span className="flex min-w-0 flex-1 flex-col gap-1.5">
       <span className="flex min-w-0 items-center justify-between gap-2">
-        <span className="truncate text-body font-medium leading-tight text-foreground">{session.title}</span>
+        <span className="truncate text-body font-medium leading-snug text-foreground">{session.title}</span>
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
           <ActivityDot state={session.activityState} />
           <RowTime timestamp={session.timestamp} fallback={session.time} />
         </span>
       </span>
-      {!compact && <span className="truncate text-aux font-normal leading-tight text-muted-foreground">{subtitle}</span>}
+      {!compact && <span className="truncate text-aux font-normal leading-snug text-muted-foreground/90">{subtitle}</span>}
     </span>
   </button>;
 }
@@ -138,28 +167,28 @@ function GroupRow({ group, profiles, active, editing, onSelect, onMenu, onConfir
   onCancelRename: () => void;
 }): React.ReactElement {
   if (editing) {
-    return <div className="rail-group-item rail-group-inline-rename-wrap active min-h-10 rounded-md bg-card-active px-2" data-room-id={group.roomId}>
+    return <div className="rail-group-item rail-group-inline-rename-wrap active min-h-12 rounded-lg bg-card-active px-2" data-room-id={group.roomId}>
       <RenameGroup initialName={group.name} roomId={group.roomId} onConfirm={onConfirmRename} onCancel={onCancelRename} />
     </div>;
   }
   const subtitle = toSnippet(group.lastMessage) || t('rail.groupsMembers', { count: String(group.members.length) });
   return <button
     type="button"
-    className={`rail-group-item group flex w-full min-h-10 items-center gap-2 rounded-md px-2 py-1 text-left transition-colors ${active ? 'active bg-card-active' : 'hover:bg-card-hover'}`}
+    className={`rail-group-item group flex w-full min-h-12 items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors duration-150 ${active ? 'active bg-card-active text-foreground' : 'hover:bg-card-hover/80 text-secondary-foreground hover:text-foreground'}`}
     data-room-id={group.roomId}
     onClick={onSelect}
     onContextMenu={(event) => { event.preventDefault(); onMenu(event.clientX, event.clientY); }}
   >
-    <CollageAvatar members={group.members} profiles={profiles} size={28} />
+    <CollageAvatar members={group.members} profiles={profiles} size={36} />
     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
       <span className="flex min-w-0 items-center justify-between gap-2">
-        <span className="truncate text-body font-medium leading-tight text-foreground">{group.name}</span>
+        <span className="truncate text-body font-medium leading-snug text-foreground">{group.name}</span>
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
           <ActivityDot state={group.activityState} />
           <RowTime timestamp={group.updatedAt || group.createdAt} />
         </span>
       </span>
-      <span className="truncate text-aux font-normal leading-tight text-muted-foreground">{subtitle}</span>
+      <span className="truncate text-aux font-normal leading-snug text-muted-foreground/90">{subtitle}</span>
     </span>
   </button>;
 }
@@ -218,7 +247,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
   const { model } = props;
   const focus = model.currentFocus;
   const profile = model.selectedAgent;
-  const railWidth = props.collapsed ? 'var(--geo-micro-rail, 52px)' : 'var(--rail-w-left, 264px)';
+  const railWidth = props.collapsed ? 'var(--geo-micro-rail, 52px)' : 'var(--rail-w-left, 296px)';
 
   const activeSessionBotName = focus.type === 'session'
     ? model.activeSessions.find((s) => s.id === focus.sessionId)?.botName
@@ -241,44 +270,30 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
     style={{ flex: `0 0 ${railWidth}`, width: railWidth, minWidth: railWidth, maxWidth: railWidth }}
     data-testid="react-left-rail"
   >
-    <div id="flux-station-rail" className="flex w-[var(--geo-micro-rail,52px)] shrink-0 flex-col items-center gap-2 border-r border-border-subtle bg-panel py-2">
-      <Button
-        variant="ghost"
-        size="icon"
-        className={`size-9 rounded-md border ${isAgentActive(model.defaultAgent.name) ? 'border-primary bg-primary-subtle' : 'border-transparent bg-transparent hover:bg-card/60'}`}
-        data-profile="default"
-        data-station-profile="default"
-        title={t('rail.enterBotChat', { name: model.defaultAgent.displayName || t('rail.defaultAssistant') })}
+    <div id="flux-station-rail" className="flex w-[var(--geo-micro-rail,52px)] shrink-0 flex-col items-center gap-2 border-r border-border-subtle bg-sidebar py-2.5">
+      <AgentStationItem
+        agent={model.defaultAgent}
+        active={isAgentActive(model.defaultAgent.name)}
         onClick={() => props.onSelectBot('default')}
         onContextMenu={(event) => openBotMenu(event, 'default')}
-      >
-        <Avatar profile={model.defaultAgent} size={30} />
-      </Button>
+      />
       <div className="station-agents-scroll flex min-h-0 w-full flex-1 flex-col items-center gap-2 overflow-y-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {model.otherAgents.map((agent) => <Button
+        {model.otherAgents.map((agent) => <AgentStationItem
           key={agent.name}
-          variant="ghost"
-          size="icon"
-          className={`station-agent-badge rail-pinned-bot-row relative size-9 shrink-0 rounded-md border p-0 ${isAgentActive(agent.name) ? 'active border-primary bg-primary-subtle' : 'border-transparent bg-transparent hover:bg-card/60'}`}
-          data-profile={agent.name}
-          data-station-profile={agent.name}
-          title={t('rail.enterBotChat', { name: agent.displayName || agent.name })}
+          agent={agent}
+          active={isAgentActive(agent.name)}
           onClick={() => props.onSelectBot(agent.name)}
           onContextMenu={(event) => openBotMenu(event, agent.name)}
-        >
-          <Avatar profile={agent} size={30} />
-          {agent.activityState === 'running' && <span className="activity-pulse-indicator absolute -right-0.5 -top-0.5 size-2 rounded-full bg-primary" title={t('rail.activityRunning')} data-status="running" />}
-          {agent.activityState === 'unread' && <span className="activity-unread-badge absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-success" title={t('rail.activityUnread')} data-status="unread" />}
-        </Button>)}
+        />)}
       </div>
-      <div className="flex w-full flex-col items-center gap-2 border-t border-border-subtle pt-2">
-        <Button id="rail-station-groups-btn" variant="ghost" size="icon" className="relative size-9 rounded-md bg-panel text-secondary-foreground" title={t('rail.groups')} onClick={() => props.onSetTab('groups')}>
-          <Users size={15} />
+      <div className="flex w-full flex-col items-center gap-1.5 border-t border-border-subtle pt-2">
+        <Button id="rail-station-groups-btn" variant="ghost" size="icon" className="relative size-[38px] rounded-lg text-secondary-foreground hover:bg-card-hover hover:text-foreground transition-colors" title={t('rail.groups')} onClick={() => props.onSetTab('groups')}>
+          <Users size={16} />
           {model.hasRunningGroup && <span className="activity-pulse-indicator absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-primary" data-status="running" />}
           {!model.hasRunningGroup && model.hasUnreadGroup && <span className="activity-unread-badge absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-success" data-status="unread" />}
         </Button>
-        <Button id="rail-station-projects-btn" variant="ghost" size="icon" className="size-9 rounded-md bg-panel text-secondary-foreground" title={t('rail.projects')} onClick={() => props.onSetTab('projects')}>
-          <Folder size={15} />
+        <Button id="rail-station-projects-btn" variant="ghost" size="icon" className="size-[38px] rounded-lg text-secondary-foreground hover:bg-card-hover hover:text-foreground transition-colors" title={t('rail.projects')} onClick={() => props.onSetTab('projects')}>
+          <Folder size={16} />
         </Button>
         {/* PR-3d 用户定案：微轨底部"新建会话 +"与"‹ 折叠"两按钮删除。
             新建入口收编到会话/群聊 header 右侧 +；折叠入口保留顶栏 PanelLeft 与 Ctrl+B，
@@ -289,10 +304,10 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
     {!props.collapsed && <div className="flux-context-drawer flex min-w-0 flex-1 flex-col overflow-hidden bg-sidebar">
       <div className="flex flex-col gap-2 p-2.5 pb-1.5">
         <label className="relative block">
-          <Search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" size={13} />
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/70" size={13} />
           <Input
             id="session-search-input"
-            className="h-8 rounded-md border border-border-subtle bg-panel pl-7 pr-2 text-aux"
+            className="h-8 rounded-md border border-border-subtle bg-panel/70 pl-8 pr-2.5 text-aux transition-colors placeholder:text-muted-foreground/50 hover:border-border focus:border-primary/40 focus:bg-panel"
             placeholder={t('rail.searchPlaceholder')}
             value={props.searchQuery}
             onChange={(event) => props.onSearchChange(event.currentTarget.value)}
@@ -300,7 +315,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
         </label>
         <Button
           variant="ghost"
-          className={`rail-pinned-bot-row rail-primary-agent-card flex min-h-12 items-center justify-start gap-2 rounded-lg px-2 text-left transition-colors ${isBotFocused(focus, profile.name) ? 'active bg-card-active' : 'bg-panel hover:bg-card-hover'}`}
+          className={`rail-pinned-bot-row rail-primary-agent-card flex min-h-12 items-center justify-start gap-2.5 rounded-lg border px-2.5 text-left transition-all duration-150 ${isBotFocused(focus, profile.name) ? 'active border-primary/30 bg-card-active shadow-sm' : 'border-border-subtle bg-card/40 hover:border-border hover:bg-card-hover/80'}`}
           data-primary-bot={profile.name}
           data-profile={profile.name}
           title={t('rail.enterBotChat', { name: profile.displayName || profile.name })}
@@ -309,8 +324,8 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
         >
           <Avatar profile={profile} size={32} />
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="truncate text-aux font-medium text-foreground">{profile.displayName || profile.name}</span>
-            <span className="truncate text-aux font-normal text-muted-foreground">{toSnippet(profile.lastMessage || profile.description) || t('rail.defaultBotSnippet')}</span>
+            <span className="truncate text-body font-semibold text-foreground leading-tight">{profile.displayName || profile.name}</span>
+            <span className="truncate text-caption font-normal text-muted-foreground leading-tight">{toSnippet(profile.lastMessage || profile.description) || t('rail.defaultBotSnippet')}</span>
           </span>
           <span className="ml-auto flex shrink-0 items-center gap-1.5">
             <ActivityDot state={profile.activityState} />
@@ -325,15 +340,16 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
         {model.visibleGroups.length > 0 && <section className="mb-2">
           {/* PR-3d 用户定案：header 字号行高放大一档，删 ⌄/› 文本箭头（折叠态由列表显隐与点击整行表达），
               右侧 + 为新建群聊入口；计数徽标沿用既有 visibleGroups.length，非新增数据面。 */}
-          <div className="flex w-full items-center gap-1 pr-1">
-            <button type="button" id="rail-groups-accordion-trigger" className="flex min-w-0 flex-1 items-center gap-1.5 px-1.5 py-2 text-left text-body font-semibold text-muted-foreground" onClick={props.onToggleGroups}>
-              <Users size={13} />{t('rail.groups')} ({model.visibleGroups.length})
+          <div className="flex w-full items-center justify-between gap-1 px-2 py-1 text-muted-foreground hover:text-foreground transition-colors mb-1">
+            <button type="button" id="rail-groups-accordion-trigger" className="flex min-w-0 flex-1 items-center gap-2.5 text-left text-body font-semibold transition-colors" onClick={props.onToggleGroups}>
+              <Users size={13} className="opacity-75 shrink-0" />
+              <span>{t('rail.groups')}</span>
             </button>
-            <Button variant="ghost" size="icon" className="rail-new-group-btn relative size-6 shrink-0 rounded p-0 text-muted-foreground hover:text-foreground after:absolute after:-inset-1.5 after:content-['']" title={t('rail.newGroup')} aria-label={t('rail.newGroup')} onClick={() => props.onNewChat('group')}>
+            <Button variant="ghost" size="icon" className="rail-new-group-btn relative size-6 shrink-0 rounded p-0 text-muted-foreground hover:bg-card-hover hover:text-foreground transition-colors after:absolute after:-inset-1.5 after:content-['']" title={t('rail.newGroup')} aria-label={t('rail.newGroup')} onClick={() => props.onNewChat('group')}>
               <Plus size={13} />
             </Button>
           </div>
-          <div id="rail-groups-nested-list" className="flex flex-col gap-0.5" style={{ display: model.isGroupsOpen ? 'flex' : 'none' }}>
+          <div id="rail-groups-nested-list" className="flex flex-col gap-2" style={{ display: model.isGroupsOpen ? 'flex' : 'none' }}>
             {model.visibleGroups.map((group) => <GroupRow
               key={group.roomId}
               group={group}
@@ -351,15 +367,16 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
 
         <section className="mb-2">
           {/* 会话 header 同构：放大字号、删箭头、右侧 + 新建会话（复用 NewTaskModal solo 态）。 */}
-          <div className="flex w-full items-center gap-1 pr-1">
-            <button type="button" id="rail-sessions-accordion-trigger" className="flex min-w-0 flex-1 items-center gap-1.5 px-1.5 py-2 text-left text-body font-semibold text-muted-foreground" onClick={props.onToggleSessions}>
-              <MessageSquare size={13} />{t('rail.conversations')} ({model.activeSessions.length})
+          <div className="flex w-full items-center justify-between gap-1 px-2 py-1 text-muted-foreground hover:text-foreground transition-colors mb-1">
+            <button type="button" id="rail-sessions-accordion-trigger" className="flex min-w-0 flex-1 items-center gap-2.5 text-left text-body font-semibold transition-colors" onClick={props.onToggleSessions}>
+              <Layers size={13} className="opacity-75 shrink-0" />
+              <span>{t('rail.conversations')}</span>
             </button>
-            <Button variant="ghost" size="icon" className="rail-new-session-btn relative size-6 shrink-0 rounded p-0 text-muted-foreground hover:text-foreground after:absolute after:-inset-1.5 after:content-['']" title={t('rail.newChat')} aria-label={t('rail.newChat')} onClick={() => props.onNewChat('session')}>
+            <Button variant="ghost" size="icon" className="rail-new-session-btn relative size-6 shrink-0 rounded p-0 text-muted-foreground hover:bg-card-hover hover:text-foreground transition-colors after:absolute after:-inset-1.5 after:content-['']" title={t('rail.newChat')} aria-label={t('rail.newChat')} onClick={() => props.onNewChat('session')}>
               <Plus size={13} />
             </Button>
           </div>
-          <div id="rail-sessions-nested-list" className="flex flex-col gap-0.5" style={{ display: model.isSessionsOpen ? 'flex' : 'none' }}>
+          <div id="rail-sessions-nested-list" className="flex flex-col gap-2" style={{ display: model.isSessionsOpen ? 'flex' : 'none' }}>
             {model.activeSessions.length > 0
               ? model.activeSessions.map((session) => <SessionRow
                 key={session.id}

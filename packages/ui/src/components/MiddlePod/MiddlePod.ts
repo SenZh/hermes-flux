@@ -130,7 +130,7 @@ export function renderConversationCanvas(props: MiddlePodProps): string {
   const agentDisplayName = (props.profileName || 'default').toUpperCase();
 
   return `
-    <div class="content-fluid-canvas" style="width: 100%; max-width: 100%; margin: 0; display: flex; flex-direction: column; gap: 8px; position: relative;">
+    <div class="content-fluid-canvas" style="width: 100%; max-width: 100%; margin: 0; display: flex; flex-direction: column; gap: 18px; position: relative;">
       ${renderContextGauge(props.contextUsage)}
       ${
         props.gatewayConnecting
@@ -577,16 +577,16 @@ export function renderMessage(
 
   if (isUser) {
     return `
-      <div class="message-row user-row" data-msg-id="${m.id}" data-row-id="${m.rowId ?? ''}" style="display: flex; flex-direction: column; align-items: flex-end; width: 100%; margin: 4px 0;">
+      <div class="message-row user-row" data-msg-id="${m.id}" data-row-id="${m.rowId ?? ''}" style="display: flex; flex-direction: column; align-items: flex-end; width: 100%; margin: 6px 0;">
         <div class="user-bubble" style="
-          max-width: 85%;
+          max-width: 82%;
           background: var(--chat-user-message-bg, var(--bg-card));
           border: 1px solid var(--border-medium);
           border-radius: 12px 12px 3px 12px;
-          padding: 8px 14px;
+          padding: 10px 14px;
           color: var(--text-main);
-          font-size: 13px;
-          line-height: 1.42;
+          font-size: 13.5px;
+          line-height: 1.55;
           box-shadow: var(--shadow-card);
           word-break: break-word;
         ">
@@ -714,12 +714,12 @@ export function renderMessage(
           ? `
         <div id="msg-content-${m.id}" class="assistant-content prose-block" style="
           color: var(--text-main);
-          font-size: 13px;
-          line-height: 1.42;
+          font-size: 13.5px;
+          line-height: 1.58;
           display: flex;
           flex-direction: column;
-          gap: 3px;
-          margin-top: 2px;
+          gap: 6px;
+          margin-top: 3px;
         ">
           ${renderMarkdown(cleanContent)}
         </div>
@@ -727,12 +727,12 @@ export function renderMessage(
           : `
         <div id="msg-content-${m.id}" class="assistant-content prose-block" style="
           color: var(--text-main);
-          font-size: 13px;
-          line-height: 1.42;
+          font-size: 13.5px;
+          line-height: 1.58;
           display: flex;
           flex-direction: column;
-          gap: 3px;
-          margin-top: 1px;
+          gap: 6px;
+          margin-top: 2px;
         "></div>
       `
       }

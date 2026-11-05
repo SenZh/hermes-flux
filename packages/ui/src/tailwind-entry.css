@@ -58,9 +58,10 @@
   --color-warning: var(--warning);
   --color-border: var(--border);
   --color-ring: var(--ring);
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
+  --radius-sm: var(--radius-inner, 4px);
+  --radius-md: var(--radius-card, 6px);
+  --radius-lg: var(--radius-panel, 8px);
+  --radius-xl: var(--radius-window, 12px);
   --radius-full: 9999px;
   --font-ui: var(--font-sans);
   --font-code: var(--font-mono);

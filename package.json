@@ -12,6 +12,7 @@
     "build:desktop": "node packages/desktop/scripts/build.mjs",
     "build": "npm run build:core && npm run build:ui && npm run build:desktop",
     "build:mobile:assets": "node packages/mobile/scripts/prepare-assets.mjs",
+    "start:browser": "npm run build && node scripts/start-browser-live.mjs",
     "package:desktop:win": "npm --workspace=@hermes-flux/desktop run package:win",
     "package:desktop:win:dir": "npm --workspace=@hermes-flux/desktop run package:win:dir",
     "package:mobile:android": "npm --workspace=@hermes-flux/mobile run build:android",

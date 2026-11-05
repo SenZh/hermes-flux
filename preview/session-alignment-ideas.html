@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>会话与群聊/Agent 垂直对齐优化提案</title>
+  <style>
+    :root {
+      --bg: #0E0F13;
+      --sidebar: #131419;
+      --card: #1B1C23;
+      --card-active: #292B37;
+      --text-main: #E8E9EC;
+      --text-sub: #8E939E;
+      --text-muted: #636773;
+      --border-subtle: rgba(255, 255, 255, 0.06);
+      --border-medium: rgba(255, 255, 255, 0.12);
+      --specular: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      --green: #10B981;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
+      background: var(--bg);
+      color: var(--text-main);
+      padding: 24px;
+    }
+    h2 { font-size: 16px; margin-bottom: 6px; }
+    p.desc { font-size: 12.5px; color: var(--text-sub); margin-bottom: 20px; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(296px, 1fr));
+      gap: 24px;
+    }
+    .panel {
+      width: 296px;
+      background: var(--sidebar);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 12px;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.5), var(--specular);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .panel-tag {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 4px;
+      display: flex;
+      justify-content: space-between;
+    }
+    .tag-badge {
+      font-size: 10px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      background: rgba(255,255,255,0.08);
+      color: var(--text-sub);
+    }
+    .panel-note {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+      line-height: 1.4;
+    }
+
+    /* 示例卡片组件 */
+    .agent-card {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: 7px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border-subtle);
+      margin-bottom: 6px;
+    }
+    .avatar-36 {
+      width: 36px;
+      height: 36px;
+      border-radius: 7px;
+      background: var(--card);
+      border: 1px solid var(--border-medium);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+    .group-avatar-wrap {
+      width: 36px;
+      height: 36px;
+      position: relative;
+      flex-shrink: 0;
+    }
+    .sub-avatar {
+      position: absolute;
+      width: 24px;
+      height: 24px;
+      border-radius: 5px;
+      background: var(--card);
+      border: 1.5px solid var(--sidebar);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 600;
+    }
+
+    .card-info {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .card-title {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text-main);
+      display: flex;
+      justify-content: space-between;
+    }
+    .card-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .sec-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 10px;
+      border-radius: 6px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border-subtle);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin: 4px 0 6px;
+    }
+
+    /* 会话行基类 */
+    .session-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      min-height: 48px;
+      padding: 7px 10px;
+      border-radius: 6px;
+      background: transparent;
+      cursor: pointer;
+    }
+    .session-item.active {
+      background: var(--card-active);
+    }
+
+    /* 辅助垂直参考对齐线 */
+    .guide-line {
+      border-left: 1px dashed rgba(255, 100, 100, 0.4);
+      margin-left: 46px; /* 对齐基准 X 坐标 */
+      padding-left: 6px;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>会话与群聊/Agent 垂直对齐分析与 3 大解决方案</h2>
+  <p class="desc">
+    红色虚线是【上方文字的垂直扫描线 (X=46px)】。<br>
+    现状中会话直接贴左侧排（X=10px），产生了整整 36px 的左错位断层。以下是 3 种专业解决思路：
+  </p>
+
+  <div class="grid">
+
+    <!-- 方案 0: 当前现状 (对比断层) -->
+    <div class="panel">
+      <div class="panel-tag">
+        <span>当前现状：左突错位</span>
+        <span class="tag-badge">As-Is</span>
+      </div>
+      <div class="panel-note">下方会话文字比上方左突了 36px，上下视线撕裂。</div>
+
+      <!-- 上方 Agent -->
+      <div class="agent-card">
+        <div class="avatar-36">法</div>
+        <div class="card-info">
+          <div class="card-title"><span>xiaofawang</span><span>11:35</span></div>
+          <div class="card-sub">任务已全部安排妥当...</div>
+        </div>
+      </div>
+
+      <!-- 上方群聊 -->
+      <div class="agent-card">
+        <div class="group-avatar-wrap">
+          <div class="sub-avatar" style="top:0;left:0;">法</div>
+          <div class="sub-avatar" style="bottom:0;right:0;z-index:2;box-shadow:-1px -1px 3px rgba(0,0,0,0.5);">管</div>
+        </div>
+        <div class="card-info">
+          <div class="card-title"><span>财务与法务群</span><span>10:20</span></div>
+          <div class="card-sub">老王: 建议先做减法...</div>
+        </div>
+      </div>
+
+      <div class="sec-header"><span>会话</span><span>+</span></div>
+
+      <!-- 会话行 -->
+      <div class="session-item active">
+        <div class="card-info">
+          <div class="card-title"><span>友好问候</span><span>11:35</span></div>
+          <div class="card-sub">周六上午 9:00 去派出所...</div>
+        </div>
+      </div>
+      <div class="session-item">
+        <div class="card-info">
+          <div class="card-title"><span>评估 Relay 商业化</span><span>10/31</span></div>
+          <div class="card-sub">Relay 技术的实现原理...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 方案 A: 严格基准线缩进 (对齐参考线) -->
+    <div class="panel">
+      <div class="panel-tag">
+        <span>方案 A: 优雅基准线对齐 (推荐)</span>
+        <span class="tag-badge">Baseline Align</span>
+      </div>
+      <div class="panel-note">文字左边缘严格与上方头像右侧文字对齐（X=46px），整齐划一！</div>
+
+      <div class="agent-card">
+        <div class="avatar-36">法</div>
+        <div class="card-info">
+          <div class="card-title"><span>xiaofawang</span><span>11:35</span></div>
+          <div class="card-sub">任务已全部安排妥当...</div>
+        </div>
+      </div>
+
+      <div class="agent-card">
+        <div class="group-avatar-wrap">
+          <div class="sub-avatar" style="top:0;left:0;">法</div>
+          <div class="sub-avatar" style="bottom:0;right:0;z-index:2;box-shadow:-1px -1px 3px rgba(0,0,0,0.5);">管</div>
+        </div>
+        <div class="card-info">
+          <div class="card-title"><span>财务与法务群</span><span>10:20</span></div>
+          <div class="card-sub">老王: 建议先做减法...</div>
+        </div>
+      </div>
+
+      <div class="sec-header"><span>会话</span><span>+</span></div>
+
+      <!-- 会话行（文字起始 X 坐标严格对齐上方 46px） -->
+      <div class="session-item active" style="padding-left: 46px;">
+        <div class="card-info">
+          <div class="card-title"><span>友好问候</span><span>11:35</span></div>
+          <div class="card-sub">周六上午 9:00 去派出所...</div>
+        </div>
+      </div>
+      <div class="session-item" style="padding-left: 46px;">
+        <div class="card-info">
+          <div class="card-title"><span>评估 Relay 商业化</span><span>10/31</span></div>
+          <div class="card-sub">Relay 技术的实现原理...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 方案 B: 轻量微状态环 (填补左侧空白) -->
+    <div class="panel">
+      <div class="panel-tag">
+        <span>方案 B: 左侧轻量微圆点/微徽标</span>
+        <span class="tag-badge">Micro Indicator</span>
+      </div>
+      <div class="panel-note">在左侧放一个 8px 发丝微圆点居中，自然把文字推到对齐线上。</div>
+
+      <div class="agent-card">
+        <div class="avatar-36">法</div>
+        <div class="card-info">
+          <div class="card-title"><span>xiaofawang</span><span>11:35</span></div>
+          <div class="card-sub">任务已全部安排妥当...</div>
+        </div>
+      </div>
+
+      <div class="agent-card">
+        <div class="group-avatar-wrap">
+          <div class="sub-avatar" style="top:0;left:0;">法</div>
+          <div class="sub-avatar" style="bottom:0;right:0;z-index:2;box-shadow:-1px -1px 3px rgba(0,0,0,0.5);">管</div>
+        </div>
+        <div class="card-info">
+          <div class="card-title"><span>财务与法务群</span><span>10:20</span></div>
+          <div class="card-sub">老王: 建议先做减法...</div>
+        </div>
+      </div>
+
+      <div class="sec-header"><span>会话</span><span>+</span></div>
+
+      <!-- 会话行（左侧带 36px 宽的居中轻量微点占位） -->
+      <div class="session-item active">
+        <div style="width: 36px; display:flex; justify-content:center; align-items:center; flex-shrink:0;">
+          <div style="width:7px; height:7px; border-radius:50%; background:var(--green);"></div>
+        </div>
+        <div class="card-info">
+          <div class="card-title"><span>友好问候</span><span>11:35</span></div>
+          <div class="card-sub">周六上午 9:00 去派出所...</div>
+        </div>
+      </div>
+      <div class="session-item">
+        <div style="width: 36px; display:flex; justify-content:center; align-items:center; flex-shrink:0;">
+          <div style="width:7px; height:7px; border-radius:50%; border:1px solid var(--text-muted);"></div>
+        </div>
+        <div class="card-info">
+          <div class="card-title"><span>评估 Relay 商业化</span><span>10/31</span></div>
+          <div class="card-sub">Relay 技术的实现原理...</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</body>
+</html>

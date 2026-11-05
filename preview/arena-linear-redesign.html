@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="linear-dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hermes Flux × Linear 工业级极客暗黑竞技场</title>
+  <style>
+    /* ==========================================================================
+       LINEAR 工业级纯粹深色真值体系 (100% 像素级对齐用户提供的截图)
+       ========================================================================== */
+    :root {
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      --font-mono: "SF Mono", "JetBrains Mono", Consolas, monospace;
+
+      /* 1. 极致纯粹的 Linear 冷碳黑阶梯 (绝无死黑，3%~4% 微阶递进) */
+      --ln-bg-canvas: #0E0F12;      /* 最底层画布 */
+      --ln-bg-sidebar: #121316;     /* 侧边栏/底栏 */
+      --ln-bg-surface: #15161A;     /* 面板与主舞台 */
+      --ln-bg-card: #18191E;        /* 卡片/气泡底色 */
+      --ln-bg-hover: #1F2026;       /* 悬浮态 */
+      --ln-bg-active: #252730;      /* 选中态 */
+      --ln-bg-input: #131417;       /* 输入框背景 */
+
+      /* 2. 文本灰阶 (杜绝 100% 死白反差，保护长时间盯屏眼力) */
+      --ln-text-main: #E6E6E8;      /* 主文本 (88% 柔白) */
+      --ln-text-sub: #8A8F98;       /* 二级文本 (铅笔灰) */
+      --ln-text-muted: #5C6068;     /* 三级/时间/快捷键 */
+      --ln-text-faint: #3E4148;     /* 极淡边框/占位符 */
+
+      /* 3. 发丝边框与物理微反光 (Linear 灵魂) */
+      --ln-border: rgba(255, 255, 255, 0.05);
+      --ln-border-strong: rgba(255, 255, 255, 0.08);
+      --ln-hairline-specular: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      --ln-shadow-card: 0 4px 20px rgba(0, 0, 0, 0.4);
+
+      /* 4. 克制点缀色 (仅限 10px 微型指示点) */
+      --ln-accent-green: #10B981;
+      --ln-accent-orange: #F59E0B;
+      --ln-accent-blue: #3B82F6;
+
+      /* 5. Linear 严苛微型字阶 */
+      --fs-title: 15px;
+      --fs-body: 13px;
+      --fs-sub: 12px;
+      --fs-caption: 11px;
+      --fs-micro: 10px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
+    body {
+      font-family: var(--font-sans);
+      background: #08080A;
+      color: var(--ln-text-main);
+      padding: 12px;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* 顶部竞技场切换控制条 */
+    .arena-header-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 14px;
+      background: var(--ln-bg-sidebar);
+      border: 1px solid var(--ln-border);
+      border-radius: 8px;
+      box-shadow: var(--ln-hairline-specular);
+    }
+    .arena-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--ln-text-main);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .arena-badge {
+      font-size: 10px;
+      font-family: var(--font-mono);
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--ln-text-sub);
+    }
+    .mode-switcher {
+      display: flex;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 2px;
+      border-radius: 6px;
+      border: 1px solid var(--ln-border);
+    }
+    .switch-btn {
+      padding: 4px 12px;
+      border-radius: 4px;
+      border: none;
+      background: transparent;
+      color: var(--ln-text-sub);
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.12s ease;
+    }
+    .switch-btn.active {
+      background: var(--ln-bg-active);
+      color: var(--ln-text-main);
+      box-shadow: var(--ln-hairline-specular);
+    }
+
+    /* 桌面外壳容器 (模拟真实 Electron 窗口) */
+    .desktop-viewport {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      border-radius: 10px;
+      border: 1px solid var(--ln-border-strong);
+      background: var(--ln-bg-canvas);
+      overflow: hidden;
+      box-shadow: 0 20px 48px rgba(0, 0, 0, 0.6);
+      position: relative;
+    }
+
+    /* 40px Linear 极简发丝顶栏 */
+    .ln-titlebar {
+      height: 38px;
+      background: var(--ln-bg-sidebar);
+      border-bottom: 1px solid var(--ln-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px;
+      box-shadow: var(--ln-hairline-specular);
+    }
+    .ln-titlebar-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--ln-text-main);
+      font-weight: 500;
+    }
+    .ln-traffic-dots {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .ln-dot { width: 9px; height: 9px; border-radius: 50%; }
+    .ln-dot-close { background: #E05252; }
+    .ln-dot-min { background: #E0A030; }
+    .ln-dot-max { background: #34C759; }
+
+    .ln-crumb {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--ln-text-sub);
+      font-size: 12px;
+    }
+    .ln-crumb span.active {
+      color: var(--ln-text-main);
+      font-weight: 600;
+    }
+
+    .ln-titlebar-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--ln-text-muted);
+    }
+    .ln-status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--ln-border);
+    }
+    .ln-green-pulse {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--ln-accent-green);
+    }
+
+    /* 主布局 */
+    .ln-main-layout {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* --------------------------------------------------------------------------
+       侧边栏：极致 28px 紧密行高 (完全对照 Linear 图 1 左侧)
+       -------------------------------------------------------------------------- */
+    .ln-sidebar {
+      width: 220px;
+      background: var(--ln-bg-sidebar);
+      border-right: 1px solid var(--ln-border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    .ln-workspace-selector {
+      padding: 8px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--ln-text-main);
+      border-bottom: 1px solid var(--ln-border);
+      cursor: pointer;
+    }
+    .ln-workspace-selector:hover { background: var(--ln-bg-hover); }
+
+    .ln-nav-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 6px 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      scrollbar-width: none;
+    }
+    .ln-nav-scroll::-webkit-scrollbar { display: none; }
+
+    .ln-nav-section-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--ln-text-muted);
+      padding: 8px 8px 3px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      text-transform: capitalize;
+    }
+
+    /* Linear 单行 26px~28px 紧密条目 */
+    .ln-nav-item {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      height: 28px;
+      padding: 0 8px;
+      border-radius: 5px;
+      color: var(--ln-text-sub);
+      font-size: 12px;
+      cursor: pointer;
+      border: none;
+      background: transparent;
+      width: 100%;
+      text-align: left;
+      transition: background 0.1s ease, color 0.1s ease;
+    }
+    .ln-nav-item:hover {
+      background: var(--ln-bg-hover);
+      color: var(--ln-text-main);
+    }
+    .ln-nav-item.active {
+      background: var(--ln-bg-active);
+      color: var(--ln-text-main);
+      font-weight: 500;
+      box-shadow: var(--ln-hairline-specular);
+    }
+
+    .ln-nav-icon {
+      width: 14px;
+      height: 14px;
+      color: var(--ln-text-muted);
+      flex-shrink: 0;
+    }
+    .ln-nav-item.active .ln-nav-icon {
+      color: var(--ln-text-main);
+    }
+
+    .ln-nav-meta {
+      margin-left: auto;
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      color: var(--ln-text-muted);
+    }
+
+    /* --------------------------------------------------------------------------
+       主工作舞台 (通栏时间轴与活动流)
+       -------------------------------------------------------------------------- */
+    .ln-stage {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: var(--ln-bg-surface);
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Issue 头部信息 (参照 Linear 图 1) */
+    .ln-issue-header {
+      padding: 16px 24px 12px;
+      border-bottom: 1px solid var(--ln-border);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: var(--ln-bg-surface);
+      box-shadow: var(--ln-hairline-specular);
+    }
+    .ln-issue-badge-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      font-family: var(--font-mono);
+    }
+    .ln-issue-id {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--ln-text-sub);
+      font-weight: 500;
+    }
+    .ln-state-tag {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--ln-accent-orange);
+    }
+    .ln-issue-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--ln-text-main);
+      letter-spacing: -0.01em;
+    }
+    .ln-issue-desc {
+      font-size: 13px;
+      color: var(--ln-text-sub);
+      line-height: 1.45;
+    }
+    .ln-inline-code {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--ln-border);
+      color: var(--ln-text-main);
+    }
+
+    /* 活动流 (Activity Timeline) */
+    .ln-activity-flow {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .ln-activity-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 12.5px;
+      line-height: 1.4;
+    }
+    /* 20px 极简头像 (彻底告别 40px 粗暴圆形) */
+    .ln-avatar-20 {
+      width: 20px;
+      height: 20px;
+      border-radius: 4px;
+      background: var(--ln-bg-card);
+      border: 1px solid var(--ln-border-strong);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--ln-text-sub);
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .ln-activity-body {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .ln-activity-head {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+    }
+    .ln-author {
+      font-weight: 600;
+      color: var(--ln-text-main);
+    }
+    .ln-time {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--ln-text-muted);
+    }
+
+    .ln-comment-box {
+      font-size: 13px;
+      color: var(--ln-text-main);
+      line-height: 1.45;
+    }
+
+    /* 工具与思考胶囊 (Linear 极微发丝线) */
+    .ln-tool-strip {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 5px;
+      background: var(--ln-bg-card);
+      border: 1px solid var(--ln-border);
+      box-shadow: var(--ln-hairline-specular);
+      font-size: 11.5px;
+      color: var(--ln-text-sub);
+      font-family: var(--font-mono);
+      width: fit-content;
+    }
+    .ln-diff-badge {
+      color: #34D399;
+      font-weight: 600;
+    }
+    .ln-diff-badge.del {
+      color: #F87171;
+    }
+
+    /* --------------------------------------------------------------------------
+       方案 1：贴底内嵌工作台 (Candidate 1 - Linear Pure Dock)
+       -------------------------------------------------------------------------- */
+    .ln-dock-pure {
+      padding: 10px 16px;
+      background: var(--ln-bg-sidebar);
+      border-top: 1px solid var(--ln-border);
+      box-shadow: var(--ln-hairline-specular);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .ln-dock-pure textarea {
+      width: 100%;
+      height: 38px;
+      background: var(--ln-bg-input);
+      border: 1px solid var(--ln-border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      color: var(--ln-text-main);
+      font-size: 12.5px;
+      font-family: inherit;
+      resize: none;
+      outline: none;
+      box-shadow: inset 0 1px 2px rgba(0,0,0,0.4);
+    }
+    .ln-dock-pure textarea:focus {
+      border-color: var(--ln-border-strong);
+    }
+    .ln-dock-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .ln-dock-btn {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: transparent;
+      border: 1px solid var(--ln-border);
+      color: var(--ln-text-sub);
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .ln-dock-btn:hover { background: var(--ln-bg-hover); color: var(--ln-text-main); }
+
+    .ln-send-btn {
+      height: 24px;
+      padding: 0 10px;
+      border-radius: 4px;
+      background: #3B82F6;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+    }
+
+    /* --------------------------------------------------------------------------
+       方案 2：右下角内嵌 Agent 悬浮小舱 (Candidate 2 - Linear Floating Mini-Pod)
+       完全像素级复刻用户截图 1 右下角小窗
+       -------------------------------------------------------------------------- */
+    .ln-floating-agent-window {
+      position: absolute;
+      bottom: 16px;
+      right: 18px;
+      width: 380px;
+      background: #141519;
+      border: 1px solid var(--ln-border-strong);
+      border-radius: 8px;
+      box-shadow: 0 16px 36px rgba(0,0,0,0.65), var(--ln-hairline-specular);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      z-index: 100;
+    }
+    .ln-agent-win-header {
+      height: 32px;
+      background: #17181D;
+      border-bottom: 1px solid var(--ln-border);
+      padding: 0 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11.5px;
+    }
+    .ln-agent-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 600;
+      color: var(--ln-text-main);
+    }
+    .ln-agent-model {
+      font-size: 10.5px;
+      color: var(--ln-text-muted);
+      font-family: var(--font-mono);
+      font-weight: normal;
+    }
+    .ln-agent-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--ln-text-muted);
+      cursor: pointer;
+    }
+
+    .ln-agent-win-body {
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-size: 12px;
+      line-height: 1.42;
+    }
+    .ln-agent-bubble-user {
+      align-self: flex-end;
+      background: #252730;
+      border: 1px solid var(--ln-border-strong);
+      border-radius: 6px;
+      padding: 6px 10px;
+      color: var(--ln-text-main);
+      max-width: 90%;
+    }
+    .ln-agent-meta-tag {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--ln-text-muted);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 2px;
+    }
+
+    .ln-agent-work-status {
+      font-size: 11px;
+      color: var(--ln-text-sub);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .ln-agent-diff-card {
+      background: #101114;
+      border: 1px solid var(--ln-border);
+      border-radius: 5px;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .ln-agent-win-input {
+      padding: 8px 10px;
+      background: #101114;
+      border-top: 1px solid var(--ln-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .ln-mini-input {
+      background: transparent;
+      border: none;
+      color: var(--ln-text-main);
+      font-size: 12px;
+      outline: none;
+      width: 75%;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 顶部控制与方案切换条 -->
+  <div class="arena-header-bar">
+    <div class="arena-title">
+      <span>Hermes Flux × Linear 工业级暗黑重塑竞技场</span>
+      <span class="arena-badge">NEUTRAL CARBON · 0% 杂色</span>
+    </div>
+
+    <div class="mode-switcher">
+      <button class="switch-btn active" id="btnMode1" onclick="switchMode(1)">方案 1: Linear 全通栏时间轴 (Pure Flow)</button>
+      <button class="switch-btn" id="btnMode2" onclick="switchMode(2)">方案 2: Linear 右下内嵌工作舱 (Mini Agent Pod)</button>
+    </div>
+  </div>
+
+  <!-- 桌面外壳容器 (1:1 原生桌面还原) -->
+  <div class="desktop-viewport">
+
+    <!-- 1. 顶栏 38px (紧密、微反光、低饱和) -->
+    <header class="ln-titlebar">
+      <div class="ln-titlebar-left">
+        <div class="ln-traffic-dots">
+          <div class="ln-dot ln-dot-close"></div>
+          <div class="ln-dot ln-dot-min"></div>
+          <div class="ln-dot ln-dot-max"></div>
+        </div>
+
+        <div class="ln-crumb">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path></svg>
+          <span>Hermes Flux</span>
+          <span>/</span>
+          <span class="active">xiaofawang</span>
+        </div>
+      </div>
+
+      <div class="ln-titlebar-right">
+        <div class="ln-status-indicator">
+          <div class="ln-green-pulse"></div>
+          <span>在线 170ms</span>
+        </div>
+        <span>gemini-3.8-flash</span>
+      </div>
+    </header>
+
+    <!-- 2. 主体区 (侧栏 + 画板) -->
+    <div class="ln-main-layout">
+
+      <!-- 左侧栏：极致 28px 紧密行高 (100% 对齐图 1 左侧列表) -->
+      <aside class="ln-sidebar">
+        <div class="ln-workspace-selector">
+          <span>xiaofawang 专属工作区 ▾</span>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        </div>
+
+        <div class="ln-nav-scroll">
+          <div class="ln-nav-section-title">常用 (Favorites)</div>
+          <button class="ln-nav-item active">
+            <span class="ln-state-tag"></span>
+            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">友好问候 · 派出所办证</span>
+            <span class="ln-nav-meta">11:35</span>
+          </button>
+          <button class="ln-nav-item">
+            <svg class="ln-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">评估 Relay 技术商业化</span>
+            <span class="ln-nav-meta">10/31</span>
+          </button>
+          <button class="ln-nav-item">
+            <svg class="ln-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">测试腾讯云 DeepRelay</span>
+            <span class="ln-nav-meta">10/31</span>
+          </button>
+
+          <div class="ln-nav-section-title" style="margin-top: 8px;">数字员工 (Agents)</div>
+          <button class="ln-nav-item">
+            <div class="ln-avatar-20" style="width: 16px; height: 16px; font-size: 9px;">管</div>
+            <span>大总管 (default)</span>
+          </button>
+          <button class="ln-nav-item active">
+            <div class="ln-avatar-20" style="width: 16px; height: 16px; font-size: 9px; color: var(--ln-text-main); border-color: rgba(255,255,255,0.2);">法</div>
+            <span>小法王 (xiaofawang)</span>
+            <span class="ln-nav-meta" style="color: var(--ln-accent-green);">●</span>
+          </button>
+          <button class="ln-nav-item">
+            <div class="ln-avatar-20" style="width: 16px; height: 16px; font-size: 9px;">码</div>
+            <span>CodeBoy</span>
+          </button>
+          <button class="ln-nav-item">
+            <div class="ln-avatar-20" style="width: 16px; height: 16px; font-size: 9px;">探</div>
+            <span>flux-probe-bot</span>
+          </button>
+
+          <div class="ln-nav-section-title" style="margin-top: 8px;">会话历史 (13)</div>
+          <button class="ln-nav-item">
+            <span style="color: var(--ln-text-muted); font-size: 11px;">#</span>
+            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">提供 Markdown 示例文件</span>
+            <span class="ln-nav-meta">10/23</span>
+          </button>
+          <button class="ln-nav-item">
+            <span style="color: var(--ln-text-muted); font-size: 11px;">#</span>
+            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">装纸巾提醒 · Oct 22</span>
+            <span class="ln-nav-meta">10/22</span>
+          </button>
+          <button class="ln-nav-item">
+            <span style="color: var(--ln-text-muted); font-size: 11px;">#</span>
+            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">画一只白色小猫趴在抱枕上</span>
+            <span class="ln-nav-meta">10/15</span>
+          </button>
+        </div>
+      </aside>
+
+      <!-- 中间主工作舞台 -->
+      <main class="ln-stage">
+
+        <!-- Issue / 任务顶头信息 -->
+        <div class="ln-issue-header">
+          <div class="ln-issue-badge-row">
+            <div class="ln-issue-id">
+              <span class="ln-state-tag"></span>
+              <span style="font-weight: 600; color: var(--ln-text-main);">DRV-8852</span>
+              <span>· 换领新身份证与定时提醒任务</span>
+            </div>
+            <span style="color: var(--ln-text-muted);">★</span>
+          </div>
+
+          <div class="ln-issue-title">西兴派出所身份证换领安排</div>
+          <div class="ln-issue-desc">
+            由女主人在微信端直接下达。安排周六上午 <span class="ln-inline-code">09:00</span> 与 <span class="ln-inline-code">09:30</span> 两次微信双保险提醒，并核对出行必备材料。
+          </div>
+        </div>
+
+        <!-- 活动与消息流 (参照 Linear 图 1 Activity) -->
+        <div class="ln-activity-flow">
+          <div style="font-size: 11px; font-weight: 600; color: var(--ln-text-muted); text-transform: uppercase; letter-spacing: 0.04em;">
+            Activity
+          </div>
+
+          <!-- 真实轮次 1 -->
+          <div class="ln-activity-item">
+            <div class="ln-avatar-20">女</div>
+            <div class="ln-activity-body">
+              <div class="ln-activity-head">
+                <span class="ln-author">女主人</span>
+                <span class="ln-time">11:34 AM</span>
+              </div>
+              <div class="ln-comment-box">
+                提醒我周六上午去西兴派出所换新的身份证。
+              </div>
+            </div>
+          </div>
+
+          <!-- 真实轮次 2：助手自动化工具执行 -->
+          <div class="ln-activity-item">
+            <div class="ln-avatar-20" style="border-color: rgba(255,255,255,0.2); color: #fff;">法</div>
+            <div class="ln-activity-body">
+              <div class="ln-activity-head">
+                <span class="ln-author">xiaofawang</span>
+                <span style="font-size: 11px; color: var(--ln-text-muted);">执行了调度脚本 · 11:34 AM</span>
+              </div>
+
+              <!-- 工具胶囊 -->
+              <div class="ln-tool-strip">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                <span>cronjob_manage: create target_utc 2026-11-07T01:00:00</span>
+                <span class="ln-diff-badge">+2 tasks</span>
+              </div>
+
+              <div class="ln-comment-box" style="margin-top: 4px;">
+                遵命女主人！两个提醒都已经准时设好啦 ⏰<br>
+                📅 <strong>提醒时间</strong>：本周六（11月7日）<br>
+                第一次：上午 09:00 准时提醒 💬<br>
+                第二次：上午 09:30 再次叮嘱 💬<br>
+                📌 <strong>提醒内容</strong>：去【西兴派出所】换领新身份证 🪪<br>
+                ⚠️ <strong>必备提醒</strong>：别忘带旧身份证，拍照穿深色有领上衣！✨
+              </div>
+            </div>
+          </div>
+
+          <!-- 真实轮次 3 -->
+          <div class="ln-activity-item">
+            <div class="ln-avatar-20">女</div>
+            <div class="ln-activity-body">
+              <div class="ln-activity-head">
+                <span class="ln-author">女主人</span>
+                <span class="ln-time">11:35 AM</span>
+              </div>
+              <div class="ln-comment-box">
+                定两个闹钟提醒我，9点一次，9点半一次
+              </div>
+            </div>
+          </div>
+
+          <!-- 真实轮次 4：最新状态更新 -->
+          <div class="ln-activity-item">
+            <div class="ln-avatar-20" style="border-color: rgba(255,255,255,0.2); color: #fff;">法</div>
+            <div class="ln-activity-body">
+              <div class="ln-activity-head">
+                <span class="ln-author">xiaofawang</span>
+                <span class="ln-time">刚刚</span>
+              </div>
+              <div class="ln-comment-box">
+                任务已全部安排妥当，女主人放心忙别的去吧～周六上午 9:00 和 9:30 我准时在微信里喊您！😊✨
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 方案 1 底部紧凑输入栏 (Candidate 1 专属) -->
+        <div class="ln-dock-pure" id="dockCandidate1">
+          <textarea rows="1" placeholder="给 xiaofawang 添加说明或下达新任务..."></textarea>
+          <div class="ln-dock-bar">
+            <div style="display: flex; gap: 6px;">
+              <button class="ln-dock-btn">⚙️ 技能 Skills ▾</button>
+              <button class="ln-dock-btn">📎 附加</button>
+            </div>
+            <button class="ln-send-btn">
+              <span>发送</span>
+              <span>↵</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 方案 2 右下角内嵌 Agent 悬浮小舱 (Candidate 2 专属，默认隐藏) -->
+        <div class="ln-floating-agent-window" id="dockCandidate2" style="display: none;">
+          <div class="ln-agent-win-header">
+            <div class="ln-agent-title">
+              <span style="color: var(--ln-accent-green);">●</span>
+              <span>xiaofawang</span>
+              <span class="ln-agent-model">Gemini 3.8</span>
+            </div>
+            <div class="ln-agent-actions">
+              <span>—</span>
+              <span>↗</span>
+              <span>✕</span>
+            </div>
+          </div>
+
+          <div class="ln-agent-win-body">
+            <div class="ln-agent-bubble-user">
+              定两个闹钟提醒我，9点一次，9点半一次
+            </div>
+            <div class="ln-agent-meta-tag">
+              <span>DRV-8852 added to context</span>
+            </div>
+
+            <div class="ln-agent-work-status">
+              <span>Worked for 14 sec ▸</span>
+            </div>
+
+            <div class="ln-agent-diff-card">
+              <div style="font-weight: 600; font-size: 11.5px; display: flex; justify-content: space-between;">
+                <span>Scheduled 2 cron alerts</span>
+                <span class="ln-diff-badge">+2 -0</span>
+              </div>
+              <div style="color: var(--ln-text-muted); font-size: 10.5px; font-family: var(--font-mono);">
+                wechat_notify ← 09:00, 09:30 CST
+              </div>
+            </div>
+          </div>
+
+          <div class="ln-agent-win-input">
+            <input class="ln-mini-input" placeholder="Reply to xiaofawang...">
+            <button class="ln-send-btn" style="height: 22px; padding: 0 8px;">↵</button>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+
+  <script>
+    function switchMode(mode) {
+      const btn1 = document.getElementById('btnMode1');
+      const btn2 = document.getElementById('btnMode2');
+      const dock1 = document.getElementById('dockCandidate1');
+      const dock2 = document.getElementById('dockCandidate2');
+
+      if (mode === 1) {
+        btn1.classList.add('active');
+        btn2.classList.remove('active');
+        dock1.style.display = 'flex';
+        dock2.style.display = 'none';
+      } else {
+        btn2.classList.add('active');
+        btn1.classList.remove('active');
+        dock1.style.display = 'none';
+        dock2.style.display = 'flex';
+      }
+    }
+  </script>
+</body>
+</html>

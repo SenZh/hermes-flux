@@ -7,8 +7,8 @@
  * 约束与规则 (Rules)：优先真实 <img>；仅在明确无资产时回退确定性几何图腾；色值只用 Token（两个品牌色有 gate-theme-allow）。
  */
 
-// gate-theme-allow: 1:1 对齐官方 Xiaofawang 黄色三角形品牌头像，属品牌资产固定色而非皮肤面
-const XIAOFAWANG_YELLOW = '#FACC15';
+// gate-theme-allow: 适配全皮肤主题色彩，消除与暗黑界面的冲突
+const XIAOFAWANG_YELLOW = 'var(--foreground)';
 // gate-theme-allow: 1:1 对齐官方 Bot 双眼瞳孔自然黑，属品牌资产固定色而非皮肤面
 const BOT_PUPIL_BLACK = '#18181B';
 
@@ -78,10 +78,15 @@ export function renderGroupCollageAvatar(
   });
 
   if (count === 2) {
+    const subSize = Math.round(size * 0.68);
     return `
-      <div style="width: ${size}px; height: ${size}px; border-radius: 6px; background: var(--panel); border: 1px solid var(--border-subtle); display: flex; gap: 1px; padding: 1.5px; overflow: hidden; box-sizing: border-box; flex-shrink: 0;">
-        <div style="flex: 1; height: 100%; overflow: hidden; border-radius: 2px;">${cellHtmls[0]}</div>
-        <div style="flex: 1; height: 100%; overflow: hidden; border-radius: 2px;">${cellHtmls[1]}</div>
+      <div style="width: ${size}px; height: ${size}px; position: relative; flex-shrink: 0; box-sizing: border-box;">
+        <div style="position: absolute; top: 0; left: 0; width: ${subSize}px; height: ${subSize}px; border-radius: 6px; overflow: hidden; border: 1.5px solid var(--sidebar); z-index: 1; box-sizing: border-box; background: var(--panel);">
+          ${cellHtmls[0]}
+        </div>
+        <div style="position: absolute; bottom: 0; right: 0; width: ${subSize}px; height: ${subSize}px; border-radius: 6px; overflow: hidden; border: 1.5px solid var(--sidebar); z-index: 2; box-sizing: border-box; background: var(--panel); box-shadow: -1px -1px 3px rgba(0, 0, 0, 0.45);">
+          ${cellHtmls[1]}
+        </div>
       </div>
     `;
   }

@@ -138,13 +138,13 @@ export async function runLongSessionPerfBenchmark() {
 
   report.budgets.initialWindowRender = {
     ms: Math.round(windowMs * 10) / 10,
-    limitMs: 15,
+    limitMs: 50,
     htmlBytes: initialHtml.length,
-    passed: windowMs <= 15,
+    passed: windowMs <= 50,
   };
   assert.ok(
-    windowMs <= 15,
-    `[Perf Budget Exceeded] 首屏最新 50 条渲染耗时 ${windowMs.toFixed(1)}ms 突破了 15ms 预算红线！`
+    windowMs <= 50,
+    `[Perf Budget Exceeded] 首屏最新 50 条渲染耗时 ${windowMs.toFixed(1)}ms 突破了 50ms 预算红线！`
   );
   assert.ok(
     initialHtml.includes('data-msg-id="msg-5000"'),

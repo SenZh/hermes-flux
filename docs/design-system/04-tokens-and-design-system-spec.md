@@ -1,212 +1,139 @@
 # 跨端设计系统与 Token 规范 (Design Tokens Spec)
 
-> ⚠️ **规范迁移说明**：本规范中的旧版色彩 Token 定义已被 [`docs/architecture/theme-engine-spec.md`](../architecture/theme-engine-spec.md)（43 槽单一真值表 `skins.ts` 版）权威取代。关于皮肤定义、CSS 变量生成链与槽位契约请以最新规范为准。
->
-> ⚠️ **姿态适用范围**：**本文是 `editorial / marketing` 姿态的 Token 字典**。
-> 第 1 节空间栅格、字体栈、DTCG 编译 JSON、响应式断点为**跨姿态通用**；
-> **第 2 节 Slate/Blue-600 色表、第 3 节 36px/700 字阶、第 5 节 Squircle、第 6 节 Spring、阴影层级
-> 仅 editorial 生效**（旧称「排版等通用几何 Token」不准确，已更正）。
->
-> Hermes Flux 工作台默认 **`tool` 姿态**，以 `/opt/data/profiles/aura/workspace/specs/05-aesthetic-constitution-and-skin-derivation.md`（Aura 工作区 · 审美宪法） 的 I1–I6 为准：
-> 四级表面阶梯 + 1px 发丝线、零静态阴影、≤16px / 字重 ⊆{400,500,590}、98% 中性 + 强调色 <1%、动效只承载状态变化。
-> 真值链见 [`README.md`](README.md)「设计真值链与姿态分治」。
-
-> 本规范定义跨端产品（Web、iOS、Android、macOS、Windows）共享的设计 Token 字典与实现代码映射，支持 Tailwind CSS、CSS Variables、SwiftUI 与 React Native / Compose 快速装配。
+> **定位与原则**：
+> 本规范定义 Hermes Flux 跨端（Desktop, Web, iOS, Android）共享的设计 Token 字典与实现代码映射。
+> 统一采用**新极客精准美学 (Neo-Geek Precision)**，所有组件、主题与样式均以本规范为唯一设计真值。
 
 ---
 
 ## 1. 空间与网格 Tokens (Spacing & Grid)
 
-### CSS / SCSS 变量定义
+系统严格基于 **4px/8px 空间节奏**：
+
 ```css
 :root {
-  --space-0:   0px;
-  --space-05:  2px;    /* 微型徽标与极细图标内距 */
-  --space-1:   4px;    /* 紧凑内距：标签内边距、行间微调 */
-  --space-2:   8px;    /* 组内元素基准间距（图标与文字、输入框内距） */
-  --space-3:   12px;   /* 小型卡片内边距 */
-  --space-4:   16px;   /* 标准组件内边距、移动端边距水槽（Gutter） */
-  --space-5:   20px;   /* 适度间隔 */
-  --space-6:   24px;   /* 桌面端内容水槽、卡片与卡片间距 */
-  --space-8:   32px;   /* 模块间垂直间距 */
-  --space-10:  40px;   /* 大模块分割 */
-  --space-12:  48px;   /* 页面主章节大留白 */
-  --space-16:  64px;   /* 呼吸级大负空间 */
-  --space-24:  96px;   /* 落地页 Hero 区块留白 */
+  --space-0:    0px;
+  --space-05:   2px;    /* 微型徽标、指示点微距 */
+  --space-1:    4px;    /* 紧凑内距：标签内边距、行间微调 */
+  --space-2:    8px;    /* 组内元素基准间距（图标与文字、输入框内距） */
+  --space-3:    12px;   /* 小型卡片内边距、列表项间距 */
+  --space-4:    16px;   /* 标准组件内边距、容器边距 */
+  --space-5:    20px;   /* 模块适度间隔 */
+  --space-6:    24px;   /* 桌面端内容水槽、卡片与卡片大间距 */
+  --space-8:    32px;   /* 模块间垂直大留白 */
+  --space-10:   40px;   /* 章节大留白 */
+  --space-12:   48px;   /* 页面主屏垂直留白 */
 }
 ```
 
 ---
 
-## 2. 色彩系统 Tokens (Color System - Slate Palette)
+## 2. 色彩系统 Tokens (Color System)
 
-### 2.1 语义色彩映射表
-采用冷暖适宜的 **Slate 中性基底**，杜绝刺眼纯黑纯白：
+色彩以中性暗调为绝对基石，消灭浮夸光晕，强化发丝线边缘与明度对比。
 
-| 语义名称 (Token) | 浅色模式 (Light Mode) | 深色模式 (Dark Mode) | 作用场景与层级 |
+### 2.1 核心语义映射表
+
+| 语义 Token | 深色模式 (Dark Baseline) | 浅色模式 (Light Baseline) | 作用场景与层级 |
 |---|---|---|---|
-| `surface-canvas` | `#F8FAFC` (Slate-50) | `#0B0F17` (Deep Slate-950) | 全局底层画板与窗口背景 |
-| `surface-subtle` | `#F1F5F9` (Slate-100) | `#111827` (Gray-900) | 侧边栏底色、嵌套面板底色 |
-| `surface-card` | `#FFFFFF` (Pure White) | `#1E293B` (Slate-800) | 内容卡片、表格行、输入框底色 |
-| `surface-elevated`| `#FFFFFF` (White + Shadow)| `#334155` (Slate-700) | 模态弹窗、浮动下拉菜单、Popover |
-| `text-primary` | `#0F172A` (Slate-900) | `#F8FAFC` (Slate-50) | 主标题、重要正文、核心数值 |
-| `text-secondary` | `#475569` (Slate-600) | `#94A3B8` (Slate-400) | 次级说明文案、副标题、表头 |
-| `text-muted` | `#94A3B8` (Slate-400) | `#64748B` (Slate-500) | 占位符、禁用文字、时间戳 |
-| `border-subtle` | `#E2E8F0` (Slate-200) | `rgba(255, 255, 255, 0.08)` | 卡片细微外边框、列表分割线 |
-| `border-strong` | `#CBD5E1` (Slate-300) | `rgba(255, 255, 255, 0.16)` | 输入框聚焦边框、激活状态卡片 |
-| `brand-primary` | `#2563EB` (Blue-600) | `#3B82F6` (Blue-500) | 主操作按钮、高亮链接、主导航 |
-| `status-success` | `#16A34A` (Green-600) | `#22C55E` (Green-500) | 成功提示、已完成状态、正向指标 |
-| `status-warning` | `#D97706` (Amber-600) | `#F59E0B` (Amber-500) | 警告、待确认、中风险标记 |
-| `status-error` | `#DC2626` (Red-600) | `#EF4444` (Red-500) | 报错提示、破坏性操作按钮、负向指标 |
+| `--background` | `#0A0B0E` (Zinc-950) | `#F8F9FA` (Gray-50) | 全局底层画板与窗口根底色 |
+| `--sidebar` | `#0F1015` (Zinc-900) | `#F1F3F6` (Gray-100) | 左侧微轨与抽屉导航区背景 |
+| `--panel` | `#13141A` (Zinc-850) | `#FFFFFF` (Pure White) | 中间主会话工作台、右侧检查舱 |
+| `--card` | `#181A22` (Zinc-800) | `#FFFFFF` (Pure White) | 消息气泡卡片、列表行、容器卡片 |
+| `--card-hover` | `#1F222D` (Zinc-750) | `#F3F4F7` (Gray-100) | 交互悬浮态背景 |
+| `--card-active` | `#262936` (Zinc-700) | `#E9ECEF` (Gray-200) | 选中与激活态背景 |
+| `--popover` | `#1E212B` (Zinc-800) | `#FFFFFF` (Pure White) | 悬浮下拉菜单、模态弹窗、Popover |
+| `--input` | `#121319` (Zinc-900) | `#F8F9FA` (Gray-50) | 表单输入框、底部输入舱容器 |
+| `--code` | `#0A0B0E` (Zinc-950) | `#F1F3F5` (Gray-100) | 代码块、终端命令行底色 |
+| `--backdrop` | `rgba(10, 11, 14, 0.80)` | `rgba(248, 249, 250, 0.80)` | 模态全屏遮罩蒙层 |
+
+### 2.2 文本与前景阶梯
+
+| 语义 Token | 深色模式 | 浅色模式 | 作用场景 |
+|---|---|---|---|
+| `--foreground` | `#F3F4F6` (Gray-100) | `#111827` (Gray-900) | 主标题、重要正文、主要代码 |
+| `--secondary-foreground`| `#9CA3AF` (Gray-400) | `#4B5563` (Gray-600) | 次级说明文案、副标题、表头 |
+| `--muted-foreground` | `#6B7280` (Gray-500) | `#9CA3AF` (Gray-400) | 占位符、辅助时间戳、快捷键说明 |
+| `--faint` | `#374151` (Gray-700) | `#D1D5DB` (Gray-300) | 行号、最弱辅助指示器 |
+
+### 2.3 边框与发丝线 (Borders)
+
+| 语义 Token | 深色模式 | 浅色模式 | 作用场景 |
+|---|---|---|---|
+| `--border-subtle` | `rgba(255, 255, 255, 0.07)` | `rgba(0, 0, 0, 0.08)` | 极细分割线、卡片次要边线 |
+| `--border` | `rgba(255, 255, 255, 0.12)` | `rgba(0, 0, 0, 0.14)` | 核心卡片外边框、模块分界线 |
+| `--border-strong` | `rgba(255, 255, 255, 0.22)` | `rgba(0, 0, 0, 0.26)` | 聚焦状态边框、激活卡片轮廓 |
+| `--specular-line` | `rgba(255, 255, 255, 0.12)` | `rgba(255, 255, 255, 0.80)` | 顶部 1px 细微内受光高光线 |
+
+### 2.4 强调色与反馈 (Accent & Feedback)
+
+| 语义 Token | 色值 | 说明 |
+|---|---|---|
+| `--primary` | `#F59E0B` (Amber Gold) | 核心品牌焦点、高光操作 |
+| `--primary-hover` | `#D97706` | 主按钮悬浮态 |
+| `--primary-dim` | `#B45309` | 主色弱化态 |
+| `--primary-subtle` | `rgba(245, 158, 11, 0.12)` | 激活项浅色透底 |
+| `--primary-border` | `rgba(245, 158, 11, 0.35)` | 激活项细边框 |
+| `--primary-foreground` | `#0A0B0E` (深色) / `#FFFFFF` (浅色) | 主操作按钮前景色 |
+| `--ring` | `rgba(245, 158, 11, 0.40)` | 全局聚焦环 (Focus Ring) |
+| `--success` | `#10B981` (Emerald) | 运行正常、已连接、构建成功 |
+| `--warning` | `#F59E0B` (Amber) | 告警、待确认操作 |
+| `--destructive` | `#EF4444` (Crimson) | 报错、中断、危险删除操作 |
 
 ---
 
 ## 3. 字体排印 Tokens (Typography Scale)
 
 ### 3.1 跨端统一字体栈
-- **西文字体栈**：`-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", sans-serif`
-- **中文字体栈**：`"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif`
-- **等宽代码栈**：`"SF Mono", "Fira Code", "Cascadia Code", "JetBrains Mono", Menlo, monospace`
+- **西文字体栈**：`-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif`
+- **中文字体栈**：`"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif`
+- **等宽代码栈**：`"JetBrains Mono", "SF Mono", Consolas, "Fira Code", monospace`
 
-### 3.2 字阶规范 (Major Third Scale ~1.25)
+### 3.2 整数阶梯字阶
 ```css
-/* Display 大标题 */
-.type-display {
-  font-size: 2.25rem;       /* 36px */
-  line-height: 2.75rem;     /* 44px (1.22) */
-  font-weight: 700;
-  letter-spacing: -0.025em; /* 标题紧缩字距 */
-}
+/* 7 档严格排版阶梯 */
+--fs-hero:     20px; /* 28px line-height, 600 weight: 突出大标 */
+--fs-title:    16px; /* 22px line-height, 600 weight: 页面主标题 */
+--fs-section:  14px; /* 20px line-height, 500 weight: 卡片标、重要段落 */
+--fs-body:     13px; /* 19px line-height, 400 weight: 通用正文、对话流 */
+--fs-aux:      12px; /* 16px line-height, 400 weight: 次级辅助、标签 */
+--fs-caption:  11px; /* 14px line-height, 500 weight: 元数据、时间戳 */
+--fs-micro:    10px; /* 12px line-height, 600 weight: 最小胶囊、快捷键 */
+```
 
-/* H1 页面一级主标题 */
-.type-h1 {
-  font-size: 1.75rem;       /* 28px */
-  line-height: 2.25rem;     /* 36px (1.28) */
-  font-weight: 600;
-  letter-spacing: -0.02em;
-}
+---
 
-/* H2 模块二级标题 */
-.type-h2 {
-  font-size: 1.25rem;       /* 20px */
-  line-height: 1.75rem;     /* 28px (1.40) */
-  font-weight: 600;
-  letter-spacing: -0.015em;
-}
+## 4. 几何与圆角 Tokens (Geometry & Radius)
 
-/* H3 卡片标题 */
-.type-h3 {
-  font-size: 1rem;          /* 16px */
-  line-height: 1.5rem;      /* 24px (1.50) */
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
+```css
+:root {
+  /* 圆角阶梯 */
+  --radius-window: 12px;   /* 桌面窗口外壳 */
+  --radius-panel:  8px;    /* 抽屉与大工作舱容器 */
+  --radius-card:   6px;    /* 内容卡片、代码块 */
+  --radius-inner:  4px;    /* 按钮、输入框、下拉项 */
+  --radius-pill:   9999px; /* 状态胶囊、徽标 */
 
-/* Body 标准正文 */
-.type-body {
-  font-size: 0.875rem;      /* 14px */
-  line-height: 1.375rem;    /* 22px (1.57) */
-  font-weight: 400;
-  letter-spacing: 0;
-}
-
-/* Caption 辅助元数据 */
-.type-caption {
-  font-size: 0.75rem;       /* 12px */
-  line-height: 1.125rem;    /* 18px (1.50) */
-  font-weight: 500;
-  letter-spacing: 0.01em;   /* 小字舒展字距 */
+  /* 核心几何单源尺寸 */
+  --geo-titlebar:        42px;   /* 顶栏固定高度 */
+  --geo-micro-rail:      52px;   /* 左侧微轨宽度 */
+  --geo-context-drawer:  212px;  /* 左侧抽屉宽度 */
+  --geo-left-rail:       264px;  /* 左双轨基线宽度 (52 + 212) */
+  --geo-resize-handle:   6px;    /* 拖拽把手基准宽度 */
+  --geo-inspector-pod:   410px;  /* 右侧检查舱基准宽度 */
+  --geo-input-dock:      740px;  /* 底部输入舱黄金收敛限宽 */
 }
 ```
 
 ---
 
-## 4. 光学与多层阴影 Tokens (Layered Shadows)
+## 5. 阴影系统 (Shadow Hierarchy)
 
-高级阴影由**微接触阴影（Key Shadow）**与**环境散射阴影（Ambient Shadow）**合成：
-
+绝不使用粗暴的纯黑大扩散阴影，采用环境光多重微距衰减：
 ```css
 :root {
-  /* Level 1: 基础卡片轻悬浮 */
-  --shadow-sm: 
-    0 1px 2px 0 rgba(15, 23, 42, 0.05),
-    0 1px 3px 1px rgba(15, 23, 42, 0.03);
-
-  /* Level 2: 交互悬停（Hover）与小下拉菜单 */
-  --shadow-md: 
-    0 4px 6px -1px rgba(15, 23, 42, 0.08),
-    0 2px 4px -2px rgba(15, 23, 42, 0.05);
-
-  /* Level 3: 模态抽屉、侧边栏悬浮、上下文菜单 */
-  --shadow-lg: 
-    0 10px 15px -3px rgba(15, 23, 42, 0.10),
-    0 4px 6px -4px rgba(15, 23, 42, 0.06);
-
-  /* Level 4: 顶层全局模态弹窗（Dialog） */
-  --shadow-xl: 
-    0 20px 25px -5px rgba(15, 23, 42, 0.12),
-    0 8px 10px -6px rgba(15, 23, 42, 0.08);
+  --shadow-card:   0 1px 3px rgba(0, 0, 0, 0.25);
+  --shadow-window: 0 8px 32px rgba(0, 0, 0, 0.45);
+  --shadow-dock:   0 6px 24px rgba(0, 0, 0, 0.35);
 }
 ```
-
----
-
-## 5. 圆角与连续曲率公式 (Radii & Squircle)
-
-```css
-:root {
-  --radius-xs:   4px;    /* 标签 Tag、小复选框 Checkbox */
-  --radius-sm:   6px;    /* 紧凑按钮、次级操作组件 */
-  --radius-md:   8px;    /* 标准输入框、标准按钮 Button */
-  --radius-lg:   12px;   /* 内容小卡片、嵌套容器 */
-  --radius-xl:   16px;   /* 主内容卡片、弹窗容器 Modal */
-  --radius-2xl:  24px;   /* 移动端底部抽屉 Bottom Sheet */
-  --radius-full: 9999px; /* 头像、圆角药丸 Badge */
-}
-```
-
-> **内缩圆角法则（Nested Radius Formula）**：
-> 在卡片内部嵌套子元素时，如果子元素圆角与外框圆角相同，会导致视觉畸变。
-> **正确的子圆角公式**：
-> `R_inner = max(0, R_outer - Padding)`
-> 例如：外框卡片 `R_outer = 16px`，卡片内边距 `Padding = 8px`，则内部子卡片圆角必须设为 `R_inner = 8px`。
-
----
-
-## 6. 动效曲线与微交互物理 Tokens (Motion Specs)
-
-### 6.1 缓动曲线参数
-```css
-:root {
-  /* 退出与消失曲线：极速收拢 */
-  --ease-out-fast: cubic-bezier(0.16, 1, 0.3, 1);
-  
-  /* 进入与展开曲线：从容平滑 */
-  --ease-in-smooth: cubic-bezier(0.32, 0, 0.67, 0);
-
-  /* 悬停与状态轻变 */
-  --ease-interactive: cubic-bezier(0.4, 0, 0.2, 1);
-}
-```
-
-### 6.2 物理弹簧参数（Spring Specs - 适用于 Framer Motion / SwiftUI / React Native）
-```json
-{
-  "spring-subtle": {
-    "stiffness": 400,
-    "damping": 30,
-    "mass": 0.8
-  },
-  "spring-snappy": {
-    "stiffness": 300,
-    "damping": 24,
-    "mass": 1.0
-  },
-  "spring-bouncy": {
-    "stiffness": 200,
-    "damping": 15,
-    "mass": 1.2
-  }
-}
-```
-- **点击交互反馈**：按下瞬间（Scale 0.96，duration: 100ms），抬起回弹（Spring-snappy，duration: 200ms）。

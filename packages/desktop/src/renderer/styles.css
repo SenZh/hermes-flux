@@ -8,18 +8,18 @@
 .assistant-content.prose-block p,
 .assistant-content.prose-block div,
 .user-bubble {
-  line-height: round(1.42em, 1px) !important;
+  line-height: round(1.56em, 1px) !important;
 }
 
 /* Tool Capsule & Stream Tight Alignment */
 .flux-tool-capsule {
-  margin: 1.5px 0 !important;
+  margin: 3px 0 !important;
 }
 .flux-tool-capsule summary {
-  padding: 2.5px 7px !important;
+  padding: 3.5px 8px !important;
 }
 .assistant-content.prose-block > div {
-  margin-bottom: 3px;
+  margin-bottom: 6px;
 }
 
 :root {
@@ -38,23 +38,23 @@
   --fs-overline: 10px;
   --fs-micro: 9px;
 
-  --radius-window: 14px;
-  --radius-panel: 10px;
-  --radius-card: 10px;
-  --radius-inner: 6px;
+  --radius-window: 12px;
+  --radius-panel: 8px;
+  --radius-card: 6px;
+  --radius-inner: 4px;
   --radius-pill: 9999px;
 
   /* 几何单源。设计意图(Why)：微轨/抽屉/检查舱/状态栏的尺寸被 TS(DIMENSIONS)、CSS fallback
      与组件 utility 三处引用；不定义真值就会永远走 fallback，改一处不生效。
      约束与规则(Rules)：本段是 CSS 侧唯一定义面，数值必须与 tokens.ts 的 DIMENSIONS 一致。 */
   --geo-titlebar: 42px;
-  --geo-micro-rail: 52px;
-  --geo-context-drawer: 212px;
-  --geo-left-rail: 264px;
-  /* 拖拽把手唯一几何真值源：左右把手共用同一宽度，杜绝两套实现各写各的（历史坑：左 8px 全可见、右 6px 被 pod overflow 裁成 3px）。 */
+  --geo-micro-rail: clamp(58px, 4.2vw, 72px);
+  --geo-context-drawer: 244px;
+  --geo-left-rail: 296px;
+  /* 拖拽把手唯一几何真值源：左右把手共用同一宽度，杜绝两套实现各写各的。 */
   --geo-resize-handle: 6px;
   --geo-inspector-pod: 410px;
-  --geo-statusbar: 22px;
+  --geo-statusbar: 0px;
   --geo-input-dock: 740px;
 
   --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
@@ -64,73 +64,73 @@
 
 /* ═══ AUTO-GENERATED SKIN TABLE — 唯一真值源 packages/ui/src/tokens/skins.ts — 手改无效 ═══ */
 [data-theme="obsidian-gold"] {
-  --background: #0E0F12;
-  --bg-window: #0E0F12;
-  --card: #14161C;
-  --bg-card: #14161C;
-  --card-hover: #1A1D24;
-  --bg-card-hover: #1A1D24;
-  --card-active: #20232B;
-  --bg-card-active: #20232B;
-  --popover: #161821;
-  --bg-elevated: #161821;
-  --sidebar: #090A0D;
-  --bg-rail: #090A0D;
-  --panel: #111317;
-  --bg-panel: #111317;
-  --input: #121419;
-  --bg-input: #121419;
-  --code: #090A0D;
-  --bg-code: #090A0D;
-  --backdrop: rgba(18, 20, 27, 0.90);
-  --bg-backdrop: rgba(18, 20, 27, 0.90);
-  --secondary: #111317;
-  --muted: #161821;
-  --foreground: #F7F8F8;
-  --text-main: #F7F8F8;
-  --secondary-foreground: #8A8F98;
-  --text-secondary: #8A8F98;
-  --muted-foreground: #5C6068;
-  --text-muted: #5C6068;
-  --faint: #3F434C;
-  --text-faint: #3F434C;
-  --primary: #D97706;
-  --accent: #D97706;
-  --primary-hover: #E58A13;
-  --accent-hover: #E58A13;
-  --primary-dim: #B45309;
-  --accent-dim: #B45309;
-  --primary-glow: rgba(217, 119, 6, 0.20);
-  --accent-glow: rgba(217, 119, 6, 0.20);
-  --primary-subtle: rgba(217, 119, 6, 0.08);
-  --accent-subtle: rgba(217, 119, 6, 0.08);
-  --primary-border: rgba(217, 119, 6, 0.28);
-  --accent-border: rgba(217, 119, 6, 0.28);
-  --primary-foreground: #FDE68A;
-  --accent-text: #FDE68A;
-  --ring: #D97706;
+  --background: #0E0F13;
+  --bg-window: #0E0F13;
+  --card: #1B1C23;
+  --bg-card: #1B1C23;
+  --card-hover: #22242D;
+  --bg-card-hover: #22242D;
+  --card-active: #292B37;
+  --bg-card-active: #292B37;
+  --popover: #1B1C23;
+  --bg-elevated: #1B1C23;
+  --sidebar: #131419;
+  --bg-rail: #131419;
+  --panel: #16171D;
+  --bg-panel: #16171D;
+  --input: #131419;
+  --bg-input: #131419;
+  --code: #0E0F13;
+  --bg-code: #0E0F13;
+  --backdrop: rgba(20, 21, 28, 0.90);
+  --bg-backdrop: rgba(20, 21, 28, 0.90);
+  --secondary: #16171D;
+  --muted: #1B1C23;
+  --foreground: #E8E9EC;
+  --text-main: #E8E9EC;
+  --secondary-foreground: #8E939E;
+  --text-secondary: #8E939E;
+  --muted-foreground: #636773;
+  --text-muted: #636773;
+  --faint: #3E4148;
+  --text-faint: #3E4148;
+  --primary: #FFFFFF;
+  --accent: #FFFFFF;
+  --primary-hover: #E5E7EB;
+  --accent-hover: #E5E7EB;
+  --primary-dim: #9CA3AF;
+  --accent-dim: #9CA3AF;
+  --primary-glow: rgba(255, 255, 255, 0.12);
+  --accent-glow: rgba(255, 255, 255, 0.12);
+  --primary-subtle: rgba(255, 255, 255, 0.06);
+  --accent-subtle: rgba(255, 255, 255, 0.06);
+  --primary-border: rgba(255, 255, 255, 0.20);
+  --accent-border: rgba(255, 255, 255, 0.20);
+  --primary-foreground: #0E0F13;
+  --accent-text: #0E0F13;
+  --ring: rgba(255, 255, 255, 0.30);
   --success: #10B981;
   --jade-pulse: #10B981;
-  --success-glow: rgba(16, 185, 129, 0.45);
-  --jade-glow: rgba(16, 185, 129, 0.45);
+  --success-glow: rgba(16, 185, 129, 0.20);
+  --jade-glow: rgba(16, 185, 129, 0.20);
   --warning: #F59E0B;
   --destructive: #EF4444;
   --danger-color: #EF4444;
-  --border: rgba(255, 255, 255, 0.12);
-  --border-medium: rgba(255, 255, 255, 0.12);
-  --border-subtle: rgba(255, 255, 255, 0.07);
-  --border-strong: rgba(255, 255, 255, 0.18);
-  --shadow-window: 0 24px 70px -12px rgba(0, 0, 0, 0.85);
-  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.45);
-  --shadow-dock: 0 20px 48px -10px rgba(0, 0, 0, 0.75);
-  --hl-comment: #718096;
-  --hl-string: #E2E8F0;
-  --hl-keyword: #F6AD55;
-  --hl-number: #B794F4;
-  --hl-type: #B794F4;
-  --specular-line: inset 0 1px 0 0 rgba(255, 255, 255, 0.10);
-  --theme-thumb-color: #0E0F12;
-  --chat-user-message-bg: #14161C;
+  --border: rgba(255, 255, 255, 0.09);
+  --border-medium: rgba(255, 255, 255, 0.09);
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --shadow-window: 0 16px 40px rgba(0, 0, 0, 0.55);
+  --shadow-card: 0 2px 10px rgba(0, 0, 0, 0.25);
+  --shadow-dock: 0 16px 40px rgba(0, 0, 0, 0.55);
+  --hl-comment: #636773;
+  --hl-string: #E5E7EB;
+  --hl-keyword: #FFFFFF;
+  --hl-number: #D1D5DB;
+  --hl-type: #A78BFA;
+  --specular-line: inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+  --theme-thumb-color: #1B1C23;
+  --chat-user-message-bg: #1C1E26;
   --badge-ts-bg: rgba(59, 130, 246, 0.16);
   --badge-ts-text: #60A5FA;
   --badge-ts-border: rgba(59, 130, 246, 0.35);
@@ -149,65 +149,65 @@
 }
 [data-theme="jade-white"],
 [data-theme="suet-jade"] {
-  --background: #F8FAFC;
-  --bg-window: #F8FAFC;
+  --background: #F8F9FA;
+  --bg-window: #F8F9FA;
   --card: #FFFFFF;
   --bg-card: #FFFFFF;
-  --card-hover: #F1F5F9;
-  --bg-card-hover: #F1F5F9;
-  --card-active: #E2E8F0;
-  --bg-card-active: #E2E8F0;
+  --card-hover: #F1F3F6;
+  --bg-card-hover: #F1F3F6;
+  --card-active: #E5E7EB;
+  --bg-card-active: #E5E7EB;
   --popover: #FFFFFF;
   --bg-elevated: #FFFFFF;
-  --sidebar: #F1F5F9;
-  --bg-rail: #F1F5F9;
-  --panel: #EAEFF5;
-  --bg-panel: #EAEFF5;
-  --input: #FFFFFF;
-  --bg-input: #FFFFFF;
-  --code: #F8FAFC;
-  --bg-code: #F8FAFC;
-  --backdrop: rgba(248, 250, 252, 0.92);
-  --bg-backdrop: rgba(248, 250, 252, 0.92);
-  --secondary: #EAEFF5;
+  --sidebar: #F1F3F6;
+  --bg-rail: #F1F3F6;
+  --panel: #FFFFFF;
+  --bg-panel: #FFFFFF;
+  --input: #F8F9FA;
+  --bg-input: #F8F9FA;
+  --code: #F1F3F5;
+  --bg-code: #F1F3F5;
+  --backdrop: rgba(248, 249, 250, 0.85);
+  --bg-backdrop: rgba(248, 249, 250, 0.85);
+  --secondary: #F1F3F6;
   --muted: #FFFFFF;
-  --foreground: #0F172A;
-  --text-main: #0F172A;
-  --secondary-foreground: #334155;
-  --text-secondary: #334155;
-  --muted-foreground: #64748B;
-  --text-muted: #64748B;
-  --faint: #94A3B8;
-  --text-faint: #94A3B8;
+  --foreground: #111827;
+  --text-main: #111827;
+  --secondary-foreground: #4B5563;
+  --text-secondary: #4B5563;
+  --muted-foreground: #9CA3AF;
+  --text-muted: #9CA3AF;
+  --faint: #D1D5DB;
+  --text-faint: #D1D5DB;
   --primary: #0D7A5E;
   --accent: #0D7A5E;
   --primary-hover: #0B6850;
   --accent-hover: #0B6850;
   --primary-dim: #095743;
   --accent-dim: #095743;
-  --primary-glow: rgba(13, 122, 94, 0.18);
-  --accent-glow: rgba(13, 122, 94, 0.18);
+  --primary-glow: rgba(13, 122, 94, 0.14);
+  --accent-glow: rgba(13, 122, 94, 0.14);
   --primary-subtle: rgba(13, 122, 94, 0.08);
   --accent-subtle: rgba(13, 122, 94, 0.08);
-  --primary-border: rgba(13, 122, 94, 0.28);
-  --accent-border: rgba(13, 122, 94, 0.28);
-  --primary-foreground: #08523F;
-  --accent-text: #08523F;
+  --primary-border: rgba(13, 122, 94, 0.25);
+  --accent-border: rgba(13, 122, 94, 0.25);
+  --primary-foreground: #FFFFFF;
+  --accent-text: #FFFFFF;
   --ring: #0D7A5E;
   --success: #10B981;
   --jade-pulse: #10B981;
-  --success-glow: rgba(16, 185, 129, 0.40);
-  --jade-glow: rgba(16, 185, 129, 0.40);
+  --success-glow: rgba(16, 185, 129, 0.25);
+  --jade-glow: rgba(16, 185, 129, 0.25);
   --warning: #F59E0B;
   --destructive: #DC2626;
   --danger-color: #DC2626;
-  --border: rgba(15, 23, 42, 0.14);
-  --border-medium: rgba(15, 23, 42, 0.14);
-  --border-subtle: rgba(15, 23, 42, 0.08);
-  --border-strong: rgba(15, 23, 42, 0.22);
-  --shadow-window: 0 24px 60px -12px rgba(15, 23, 42, 0.12);
-  --shadow-card: 0 2px 8px rgba(15, 23, 42, 0.04);
-  --shadow-dock: 0 16px 40px -10px rgba(15, 23, 42, 0.10);
+  --border: rgba(0, 0, 0, 0.10);
+  --border-medium: rgba(0, 0, 0, 0.10);
+  --border-subtle: rgba(0, 0, 0, 0.06);
+  --border-strong: rgba(0, 0, 0, 0.20);
+  --shadow-window: 0 12px 36px rgba(0, 0, 0, 0.10);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.05);
+  --shadow-dock: 0 8px 24px rgba(0, 0, 0, 0.08);
   --hl-comment: #6E7781;
   --hl-string: #0A3069;
   --hl-keyword: #CF222E;
@@ -618,11 +618,18 @@ html[data-maximized="true"] #flux-app-root {
    约束与规则 (Rules)：组件内禁止再写把手宽度/偏移；高亮色必须经皮肤 Token 派生。 */
 .rail-resize-handle {
   width: var(--geo-resize-handle);
-  transition: background-color 150ms ease;
+  background: transparent !important;
+  transition: border-color 150ms ease;
+  border-right: 1px solid transparent;
+}
+.rail-resize-handle[data-rail-handle="right"] {
+  border-right: none;
+  border-left: 1px solid transparent;
 }
 .rail-resize-handle:hover,
 .rail-resize-handle:focus-visible {
-  background: color-mix(in srgb, var(--primary) 38%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 45%, transparent) !important;
+  background: color-mix(in srgb, var(--primary) 0%, transparent);
 }
 
 /* Dragging state: Disable transition & selections across entire window to maintain 120 FPS */
@@ -983,11 +990,22 @@ button {
    Clean Light Theme Refinements (OpenChamber Light Mode Aesthetic Polish)
    ========================================================================== */
 
-/* Active session card elevated state in light mode (对齐参考图：纯对比背景色，无边框无强加投影) */
+.session-item {
+  border: 1px solid transparent;
+}
+.session-item:hover {
+  background: var(--card-hover);
+}
 .session-item.active {
-  background: var(--bg-card-active, var(--bg-card)) !important;
+  background: var(--bg-card-active, var(--card-active)) !important;
+  border-color: transparent !important;
   box-shadow: none !important;
-  border: none !important;
+}
+
+#flux-station-rail button.active {
+  border-color: transparent !important;
+  background: var(--card-active) !important;
+  box-shadow: none !important;
 }
 
 [data-theme="jade-white"] .session-item.active,
