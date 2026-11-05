@@ -121,7 +121,7 @@ Hermes Flux Settings (设置中心)
 | **1.2.1 UI 与代码字体族** | 自由设定界面无衬线字体与编辑器等宽字体（Mono） | **P1** | **否 (纯前端)** | 客户端加载本地系统字体或 WebFont | • 本地键: `flux.font.sans`, `flux.font.mono`<br>• 默认: `JetBrains Mono, Fira Code, Consolas` |
 | **1.2.2 字号与阅读缩放** | 调整主聊天流 720px 通道内文字大小 (12px ~ 18px) | **P1** | **否 (纯前端)** | 调节 `:root { --flux-font-base: Nrem }` | • 本地键: `flux.ui.font_size`<br>• 快捷键 `Ctrl + = / - / 0` 联动 |
 | **1.2.3 终端与代码高亮主题** | 选择 Diff 审查舱与穿透终端的语法着色方案 | **P1** | **否 (纯前端)** | 集成 Shiki / Prism 渲染主题 | • 本地键: `flux.syntax.theme`<br>• 支持 One Dark, GitHub Light, Catppuccin |
-| **1.3.1 视口三舱默认折叠态** | 配置冷启动时左侧抽屉（212px）与右侧检查舱（410px）的开合状态 | **P0** | **是** | 事件: `layout.apply`<br>RPC: `config.set({ key: 'desktop.layout', value })` | • 本地键: `flux.layout.state`<br>• 结构: `{ leftDrawer: bool, rightPod: bool }` |
+| **1.3.1 视口三舱默认折叠态** | 配置冷启动时左侧抽屉（212px）与右侧检查舱（410px）的开合状态 | **P0** | **是** | 事件: 网关 `pane.reveal` / 本地 `layout.apply`<br>RPC: `config.set({ key: 'desktop.layout', value })` | • 本地键: `flux.layout.state`<br>• 结构: `{ leftDrawer: bool, rightPod: bool }` |
 | **1.3.2 悬浮输入舱黄金限宽** | 锁定输入框最大宽度（默认 740px），防止大屏拉伸失衡 | **P1** | **否 (纯前端)** | 客户端容器 CSS 几何约束 | • 常量约束: `max-width: 740px`<br>• 严禁在页面祖先节点注入动态变量 |
 | **1.4.1 多语言选择** | 切换工作台界面语言（zh-CN / en-US / 更多语言） | **P0** | **是** | RPC: `i18n.languages({ profile })`<br>RPC: `i18n.catalog({ language, surface: 'desktop' })` | • 本地键: `flux.i18n.locale`<br>• 远端网关动态语言包合并至本地字典 |
 | **1.5.1 快捷键映射与录制** | 查看并自定义全局快捷键（呼出、切人、折叠双轨、清屏） | **P1** | **否 (纯前端)** | Electron 全局与窗口局部按键监听 | • 默认表: `Cmd+B`(收起抽屉), `Cmd+\`(收起检查舱), `Cmd+K`(聚焦输入舱), `Cmd+N`(新旁聊) |

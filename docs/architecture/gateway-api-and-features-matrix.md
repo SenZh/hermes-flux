@@ -1,28 +1,28 @@
 # Hermes Agent 官方协议与全平台全景对照映射表（权威基线）
 
-> **文档定位**：本文件是 **Hermes Flux**（全平台美学工作台：Desktop, Web, iOS, Android）的核心协议与功能基线。基于 Nous Research 官方 Gateway 协议定义（`contract.generated.ts`）与客户端实现源码进行 100% 逐项对齐校验，包含 **252 个 RPC 方法、77 个下行推送事件、13 个服务端反向干预请求**，并准确记录客户端目前的真实消费覆盖状态与跨端演进蓝图。
+> **文档定位**：本文件是 **Hermes Flux**（全平台美学工作台：Desktop, Web, iOS, Android）的核心协议与功能基线。基于 Nous Research 官方 Gateway 协议定义（`contract.generated.ts`）与客户端实现源码进行 100% 逐项对齐校验，包含 **258 个 RPC 方法、77 个下行推送事件、14 个服务端反向干预请求**，并准确记录客户端目前的真实消费覆盖状态与跨端演进蓝图。
 
 ---
 
 ## 目录
 1. [Hermes 官方通信协议体系总览](#一hermes-官方通信协议体系总览)
 2. [客户端功能模块现状全景（48 个路由与核心组件）](#二客户端功能模块现状全景48-个路由与核心组件)
-3. [官方 RPC 接口（Client ➔ Gateway）252 个全量分类清单与覆盖对照](#三官方-rpc-接口client--gateway-252-个全量分类清单与覆盖对照)
+3. [官方 RPC 接口（Client ➔ Gateway）258 个全量分类清单与覆盖对照](#三官方-rpc-接口client--gateway-258-个全量分类清单与覆盖对照)
 4. [官方下行事件（Gateway ➔ Client Push）77 个全量清单与监听状态](#四官方下行事件gateway--client-push-77-个全量清单与监听状态)
-5. [服务端反向干预请求（Gateway ➔ Client Requests）13 项全量契约与人机协同](#五服务端反向干预请求gateway--client-requests-13-项全量契约与人机协同)
+5. [服务端反向干预请求（Gateway ➔ Client Requests）14 项全量契约与人机协同](#五服务端反向干预请求gateway--client-requests-14-项全量契约与人机协同)
 6. [客户端实调统计纠错（139 RPC / 51 Events）与能力差距清单](#六客户端实调统计纠错139-rpc--51-events与能力差距清单)
 
 ---
 
 ## 一、Hermes 官方通信协议体系总览
 
-Hermes 网关（Gateway）采用标准的 **JSON-RPC 2.0 over WebSocket** 双向长连接通信模型（默认挂载在 `/api/ws`，配套 `/api/*` REST 辅助），核心协议契约由 `contract.generated.ts` 强类型定义：
+Hermes 网关（Gateway）采用标准的 **JSON-RPC 2.0 over WebSocket** 双向长连接通信模型（默认挂载在 `/api/ws`，配套 `/api/*` REST 辅助），核心协议契约由 `packages/core/src/rpc/contracts/gateway-contract.generated.ts` 强类型定义：
 
 | 协议层级 | 方向 | 官方总量 | 客户端实调消费数 | 核心职责与消费模式 |
 |---|---|:---:|:---:|---|
-| **RPC Methods** | Client ➔ Gateway | **252 个** | **139 个** | 主动操作请求（102 个命令式 `request/call` + 37 个响应式 `useRpc` Hook 查询） |
-| **Gateway Events** | Gateway ➔ Client (Push) | **77 个** | **51 个** | 实时异步推送（38 个在 `handleEvent` 驱动会话，6 个全局系统处理，7 个 TanStack Query 缓存失效信号） |
-| **Server Requests** | Gateway ➔ Client (Intervention) | **13 个** | **13 个** | 服务端反向发起阻断（8 个手机端交互弹窗卡片 + 5 个 `WINDOW_ONLY` 桌面视口快速应答） |
+| **RPC Methods** | Client ➔ Gateway | **258 个** | **54 个 (Flux)** / 139 个 (上游) | 主动操作请求（Flux 生产激活 54 个核心 RPC 见 `docs/gateway/README.md`，上游 Android 原型覆盖 139 个） |
+| **Gateway Events** | Gateway ➔ Client (Push) | **77 个** | **51 个** | 实时异步推送（契约数组含 77 个事件；`docs/gateway/events.md` 略去 5 个无 payload 字段事件显示为 72 个） |
+| **Server Requests** | Gateway ➔ Client (Intervention) | **14 个** | **14 个** | 服务端反向发起阻断（8 个交互卡片 + 5 个 `WINDOW_ONLY` 桌面视口应答 + `setup_choose` 引导） |
 
 ---
 
@@ -49,15 +49,17 @@ Hermes 网关（Gateway）采用标准的 **JSON-RPC 2.0 over WebSocket** 双向
 
 ---
 
-## 三、官方 RPC 接口（Client ➔ Gateway）252 个全量分类清单与覆盖对照
+## 三、官方 RPC 接口（Client ➔ Gateway）258 个全量分类清单与覆盖对照
 
-网关共开放 **252 个 RPC 方法**。此前文档仅统计了 10 个分类（加总仅 161 个，缺失 91 个），现完整补充至 **20 个领域全景大类**：
+网关共开放 **258 个 RPC 方法**（强类型数组 `RPC_METHODS` 严格定义于 `packages/core/src/rpc/contracts/gateway-contract.generated.ts`，首项 `agents.list`，尾项 `wake.stop`）。
+
+> **调用点路径说明**：下表“客户端调用方式与状态”一栏标注的代码路径（如 `store/chat.ts`、`(tabs)/chat.tsx`、`sessions.tsx` 等）系**上游 Nous 官方移动端原型（`hermes-android`）全景基线**。在 **Hermes Flux** 当前 Monorepo 中，调用逻辑已下沉至 `packages/core/src/` 与 `packages/desktop/src/`，当前经真实探针（`npm run probe:gateway`）严格激活的核心 RPC 为 54 个（详见 `docs/gateway/README.md`）。
 
 ### 1. 会话与上下文核心 (Session Core) — 33 个
 | RPC 方法名 | 参数摘要 (`params`) | 返回值 (`result`) | 客户端调用方式与状态 |
 |---|---|---|:---:|
 | `session.create` | `SessionCreateParams` (title?, model?, system_prompt?, profile?) | `SessionCreateResult` | ✅ `gw.request` (`store/chat.ts`) |
-| `session.list` | `SessionListParams` (limit?, offset?, filter?) | `SessionListResult` | ✅ REST + `useRpc` 混合调用 |
+| `session.list` | `SessionListParams` (profile?, title?, limit?, include_hidden?) | `SessionListResult` | ✅ 单 Profile 列表查询；跨 Profile 聚合建议走 REST `/api/profiles/sessions` |
 | `session.resume` | `SessionResumeParams` (session_id) | `SessionResumeResult` | ✅ `gw.request` (`store/chat.ts`) |
 | `session.delete` | `SessionDeleteParams` (session_id) | `SessionDeleteResult` | ✅ `gw.request` (`sessions.tsx`) |
 | `session.interrupt` | `SessionInterruptParams` (session_id) | `SessionInterruptResult` | ✅ `gw.request` (`store/chat.ts`) |
@@ -420,14 +422,15 @@ Hermes 网关（Gateway）采用标准的 **JSON-RPC 2.0 over WebSocket** 双向
 
 ---
 
-## 五、服务端反向干预请求（Gateway ➔ Client Requests）13 项全量契约与人机协同
+## 五、服务端反向干预请求（Gateway ➔ Client Requests）14 项全量契约与人机协同
 
-在 Agent 自主决策遇到高危动作或权限瓶颈时，网关主动发起反向 RPC（`SERVER_REQUEST_METHODS`），客户端必须对齐以下 13 项契约：
+在 Agent 自主决策遇到高危动作或权限瓶颈时，网关主动发起反向 RPC（`SERVER_REQUEST_METHODS`，共 14 项），客户端必须对齐以下 14 项契约：
 
 | 反向干预方法名 | 触发场景说明 | 载荷参数 (`params`) | 预期返回 (`result`) | 客户端 UI 呈现与响应逻辑 |
 |---|---|---|---|---|
 | **`approval`** | 准备执行高危命令（`rm -rf`, `drop table`, `git reset --hard` 等） | `ApprovalRequestParams` (command, risk, timeout) | `ApprovalResult` (allow, forever, deny) | 弹出**暗红警告卡片**，展示高危命令与风险原因，提供「仅允许一次」、「永久信任」与「拒绝」按钮。 |
 | **`clarify`** | Agent 方案存在分歧，调用 `clarify` 工具向人类提问（1~5 问） | `ClarifyRequestParams` (questions: array) | `ClarifyResult` (answers: Record) | 弹出**结构化问卷卡片**，支持单选、多选（带 Recommended 标记）与自定义补充。提交后一次性回传。 |
+| **`setup_choose`** | 首次进入配置档或运行引导时选择初始预设方案 | `SetupChooseRequestParams` (prompt, choices) | `ValueResult` (value: string) | 弹出**向导式初始预设选择卡片**，用户选择后向网关返回决议。 |
 | **`sudo`** | 终端工具执行了需要 Root 权限的指令 | `SudoRequestParams` (command, user) | `ValueResult` (value: password) | 弹出密码授权面板，密码输入框自动脱敏，提交后安全传递。 |
 | **`secret`** | 技能或运行流缺失必要的环境变量（如某平台 API Secret） | `SecretRequestParams` (env_var, prompt) | `ValueResult` (value: secret) | 弹出机密变量填报卡片，支持直接从本地 Vault 拾取或手动输入。 |
 | **`vault.code`** | 自动化脚本执行中触发了双因子（2FA / 短信 / 邮件）验证码 | `VaultCodeRequestParams` (service, hint) | `ValueResult` (value: 6位验证码) | 弹出 6 位动态验证码快捷输入小键盘。 |
