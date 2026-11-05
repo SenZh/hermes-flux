@@ -47,6 +47,10 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   });
 
   ipcMain.handle('window:maximize', () => {
+    if (mainWindow.isFullScreen()) {
+      mainWindow.setFullScreen(false);
+      return false;
+    }
     if (mainWindow.isMaximized()) {
       mainWindow.unmaximize();
     } else {

@@ -74,6 +74,14 @@ export function createMainWindow(): BrowserWindow {
     win.webContents.send('window:state-changed', { isMaximized: false });
   });
 
+  win.on('enter-full-screen', () => {
+    win.webContents.send('window:state-changed', { isMaximized: true });
+  });
+
+  win.on('leave-full-screen', () => {
+    win.webContents.send('window:state-changed', { isMaximized: false });
+  });
+
   // Native desktop context menu: enable standard Copy/Cut/Paste/SelectAll across the app
   win.webContents.on('context-menu', (_event, params) => {
     const menu = new Menu();
