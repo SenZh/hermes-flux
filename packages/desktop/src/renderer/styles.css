@@ -991,20 +991,25 @@ button {
    ========================================================================== */
 
 .session-item,
+.rail-group-item,
 .rail-primary-agent-card {
   border: 1px solid transparent !important;
 }
 .session-item:hover,
+.rail-group-item:hover,
 .rail-primary-agent-card:hover {
   background: var(--card-hover) !important;
 }
 .session-item.active,
+.rail-group-item.active,
 .rail-primary-agent-card.active {
   background: var(--bg-card-active, var(--card-active)) !important;
   border-color: transparent !important;
   box-shadow: none !important;
 }
-.rail-primary-agent-card:not(.active) {
+.rail-primary-agent-card:not(.active),
+.rail-group-item:not(.active),
+.session-item:not(.active) {
   background: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;

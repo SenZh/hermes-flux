@@ -120,10 +120,72 @@ function AgentStationItem({
 }
 
 /**
- * 会话行（用户定案形态，优化收敛）。
- * 【设计意图】去边框纯对比色：对齐现代极简设计，激活态依靠 bg-card-active 纯对比背景色标定；
- *   状态指示点与时间绑定钉在右缘，形成垂直扫描基准线。
- * 【约束与规则】只消费传进来的快照，绝不改写数据管道；点击与右键一律交回壳层。
+ * 左侧实体行通用组件 (RailEntityRow)。
+ * 设计意图 (Why)：普通会话、群聊会话与 Agent 主工位卡片在抽屉中垂直并列展示，
+ *   必须保持 100% 相同的高度、内边距、圆角与排版字阶（以普通会话为基准），消除视觉错位与样式分叉。
+ * 约束与规则 (Rules)：
+ *   1. 尺寸与间距以普通会话为基准（min-h-12, px-2, py-1.5, gap-2, 标题副标题间距 gap-1.5）；
+ *   2. 支持可选头像（avatar?: React.ReactNode），普通会话不传，群聊与 Agent 传入相应头像；
+ *   3. 状态与交互遵循无边框纯对比色（active 为 bg-card-active，未选中为透明）。
+ */
+export interface RailEntityRowProps {
+  className?: string;
+  active: boolean;
+  compact?: boolean;
+  avatar?: React.ReactNode;
+  title: string;
+  subtitle?: string;
+  timestamp?: number;
+  timeFallback?: string;
+  activityState?: LeftRailSession['activityState'];
+  titleAttr?: string;
+  onClick?: () => void;
+  onContextMenu?: (event: React.MouseEvent) => void;
+  dataAttributes?: Record<string, string>;
+}
+
+export function RailEntityRow({
+  className = '',
+  active,
+  compact,
+  avatar,
+  title,
+  subtitle,
+  timestamp,
+  timeFallback,
+  activityState,
+  titleAttr,
+  onClick,
+  onContextMenu,
+  dataAttributes,
+}: RailEntityRowProps): React.ReactElement {
+  return <button
+    type="button"
+    className={`${className} group relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors duration-150 ${compact ? 'min-h-8' : 'min-h-12'} ${active ? 'active bg-card-active text-foreground' : 'hover:bg-card-hover/80 text-secondary-foreground hover:text-foreground'}`}
+    title={titleAttr}
+    onClick={onClick}
+    onContextMenu={onContextMenu}
+    {...dataAttributes}
+  >
+    {avatar && <span aria-hidden="true" className="shrink-0 flex items-center justify-center">{avatar}</span>}
+    <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+      <span className="flex min-w-0 items-center justify-between gap-2">
+        <span className="truncate text-body font-medium leading-snug text-foreground">{title}</span>
+        <span className="ml-auto flex shrink-0 items-center gap-1.5">
+          <ActivityDot state={activityState} />
+          <RowTime timestamp={timestamp} fallback={timeFallback} />
+        </span>
+      </span>
+      {!compact && subtitle && (
+        <span className="truncate text-aux font-normal leading-snug text-muted-foreground/90">{subtitle}</span>
+      )}
+    </span>
+  </button>;
+}
+
+/**
+ * 会话行（消费统一的 RailEntityRow 组件）。
+ * 普通会话不支持头像，样式完全作为全局统一基准。
  */
 function SessionRow({ session, active, compact, onSelect, onMenu }: {
   session: LeftRailSession;
@@ -133,28 +195,29 @@ function SessionRow({ session, active, compact, onSelect, onMenu }: {
   onMenu: (x: number, y: number) => void;
 }): React.ReactElement {
   const subtitle = toSnippet(session.preview) || toSnippet(session.title);
-  return <button
-    type="button"
-    className={`session-item group relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors duration-150 ${compact ? 'min-h-8' : 'min-h-12'} ${active ? 'active bg-card-active text-foreground' : 'hover:bg-card-hover/80 text-secondary-foreground hover:text-foreground'}`}
-    data-id={session.id}
-    data-title={session.title}
-    data-bot={session.botName || ''}
+  return <RailEntityRow
+    className="session-item"
+    active={active}
+    compact={compact}
+    title={session.title}
+    subtitle={subtitle}
+    timestamp={session.timestamp}
+    timeFallback={session.time}
+    activityState={session.activityState}
     onClick={onSelect}
     onContextMenu={(event) => { event.preventDefault(); onMenu(event.clientX, event.clientY); }}
-  >
-    <span className="flex min-w-0 flex-1 flex-col gap-1.5">
-      <span className="flex min-w-0 items-center justify-between gap-2">
-        <span className="truncate text-body font-medium leading-snug text-foreground">{session.title}</span>
-        <span className="ml-auto flex shrink-0 items-center gap-1.5">
-          <ActivityDot state={session.activityState} />
-          <RowTime timestamp={session.timestamp} fallback={session.time} />
-        </span>
-      </span>
-      {!compact && <span className="truncate text-aux font-normal leading-snug text-muted-foreground/90">{subtitle}</span>}
-    </span>
-  </button>;
+    dataAttributes={{
+      'data-id': session.id,
+      'data-title': session.title,
+      'data-bot': session.botName || '',
+    }}
+  />;
 }
 
+/**
+ * 群聊行（消费统一的 RailEntityRow 组件）。
+ * 传入多人拼贴头像 CollageAvatar，其余尺寸排版与普通会话 100% 对齐。
+ */
 function GroupRow({ group, profiles, active, editing, onSelect, onMenu, onConfirmRename, onCancelRename }: {
   group: LeftRailGroupRoom;
   profiles: LeftRailProfile[];
@@ -167,30 +230,25 @@ function GroupRow({ group, profiles, active, editing, onSelect, onMenu, onConfir
   onCancelRename: () => void;
 }): React.ReactElement {
   if (editing) {
-    return <div className="rail-group-item rail-group-inline-rename-wrap active min-h-12 rounded-lg bg-card-active px-2" data-room-id={group.roomId}>
+    return <div className="rail-group-item rail-group-inline-rename-wrap active min-h-12 rounded-md bg-card-active px-2" data-room-id={group.roomId}>
       <RenameGroup initialName={group.name} roomId={group.roomId} onConfirm={onConfirmRename} onCancel={onCancelRename} />
     </div>;
   }
   const subtitle = toSnippet(group.lastMessage) || t('rail.groupsMembers', { count: String(group.members.length) });
-  return <button
-    type="button"
-    className={`rail-group-item group flex w-full min-h-12 items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors duration-150 ${active ? 'active bg-card-active text-foreground' : 'hover:bg-card-hover/80 text-secondary-foreground hover:text-foreground'}`}
-    data-room-id={group.roomId}
+  return <RailEntityRow
+    className="rail-group-item"
+    active={active}
+    avatar={<CollageAvatar members={group.members} profiles={profiles} size={36} />}
+    title={group.name}
+    subtitle={subtitle}
+    timestamp={group.updatedAt || group.createdAt}
+    activityState={group.activityState}
     onClick={onSelect}
     onContextMenu={(event) => { event.preventDefault(); onMenu(event.clientX, event.clientY); }}
-  >
-    <CollageAvatar members={group.members} profiles={profiles} size={36} />
-    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-      <span className="flex min-w-0 items-center justify-between gap-2">
-        <span className="truncate text-body font-medium leading-snug text-foreground">{group.name}</span>
-        <span className="ml-auto flex shrink-0 items-center gap-1.5">
-          <ActivityDot state={group.activityState} />
-          <RowTime timestamp={group.updatedAt || group.createdAt} />
-        </span>
-      </span>
-      <span className="truncate text-aux font-normal leading-snug text-muted-foreground/90">{subtitle}</span>
-    </span>
-  </button>;
+    dataAttributes={{
+      'data-room-id': group.roomId,
+    }}
+  />;
 }
 
 function RenameGroup({ initialName, roomId, onConfirm, onCancel }: {
@@ -313,25 +371,23 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
             onChange={(event) => props.onSearchChange(event.currentTarget.value)}
           />
         </label>
-        <Button
-          variant="ghost"
-          className={`rail-pinned-bot-row rail-primary-agent-card flex min-h-12 items-center justify-start gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition-colors duration-150 ${isBotFocused(focus, profile.name) ? 'active bg-card-active text-foreground' : 'bg-transparent text-secondary-foreground hover:bg-card-hover/80 hover:text-foreground'}`}
-          data-primary-bot={profile.name}
-          data-profile={profile.name}
-          title={t('rail.enterBotChat', { name: profile.displayName || profile.name })}
+        <RailEntityRow
+          className="rail-pinned-bot-row rail-primary-agent-card"
+          active={isBotFocused(focus, profile.name)}
+          avatar={<Avatar profile={profile} size={36} />}
+          title={profile.displayName || profile.name}
+          subtitle={toSnippet(profile.lastMessage || profile.description) || t('rail.defaultBotSnippet')}
+          timestamp={profile.timestamp}
+          timeFallback={profile.lastTime}
+          activityState={profile.activityState}
+          titleAttr={t('rail.enterBotChat', { name: profile.displayName || profile.name })}
           onClick={() => props.onSelectBot(profile.name)}
           onContextMenu={(event) => openBotMenu(event, profile.name)}
-        >
-          <Avatar profile={profile} size={32} />
-          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="truncate text-body font-semibold text-foreground leading-tight">{profile.displayName || profile.name}</span>
-            <span className="truncate text-caption font-normal text-muted-foreground leading-tight">{toSnippet(profile.lastMessage || profile.description) || t('rail.defaultBotSnippet')}</span>
-          </span>
-          <span className="ml-auto flex shrink-0 items-center gap-1.5">
-            <ActivityDot state={profile.activityState} />
-            <RowTime timestamp={profile.timestamp} fallback={profile.lastTime} />
-          </span>
-        </Button>
+          dataAttributes={{
+            'data-primary-bot': profile.name,
+            'data-profile': profile.name,
+          }}
+        />
       </div>
 
       {model.showChatDeck && <div className="session-scroll-area min-h-0 flex-1 overflow-y-auto px-1.5 pb-3 mr-[var(--geo-resize-handle)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" id="session-list-container">
@@ -395,18 +451,20 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
         {model.archivedSessions.length > 0 && <section>
           <div className="px-1.5 pb-0.5 pt-2 text-overline font-bold uppercase tracking-wide text-muted-foreground">{t('rail.archived')} ({model.archivedSessions.length})</div>
           <div className="flex flex-col gap-0.5 opacity-65">
-            {model.archivedSessions.map((session) => <button
+            {model.archivedSessions.map((session) => <RailEntityRow
               key={session.id}
-              type="button"
-              className={`session-item flex min-h-8 items-center rounded-md px-2 text-left transition-colors ${isSessionFocused(focus, session.id) ? 'active bg-card-active' : 'hover:bg-card-hover'}`}
-              data-id={session.id}
-              data-title={session.title}
-              data-bot={session.botName || ''}
+              className="session-item"
+              active={isSessionFocused(focus, session.id)}
+              compact
+              title={session.title}
               onClick={() => props.onSelectSession(session.id, session.botName)}
               onContextMenu={(event) => { event.preventDefault(); props.onOpenSessionMenu(session.id, session.title, event.clientX, event.clientY); }}
-            >
-              <span className={`truncate text-aux font-medium ${isSessionFocused(focus, session.id) ? 'text-foreground' : 'text-muted-foreground'}`}>{session.title}</span>
-            </button>)}
+              dataAttributes={{
+                'data-id': session.id,
+                'data-title': session.title,
+                'data-bot': session.botName || '',
+              }}
+            />)}
           </div>
         </section>}
       </div>}
