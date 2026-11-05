@@ -2,6 +2,12 @@
 
 > **定位说明**：本文档确立了 **Hermes Flux**（全平台 Desktop / Web / iOS / Android）设置体系的终极定稿交互架构（UX Architecture）与高质感视觉设计规范（UI Spec）。
 > 核心原则：**文案 100% 务实克制，零中二花哨词汇；UI 与微交互追求极致的物理流动感、磁性滑块与触控手感**。
+>
+> ⚠️ **姿态与真值**：设置中心属 Hermes Flux 工作台 = **`tool` 姿态**，美学裁决以 `/opt/data/profiles/aura/workspace/specs/05-aesthetic-constitution-and-skin-derivation.md`（Aura 工作区 · 审美宪法） 为准。
+> 本文的「物理流动感 / 磁性滑块 / 弹簧过冲」是 **editorial 式微交互**，与宪法 I6
+> （动效只承载状态变化、稳态常驻 ≤1、非对称 enter/exit、禁过冲）**存在已知偏离**。
+> 交互架构（作用域级联、双模编辑、检索、下钻栈）继续有效；
+> **动效参数待按宪法 I6 复核，复核前不得把本文弹簧曲线当作 tool 姿态验收标准**。
 
 ---
 
@@ -30,7 +36,7 @@
 ### 1.1 顶部 Agent 磁性滑动选择轨 (Magnetic Slider Track)
 - **物理滑块背景 (Glider)**：
   - 轨内常驻一个深色微浮雕滑块背景（`#20242E`，带 1px 半透明亮边与微阴影）；
-  - 当用户在老王、小张、老李之间点击切换时，滑块使用**弹簧物理缓动**（`transition: transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1)`）平滑横移对准目标；
+  - 当用户在老王、小张、老李之间点击切换时，滑块使用**弹簧物理缓动**（`transition: transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1)`）平滑横移对准目标；〔**editorial 式过冲，tool 姿态已知偏离宪法 I6，待复核**：应改非对称 120ms enter / 200ms exit、无过冲〕
   - 按钮按下时附带 `transform: scale(0.97)` 物理按压反馈。
 - **内容区平滑十字交叉位移淡入 (Crossfade Animation)**：
   - 切换 Agent 时，右侧表单内容**绝不生硬刷新**；

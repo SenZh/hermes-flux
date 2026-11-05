@@ -4,6 +4,15 @@
 > 彻底终结多源真值漂移（旧 styles.css 手写块、themeRegistry 29 槽表、tokens.ts 僵尸表）。
 > 本规范确立 `packages/ui/src/tokens/skins.ts` 为**全仓唯一皮肤真值源**，通过自动化生成链编译至 CSS 标记区，实行严格的 43 槽完备性契约与别名收敛机制。
 
+> ⚠️ **工程契约真值 ≠ 美学真值**：本文约束的是**槽位完备性、别名收敛与生成链**，不定义「什么好看」。
+> 其中 `--primary-glow` / `--success-glow` / `--shadow-window|card|dock` / `badge-palette`
+> 作为**必填槽**，编码了 editorial 姿态假设（光晕、静态阴影、5 色相类别色）。
+> Hermes Flux 默认 **`tool` 姿态**，美学以 `/opt/data/profiles/aura/workspace/specs/05-aesthetic-constitution-and-skin-derivation.md`（Aura 设计总监工作区 · 审美宪法） 的 I1–I6 为准（零静态阴影、单色、动效只承载状态）。
+>
+> **P1 待办（契约美学中立化）**：装饰槽降为可选并默认 `none`、派生槽改由 L0 规则生成、
+> `badge-palette` 类别色收敛为中性块 + 文字标签。**中立化前，不要仅凭本文件生成 tool 姿态皮肤**；
+> 参考映射见 Aura 工作区 `specs/skins/linear-dark.json`。
+
 ---
 
 ## 一、43 语义槽契约规范 (SLOT_IDS Specification)

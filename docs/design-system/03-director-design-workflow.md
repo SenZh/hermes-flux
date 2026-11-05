@@ -1,5 +1,11 @@
 # 跨端 UI/UE 设计总监全流程工作流 (Director SOP)
 
+> **流程跨姿态通用，数值不通用**：本文定义 6 大阶段（解构 → 骨架 → Token → 精修 → 动效 → 验收）。
+> 阶段内**取什么数值**先按 `README.md` 的「设计真值链」判定 posture：
+> `tool` 走 `/opt/data/profiles/aura/workspace/specs/05-aesthetic-constitution-and-skin-derivation.md`（Aura 设计总监工作区 · 审美宪法），`editorial` 走 `04-tokens…`。
+> 文中 36px/700 字阶、Spring 弹簧、Squircle、「材质光影门禁（双层漫反射阴影）」
+> **均为 editorial 姿态参数**；tool 姿态的对应门禁见宪法 §5.3 / §6。
+
 > **导言**：
 > 顶级的设计从不是灵光乍现的碰运气，而是一套**严密推演、可复现、端到端闭环的工业级工程流水线**。
 > 本工作流覆盖从业务目标解构、心智模型映射、空间网格骨架、美学 Token 架构、跨端界面精细化，一直到动效物理学与严苛代码级交付验收门禁的 6 大阶段。

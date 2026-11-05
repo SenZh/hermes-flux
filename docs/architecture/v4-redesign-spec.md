@@ -1,5 +1,17 @@
 # Hermes Flux 全面重构技术方案与架构规范 (v4.0 旗舰美学与全链路闭环)
 
+> ⚠️ **美学目标已按 posture 分治修正（务必先读）**：本文 §1.1「缺陷三」把
+> 「未实现 1px 天光切线 / 多层环境漫反射阴影 / 超椭圆连续曲率 / 弹簧物理动效」列为**代码缺陷**，
+> 并将这些装饰写进 §重构清单的验收目标。这是 **editorial / marketing 姿态**的主张。
+>
+> Hermes Flux 三舱工作台 = **`tool` 姿态**，以 `/opt/data/profiles/aura/workspace/specs/05-aesthetic-constitution-and-skin-derivation.md`（Aura 工作区 · 审美宪法） 的 I1–I6 为准：
+> **零静态阴影、1px 发丝线（非内描边/天光切线）、4–8px 标准圆角（非 Squircle）、
+> 动效只承载状态变化且禁过冲**。按宪法，上述装饰**本就不该实现**，不得再作为验收缺口。
+>
+> 本文 §1.1 缺陷一/二（会话加载、模型提取）与架构分层、RPC 改造**继续有效**；
+> **§1.1 缺陷三及 §重构清单中的装饰类目标仅限 editorial 姿态，tool 姿态不予采纳**。
+> 真值链见 [`docs/design-system/README.md`](../design-system/README.md)「设计真值链与姿态分治」。
+
 ## 一、用户意图与现状事实清单 (Facts & Intent)
 
 ### 1.1 现状与三大致命缺陷

@@ -1,5 +1,11 @@
 # UI/UE 经典著作研读与核心理论模型萃取
 
+> ⚠️ **定位声明（理论源，非现行规范）**：本篇是 Apple HIG / Fluent / Refactoring UI 等经典著作的
+> **历史理论摘录**。其中 Squircle 连续曲率、亚克力/云母材质、1px 内描边、Spring Physics 是
+> 平台原生 / editorial 姿态的历史主张，**不构成 `tool` 姿态（Hermes Flux 工作台）的现行约束**。
+> 现行标准以 `/opt/data/profiles/aura/workspace/specs/05-aesthetic-constitution-and-skin-derivation.md`（Aura 工作区 · 审美宪法） 为准（真值链见 [`README.md`](README.md)）。
+> **保留原貌以供理论溯源，不得据此生成工作台界面**。
+
 > 本篇梳理人机交互、界面美学与设计系统发展史上的核心经典著作，提炼各领域的底层公理、理论模型与工程指导原则。
 
 ---
