@@ -514,9 +514,12 @@
 .status-location { opacity: 0.7; }
 /* 延迟读数走 caption 档 muted 前景：同字号同色系，只靠等宽数字与间距区分层级 */
 .status-latency { font-variant-numeric: tabular-nums; }
+/* 设计意图 (Why)：顶栏主体操作与窗控区必须完整锁定 42px 物理高度，下边框 1px 不得挤占内容区。
+   防范的历史坑 (Pitfall)：历史版本在 box-sizing: border-box 下直接声明 height: 42px，导致 1px 下边框挤压内部高度仅剩 41px，窗控三键与图标发生 1px 垂直偏心。
+   约束与规则 (Rules)：内部元素 height: 100% 必须精准对应 42px，含边框总外围高度为 43px。 */
 .flux-titlebar {
-  height: calc(42px + env(safe-area-inset-top, 0px));
-  min-height: 42px;
+  height: calc(var(--geo-titlebar) + 1px + env(safe-area-inset-top, 0px));
+  min-height: calc(var(--geo-titlebar) + 1px);
   padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) 0 env(safe-area-inset-left, 0px);
   box-sizing: border-box;
   display: flex;
@@ -543,12 +546,13 @@
   letter-spacing: -0.01em;
 }
 .titlebar-latency-pill { color: var(--secondary-foreground); font-family: var(--font-mono); }
-.win-caption-controls { display: flex; align-items: center; height: 100%; -webkit-app-region: no-drag; }
-.win-cap-btn { width: 46px; height: 100%; border: 0; background: transparent; color: var(--secondary-foreground); display: flex; align-items: center; justify-content: center; cursor: pointer; -webkit-app-region: no-drag; }
+.win-caption-controls { display: flex; align-items: center; height: var(--geo-titlebar); -webkit-app-region: no-drag; }
+.win-cap-btn { width: var(--geo-titlebar); height: var(--geo-titlebar); border: 0; background: transparent; color: var(--secondary-foreground); display: flex; align-items: center; justify-content: center; cursor: pointer; -webkit-app-region: no-drag; }
 .win-cap-btn:hover { background: var(--card-hover); }
 .win-cap-close:hover { background: var(--destructive); color: var(--foreground); }
 .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; flex: 0 0 auto; border: 1px solid var(--border-subtle); border-radius: 6px; background: transparent; color: var(--secondary-foreground); cursor: pointer; -webkit-app-region: no-drag; }
 .icon-btn:hover { background: var(--card-hover); color: var(--foreground); }
+#toggle-left-rail-btn { margin-left: 7px; }
 /* gate-theme-allow: macOS traffic-light controls use the platform-standard fixed control colors. */
 .mac-traffic-lights { display: flex; align-items: center; gap: 7px; padding-left: 12px; -webkit-app-region: no-drag; }
 .traffic-btn { width: 12px; height: 12px; padding: 0; border: 0; border-radius: 50%; cursor: pointer; }
@@ -634,6 +638,13 @@ html[data-rail-resizing],
 html[data-rail-resizing] * {
   cursor: col-resize !important;
   user-select: none !important;
+}
+
+/* 设计意图 (Why)：微轨内容宽度严格锁定为 52px，右边框 1px 不得挤占内容区。
+   防范的历史坑 (Pitfall)：历史版本在 box-sizing: border-box 下直接声明 width: 52px，导致 1px 右边框将微轨挤压至 51px，微轨内 36px 按钮两侧留白不对称。
+   约束与规则 (Rules)：微轨总宽为 calc(var(--geo-micro-rail) + 1px)，扣除右边框后内容区精准为 52px。 */
+#flux-station-rail {
+  width: calc(var(--geo-micro-rail) + 1px);
 }
 
 /* Scrollbar Customization */
@@ -895,7 +906,7 @@ button {
   .flux-left-rail {
     position: fixed !important;
     left: 0;
-    top: calc(42px + env(safe-area-inset-top, 0px));
+    top: calc(var(--geo-titlebar) + 1px + env(safe-area-inset-top, 0px));
     bottom: 0;
     width: min(300px, 80vw) !important;
     min-width: 0 !important;
@@ -933,7 +944,7 @@ button {
     position: fixed !important;
     left: 0 !important;
     right: 0 !important;
-    top: calc(42px + env(safe-area-inset-top, 0px));
+    top: calc(var(--geo-titlebar) + 1px + env(safe-area-inset-top, 0px));
     bottom: 0;
     width: 100% !important;
     max-width: 100% !important;

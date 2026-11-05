@@ -218,7 +218,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
   const { model } = props;
   const focus = model.currentFocus;
   const profile = model.selectedAgent;
-  const railWidth = props.collapsed ? 'var(--geo-micro-rail, 52px)' : 'var(--rail-w-left, 264px)';
+  const railWidth = props.collapsed ? 'calc(var(--geo-micro-rail, 52px) + 1px)' : 'var(--rail-w-left, 264px)';
 
   const activeSessionBotName = focus.type === 'session'
     ? model.activeSessions.find((s) => s.id === focus.sessionId)?.botName
@@ -241,7 +241,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
     style={{ flex: `0 0 ${railWidth}`, width: railWidth, minWidth: railWidth, maxWidth: railWidth }}
     data-testid="react-left-rail"
   >
-    <div id="flux-station-rail" className="flex w-[var(--geo-micro-rail,52px)] shrink-0 flex-col items-center gap-2 border-r border-border-subtle bg-panel py-2">
+    <div id="flux-station-rail" className="flex shrink-0 flex-col items-center gap-2 border-r border-border-subtle bg-panel py-2" style={{ width: 'calc(var(--geo-micro-rail, 52px) + 1px)' }}>
       <Button
         variant="ghost"
         size="icon"

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Minus, Square, X, PanelLeft, Settings2, PanelRight, Sun } from 'lucide-react';
+import { Minus, Square, X, PanelLeft, Settings2, PanelRight, Sun, Minimize } from 'lucide-react';
 import { t } from '../i18n/index.js';
 import { renderBotAvatar, renderGroupCollageAvatar } from '../utils/botAvatar.js';
 
@@ -63,9 +63,11 @@ export function Titlebar({ platform, title, isMaximized, gatewayConnected, laten
       <button id="btn-open-settings" className="icon-btn" title={t('titlebar.settings')} type="button" onClick={onOpenSettings}><Settings2 size={14} /></button>
       <button id="toggle-inspector-btn" className="icon-btn" title={t('titlebar.toggleInspector')} type="button" onClick={onToggleInspector}><PanelRight size={14} /></button>
       {isWindows && <div className="win-caption-controls">
-        <button className="win-cap-btn" id="win-min-btn" title={t('titlebar.minimize')} type="button" onClick={onMinimize}><Minus size={12} /></button>
-        <button className="win-cap-btn" id="win-max-btn" title={isMaximized ? t('titlebar.restore') : t('titlebar.maximize')} type="button" onClick={onMaximize}><Square size={11} /></button>
-        <button className="win-cap-btn win-cap-close" id="win-close-btn" title={t('titlebar.close')} type="button" onClick={onClose}><X size={12} /></button>
+        <button className="win-cap-btn" id="win-min-btn" title={t('titlebar.minimize')} type="button" onClick={onMinimize}><Minus size={14} /></button>
+        <button className="win-cap-btn" id="win-max-btn" title={isMaximized ? t('titlebar.restore') : t('titlebar.maximize')} type="button" onClick={onMaximize}>
+          {isMaximized ? <Minimize size={12} /> : <Square size={12} />}
+        </button>
+        <button className="win-cap-btn win-cap-close" id="win-close-btn" title={t('titlebar.close')} type="button" onClick={onClose}><X size={14} /></button>
       </div>}
     </div>
   </header>;

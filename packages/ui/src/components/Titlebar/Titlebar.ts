@@ -43,10 +43,10 @@ export function renderTitlebar(props: TitlebarProps): string {
 
   const winControls = `
     <div class="win-caption-controls" style="-webkit-app-region: no-drag; display: flex; align-items: center; height: 100%;">
-      <button class="win-cap-btn" id="win-min-btn" title="最小化" style="width: 46px; height: 100%; border: none; background: transparent; color: var(--text-secondary); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.1s ease;">
+      <button class="win-cap-btn" id="win-min-btn" title="${t('titlebar.minimize')}" style="width: 42px; height: 100%; border: none; background: transparent; color: var(--text-secondary); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.1s ease;">
         <svg width="10" height="10" viewBox="0 0 10 10"><line x1="0" y1="5" x2="10" y2="5" stroke="currentColor" stroke-width="1"/></svg>
       </button>
-      <button class="win-cap-btn" id="win-max-btn" title="${props.isMaximized ? '向下还原' : '最大化'}" style="width: 46px; height: 100%; border: none; background: transparent; color: var(--text-secondary); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.1s ease;">
+      <button class="win-cap-btn" id="win-max-btn" title="${props.isMaximized ? t('titlebar.restore') : t('titlebar.maximize')}" style="width: 42px; height: 100%; border: none; background: transparent; color: var(--text-secondary); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.1s ease;">
         ${
           props.isMaximized
             ? `<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1">
@@ -58,7 +58,7 @@ export function renderTitlebar(props: TitlebarProps): string {
               </svg>`
         }
       </button>
-      <button class="win-cap-btn win-cap-close" id="win-close-btn" title="关闭" style="width: 46px; height: 100%; border: none; background: transparent; color: var(--text-secondary); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.1s ease, color 0.1s ease;">
+      <button class="win-cap-btn win-cap-close" id="win-close-btn" title="${t('titlebar.close')}" style="width: 42px; height: 100%; border: none; background: transparent; color: var(--text-secondary); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.1s ease, color 0.1s ease;">
         <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1"><path d="M1 1L9 9M9 1L1 9"/></svg>
       </button>
     </div>
@@ -70,8 +70,8 @@ export function renderTitlebar(props: TitlebarProps): string {
 
   return `
     <header class="flux-titlebar" style="
-      height: calc(42px + env(safe-area-inset-top, 0px));
-      min-height: 42px;
+      height: calc(42px + 1px + env(safe-area-inset-top, 0px));
+      min-height: calc(42px + 1px);
       padding-top: env(safe-area-inset-top, 0px);
       padding-left: env(safe-area-inset-left, 0px);
       padding-right: env(safe-area-inset-right, 0px);
@@ -91,7 +91,7 @@ export function renderTitlebar(props: TitlebarProps): string {
         ${isMac ? macControls : ''}
         <button id="toggle-left-rail-btn" class="icon-btn" title="${t('titlebar.toggleLeftRail')}" style="
           -webkit-app-region: no-drag;
-          margin-left: ${isWin ? '12px' : '6px'};
+          margin-left: ${isWin ? '7px' : '6px'};
           background: transparent;
           border: 1px solid var(--border-subtle);
           border-radius: 6px;
