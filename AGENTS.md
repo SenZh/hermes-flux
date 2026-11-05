@@ -32,6 +32,7 @@
 | **网关契约与特性** | [`docs/architecture/gateway-api-and-features-matrix.md`](docs/architecture/gateway-api-and-features-matrix.md) | 官方网关契约基线（258 RPC / 72 事件），客户端 Capacitor 8 容器映射 |
 | **网关接口索引** | [`docs/gateway/README.md`](docs/gateway/README.md) | 自动生成的 10 个网关核心模块接口文档与真实探针状态（禁止手动修改） |
 | **踩坑登记表** | [`docs/architecture/pitfall-registry.md`](docs/architecture/pitfall-registry.md) | 踩坑记录 ➔ 根因 ➔ 守卫探针映射（P-001 ~ P-021） |
+| **动效与宿主隔离** | [`docs/architecture/motion-system-and-host-isolation-spec.md`](docs/architecture/motion-system-and-host-isolation-spec.md) | 跨端通用动效引擎、Version CAS 状态机、动态 Token 探测、Grid 折叠契约与宿主渐进改造规范 |
 | **工程纪律总纲** | [`ENGINEERING_DISCIPLINE.md`](ENGINEERING_DISCIPLINE.md) | 工业级工程防御体系、AST 防 AI 糊弄 15 条棘轮、长会话性能预算与平台避坑军规 |
 
 ### 3. 本地专属自动化验证技能 (`.opencode/skills/`)

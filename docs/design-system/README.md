@@ -159,3 +159,7 @@
    - **尺寸与间距以基准对齐**：必须选定一个通用业务形态（如普通会话 `SessionRow`）作为基准真值，所有衍生变体在高度（48px）、内边距（px-2 py-1.5）、外边距、圆角与字阶上严格 100% 保持一致；
    - **可选插槽扩展变体**：变体特性（如头像 Avatar、操作栏、状态徽标）必须作为可选 Props 注入（如 `avatar?: React.ReactNode`），不支持头像的业务形态直接缺省，严禁私自派生第二套 HTML/JSX 结构；
    - **杜绝样式漂移与双标**：任何通用排版与视觉样式的变更必须在基础复用组件内一次性完成，保证全端全业务形态自动同步。
+5. **动效物理学与宿主隔离铁律 (Motion System & Host Isolation)**：
+   - 动效严格遵守审美宪法 I6，严禁弹性过冲，进退场非对称（120ms enter / 200ms exit）；
+   - 滚动容器绝对禁止声明 `transform`（防止 WebKit 硬件层退化）；
+   - 详细设计与代码契约详见 [`docs/architecture/motion-system-and-host-isolation-spec.md`](../architecture/motion-system-and-host-isolation-spec.md)。

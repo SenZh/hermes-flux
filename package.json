@@ -16,7 +16,7 @@
     "package:desktop:win": "npm --workspace=@hermes-flux/desktop run package:win",
     "package:desktop:win:dir": "npm --workspace=@hermes-flux/desktop run package:win:dir",
     "package:mobile:android": "npm --workspace=@hermes-flux/mobile run build:android",
-    "test": "node --test packages/core/__tests__/**/*.test.mjs packages/ui/__tests__/**/*.test.mjs packages/desktop/__tests__/unit/**/*.test.mjs",
+    "test": "node --test packages/core/__tests__/**/*.test.mjs packages/ui/__tests__/**/*.test.mjs packages/desktop/__tests__/unit/**/*.test.mjs scripts/__tests__/**/*.test.mjs",
     "verify:formal": "node --test packages/core/__tests__/formal/**/*.test.mjs",
     "test:mobile:cdp": "node packages/mobile/scripts/prepare-assets.mjs && node --test packages/mobile/__tests__/cdp-mobile-bridge.test.mjs",
     "test:mobile:emulator": "node packages/mobile/__tests__/adb-mobile-runner.mjs",

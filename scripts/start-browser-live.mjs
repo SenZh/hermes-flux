@@ -17,40 +17,60 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
-// 优先从环境变量取，兜底使用本地已对齐网关与凭据
+// 优先从环境变量取，兜底使用本地已对齐网关地址；凭据一律由用户在连接面板输入，绝不落盘
 const GW_BASE = (process.env.FLUX_GATEWAY_URL || process.env.HERMES_GATEWAY_URL || 'https://fn-ai.codepower.cloud:1519').replace(/\/+$/, '');
 const GW_USER = process.env.FLUX_GATEWAY_USER || 'zhangsen';
-const GW_PASS = process.env.FLUX_GATEWAY_PASS || '';
 const PORT = Number(process.env.PORT) || 9120;
 
 let sessionCookie = '';
 
-async function loginGateway() {
-  try {
-    const res = await fetch(`${GW_BASE}/auth/password-login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json', Origin: GW_BASE },
-      body: JSON.stringify({ username: GW_USER, password: GW_PASS, provider: 'basic' }),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const setCookie = res.headers.get('set-cookie') || '';
-    sessionCookie = setCookie.split(';')[0] || '';
-    console.log(`[Live Server] 网关认证就绪 · ${GW_BASE}`);
-  } catch (err) {
-    console.warn(`[Live Server] 网关登录警告 (将按免密模式探测):`, err.message);
-  }
-}
-
-async function fetchWsTicket() {
-  const res = await fetch(`${GW_BASE}/api/auth/ws-ticket`, {
+/**
+ * 【设计意图 (Why)】浏览器直跑模式下，凭据由用户在连接面板输入并经 PAL 桥透传到 /__gw/auth，
+ *   服务端必须复刻桌面主进程 ipc.ts:167-216 的认证链路，而非依赖环境变量预登录。
+ * 【防范的历史坑 (Pitfall)】旧实现用空密码预登录导致 /auth/password-login 返回 401，
+ *   sessionCookie 为空，/api/auth/ws-ticket 返回 401 no_cookie；且 ticket 为空时仍返回
+ *   ok:true，把鉴权失败伪装成成功，使前端拼出不带 ticket 的 WS URL 被网关拒绝握手。
+ * 【约束与规则 (Rules)】登录 → 提取 Set-Cookie → 带 Cookie 换 ticket 三步必须全部成功；
+ *   任一步失败都显式返回 ok:false，ticket 缺失等同失败，绝不降级为空字符串（Failure Is Not Empty）。
+ */
+async function authenticateWithCredentials(baseUrl, username, password) {
+  const base = (baseUrl || GW_BASE).replace(/\/+$/, '');
+  const loginRes = await fetch(`${base}/auth/password-login`, {
     method: 'POST',
-    headers: { Accept: 'application/json', Cookie: sessionCookie },
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', Origin: base },
+    body: JSON.stringify({ username, password, provider: 'basic' }),
   });
-  const data = await res.json().catch(() => ({}));
-  return data.ticket || '';
+  if (loginRes.status === 401) {
+    throw new Error('认证失败: 用户名或密码错误 (HTTP 401)');
+  }
+  if (!loginRes.ok) {
+    throw new Error(`登录接口异常 HTTP ${loginRes.status}`);
+  }
+
+  // 仅取每条 Set-Cookie 的 name=value 段，剥离 Path/Expires/HttpOnly 等属性后拼成请求头
+  const setCookies = typeof loginRes.headers.getSetCookie === 'function'
+    ? loginRes.headers.getSetCookie()
+    : [loginRes.headers.get('set-cookie') || ''];
+  sessionCookie = setCookies.map((c) => c.split(';')[0]).filter(Boolean).join('; ');
+  if (!sessionCookie) {
+    throw new Error('登录成功但网关未下发会话 Cookie，无法换取 WS ticket');
+  }
+
+  const ticketRes = await fetch(`${base}/api/auth/ws-ticket`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', Cookie: sessionCookie, Origin: base },
+  });
+  if (!ticketRes.ok) {
+    throw new Error(`获取 WebSocket 凭证失败 HTTP ${ticketRes.status}`);
+  }
+  const ticketData = await ticketRes.json().catch(() => ({}));
+  if (typeof ticketData.ticket !== 'string' || !ticketData.ticket) {
+    throw new Error('网关未返回有效的 WebSocket ticket');
+  }
+  return ticketData.ticket;
 }
 
-async function httpProxy(cookie, { baseUrl, path: p, method = 'GET', params, body }) {
+async function httpProxy(cookie, { baseUrl, path: p, method = 'GET', params, body, ticket }) {
   const b = (baseUrl || GW_BASE).replace(/\/$/, '');
   const url = new URL(`${b}${p}`);
   if (params) {
@@ -58,9 +78,12 @@ async function httpProxy(cookie, { baseUrl, path: p, method = 'GET', params, bod
       if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
     }
   }
+  // REST 降级通道与桌面主进程 ipc.ts:268-270 对齐，透传 X-WS-Ticket，否则网关按无凭证拒绝
+  const headers = { Accept: 'application/json', Cookie: cookie, ...(body ? { 'Content-Type': 'application/json' } : {}) };
+  if (ticket) headers['X-WS-Ticket'] = ticket;
   const res = await fetch(url, {
     method,
-    headers: { Accept: 'application/json', Cookie: cookie, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
@@ -76,8 +99,6 @@ function readBody(req) {
 }
 
 async function start() {
-  await loginGateway();
-
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
     const sendJson = (obj, status = 200) => {
@@ -85,13 +106,19 @@ async function start() {
       res.end(JSON.stringify(obj));
     };
 
-    // 1. 网关认证换票据接口
+    // 1. 网关认证换票据接口：凭据来自连接面板，原样透传，不做环境变量预登录
     if (url.pathname === '/__gw/auth') {
+      const startAt = Date.now();
       try {
-        const ticket = await fetchWsTicket();
-        return sendJson({ ok: true, ticket, latency: 45, message: `认证就绪 · Gateway ${GW_BASE}` });
+        const body = await readBody(req);
+        const ticket = await authenticateWithCredentials(
+          body.url || body.baseUrl || GW_BASE,
+          typeof body.username === 'string' ? body.username : '',
+          typeof body.password === 'string' ? body.password : '',
+        );
+        return sendJson({ ok: true, ticket, latency: Date.now() - startAt, message: `认证就绪 · Gateway ${GW_BASE}` });
       } catch (e) {
-        return sendJson({ ok: false, message: e.message, latency: 0 });
+        return sendJson({ ok: false, message: e.message, latency: Date.now() - startAt });
       }
     }
 
@@ -105,6 +132,7 @@ async function start() {
           method: body.method,
           params: body.params,
           body: body.body,
+          ticket: body.ticket,
         });
         return sendJson(result ?? null);
       } catch (err) {
@@ -221,11 +249,13 @@ async function start() {
     console.log(`⚡ 无需打包 exe，浏览器刷新即可预览最新代码改动！`);
     console.log(`======================================================\n`);
 
-    // 自动打开浏览器
-    if (process.platform === 'win32') {
-      spawn('cmd.exe', ['/c', 'start', liveUrl], { stdio: 'ignore', detached: true }).unref();
-    } else if (process.platform === 'darwin') {
-      spawn('open', [liveUrl], { stdio: 'ignore', detached: true }).unref();
+    // 自动打开浏览器；CI / 自动化探针通过 FLUX_NO_OPEN_BROWSER 关闭，避免拉起真实窗口
+    if (!process.env.FLUX_NO_OPEN_BROWSER) {
+      if (process.platform === 'win32') {
+        spawn('cmd.exe', ['/c', 'start', liveUrl], { stdio: 'ignore', detached: true }).unref();
+      } else if (process.platform === 'darwin') {
+        spawn('open', [liveUrl], { stdio: 'ignore', detached: true }).unref();
+      }
     }
   });
 }
