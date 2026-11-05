@@ -315,7 +315,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
         </label>
         <Button
           variant="ghost"
-          className={`rail-pinned-bot-row rail-primary-agent-card flex min-h-12 items-center justify-start gap-2.5 rounded-lg border px-2.5 text-left transition-all duration-150 ${isBotFocused(focus, profile.name) ? 'active border-primary/30 bg-card-active shadow-sm' : 'border-border-subtle bg-card/40 hover:border-border hover:bg-card-hover/80'}`}
+          className={`rail-pinned-bot-row rail-primary-agent-card flex min-h-12 items-center justify-start gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition-colors duration-150 ${isBotFocused(focus, profile.name) ? 'active bg-card-active text-foreground' : 'bg-transparent text-secondary-foreground hover:bg-card-hover/80 hover:text-foreground'}`}
           data-primary-bot={profile.name}
           data-profile={profile.name}
           title={t('rail.enterBotChat', { name: profile.displayName || profile.name })}

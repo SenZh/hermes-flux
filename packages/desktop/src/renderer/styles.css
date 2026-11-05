@@ -990,14 +990,22 @@ button {
    Clean Light Theme Refinements (OpenChamber Light Mode Aesthetic Polish)
    ========================================================================== */
 
-.session-item {
-  border: 1px solid transparent;
+.session-item,
+.rail-primary-agent-card {
+  border: 1px solid transparent !important;
 }
-.session-item:hover {
-  background: var(--card-hover);
+.session-item:hover,
+.rail-primary-agent-card:hover {
+  background: var(--card-hover) !important;
 }
-.session-item.active {
+.session-item.active,
+.rail-primary-agent-card.active {
   background: var(--bg-card-active, var(--card-active)) !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+.rail-primary-agent-card:not(.active) {
+  background: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;
 }
