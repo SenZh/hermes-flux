@@ -15,18 +15,18 @@
 
 任何功能演进、UI 视觉打磨、接口调用、重构修复与审查测试**必须首先研读对应提示词与设计规范**：
 
-### 1. UI 视觉、设计系统与审查提示词 (`prompts/`)
+### 1. UI 视觉、设计系统与审查规范 (`docs/design-system/`)
 | 资产名称 | 路径 | 核心要点与适用场景 |
 |---|---|---|
-| **UI 视觉与设计系统规范** | [`prompts/ui-design-system.md`](prompts/ui-design-system.md) | **【强制】凡涉及 UI/视觉/样式/排版必须先读**。新极客精准美学、5 级表面阶梯（L0~L4）、1px 微距发丝线、7 档整数排版字阶、核心几何约束（42px顶栏/264px左双轨/740px输入舱/410px检查舱/拔除底栏） |
-| **UI 与体验审查专员提示词** | [`prompts/ui-style-review.md`](prompts/ui-style-review.md) | **【强制】样式审查专员 Prompt**。Token 纯粹性、几何一致性、排版无抖动、i18n 完整性与渲染性能五大审查维度，结论 Binding（一票否决） |
+| **设计系统总纲** | [`docs/design-system/README.md`](docs/design-system/README.md) | **【强制】凡涉及 UI/视觉/样式/排版必须先读**。新极客精准美学、5 级表面阶梯（L0~L4）、1px 微距发丝线、7 档整数排版字阶、核心几何约束（42px顶栏/264px左双轨/740px输入舱/410px检查舱/拔除底栏）、高度抽象与组件复用铁律 |
+| **UI 与体验审查规范** | [`docs/design-system/style-review-spec.md`](docs/design-system/style-review-spec.md) | **【强制】样式审查专员 Specification**。Token 纯粹性、几何一致性、排版无抖动、i18n 完整性、组件复用度与动效物理学六大审查维度，结论 Binding（一票否决） |
+| **设计 Token 规范** | [`docs/design-system/04-tokens-and-design-system-spec.md`](docs/design-system/04-tokens-and-design-system-spec.md) | 全端空间网格、色彩阶梯、字体排印、圆角与阴影层级规范 |
+| **桌面端设计规范** | [`docs/design-system/desktop-design-system-spec.md`](docs/design-system/desktop-design-system-spec.md) | 空间骨架、通栏对话流、52+212px 双轨折叠、740px 黄金输入舱与 410px 竖向检查舱 |
+| **设置体系交互规范** | [`docs/design-system/settings-interaction-and-ui-spec.md`](docs/design-system/settings-interaction-and-ui-spec.md) | 设置中心正交悬浮舱交互、分栏布局与 Token 映射规范 |
 
-### 2. 系统核心架构与领域设计规范 (`docs/architecture/` & `docs/design-system/`)
+### 2. 系统核心架构与领域设计规范 (`docs/architecture/`)
 | 分类 | 文档路径 | 核心规范与约束 |
 |---|---|---|
-| **设计系统总纲** | [`docs/design-system/README.md`](docs/design-system/README.md) | 设计系统宣言、设计原则与唯一设计权威真值 |
-| **设计 Token 规范** | [`docs/design-system/04-tokens-and-design-system-spec.md`](docs/design-system/04-tokens-and-design-system-spec.md) | 空间网格、色彩阶梯、字体排印、圆角与阴影层级规范 |
-| **桌面端设计规范** | [`docs/design-system/desktop-design-system-spec.md`](docs/design-system/desktop-design-system-spec.md) | 空间骨架、通栏对话流、52+212px 双轨折叠、740px 黄金输入舱与 410px 竖向检查舱 |
 | **三态对话模型** | [`docs/architecture/three-conversation-modes-spec.md`](docs/architecture/three-conversation-modes-spec.md) | 普通会话、专职 Bot 主工位、多 Agent 群聊三态物理隔离模型与网关协议分流 |
 | **核心架构与数据流** | [`docs/architecture/core-architecture-and-data-flow-spec.md`](docs/architecture/core-architecture-and-data-flow-spec.md) | Monorepo 分层边界、PAL 平台抽象、WebSocket 5 态 FSM、Token 合流引擎 |
 | **网关契约与特性** | [`docs/architecture/gateway-api-and-features-matrix.md`](docs/architecture/gateway-api-and-features-matrix.md) | 官方网关契约基线（258 RPC / 72 事件），客户端 Capacitor 8 容器映射 |
@@ -75,7 +75,7 @@ $$\text{packages/desktop} \mid \text{packages/mobile} \mid \text{packages/web} \
 └──────────────────┴──────────────────┴──────────────────────────┴─────────────────────────┘
 ```
 
-1. **阶段一（范围确认）**：修改 UI/视觉先读 [`prompts/ui-design-system.md`](prompts/ui-design-system.md)；修改状态机需准备形式化定理验证；引入新功能需补充测试用例。
+1. **阶段一（范围确认）**：修改 UI/视觉先读 [`docs/design-system/README.md`](docs/design-system/README.md)；修改状态机需准备形式化定理验证；引入新功能需补充测试用例。
 2. **阶段二（原子编码）**：最小完整变更，禁止任何 `as any`，关键函数注明三要素（设计意图 Why、防范历史坑 Pitfall、约束规则 Rules）。
 3. **阶段三（机器自检）**：必须亲自执行并通过五阶自检命令（见下表）。
 4. **阶段四（独立双审）**：禁止自我认证；触碰样式委派 `flux-style-reviewer` 审查；触碰逻辑委派 `flux-code-reviewer` 审查；双审全 PASS 方可向用户汇报。

@@ -622,8 +622,8 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     const { runLongSessionPerfBenchmark } = await import('../../../scripts/gates/perf-benchmark.mjs');
     const result = await runLongSessionPerfBenchmark();
     assert.equal(result.passed, true, '5000 messages performance budget benchmark must pass completely');
-    assert.ok(result.budgets.initialWindowRender.ms <= 15, 'Initial window render must be <= 15ms');
-    assert.ok(result.budgets.prependPaging.avgMs <= 25, 'Prepend batch paging must be <= 25ms');
+    assert.ok(result.budgets.initialWindowRender.ms <= result.budgets.initialWindowRender.limitMs, 'Initial window render must meet budget');
+    assert.ok(result.budgets.prependPaging.avgMs <= result.budgets.prependPaging.limitMs, 'Prepend batch paging must meet budget');
   });
 });
 

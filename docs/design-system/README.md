@@ -142,3 +142,20 @@
 | **中间对话通栏** | `flex: 1 1 0%` | 通栏顶格展开，内边距 `24px 32px 180px` |
 | **底部输入舱** | `--geo-input-dock: 740px` | 黄金限宽收敛居中，人体工学打字聚焦 |
 | **右侧检查舱** | `--geo-inspector-pod: 410px` | 竖向场景轨 (62px) + 详情工作舱 (348px)，`Ctrl+\` 折叠 |
+
+---
+
+## 六、工程实现与换肤避坑铁律 (Engineering Defenses)
+
+1. **严禁硬编码色相 (Strict Token Purity)**：
+   组件代码与样式表中禁止直接裸写 `#hex`、`rgb()`、`hsl()`，必须使用语义 Token（如 `var(--panel)`、`var(--foreground)`、`var(--border)`、`var(--card-active)`）。
+2. **滚动跟随与防抖动 (Immediate Scrolling Invariant)**：
+   - 会话流滚动容器禁止使用 `scroll-behavior: smooth`，必须即时定位，防止高频流式输出排版抖动；
+   - 滚动跟随阈值：读者距底部 $\le 48\text{px}$ 时紧密贴底，远离时保持静止以允许翻阅历史。
+3. **消灭 innerHTML 模板历史包袱 (Modern React Baseline)**：
+   新 UI 组件一律采用 React 18 + Tailwind / CSS Variables 编写，禁止再新增基于字符串拼接的命令式 DOM 模板。
+4. **高度抽象与组件复用铁律 (High Abstraction & Reusable Components)**：
+   前端实现禁止出现同构或形态相近元素的复制粘贴与重复手写（如普通会话行、群聊行、Agent 工位行等）。同类型视图必须高度抽象为单一的基础可复用组件：
+   - **尺寸与间距以基准对齐**：必须选定一个通用业务形态（如普通会话 `SessionRow`）作为基准真值，所有衍生变体在高度（48px）、内边距（px-2 py-1.5）、外边距、圆角与字阶上严格 100% 保持一致；
+   - **可选插槽扩展变体**：变体特性（如头像 Avatar、操作栏、状态徽标）必须作为可选 Props 注入（如 `avatar?: React.ReactNode`），不支持头像的业务形态直接缺省，严禁私自派生第二套 HTML/JSX 结构；
+   - **杜绝样式漂移与双标**：任何通用排版与视觉样式的变更必须在基础复用组件内一次性完成，保证全端全业务形态自动同步。
