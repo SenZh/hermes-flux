@@ -36,16 +36,16 @@
 
 | 语义 Token | 深色模式 (Dark Baseline) | 浅色模式 (Light Baseline) | 作用场景与层级 |
 |---|---|---|---|
-| `--background` | `#0A0B0E` (Zinc-950) | `#F8F9FA` (Gray-50) | 全局底层画板与窗口根底色 |
-| `--sidebar` | `#0F1015` (Zinc-900) | `#F1F3F6` (Gray-100) | 左侧微轨与抽屉导航区背景 |
-| `--panel` | `#13141A` (Zinc-850) | `#FFFFFF` (Pure White) | 中间主会话工作台、右侧检查舱 |
-| `--card` | `#181A22` (Zinc-800) | `#FFFFFF` (Pure White) | 消息气泡卡片、列表行、容器卡片 |
-| `--card-hover` | `#1F222D` (Zinc-750) | `#F3F4F7` (Gray-100) | 交互悬浮态背景 |
-| `--card-active` | `#262936` (Zinc-700) | `#E9ECEF` (Gray-200) | 选中与激活态背景 |
-| `--popover` | `#1E212B` (Zinc-800) | `#FFFFFF` (Pure White) | 悬浮下拉菜单、模态弹窗、Popover |
-| `--input` | `#121319` (Zinc-900) | `#F8F9FA` (Gray-50) | 表单输入框、底部输入舱容器 |
-| `--code` | `#0A0B0E` (Zinc-950) | `#F1F3F5` (Gray-100) | 代码块、终端命令行底色 |
-| `--backdrop` | `rgba(10, 11, 14, 0.80)` | `rgba(248, 249, 250, 0.80)` | 模态全屏遮罩蒙层 |
+| `--background` | `#0E0F13` (Zinc-950) | `#F8F9FA` (Gray-50) | 全局底层画板与窗口根底色 |
+| `--sidebar` | `#131419` (Zinc-900) | `#F1F3F6` (Gray-100) | 左侧微轨与抽屉导航区背景 |
+| `--panel` | `#16171D` (Zinc-850) | `#FFFFFF` (Pure White) | 中间主会话工作台、右侧检查舱 |
+| `--card` | `#1B1C23` (Zinc-800) | `#FFFFFF` (Pure White) | 消息气泡卡片、列表行、容器卡片 |
+| `--card-hover` | `#22242D` (Zinc-750) | `#F3F4F7` (Gray-100) | 交互悬浮态背景 |
+| `--card-active` | `#292B37` (Zinc-700) | `#E9ECEF` (Gray-200) | 选中与激活态背景 |
+| `--popover` | `#1B1C23` (Zinc-800) | `#FFFFFF` (Pure White) | 悬浮下拉菜单、模态弹窗、Popover |
+| `--input` | `#131419` (Zinc-900) | `#F8F9FA` (Gray-50) | 表单输入框、底部输入舱容器 |
+| `--code` | `#0E0F13` (Zinc-950) | `#F1F3F5` (Gray-100) | 代码块、终端命令行底色 |
+| `--backdrop` | `rgba(20, 21, 28, 0.90)` | `rgba(248, 249, 250, 0.80)` | 模态全屏遮罩蒙层 |
 
 ### 2.2 文本与前景阶梯
 
@@ -69,13 +69,13 @@
 
 | 语义 Token | 色值 | 说明 |
 |---|---|---|
-| `--primary` | `#F59E0B` (Amber Gold) | 核心品牌焦点、高光操作 |
-| `--primary-hover` | `#D97706` | 主按钮悬浮态 |
-| `--primary-dim` | `#B45309` | 主色弱化态 |
-| `--primary-subtle` | `rgba(245, 158, 11, 0.12)` | 激活项浅色透底 |
-| `--primary-border` | `rgba(245, 158, 11, 0.35)` | 激活项细边框 |
-| `--primary-foreground` | `#0A0B0E` (深色) / `#FFFFFF` (浅色) | 主操作按钮前景色 |
-| `--ring` | `rgba(245, 158, 11, 0.40)` | 全局聚焦环 (Focus Ring) |
+| `--primary` | `#FFFFFF` (高纯柔白) | 核心品牌焦点、高光操作 |
+| `--primary-hover` | `#E5E7EB` | 主按钮悬浮态 |
+| `--primary-dim` | `#9CA3AF` | 主色弱化态 |
+| `--primary-subtle` | `rgba(255, 255, 255, 0.06)` | 激活项浅色透底 |
+| `--primary-border` | `rgba(255, 255, 255, 0.20)` | 激活项细边框 |
+| `--primary-foreground` | `#0E0F13` (深色) / `#FFFFFF` (浅色) | 主操作按钮前景色 |
+| `--ring` | `rgba(255, 255, 255, 0.30)` | 全局聚焦环 (Focus Ring) |
 | `--success` | `#10B981` (Emerald) | 运行正常、已连接、构建成功 |
 | `--warning` | `#F59E0B` (Amber) | 告警、待确认操作 |
 | `--destructive` | `#EF4444` (Crimson) | 报错、中断、危险删除操作 |
