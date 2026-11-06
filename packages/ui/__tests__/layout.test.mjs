@@ -172,7 +172,8 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     });
 
     assert.ok(html.includes('content-fluid-canvas'), 'MiddlePod must contain content-fluid-canvas');
-    assert.ok(html.includes('width: 100%'), 'MiddlePod canvas must span 100% width');
+    assert.ok(html.includes('conv-canvas'), 'Canvas must carry conv-canvas structural class');
+    assert.ok(html.includes('data-conv-layer="canvas"'), 'Canvas must expose data-conv-layer for geometry assertions');
     assert.ok(html.includes('id="msg-content-ast-100"'), 'Must have incremental content anchor');
     assert.ok(html.includes('id="msg-thought-ast-100"'), 'Must have incremental thought anchor');
     assert.ok(html.includes('code-block-wrapper'), 'Must render Markdown code blocks with wrapper');

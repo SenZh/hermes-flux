@@ -81,6 +81,8 @@ export interface MiddlePodProps {
   contextUsage?: ContextGaugeUsage;
   isStreaming?: boolean;
   sideAgentCapsules?: SideAgentCapsuleView[];
+  /** 接入开关：true 时消息列表交给 React 宿主；默认 false 保持旧模板，供测试与回退使用 */
+  reactList?: boolean;
 }
 
 export function renderContextGauge(usage?: ContextGaugeUsage): string {
@@ -127,10 +129,21 @@ export function renderContextGauge(usage?: ContextGaugeUsage): string {
 }
 
 export function renderConversationCanvas(props: MiddlePodProps): string {
+  // 接入期：开关打开且已连接有消息时，消息列表交给 React 宿主；其余状态保留旧渲染。
+  if (props.reactList && props.gatewayConnected && props.messages.length > 0) {
+    return `
+      <div class="content-fluid-canvas conv-canvas" data-conv-layer="canvas">
+        ${renderContextGauge(props.contextUsage)}
+        <div id="react-message-list-host" style="display:contents"></div>
+        ${(props.sideAgentCapsules || []).map(renderSideAgentCapsule).join('')}
+      </div>
+    `;
+  }
+
   const agentDisplayName = (props.profileName || 'default').toUpperCase();
 
   return `
-    <div class="content-fluid-canvas" style="width: 100%; max-width: 100%; margin: 0; display: flex; flex-direction: column; gap: 18px; position: relative;">
+    <div class="content-fluid-canvas conv-canvas" data-conv-layer="canvas">
       ${renderContextGauge(props.contextUsage)}
       ${
         props.gatewayConnecting
@@ -224,42 +237,14 @@ export function renderSideAgentCapsule(capsule: SideAgentCapsuleView): string {
 
 export function renderMiddlePod(props: MiddlePodProps): string {
   return `
-    <main class="flux-middle-pod conversation-pod" style="
-      flex: 1 1 0%;
-      min-width: 0;
-      height: 100%;
-      position: relative;
-      display: flex;
-      flex-direction: column;
-      background: var(--bg-window);
-      overflow: hidden;
-      width: 100%;
-    ">
+    <main class="flux-middle-pod conversation-pod" data-conv-layer="stage">
       <!-- Conversation Scroll Stream (100% Full-bleed width) -->
-      <div id="conversation-stream" class="messages-stream-area" style="
-        flex: 1;
-        width: 100%;
-        overflow-y: auto;
-        overflow-x: hidden;
-        display: flex;
-        flex-direction: column;
-        padding: 24px 32px 180px;
-        box-sizing: border-box;
-      ">
+      <div id="conversation-stream" class="messages-stream-area conv-stream" data-conv-layer="stream">
         ${renderConversationCanvas(props)}
       </div>
 
       <!-- Dock Scrim Fade (Bottom gradient to prevent card collision) -->
-      <div class="dock-scrim-fade" style="
-        position: absolute;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        height: 120px;
-        background: linear-gradient(to top, var(--bg-window) 30%, transparent 100%);
-        pointer-events: none;
-        z-index: 30;
-      "></div>
+      <div class="dock-scrim-fade conv-dock-scrim" data-conv-layer="scrim"></div>
 
       <!-- Centered Input Dock mounted strictly inside the conversation pod -->
       ${props.dockHtml || ''}

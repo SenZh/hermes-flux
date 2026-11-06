@@ -109,7 +109,16 @@ async function buildAll() {
     format: 'esm',
     sourcemap: true,
   });
-  console.log('  ✔ Interactive-stage pure modules compiled (rollbackTransaction, toolPatchQueue)');
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/conversationPush.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/conversationPush.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    sourcemap: true,
+  });
+  console.log('  ✔ Interactive-stage pure modules compiled (rollbackTransaction, toolPatchQueue, conversationPush)');
 
   // 4. Copy static assets
   fs.copyFileSync(
@@ -119,6 +128,12 @@ async function buildAll() {
   fs.copyFileSync(
     path.join(rootDir, 'src/renderer/styles.css'),
     path.join(rootDir, 'dist/renderer/styles.css')
+  );
+
+  // 对话区样式资产来自 UI 包，供 desktop 与后续 web/mobile 共用。
+  fs.copyFileSync(
+    path.join(repoDir, 'packages', 'ui', 'src', 'styles', 'conversation.css'),
+    path.join(rootDir, 'dist/renderer', 'conversation.css')
   );
 
   // 5. Ship the brand icons next to the compiled main process

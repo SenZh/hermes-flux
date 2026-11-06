@@ -157,6 +157,7 @@ async function start() {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Hermes Flux — 桌面壳浏览器直跑模式</title>
   <link rel="stylesheet" href="/packages/desktop/dist/renderer/styles.css?v=${t}">
+  <link rel="stylesheet" href="/packages/desktop/dist/renderer/conversation.css?v=${t}">
   <link rel="stylesheet" href="/packages/desktop/dist/renderer/tailwind.css?v=${t}">
 </head>
 <body>

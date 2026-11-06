@@ -51,6 +51,9 @@ import {
   type LeftRailSnapshot,
   type TitlebarSnapshot,
   attachMotionController,
+  mountMessageList,
+  type ConversationMount,
+  type ConversationSnapshot,
 } from '@hermes-flux/ui';
 
 import {
@@ -61,6 +64,7 @@ import {
 } from './messageActions.js';
 import { applyOptimisticCut, planSessionLoadMerge, planRollbackLeaveRestore, takeServerPriority, extractDurableRowId, bindTurnRowIds, resolveRollbackTarget } from './rollbackTransaction.js';
 import { createToolPatchQueue } from './toolPatchQueue.js';
+import { decideConversationPush } from './conversationPush.js';
 
 import {
   HermesGatewayClient,
@@ -3783,8 +3787,8 @@ function updateActivityPill(statusText?: string): void {
           width: 6px;
           height: 6px;
           border-radius: 50%;
-          background: #10B981;
-          box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+          background: var(--success);
+          box-shadow: 0 0 8px var(--success-glow);
           display: inline-block;
           animation: flux-pulse 2s infinite ease-in-out;
         "></span>
@@ -4594,6 +4598,81 @@ function getLeftRailSnapshot(): LeftRailSnapshot {
   };
 }
 
+let reactMessageList: ConversationMount | null = null;
+let reactMessageListHost: HTMLElement | null = null;
+let renderedMessageIds = new Set<string>();
+let lastSeenStreaming = false;
+
+/** 把当前会话状态映射为对话区只读视图模型；不做任何排序或解析。 */
+function buildConversationSnapshot(): ConversationSnapshot {
+  const focusType = state.activeFocus.type;
+  const streaming = isStreamingActiveForCurrentSession();
+  const lastMessageId = state.messages[state.messages.length - 1]?.id;
+  return {
+    mode: focusType === 'group' ? 'group' : focusType === 'bot' ? 'foreground' : 'scratchpad',
+    connection: state.gatewayConnected ? 'connected' : state.gatewayConnecting ? 'connecting' : 'disconnected',
+    isStreaming: streaming,
+    hasOlderMessages: state.hasOlderMessages,
+    isLoadingOlder: state.isLoadingOlder,
+    profileName: state.profileName,
+    messages: state.messages.map((m) => ({
+      id: m.id,
+      rowId: m.rowId,
+      role: m.role,
+      content: m.content,
+      sender: m.sender,
+      senderAvatar: m.senderAvatar,
+      model: m.model,
+      thought: m.thought,
+      thoughtDurationMs: m.thoughtDurationMs,
+      durationMs: m.durationMs,
+      timestamp: m.timestamp,
+      status: streaming && m.id === lastMessageId ? 'streaming' : undefined,
+      isStreaming: streaming && m.id === lastMessageId,
+      toolCalls: m.toolCalls,
+    })),
+  };
+}
+
+/**
+ * 同步 React 消息列表。
+ * 【设计意图】流式期间不推送新快照，正文由锚点直写；只在出现新消息行或回合结束时收敛，
+ * 避免 React 重渲染覆盖 ref / innerHTML 直写的内容。
+ */
+function syncReactMessageList(force = false): void {
+  const host = document.getElementById('react-message-list-host');
+  if (!host) {
+    reactMessageList?.unmount();
+    reactMessageList = null;
+    reactMessageListHost = null;
+    renderedMessageIds = new Set();
+    lastSeenStreaming = false;
+    return;
+  }
+  const currentIds = state.messages.map((m) => m.id);
+  if (reactMessageListHost !== host) {
+    reactMessageList?.unmount();
+    reactMessageList = mountMessageList(host, buildConversationSnapshot);
+    reactMessageListHost = host;
+    renderedMessageIds = new Set(currentIds);
+    lastSeenStreaming = isStreamingActiveForCurrentSession();
+    return;
+  }
+  const streaming = isStreamingActiveForCurrentSession();
+  const justStoppedStreaming = lastSeenStreaming && !streaming;
+  lastSeenStreaming = streaming;
+  const shouldPush = decideConversationPush({
+    prevIds: renderedMessageIds,
+    nextIds: currentIds,
+    justStoppedStreaming,
+    force,
+  });
+  if (shouldPush && reactMessageList) {
+    reactMessageList.update();
+    renderedMessageIds = new Set(currentIds);
+  }
+}
+
 function mountReactShellComponents(): void {
   const titlebarHost = document.getElementById('react-titlebar-host');
   const leftRailHost = document.getElementById('react-leftrail-host');
@@ -4623,6 +4702,7 @@ function mountReactShellComponents(): void {
   }
   updateReactTitlebar?.();
   updateReactLeftRail?.();
+  syncReactMessageList();
 }
 
 function render(): void {
@@ -4762,6 +4842,7 @@ function render(): void {
           hasOlderMessages: state.hasOlderMessages,
           isLoadingOlder: state.isLoadingOlder,
           isStreaming: isStreamingActiveForCurrentSession(),
+          reactList: true,
           dockHtml: state.gatewayConnected
             ? renderInputDock({
                 selectedModel: state.selectedModel,
@@ -5069,26 +5150,37 @@ function render(): void {
       root.insertAdjacentHTML('beforeend', nextMenuHtml);
     }
 
-    // Conversation Stream: ONLY update if messages or connection state genuinely changed!
+    // Conversation Stream: React 列表已挂载时只更新列表，不重建 canvas（避免销毁 React root）
     const activeStream = document.getElementById('conversation-stream');
     if (activeStream && messagesChanged) {
-      activeStream.innerHTML = renderConversationCanvas({
-        gatewayConnected: state.gatewayConnected,
-        gatewayConnecting: state.gatewayConnecting,
-        gatewayUrl: state.gatewayUrl,
-        username: state.username,
-        password: state.password,
-        profileName: state.profileName,
-        messages: state.messages,
-        testStatus: state.testStatus,
-        hasOlderMessages: state.hasOlderMessages,
-        isLoadingOlder: state.isLoadingOlder,
-        isStreaming: isStreamingActiveForCurrentSession(),
-        sideAgentCapsules: state.sideAgentCapsules,
-      });
-      canvasStructureDirty = false;
-      applyStreamAnchor(streamAnchor, pinBottom);
-      lastMessagesSnapshot = currentMessagesSnapshot;
+      const reactHost = document.getElementById('react-message-list-host');
+      const canUseReactList = state.gatewayConnected && state.messages.length > 0;
+      if (reactHost && canUseReactList) {
+        syncReactMessageList();
+        canvasStructureDirty = false;
+        applyStreamAnchor(streamAnchor, pinBottom);
+        lastMessagesSnapshot = currentMessagesSnapshot;
+      } else {
+        activeStream.innerHTML = renderConversationCanvas({
+          gatewayConnected: state.gatewayConnected,
+          gatewayConnecting: state.gatewayConnecting,
+          gatewayUrl: state.gatewayUrl,
+          username: state.username,
+          password: state.password,
+          profileName: state.profileName,
+          messages: state.messages,
+          testStatus: state.testStatus,
+          hasOlderMessages: state.hasOlderMessages,
+          isLoadingOlder: state.isLoadingOlder,
+          isStreaming: isStreamingActiveForCurrentSession(),
+          sideAgentCapsules: state.sideAgentCapsules,
+          reactList: true,
+        });
+        canvasStructureDirty = false;
+        syncReactMessageList(true);
+        applyStreamAnchor(streamAnchor, pinBottom);
+        lastMessagesSnapshot = currentMessagesSnapshot;
+      }
     }
   }
 
@@ -6916,6 +7008,55 @@ document.addEventListener('mousedown', (e) => {
   }
 });
 
+/**
+ * 浏览器直跑演示模式：仅在 http(s) 且 URL 带 `?demo=conversation` 时生效。
+ * 设计意图(Why)：网关凭据不可用时，仍能在真实壳里查看新的对话区渲染，不影响 Electron 生产路径。
+ */
+function isConversationDemoMode(): boolean {
+  if (typeof location === 'undefined') return false;
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') return false;
+  return new URLSearchParams(location.search).get('demo') === 'conversation';
+}
+
+function injectConversationDemo(): void {
+  state.gatewayConnected = true;
+  state.gatewayConnecting = false;
+  state.profileName = 'default';
+  state.activeFocus = { type: 'session', sessionId: 'demo-session' };
+  state.hasOlderMessages = true;
+  state.messages = [
+    { id: 'demo-u1', role: 'user', content: 'Review the new conversation layout, spacing and bubble width.', timestamp: '10:24' },
+    {
+      id: 'demo-a1',
+      role: 'assistant',
+      content:
+        'The structure is now Stage → Stream → Turn → Message.\n\n- User bubble right-aligned, max 80% / 820px\n- Assistant full width\n- Turn gap independent from message gap\n\nTool capsules and card containers mount into Turn next.',
+      thought: 'Check container hierarchy first, then padding and width.',
+      thoughtDurationMs: 1800,
+      model: 'deepseek-v4.1-flash',
+      durationMs: 2400,
+      timestamp: '10:25',
+      sender: 'Default',
+      toolCalls: [
+        { id: 'demo-t1', name: 'shell', status: 'completed', args: 'npm test', output: '664 passing', durationMs: 1200 },
+        { id: 'demo-t2', name: 'read_file', status: 'completed', args: 'packages/ui/src/styles/conversation.css', durationMs: 80 },
+        { id: 'demo-t3', name: 'grep', status: 'failed', args: 'ghost-token', output: 'no matches', durationMs: 40 },
+      ],
+    },
+    { id: 'demo-a2', role: 'assistant', content: 'Streaming writes through ref, so the tree does not re-render.', timestamp: '10:25', sender: 'Default' },
+    { id: 'demo-u2', role: 'user', content: 'Second user message for alignment and spacing.', timestamp: '10:26' },
+    {
+      id: 'demo-a3',
+      role: 'assistant',
+      content: 'Final assistant message, used to check the turn footer position.',
+      model: 'deepseek-v4.1-flash',
+      durationMs: 1200,
+      timestamp: '10:27',
+      sender: 'Default',
+    },
+  ];
+}
+
 async function init(): Promise<void> {
   logApp.info('renderer boot', {
     level: getLogLevel(),
@@ -6924,6 +7065,12 @@ async function init(): Promise<void> {
     electron: navigator.userAgent.includes('Electron'),
   });
   installLayoutShiftDiagnostics();
+
+  if (isConversationDemoMode()) {
+    injectConversationDemo();
+    render();
+    return;
+  }
 
   // Restore persisted rail widths — 夹取后才允许注入，防止历史越界存档复活（坑：恢复路径曾无 clamp）
   const clampRail = (raw: string | null, minW: number, maxW: number, fallback: number): number => {

@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="obsidian-gold">
+<head>
+  <meta charset="UTF-8">
+  <title>React 流式渲染 spike</title>
+  <link rel="stylesheet" href="/packages/desktop/dist/renderer/styles.css">
+  <link rel="stylesheet" href="/packages/desktop/dist/renderer/conversation.css">
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; font: 13px/1.5 system-ui, sans-serif; }
+    #spike-root { position: relative; height: 100vh; }
+    .conv-stream { position: absolute; inset: 0; overflow-y: auto; }
+    .conv-canvas { display: flex; flex-direction: column; gap: 4px; padding: 24px 32px; }
+    .conv-message { padding: 4px 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-inner); }
+    .conv-message--user { align-self: flex-end; max-width: 80%; }
+    .conv-message--assistant { width: 100%; }
+    .conv-message__body { white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div id="spike-root"></div>
+  <script src="/artifacts/spike/spike.js"></script>
+</body>
+</html>
