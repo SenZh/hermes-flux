@@ -23,8 +23,11 @@ description: 基于属性测试 (Property-Based Testing via fast-check) 的核�
   3. `packages/core/src/session/truncatePlan.ts`（回滚事务、截断锚点裁决与行号收敛）
   4. `packages/core/src/session/eventReducer.ts`（网关下行事件流规约与工具生命周期状态机）
   5. `packages/core/src/session/planSendRoute.ts`（消息发送分流、@ 路由解析与子代理调度决策）
-- **最后同步基线 Commit**：`8962d80`
+- **最后同步基线 Commit**：`c4f13e5`
+- **基线推进记录**：`8962d80 → c4f13e5` 之间，`botActivitySync.ts`（+70）与 `eventReducer.ts`（+13）有变更，其余 3 个守护文件未变。变更内容为：`resolveTitlebarTitle` 去除表情前缀、新增 `resolveTitlebarAvatar` 纯函数、`TurnAction` 增加可选 `sessionId` 字段。重跑 `npm run verify:formal` 全量 32/32 通过，11 大定理仍获证，故推进基线。
+  **但需注意**：`resolveTitlebarTitle` / `resolveTitlebarAvatar` 属于标题栏展示逻辑，**不在定理 1~4 的覆盖范围内**；基线推进只表示"定理仍然成立"，不表示"这两个新函数已被证明"。
 - **规则**：当上述任一生产文件的业务逻辑发生变更时，必须重新运行形式化验证并证明 11 大定理依然获证，方可推进同步 Commit。
+- **相关技能**：缓存子系统的 5 条不变量（定理 22~26）由 `verify-cache-invariants` 单独守护，不要与本技能的 11 条混为一谈。
 
 ## Verified Mathematical Invariants (11 大形式化获证定理)
 
