@@ -1,6 +1,7 @@
 # 客户端缓存组件 · 原理与流程图
 
 > 代码：`packages/core/src/cache/`、`packages/desktop/src/renderer/cache/`
+> **进度与交接**：[`client-cache-status.md`](./client-cache-status.md)（换机器先读这个：环境恢复、待办、坑）
 > API 手册：[`client-cache.md`](./client-cache.md) ｜ 设计决策：[`../architecture/client-cache-and-multi-client-sync-spec.md`](../architecture/client-cache-and-multi-client-sync-spec.md)
 >
 > 本文只讲**为什么这么设计**和**数据怎么流动**，不讲每个方法怎么调。
@@ -523,5 +524,24 @@ remoteMax = 100, fenceMax = 100
 | 只缓存尾部 500 行 | 更早的按需分页拉 | 设计如此 |
 | 群聊无下行事件 | 只能轮询 `groups.log(since_seq)` | 协议层限制 |
 | Agent 无下行事件 | 只能启动 / 重连 / 聚焦时拉 | 协议层限制 |
-| 离线时不弹连接层 | 有缓存也看不到内容 | **未解决**，属另一个特性 |
-| 消息删除仅覆盖手工删除 | 截断删除路径尚未接线 | **待补** |
+| 群聊消息正文未缓存 | 只缓存房间索引，历史仍每次拉 | P1，见交接文档 |
+| `window.focus` 未接 | Agent 变更要等重连 | P1，半行代码 |
+| 旧 localStorage 键未迁移 | 副标题有两个真值源 | P1，见交接文档 |
+
+---
+
+## 十、待办（P0）
+
+**这两项尚未接线，细节、下手位置与完成标准见 [`client-cache-status.md`](./client-cache-status.md) 第四节。**
+
+### 10.1 截断删除路径未接线
+
+`cacheService.truncate()` 已实现且有定理 24 守护，但 renderer **从未调用它**。用户回滚后磁盘里的旧消息还在，重启会复活。
+
+必须按三阶段接：`armed` 只改内存 → 成功才动磁盘（用 `survivor_row_id_map` 重绑定）→ 失败/取消恢复内存快照。详见第五章 5.4。
+
+### 10.2 离线时弹"未连接网关"遮罩
+
+缓存已把消息读进 `state.messages`，但被连接弹层盖住，用户看不到。证据留在 `artifacts/verification/cache-offline-blocked-by-connect-panel.txt`。
+
+这是**产品决策**（离线是否允许浏览），需先定行为再动手，选项中见交接文档。

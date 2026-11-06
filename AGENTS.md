@@ -23,6 +23,7 @@
 | **设置中枢** | [`docs/architecture/settings-architecture-and-implementation-map.md`](docs/architecture/settings-architecture-and-implementation-map.md) | 12 大功能域全景设置树、三级级联继承状态机、258 RPC 映射与 4 阶段实施路线图 |
 | **协议基线** | [`docs/architecture/gateway-api-and-features-matrix.md`](docs/architecture/gateway-api-and-features-matrix.md) | 官方网关契约基线（257 RPC / 14 反向请求 / 77 下行事件），客户端移动端 Capacitor 8 容器映射 |
 | **交互协议** | [`docs/architecture/gateway-client-interaction-protocol.md`](docs/architecture/gateway-client-interaction-protocol.md) | 每次交互的发起方 / 方式（推还是拉）/ 接口名三要素，含连接生命周期、双 ID 语义、六大场景时序与增量对齐能力矩阵 |
+| **客户端缓存** | [`docs/api/client-cache-status.md`](docs/api/client-cache-status.md) | **进度与交接**：当前状态、换机恢复命令、两个 P0 待办、七个必知坑点位 |
 | **接口索引** | [`docs/gateway/README.md`](docs/gateway/README.md) | 自动生成的 10 个网关核心模块接口文档与真实探针状态（禁止手动修改） |
 | **设计系统** | [`docs/design-system/04-tokens-and-design-system-spec.md`](docs/design-system/04-tokens-and-design-system-spec.md) | 几何/字体栈/DTCG 跨姿态通用；Slate 色表与 Shadow 物理层级**仅 editorial / marketing 姿态**。工程皮肤真值见 `theme-engine-spec.md`；**Hermes Flux 默认 `tool` 姿态，美学裁决以 Aura 工作区 `specs/05-…` 审美宪法为准**（见 `docs/design-system/README.md` 设计真值链） |
 | **踩坑登记** | [`docs/architecture/pitfall-registry.md`](docs/architecture/pitfall-registry.md) | 踩坑记录 ➔ 根因 ➔ 守卫探针映射（P-001 ~ P-021，每条坑必须绑定可变红的门禁/单测） |

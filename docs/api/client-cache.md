@@ -1,6 +1,7 @@
 # 客户端缓存组件 · 接口使用说明
 
 > 代码位置：`packages/core/src/cache/`（纯逻辑 + 存储抽象）、`packages/desktop/src/renderer/cache/`（桌面适配器）
+> **进度与交接**：[`client-cache-status.md`](./client-cache-status.md)（换机器先读：环境恢复、待办、坑）
 > **原理与流程图**：[`client-cache-principles.md`](./client-cache-principles.md)（为什么这么设计、数据怎么流动）
 > 设计文档：[`../architecture/client-cache-and-multi-client-sync-spec.md`](../architecture/client-cache-and-multi-client-sync-spec.md)
 > 形式化验证：[`../../.claude/skills/verify-cache-invariants/SKILL.md`](../../.claude/skills/verify-cache-invariants/SKILL.md)
