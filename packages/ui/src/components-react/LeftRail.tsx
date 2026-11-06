@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { Folder, Layers, Plus, Search, Users } from 'lucide-react';
 import { t } from '../i18n/index.js';
+import { useMotionPresence } from '../motion/index.js';
 import { Badge } from './primitives/Badge.js';
 import { Button } from './primitives/Button.js';
 import { Input } from './primitives/Input.js';
@@ -305,6 +306,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
   const { model } = props;
   const focus = model.currentFocus;
   const profile = model.selectedAgent;
+  const drawerPresence = useMotionPresence(!props.collapsed);
   const railWidth = props.collapsed ? 'var(--geo-micro-rail, 52px)' : 'var(--rail-w-left, 296px)';
 
   const activeSessionBotName = focus.type === 'session'
@@ -324,7 +326,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
 
   return <aside
     id="flux-left-rail"
-    className={`flux-left-rail relative flex h-full flex-row border-r border-border-subtle bg-sidebar ${props.collapsed ? 'rail-collapsed' : ''}`}
+    className={`flux-left-rail relative flex h-full flex-row border-r border-border-subtle bg-sidebar overflow-hidden ${props.collapsed ? 'rail-collapsed' : ''}`}
     style={{ flex: `0 0 ${railWidth}`, width: railWidth, minWidth: railWidth, maxWidth: railWidth }}
     data-testid="react-left-rail"
   >
@@ -359,7 +361,10 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
       </div>
     </div>
 
-    {!props.collapsed && <div className="flux-context-drawer flex min-w-0 flex-1 flex-col overflow-hidden bg-sidebar">
+    {drawerPresence.isMounted && <div
+      className="flux-context-drawer flex min-w-0 flex-1 flex-col overflow-hidden bg-sidebar"
+      {...drawerPresence.motionProps}
+    >
       <div className="flex flex-col gap-2 p-2.5 pb-1.5">
         <label className="relative block">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/70" size={13} />

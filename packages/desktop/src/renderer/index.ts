@@ -50,6 +50,7 @@ import {
   type LeftRailActions,
   type LeftRailSnapshot,
   type TitlebarSnapshot,
+  attachMotionController,
 } from '@hermes-flux/ui';
 
 import {
@@ -4404,6 +4405,33 @@ let lastMessagesSnapshot: RenderMessagesSnapshot | null = null;
 let lastInputDockSnapshot: RenderInputDockSnapshot | null = null;
 let updateReactTitlebar: (() => void) | null = null;
 let updateReactLeftRail: (() => void) | null = null;
+let inspectorMotionController: ReturnType<typeof attachMotionController> | null = null;
+let lastInspectorCollapsed = true;
+
+/**
+ * 复合检查舱动效控制器生命周期绑定器。
+ * 设计意图 (Why):
+ *   统一构造并管理 InspectionPod 的动效控制器，确保任何时机挂载均持有完整的 onExited 兜底。
+ * 防范的历史坑 (Pitfall):
+ *   之前在展开与折叠两处各写一套 attach，导致 onExited 回调短路失效，节点退场无法安全收敛为 display: none；
+ *   且高频 render 未 detach 旧实例造成潜在事件泄漏。
+ * 约束与规则 (Rules):
+ *   每次重新绑定前强制对前序实例执行 detach()。
+ */
+function bindInspectorController(el: HTMLElement): NonNullable<typeof inspectorMotionController> {
+  if (inspectorMotionController) {
+    inspectorMotionController.detach();
+  }
+  const controller = attachMotionController(el, {
+    triggerProperty: 'width',
+    onExited: () => {
+      el.style.display = 'none';
+      el.classList.add('inspector-collapsed');
+    },
+  });
+  inspectorMotionController = controller;
+  return controller;
+}
 
 /**
  * 左轨动作表：每个动作只改 state 再 render，事件语义由 React 侧保证。
@@ -4832,25 +4860,72 @@ function render(): void {
 
     // 左轨由 React 岛自管子树，递增更新路径不再触碰其 DOM（不会重建滚动容器与输入框）。
 
-    const inspectEl = root.querySelector('#flux-inspector-pod') || root.querySelector('.flux-inspector-pod');
+    const inspectEl = (root.querySelector('#flux-inspector-pod') || root.querySelector('.flux-inspector-pod')) as HTMLElement | null;
     if (inspectEl) {
-      inspectEl.outerHTML = renderInspectionPod({
-        collapsed: state.inspectorCollapsed,
-        activeTab: state.activeInspectorTab,
-        gatewayConnected: state.gatewayConnected,
-        isFullscreen: state.inspectorFullscreen,
-        openFiles: state.openFiles,
-        activeFilePath: state.activeFilePath,
-        viewMode: state.fileViewMode,
-        showLineNumbers: state.fileShowLineNumbers,
-        wordWrap: state.fileWordWrap,
-        searchOpen: state.fileSearchOpen,
-        searchQuery: state.fileSearchQuery,
-        artifacts: state.artifacts,
-        browserFrame: state.browserFrame,
-        gitDiffs: state.gitDiffs,
-        memories: state.memories,
-      });
+      if (lastInspectorCollapsed !== state.inspectorCollapsed) {
+        if (!state.inspectorCollapsed) {
+          // 折叠 ➔ 展开：构建新节点并实施两阶段挂载帧序，确保浏览器感知 0 到 420px 的 120ms 平滑展开
+          inspectEl.outerHTML = renderInspectionPod({
+            collapsed: false,
+            activeTab: state.activeInspectorTab,
+            gatewayConnected: state.gatewayConnected,
+            isFullscreen: state.inspectorFullscreen,
+            openFiles: state.openFiles,
+            activeFilePath: state.activeFilePath,
+            viewMode: state.fileViewMode,
+            showLineNumbers: state.fileShowLineNumbers,
+            wordWrap: state.fileWordWrap,
+            searchOpen: state.fileSearchOpen,
+            searchQuery: state.fileSearchQuery,
+            artifacts: state.artifacts,
+            browserFrame: state.browserFrame,
+            gitDiffs: state.gitDiffs,
+            memories: state.memories,
+          });
+          const nextInspectEl = root.querySelector('#flux-inspector-pod') as HTMLElement | null;
+          if (nextInspectEl) {
+            // 阶段 1：首帧强制折叠态 width: 0 并使容器立即可见
+            nextInspectEl.classList.add('inspector-collapsed');
+            nextInspectEl.style.display = 'flex';
+            // 关键帧刷新：强制触发重绘，锁定 width: 0 为起始跃迁帧
+            void nextInspectEl.offsetWidth;
+
+            // 阶段 2：挂载控制器并移除折叠类，激发 120ms 平滑入场
+            const controller = bindInspectorController(nextInspectEl);
+            nextInspectEl.classList.remove('inspector-collapsed');
+            void controller.enter();
+          }
+        } else {
+          // 展开 ➔ 折叠：保持节点保活，触发 200ms 退场收缩，动画结束后 onExited 自动置为 display: none
+          const controller = inspectorMotionController || bindInspectorController(inspectEl);
+          inspectEl.classList.add('inspector-collapsed');
+          void controller.exit();
+        }
+        lastInspectorCollapsed = state.inspectorCollapsed;
+      } else if (!state.inspectorCollapsed) {
+        // 展开状态下的内容增量更新（切换文件/Tab等）
+        inspectEl.outerHTML = renderInspectionPod({
+          collapsed: false,
+          activeTab: state.activeInspectorTab,
+          gatewayConnected: state.gatewayConnected,
+          isFullscreen: state.inspectorFullscreen,
+          openFiles: state.openFiles,
+          activeFilePath: state.activeFilePath,
+          viewMode: state.fileViewMode,
+          showLineNumbers: state.fileShowLineNumbers,
+          wordWrap: state.fileWordWrap,
+          searchOpen: state.fileSearchOpen,
+          searchQuery: state.fileSearchQuery,
+          artifacts: state.artifacts,
+          browserFrame: state.browserFrame,
+          gitDiffs: state.gitDiffs,
+          memories: state.memories,
+        });
+        const nextInspectEl = root.querySelector('#flux-inspector-pod') as HTMLElement | null;
+        if (nextInspectEl) {
+          bindInspectorController(nextInspectEl);
+        }
+      }
     }
 
 

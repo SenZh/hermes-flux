@@ -58,6 +58,8 @@
   --geo-input-dock: 740px;
 
   --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-enter: 120ms;
+  --duration-exit: 200ms;
   --duration-fast: 140ms;
   --duration-normal: 240ms;
 }
@@ -632,10 +634,75 @@ html[data-maximized="true"] #flux-app-root {
   background: color-mix(in srgb, var(--primary) 0%, transparent);
 }
 
+/* 左轨平滑折叠/展开动效：严格对齐宪法 I6 非对称时序与 GPU 独立图层加速 */
+#flux-left-rail,
+.flux-left-rail {
+  transition:
+    width var(--duration-exit) var(--ease-spring),
+    flex-basis var(--duration-exit) var(--ease-spring),
+    min-width var(--duration-exit) var(--ease-spring),
+    max-width var(--duration-exit) var(--ease-spring);
+  will-change: width, flex-basis;
+  overflow: hidden !important;
+}
+
+#flux-left-rail:not(.rail-collapsed) {
+  transition-duration: var(--duration-enter);
+}
+
+.flux-context-drawer {
+  width: var(--geo-context-drawer, 244px);
+  min-width: var(--geo-context-drawer, 244px);
+  flex-shrink: 0;
+  transition: opacity var(--duration-exit) var(--ease-spring);
+  will-change: opacity;
+}
+
+.flux-context-drawer[data-motion-state="entering"],
+.flux-context-drawer[data-motion-state="entered"] {
+  opacity: 1;
+  transition-duration: var(--duration-enter);
+}
+
+.flux-context-drawer[data-motion-state="exiting"] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 右侧检查舱平滑折叠/展开动效：严格对齐宪法 I6 非对称时序与 GPU 独立图层加速 */
+#flux-inspector-pod,
+.flux-inspector-pod {
+  transition:
+    width var(--duration-exit) var(--ease-spring),
+    flex-basis var(--duration-exit) var(--ease-spring),
+    min-width var(--duration-exit) var(--ease-spring),
+    max-width var(--duration-exit) var(--ease-spring);
+  will-change: width, flex-basis;
+  overflow: hidden !important;
+}
+
+#flux-inspector-pod[data-motion-state="entering"],
+#flux-inspector-pod:not(.inspector-collapsed) {
+  transition-duration: var(--duration-enter);
+}
+
+#flux-inspector-pod.inspector-collapsed,
+#flux-inspector-pod[data-motion-state="exited"] {
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  flex-basis: 0 !important;
+  border-left-width: 0 !important;
+  pointer-events: none;
+}
+
 /* Dragging state: Disable transition & selections across entire window to maintain 120 FPS */
 html[data-rail-resizing] #flux-left-rail,
-html[data-rail-resizing] #flux-inspector-pod {
+html[data-rail-resizing] .flux-left-rail,
+html[data-rail-resizing] #flux-inspector-pod,
+html[data-rail-resizing] .flux-inspector-pod {
   transition: none !important;
+  will-change: auto;
 }
 html[data-rail-resizing],
 html[data-rail-resizing] * {

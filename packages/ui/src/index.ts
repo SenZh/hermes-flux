@@ -46,3 +46,5 @@ export { renderLeftRailHtml, type LeftRailHtmlSnapshot } from './components-reac
 export { renderBotAvatar, escapeHtml } from './utils/botAvatar.js';
 export { mountStatusBar, mountTitlebar, mountLeftRail, type StatusBarSnapshot, type TitlebarSnapshot, type LeftRailSnapshot, type LeftRailActions } from './components-react/mount-shell-components.js';
 export { getStatusBarSnapshot, getTitlebarSnapshot } from './components-react/mount-shell-components.js';
+export * from './motion/index.js';
+

@@ -30,4 +30,5 @@ export * from './project/sessionProjectMatcher.js';
 export * from './queue/chatQueueStore.js';
 export * from './session/interactiveService.js';
 export * from './session/truncatePlan.js';
+export * from './motion/index.js';
 export type { AttachedImageResult, PromptSubmitResult, CommandDispatchResult, SlashExecResult, CompleteSlashResult, CompletePathParams, CompletionItemsResult, SessionHistoryResult, GroupsSendResult } from './rpc/contracts/gateway-contract.generated.js';

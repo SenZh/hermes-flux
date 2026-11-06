@@ -110,7 +110,6 @@ export function renderInspectionPod(props: InspectionPodProps): string {
       border-left: 1px solid var(--border-subtle);
       display: flex;
       flex-direction: row;
-      transition: width 0.15s cubic-bezier(0.16, 1, 0.3, 1);
       overflow: hidden;
       position: relative;
     `;
