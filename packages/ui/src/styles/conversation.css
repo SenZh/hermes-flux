@@ -399,11 +399,15 @@ details[open] > summary > .tool-row__expand {
   color: var(--muted-foreground);
 }
 
-/* 思考行展开主体 */
+/* 思考行展开主体
+   【设计意图 (Why)】展开内容的左侧竖线必须落在 summary 图标的中心线上（X+8px），
+     与展开箭头同轴；思考与工具清单若各写一套缩进，两条线就会一左一右错开。
+   【约束与规则 (Rules)】所有可展开行的主体统一 margin-left: 8px + padding-left: 12px，
+     禁止再出现 20px 之类的魔法缩进。 */
 .conv-row__thought,
 .thinking-row__body {
-  margin: 4px 0 6px 20px;
-  padding-left: 10px;
+  margin: 4px 0 6px 8px;
+  padding-left: 12px;
   border-left: 1px solid var(--border-subtle);
   font-family: var(--conv-font-sans);
   font-size: var(--conv-code-size);
@@ -416,7 +420,7 @@ details[open] > summary > .tool-row__expand {
 
 /* 工具行展开输出体 */
 .tool-row__body {
-  margin: 4px 0 6px 20px;
+  margin: 4px 0 6px 8px;
   padding: 8px 12px;
   background: var(--conv-code-block-bg);
   border: 1px solid var(--border-subtle);
@@ -512,6 +516,8 @@ details[open] > summary > .tool-row__expand {
   flex-direction: column;
   gap: 2px;
   margin-top: 4px;
+  /* 与思考主体同轴：竖线落在 summary 图标中心线（X+8px） */
+  margin-left: 8px;
   padding-left: 12px;
   border-left: 1px solid var(--border-subtle);
 }
