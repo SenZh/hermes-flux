@@ -1,0 +1,23 @@
+{
+  "_note": "由 packages/ui/src/tokens/fonts.ts 的 source 字段生成，禁止手改；新增字体只改 fonts.ts 后运行 node scripts/sync-font-manifest.mjs",
+  "sources": [
+    { "packageName": "@fontsource/ibm-plex-sans", "filePrefix": "ibm-plex-sans", "weights": [400, 500, 600] },
+    { "packageName": "@fontsource/inter", "filePrefix": "inter", "weights": [400, 500, 600] },
+    { "packageName": "@fontsource/geist-sans", "filePrefix": "geist-sans", "weights": [400, 500, 600] },
+    { "packageName": "@fontsource/atkinson-hyperlegible", "filePrefix": "atkinson-hyperlegible", "weights": [400, 700] },
+    { "packageName": "@fontsource/source-sans-3", "filePrefix": "source-sans-3", "weights": [400, 500, 600] },
+    { "packageName": "@fontsource/roboto", "filePrefix": "roboto", "weights": [400, 500, 600] },
+    { "packageName": "@fontsource/noto-sans", "filePrefix": "noto-sans", "weights": [400, 500, 600] },
+    { "packageName": "@fontsource/dm-sans", "filePrefix": "dm-sans", "weights": [400, 500, 600] },
+    { "packageName": "@fontsource/manrope", "filePrefix": "manrope", "weights": [400, 500, 600] },
+    { "packageName": "@fontsource/ibm-plex-mono", "filePrefix": "ibm-plex-mono", "weights": [400, 500, 600] },
+    { "packageName": "@fontsource/jetbrains-mono", "filePrefix": "jetbrains-mono", "weights": [400, 500, 600] },
+    { "packageName": "@fontsource/fira-code", "filePrefix": "fira-code", "weights": [400, 500, 600] },
+    { "packageName": "@fontsource/geist-mono", "filePrefix": "geist-mono", "weights": [400, 500, 600] },
+    { "packageName": "@fontsource/commit-mono", "filePrefix": "commit-mono", "weights": [400, 500, 600] },
+    { "packageName": "@fontsource/source-code-pro", "filePrefix": "source-code-pro", "weights": [400, 500, 600] },
+    { "packageName": "@fontsource/cascadia-code", "filePrefix": "cascadia-code", "weights": [400, 500, 600] },
+    { "packageName": "@fontsource/roboto-mono", "filePrefix": "roboto-mono", "weights": [400, 500, 600] },
+    { "packageName": "@fontsource/iosevka", "filePrefix": "iosevka", "weights": [400, 500, 600] }
+  ]
+}

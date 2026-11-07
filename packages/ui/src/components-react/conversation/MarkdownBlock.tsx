@@ -13,6 +13,7 @@
 
 import * as React from 'react';
 import { renderMarkdown } from '../../components/MiddlePod/MiddlePod.js';
+import { mountFileTypeSprite } from '../../lib/fileTypeIcons.js';
 
 export interface MarkdownBlockProps {
   content: string;
@@ -21,8 +22,16 @@ export interface MarkdownBlockProps {
   className?: string;
 }
 
-export function MarkdownBlock({ content, anchorId, className }: MarkdownBlockProps): React.ReactElement {
+export function MarkdownBlock({ content, anchorId, className }: MarkdownBlockProps): React.ReactElement | null {
   const html = React.useMemo(() => renderMarkdown(content), [content]);
+
+  // 文件类型图标依赖 document 中的 sprite；挂载一次即可，重复调用无副作用。
+  React.useEffect(() => {
+    mountFileTypeSprite();
+  }, []);
+
+  // 纯工具消息没有正文时不要渲染空容器，否则会在 flex 布局里多占一个块间距
+  if (!content.trim()) return null;
   return (
     <div
       id={anchorId}

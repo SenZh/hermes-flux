@@ -3,6 +3,7 @@
  *
  * 设计意图(Why)：
  *   用户气泡与助手通栏共用一套外壳；思考、工具、正文、页脚按固定顺序挂载。
+ *   思考行与工具行统一由 StreamRow 渲染，避免两套行结构造成间距与字号漂移。
  *
  * 约束与规则(Rules)：
  *   1. 正文使用现有 Markdown 渲染器，经 dangerouslySetInnerHTML 注入；
@@ -13,6 +14,7 @@
 import * as React from 'react';
 import { t } from '../../i18n/index.js';
 import { MarkdownBlock } from './MarkdownBlock.js';
+import { StreamRow } from './StreamRow.js';
 import { ToolSection } from './ToolCapsule.js';
 import type { ConversationMode, ConversationMessageVM } from './types.js';
 
@@ -142,42 +144,26 @@ export function MessageRow({
       data-msg-id={message.id}
       data-conv-status={message.status}
     >
-      {isFirstInTurn && (message.sender || message.timestamp) ? (
+      {isFirstInTurn && message.sender ? (
         <div className="conv-message__header">
-          {message.sender ? <span className="conv-message__sender">{message.sender}</span> : null}
-          {message.timestamp ? <span className="conv-message__meta">{message.timestamp}</span> : null}
+          <span className="conv-message__sender">{message.sender}</span>
         </div>
       ) : null}
 
-      <details
-        className="conv-thought"
-        data-expanded="false"
-        style={message.thought ? undefined : { display: 'none' }}
-      >
-        <summary>
-          <svg
-            className="conv-thought__chevron"
-            width="10"
-            height="10"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <polyline points="9 18 15 12 9 6" />
-          </svg>
-          <span className="conv-thought__label">{t('conversation.thought')}</span>
-          {message.thoughtDurationMs ? (
-            <span className="conv-thought__duration">{(message.thoughtDurationMs / 1000).toFixed(1)}s</span>
-          ) : null}
-          {thoughtSummary ? <span className="conv-thought__summary">{thoughtSummary}</span> : null}
-        </summary>
-        <div className="conv-thought__body" id={`msg-thought-${message.id}`}>
-          {message.thought ?? ''}
-        </div>
-      </details>
+      {message.thought ? (
+        <StreamRow
+          kind="thought"
+          label={t('conversation.thought')}
+          target={thoughtSummary || undefined}
+          meta={message.thoughtDurationMs ? `${(message.thoughtDurationMs / 1000).toFixed(1)}s` : undefined}
+          expandable
+          title={thoughtSummary}
+        >
+          <div className="conv-row__thought" id={`msg-thought-${message.id}`}>
+            {message.thought}
+          </div>
+        </StreamRow>
+      ) : null}
 
       <ToolSection messageId={message.id} tools={message.toolCalls ?? []} />
 

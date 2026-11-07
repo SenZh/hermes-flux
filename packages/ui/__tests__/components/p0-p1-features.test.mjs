@@ -204,7 +204,7 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
     });
     assert.ok(runningToolsHtml.includes('tool-execution-package-card'), '多工具必须渲染打包卡片');
     assert.ok(runningToolsHtml.includes('open'), '有正在执行的工具时卡片必须自动 open 展开');
-    assert.ok(runningToolsHtml.includes('正在执行'), '包含运行中工具时必须显示正在执行状态');
+    assert.ok(runningToolsHtml.includes('Running'), '包含运行中工具时必须显示正在执行状态');
     assert.ok(runningToolsHtml.includes('npm test'), '卡片头部必须实时渲染当前正在执行的命令');
     assert.ok(!runningToolsHtml.includes('[object Object]'), '严禁泄露 [object Object] 裸文本');
 
@@ -224,7 +224,7 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
         },
       ],
     });
-    assert.ok(failedToolsHtml.includes('失败 1 项'), '包含失败工具时必须展示失败汇总文案');
+    assert.ok(failedToolsHtml.includes('1 failed'), '包含失败工具时必须展示失败汇总文案');
     assert.ok(!failedToolsHtml.includes('<details class="tool-execution-package-card" open'), '无运行态工具时严禁默认展开');
   });
 

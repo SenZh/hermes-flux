@@ -11,6 +11,7 @@
 
 import { t } from '../../i18n/index.js';
 import { renderBotAvatar } from '../../utils/botAvatar.js';
+import { renderMarkdownCore, formatInlineCodeOrLink as formatInlineCodeOrLinkLib, highlightCodeSyntax as highlightCodeSyntaxLib } from '../../lib/markdown.js';
 
 export interface MessageTokenMetrics {
   total?: number;
@@ -841,14 +842,21 @@ function renderThinkingFold(m: MessageViewModel): string {
 
 export function getCleanReasoningSummary(text: string): string {
   if (!text) return '';
-  const clean = text
-    .replace(/```[\s\S]*?```/g, '')
+  const flat = text
+    .replace(/```[\w]*\n?([\s\S]*?)```/g, (_, inner: string) => inner.trim())
     .replace(/`([^`]+)`/g, '$1')
-    .replace(/[#*_\->]/g, '')
+    .replace(/\*{1,3}([^*]+)\*{1,3}/g, '$1')
+    .replace(/_{1,3}([^_]+)_{1,3}/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^>\s?/gm, '')
+    .replace(/^[-*_]{3,}\s*$/gm, '')
     .replace(/\s+/g, ' ')
     .trim();
-  if (clean.length <= 75) return clean;
-  return `${clean.substring(0, 75).trimEnd()}…`;
+  if (flat.length <= 80) return flat;
+  const cut = flat.lastIndexOf(' ', 80);
+  const end = cut > 0 ? cut : 80;
+  return `${flat.substring(0, end).trimEnd()}…`;
 }
 
 function getFileBadge(pathStr: string): string {
@@ -1723,364 +1731,14 @@ export function isLikelyHttpUrl(str: string): boolean {
   return /^https?:\/\/[^\s"'`<>]+$/i.test(trimmed);
 }
 
-/**
- * 格式化行内代码或可交互路径/链接
- * 【设计意图 (Why)】
- * 智能识别行内代码中的文件路径与 HTTP 链接，将其提升为具有 .tool-file-link 属性的交互式胶囊。
- * 用户点击后，能够在右侧 Inspection Pod 实时预览 HTML 单文件原型、图片与代码，并支持一键下载。
- * 【防范的陷阱 (Pitfall)】
- * 1. 严格使用 Design Tokens，避免硬编码色相导致不同皮肤下对比度翻车；
- * 2. title 提示文本走 t() 国际化，规避 i18n 门禁拦截；
- * 3. 仅对符合路径与 URL 特征的文本增强，普通代码依然保持纯 code 标签。
- * 【约束与规则 (Rules)】
- * 保持语义化与无障碍支持，生成合规的 data-preview-file 与 data-preview-url 属性。
- */
 export function formatInlineCodeOrLink(escapedContent: string): string {
-  // 反转基本实体以供精准路径与 URL 校验
-  const unescaped = escapedContent
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#039;/g, "'");
-
-  const isHttp = isLikelyHttpUrl(unescaped);
-  const isFile = isLikelyFilePath(unescaped);
-
-  if (!isHttp && !isFile) {
-    return `<code style="background: var(--bg-panel); border: 1px solid var(--border-subtle); padding: 1.5px 5.5px; border-radius: 4px; font-family: var(--font-mono); font-size: 11.5px; color: var(--text-main); font-weight: 500;">${escapedContent}</code>`;
-  }
-
-  const tip = isHttp
-    ? t('inspector.clickToOpenLink', { url: unescaped })
-    : t('inspector.clickToPreview', { file: unescaped });
-
-  const ext = (unescaped.split(/[?#]/)[0].split('.').pop() || '').toLowerCase();
-  const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp'].includes(ext);
-
-  // 精致的微型指示图标 (中性遮蔽/accent，严格走 Token，无死色相)
-  const iconSvg = isImage
-    ? `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink: 0; opacity: 0.85; vertical-align: -1px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`
-    : isHttp
-    ? `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink: 0; opacity: 0.85; vertical-align: -1px;"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`
-    : `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink: 0; opacity: 0.85; vertical-align: -1px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
-
-  return `<code class="tool-file-link content-interactive-link" data-preview-file="${escapeHtml(unescaped)}" ${
-    isHttp ? `data-preview-url="${escapeHtml(unescaped)}"` : ''
-  } title="${escapeHtml(tip)}" style="background: var(--bg-panel); border: 1px solid var(--border-subtle); padding: 1.5px 6px; border-radius: 4px; font-family: var(--font-mono); font-size: 11.5px; color: var(--text-main); cursor: pointer; display: inline-flex; align-items: baseline; gap: 4px; text-decoration: underline; text-decoration-color: var(--border-medium); text-underline-offset: 2px;">${iconSvg}<span>${escapedContent}</span><span style="font-size: 9px; opacity: 0.65; margin-left: 1px;">↗</span></code>`;
+  return formatInlineCodeOrLinkLib(escapedContent);
 }
 
-const markdownRenderCache = new Map<string, string>();
-const MARKDOWN_CACHE_MAX = 500;
+export function highlightCodeSyntax(code: string): string {
+  return highlightCodeSyntaxLib(code);
+}
 
 export function renderMarkdown(md: string): string {
-  if (!md) return '';
-  const cached = markdownRenderCache.get(md);
-  if (cached !== undefined) return cached;
-
-  const protectedBlocks: Record<string, string> = {};
-  let blockCounter = 0;
-
-  // 1. Extract and protect code blocks
-  let processed = md.replace(/```([a-zA-Z0-9_-]+)?\n([\s\S]*?)```/g, (_match, lang, code) => {
-    const key = `__AURA_CODE_${blockCounter++}__`;
-    const cleanLang = (lang || '').toLowerCase().trim();
-    // Fast-path bypass for plain logs or oversized text (prevents catastrophic regex backtracking on giant Android Logcat)
-    const isPlainLog = ['log', 'txt', 'text', 'logcat', 'output'].includes(cleanLang);
-    const isOversized = code.length > 25000;
-    const highlighted = (isPlainLog || isOversized) ? escapeHtml(code) : highlightCodeSyntax(code);
-
-    const blockHtml = `
-      <div class="code-block-wrapper" style="
-        border-radius: 8px;
-        overflow: hidden;
-        border: 1px solid var(--border-medium);
-        margin: 12px 0;
-        background: var(--bg-code);
-        box-shadow: var(--shadow-card);
-      ">
-        <div style="
-          padding: 6px 14px;
-          background: var(--bg-elevated);
-          border-bottom: 1px solid var(--border-subtle);
-          font-size: 11px;
-          color: var(--text-muted);
-          font-family: var(--font-mono);
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          user-select: none;
-        ">
-          <span style="text-transform: lowercase; font-weight: 500; letter-spacing: 0.02em; color: var(--text-muted);">${lang || 'text'}</span>
-          <button class="btn-copy-code" onclick="(window.__fluxCopyText ? window.__fluxCopyText(this.closest('.code-block-wrapper').querySelector('code').innerText) : navigator.clipboard.writeText(this.closest('.code-block-wrapper').querySelector('code').innerText)); this.innerText='${escapeHtml(t('common.copied'))}'; this.style.color='var(--accent)'; setTimeout(() => { this.innerText='${escapeHtml(t('common.copy'))}'; this.style.color=''; }, 1500);" style="
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid var(--border-subtle);
-            color: var(--text-secondary);
-            border-radius: 4px;
-            padding: 2px 8px;
-            cursor: pointer;
-            font-size: 10.5px;
-            font-family: var(--font-sans);
-            transition: all 0.15s ease;
-          ">${escapeHtml(t('common.copy'))}</button>
-        </div>
-        <pre style="
-          margin: 0;
-          padding: 8px 12px;
-          overflow-x: auto;
-          font-family: var(--font-mono);
-          font-size: 11.5px;
-          line-height: 1.45;
-          color: var(--text-main);
-        "><code>${highlighted}</code></pre>
-      </div>
-    `;
-    protectedBlocks[key] = blockHtml;
-    return key;
-  });
-
-  // 2. Extract and protect GFM Tables (ensuring last line without trailing newline is captured)
-  processed = extractAndProtectTables(processed, protectedBlocks, () => `__AURA_TBL_${blockCounter++}__`);
-
-  // 3. Escape HTML on the rest of markdown content
-  let html = escapeHtml(processed);
-
-  // 4. Full range of Headings (######, #####, ####, ###, ##, #)
-  html = html.replace(/^###### (.*$)/gim, '<h6 style="font-size: 0.95em; font-weight: 700; margin: 6px 0 2px; color: var(--text-muted);">$1</h6>');
-  html = html.replace(/^##### (.*$)/gim, '<h5 style="font-size: 1.0em; font-weight: 700; margin: 8px 0 2px; color: var(--text-main);">$1</h5>');
-  html = html.replace(/^#### (.*$)/gim, '<h4 style="font-size: 1.05em; font-weight: 700; margin: 9px 0 3px; color: var(--text-main);">$1</h4>');
-  html = html.replace(/^### (.*$)/gim, '<h3 style="font-size: 1.1em; font-weight: 700; margin: 11px 0 3px; color: var(--text-main); letter-spacing: -0.01em;">$1</h3>');
-  html = html.replace(/^## (.*$)/gim, '<h2 style="font-size: 1.22em; font-weight: 700; margin: 13px 0 4px; color: var(--text-main); border-bottom: 1px solid var(--border-subtle); padding-bottom: 4px; letter-spacing: -0.01em;">$1</h2>');
-  html = html.replace(/^# (.*$)/gim, '<h1 style="font-size: 1.35em; font-weight: 800; margin: 15px 0 5px; color: var(--text-main); letter-spacing: -0.02em;">$1</h1>');
-
-  // 5. Blockquotes
-  html = html.replace(/^\&gt;\s?(.*$)/gim, '<blockquote style="border-left: 3px solid var(--accent); padding: 2px 10px; margin: 4px 0; color: var(--text-secondary); background: var(--accent-subtle); border-radius: 0 6px 6px 0;">$1</blockquote>');
-
-  // 6. Task lists (- [ ] / - [x])
-  html = html.replace(/^\s*[\-\*]\s+\[ \]\s+(.*$)/gim, '<li style="margin-left: 18px; margin-bottom: 1.5px; line-height: 1.42; list-style-type: none;"><span style="display: inline-block; width: 12px; height: 12px; border: 1.5px solid var(--text-muted); border-radius: 3px; vertical-align: middle; margin-right: 6px;"></span>$1</li>');
-  html = html.replace(/^\s*[\-\*]\s+\[x\]\s+(.*$)/gim, '<li style="margin-left: 18px; margin-bottom: 1.5px; line-height: 1.42; list-style-type: none;"><span style="display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 12px; background: var(--accent); border-radius: 3px; vertical-align: middle; margin-right: 6px; color: #000; font-size: 9px; font-weight: bold;">✓</span>$1</li>');
-
-  // 7. Regular Unordered & Ordered lists (Compact & Natural line-height)
-  html = html.replace(/^\s*[\-\*]\s+(.*$)/gim, '<li style="margin-left: 18px; margin-bottom: 1.5px; line-height: 1.42; list-style-type: disc;">$1</li>');
-  html = html.replace(/^\s*(\d+)\.\s+(.*$)/gim, '<li style="margin-left: 18px; margin-bottom: 1.5px; line-height: 1.42; list-style-type: decimal;">$2</li>');
-
-  // 7.5. Markdown Links ([label](url-or-path))
-  html = html.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_match, label, href) => {
-    const unescapedHref = href.replace(/&amp;/g, '&');
-    const isHttp = isLikelyHttpUrl(unescapedHref);
-    const isFile = isLikelyFilePath(unescapedHref);
-    const tip = isHttp
-      ? t('inspector.clickToOpenLink', { url: unescapedHref })
-      : t('inspector.clickToPreview', { file: unescapedHref });
-
-    if (isHttp || isFile) {
-      return `<a class="tool-file-link content-interactive-link" data-preview-file="${escapeHtml(unescapedHref)}" ${
-        isHttp ? `data-preview-url="${escapeHtml(unescapedHref)}"` : ''
-      } href="${escapeHtml(unescapedHref)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(tip)}" style="color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; display: inline-flex; align-items: baseline; gap: 3px;"><span>${label}</span><span style="font-size: 9px; opacity: 0.65;">↗</span></a>`;
-    }
-    return `<a href="${escapeHtml(unescapedHref)}" target="_blank" rel="noopener noreferrer" style="color: var(--accent); text-decoration: underline; text-underline-offset: 2px;">${label}</a>`;
-  });
-
-  // 8. Inline code & Smart Interactive File / URL Capsules
-  html = html.replace(/`([^`]+)`/g, (_match, codeContent) => formatInlineCodeOrLink(codeContent));
-
-  // 9. Bold, Italic & Strikethrough
-  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong style="color: var(--text-main); font-weight: 600;">$1</strong>');
-  html = html.replace(/\*([^*]+)\*/g, '<em style="color: var(--text-secondary);">$1</em>');
-  html = html.replace(/~~([^~]+)~~/g, '<del style="color: var(--text-muted);">$1</del>');
-
-  // 10. Horizontal Rule
-  html = html.replace(/^---$/gim, '<hr style="border: none; border-top: 1px solid var(--border-subtle); margin: 10px 0;" />');
-
-  // 11. Paragraphs & Line Breaks on non-block content (OpenChamber Compact Rhythm)
-  const rawParagraphs = html.split('\n\n').filter((p) => p.trim().length > 0);
-  let renderedResult = '';
-
-  if (rawParagraphs.length <= 1) {
-    const withBreaks = html.replace(/\n/g, '<br/>');
-    renderedResult = `<div style="margin: 0; line-height: 1.42;">${withBreaks}</div>`;
-  } else {
-    renderedResult = rawParagraphs
-      .map((p) => {
-        const withBreaks = p.replace(/\n/g, '<br/>');
-        return `<div style="margin-bottom: 3px; line-height: 1.42;">${withBreaks}</div>`;
-      })
-      .join('');
-  }
-
-  // 12. Safely restore protected blocks using function replacement to prevent $& injection
-  for (const [placeholder, blockContent] of Object.entries(protectedBlocks)) {
-    renderedResult = renderedResult.replace(placeholder, () => blockContent);
-  }
-
-  if (markdownRenderCache.size >= MARKDOWN_CACHE_MAX) {
-    const oldestKey = markdownRenderCache.keys().next().value;
-    if (oldestKey) markdownRenderCache.delete(oldestKey);
-  }
-  markdownRenderCache.set(md, renderedResult);
-
-  return renderedResult;
-}
-
-/** Single-pass lexical tokenizer for code syntax highlighting that never corrupts HTML attributes */
-export function highlightCodeSyntax(code: string): string {
-  if (!code) return '';
-
-  // Token definition regex: Comments, Strings, JSX Tags, JSX Attribute Names, Keywords, Numbers
-  const tokenRegex = /(\/\/[^\n]*|\{\/\*[\s\S]*?\*\/\}|\/\*[\s\S]*?\*\/)|(["'`][\s\S]*?["'`])|(<\/?[a-zA-Z0-9_-]+)|(\b[a-zA-Z0-9_-]+(?==))|\b(const|let|var|function|return|if|else|for|while|import|from|export|default|class|async|await|try|catch|type|interface|extends|implements)\b|\b(\d+)\b/g;
-
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-  let output = '';
-
-  while ((match = tokenRegex.exec(code)) !== null) {
-    // Escape and append plain code text before match
-    if (match.index > lastIndex) {
-      output += escapeHtml(code.slice(lastIndex, match.index));
-    }
-
-    const [fullMatch, comment, stringLit, jsxTag, jsxAttr, keyword, numberLit] = match;
-
-    if (comment) {
-      output += `<span style="color: var(--hl-comment, var(--text-muted)); font-style: italic;">${escapeHtml(comment)}</span>`;
-    } else if (stringLit) {
-      output += `<span style="color: var(--hl-string, var(--accent));">${escapeHtml(stringLit)}</span>`;
-    } else if (jsxTag) {
-      output += `<span style="color: var(--hl-keyword, var(--accent)); font-weight: 600;">${escapeHtml(jsxTag)}</span>`;
-    } else if (jsxAttr) {
-      output += `<span style="color: var(--hl-type, var(--hl-number, var(--text-secondary)));">${escapeHtml(jsxAttr)}</span>`;
-    } else if (keyword) {
-      output += `<span style="color: var(--hl-keyword, var(--accent-dim)); font-weight: 600;">${escapeHtml(keyword)}</span>`;
-    } else if (numberLit) {
-      output += `<span style="color: var(--hl-number, var(--text-secondary));">${escapeHtml(numberLit)}</span>`;
-    }
-
-    lastIndex = tokenRegex.lastIndex;
-  }
-
-  if (lastIndex < code.length) {
-    output += escapeHtml(code.slice(lastIndex));
-  }
-
-  return output;
-}
-
-/** Helper to format inline markdown within table cells safely */
-function formatCellInlineMarkdown(rawCell: string): string {
-  let cell = escapeHtml(rawCell.trim());
-  cell = cell.replace(/`([^`]+)`/g, (_match, codeContent) => formatInlineCodeOrLink(codeContent));
-  cell = cell.replace(/\*\*([^*]+)\*\*/g, '<strong style="color: var(--text-main); font-weight: 600;">$1</strong>');
-  cell = cell.replace(/\*([^*]+)\*/g, '<em style="color: var(--text-secondary);">$1</em>');
-  return cell;
-}
-
-/** Extracts GFM tables & TSV tables, compiles them directly to clean HTML, and stores them in protected map */
-function extractAndProtectTables(
-  content: string,
-  blockMap: Record<string, string>,
-  keyGen: () => string
-): string {
-  // 1. Matches consecutive lines starting and ending with pipe, ending with newline or EOF
-  const pipeTableRegex = /((?:\|.+?\|(?:\r?\n|$))+)/g;
-
-  let result = content.replace(pipeTableRegex, (rawTable) => {
-    const lines = rawTable
-      .trim()
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean);
-
-    if (lines.length < 2) return rawTable;
-
-    const headerLine = lines[0];
-    const separatorLine = lines[1];
-    if (!separatorLine.includes('-')) return rawTable;
-
-    const parseRow = (line: string): string[] =>
-      line
-        .replace(/^\|/, '')
-        .replace(/\|$/, '')
-        .split('|')
-        .map(formatCellInlineMarkdown);
-
-    const headers = parseRow(headerLine);
-    const rows = lines.slice(2).map(parseRow);
-
-    const theadHtml = `
-      <tr style="background: rgba(255, 255, 255, 0.04); border-bottom: 1.5px solid var(--border-medium);">
-        ${headers.map((h) => `<th style="padding: 8px 12px; font-weight: 700; color: var(--text-main); font-size: 12px; text-align: left;">${h}</th>`).join('')}
-      </tr>
-    `;
-
-    const tbodyHtml = rows
-      .map(
-        (r, idx) => `
-      <tr style="background: ${idx % 2 === 0 ? 'transparent' : 'rgba(255, 255, 255, 0.015)'}; border-bottom: 1px solid var(--border-subtle);">
-        ${r.map((c) => `<td style="padding: 7px 12px; color: var(--text-secondary); font-size: 12px;">${c}</td>`).join('')}
-      </tr>
-    `
-      )
-      .join('');
-
-    const tableHtml = `
-      <div style="overflow-x: auto; margin: 14px 0; border: 1px solid var(--border-medium); border-radius: 8px; box-shadow: var(--shadow-card);">
-        <table style="width: 100%; border-collapse: collapse; text-align: left;">
-          <thead>${theadHtml}</thead>
-          <tbody>${tbodyHtml}</tbody>
-        </table>
-      </div>
-    `;
-
-    const key = keyGen();
-    blockMap[key] = tableHtml;
-    return key;
-  });
-
-  // 2. Matches TSV (Tab-separated) tables (consecutive lines with at least one tab each)
-  const tsvTableRegex = /((?:[^\n\r]+\t[^\n\r]+(?:\r?\n|$)){2,})/g;
-  result = result.replace(tsvTableRegex, (rawTsv) => {
-    const lines = rawTsv
-      .trim()
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l.includes('\t'));
-
-    if (lines.length < 2) return rawTsv;
-
-    const parseTsvRow = (line: string): string[] => line.split('\t').map(formatCellInlineMarkdown);
-
-    const headers = parseTsvRow(lines[0]);
-    const rows = lines.slice(1).map(parseTsvRow);
-
-    const theadHtml = `
-      <tr style="background: rgba(255, 255, 255, 0.05); border-bottom: 1.5px solid var(--border-medium);">
-        ${headers.map((h) => `<th style="padding: 8px 12px; font-weight: 700; color: var(--text-main); font-size: 12px; text-align: left;">${h}</th>`).join('')}
-      </tr>
-    `;
-
-    const tbodyHtml = rows
-      .map(
-        (r, idx) => `
-      <tr style="background: ${idx % 2 === 0 ? 'transparent' : 'rgba(255, 255, 255, 0.015)'}; border-bottom: 1px solid var(--border-subtle);">
-        ${r.map((c) => `<td style="padding: 7px 12px; color: var(--text-secondary); font-size: 12px; line-height: 1.5;">${c}</td>`).join('')}
-      </tr>
-    `
-      )
-      .join('');
-
-    const tableHtml = `
-      <div style="overflow-x: auto; margin: 14px 0; border: 1px solid var(--border-medium); border-radius: 8px; box-shadow: var(--shadow-card);">
-        <table style="width: 100%; border-collapse: collapse; text-align: left;">
-          <thead>${theadHtml}</thead>
-          <tbody>${tbodyHtml}</tbody>
-        </table>
-      </div>
-    `;
-
-    const key = keyGen();
-    blockMap[key] = tableHtml;
-    return key;
-  });
-
-  return result;
+  return renderMarkdownCore(md);
 }

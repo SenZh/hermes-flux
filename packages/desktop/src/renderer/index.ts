@@ -13,6 +13,7 @@ import {
   renderSlashPopper,
   renderMentionPopper,
   renderToolCapsuleSlot,
+  extractToolTarget,
   renderInspectionPod,
   mountTitlebar,
   mountLeftRail,
@@ -54,6 +55,12 @@ import {
   mountMessageList,
   type ConversationMount,
   type ConversationSnapshot,
+  mountFileTypeSprite,
+  warmUpHighlighting,
+  loadFontPreferences,
+  saveFontPreferences,
+  applyFontPreferences,
+  type FontPreferences,
 } from '@hermes-flux/ui';
 
 import {
@@ -386,6 +393,28 @@ async function safeCopyText(text: string): Promise<boolean> {
 window.__fluxCopyText = safeCopyText;
 
 /**
+ * Markdown 代码块复制按钮：事件委托。
+ * 【设计意图 (Why)】渲染出的 HTML 会经过 DOMPurify 清洗，内联 onclick 会被剥离，
+ *   按钮会变成一个点不动的装饰。改为 data 属性 + 全局委托，清洗不影响交互。
+ * 【约束与规则 (Rules)】只处理 .md-codeblock__copy，不拦截其它点击事件。
+ */
+document.addEventListener('click', (event) => {
+  const target = event.target as HTMLElement | null;
+  const btn = target?.closest?.<HTMLElement>('.md-codeblock__copy');
+  if (!btn) return;
+  const code = btn.closest('.md-codeblock')?.querySelector('code')?.textContent ?? '';
+  if (!code) return;
+  const original = btn.textContent ?? '';
+  void safeCopyText(code).then((ok) => {
+    if (!ok) return;
+    btn.textContent = t('common.copied');
+    setTimeout(() => {
+      btn.textContent = original;
+    }, 1500);
+  });
+});
+
+/**
  * 设计意图 (Why):
  *   跨端自适应探测当前宿主运行时平台（Windows / macOS / Linux / iOS / Android / Web）。
  *   当运行在移动端（手机浏览器或 Capacitor 容器）或小屏环境时，
@@ -416,6 +445,8 @@ function detectInitialPlatform(): 'windows' | 'macos' | 'linux' | 'ios' | 'andro
 
 const profileService = new ProfileService();
 const groupRoomStore = new GroupRoomStore();
+
+let fontPreferences: FontPreferences = loadFontPreferences();
 
 const state: AppState = {
   platform: detectInitialPlatform(),
@@ -1895,26 +1926,10 @@ function parseRawMessages(list: any[]): MessageViewModel[] {
 
     const toolCalls = rawToolCalls.map((tc: any, tIdx: number) => {
       const toolName = tc.name || tc.function?.name || tc.tool || 'tool';
-      let rawArgs = tc.args ?? tc.arguments ?? tc.function?.arguments ?? tc.input ?? tc.parameters ?? {};
-      if (typeof rawArgs === 'string') {
-        const trimmed = rawArgs.trim();
-        if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-          try {
-            rawArgs = JSON.parse(trimmed);
-          // gate-degrade: 工具 args 字符串非合法 JSON 时按原始文本降级展示，属可选增强失败不影响主流程
-          } catch {}
-        }
-      }
-
-      // Deeply extract command or target file path so the title line never shows empty
-      let cleanArg = '';
-      if (typeof rawArgs === 'object' && rawArgs !== null) {
-        cleanArg = rawArgs.command || rawArgs.cmd || rawArgs.path || rawArgs.file || rawArgs.filePath || rawArgs.file_path || rawArgs.resolved_path || rawArgs.query || rawArgs.pattern || rawArgs.description || rawArgs.prompt || '';
-      } else if (typeof rawArgs === 'string') {
-        cleanArg = rawArgs;
-      }
-
-      const argsStr = typeof rawArgs === 'string' ? rawArgs : JSON.stringify(rawArgs);
+      const rawArgs = tc.args ?? tc.arguments ?? tc.function?.arguments ?? tc.input ?? tc.parameters ?? {};
+      // 【防范的历史坑 (Pitfall)】历史 args 形状不统一（顶层 command / 信封 args.command / JSON 字符串），
+      // 旧实现取不到 key 就把整段 JSON 当目标显示。统一走深度提取，取不到留空。
+      const cleanArg = extractToolTarget(rawArgs);
 
       const formatRawOutput = (val: unknown): string | undefined => {
         if (val === null || val === undefined) return undefined;
@@ -1930,7 +1945,7 @@ function parseRawMessages(list: any[]): MessageViewModel[] {
         id: tc.id || tc.tool_call_id || `tc-${idx}-${tIdx}`,
         name: toolName,
         status: (tc.status || 'completed') as any,
-        args: cleanArg ? cleanArg : argsStr,
+        args: cleanArg,
         output: formatRawOutput(tc.output ?? tc.result ?? tc.stdout),
       };
     });
@@ -4629,7 +4644,15 @@ function buildConversationSnapshot(): ConversationSnapshot {
       timestamp: m.timestamp,
       status: streaming && m.id === lastMessageId ? 'streaming' : undefined,
       isStreaming: streaming && m.id === lastMessageId,
-      toolCalls: m.toolCalls,
+      toolCalls: m.toolCalls?.map((tc) => ({
+        id: tc.id,
+        name: tc.name,
+        status: tc.status,
+        args: tc.args,
+        output: tc.output,
+        durationMs: tc.durationMs,
+        startedAt: tc.startTime,
+      })),
     })),
   };
 }
@@ -4901,6 +4924,7 @@ function render(): void {
         connectionStatus: state.gatewayConnected ? 'connected' : state.gatewayConnecting ? 'connecting' : 'disconnected',
         latencyMs: state.gatewayLatencyMs,
         testStatus: state.testStatus,
+        fontPrefs: fontPreferences,
       })}
 
       ${renderNewTaskModal({
@@ -5076,6 +5100,7 @@ function render(): void {
       connectionStatus: state.gatewayConnected ? 'connected' : state.gatewayConnecting ? 'connecting' : 'disconnected',
       latencyMs: state.gatewayLatencyMs,
       testStatus: state.testStatus,
+      fontPrefs: fontPreferences,
     });
     if (modalRoot) {
       modalRoot.outerHTML = nextModalHtml;
@@ -5584,6 +5609,33 @@ function bindEvents(): void {
         localStorage.setItem('hermes_aura_theme', theme);
         render();
       }
+    };
+  });
+
+  // 字体配置：直接写 :root 并落盘，不触发整页重绘，保证改动即时可见且不丢滚动位置
+  document.querySelectorAll<HTMLSelectElement>('.settings-font-select').forEach((select) => {
+    select.onchange = () => {
+      const kind = select.dataset.fontKind;
+      const next = { ...fontPreferences };
+      if (kind === 'ui') next.uiFont = select.value as typeof next.uiFont;
+      if (kind === 'mono') next.monoFont = select.value as typeof next.monoFont;
+      fontPreferences = next;
+      saveFontPreferences(next);
+      applyFontPreferences(next);
+    };
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('.settings-font-scale-btn').forEach((btn) => {
+    btn.onclick = () => {
+      const scale = btn.dataset.scale as typeof fontPreferences.sizeScale;
+      const next = { ...fontPreferences, sizeScale: scale };
+      fontPreferences = next;
+      saveFontPreferences(next);
+      applyFontPreferences(next);
+      document.querySelectorAll('.settings-font-scale-btn').forEach((b) => {
+        const active = (b as HTMLElement).dataset.scale === scale;
+        b.classList.toggle('active', active);
+      });
     };
   });
 
@@ -7065,6 +7117,11 @@ async function init(): Promise<void> {
     electron: navigator.userAgent.includes('Electron'),
   });
   installLayoutShiftDiagnostics();
+  // 文件类型图标 sprite 只注入一次；Markdown 与工具行都靠 <use href="#id"> 引用。
+  mountFileTypeSprite();
+  applyFontPreferences(fontPreferences);
+  // 代码高亮引擎空闲预热：首屏先用轻量高亮，避免 300ms 的语法编译阻塞首屏。
+  warmUpHighlighting();
 
   if (isConversationDemoMode()) {
     injectConversationDemo();

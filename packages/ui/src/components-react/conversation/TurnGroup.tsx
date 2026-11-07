@@ -12,7 +12,7 @@
  */
 
 import * as React from 'react';
-import type { ConversationMessageVM, ConversationMode } from './types.js';
+import type { ConversationMessageVM, ConversationMode, ConversationToolVM } from './types.js';
 import { MessageRow } from './MessageRow.js';
 
 export interface TurnGroupProps {
@@ -63,13 +63,41 @@ const areEqual = (prev: TurnGroupProps, next: TurnGroupProps): boolean => {
   return true;
 };
 
+/**
+ * 回合内工具收敛
+ * 【设计意图 (Why)】网关历史把每一轮「模型输出 + 工具调用」落成独立的 assistant 行，
+ * 历史回放时每个工具各占一行、散落在正文之间；实时流式只有一个 message，天然收敛成
+ * 一个执行清单。这里把同一回合的工具合并到首条消息，让历史与实时形态一致。
+ * 【防范的历史坑 (Pitfall)】正在流式的回合不聚合：工具区仍靠 #msg-tools-<id> 增量直写，
+ * 合并会让锚点与消息错位。
+ * 【约束与规则 (Rules)】只做视图变换，不改入参；单工具或非 assistant 回合原样返回。
+ */
+function aggregateTurnTools(
+  messages: ConversationMessageVM[],
+  isStreaming: boolean
+): ConversationMessageVM[] {
+  if (isStreaming || messages.length <= 1 || messages[0]?.role !== 'assistant') return messages;
+  const merged: ConversationToolVM[] = [];
+  for (const message of messages) {
+    if (message.toolCalls?.length) merged.push(...message.toolCalls);
+  }
+  if (merged.length <= 1) return messages;
+  return messages.map((message, index) =>
+    index === 0 ? { ...message, toolCalls: merged } : { ...message, toolCalls: [] }
+  );
+}
+
 export const TurnGroup = React.memo(function TurnGroup({
   messages,
   mode,
   isLastTurn,
   isStreaming,
 }: TurnGroupProps): React.ReactElement {
-  const lastIndex = messages.length - 1;
+  const viewMessages = React.useMemo(
+    () => aggregateTurnTools(messages, isStreaming),
+    [messages, isStreaming]
+  );
+  const lastIndex = viewMessages.length - 1;
   return (
     <div
       className="conv-turn"
@@ -77,7 +105,7 @@ export const TurnGroup = React.memo(function TurnGroup({
       data-conv-turn-last={isLastTurn ? 'true' : 'false'}
       data-conv-streaming={isStreaming ? 'true' : 'false'}
     >
-      {messages.map((message, index) => (
+      {viewMessages.map((message, index) => (
         <MessageRow
           key={message.id}
           message={message}

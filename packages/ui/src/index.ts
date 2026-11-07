@@ -22,6 +22,27 @@ export {
   type ActivityState as LeftRailActivityState,
 } from './components-react/leftRailModel.js';
 export * from './components/MiddlePod/MiddlePod.js';
+export { mountFileTypeSprite, renderFileTypeIcon, resolveFileTypeIcon } from './lib/fileTypeIcons.js';
+export { warmUpHighlighting, isHighlightReady } from './lib/highlight.js';
+export { extractToolTarget, isLikelyFilePath } from './lib/text.js';
+export {
+  UI_FONT_OPTIONS,
+  MONO_FONT_OPTIONS,
+  getUiFontSelectOptions,
+  DEFAULT_UI_FONT,
+  DEFAULT_MONO_FONT,
+  resolveFontStack,
+  type UiFontId,
+  type MonoFontId,
+  type FontSizeScale,
+} from './tokens/fonts.js';
+export {
+  loadFontPreferences,
+  saveFontPreferences,
+  applyFontPreferences,
+  DEFAULT_FONT_PREFERENCES,
+  type FontPreferences,
+} from './tokens/fontPreferences.js';
 export * from './components/InputDock/InputDock.js';
 export * from './components/InspectionPod/InspectionPod.js';
 export * from './components/StatusBar/StatusBar.js';

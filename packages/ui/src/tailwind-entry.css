@@ -75,8 +75,8 @@
   --text-body: var(--fs-body, 13px);
   --text-aux: var(--fs-aux, 12px);
   --text-caption: var(--fs-caption, 11px);
-  --text-overline: var(--fs-overline, 10px);
-  --text-micro: var(--fs-micro, 9px);
+  --text-overline: var(--fs-caption, 11px);
+  --text-micro: var(--fs-micro, 10px);
   /* 时长与缓动不在此定义：--duration-fast/--duration-normal 由 :root 节奏层（styles.css）单一来源持有，同名定义会造成隐式覆盖 */
 }
 

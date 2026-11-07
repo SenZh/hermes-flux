@@ -727,7 +727,7 @@ const literalFontSizeRules = {
           file,
           line: i + 1,
           ruleId: 'typo/no-literal-font-size',
-          message: `[typo/no-literal-font-size] :${i + 1} 发现字面量字号「${matchText.trim()}」，必须收敛至设计系统 8 档变量（--fs-*）`,
+          message: `[typo/no-literal-font-size] :${i + 1} 发现字面量字号「${matchText.trim()}」，必须收敛至设计系统 7 档变量（--fs-*）`,
         });
       }
     });

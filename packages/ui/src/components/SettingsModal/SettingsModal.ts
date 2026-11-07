@@ -8,6 +8,8 @@
  */
 
 import { t } from '../../i18n/index.js';
+import { getUiFontSelectOptions, MONO_FONT_OPTIONS } from '../../tokens/fonts.js';
+import type { FontPreferences } from '../../tokens/fontPreferences.js';
 
 export interface SettingsModalProps {
   isOpen: boolean;
@@ -21,6 +23,7 @@ export interface SettingsModalProps {
   connectionStatus: 'disconnected' | 'connecting' | 'connected' | 'error';
   latencyMs: number;
   testStatus?: { ok?: boolean; message?: string; latency?: number };
+  fontPrefs?: FontPreferences;
 }
 
 export function renderSettingsModal(props: SettingsModalProps): string {
@@ -394,6 +397,37 @@ function renderTabPane(props: SettingsModalProps): string {
                 <span class="theme-preview-sub" style="font-size: 10px;">${t('settings.themeCyberSub')}</span>
               </button>
             </div>
+          </div>
+
+          <!-- Font Selection：界面字体、代码字体、字号档位。改动即时写入 :root，无需刷新 -->
+          <div class="settings-font-section" style="display: flex; flex-direction: column; gap: 12px;">
+            <label style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">${t('settings.fontSection')}</label>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <label style="display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-secondary);">
+                ${t('settings.uiFont')}
+                <select class="settings-font-select" data-font-kind="ui" style="height: 36px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--border-medium); background: var(--bg-panel); color: var(--text-main); font-size: 13px;">
+                  ${getUiFontSelectOptions().map((o) => `<option value="${o.id}" ${o.id === props.fontPrefs?.uiFont ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('')}
+                </select>
+              </label>
+              <label style="display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-secondary);">
+                ${t('settings.codeFont')}
+                <select class="settings-font-select" data-font-kind="mono" style="height: 36px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--border-medium); background: var(--bg-panel); color: var(--text-main); font-size: 13px;">
+                  ${MONO_FONT_OPTIONS.map((o) => `<option value="${o.id}" ${o.id === props.fontPrefs?.monoFont ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('')}
+                </select>
+              </label>
+            </div>
+            <label style="display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-secondary);">
+              ${t('settings.textSize')}
+              <div class="settings-font-scale" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;">
+                ${(['small', 'medium', 'large'] as const)
+                  .map((scale) => {
+                    const active = props.fontPrefs?.sizeScale === scale;
+                    const label = t(scale === 'small' ? 'settings.sizeSmall' : scale === 'large' ? 'settings.sizeLarge' : 'settings.sizeMedium');
+                    return `<button class="settings-font-scale-btn ${active ? 'active' : ''}" data-scale="${scale}" style="height: 34px; border-radius: 8px; border: 1px solid ${active ? 'var(--accent)' : 'var(--border-medium)'}; background: ${active ? 'var(--accent-subtle)' : 'var(--bg-panel)'}; color: ${active ? 'var(--accent)' : 'var(--text-main)'}; font-size: 13px; cursor: pointer;">${label}</button>`;
+                  })
+                  .join('')}
+              </div>
+            </label>
           </div>
         </div>
       `;

@@ -136,6 +136,30 @@ async function buildAll() {
     path.join(rootDir, 'dist/renderer', 'conversation.css')
   );
 
+  // 字体清单由 scripts/font-manifest.json 提供（与 tokens/fonts.ts 的 source 字段一一对应）。
+  // 只拷贝 latin 子集；中文继续走系统字体，避免引入 MB 级 CJK 字重。
+  const fontTargetDir = path.join(rootDir, 'dist/renderer/fonts');
+  fs.mkdirSync(fontTargetDir, { recursive: true });
+  const fontManifest = JSON.parse(
+    fs.readFileSync(path.join(rootDir, 'scripts', 'font-manifest.json'), 'utf8')
+  );
+  let copiedFonts = 0;
+  let missingFonts = 0;
+  for (const { packageName, filePrefix, weights } of fontManifest.sources) {
+    const filesDir = path.join(rootDir, 'node_modules', packageName, 'files');
+    for (const weight of weights) {
+      const name = `${filePrefix}-latin-${weight}-normal.woff2`;
+      const source = path.join(filesDir, name);
+      if (!fs.existsSync(source)) {
+        missingFonts += 1;
+        continue;
+      }
+      fs.copyFileSync(source, path.join(fontTargetDir, name));
+      copiedFonts += 1;
+    }
+  }
+  console.log(`  ✔ Web fonts copied (${copiedFonts} woff2, ${missingFonts} missing)`);
+
   // 5. Ship the brand icons next to the compiled main process
   const iconDir = path.join(rootDir, 'build');
   const iconTargets = ['icon.ico', 'icon.png'];

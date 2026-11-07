@@ -21,6 +21,8 @@ export interface ConversationToolVM {
   args: string;
   output?: string;
   durationMs?: number;
+  /** tool.start 到达时的本地毫秒时间戳；运行中据此实时累加，complete 后以 durationMs 为准 */
+  startedAt?: number;
 }
 
 export interface ConversationMessageVM {

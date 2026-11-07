@@ -1,32 +1,74 @@
 /**
- * 对话区表现层样式（P0 骨架）
+ * Hermes Flux 对话区表现层专属样式表
+ * 100% 深度对标 OpenChamber 官方实现（packages/ui/src/components/chat + typography.css）
  *
- * 设计意图(Why)：
- *   对话区的几何与外观此前全部内联在 MiddlePod 模板里，跨端无法复用、改一处要动多处。
- *   本文件是对话区唯一的样式资产，desktop 构建后复制到 renderer，web/mobile 可直接复用。
- *
- * 防范的历史坑(Pitfall)：
- *   迁移期新旧 CSS 变量并存（--bg-* 与 --*），旧变量仅供未迁移组件，本文件禁止新增旧变量引用。
- *
- * 约束与规则(Rules)：
- *   1. 只消费语义化 CSS 变量，禁止任何色值字面量（#hex / rgb / hsl）；
- *   2. 滚动容器禁止 scroll-behavior: smooth 与 transform；
- *   3. 选择器全部限定在对话区结构类内，禁止全局标签选择器；
- *   4. 本阶段变量值刻意镜像现状，保证零视觉变化；规范值在 P1 切换。
- *   5. 背景从 --bg-window 切到 --panel、画布 gap 从 18px 收到 16px，均为用户确认的有意视觉变更：
- *      中间对话区需比侧栏浅一级，并落回 4pt 阶梯。
+ * 核心特性：
+ *   1. 黄金居中 + 宽屏自适应支持（普通屏 48rem，宽屏 68rem 自适应展开）；
+ *   2. OpenChamber 原版阅读尺度（正文 15px / 行高 26px / 段落 14px）；
+ *   3. 零宋体回退，中英文混排优先 Windows 高清无衬线（Segoe UI + 微软雅黑）；
+ *   4. 杜绝单词腰斩（word-break: normal + overflow-wrap: break-word）；
+ *   5. OpenChamber 原版行内代码小药丸（4px 微圆角、柔和微透衬底）；
+ *   6. OpenChamber 原版代码块（圆角外壳、顶部语言栏、无边框微图标复制按钮）；
+ *   7. 思考行与工具行纯净呈现，无生肉 Markdown 语法泄露；
+ *   8. 全局样式沙盒化，绝不污染外层左侧边栏、头像栏与设置中心。
  */
 
-:root {
-  --conv-gutter-x: 32px;
+/* ==========================================================================
+   1. 局部作用域设计变量（Scoped Tokens，对标 OpenChamber design-system.css）
+   ========================================================================== */
+
+.conversation-pod,
+.middle-conversation-pod,
+#conversation-stream {
+  /* 基础列宽与宽屏自适应（严格 100% 对标 OpenChamber .chat-message-column / .wide-chat-layout） */
+  --conv-column-normal: 48rem;
+  --conv-column-wide: 64rem;
+  --conv-column-max: var(--conv-column-wide);
+
+  --conv-gutter-x: clamp(16px, 2.5vw, 32px);
   --conv-gutter-top: 24px;
-  --conv-bottom-reserve: 180px;
-  --conv-canvas-gap: 16px;
-  --conv-scrim-height: 120px;
+  --conv-gutter-bottom: 160px;
+  --conv-turn-gap: 24px;
+  --conv-item-gap: 8px;
+
+  /* 独立字体栈：优先西文无衬线与 Windows 高清中文字体，彻底根除宋体回退 */
+  /* 与左侧栏同源：直接引用全局字体变量，界面字体改一处，对话区同步生效 */
+  --conv-font-sans: var(--font-sans);
+  --conv-font-mono: var(--font-mono);
+
+  /* 阅读尺度（对标 OpenChamber: --text-markdown: 0.9375rem(15px), line-height: 1.625(26px)）
+     【设计意图 (Why)】所有可读文字都必须挂在 --text-* 语义 Token 上，
+       否则用户在设置里调整字号时，只有正文变、执行轨迹不变。
+     【约束与规则 (Rules)】本区块内禁止再引用 --fs-* 固定字阶。 */
+  --conv-text-size: var(--text-markdown);
+  --conv-text-lh: 26px;
+  --conv-para-margin: 14px;
+  --conv-code-size: var(--text-code);
+  --conv-code-lh: 20px;
+  /* 执行轨迹行标签（思考 / Shell Command 等）与元数据、辅助文字 */
+  --conv-label-size: var(--text-ui-label);
+  --conv-meta-size: var(--text-meta);
+  --conv-micro-size: var(--text-micro);
+
+  /* OpenChamber 风格的表面衬底色 */
+  --conv-code-pill-bg: color-mix(in oklab, var(--foreground) 7%, transparent);
+  --conv-code-block-bg: color-mix(in oklab, var(--foreground) 4%, transparent);
+  --conv-hover-bg: color-mix(in oklab, var(--foreground) 4%, transparent);
 }
 
-/* L0 舞台：占满左双轨与检查舱之间的通栏 */
-.conversation-pod {
+/* 宽屏自适应：默认使用 OpenChamber 64rem（1024px）黄金宽屏列宽，居中对齐 */
+.wide-chat-layout,
+[data-chat-layout="wide"] {
+  --conv-column-max: var(--conv-column-wide) !important;
+}
+
+/* ==========================================================================
+   2. 舞台骨架与居中流式画布（对标 ChatContainer.tsx & ChatViewport）
+   ========================================================================== */
+
+/* L0 舞台：占满中场 */
+.conversation-pod,
+.middle-conversation-pod {
   flex: 1 1 0%;
   min-width: 0;
   width: 100%;
@@ -38,430 +80,851 @@
   overflow: hidden;
 }
 
-/* L1 滚动流：即时滚动，不参与平滑滚动与合成层变换 */
-.conv-stream {
-  flex: 1;
+/* L1 滚动视口：消除平滑滚动抖动，保证毫秒级流式定位 */
+.conv-stream,
+#conversation-stream {
+  flex: 1 1 0%;
   width: 100%;
   overflow-y: auto;
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
-  padding: var(--conv-gutter-top) var(--conv-gutter-x) var(--conv-bottom-reserve);
+  padding: var(--conv-gutter-top) var(--conv-gutter-x) var(--conv-gutter-bottom);
   box-sizing: border-box;
   scroll-behavior: auto;
   overscroll-behavior: contain;
 }
 
-/* L1 画布：竖向节奏容器，宽度随舞台通栏 */
-.conv-canvas {
+/* L1 画布：核心自适应限宽居中列，支持宽屏展开 */
+.conv-canvas,
+.middle-conversation-pod .conv-canvas,
+#conversation-stream .conv-canvas,
+.chat-message-column {
   width: 100%;
-  max-width: 100%;
-  margin: 0;
+  max-width: var(--conv-column-max);
+  margin-left: auto !important;
+  margin-right: auto !important;
   display: flex;
   flex-direction: column;
-  gap: var(--conv-canvas-gap);
+  gap: var(--conv-turn-gap);
   position: relative;
+  transition: max-width 0.2s ease;
 }
 
-/* 底部柔光遮罩：防止消息与输入舱视觉碰撞 */
+/* 底部渐变柔光遮罩：防止长文字撞击底部悬浮输入舱 */
 .conv-dock-scrim {
   position: absolute;
   bottom: 0;
   left: 0;
   right: 0;
-  height: var(--conv-scrim-height);
-  background: linear-gradient(to top, var(--panel) 30%, transparent 100%);
+  height: 100px;
   pointer-events: none;
-  z-index: 30;
+  background: linear-gradient(to top, var(--panel) 15%, transparent 100%);
+  z-index: 10;
 }
 
-/* L2 回合：回合间距独立于消息间距 */
-.conv-turn {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 8px 0;
-}
+/* ==========================================================================
+   3. 消息回合外壳（对标 OpenChamber ChatMessage.tsx）
+   ========================================================================== */
 
-/* L3 用户气泡：右对齐，上限 80% / 820px */
-.conv-message--user {
-  align-self: flex-end;
-  max-width: min(80%, 820px);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-/* 气泡本体：操作栏与时间挂在气泡外，不进入气泡内部 */
-.conv-message__bubble {
-  padding: 12px 16px;
-  background: var(--chat-user-message-bg, var(--card));
-  border: 1px solid var(--border);
-  border-radius: var(--radius-window) var(--radius-window) var(--radius-inner) var(--radius-window);
-  font-size: var(--fs-body);
-  line-height: 19px;
-  color: var(--foreground);
-}
-
-/* 用户消息保留原始换行；助手正文由 Markdown 块级节奏控制，不能继承 pre-wrap */
-.conv-message--user .conv-message__bubble {
-  white-space: pre-wrap;
-}
-
-/* L3 助手消息：通栏延展，不加外边框 */
-.conv-message--assistant {
+.conv-message,
+.message-row {
   width: 100%;
-  padding: 2px 0;
-}
-
-.conv-message__header {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
-  font-size: var(--fs-caption);
-  font-weight: 500;
-  color: var(--foreground);
+  flex-direction: column;
+  gap: var(--conv-item-gap);
+  margin: 0;
+  position: relative;
 }
 
-.conv-message__body {
-  font-size: var(--fs-body);
-  line-height: 19px;
-  color: var(--foreground);
-  white-space: normal;
-  word-break: break-word;
+/* 用户发言行：靠右布局 */
+.conv-message--user,
+.user-row {
+  align-items: flex-end;
 }
 
-/* Markdown 渲染出的每个块级元素都按行距 19px 对齐。
-   renderMarkdown 输出的是内联字号与行高，内联优先级高于类选择器，因此这里必须 !important 才能统一。 */
-.conv-markdown div,
-.conv-markdown p,
-.conv-markdown li {
-  font-size: var(--fs-body) !important;
-  line-height: 19px !important;
-  color: var(--foreground);
+/* 助手发言行：通栏展开 */
+.conv-message--assistant,
+.assistant-row {
+  align-items: stretch;
 }
 
-.conv-markdown > div,
-.conv-markdown > p {
-  margin: 0 !important;
-}
-
-/* renderMarkdown 在列表项后插入 <br/>，会额外撑出一行；列表自身用 margin 控制节奏 */
-.conv-markdown li + br {
-  display: none;
-}
-
-.conv-markdown li {
-  margin-bottom: 2px;
-  list-style-position: outside;
-}
-
-.conv-message__meta {
+/* 多 Agent 发言人徽章 */
+.conv-message__header,
+.message-sender-badge {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  font-family: var(--font-mono);
-  font-size: var(--fs-micro);
-  color: var(--muted-foreground);
+  gap: 6px;
+  margin-bottom: 2px;
 }
 
-/* L4 思考折叠：与工具行共用同一套行式布局与字号 */
-.conv-thought {
-  margin: 0;
-  font-size: var(--fs-body);
-  color: var(--muted-foreground);
-}
-
-.conv-thought > summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 26px;
-  padding: 0 4px;
-  margin: 0 -4px;
-  border-radius: var(--radius-inner);
-  cursor: pointer;
-  list-style: none;
-  font-size: var(--fs-body);
-  line-height: 26px;
+.conv-message__sender {
+  font-family: var(--conv-font-sans);
+  font-size: var(--conv-meta-size);
+  font-weight: 600;
   color: var(--secondary-foreground);
 }
 
-.conv-thought > summary:hover {
-  background: var(--card-hover);
-}
+/* ==========================================================================
+   4. 用户消息气泡（对标 OpenChamber UserTextPart.tsx）
+   ========================================================================== */
 
-.conv-thought__chevron {
-  flex-shrink: 0;
-  color: var(--muted-foreground);
-  transition: transform 120ms ease;
-}
-
-.conv-thought[open] .conv-thought__chevron {
-  transform: rotate(90deg);
-}
-
-.conv-thought__label {
-  flex-shrink: 0;
+.conv-message__bubble,
+.user-bubble {
+  max-width: 82%;
+  padding: 10px 16px;
+  background: var(--chat-user-message-bg, var(--card));
+  border: 1px solid var(--border);
+  border-radius: 14px 14px 4px 14px;
+  box-shadow: var(--shadow-card);
+  font-family: var(--conv-font-sans);
+  font-size: var(--conv-text-size);
+  line-height: 24px;
   color: var(--foreground);
+  word-break: normal;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
 }
 
-.conv-thought__duration {
+/* ==========================================================================
+   5. 思考行与工具行（对标 OpenChamber ReasoningPart.tsx & ToolPart.tsx）
+   ========================================================================== */
+
+.conv-row,
+.timeline-row,
+.thinking-row,
+.tool-capsule {
+  border: none;
+  background: transparent;
+  margin: 0;
+}
+
+/* 轨迹单行摘要条（32px 高度，温润微距悬停）
+   gap 取 6px：对标 OpenChamber 执行行的 gap-1.5，标签与摘要靠得更近。 */
+.conv-row__summary,
+.thinking-row__summary,
+.tool-row__summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 8px;
+  margin: 0 -8px;
+  border-radius: var(--radius-inner);
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  color: var(--secondary-foreground);
+  font-family: var(--conv-font-sans);
+  /* 必须走可缩放的语义 Token：--fs-section 是固定字阶，用户调字号时不会跟着变 */
+  font-size: var(--conv-label-size);
+  line-height: 20px;
+  transition: background 0.12s ease;
+}
+
+.conv-row__summary:hover,
+.thinking-row__summary:hover,
+.tool-row__summary:hover {
+  background: var(--conv-hover-bg);
+}
+
+.conv-row__summary::-webkit-details-marker,
+.thinking-row__summary::-webkit-details-marker,
+.tool-row__summary::-webkit-details-marker {
+  display: none;
+}
+
+/* 左侧 16px 矢量图标位 */
+/* 图标槽：所有执行行（含工具清单）共用同一套盒子。
+   【设计意图 (Why)】图标必须严格 16×16 且 flex 居中。缺了这套规则时 div 退化成 block，
+     行盒被 line-height 撑到 21.3px，16px 的 SVG 在里面居中后会向上偏 3px，看起来就是"错位"。
+   【约束与规则 (Rules)】任何新增的执行行图标都必须挂进这条选择器，禁止另写一套尺寸。 */
+.conv-row__icon,
+.thinking-row__icon,
+.tool-row__icon,
+.conv-package__icon,
+.tool-package__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
-  font-family: var(--font-mono);
-  font-size: var(--fs-caption);
+  width: 16px;
+  height: 16px;
+  line-height: 16px;
   color: var(--muted-foreground);
 }
 
-.conv-thought__summary {
-  flex: 1;
+.conv-row__icon svg,
+.thinking-row__icon svg,
+.tool-row__icon svg,
+.conv-package__icon svg,
+.tool-package__icon svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+  /* 墨迹光学居中：图标 viewBox 的图形区并非满 24×24（实测 y 约 2~22），
+     直接用几何居中会让图标墨迹比文字基线低约 1.7px，看起来"图标偏下"。
+     这里上移 1px 补偿，使图标墨迹中心与中文字面中心对齐。 */
+  transform: translateY(-1px);
+}
+
+/* 可展开行：默认显示类型图标，悬停或展开时图标淡出、箭头淡入（对标 OpenChamber group-hover/tool）。
+   箭头叠放在图标槽的位置上，因此不占用额外布局宽度。
+   【约束与规则 (Rules)】箭头必须与 .conv-*-__icon 同尺寸同定位，否则 hover 时会有位移跳变。 */
+.conv-row__summary,
+.conv-package__summary,
+.tool-package__summary {
+  position: relative;
+}
+
+.conv-row__icon,
+.conv-package__icon,
+.tool-package__icon {
+  transition: opacity 0.12s ease;
+}
+
+.conv-row__expand,
+.thinking-row__expand,
+.tool-row__expand,
+.conv-package__expand,
+.tool-package__expand {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  margin-top: -8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--muted-foreground);
+  opacity: 0;
+  /* 与图标同一位移量，保证 hover 切换时不出现上下跳动 */
+  transform: translateY(-1px) rotate(-90deg);
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+/* 悬停 / 展开态：图标淡出、箭头淡入。
+   用 details 通用选择器同时覆盖执行行与工具清单，避免两套结构各写一遍而漂移。 */
+details > summary:hover > .conv-row__icon,
+details > summary:hover > .conv-package__icon,
+details > summary:hover > .tool-package__icon,
+details > summary:hover > .thinking-row__icon,
+details > summary:hover > .tool-row__icon,
+details[open] > summary > .conv-row__icon,
+details[open] > summary > .conv-package__icon,
+details[open] > summary > .tool-package__icon,
+details[open] > summary > .thinking-row__icon,
+details[open] > summary > .tool-row__icon {
+  opacity: 0;
+}
+
+details > summary:hover > .conv-row__expand,
+details > summary:hover > .conv-package__expand,
+details > summary:hover > .tool-package__expand,
+details > summary:hover > .thinking-row__expand,
+details > summary:hover > .tool-row__expand {
+  opacity: 1;
+}
+
+details[open] > summary > .conv-row__expand,
+details[open] > summary > .conv-package__expand,
+details[open] > summary > .tool-package__expand,
+details[open] > summary > .thinking-row__expand,
+details[open] > summary > .tool-row__expand {
+  opacity: 1;
+  transform: translateY(-1px) rotate(0deg);
+}
+
+/* 动作标签（如「思考」、「Shell Command」） */
+/* 动作标签：次级前景灰，而非正文的纯前景色。
+   设计意图(Why)：标签是"动作名"不是"正文结论"，用灰色才能让正文成为唯一最重的字。
+     纯前景色的标签会和摘要抢视觉重量，整行看起来发黑、发闷。
+   约束与规则(Rules)：禁止改回 var(--foreground)；间距只由父级 gap 控制，禁止加 margin。 */
+.conv-row__label,
+.thinking-row__label,
+.tool-row__label,
+.tool-row__name {
+  flex-shrink: 0;
+  font-weight: 500;
+  letter-spacing: normal;
+  color: var(--secondary-foreground);
+  font-size: var(--conv-label-size);
+}
+
+/* 目标与摘要：与标签同字号（OpenChamber 两者都用 typography-meta），
+   只有真正的命令与文件路径才用等宽，避免中文摘要被等宽字形拉窄。 */
+.conv-row__target,
+.thinking-row__preview,
+.tool-row__target {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--fs-body);
+  font-family: var(--conv-font-sans);
+  font-size: var(--conv-label-size);
+  line-height: 20px;
   color: var(--muted-foreground);
 }
 
-.conv-thought__body {
-  margin: 4px 0 6px 18px;
-  padding-left: 8px;
-  border-left: 1px solid var(--border-subtle);
-  font-size: var(--fs-aux);
-  line-height: 18px;
-  white-space: pre-wrap;
+/* 命令与文件路径是"标识符"，保留等宽以便逐个字符辨认 */
+.tool-row__target {
+  font-family: var(--conv-font-mono);
+  font-size: var(--conv-meta-size);
 }
 
-/* 状态块：连接中 / 未连接 / 空会话共用 */
-.conv-state {
+/* 行尾耗时与元数据 */
+.conv-row__meta,
+.thinking-row__duration,
+.tool-row__duration {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding-left: 8px;
+  font-family: var(--conv-font-mono);
+  font-size: var(--conv-meta-size);
+  color: var(--muted-foreground);
+}
+
+/* 思考行展开主体 */
+.conv-row__thought,
+.thinking-row__body {
+  margin: 4px 0 6px 20px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border-subtle);
+  font-family: var(--conv-font-sans);
+  font-size: var(--conv-code-size);
+  line-height: 20px;
+  color: var(--muted-foreground);
+  white-space: pre-wrap;
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+/* 工具行展开输出体 */
+.tool-row__body {
+  margin: 4px 0 6px 20px;
+  padding: 8px 12px;
+  background: var(--conv-code-block-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-inner);
+  font-family: var(--conv-font-mono);
+  font-size: var(--conv-meta-size);
+  line-height: 18px;
+  color: var(--foreground);
+  overflow-x: auto;
+  max-height: 280px;
+}
+
+/* 多工具聚合执行清单卡片 */
+.conv-package,
+.tool-execution-package-card {
+  border: none;
+  background: transparent;
+  margin: 0;
+}
+
+/* 工具清单摘要：与执行行完全同一套尺寸与节奏（32px 盒、6px gap、4/8 padding）。
+   【约束与规则 (Rules)】gap 必须与 .conv-row__summary 一致，否则"思考"和"工具执行"
+     的图标到文字间距会差 2px，肉眼能看出不齐。 */
+.conv-package__summary,
+.tool-package__summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 8px;
+  margin: 0 -8px;
+  border-radius: var(--radius-inner);
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  font-family: var(--conv-font-sans);
+  font-size: var(--conv-label-size);
+  line-height: 20px;
+  color: var(--secondary-foreground);
+}
+
+.conv-package__summary:hover,
+.tool-package__summary:hover {
+  background: var(--conv-hover-bg);
+}
+
+.conv-package__summary::-webkit-details-marker,
+.tool-package__summary::-webkit-details-marker {
+  display: none;
+}
+
+/* 标题行高必须与执行行的 label 对齐（同为 20px）。
+   设计意图(Why)：summary 都是 32px 盒，但 label 用 20px 行高、title 若用 normal（约 17px），
+     文字在盒内的上下余量就不一致，肉眼看到的"思考→工具"间距会比"工具→正文"多出几个像素。
+   约束与规则(Rules)：所有 summary 内的一级文字统一 line-height: 20px。 */
+.conv-package__title,
+.tool-package__title {
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--secondary-foreground);
+}
+
+.conv-package__status,
+.tool-package__status {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--conv-font-sans);
+  font-size: var(--conv-label-size);
+  line-height: 20px;
+  color: var(--muted-foreground);
+}
+
+.conv-package__body,
+.tool-package__body {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 48px 0;
-  text-align: center;
+  gap: 2px;
+  margin-top: 4px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border-subtle);
+}
+
+/* 工具区容器：保持 #msg-tools-<id> 锚点，行与行之间 2px 形成紧凑清单。
+   设计意图(Why)：思考行与工具清单必须共用同一套竖向节奏，否则两者之间的
+     空白会比相邻行多出一截，看起来"松"。
+   约束与规则(Rules)：本体必须显式声明 flex + gap，缺了它 div 退化为 block，
+     gap 不生效，间距只能靠子元素自身边距兜底，节奏就会不一致。 */
+.conv-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+}
+
+/* 空锚点归零：流式直写前不撑起额外间隙 */
+.assistant-content:empty,
+.conv-tools:empty {
+  display: none !important;
+}
+
+/* ==========================================================================
+   6. Markdown 正文排版引擎（对标 OpenChamber markdownCore.ts & typography.css）
+   ========================================================================== */
+
+.conv-markdown,
+.assistant-content.prose-block,
+.conv-message__body {
+  font-family: var(--conv-font-sans);
+  font-size: var(--conv-text-size);
+  line-height: var(--conv-text-lh);
+  color: var(--foreground);
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+/* 段落间距：舒适的 14px */
+.conv-markdown p,
+.assistant-content.prose-block p {
+  margin: 0 0 var(--conv-para-margin);
+}
+
+.conv-markdown > :last-child,
+.assistant-content.prose-block > :last-child {
+  margin-bottom: 0 !important;
+}
+
+/* 标题：OpenChamber 式的轻微阶梯比例，600 字重，拒绝粗暴的伪粗体 */
+.conv-markdown h1,
+.conv-markdown h2,
+.conv-markdown h3,
+.conv-markdown h4,
+.assistant-content.prose-block h1,
+.assistant-content.prose-block h2,
+.assistant-content.prose-block h3,
+.assistant-content.prose-block h4 {
+  color: var(--foreground);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.conv-markdown h1,
+.assistant-content.prose-block h1 {
+  font-size: 1.2em;
+  letter-spacing: -0.02em;
+  margin: 20px 0 8px;
+}
+
+.conv-markdown h2,
+.assistant-content.prose-block h2 {
+  font-size: 1.1em;
+  letter-spacing: -0.015em;
+  margin: 16px 0 6px;
+}
+
+.conv-markdown h3,
+.assistant-content.prose-block h3 {
+  font-size: 1.02em;
+  letter-spacing: -0.01em;
+  margin: 12px 0 4px;
+}
+
+.conv-markdown h4,
+.assistant-content.prose-block h4 {
+  font-size: 1em;
+  margin: 10px 0 4px;
+}
+
+/* 列表排版：OpenChamber 极简短横列表 */
+.conv-markdown ul,
+.conv-markdown ol,
+.assistant-content.prose-block ul,
+.assistant-content.prose-block ol {
+  margin: 0 0 var(--conv-para-margin);
+  padding-left: 1.8em;
+}
+
+.conv-markdown ul,
+.assistant-content.prose-block ul {
+  list-style: none;
+}
+
+.conv-markdown ul > li,
+.assistant-content.prose-block ul > li {
+  position: relative;
+}
+
+.conv-markdown ul > li::before,
+.assistant-content.prose-block ul > li::before {
+  content: "–";
+  position: absolute;
+  left: -1.25em;
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+
+.conv-markdown ol,
+.assistant-content.prose-block ol {
+  list-style: decimal;
+}
+
+.conv-markdown li,
+.assistant-content.prose-block li {
+  margin: 0 0 4px;
+  line-height: 24px;
+}
+
+.conv-markdown li > p,
+.assistant-content.prose-block li > p {
+  margin: 0;
+}
+
+.conv-markdown li::marker,
+.assistant-content.prose-block li::marker {
   color: var(--muted-foreground);
 }
 
-.conv-state__title {
-  font-size: var(--fs-body);
+/* GFM 任务清单复选框 */
+.conv-markdown li:has(> input[type="checkbox"]),
+.assistant-content.prose-block li:has(> input[type="checkbox"]) {
+  list-style: none;
+  padding-left: 1.5em;
+}
+
+.conv-markdown li:has(> input[type="checkbox"])::before,
+.assistant-content.prose-block li:has(> input[type="checkbox"])::before {
+  content: none;
+}
+
+.conv-markdown li > input[type="checkbox"],
+.assistant-content.prose-block li > input[type="checkbox"] {
+  position: absolute;
+  left: 0;
+  top: 0.35em;
+  width: 0.85em;
+  height: 0.85em;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: transparent;
+  cursor: default;
+}
+
+.conv-markdown li > input[type="checkbox"]:checked,
+.assistant-content.prose-block li > input[type="checkbox"]:checked {
+  border-color: var(--primary);
+  background: var(--primary);
+}
+
+.conv-markdown li > input[type="checkbox"]:checked::after,
+.assistant-content.prose-block li > input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 0.22em;
+  top: 0.05em;
+  width: 0.22em;
+  height: 0.42em;
+  border: solid var(--primary-foreground);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+
+/* 强调文字与粗体 */
+.conv-markdown strong,
+.assistant-content.prose-block strong {
+  font-weight: 600;
   color: var(--foreground);
 }
 
-.conv-state__hint {
-  font-size: var(--fs-aux);
+.conv-markdown em,
+.assistant-content.prose-block em {
+  font-style: italic;
+  color: var(--secondary-foreground);
 }
 
-/* 历史分页提示 */
-.conv-history-indicator {
-  padding: 4px 0;
-  text-align: center;
-  font-family: var(--font-mono);
-  font-size: var(--fs-caption);
+/* 引用块（Blockquote）：极简左单竖线 */
+.conv-markdown blockquote,
+.assistant-content.prose-block blockquote {
+  margin: 0 0 var(--conv-para-margin);
+  padding-left: 12px;
+  border-left: 2px solid var(--border-strong) !important;
+  background: transparent !important;
+  color: var(--secondary-foreground) !important;
+}
+
+.conv-markdown blockquote > p,
+.assistant-content.prose-block blockquote > p {
+  margin: 0;
+}
+
+/* 分割线 */
+.conv-markdown hr,
+.assistant-content.prose-block hr {
+  height: 0;
+  margin: 16px 0;
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* ==========================================================================
+   7. 行内代码小药丸与代码块（对标 OpenChamber decorate.ts）
+   ========================================================================== */
+
+/* 行内代码小药丸（Code Pill）：4px 微圆角、微透衬底、等宽字形、无生硬黑线 */
+.conv-markdown code:not(pre code),
+.assistant-content.prose-block code:not(pre code),
+.user-bubble code:not(pre code),
+[data-markdown="inline-code"] {
+  font-family: var(--conv-font-mono);
+  font-size: var(--conv-code-size);
+  line-height: inherit;
+  padding: 0.15em 0.35em;
+  border-radius: 4px;
+  background: var(--conv-code-pill-bg);
+  color: var(--foreground);
+  border: none;
+  word-break: break-word;
+}
+
+/* 代码块容器（对标 OpenChamber data-component="markdown-code"） */
+.md-codeblock,
+[data-component="markdown-code"] {
+  margin: 0 0 var(--conv-para-margin);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-inner);
+  overflow: hidden;
+  background: var(--conv-code-block-bg);
+}
+
+/* 代码块顶栏（语言标签 + 纯图标复制按钮） */
+.md-codeblock__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-family: var(--conv-font-mono);
+  font-size: var(--conv-micro-size);
+  line-height: 16px;
+  color: var(--muted-foreground);
+  user-select: none;
+}
+
+.md-codeblock__lang {
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+
+.md-codeblock__copy {
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-family: var(--conv-font-sans);
+  font-size: var(--conv-micro-size);
+  cursor: pointer;
+  transition: color 0.12s ease;
+}
+
+.md-codeblock__copy:hover {
+  color: var(--foreground);
+}
+
+/* 代码块主体 */
+.md-pre {
+  margin: 0;
+  padding: 12px;
+  overflow-x: auto;
+}
+
+.md-pre code {
+  font-family: var(--conv-font-mono);
+  font-size: var(--conv-code-size);
+  line-height: var(--conv-code-lh);
+  color: var(--foreground);
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+}
+
+/* ==========================================================================
+   8. 文件链接与普通链接（对标 OpenChamber inlineMessageLinks）
+   ========================================================================== */
+
+.md-link {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.md-link__label {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-decoration-color: var(--border-subtle);
+  text-underline-offset: 3px;
+  transition: text-decoration-color 0.12s ease;
+}
+
+.md-link:hover .md-link__label {
+  text-decoration-color: var(--primary);
+}
+
+.md-file__icon,
+.md-link__icon {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  flex-shrink: 0;
   color: var(--muted-foreground);
 }
 
-/* L3 页脚：操作栏与元数据 */
-.conv-message__footer {
+.md-file__icon svg {
+  width: 1.1em;
+  height: 1.1em;
+  display: block;
+}
+
+.md-link__icon svg {
+  width: 1em;
+  height: 1em;
+  display: block;
+}
+
+/* ==========================================================================
+   9. Markdown GFM 表格排版（极简下划线无卡片框）
+   ========================================================================== */
+
+.md-table {
+  width: 100%;
+  margin: 0 0 var(--conv-para-margin);
+  border-collapse: collapse;
+  text-align: left;
+  font-size: inherit;
+  line-height: var(--conv-text-lh);
+}
+
+.md-table th {
+  padding: 6px 14px 6px 0;
+  border-bottom: 1px solid var(--border-strong);
+  font-weight: 600;
+  color: var(--foreground);
+  text-align: left;
+}
+
+.md-table td {
+  padding: 6px 14px 6px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--foreground);
+  vertical-align: top;
+}
+
+.md-table tr:last-child td {
+  border-bottom: none;
+}
+
+/* ==========================================================================
+   10. 页脚操作栏（悬停浮现）
+   ========================================================================== */
+
+.conv-message__footer,
+.assistant-footer-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-top: 4px;
-  font-size: var(--fs-micro);
+  margin-top: 2px;
+  font-size: var(--conv-micro-size);
   color: var(--muted-foreground);
+  font-family: var(--conv-font-mono);
 }
 
 .conv-message__actions {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
 }
 
-.conv-message__actions .msg-action-btn {
+.conv-message:hover .conv-message__actions,
+.message-row:hover .conv-message__actions,
+.assistant-row:hover .conv-message__actions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .conv-message__actions {
+    opacity: 1;
+  }
+}
+
+.msg-action-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   background: transparent;
   border: none;
   border-radius: var(--radius-inner);
   color: var(--muted-foreground);
   cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease;
+  transition: color 0.12s ease;
 }
 
-.conv-message__actions .msg-action-btn:hover {
-  color: var(--foreground);
-  background: var(--card-hover);
-}
-
-.conv-message--user .conv-message__footer,
-.conv-message__footer--end {
-  justify-content: flex-end;
-}
-
-.conv-message__sender {
-  font-weight: 500;
+.msg-action-btn:hover {
   color: var(--foreground);
 }
 
-.conv-message__model {
-  padding: 1px 6px;
-  background: var(--panel);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-pill);
-}
-
-/* Markdown 正文容器：段落纵向排列 */
-.conv-markdown {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-/* L4 工具胶囊：无外框行式布局，图标列与思考行对齐 */
-.conv-tools {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  margin: 2px 0;
-}
-
-.conv-tool {
-  border: none;
-  border-radius: var(--radius-inner);
-  background: transparent;
-}
-
-.conv-tool:hover {
-  background: var(--card-hover);
-}
-
-.conv-tool[data-tool-status='failed'] .conv-tool__name {
-  color: var(--destructive);
-}
-
-.conv-tool__summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 26px;
-  padding: 0 4px;
-  margin: 0 -4px;
-  border-radius: var(--radius-inner);
-  list-style: none;
-  cursor: pointer;
-  font-size: var(--fs-body);
-  line-height: 26px;
-  color: var(--secondary-foreground);
-}
-
-.conv-tool__summary:hover {
-  background: var(--card-hover);
-}
-
-.conv-tool__summary::-webkit-details-marker {
-  display: none;
-}
-
-.conv-tool__icon {
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
+.meta-tag,
+.time-tag,
+.model-tag,
+.duration-tag {
   color: var(--muted-foreground);
-}
-
-.conv-tool__name {
-  flex-shrink: 0;
-  font-size: var(--fs-body);
-  font-weight: 400;
-  color: var(--foreground);
-}
-
-.conv-tool__target {
-  flex: 0 1 auto;
-  max-width: 60%;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-  font-size: var(--fs-aux);
-  color: var(--muted-foreground);
-}
-
-.conv-tool__file {
-  flex: 0 1 auto;
-  max-width: 60%;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.conv-tool__file-name {
-  font-family: var(--font-mono);
-  font-size: var(--fs-micro);
-  color: var(--secondary-foreground);
-}
-
-.conv-tool__time {
-  flex-shrink: 0;
-  font-family: var(--font-mono);
-  font-size: var(--fs-micro);
-  color: var(--muted-foreground);
-}
-
-.conv-tool__chips {
-  display: flex;
-  gap: 4px;
-  min-width: 0;
-  overflow: hidden;
-  flex: 1;
-}
-
-.conv-tool__chip {
-  padding: 1px 6px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-inner);
-  background: var(--panel);
-  font-family: var(--font-mono);
-  font-size: var(--fs-micro);
-  color: var(--secondary-foreground);
-  white-space: nowrap;
-}
-
-.conv-tool__group-body {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  margin: 2px 0 4px 21px;
-  padding: 2px 0 2px 8px;
-  border-left: 2px solid var(--border-subtle);
-}
-
-.conv-tool__output {
-  margin: 2px 0 4px 21px;
-  padding: 8px 10px;
-  border: none;
-  border-left: 2px solid var(--border-subtle);
-  border-radius: 0;
-  background: var(--code);
-  font-family: var(--font-mono);
-  font-size: var(--fs-micro);
-  line-height: 16px;
-  white-space: pre-wrap;
-  overflow-x: auto;
-  color: var(--secondary-foreground);
-}
-
-/* 失败不静默：错误与中断在发丝线上直接换色，不重复声明几何 */
-
-/* 移动端操作热区兜底到 48px，桌面保持 22px 视觉 */
-@media (max-width: 768px) {
-  .conv-message__actions .msg-action-btn {
-    width: 48px;
-    height: 48px;
-  }
 }

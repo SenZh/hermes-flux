@@ -16,7 +16,26 @@
     "package:mac": "node scripts/build.mjs && electron-builder --mac",
     "package:linux": "node scripts/build.mjs && electron-builder --linux"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@fontsource/atkinson-hyperlegible": "^5.3.0",
+    "@fontsource/cascadia-code": "^5.3.0",
+    "@fontsource/commit-mono": "^5.3.0",
+    "@fontsource/dm-sans": "^5.3.0",
+    "@fontsource/fira-code": "^5.3.0",
+    "@fontsource/geist-mono": "^5.3.0",
+    "@fontsource/geist-sans": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.2.7",
+    "@fontsource/ibm-plex-sans": "^5.2.7",
+    "@fontsource/inter": "^5.3.0",
+    "@fontsource/iosevka": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@fontsource/manrope": "^5.3.0",
+    "@fontsource/noto-sans": "^5.3.0",
+    "@fontsource/roboto": "^5.3.0",
+    "@fontsource/roboto-mono": "^5.3.0",
+    "@fontsource/source-code-pro": "^5.3.1",
+    "@fontsource/source-sans-3": "^5.3.1"
+  },
   "devDependencies": {
     "@hermes-flux/core": "workspace:*",
     "@hermes-flux/ui": "workspace:*",

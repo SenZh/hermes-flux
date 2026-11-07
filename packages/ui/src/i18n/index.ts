@@ -182,21 +182,22 @@ export const zhDict = {
   'rail.resizeHandleTitle': '拖拽调整左侧栏宽度',
 
   // Tool Packages
-  'tool.executingSummary': '正在执行 ({running}/{total}) · 已完成 {completed}',
-  'tool.completedWithFailed': '已执行 {completed} 项 · 失败 {failed} 项',
-  'tool.completedAll': '已执行 {completed} 项命令与操作',
-  'tool.packageTitle': '工具执行清单 ({count})',
+  'tool.executingSummary': 'Running ({running}/{total}) · {completed} completed',
+  'tool.completedWithFailed': '{completed} executed · {failed} failed',
+  'tool.completedAll': '{completed} executed',
+  'tool.packageTitle': 'Tool Executions ({count})',
   'tool.collapse': '收起 ▴',
   'tool.expand': '展开 ▾',
-  'tool.shell': '命令执行',
-  'tool.write': '写入文件',
-  'tool.edit': '编辑文件',
-  'tool.read': '读取文件',
-  'tool.search': '检索内容',
-  'tool.find': '查找文件',
-  'tool.agent': '子代理任务',
-  'tool.generic': '工具调用',
-  'tool.readGroup': '读取了 {count} 个文件',
+  // 工具名保持英文技术术语：它们是命令标识而不是自然语言，翻译后反而丢失可检索性
+  'tool.shell': 'Shell Command',
+  'tool.write': 'Write File',
+  'tool.edit': 'Edit File',
+  'tool.read': 'Read File',
+  'tool.search': 'Search Files',
+  'tool.find': 'Find Files',
+  'tool.agent': 'Agent Task',
+  'tool.generic': 'Tool Call',
+  'tool.readGroup': 'Read {count} files',
 
   // Task Modal Workspace & Naming
   'modal.workspaceLabel': '工作区 / 归属项目 (Workspace)',
@@ -381,6 +382,13 @@ export const zhDict = {
   'settings.themeLightSub': 'Clean Slate · 现代微冷灰度',
   'settings.themeCyberTitle': '☾ 赛博冷翠 (深色)',
   'settings.themeCyberSub': 'Cyber Matrix · 极客冷翠荧光',
+  'settings.fontSection': '字体与字号',
+  'settings.uiFont': '界面字体',
+  'settings.codeFont': '代码字体',
+  'settings.textSize': '字号',
+  'settings.sizeSmall': '小',
+  'settings.sizeMedium': '标准',
+  'settings.sizeLarge': '大',
 } as const;
 
 export type I18nKey = keyof typeof zhDict;
@@ -756,6 +764,13 @@ export const enDict: Record<I18nKey, string> = {
   'settings.themeLightSub': 'Clean Slate · Minimalist Cool Slate',
   'settings.themeCyberTitle': '☾ Cyber Matrix (Dark)',
   'settings.themeCyberSub': 'Cyber Matrix · Neon Matrix Green',
+  'settings.fontSection': 'Typography',
+  'settings.uiFont': 'UI font',
+  'settings.codeFont': 'Code font',
+  'settings.textSize': 'Text size',
+  'settings.sizeSmall': 'Small',
+  'settings.sizeMedium': 'Default',
+  'settings.sizeLarge': 'Large',
 };
 
 export type Locale = 'zh-CN' | 'en-US';

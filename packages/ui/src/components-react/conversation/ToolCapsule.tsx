@@ -1,95 +1,34 @@
 /**
- * 工具胶囊与工具区
+ * 工具行与工具区
  *
  * 设计意图(Why)：
- *   工具是执行轨迹的主体。分类、目标、状态、耗时、diff 统计与输出必须同屏可读，
- *   而不是全部折叠成一行名字。只读工具聚合为一行 chips，写操作逐条可见。
+ *   工具是执行轨迹的主体。分类、目标、状态、耗时、输出必须同屏可读，
+ *   只读工具聚合为一行 chips，写操作逐条可见。所有行统一由 StreamRow 渲染。
+ *
+ * 防范的历史坑(Pitfall)：
+ *   旧模板用 tool-duration-badge 在 running 时按 data-start-time 本地累加；
+ *   React 化后若只读 durationMs，运行中的命令会一直不显示时间，用户无法判断是否卡死。
  *
  * 约束与规则(Rules)：
  *   1. 分类只做展示映射，分类结果由宿主给出的 name 决定，不在组件内解析正文；
  *   2. 状态色只用语义变量（--success / --destructive / --primary）；
- *   3. 保留 #msg-tools-<id> 锚点，工具补丁通道仍然有效。
+ *   3. 保留 #msg-tools-<id> 锚点，工具补丁通道仍然有效；
+ *   4. 运行中计时由共享秒脉冲驱动，complete 后以 durationMs 冻结。
  */
 
 import * as React from 'react';
 import { t } from '../../i18n/index.js';
+import { extractToolTarget } from '../../lib/text.js';
 import type { ConversationToolVM } from './types.js';
-
-type ToolKind = 'shell' | 'write' | 'edit' | 'read' | 'search' | 'glob' | 'agent' | 'other';
+import { StreamRow, type StreamRowKind } from './StreamRow.js';
+import { FileTypeIcon } from './FileTypeIcon.js';
+import { useNow } from './useNow.js';
 
 interface ToolPresentation {
-  kind: ToolKind;
+  kind: StreamRowKind;
   label: string;
-  icon: React.ReactElement;
   readOnly: boolean;
 }
-
-function icon(path: React.ReactNode): React.ReactElement {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      {path}
-    </svg>
-  );
-}
-
-const ICONS: Record<ToolKind, React.ReactElement> = {
-  shell: icon(
-    <>
-      <polyline points="4 17 10 11 4 5" />
-      <line x1="12" y1="19" x2="20" y2="19" />
-    </>
-  ),
-  write: icon(
-    <>
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
-      <line x1="12" y1="18" x2="16" y2="18" />
-    </>
-  ),
-  edit: icon(
-    <>
-      <path d="M12 20h9" />
-      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-    </>
-  ),
-  read: icon(
-    <>
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
-      <line x1="16" y1="13" x2="8" y2="13" />
-    </>
-  ),
-  search: icon(
-    <>
-      <circle cx="11" cy="11" r="8" />
-      <line x1="21" y1="21" x2="16.65" y2="16.65" />
-    </>
-  ),
-  glob: icon(
-    <>
-      <circle cx="11" cy="11" r="8" />
-      <line x1="21" y1="21" x2="16.65" y2="16.65" />
-    </>
-  ),
-  agent: icon(
-    <>
-      <rect width="18" height="18" x="3" y="3" rx="2" />
-      <circle cx="9" cy="9" r="1.5" />
-      <circle cx="15" cy="9" r="1.5" />
-      <path d="M8 15h8" />
-    </>
-  ),
-  other: icon(<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />),
-};
 
 /**
  * 工具名 → 展示分类。
@@ -98,30 +37,41 @@ const ICONS: Record<ToolKind, React.ReactElement> = {
 export function classifyTool(name: string): ToolPresentation {
   const raw = (name || '').toLowerCase();
   if (raw.includes('shell') || raw.includes('bash') || raw.includes('cmd') || raw.includes('terminal')) {
-    return { kind: 'shell', label: t('tool.shell'), icon: ICONS.shell, readOnly: false };
+    return { kind: 'command', label: t('tool.shell'), readOnly: false };
   }
-  if (raw.includes('write')) return { kind: 'write', label: t('tool.write'), icon: ICONS.write, readOnly: false };
+  if (raw.includes('skill')) {
+    return { kind: 'skill', label: t('tool.generic'), readOnly: false };
+  }
+  if (raw.includes('write')) return { kind: 'write', label: t('tool.write'), readOnly: false };
   if (raw.includes('edit') || raw.includes('patch')) {
-    return { kind: 'edit', label: t('tool.edit'), icon: ICONS.edit, readOnly: false };
+    return { kind: 'edit', label: t('tool.edit'), readOnly: false };
   }
   if (raw.includes('read') || raw.includes('cat')) {
-    return { kind: 'read', label: t('tool.read'), icon: ICONS.read, readOnly: true };
+    return { kind: 'read', label: t('tool.read'), readOnly: true };
   }
   if (raw.includes('grep') || raw.includes('search')) {
-    return { kind: 'search', label: t('tool.search'), icon: ICONS.search, readOnly: false };
+    return { kind: 'search', label: t('tool.search'), readOnly: false };
   }
   if (raw.includes('glob') || raw.includes('find')) {
-    return { kind: 'glob', label: t('tool.find'), icon: ICONS.glob, readOnly: false };
+    return { kind: 'search', label: t('tool.find'), readOnly: false };
   }
   if (raw.includes('subagent') || raw.includes('agent')) {
-    return { kind: 'agent', label: t('tool.agent'), icon: ICONS.agent, readOnly: false };
+    return { kind: 'agent', label: t('tool.agent'), readOnly: false };
   }
-  return { kind: 'other', label: name || t('tool.generic'), icon: ICONS.other, readOnly: false };
+  if (raw.includes('browser') || raw.includes('playwright') || raw.includes('navigate')) {
+    return { kind: 'browser', label: 'Browser', readOnly: false };
+  }
+  return { kind: 'other', label: name || t('tool.generic'), readOnly: false };
 }
 
+/**
+ * 工具目标：统一走深度提取，兼容信封 args / JSON 字符串 / 纯文本。
+ * 【防范的历史坑 (Pitfall)】直接取 args 第一行会把 `{"command":"..."}` 整段 JSON 显示出来。
+ */
 function shortTarget(args: string): string {
-  if (!args) return '';
-  const firstLine = args.split('\n')[0].trim();
+  const target = extractToolTarget(args);
+  if (!target) return '';
+  const firstLine = target.split('\n')[0].trim();
   return firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine;
 }
 
@@ -133,44 +83,35 @@ function fileName(path: string): string {
 
 export interface ToolCapsuleProps {
   tool: ConversationToolVM;
+  /** 共享秒脉冲；running 时用于实时累加耗时 */
+  now?: number;
 }
 
-export function ToolCapsule({ tool }: ToolCapsuleProps): React.ReactElement {
+export function ToolCapsule({ tool, now }: ToolCapsuleProps): React.ReactElement {
   const presentation = classifyTool(tool.name);
   const target = shortTarget(tool.args);
-  const duration = tool.durationMs ? `${(tool.durationMs / 1000).toFixed(1)}s` : '';
-  const state = tool.status;
+  const liveMs =
+    tool.durationMs ??
+    (tool.status === 'running' && tool.startedAt ? Math.max(0, (now ?? Date.now()) - tool.startedAt) : undefined);
+  const duration = liveMs !== undefined ? `${(liveMs / 1000).toFixed(1)}s` : '';
+  const display = presentation.readOnly && target ? fileName(target) : target;
 
-  const summary = (
-    <summary className="conv-tool__summary">
-      <span className="conv-tool__icon">{presentation.icon}</span>
-      <span className="conv-tool__name">{presentation.label}</span>
-      {presentation.readOnly && target ? (
-        <span className="conv-tool__file">
-          <span className="conv-tool__file-name">{fileName(target)}</span>
-        </span>
-      ) : target ? (
-        <span className="conv-tool__target" title={target}>
-          {target}
-        </span>
-      ) : null}
-      {duration ? <span className="conv-tool__time">{duration}</span> : null}
-    </summary>
-  );
-
-  if (!tool.output) {
-    return (
-      <div className="conv-tool" data-tool-status={state} data-tool-id={tool.id}>
-        {summary}
-      </div>
-    );
-  }
+  // 文件类工具：左侧直接显示文件类型图标，替代通用的工具形状图标
+  const showsFileIcon = Boolean(target) && ['read', 'write', 'edit'].includes(presentation.kind);
 
   return (
-    <details className="conv-tool" data-tool-status={state} data-tool-id={tool.id}>
-      {summary}
-      <pre className="conv-tool__output">{tool.output}</pre>
-    </details>
+    <StreamRow
+      kind={presentation.kind}
+      label={presentation.label}
+      target={display || undefined}
+      meta={duration || undefined}
+      status={tool.status}
+      expandable={Boolean(tool.output)}
+      title={target}
+      iconOverride={showsFileIcon ? <FileTypeIcon filePath={target} /> : undefined}
+    >
+      {tool.output ? <pre className="conv-row__output">{tool.output}</pre> : null}
+    </StreamRow>
   );
 }
 
@@ -179,30 +120,36 @@ export interface ToolSectionProps {
   tools: ConversationToolVM[];
 }
 
-function ReadGroup({ tools }: { tools: ConversationToolVM[] }): React.ReactElement {
+function ReadGroup({ tools, now }: { tools: ConversationToolVM[]; now?: number }): React.ReactElement {
   return (
-    <details className="conv-tool conv-tool--group" data-tool-group="read">
-      <summary className="conv-tool__summary">
-        <span className="conv-tool__icon">{ICONS.read}</span>
-        <span className="conv-tool__name">{t('tool.readGroup', { count: String(tools.length) })}</span>
-        <span className="conv-tool__chips">
+    <StreamRow
+      kind="read"
+      label={t('tool.readGroup', { count: String(tools.length) })}
+      target={
+        <span className="conv-row__chips">
           {tools.map((tool) => (
-            <span key={tool.id} className="conv-tool__chip">
+            <span key={tool.id} className="conv-row__chip">
               {fileName(shortTarget(tool.args))}
             </span>
           ))}
         </span>
-      </summary>
-      <div className="conv-tool__group-body">
+      }
+      expandable
+    >
+      <div className="conv-row__group">
         {tools.map((tool) => (
-          <ToolCapsule key={tool.id} tool={tool} />
+          <ToolCapsule key={tool.id} tool={tool} now={now} />
         ))}
       </div>
-    </details>
+    </StreamRow>
   );
 }
 
 export function ToolSection({ messageId, tools }: ToolSectionProps): React.ReactElement {
+  // 只有存在未完成的运行项时才启用秒脉冲，完成态不空转定时器
+  const hasRunning = tools.some((tool) => tool.status === 'running' && tool.durationMs === undefined);
+  const now = useNow(hasRunning);
+
   const blocks: React.ReactNode[] = [];
   let index = 0;
   while (index < tools.length) {
@@ -213,21 +160,98 @@ export function ToolSection({ messageId, tools }: ToolSectionProps): React.React
       const group = tools.slice(index, end);
       blocks.push(
         group.length === 1 ? (
-          <ToolCapsule key={group[0].id} tool={group[0]} />
+          <ToolCapsule key={group[0].id} tool={group[0]} now={now} />
         ) : (
-          <ReadGroup key={`read-${group[0].id}`} tools={group} />
+          <ReadGroup key={`read-${group[0].id}`} tools={group} now={now} />
         )
       );
       index = end;
     } else {
-      blocks.push(<ToolCapsule key={tool.id} tool={tool} />);
+      blocks.push(<ToolCapsule key={tool.id} tool={tool} now={now} />);
       index++;
     }
   }
 
+  // 单工具直通：多包一层折叠会让「一个命令」变成两次点击
+  if (tools.length <= 1) {
+    return (
+      <div className="conv-tools" id={`msg-tools-${messageId}`}>
+        {blocks}
+      </div>
+    );
+  }
+
+  const runningCount = tools.filter((tool) => tool.status === 'running').length;
+  const completedCount = tools.filter((tool) => tool.status === 'completed').length;
+  const failedCount = tools.filter((tool) => tool.status === 'failed').length;
+  const statusSummary = hasRunning
+    ? t('tool.executingSummary', {
+        running: String(runningCount),
+        total: String(tools.length),
+        completed: String(completedCount),
+      })
+    : failedCount > 0
+    ? t('tool.completedWithFailed', { completed: String(completedCount), failed: String(failedCount) })
+    : t('tool.completedAll', { completed: String(completedCount) });
+
+  // 【防范的历史坑 (Pitfall)】#msg-tools-<id> 必须留在外层 div：
+  // 流式补丁通道会直写该容器的 innerHTML，锚点若是 details 会把 summary 一起冲掉。
   return (
     <div className="conv-tools" id={`msg-tools-${messageId}`}>
-      {blocks}
+      <details className="conv-package" open={hasRunning || undefined}>
+        <summary className="conv-package__summary">
+          <span className="conv-package__icon">
+            {hasRunning ? (
+              <svg
+                className="conv-package__spinner"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+              </svg>
+            ) : (
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <polyline points="9 11 12 14 22 4" />
+                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+              </svg>
+            )}
+          </span>
+          <svg
+            className="conv-package__expand"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+          <span className="conv-package__title">{t('tool.packageTitle', { count: String(tools.length) })}</span>
+          <span className="conv-package__status">{statusSummary}</span>
+        </summary>
+        <div className="conv-package__body">{blocks}</div>
+      </details>
     </div>
   );
 }
