@@ -151,10 +151,21 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
       isStreaming: false,
     });
 
-    assert.ok(html.includes('max-width: 740px'), 'InputDock must have max-width: 740px constraint');
+    // 740px 黄金限宽现在收敛在 conversation.css 的 .composer-dock 上（组件只输出语义类名）
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, join } = await import('node:path');
+    const testDir = dirname(fileURLToPath(import.meta.url));
+    const convCss = readFileSync(join(testDir, '../src/styles/conversation.css'), 'utf8');
+    const dockCssMatch = convCss.match(/\.input-card-box\.composer-dock\s*\{([\s\S]*?)\}/);
+    assert.ok(dockCssMatch, 'InputDock must define .composer-dock styles in conversation.css');
+    assert.ok(dockCssMatch[1].includes('max-width: 740px'), 'InputDock must have max-width: 740px constraint');
     assert.ok(html.includes('id="dock-prompt-input"'), 'InputDock must have prompt input textarea');
     assert.ok(html.includes('id="dock-model-selector-btn"'), 'InputDock must have model selector button');
     assert.ok(html.includes('id="dock-send-btn"'), 'InputDock must have send action button');
+    assert.ok(html.includes('composer-dock__footer'), 'InputDock must render OpenChamber-style footer row');
+    assert.ok(html.includes('composer-send'), 'Send action must use the borderless composer-send button');
+    assert.ok(!html.includes('micro-pill'), 'Model / reasoning controls must not fall back to pill chrome');
   });
 
   await t.test('Canvas must be full-bleed and messages must expose incremental DOM hooks', async () => {
@@ -529,20 +540,24 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
       'Must define ayu-left-rail selector'
     );
 
-    // 3. Invariant: Composer dock in ayu-light MUST NOT use accent border
+    // 3. Invariant: Composer dock 在任何皮肤下都只用中性前景色描边，禁止强调色
     const dockMatch = cssContent.match(/\[data-theme="ayu-light"\]\s+\.composer-dock\s*\{([\s\S]*?)\}/);
     assert.ok(dockMatch, 'Must define [data-theme="ayu-light"] .composer-dock');
     const dockBlock = dockMatch[1];
-    assert.ok(dockBlock.includes('var(--border-subtle)'), 'Composer dock must use var(--border-subtle)');
+    assert.ok(
+      dockBlock.includes('color-mix(in srgb, var(--foreground) 10%, transparent)'),
+      'Composer dock must draw its hairline from the neutral foreground token'
+    );
     assert.ok(!dockBlock.includes('var(--accent)'), 'Composer dock container must NOT use accent border');
 
-    // 4. Invariant: Composer dock focus-within in ayu-light MUST NOT use accent border
+    // 4. Invariant: 聚焦态同样只允许中性前景色，禁止 accent / primary
     const focusMatch = cssContent.match(/\[data-theme="ayu-light"\]\s+\.composer-dock:focus-within\s*\{([\s\S]*?)\}/);
     assert.ok(focusMatch, 'Must define [data-theme="ayu-light"] .composer-dock:focus-within');
     const focusBlock = focusMatch[1];
-    assert.ok(focusBlock.includes('border-color: var(--border-medium)'), 'Composer dock focus must use var(--border-medium)');
+    assert.ok(focusBlock.includes('var(--foreground) 22%'), 'Composer dock focus ring must stay neutral');
     assert.ok(!focusBlock.includes('var(--accent-border)'), 'Composer dock focus must NOT use accent-border');
     assert.ok(!focusBlock.includes('var(--accent)'), 'Composer dock focus must NOT use accent');
+    assert.ok(!focusBlock.includes('var(--primary)'), 'Composer dock focus must NOT use primary');
   });
 
   await t.test('User bubble must consume --chat-user-message-bg token', async () => {

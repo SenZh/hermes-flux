@@ -6200,7 +6200,7 @@ function bindEvents(): void {
   }
 
   // Send message & IME Composition defense
-  const sendBtn = document.getElementById('dock-send-btn');
+  const sendBtn = document.getElementById('dock-send-btn') as HTMLButtonElement | null;
   const inputEl = document.getElementById('dock-prompt-input') as HTMLTextAreaElement;
   let isComposing = false;
 
@@ -6224,9 +6224,20 @@ function bindEvents(): void {
     void routeSend(text);
   };
 
+  // 发送按钮可用性：与 OpenChamber 一致，空内容时降到 30% 不透明度且不可点。
+  // 【防范的历史坑 (Pitfall)】流式期间按钮切换成中断动作，必须保持可点击；
+  //   网关未连接时模板已写入 disabled + data-locked，这里不得擅自解锁。
+  const syncSendAvailability = () => {
+    if (!sendBtn || !inputEl || sendBtn.dataset.locked === 'true') return;
+    const hasAttachments = Boolean(document.querySelector('.composer-attachment-pill'));
+    sendBtn.disabled = !state.isStreaming && !inputEl.value.trim() && !hasAttachments;
+  };
+
   if (sendBtn) sendBtn.onclick = () => handleSend('button');
+  syncSendAvailability();
   if (inputEl) {
     if (inputEl.dataset.dockEventsBound !== 'true') {
+      inputEl.addEventListener('input', syncSendAvailability);
       inputEl.dataset.dockEventsBound = 'true';
       const collapseBtn = document.getElementById('dock-input-collapse-toggle') as HTMLButtonElement | null;
       let isManuallyCollapsed = false;
@@ -6235,7 +6246,7 @@ function bindEvents(): void {
         if (isManuallyCollapsed) return;
         inputEl.style.height = 'auto';
         const scrollHeight = inputEl.scrollHeight;
-        const targetHeight = Math.min(Math.max(scrollHeight, 48), 240);
+        const targetHeight = Math.min(Math.max(scrollHeight, 52), 240);
         inputEl.style.height = `${targetHeight}px`;
 
         if (collapseBtn) {

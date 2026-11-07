@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <title>Hermes Flux End-to-End CDP Acceptance Harness</title>
   <link rel="stylesheet" href="../../dist/renderer/styles.css">
+  <!-- 输入舱的排版（发丝边 / 圆角 / 触控高度 / 字号档位）统一由对话区样式表承担，
+       验收 harness 必须加载同一份样式，否则断言的是不存在的视觉 -->
+  <link rel="stylesheet" href="../../dist/renderer/conversation.css">
   <style>
     :root[data-theme="obsidian-gold"] {
       --bg-window: #090A0F;

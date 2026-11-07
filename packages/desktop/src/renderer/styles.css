@@ -887,15 +887,8 @@ button {
   opacity: 0.9;
 }
 
-.send-action-btn:hover {
-  filter: brightness(1.1);
-  box-shadow: 0 0 12px var(--accent-glow);
-}
-
-.composer-dock:focus-within {
-  border-color: var(--accent-border) !important;
-  box-shadow: none !important;
-}
+/* 输入舱聚焦态统一由 conversation.css 的 1px 主色环表达（对标 OpenChamber
+   focus-within:ring-1 ring-primary/50），这里不再覆盖边框色，避免两套聚焦语言打架 */
 
 .vertical-tab-item {
   transition: all 0.15s ease;
@@ -1017,7 +1010,9 @@ button {
   }
 
   /* 移动端交互控件最小触控热区保护 (>= 44x44px) */
-  .icon-btn {
+  .icon-btn,
+  .composer-icon-btn,
+  .composer-send {
     min-width: 44px !important;
     min-height: 44px !important;
   }
@@ -1112,20 +1107,14 @@ button {
   box-shadow: none !important;
 }
 
-/* Floating Input Dock Light Refinement */
-.composer-dock {
-  background: var(--bg-card) !important;
-  border: 1px solid var(--border-subtle) !important;
-  /* 输入舱与内容同层，靠边框定位即可，投影会让它浮出纸面 */
-  box-shadow: none !important;
-  border-radius: var(--radius-window) !important;
+/* Floating Input Dock：外壳视觉 100% 由 conversation.css 的 .composer-dock 维护，
+   此处不再重复声明背景 / 圆角 / 边框，避免 !important 反复覆盖导致聚焦态失效 */
+.composer-dock__textarea {
+  color: var(--foreground) !important;
 }
-.composer-textarea {
-  color: var(--text-main) !important;
-}
-.composer-textarea::placeholder {
-  color: var(--text-muted) !important;
-  opacity: 0.85;
+.composer-dock__textarea::placeholder {
+  color: var(--muted-foreground) !important;
+  opacity: 0.8;
 }
 
 /* Micro pill option buttons in Input Dock */
@@ -1274,16 +1263,16 @@ blockquote {
   border-color: var(--border-subtle) !important;
 }
 
-/* 核心约束：输入框边框杜绝使用天青强调色，无论普通态还是聚焦态均采用温暖石板中性边框 */
+/* 核心约束：输入框边框杜绝使用天青强调色，聚焦态沿用统一的主色 1px 环 */
 [data-theme="ayu-light"] .composer-dock {
   background: var(--bg-card) !important;
-  border: 1px solid var(--border-subtle) !important;
+  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent) !important;
   box-shadow: none !important;
 }
 
 [data-theme="ayu-light"] .composer-dock:focus-within {
-  border-color: var(--border-medium) !important;
-  box-shadow: none !important;
+  border-color: color-mix(in srgb, var(--foreground) 14%, transparent) !important;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 22%, transparent) !important;
 }
 
 /* THEME D 注释头已随皮肤块迁入生成区 */

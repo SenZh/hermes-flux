@@ -124,7 +124,8 @@ test('InputDock Enhanced - 队列托盘、附件托盘、手风琴模型器与Po
     });
 
     assert.ok(dockHtml.includes('composer-dock'), '必须渲染输入舱容器');
-    assert.ok(dockHtml.includes('max-width: 740px'), '输入舱必须具备 740px 黄金限宽');
+    // 740px 黄金限宽已收敛到 conversation.css 的 .composer-dock（组件只输出语义类名）
+    assert.ok(dockHtml.includes('input-card-box composer-dock'), '输入舱必须挂载统一外壳类，由样式表承担 740px 限宽');
     assert.ok(dockHtml.includes('pending-queue-tray'), '宿主必须自动挂载待发送队列抽屉');
     assert.ok(dockHtml.includes('composer-attachment-tray'), '宿主必须自动挂载附件暂存托盘');
     assert.ok(dockHtml.includes('dock-prompt-input'), '必须包含核心输入框');

@@ -270,103 +270,43 @@ export function renderInputDock(props: InputDockProps): string {
           : ''
       }
 
-      <div class="input-card-box composer-dock" style="
-        pointer-events: auto;
-        position: relative;
-        box-sizing: border-box;
-        width: 100%;
-        max-width: 740px; /* 黄金限宽 740px 约束 */
-        margin: 0 auto;
-        background: var(--bg-backdrop);
-        backdrop-filter: blur(28px);
-        -webkit-backdrop-filter: blur(28px);
-        border: 1px solid var(--border-subtle);
-        box-shadow: none;
-        border-radius: 14px;
-        padding: 12px 16px 10px;
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        transition: border-color 0.15s ease, box-shadow 0.15s ease;
-      ">
+      <div class="input-card-box composer-dock">
         <!-- Popper 固定挂载点：开合只替换本占位子树，绝不重建 textarea（键盘时序军规） -->
         <div id="composer-popper-mount">${renderSlashPopper(props.slashItems, props.slashPopperOpen)}${renderMentionPopper(props.mentionItems, props.mentionPopperOpen)}</div>
 
         <!-- Attachment Tray (if any attachments pending send) -->
         ${renderAttachmentTray(props.attachments)}
 
-        <!-- Textarea Container & Smart Collapse Button -->
-        <div style="position: relative; display: flex; flex-direction: column;">
-          <textarea id="dock-prompt-input" rows="2" placeholder="${props.disabled ? '请先连接网关...' : '给 Hermes 下达任务... (Enter 发送, Shift+Enter 换行, 支持 Ctrl+V 粘贴/拖入附件, / 命令, @ 引用)'}" ${props.disabled ? 'disabled' : ''} style="
-            width: 100%;
-            min-height: 48px;
-            max-height: 240px;
-            border: none;
-            background: transparent;
-            color: var(--text-main);
-            font-family: inherit;
-            font-size: 13.5px;
-            line-height: 1.5;
-            resize: none;
-            outline: none;
-            box-sizing: border-box;
-            overflow-y: auto;
-            transition: height 0.12s ease;
-          "></textarea>
+        <!-- 编辑器区：与 OpenChamber 一致，只承担输入与内边距 -->
+        <div class="composer-dock__editor">
+          <textarea id="dock-prompt-input" class="composer-dock__textarea" rows="1" placeholder="${props.disabled ? t('dock.placeholderDisabled') : t('dock.placeholder')}" ${props.disabled ? 'disabled' : ''}></textarea>
 
-          <button id="dock-input-collapse-toggle" type="button" style="
-            display: none;
-            align-self: flex-end;
-            margin-top: 4px;
-            background: var(--bg-panel);
-            border: 1px solid var(--border-subtle);
-            border-radius: 4px;
-            color: var(--text-secondary);
-            font-size: 11px;
-            padding: 2px 8px;
-            cursor: pointer;
-            transition: all 0.12s ease;
-          ">${t('dock.collapse')}</button>
+          <button id="dock-input-collapse-toggle" class="composer-dock__collapse" type="button" style="display: none;">${t('dock.collapse')}</button>
         </div>
 
-        <!-- Embedded Micro-Control Strip (Height: 28px) -->
-        <div class="input-control-strip" style="
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          height: 28px;
-          padding-top: 6px;
-          border-top: 1px solid var(--border-subtle);
-        ">
-          <!-- Left Control Pills -->
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <!-- 1. Model Selector Pill -->
-            <div class="pill-dropdown-wrapper" style="position: relative;">
-              <button id="dock-model-selector-btn" class="micro-pill" title="点击切换模型" style="
-                height: 24px;
-                padding: 0 9px;
-                border-radius: 6px;
-                background: var(--bg-card);
-                border: 1px solid var(--border-subtle);
-                color: var(--text-main);
-                font-size: 11px;
-                font-weight: 600;
-                display: flex;
-                align-items: center;
-                gap: 5px;
-                cursor: pointer;
-                transition: background 0.15s ease, border-color 0.15s ease;
-              ">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent); flex-shrink: 0;"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2"/></svg>
-                <span id="current-model-label">${escapeHtml(props.selectedModel || '选择模型')}</span>
-                <span style="font-size: 8px; color: var(--text-muted); margin-left: 1px;">▾</span>
+        <!-- Footer：左侧附件，右侧模型 / 思考 / 发送（对标 OpenChamber） -->
+        <div class="composer-dock__footer">
+          <div class="composer-dock__footer-group">
+            <!-- File Attach -->
+            <button id="dock-attach-file-btn" class="composer-icon-btn" title="${t('dock.attachTooltip')}">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+            </button>
+          </div>
+
+          <div class="composer-dock__footer-group composer-dock__footer-group--end">
+            <!-- 1. Model Selector -->
+            <div class="pill-dropdown-wrapper">
+              <button id="dock-model-selector-btn" class="composer-ctrl" title="${t('dock.selectModel')}">
+                <svg class="composer-ctrl__icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2"/></svg>
+                <span id="current-model-label" class="composer-ctrl__label">${escapeHtml(props.selectedModel || t('dock.selectModel'))}</span>
+                <span class="composer-ctrl__caret" style="font-size: 9px;">▾</span>
               </button>
 
               <div id="dock-model-dropdown" class="model-dropdown-menu" style="
                 display: ${modelMenuOpen ? 'block' : 'none'};
                 position: absolute;
-                bottom: 34px;
-                left: 0;
+                bottom: calc(100% + 8px);
+                right: 0;
                 width: 320px;
                 background: var(--bg-card);
                 border: 1px solid var(--border-strong);
@@ -423,33 +363,19 @@ export function renderInputDock(props: InputDockProps): string {
               </div>
             </div>
 
-            <!-- 2. Reasoning Dropdown Pill -->
-            <div class="pill-dropdown-wrapper" style="position: relative;">
-              <button id="dock-reasoning-toggle-btn" class="micro-pill" title="选择思考深度" style="
-                height: 24px;
-                padding: 0 8px;
-                border-radius: 6px;
-                background: var(--bg-card);
-                border: 1px solid var(--border-subtle);
-                color: var(--text-main);
-                font-size: 11px;
-                font-weight: 500;
-                display: flex;
-                align-items: center;
-                gap: 5px;
-                cursor: pointer;
-                transition: background 0.15s ease, border-color 0.15s ease;
-              ">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-secondary); flex-shrink: 0;"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                <span id="current-reasoning-label" style="color: var(--text-main); font-weight: 500;">${reasoningLabels[props.reasoningLevel] || '默认'}</span>
-                <span style="font-size: 8px; color: var(--text-muted);">▾</span>
+            <!-- 2. Reasoning Dropdown -->
+            <div class="pill-dropdown-wrapper">
+              <button id="dock-reasoning-toggle-btn" class="composer-ctrl" title="${t('dock.reasoning')}">
+                <svg class="composer-ctrl__icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                <span id="current-reasoning-label" class="composer-ctrl__label">${reasoningLabels[props.reasoningLevel] || t('dock.reasoningDefault')}</span>
+                <span class="composer-ctrl__caret" style="font-size: 9px;">▾</span>
               </button>
 
               <div id="dock-reasoning-dropdown" class="reasoning-dropdown-menu" style="
                 display: none;
                 position: absolute;
-                bottom: 32px;
-                left: 0;
+                bottom: calc(100% + 8px);
+                right: 0;
                 min-width: 140px;
                 background: var(--bg-card);
                 border: 1px solid var(--border-medium);
@@ -488,43 +414,12 @@ export function renderInputDock(props: InputDockProps): string {
             </div>
           </div>
 
-          <!-- Right Action Buttons -->
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <!-- File Attach -->
-            <button id="dock-attach-file-btn" class="icon-btn" title="${t('dock.attachTooltip')}" style="
-              background: transparent;
-              border: none;
-              color: var(--text-muted);
-              cursor: pointer;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              padding: 4px;
-              border-radius: 4px;
-              transition: color 0.15s ease;
-            ">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-            </button>
-
             <!-- Send Action Button -->
-            <button id="dock-send-btn" class="send-action-btn" title="${isStreaming ? '中断本轮生成' : '发送 (Enter)'}" ${props.disabled ? 'disabled' : ''} style="
-              height: 28px;
-              width: 28px;
-              border-radius: 7px;
-              background: ${isStreaming ? 'rgba(239, 68, 68, 0.14)' : 'rgba(56, 189, 248, 0.12)'};
-              border: 1px solid ${isStreaming ? '#EF4444' : 'rgba(56, 189, 248, 0.38)'};
-              color: ${isStreaming ? '#EF4444' : '#0284C7'};
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              cursor: ${props.disabled ? 'not-allowed' : 'pointer'};
-              box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-              transition: all 0.15s ease;
-            ">
+            <button id="dock-send-btn" class="composer-send${isStreaming ? ' composer-send--stop' : ''}" title="${isStreaming ? t('dock.stop') : t('dock.send')}" ${props.disabled ? 'disabled data-locked="true"' : ''}>
               ${
                 isStreaming
-                  ? `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>`
-                  : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>`
+                  ? `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>`
+                  : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>`
               }
             </button>
           </div>

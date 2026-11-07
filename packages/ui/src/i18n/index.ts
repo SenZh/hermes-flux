@@ -143,8 +143,8 @@ export const zhDict = {
   'chat.loadingOlder': '正在加载更早历史...',
 
   // Input Dock
-  'dock.placeholder': '给 Hermes 下达任务... (Enter 发送, Shift+Enter 换行)',
-  'dock.placeholderDisabled': '请先连接网关...',
+  'dock.placeholder': '给 Hermes 下达任务...',
+  'dock.placeholderDisabled': '正在连接网关...',
   'dock.enterBotChatFailed': '进入 Bot [{name}] 主工位失败: {error}',
   'dock.createGroupFailed': '创建群聊失败: {error}',
   'group.defaultRoomName': '多智能体研讨室',
@@ -164,6 +164,7 @@ export const zhDict = {
   'dock.favorites': '收藏',
   'dock.recents': '最近',
   'dock.reasoning': '思考',
+  'dock.reasoningDefault': '默认',
   'dock.approval': '权限审批',
   'dock.approvalAuto': '自动',
   'dock.approvalAsk': '询问',
@@ -531,8 +532,8 @@ export const enDict: Record<I18nKey, string> = {
   'chat.loadOlder': '↑ Scroll up to load earlier history',
   'chat.loadingOlder': 'Loading earlier history...',
 
-  'dock.placeholder': 'Dispatch tasks to Hermes... (Enter to send, Shift+Enter for new line)',
-  'dock.placeholderDisabled': 'Connect to gateway first...',
+  'dock.placeholder': 'Dispatch tasks to Hermes...',
+  'dock.placeholderDisabled': 'Connecting to gateway...',
   'dock.enterBotChatFailed': 'Failed to enter Bot [{name}] workspace: {error}',
   'dock.createGroupFailed': 'Failed to create group: {error}',
   'group.defaultRoomName': 'Multi-Agent Room',
@@ -552,6 +553,7 @@ export const enDict: Record<I18nKey, string> = {
   'dock.favorites': 'Favorites',
   'dock.recents': 'Recents',
   'dock.reasoning': 'Thinking',
+  'dock.reasoningDefault': 'Default',
   'dock.approval': 'Approval',
   'dock.approvalAuto': 'Auto',
   'dock.approvalAsk': 'Ask',

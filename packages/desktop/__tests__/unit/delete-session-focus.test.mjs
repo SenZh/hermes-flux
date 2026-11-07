@@ -70,9 +70,9 @@ test('Delete Session Focus & InputDock Snapshot Invariants', async (t) => {
     // 2. Act: 调用生产渲染函数
     const html = renderInputDock(props);
 
-    // 3. Assert: 必须包含关键的 dock-prompt-input 与 740px 限宽约束
+    // 3. Assert: 必须包含关键的 dock-prompt-input 与限宽外壳（740px 由 .composer-dock 样式承担）
     assert.ok(html.includes('id="dock-prompt-input"'), '必须包含核心 textarea 节点');
-    assert.ok(html.includes('max-width: 740px'), '输入舱必须遵守 740px 黄金限宽规范');
+    assert.ok(html.includes('input-card-box composer-dock'), '输入舱必须挂载统一外壳类');
     assert.ok(!html.includes('disabled'), '未禁用状态下禁止含有 disabled 属性');
   });
 

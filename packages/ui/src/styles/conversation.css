@@ -1281,3 +1281,217 @@ details[open] > summary > .tool-row__expand {
 .duration-tag {
   color: var(--muted-foreground);
 }
+
+/* ==========================================================================
+   12. 输入舱（100% 对标 OpenChamber ChatInput.tsx）
+   【设计意图 (Why)】
+     OpenChamber 的输入舱只有一个外壳 + 一条 footer：
+       - 外壳：1px 中性细边、12px 圆角、单一表面底色、零投影；
+       - 聚焦：只在外面加 1px 主色环（ring-1 ring-primary/50），不改边框色；
+       - footer：透明、无分割线，控件是「纯图标 + 文字」，没有药丸底色；
+       - 发送：纯图标按钮，无边框无底色，禁用时只降到 30% 不透明度。
+     旧实现的药丸（底色+描边）、28px 蓝框发送按钮、footer 顶部 1px 分割线，
+     把输入舱切成一堆贴纸，和正文的克制排版完全不是一套语言。
+   【约束与规则 (Rules)】
+     1. 输入舱只用 --foreground / --primary / --muted-foreground 语义色，禁止硬编码；
+     2. 控件默认零背景零边框，hover 只降不透明度，禁止出现整块底色；
+     3. 圆角与对话区代码块同源（--radius-window），阴影严格为 none；
+     4. 字号挂 --text-markdown / --text-meta，跟随设置里的字号档位同步缩放。
+   ========================================================================== */
+
+.input-card-box.composer-dock {
+  pointer-events: auto;
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 740px;
+  margin: 0 auto;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+  background: var(--bg-card);
+  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  border-radius: var(--radius-window);
+  box-shadow: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* 聚焦：OpenChamber 的 focus-within:ring-1 —— 外圈 1px 环，边框本身几乎不动。
+   【防范的历史坑 (Pitfall)】这里不能挂 --primary：本项目 ayu-light 皮肤的主色是天青，
+     历史约束明确要求输入舱任何状态都用中性石板色，天青环会让输入框像被高亮选中。 */
+.input-card-box.composer-dock:focus-within {
+  border-color: color-mix(in srgb, var(--foreground) 14%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 22%, transparent);
+}
+
+.composer-dock__editor {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 12px 4px;
+}
+
+.composer-dock__textarea {
+  width: 100%;
+  min-height: 52px;
+  max-height: 240px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: var(--text-markdown);
+  line-height: 24px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  caret-color: var(--foreground);
+}
+
+.composer-dock__textarea::placeholder {
+  color: var(--muted-foreground);
+  opacity: 0.8;
+}
+
+.composer-dock__textarea:disabled {
+  cursor: not-allowed;
+}
+
+/* 折叠按钮默认隐藏，由宿主在内容超长时切 display */
+.composer-dock__collapse {
+  align-self: flex-end;
+  margin-top: 2px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
+  font-size: var(--text-meta);
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.12s ease;
+}
+
+.composer-dock__collapse:hover {
+  opacity: 1;
+}
+
+.composer-dock__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 2px 8px 8px;
+}
+
+.composer-dock__footer-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.composer-dock__footer-group--end {
+  justify-content: flex-end;
+}
+
+/* dropdown 锚点：模型 / 思考菜单向上弹出，锚点必须跟随控件本身，
+   否则下拉会以整个输入舱为参照物漂到面板左侧 */
+.pill-dropdown-wrapper {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+
+/* 纯文本控件（模型 / 思考深度）：图标 + 标签，无背景无描边 */
+.composer-ctrl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: var(--text-meta);
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition: opacity 0.12s ease;
+}
+
+.composer-ctrl:hover {
+  opacity: 0.7;
+}
+
+.composer-ctrl__icon {
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+}
+
+.composer-ctrl__label {
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-ctrl__caret {
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+  opacity: 0.8;
+}
+
+/* 纯图标按钮（附件）：与控件同高，hover 只抬亮度 */
+.composer-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: color 0.12s ease, opacity 0.12s ease;
+}
+
+.composer-icon-btn:hover {
+  color: var(--foreground);
+}
+
+/* 发送 / 中断：纯图标，无边框无底色 */
+.composer-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--primary);
+  cursor: pointer;
+  transition: opacity 0.12s ease;
+}
+
+.composer-send:hover {
+  opacity: 0.78;
+}
+
+.composer-send:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.composer-send--stop {
+  color: var(--destructive);
+}
