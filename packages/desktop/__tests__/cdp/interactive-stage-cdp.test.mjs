@@ -224,11 +224,12 @@ test('Main Chat Stage & Composer Dock - Live Headless Browser CDP Physical Verif
           return { success: false, reason: 'buttons-missing' };
         }
 
-        // 验证纯图标特性：按钮内无 span 标签，且具备 title 提示属性
+        // 验证纯图标特性：按钮内无 span 标签，且具备自绘 data-tooltip 提示
         const copyHasSpan = Boolean(copyBtn.querySelector('span'));
         const forkHasSpan = Boolean(forkBtn.querySelector('span'));
-        const copyTitle = copyBtn.getAttribute('title');
-        const forkTitle = forkBtn.getAttribute('title');
+        const copyTitle = copyBtn.getAttribute('data-tooltip');
+        const forkTitle = forkBtn.getAttribute('data-tooltip');
+        const usesNativeTitle = Boolean(copyBtn.getAttribute('title') || forkBtn.getAttribute('title'));
 
         // 模拟物理触发点击，验证无任何异常抛出且状态可达
         copyBtn.click();
@@ -240,6 +241,7 @@ test('Main Chat Stage & Composer Dock - Live Headless Browser CDP Physical Verif
           forkHasSpan,
           hasRegenBtn: Boolean(regenBtn),
           hasTitles: Boolean(copyTitle && forkTitle),
+          usesNativeTitle,
           copyTitle,
           forkTitle,
         };
@@ -251,9 +253,10 @@ test('Main Chat Stage & Composer Dock - Live Headless Browser CDP Physical Verif
     assert.equal(actionResult.result.value.copyHasSpan, false, '复制按钮严禁内联文本标签');
     assert.equal(actionResult.result.value.forkHasSpan, false, 'Fork按钮严禁内联文本标签');
     assert.equal(actionResult.result.value.hasRegenBtn, false, '助手消息行必须彻底移除重新生成按钮');
-    assert.ok(actionResult.result.value.hasTitles, '所有操作按钮必须具备 title 悬浮说明');
-    assert.ok(actionResult.result.value.copyTitle.length > 0, '复制按钮必须具备有效 title');
-    assert.ok(actionResult.result.value.forkTitle.length > 0, 'Fork按钮必须具备有效 title');
+    assert.ok(actionResult.result.value.hasTitles, '所有操作按钮必须具备 data-tooltip 悬浮说明');
+    assert.equal(actionResult.result.value.usesNativeTitle, false, '禁止使用原生 title（黑底方框无法换肤）');
+    assert.ok(actionResult.result.value.copyTitle.length > 0, '复制按钮必须具备有效 tooltip 文案');
+    assert.ok(actionResult.result.value.forkTitle.length > 0, 'Fork按钮必须具备有效 tooltip 文案');
   });
 
   // 6.2 物理验证：附件暂存托盘双层缩略图卡片（上图下文与结构化标号）
@@ -342,8 +345,8 @@ test('Main Chat Stage & Composer Dock - Live Headless Browser CDP Physical Verif
     assert.equal(val.streamingHasFooter, false, 'isStreaming: true 时末条助手行绝不能渲染 assistant-footer-bar');
     assert.equal(val.streamingHasTimeTag, false, 'isStreaming: true 时末条助手行绝不能渲染 time-tag');
     assert.equal(val.completedHasFooter, true, 'isStreaming: false 且为回合末条时必须呈现 assistant-footer-bar');
-    assert.equal(val.completedHasTimeTag, false, 'isStreaming: false 时助手行也不再渲染 time-tag（时间只保留在用户提问下方）');
-    assert.equal(val.completedTimeText, '', '助手行严禁渲染任何时间戳文本');
+    assert.equal(val.completedHasTimeTag, true, 'isStreaming: false 时助手行必须渲染 time-tag');
+    assert.equal(val.completedTimeText, '10:00:02', '助手行时间必须展示真实时间戳');
   });
 
   // 6.4 物理验证：工具插槽常驻锚点与 renderToolCapsuleSlot 判空契约

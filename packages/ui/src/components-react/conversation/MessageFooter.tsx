@@ -92,7 +92,7 @@ function ActionButton({
       data-msg-id={message.id}
       data-row-id={message.rowId ?? ''}
       data-content={message.content}
-      title={label}
+      data-tooltip={label}
       aria-label={label}
     >
       {children}
@@ -140,8 +140,8 @@ export function ConversationMessageFooter({
     </span>
   );
 
-  // 时间只挂在用户提问下方：助手行再显示一次会让相邻消息之间出现两个时间锚点
-  const stamp = isUser && message.timestamp ? (
+  // 每条消息都在自己页脚给出时间：用户与 Agent 输出共用同一时间样式
+  const stamp = message.timestamp ? (
     <span className="conv-message__meta conv-footer__time time-tag">
       <ClockIcon />
       {message.timestamp}

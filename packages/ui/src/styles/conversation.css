@@ -974,6 +974,7 @@ details[open] > summary > .tool-row__expand {
 /* 纯图标按钮：静态完全透明，hover 才浮出一层极淡底色，
    不再使用整块高亮补丁，避免深色主题下出现一排小方块。 */
 .msg-action-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -987,6 +988,39 @@ details[open] > summary > .tool-row__expand {
   cursor: pointer;
   opacity: 0.75;
   transition: color 0.12s ease, background-color 0.12s ease, opacity 0.12s ease, transform 0.12s ease;
+}
+
+/* 自绘提示气泡：原生 title 的黑底方框无法换肤，深色主题下像一块墨渍。
+   这里用与浮层同源的 Token 画小胶囊，延迟 0.35s 出现，快速划过不闪。 */
+.msg-action-btn::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  z-index: 20;
+  padding: 3px 7px;
+  border-radius: 6px;
+  /* 反色胶囊：深色主题给浅底深字、浅色主题给深底白字。
+     直接用 --popover 在深色下仍是近黑色块，和系统原生提示一样生硬。 */
+  background: color-mix(in srgb, var(--foreground) 90%, var(--background));
+  color: var(--background);
+  font-family: var(--conv-font-sans);
+  font-size: var(--conv-micro-size);
+  font-weight: 400;
+  line-height: 16px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(-2px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  transition-delay: 0s;
+}
+
+.msg-action-btn:hover::after,
+.msg-action-btn:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  transition-delay: 0.35s;
 }
 
 .msg-action-btn:hover {

@@ -22,7 +22,8 @@ test('Interactive Stage UI Components - 对话区交互操作栏、Token仪表�
     assert.ok(!html.includes('<span>复制</span>') && !html.includes('<span>Copy</span>'), '用户行复制按钮严禁内联文本标签');
     assert.ok(!html.includes('<span>回滚</span>') && !html.includes('<span>Rollback</span>'), '用户行回滚按钮严禁内联文本标签');
     assert.ok(!html.includes('<span>Fork 分支</span>') && !html.includes('<span>Fork Branch</span>'), '用户行Fork按钮严禁内联文本标签');
-    assert.ok(html.includes('title='), '用户行按钮必须具备 title 悬浮说明');
+    assert.ok(html.includes('data-tooltip='), '用户行按钮必须具备 data-tooltip 自绘悬浮说明');
+    assert.ok(!html.includes('title='), '用户行按钮严禁使用原生 title，避免黑底方框提示');
     assert.ok(html.includes('aria-label='), '用户行按钮必须具备 aria-label 无障碍说明');
   });
 
@@ -58,7 +59,8 @@ test('Interactive Stage UI Components - 对话区交互操作栏、Token仪表�
     assert.ok(ordinaryHtml.includes('data-action="copy-msg"'), '普通会话助手行必须渲染复制按钮');
     assert.ok(!ordinaryHtml.includes('<span>Fork 分支</span>') && !ordinaryHtml.includes('<span>Fork Branch</span>'), '助手行Fork按钮严禁内联文本标签');
     assert.ok(!ordinaryHtml.includes('<span>复制</span>') && !ordinaryHtml.includes('<span>Copy</span>'), '助手行复制按钮严禁内联文本标签');
-    assert.ok(ordinaryHtml.includes('title='), '助手行按钮必须具备 title 悬浮说明');
+    assert.ok(ordinaryHtml.includes('data-tooltip='), '助手行按钮必须具备 data-tooltip 自绘悬浮说明');
+    assert.ok(!ordinaryHtml.includes('title='), '助手行按钮严禁使用原生 title，避免黑底方框提示');
     assert.ok(ordinaryHtml.includes('aria-label='), '助手行按钮必须具备 aria-label 无障碍说明');
 
     // 3.1.1 核心边界断言：非回合末尾（中间步骤/工具调用）坚决隐藏底部操作栏与时间戳
@@ -94,8 +96,9 @@ test('Interactive Stage UI Components - 对话区交互操作栏、Token仪表�
     assert.ok(completedHtml.includes('data-action="copy-msg"'), '最终生成完成必须包含复制');
     assert.ok(completedHtml.includes('data-action="fork-msg"'), '最终生成完成必须包含Fork');
     assert.ok(!completedHtml.includes('data-action="regenerate-msg"'), '最终生成完成不得包含重新生成按钮');
-    assert.ok(!completedHtml.includes('time-tag'), '助手行不再重复展示时间，时间只保留在用户提问下方');
-    assert.ok(!completedHtml.includes('14:34:00'), '助手行严禁渲染时间戳文本');
+    assert.ok(completedHtml.includes('time-tag'), '助手行必须展示时间（与用户行同一页脚组件）');
+    assert.ok(completedHtml.includes('14:34:00'), '助手行必须展示精确时间');
+    assert.ok(completedHtml.includes('conv-footer__clock'), '时间前必须带时钟图标');
 
     // 3.2 群聊助手行：禁止 Fork，但强显 Agent 昵称
     const html = renderOne(
