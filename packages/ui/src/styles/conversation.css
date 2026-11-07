@@ -903,7 +903,11 @@ details[open] > summary > .tool-row__expand {
 }
 
 /* ==========================================================================
-   10. 页脚操作栏（悬停浮现）
+   10. 消息页脚（时间 + 操作按钮，全场景唯一结构）
+   【设计意图 (Why)】页脚默认不可见，鼠标移到这条消息上才整体浮现；
+     它属于"二次操作层"，常显会让整屏长满小图标，正文反而失去焦点。
+   【约束与规则 (Rules)】显隐必须作用于整条页脚（时间 + 按钮一起），
+     禁止只隐藏按钮而把时间留在界面上。
    ========================================================================== */
 
 .conv-message__footer,
@@ -913,31 +917,62 @@ details[open] > summary > .tool-row__expand {
   justify-content: space-between;
   gap: 8px;
   margin-top: 2px;
+  min-height: 24px;
   font-size: var(--conv-micro-size);
   color: var(--muted-foreground);
   font-family: var(--conv-font-mono);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.conv-message:hover > .conv-message__footer,
+.conv-message:focus-within > .conv-message__footer {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* 触屏没有 hover，页脚必须常显，否则用户永远点不到复制 */
+@media (hover: none) {
+  .conv-message__footer,
+  .assistant-footer-bar {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* 用户消息右对齐：时间在前、按钮在后 */
+.conv-footer--user {
+  justify-content: flex-end;
+}
+
+.conv-footer__info {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.conv-footer__time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.conv-footer__clock {
+  flex-shrink: 0;
+  opacity: 0.75;
 }
 
 .conv-message__actions {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  opacity: 0;
-  transition: opacity 0.15s ease;
+  gap: 2px;
 }
 
-.conv-message:hover .conv-message__actions,
-.message-row:hover .conv-message__actions,
-.assistant-row:hover .conv-message__actions {
-  opacity: 1;
-}
-
-@media (hover: none) {
-  .conv-message__actions {
-    opacity: 1;
-  }
-}
-
+/* 纯图标按钮：静态完全透明，hover 才浮出一层极淡底色，
+   不再使用整块高亮补丁，避免深色主题下出现一排小方块。 */
 .msg-action-btn {
   display: inline-flex;
   align-items: center;
@@ -947,14 +982,28 @@ details[open] > summary > .tool-row__expand {
   padding: 0;
   background: transparent;
   border: none;
-  border-radius: var(--radius-inner);
+  border-radius: 6px;
   color: var(--muted-foreground);
   cursor: pointer;
-  transition: color 0.12s ease;
+  opacity: 0.75;
+  transition: color 0.12s ease, background-color 0.12s ease, opacity 0.12s ease, transform 0.12s ease;
 }
 
 .msg-action-btn:hover {
   color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+  opacity: 1;
+}
+
+.msg-action-btn:active {
+  transform: scale(0.92);
+}
+
+.msg-action-btn:focus-visible {
+  color: var(--foreground);
+  opacity: 1;
+  outline: 2px solid color-mix(in srgb, var(--primary) 45%, transparent);
+  outline-offset: 1px;
 }
 
 .meta-tag,

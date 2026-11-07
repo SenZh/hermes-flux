@@ -3,6 +3,7 @@ export { ConversationStage } from './ConversationStage.js';
 export { ConversationStream } from './ConversationStream.js';
 export { ConversationMessageList } from './ConversationMessageList.js';
 export { MessageRow } from './MessageRow.js';
+export { ConversationMessageFooter } from './MessageFooter.js';
 export { MarkdownBlock } from './MarkdownBlock.js';
 export { ToolCapsule, ToolSection, ToolBlocks, classifyTool } from './ToolCapsule.js';
 export { TurnGroup, groupTurns } from './TurnGroup.js';
