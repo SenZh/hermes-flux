@@ -738,10 +738,22 @@ document.addEventListener('click', (event) => {
  *   - 当 window.hermesDesktop 存在时，首屏保持桌面推导，后续由 desktopApi.getSystemInfo() 确认；
  *   - 当 window.hermesDesktop 不存在且处于小屏时，自动推导为移动端（android / ios）。
  */
-function safeParseJson<T>(raw: string | null, fallback: T): T {
+function isStringArray(val: unknown): val is string[] {
+  return Array.isArray(val) && val.every((item) => typeof item === 'string');
+}
+
+function safeParseJson<T>(
+  raw: string | null,
+  fallback: T,
+  validate?: (val: unknown) => val is T
+): T {
   if (!raw) return fallback;
   try {
-    return JSON.parse(raw) as T;
+    const parsed: unknown = JSON.parse(raw);
+    if (validate) {
+      return validate(parsed) ? parsed : fallback;
+    }
+    return parsed as T;
   // gate-degrade: JSON 解析异常时回落到默认值，避免启动受阻
   } catch {
     return fallback;
@@ -805,8 +817,8 @@ const state: AppState = {
   dockNotice: '',
   sessionListError: '',
   pendingSessionIds: [],
-  favoriteModels: safeParseJson<string[]>(localStorage.getItem('hermes_flux_fav_models') || localStorage.getItem('hermes_aura_fav_models'), []),
-  recentModels: safeParseJson<string[]>(localStorage.getItem('hermes_flux_recent_models') || localStorage.getItem('hermes_aura_recent_models'), []),
+  favoriteModels: safeParseJson<string[]>(localStorage.getItem('hermes_flux_fav_models') || localStorage.getItem('hermes_aura_fav_models'), [], isStringArray),
+  recentModels: safeParseJson<string[]>(localStorage.getItem('hermes_flux_recent_models') || localStorage.getItem('hermes_aura_recent_models'), [], isStringArray),
   modelSearchQuery: '',
   reasoningLevel: 'high',
   approvalMode: 'auto',
@@ -7621,7 +7633,12 @@ async function init(): Promise<void> {
   void restoreCacheToState();
   connect();
 
+  let lastFocusRefreshAt = 0;
   window.addEventListener('focus', () => {
+    const now = Date.now();
+    // 5 秒冷却防抖：避免桌面端频繁切换窗口触发密集无意义的网关 RPC
+    if (now - lastFocusRefreshAt < 5000) return;
+    lastFocusRefreshAt = now;
     if (gatewayClient && !state.isStreaming) {
       void fetchProfiles().catch(() => undefined);
     }
