@@ -2488,8 +2488,18 @@ async function loadOlderMessages(): Promise<void> {
     if (outcome.status === 'success' && outcome.messages.length > 0) {
       const batch = parseRawMessages(outcome.messages);
       sessionServerOffset.set(sessionId, currentOffset + outcome.messages.length);
-      state.hasOlderMessages = outcome.messages.length >= OLDER_BATCH_PAGE_SIZE;
       state.messages = [...batch, ...state.messages];
+      sessionMessagesCache.set(sessionId, state.messages);
+      const isRoom = hostedRoomIds.has(sessionId) || state.groupRooms.some((g) => g.roomId === sessionId);
+      const olderCacheRef: CacheChannelRef = {
+        profile: isRoom ? '' : (state.profileName || 'default'),
+        channel: isRoom ? 'room' : 'session',
+        channelId: sessionId,
+      };
+      persistMessagesToCache(olderCacheRef, state.messages, 0);
+      const earliestRow = state.messages[0]?.rowId;
+      const isEarliestReached = typeof earliestRow === 'number' && earliestRow <= 1;
+      state.hasOlderMessages = !isEarliestReached && outcome.messages.length >= OLDER_BATCH_PAGE_SIZE;
       render();
 
       requestAnimationFrame(() => {
@@ -2645,6 +2655,7 @@ async function loadMessages(sessionId: string, targetBotName?: string): Promise<
       // 只有当前视口仍为空时才渲染缓存，避免覆盖用户在新会话里已有的内容
       if (opened.rows.length > 0 && stillCurrent && state.messages.length === 0) {
         state.messages = opened.rows.map(toMessageViewModel).reverse();
+        sessionMessagesCache.set(sessionId, state.messages);
         pendingScrollToBottom = true;
         render();
         scrollStreamToBottom('persistent cache hit');
@@ -2690,9 +2701,11 @@ async function loadMessages(sessionId: string, targetBotName?: string): Promise<
       sessionMessagesCache.set(sessionId, merged);
       persistMessagesToCache(cacheRef, merged, cacheFenceMax);
       syncActiveSessionPreviewToRail(sessionId, merged, resolvedBotName);
-      sessionServerOffset.set(sessionId, outcome.pagination?.returned || outcome.messages.length);
+      sessionServerOffset.set(sessionId, Math.max(sessionServerOffset.get(sessionId) || 0, outcome.pagination?.returned || outcome.messages.length));
       state.messages = merged;
-      state.hasOlderMessages = Boolean((outcome.pagination?.returned ?? outcome.messages.length) >= INITIAL_WINDOW_PAGE_SIZE);
+      const earliestRow = merged[0]?.rowId;
+      const isEarliestReached = typeof earliestRow === 'number' && earliestRow <= 1;
+      state.hasOlderMessages = !isEarliestReached && Boolean((outcome.pagination?.returned ?? outcome.messages.length) >= INITIAL_WINDOW_PAGE_SIZE);
       state.dockNotice = '';
       pendingScrollToBottom = true;
       render();

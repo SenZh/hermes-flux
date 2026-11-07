@@ -58,21 +58,53 @@ export function takeServerPriority(
  *   无法对齐（不同源）则整体保留本地更长列表，等待后续对账。
  * 纯函数、零变异，供单测正向/负向/慢响应竞态穷尽证伪。
  */
-export function planSessionLoadMerge<T extends { id: string }>(
+export function planSessionLoadMerge<T extends { id: string; rowId?: number }>(
   parsed: readonly T[],
   existing: readonly T[] | undefined,
   serverPriority: boolean
 ): T[] {
   if (serverPriority) return [...parsed];
-  if (existing && existing.length > parsed.length) {
-    const lastParsed = parsed[parsed.length - 1];
-    const matchIdx = lastParsed ? existing.findIndex((m) => m.id === lastParsed.id) : -1;
-    if (matchIdx >= 0 && matchIdx < existing.length - 1) {
-      return [...parsed, ...existing.slice(matchIdx + 1)];
+  if (!existing || existing.length === 0) return [...parsed];
+  if (parsed.length === 0) return [...existing];
+
+  const matchKey = (a: T, b: T): boolean => {
+    if (a.id === b.id) return true;
+    if (typeof a.rowId === 'number' && typeof b.rowId === 'number' && a.rowId > 0 && b.rowId > 0) {
+      return a.rowId === b.rowId;
+    }
+    return false;
+  };
+
+  const lastParsed = parsed[parsed.length - 1];
+  const matchIdx = lastParsed ? existing.findIndex((m) => matchKey(m, lastParsed)) : -1;
+
+  if (existing.length > parsed.length) {
+    // 无法对齐末尾（不同源）：整体保留本地更长列表
+    if (matchIdx < 0) {
+      return [...existing];
+    }
+    // 能对齐末尾且本地末尾还有未落盘尾部（例如刚发出的提问）
+    if (matchIdx < existing.length - 1) {
+      // 检查 parsed 前面是否有更早历史需要拼接
+      const firstParsed = parsed[0];
+      const firstMatchIdx = firstParsed ? existing.findIndex((m) => matchKey(m, firstParsed)) : -1;
+      const head = firstMatchIdx > 0 ? existing.slice(0, firstMatchIdx) : [];
+      return [...head, ...parsed, ...existing.slice(matchIdx + 1)];
+    }
+    // 能对齐末尾且 matchIdx === existing.length - 1：说明 existing 包含了比 parsed 更早的头部历史
+    const firstParsed = parsed[0];
+    const firstMatchIdx = firstParsed ? existing.findIndex((m) => matchKey(m, firstParsed)) : -1;
+    if (firstMatchIdx > 0) {
+      return [...existing.slice(0, firstMatchIdx), ...parsed];
     }
     return [...existing];
   }
-  return [...parsed];
+
+  // parsed.length >= existing.length：检查本地是否有更早历史
+  const firstParsed = parsed[0];
+  const firstMatchIdx = firstParsed ? existing.findIndex((m) => matchKey(m, firstParsed)) : -1;
+  const head = firstMatchIdx > 0 ? existing.slice(0, firstMatchIdx) : [];
+  return [...head, ...parsed];
 }
 
 /**
