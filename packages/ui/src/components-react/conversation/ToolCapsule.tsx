@@ -19,9 +19,11 @@
 import * as React from 'react';
 import { t } from '../../i18n/index.js';
 import { extractToolTarget } from '../../lib/text.js';
+import { hasToolOutput, normalizeToolOutput } from '../../lib/toolOutput.js';
 import type { ConversationToolVM } from './types.js';
 import { StreamRow, type StreamRowKind } from './StreamRow.js';
 import { FileTypeIcon } from './FileTypeIcon.js';
+import { ToolOutput } from './ToolOutput.js';
 import { useNow } from './useNow.js';
 
 interface ToolPresentation {
@@ -90,6 +92,8 @@ export interface ToolCapsuleProps {
 export function ToolCapsule({ tool, now }: ToolCapsuleProps): React.ReactElement {
   const presentation = classifyTool(tool.name);
   const target = shortTarget(tool.args);
+  // 输出在渲染前统一归一化：信封 JSON 必须拆成正文，绝不原样展示协议
+  const view = React.useMemo(() => normalizeToolOutput(tool.output), [tool.output]);
   const liveMs =
     tool.durationMs ??
     (tool.status === 'running' && tool.startedAt ? Math.max(0, (now ?? Date.now()) - tool.startedAt) : undefined);
@@ -98,19 +102,27 @@ export function ToolCapsule({ tool, now }: ToolCapsuleProps): React.ReactElement
 
   // 文件类工具：左侧直接显示文件类型图标，替代通用的工具形状图标
   const showsFileIcon = Boolean(target) && ['read', 'write', 'edit'].includes(presentation.kind);
+  const failedExit = view.exitCode !== undefined && view.exitCode !== 0;
+
+  const meta = duration || failedExit ? (
+    <>
+      {duration ? <span>{duration}</span> : null}
+      {failedExit ? <span className="conv-row__exit">exit {view.exitCode}</span> : null}
+    </>
+  ) : undefined;
 
   return (
     <StreamRow
       kind={presentation.kind}
       label={presentation.label}
       target={display || undefined}
-      meta={duration || undefined}
+      meta={meta}
       status={tool.status}
-      expandable={Boolean(tool.output)}
+      expandable={hasToolOutput(view)}
       title={target}
       iconOverride={showsFileIcon ? <FileTypeIcon filePath={target} /> : undefined}
     >
-      {tool.output ? <pre className="conv-row__output">{tool.output}</pre> : null}
+      <ToolOutput view={view} />
     </StreamRow>
   );
 }

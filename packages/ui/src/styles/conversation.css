@@ -391,6 +391,9 @@ details[open] > summary > .tool-row__expand {
 .conv-row__meta,
 .thinking-row__duration,
 .tool-row__duration {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   flex-shrink: 0;
   margin-left: auto;
   padding-left: 8px;
@@ -431,6 +434,198 @@ details[open] > summary > .tool-row__expand {
   color: var(--foreground);
   overflow-x: auto;
   max-height: 280px;
+}
+
+/* ==========================================================================
+   工具结果输出（协议 JSON 归一化后的五种可读形态）
+   【设计意图 (Why)】网关返回的是信封 JSON，用户要看的是命令正文、diff、命中行。
+     容器缩进与思考主体同轴：竖线落在 summary 图标中心线（X+8px）。
+   【约束与规则 (Rules)】只准使用语义 Token；正文等宽、可换行、自带最大高度滚动，
+     禁止把未解析的 JSON 大括号直接塞进界面。
+   ========================================================================== */
+
+.conv-tool-output {
+  margin: 4px 0 6px 8px;
+  padding: 8px 12px;
+  min-width: 0;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.conv-tool-output__text {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  font-family: var(--conv-font-mono);
+  font-size: var(--conv-meta-size);
+  line-height: 18px;
+  color: var(--secondary-foreground);
+  white-space: pre-wrap;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+
+.conv-tool-output__error {
+  margin-bottom: 6px;
+  font-family: var(--conv-font-sans);
+  font-size: var(--conv-meta-size);
+  line-height: 18px;
+  color: var(--destructive);
+}
+
+.conv-tool-output__note {
+  margin-top: 6px;
+  font-family: var(--conv-font-sans);
+  font-size: var(--conv-micro-size);
+  line-height: 17px;
+  color: var(--muted-foreground);
+}
+
+.conv-tool-output__empty {
+  font-family: var(--conv-font-sans);
+  font-size: var(--conv-meta-size);
+  line-height: 18px;
+  color: var(--muted-foreground);
+}
+
+/* 变更文件胶囊：可换行，长路径单行省略，避免撑破折叠区 */
+.conv-tool-output__files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.conv-tool-output__file {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+  color: var(--muted-foreground);
+  font-family: var(--conv-font-mono);
+  font-size: var(--conv-micro-size);
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* diff：整行铺底色，新增/删除靠语义色区分，不画额外边框 */
+.conv-tool-output__diff-body {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  font-family: var(--conv-font-mono);
+  font-size: var(--conv-meta-size);
+  line-height: 18px;
+  color: var(--secondary-foreground);
+  white-space: pre;
+}
+
+.conv-diff__line {
+  display: block;
+  padding: 0 6px;
+}
+
+.conv-diff__line--add {
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  color: var(--success);
+}
+
+.conv-diff__line--del {
+  background: color-mix(in srgb, var(--destructive) 12%, transparent);
+  color: var(--destructive);
+}
+
+.conv-diff__line--hunk {
+  color: var(--muted-foreground);
+}
+
+.conv-diff__line--file {
+  color: var(--muted-foreground);
+  font-weight: 500;
+}
+
+/* 搜索命中：路径 / 行号 / 命中内容三段，长内容换行而不是截断 */
+.conv-tool-output__matches {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.conv-match {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-family: var(--conv-font-mono);
+  font-size: var(--conv-meta-size);
+  line-height: 18px;
+}
+
+.conv-match__path {
+  flex-shrink: 0;
+  max-width: 42%;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conv-match__line {
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+.conv-match__text {
+  min-width: 0;
+  color: var(--secondary-foreground);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 通用字段清单：key 用弱化等宽，value 可换行 */
+.conv-tool-output__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+
+.conv-field {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.conv-field__key {
+  flex-shrink: 0;
+  min-width: 96px;
+  color: var(--muted-foreground);
+  font-family: var(--conv-font-mono);
+  font-size: var(--conv-micro-size);
+  line-height: 18px;
+}
+
+.conv-field__value {
+  min-width: 0;
+  margin: 0;
+  color: var(--secondary-foreground);
+  font-family: var(--conv-font-mono);
+  font-size: var(--conv-meta-size);
+  line-height: 18px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 非零退出码：与耗时同排，只染色不加重 */
+.conv-row__exit {
+  color: var(--destructive);
+  font-variant-numeric: tabular-nums;
 }
 
 /* 多工具聚合执行清单卡片 */

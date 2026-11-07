@@ -198,6 +198,8 @@ export const zhDict = {
   'tool.agent': 'Agent Task',
   'tool.generic': 'Tool Call',
   'tool.readGroup': 'Read {count} files',
+  'tool.noMatches': '无匹配结果',
+  'tool.moreMatches': '还有 {count} 条未展示',
 
   // Task Modal Workspace & Naming
   'modal.workspaceLabel': '工作区 / 归属项目 (Workspace)',
@@ -583,6 +585,8 @@ export const enDict: Record<I18nKey, string> = {
   'tool.agent': 'Subagent task',
   'tool.generic': 'Tool call',
   'tool.readGroup': 'Read {count} files',
+  'tool.noMatches': 'No matches',
+  'tool.moreMatches': '{count} more not shown',
 
   // Task Modal Workspace & Naming
   'modal.workspaceLabel': 'Project / Workspace',
