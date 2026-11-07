@@ -380,6 +380,12 @@ async function restoreCacheToState(): Promise<void> {
     }
 
     if (touched) {
+      logApp.info('cold start cache snapshot restored', {
+        sessions: state.sessions.length,
+        groups: state.groupRooms.length,
+        profiles: state.profiles.length,
+        avatars: Object.keys(avatars || {}).length,
+      });
       // 若当前未激活会话且缓存中存在会话，预载首个会话消息以瞬间完成首屏渲染
       if (!state.activeSessionId && state.sessions.length > 0) {
         const firstSession = state.sessions[0];
@@ -2642,7 +2648,7 @@ async function loadMessages(sessionId: string, targetBotName?: string): Promise<
         pendingScrollToBottom = true;
         render();
         scrollStreamToBottom('persistent cache hit');
-        logSession.debug('session rendered from persistent cache', {
+        logSession.info('session rendered from persistent cache', {
           sessionId,
           mounted: state.messages.length,
           ms: Math.round((performance.now() - loadStartedAt) * 10) / 10,
