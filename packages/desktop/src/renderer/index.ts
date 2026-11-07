@@ -128,7 +128,257 @@ import {
   SessionLifecycleService,
   RpcErrorCode,
   SessionListGeneration,
+  CacheService,
+  type CachedSessionSummary,
+  type CachedAgentSummary,
+  type CachedMessageRow,
+  type CacheChannelRef,
 } from '@hermes-flux/core';
+
+import { DesktopCacheStore } from './cache/DesktopCacheStore.js';
+
+/**
+ * 客户端缓存服务（冷启动快照 + 消息正文）。
+ *
+ * 【设计意图 (Why)】
+ *   冷启动先读本地快照直接出图，再让后台权威拉取覆盖，避免首屏等网络。
+ *   运行期所有读仍走 `state`，缓存只负责"启动时喂一次"。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   缓存必须与权威结果同源写入，且删除必须双向传播；否则会出现
+ *   "已删除的会话在重启后复活"。
+ *
+ * 【约束与规则 (Rules)】
+ *   - 只在启动时读一次，不在渲染周期内读；
+ *   - 写缓存失败不得影响主流程（由 DesktopCacheStore 内部降级）。
+ */
+const cacheService = new CacheService(new DesktopCacheStore(), { sessionCap: 200, messageCap: 500 });
+
+/** 把缓存索引行还原成渲染层使用的会话结构。 */
+function toNormalizedSession(row: CachedSessionSummary): NormalizedSession {
+  return {
+    id: row.id,
+    title: row.title,
+    model: '',
+    time: formatSessionTime(row.timestamp),
+    preview: row.preview || '',
+    isArchived: row.isArchived,
+    timestamp: row.timestamp,
+    hidden: row.hidden,
+    unread: row.unread,
+    pinned: row.pinned,
+    botName: row.botName,
+    projectId: row.projectId,
+  };
+}
+
+/** 把渲染层会话结构收敛成缓存索引行。 */
+function toCachedSession(row: NormalizedSession): CachedSessionSummary {
+  return {
+    id: row.id,
+    profile: row.botName || state.profileName || 'default',
+    kind: 'session',
+    title: row.title,
+    preview: row.preview || undefined,
+    timestamp: row.timestamp,
+    isArchived: Boolean(row.isArchived),
+    hidden: Boolean(row.hidden),
+    pinned: Boolean(row.pinned),
+    unread: Boolean(row.unread),
+    botName: row.botName,
+    projectId: row.projectId,
+  };
+}
+
+/** 把缓存群聊行还原成左轨群聊结构。 */
+function toLeftRailGroupRoom(row: CachedSessionSummary): LeftRailGroupRoom {
+  return {
+    roomId: row.id,
+    name: row.title,
+    members: row.members ?? [],
+    createdAt: row.timestamp,
+    updatedAt: row.timestamp,
+  };
+}
+
+/** 把左轨群聊结构收敛成缓存索引行（群聊不属于任何 profile，profile 固定空串）。 */
+function toCachedGroup(room: LeftRailGroupRoom): CachedSessionSummary {
+  return {
+    id: room.roomId,
+    profile: '',
+    kind: 'group',
+    title: room.name,
+    timestamp: room.updatedAt ?? room.createdAt ?? Date.now(),
+    isArchived: false,
+    hidden: false,
+    pinned: false,
+    unread: false,
+    members: room.members ?? [],
+    memberCount: room.members?.length ?? 0,
+  };
+}
+
+/** 消息缓存上限：与设计文档的"每会话 500 行"一致。 */
+const MESSAGE_CACHE_LIMIT = 500;
+
+/** 把缓存消息行还原成渲染层消息视图。 */
+function toMessageViewModel(row: CachedMessageRow): MessageViewModel {
+  return {
+    id: `row-${row.orderKey}`,
+    rowId: row.orderKey,
+    role: row.role,
+    content: row.text,
+    thought: row.reasoning,
+    toolCalls: row.toolCalls?.map((call) => ({
+      id: call.toolId,
+      name: call.name,
+      status: call.status === 'done' ? 'completed' : call.status === 'error' ? 'failed' : 'running',
+      args: call.argsText || '',
+      output: call.resultText,
+    })),
+    timestamp: formatSessionTime(row.timestamp),
+    rawTimestamp: row.timestamp,
+  };
+}
+
+/**
+ * 把渲染层消息视图收敛成缓存行。
+ *
+ * 【规则】没有可靠 `rowId` 的消息不落盘——临时主键（`usr-` / `ast-`）写进缓存后，
+ * 下次启动会与真实行号对不上，产生重复消息。
+ */
+function toCachedMessage(view: MessageViewModel, ref: CacheChannelRef): CachedMessageRow | null {
+  const orderKey = typeof view.rowId === 'number' && Number.isFinite(view.rowId) && view.rowId > 0
+    ? view.rowId
+    : Number.parseInt(view.id.replace(/^row-/, ''), 10);
+  if (!Number.isFinite(orderKey) || orderKey <= 0) return null;
+
+  return {
+    profile: ref.profile,
+    channel: ref.channel,
+    channelId: ref.channelId,
+    orderKey,
+    role: view.role,
+    text: view.content,
+    reasoning: view.thought,
+    toolCalls: view.toolCalls?.map((call) => ({
+      toolId: call.id,
+      name: call.name,
+      argsText: call.args,
+      resultText: call.output,
+      status: call.status === 'completed' ? 'done' : call.status === 'failed' ? 'error' : 'running',
+    })),
+    timestamp: view.rawTimestamp ?? Date.now(),
+    status: 'complete',
+  };
+}
+
+/** 把一次 REST 窗口写入持久化缓存（异步，失败只降级为纯内存）。 */
+function persistMessagesToCache(
+  ref: CacheChannelRef,
+  messages: MessageViewModel[],
+  fenceMax: number
+): void {
+  const rows: CachedMessageRow[] = [];
+  for (const message of messages) {
+    const row = toCachedMessage(message, ref);
+    if (row) rows.push(row);
+  }
+  void cacheService.applyRemoteWindow(ref, rows, fenceMax).catch(() => undefined);
+}
+
+/** 把缓存 Agent 行还原成渲染层档案结构。 */
+function toAgentProfile(row: CachedAgentSummary): AgentProfile {
+  return {
+    name: row.name,
+    displayName: row.displayName,
+    description: row.description || '',
+    model: row.model || '',
+    avatar: row.avatar,
+    hasAvatar: row.hasAvatar,
+    timestamp: row.lastSessionLastActive,
+  };
+}
+
+/**
+ * 冷启动恢复：把本地快照填进 state 并立即渲染。
+ *
+ * 【规则】只在 state 为空时填充，绝不覆盖已由网络拉到的数据；
+ * 读取失败时静默跳过（缓存是可选加速，不是功能依赖）。
+ */
+async function restoreCacheToState(): Promise<void> {
+  try {
+    const [indexRows, agents] = await Promise.all([cacheService.readSessions(), cacheService.readAgents()]);
+    let touched = false;
+
+    if (state.sessions.length === 0) {
+      const cachedSessions = indexRows.filter((row) => row.kind === 'session');
+      if (cachedSessions.length > 0) {
+        state.sessions = cachedSessions.map(toNormalizedSession);
+        touched = true;
+      }
+    }
+    if (state.groupRooms.length === 0) {
+      const cachedGroups = indexRows.filter((row) => row.kind === 'group');
+      if (cachedGroups.length > 0) {
+        state.groupRooms = cachedGroups.map(toLeftRailGroupRoom);
+        touched = true;
+      }
+    }
+    if (agents.length > 0 && state.profiles.length === 0) {
+      state.profiles = agents.map(toAgentProfile);
+      touched = true;
+    }
+    if (touched) render();
+  // gate-degrade: 本地缓存读取失败属于可选加速失效，回落到网络拉取即可
+  } catch {}
+}
+
+/**
+ * 索引写入串行链。
+ *
+ * 【设计意图 (Why)】会话与群聊共享同一个索引键，两个异步写并发会互相覆盖。
+ * 【规则】所有索引写入必须经此链，禁止直接调 cacheService.writeSessions。
+ */
+let indexWriteTail: Promise<unknown> = Promise.resolve();
+function enqueueIndexWrite(task: () => Promise<void>): void {
+  indexWriteTail = indexWriteTail.then(task, task).catch(() => undefined);
+}
+
+/** 权威会话列表写入缓存：保留既有群聊行，只替换 session 行。 */
+function persistSessionsToCache(sessions: NormalizedSession[]): void {
+  const rows = sessions.map(toCachedSession);
+  enqueueIndexWrite(async () => {
+    const existing = await cacheService.readSessions();
+    const groups = existing.filter((row) => row.kind === 'group');
+    await cacheService.writeSessions([...groups, ...rows]);
+  });
+}
+
+/** 权威群聊列表写入缓存：保留既有会话行，只替换 group 行。 */
+function persistGroupsToCache(rooms: LeftRailGroupRoom[]): void {
+  const rows = rooms.map(toCachedGroup);
+  enqueueIndexWrite(async () => {
+    const existing = await cacheService.readSessions();
+    const sessions = existing.filter((row) => row.kind === 'session');
+    await cacheService.writeSessions([...sessions, ...rows]);
+  });
+}
+
+/** 权威 Agent 列表写入缓存（异步，失败不影响渲染）。 */
+function persistAgentsToCache(profiles: AgentProfile[]): void {
+  void cacheService.writeAgents(
+    profiles.map((p) => ({
+      name: p.name,
+      displayName: p.displayName,
+      description: p.description,
+      model: p.model,
+      avatar: p.avatar,
+      hasAvatar: Boolean(p.hasAvatar),
+      lastSessionLastActive: p.last_session?.last_active ?? p.timestamp,
+    }))
+  );
+}
 
 import type { HermesDesktopBridge } from '../preload/index.js';
 
@@ -1266,6 +1516,8 @@ async function fetchSessions(): Promise<void> {
   });
   state.sessions = reconciled.sessions;
   state.pendingSessionIds = reconciled.pendingIds;
+  // 权威结果落缓存：只在完整成功时覆盖，部分失败保留上一代快照（规则 1）
+  if (authoritative) persistSessionsToCache(reconciled.sessions);
 
   // 运行中的会话以本地乐观时间戳为准，防止过期 last_active 把置顶冲掉
   if (activeRunningSessionIds.size > 0) {
@@ -1434,11 +1686,13 @@ async function fetchGroupRooms(): Promise<void> {
     }
 
     const mergedRoomsMap = new Map<string, LeftRailGroupRoom>();
+    let groupsAuthoritative = false;
 
     // 1. 网关正统托管房间（支持 groups.send / groups.log / 真实多智能体协同调度）
     hostedRoomIds.clear();
     try {
       const rpcRooms = await groupRoomStore.listRooms(client);
+      groupsAuthoritative = true;
       for (const r of rpcRooms) {
         hostedRoomIds.add(r.roomId);
         const existing = state.groupRooms.find((old) => old.roomId === r.roomId);
@@ -1461,11 +1715,16 @@ async function fetchGroupRooms(): Promise<void> {
       console.warn('[Flux] groups.list failed:', e);
     }
 
-    state.groupRooms = Array.from(mergedRoomsMap.values());
+    // 权威门：只有 groups.list 完整成功才允许覆盖列表与写缓存；
+    // 失败时保留既有群聊，避免一次弱网抖动把整列群聊清空（失败 ≠ 空）。
+    if (groupsAuthoritative) {
+      state.groupRooms = Array.from(mergedRoomsMap.values());
+      persistGroupsToCache(state.groupRooms);
+    }
     render();
   } catch (e) {
     console.warn('[Flux] fetchGroupRooms failed:', e);
-    state.groupRooms = [];
+    // 保留既有列表，不清空
     render();
   }
 }
@@ -1649,6 +1908,7 @@ async function fetchProfiles(): Promise<void> {
       }
     }
     state.profiles = list;
+    persistAgentsToCache(list);
     syncProfileLastMessages();
     render();
 
@@ -2209,7 +2469,8 @@ function syncActiveSessionPreviewToRail(sessionId: string, messages: MessageView
 let activeLoadMessagesGeneration = 0;
 
 async function loadMessages(sessionId: string, targetBotName?: string): Promise<void> {
-  if (!sessionId || !gatewayClient) {
+  // 离线也允许打开会话：历史由持久化缓存提供，没有网关不该直接清空
+  if (!sessionId) {
     state.messages = [];
     state.hasOlderMessages = false;
     render();
@@ -2253,7 +2514,37 @@ async function loadMessages(sessionId: string, targetBotName?: string): Promise<
     return;
   }
 
-  // 3. High-speed REST pagination: 50 items latest-first (<50ms vs 6500ms WS dump)
+  // 2.5 持久化缓存命中（内存未命中时）：先把历史读出来，再拉最新
+  const cacheRef: CacheChannelRef = { profile: resolvedBotName, channel: 'session', channelId: sessionId };
+  let cacheFenceMax = 0;
+  if (!cached || cached.length === 0) {
+    try {
+      const opened = await cacheService.openChannel(cacheRef, MESSAGE_CACHE_LIMIT);
+      cacheFenceMax = opened.fenceMax;
+      const stillCurrent = currentGen === activeLoadMessagesGeneration && state.activeSessionId === sessionId;
+      // 只有当前视口仍为空时才渲染缓存，避免覆盖用户在新会话里已有的内容
+      if (opened.rows.length > 0 && stillCurrent && state.messages.length === 0) {
+        state.messages = opened.rows.map(toMessageViewModel).reverse();
+        pendingScrollToBottom = true;
+        render();
+        scrollStreamToBottom('persistent cache hit');
+        logSession.debug('session rendered from persistent cache', {
+          sessionId,
+          mounted: state.messages.length,
+          ms: Math.round((performance.now() - loadStartedAt) * 10) / 10,
+        });
+      }
+    // gate-degrade: 持久化缓存读取失败时直接走 REST，属可选加速失效
+    } catch {}
+  }
+
+  // 3. 无网关时到此为止：有缓存就已上屏，没有则保持空态（离线可读历史）
+  if (!gatewayClient) {
+    render();
+    return;
+  }
+
+  // 4. High-speed REST pagination: 50 items latest-first (<50ms vs 6500ms WS dump)
   let fastLoaded = false;
   try {
     const outcome = await gatewayClient.fetchSessionMessages(sessionId, {
@@ -2277,6 +2568,7 @@ async function loadMessages(sessionId: string, targetBotName?: string): Promise<
       const serverPriority = takeServerPriority(sessionHistoryTrust, sessionId);
       const merged = planSessionLoadMerge(parsed, existing, serverPriority);
       sessionMessagesCache.set(sessionId, merged);
+      persistMessagesToCache(cacheRef, merged, cacheFenceMax);
       syncActiveSessionPreviewToRail(sessionId, merged, resolvedBotName);
       sessionServerOffset.set(sessionId, outcome.pagination?.returned || outcome.messages.length);
       state.messages = merged;
@@ -7174,6 +7466,8 @@ async function init(): Promise<void> {
     }
   }
 
+  // 冷启动先喂本地快照再连网：首屏不等网络（失败自动回落，不阻塞 connect）
+  void restoreCacheToState();
   connect();
 }
 

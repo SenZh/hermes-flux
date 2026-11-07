@@ -29,17 +29,24 @@
 |---|---|---|
 | **三态对话模型** | [`docs/architecture/three-conversation-modes-spec.md`](docs/architecture/three-conversation-modes-spec.md) | 普通会话、专职 Bot 主工位、多 Agent 群聊三态物理隔离模型与网关协议分流 |
 | **核心架构与数据流** | [`docs/architecture/core-architecture-and-data-flow-spec.md`](docs/architecture/core-architecture-and-data-flow-spec.md) | Monorepo 分层边界、PAL 平台抽象、WebSocket 5 态 FSM、Token 合流引擎 |
-| **网关契约与特性** | [`docs/architecture/gateway-api-and-features-matrix.md`](docs/architecture/gateway-api-and-features-matrix.md) | 官方网关契约基线（258 RPC / 72 事件），客户端 Capacitor 8 容器映射 |
+| **终极三舱** | [`docs/architecture/ultimate-tri-rail-architecture-spec.md`](docs/architecture/ultimate-tri-rail-architecture-spec.md) | 实体定义(Folder/Workspace/Project/Bot/Group/Session)、左双轨(52px微轨+212px抽屉)、右侧工具舱 |
+| **设置中枢** | [`docs/architecture/settings-architecture-and-implementation-map.md`](docs/architecture/settings-architecture-and-implementation-map.md) | 12 大功能域全景设置树、三级级联继承状态机、258 RPC 映射与 4 阶段实施路线图 |
+| **协议基线与特性** | [`docs/architecture/gateway-api-and-features-matrix.md`](docs/architecture/gateway-api-and-features-matrix.md) | 官方网关契约基线（257 RPC / 14 反向请求 / 77 下行事件），客户端 Capacitor 8 容器映射 |
+| **网关交互协议** | [`docs/architecture/gateway-client-interaction-protocol.md`](docs/architecture/gateway-client-interaction-protocol.md) | 每次交互的发起方 / 方式（推还是拉）/ 接口名三要素，含连接生命周期、双 ID 语义、六大场景时序与增量对齐能力矩阵 |
+| **客户端缓存** | [`docs/api/client-cache-status.md`](docs/api/client-cache-status.md) | **进度与交接**：当前状态、换机恢复命令、两个 P0 待办、七个必知坑点位 |
 | **网关接口索引** | [`docs/gateway/README.md`](docs/gateway/README.md) | 自动生成的 10 个网关核心模块接口文档与真实探针状态（禁止手动修改） |
+| **设计系统** | [`docs/design-system/04-tokens-and-design-system-spec.md`](docs/design-system/04-tokens-and-design-system-spec.md) | 几何/字体栈/DTCG 跨姿态通用；Slate 色表与 Shadow 物理层级仅 editorial/marketing 姿态；Hermes Flux 默认 tool 姿态 |
 | **踩坑登记表** | [`docs/architecture/pitfall-registry.md`](docs/architecture/pitfall-registry.md) | 踩坑记录 ➔ 根因 ➔ 守卫探针映射（P-001 ~ P-021） |
 | **动效与宿主隔离** | [`docs/architecture/motion-system-and-host-isolation-spec.md`](docs/architecture/motion-system-and-host-isolation-spec.md) | 跨端通用动效引擎、Version CAS 状态机、动态 Token 探测、Grid 折叠契约与宿主渐进改造规范 |
 | **工程纪律总纲** | [`ENGINEERING_DISCIPLINE.md`](ENGINEERING_DISCIPLINE.md) | 工业级工程防御体系、AST 防 AI 糊弄 15 条棘轮、长会话性能预算与平台避坑军规 |
+| **研发路线图** | [`docs/roadmap.md`](docs/roadmap.md) | 全局研发路线图、已落地特性看板、已知缺陷跟踪 |
 
 ### 3. 本地专属自动化验证技能 (`.opencode/skills/`)
 | 技能名称 | 目录路径 | 核心能力与适用场景 |
 |---|---|---|
 | **verify-hermes-flux** | [`.opencode/skills/verify-hermes-flux/`](.opencode/skills/verify-hermes-flux/) | 驱动真实 Blink 浏览器内核对工作台进行物理渲染验证，捕获截图存盘至 `artifacts/verification/` |
 | **verify-formal-invariants** | [`.opencode/skills/verify-formal-invariants/`](.opencode/skills/verify-formal-invariants/) | 基于 `fast-check` 的形式化安全不变量检验器，在随机并发交错中证明核心数学定理 |
+| **verify-cache-invariants** | [`.opencode/skills/verify-cache-invariants/`](.opencode/skills/verify-cache-invariants/) | 客户端缓存子系统的形式化安全不变量验证，在随机操作交错中证明定理 22~26 |
 
 ---
 
