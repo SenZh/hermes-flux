@@ -946,6 +946,13 @@ details[open] > summary > .tool-row__expand {
   justify-content: flex-end;
 }
 
+/* Agent 输出：模型 / 耗时 / 时间紧挨着操作按钮排在一行，
+   不再用 space-between 把时间推到最右边（那会让页脚被拉成两截）。 */
+.conv-footer--assistant {
+  justify-content: flex-start;
+  gap: 6px;
+}
+
 .conv-footer__info {
   display: inline-flex;
   align-items: center;
