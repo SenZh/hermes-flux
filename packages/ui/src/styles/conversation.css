@@ -753,54 +753,53 @@ details[open] > summary > .tool-row__expand {
   word-break: break-word;
 }
 
-/* 代码块容器（对标 OpenChamber data-component="markdown-code"） */
+/* 代码块容器：无表头、极细边框、零阴影
+   【设计意图 (Why)】顶部语言条会让每段代码多一条横墙，打断纵向阅读节奏；
+     边框与阴影都在抢注意力，代码本身才是主体。
+   【约束与规则 (Rules)】复制按钮是容器直接子元素并绝对定位，不得新增会撑高的横向条。 */
 .md-codeblock,
 [data-component="markdown-code"] {
+  position: relative;
   margin: 0 0 var(--conv-para-margin);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-inner);
+  border: 1px solid color-mix(in srgb, var(--foreground) 9%, transparent);
+  border-radius: 8px;
   overflow: hidden;
   background: var(--conv-code-block-bg);
+  box-shadow: none;
 }
 
-/* 代码块顶栏（语言标签 + 纯图标复制按钮） */
-.md-codeblock__bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 5px 12px;
-  border-bottom: 1px solid var(--border-subtle);
-  font-family: var(--conv-font-mono);
-  font-size: var(--conv-micro-size);
-  line-height: 16px;
-  color: var(--muted-foreground);
-  user-select: none;
-}
-
-.md-codeblock__lang {
-  text-transform: lowercase;
-  letter-spacing: 0.02em;
-}
-
+/* 右上角复制按钮：低对比常驻，hover 提亮，不占文档流 */
 .md-codeblock__copy {
-  padding: 0 4px;
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 1;
+  padding: 2px 6px;
   border: none;
+  border-radius: 5px;
   background: transparent;
   color: var(--muted-foreground);
   font-family: var(--conv-font-sans);
   font-size: var(--conv-micro-size);
+  line-height: 16px;
   cursor: pointer;
-  transition: color 0.12s ease;
+  opacity: 0.55;
+  transition: opacity 0.12s ease, color 0.12s ease, background-color 0.12s ease;
+}
+
+.md-codeblock:hover .md-codeblock__copy {
+  opacity: 1;
 }
 
 .md-codeblock__copy:hover {
   color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
 }
 
-/* 代码块主体 */
+/* 代码块主体：右上角按钮需要呼吸空间，右侧留白略大于左侧 */
 .md-pre {
   margin: 0;
-  padding: 12px;
+  padding: 12px 14px;
   overflow-x: auto;
 }
 
@@ -861,12 +860,21 @@ details[open] > summary > .tool-row__expand {
 }
 
 /* ==========================================================================
-   9. Markdown GFM 表格排版（极简下划线无卡片框）
+   9. Markdown GFM 表格排版（细边框容器 + 极淡行分隔）
+   【设计意图 (Why)】表格需要边界感，但不能用重边框 + 卡片阴影制造"贴纸感"；
+     表头靠字重区分，行间只用极淡分隔线，视线才落在数据上。
    ========================================================================== */
+
+.md-table-wrap {
+  margin: 0 0 var(--conv-para-margin);
+  border: 1px solid color-mix(in srgb, var(--foreground) 9%, transparent);
+  border-radius: 8px;
+  overflow-x: auto;
+  box-shadow: none;
+}
 
 .md-table {
   width: 100%;
-  margin: 0 0 var(--conv-para-margin);
   border-collapse: collapse;
   text-align: left;
   font-size: inherit;
@@ -874,16 +882,17 @@ details[open] > summary > .tool-row__expand {
 }
 
 .md-table th {
-  padding: 6px 14px 6px 0;
-  border-bottom: 1px solid var(--border-strong);
+  padding: 8px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
   font-weight: 600;
   color: var(--foreground);
   text-align: left;
+  white-space: nowrap;
 }
 
 .md-table td {
-  padding: 6px 14px 6px 0;
-  border-bottom: 1px solid var(--border-subtle);
+  padding: 8px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 5%, transparent);
   color: var(--foreground);
   vertical-align: top;
 }

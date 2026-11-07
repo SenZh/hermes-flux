@@ -894,7 +894,7 @@ button {
 
 .composer-dock:focus-within {
   border-color: var(--accent-border) !important;
-  box-shadow: var(--shadow-dock), 0 0 0 1px var(--accent-border) !important;
+  box-shadow: none !important;
 }
 
 .vertical-tab-item {
@@ -1107,15 +1107,17 @@ button {
 /* Code block wrapper light-mode fidelity */
 .code-block-wrapper {
   background: var(--bg-code) !important;
-  border: 1px solid var(--border-subtle) !important;
-  box-shadow: var(--shadow-card) !important;
+  border: 1px solid color-mix(in srgb, var(--foreground) 9%, transparent) !important;
+  /* 代码块只用细边框表达边界，禁止卡片阴影：阴影会让每段代码像贴在纸上的便利贴 */
+  box-shadow: none !important;
 }
 
 /* Floating Input Dock Light Refinement */
 .composer-dock {
   background: var(--bg-card) !important;
   border: 1px solid var(--border-subtle) !important;
-  box-shadow: var(--shadow-dock) !important;
+  /* 输入舱与内容同层，靠边框定位即可，投影会让它浮出纸面 */
+  box-shadow: none !important;
   border-radius: var(--radius-window) !important;
 }
 .composer-textarea {
@@ -1275,13 +1277,13 @@ blockquote {
 /* 核心约束：输入框边框杜绝使用天青强调色，无论普通态还是聚焦态均采用温暖石板中性边框 */
 [data-theme="ayu-light"] .composer-dock {
   background: var(--bg-card) !important;
-  border: 1px solid var(--border-medium) !important;
-  box-shadow: var(--shadow-dock) !important;
+  border: 1px solid var(--border-subtle) !important;
+  box-shadow: none !important;
 }
 
 [data-theme="ayu-light"] .composer-dock:focus-within {
-  border-color: var(--border-strong) !important;
-  box-shadow: var(--shadow-dock), 0 0 0 1px var(--border-medium) !important;
+  border-color: var(--border-medium) !important;
+  box-shadow: none !important;
 }
 
 /* THEME D 注释头已随皮肤块迁入生成区 */

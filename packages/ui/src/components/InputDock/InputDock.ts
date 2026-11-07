@@ -280,8 +280,8 @@ export function renderInputDock(props: InputDockProps): string {
         background: var(--bg-backdrop);
         backdrop-filter: blur(28px);
         -webkit-backdrop-filter: blur(28px);
-        border: 1px solid var(--border-medium);
-        box-shadow: var(--shadow-dock), var(--specular-line);
+        border: 1px solid var(--border-subtle);
+        box-shadow: none;
         border-radius: 14px;
         padding: 12px 16px 10px;
         display: flex;

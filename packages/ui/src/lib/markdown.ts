@@ -93,7 +93,18 @@ export function highlightCodeSyntax(code: string): string {
 const PLAIN_LANGUAGES = new Set(['log', 'txt', 'text', 'logcat', 'output', 'plaintext']);
 const HIGHLIGHT_SIZE_LIMIT = 25000;
 
-/** 代码块：统一的语言条 + 复制按钮 + 可横向滚动的 pre。 */
+/**
+ * 代码块：无表头的细边框容器 + 右上角复制按钮 + 可横向滚动的 pre。
+ *
+ * 【设计意图 (Why)】
+ *   顶部语言条会让每个代码块都多出一条"假表头"，在连续阅读时形成一堵横向墙。
+ *   语言信息已由代码本身表达，复制动作属于辅助操作，应当弱化并贴近内容右上角。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 复制按钮必须保留 .md-codeblock__copy 与 data-md-copy，宿主事件委托依赖它；
+ *   2. 按钮是容器的直接子元素，绝对定位在右上角，不参与文档流；
+ *   3. 禁止在此处新增任何会撑高容器的横向条。
+ */
 function renderCodeBlock(code: string, rawLang: string | undefined): string {
   const lang = (rawLang || '').trim().toLowerCase();
   const isPlain = PLAIN_LANGUAGES.has(lang) || code.length > HIGHLIGHT_SIZE_LIMIT;
@@ -102,9 +113,11 @@ function renderCodeBlock(code: string, rawLang: string | undefined): string {
   const body = highlighted ?? (isPlain ? escapeHtml(code) : highlightCodeSyntax(code));
   const langLabel = escapeHtml(lang || 'text');
 
-  return `<div class="md-codeblock code-block-wrapper" data-lang="${langLabel}"><div class="md-codeblock__bar"><span class="md-codeblock__lang">${langLabel}</span><button type="button" class="md-codeblock__copy" data-md-copy="true">${escapeHtml(
+  return `<div class="md-codeblock code-block-wrapper" data-lang="${langLabel}"><button type="button" class="md-codeblock__copy" data-md-copy="true" title="${escapeHtml(
     t('common.copy')
-  )}</button></div><pre class="md-pre"><code class="language-${langLabel}">${body}</code></pre></div>`;
+  )}" aria-label="${escapeHtml(t('common.copy'))}">${escapeHtml(
+    t('common.copy')
+  )}</button><pre class="md-pre"><code class="language-${langLabel}">${body}</code></pre></div>`;
 }
 
 const parser = marked.use({
@@ -241,7 +254,8 @@ export function renderMarkdownCore(md: string): string {
   const normalized = convertTsvTables(healStreamingMarkdown(md));
   const parsed = parser.parse(normalized) as string;
   const withClasses = parsed
-    .replace(/<table>/g, '<table class="md-table">')
+    .replace(/<table>/g, '<div class="md-table-wrap"><table class="md-table">')
+    .replace(/<\/table>/g, '</table></div>')
     .replace(/<blockquote>/g, '<blockquote class="md-quote">')
     .replace(/<hr>/g, '<hr class="md-hr">');
   const result = sanitize(withClasses);

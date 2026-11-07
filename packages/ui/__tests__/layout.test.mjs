@@ -175,7 +175,10 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     const { renderMarkdown } = await import('../dist/components/MiddlePod/MiddlePod.js');
     const html = renderMarkdown('```ts\nconst a = 1;\n```');
     assert.ok(html.includes('md-codeblock'), 'Must render Markdown code blocks with md-codeblock wrapper');
-    assert.ok(html.includes('md-codeblock__lang">ts<'), 'Code block must carry its language label');
+    // 语言只保留在 data-lang 上，不再渲染顶部语言条
+    assert.ok(html.includes('data-lang="ts"'), 'Code block must carry its language in data-lang');
+    assert.ok(!html.includes('md-codeblock__bar'), '代码块严禁再渲染顶部表头');
+    assert.ok(html.includes('md-codeblock__copy'), '复制按钮必须常驻在容器右上角');
   });
 
   await t.test('InputDock must be mounted strictly inside the middle pod conversation area', async () => {
@@ -516,14 +519,14 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     const dockMatch = cssContent.match(/\[data-theme="ayu-light"\]\s+\.composer-dock\s*\{([\s\S]*?)\}/);
     assert.ok(dockMatch, 'Must define [data-theme="ayu-light"] .composer-dock');
     const dockBlock = dockMatch[1];
-    assert.ok(dockBlock.includes('var(--border-medium)'), 'Composer dock must use var(--border-medium)');
+    assert.ok(dockBlock.includes('var(--border-subtle)'), 'Composer dock must use var(--border-subtle)');
     assert.ok(!dockBlock.includes('var(--accent)'), 'Composer dock container must NOT use accent border');
 
     // 4. Invariant: Composer dock focus-within in ayu-light MUST NOT use accent border
     const focusMatch = cssContent.match(/\[data-theme="ayu-light"\]\s+\.composer-dock:focus-within\s*\{([\s\S]*?)\}/);
     assert.ok(focusMatch, 'Must define [data-theme="ayu-light"] .composer-dock:focus-within');
     const focusBlock = focusMatch[1];
-    assert.ok(focusBlock.includes('border-color: var(--border-strong)'), 'Composer dock focus must use var(--border-strong)');
+    assert.ok(focusBlock.includes('border-color: var(--border-medium)'), 'Composer dock focus must use var(--border-medium)');
     assert.ok(!focusBlock.includes('var(--accent-border)'), 'Composer dock focus must NOT use accent-border');
     assert.ok(!focusBlock.includes('var(--accent)'), 'Composer dock focus must NOT use accent');
   });
