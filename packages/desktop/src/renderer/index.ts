@@ -287,6 +287,43 @@ function persistMessagesToCache(
   void cacheService.applyRemoteWindow(ref, rows, fenceMax).catch(() => undefined);
 }
 
+/**
+ * 把当前流式回合已获权威 rowId 的消息写入客户端持久化缓存。
+ *
+ * 【设计意图 (Why)】
+ *   接手流式处理内容：使流式结束或回合落盘后的对话内容实时落盘到 IndexedDB，
+ *   避免刷新或离线时丢失刚才对话的内容。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   没有真实 rowId 的消息不落盘，避免产生 usr-/ast- 临时主键污染。
+ *   只有通过 bindTurnRowIds 绑定过网关权威 rowId 的消息才能落盘。
+ *
+ * 【约束与规则 (Rules)】
+ *   - 异步写入，降级静默，不阻塞 UI 渲染循环；
+ *   - 写入失败不影响内存状态与流式响应。
+ */
+function persistTurnToCache(
+  sessionId: string,
+  botName: string | undefined | null,
+  messages: MessageViewModel[]
+): void {
+  if (!sessionId) return;
+  const isRoom = hostedRoomIds.has(sessionId) || state.groupRooms.some((g) => g.roomId === sessionId);
+  const ref: CacheChannelRef = {
+    profile: isRoom ? '' : (botName || state.profileName || 'default'),
+    channel: isRoom ? 'room' : 'session',
+    channelId: sessionId,
+  };
+  const rows: CachedMessageRow[] = [];
+  for (const message of messages) {
+    const row = toCachedMessage(message, ref);
+    if (row) rows.push(row);
+  }
+  if (rows.length > 0) {
+    void cacheService.appendRows(ref, rows).catch(() => undefined);
+  }
+}
+
 /** 把缓存 Agent 行还原成渲染层档案结构。 */
 function toAgentProfile(row: CachedAgentSummary): AgentProfile {
   return {
@@ -308,8 +345,20 @@ function toAgentProfile(row: CachedAgentSummary): AgentProfile {
  */
 async function restoreCacheToState(): Promise<void> {
   try {
-    const [indexRows, agents] = await Promise.all([cacheService.readSessions(), cacheService.readAgents()]);
+    const [indexRows, agents, avatars] = await Promise.all([
+      cacheService.readSessions(),
+      cacheService.readAgents(),
+      cacheService.readAvatars(),
+    ]);
     let touched = false;
+
+    if (avatars && Object.keys(avatars).length > 0) {
+      for (const [k, v] of Object.entries(avatars)) {
+        if (v && typeof v === 'string') {
+          profileAvatarCache.set(k.toLowerCase(), v);
+        }
+      }
+    }
 
     if (state.sessions.length === 0) {
       const cachedSessions = indexRows.filter((row) => row.kind === 'session');
@@ -329,7 +378,19 @@ async function restoreCacheToState(): Promise<void> {
       state.profiles = agents.map(toAgentProfile);
       touched = true;
     }
-    if (touched) render();
+
+    if (touched) {
+      // 若当前未激活会话且缓存中存在会话，预载首个会话消息以瞬间完成首屏渲染
+      if (!state.activeSessionId && state.sessions.length > 0) {
+        const firstSession = state.sessions[0];
+        if (firstSession?.id) {
+          state.activeSessionId = firstSession.id;
+          state.activeLiveSessionId = '';
+          void loadMessages(firstSession.id, firstSession.botName);
+        }
+      }
+      render();
+    }
   // gate-degrade: 本地缓存读取失败属于可选加速失效，回落到网络拉取即可
   } catch {}
 }
@@ -677,6 +738,16 @@ document.addEventListener('click', (event) => {
  *   - 当 window.hermesDesktop 存在时，首屏保持桌面推导，后续由 desktopApi.getSystemInfo() 确认；
  *   - 当 window.hermesDesktop 不存在且处于小屏时，自动推导为移动端（android / ios）。
  */
+function safeParseJson<T>(raw: string | null, fallback: T): T {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  // gate-degrade: JSON 解析异常时回落到默认值，避免启动受阻
+  } catch {
+    return fallback;
+  }
+}
+
 function detectInitialPlatform(): 'windows' | 'macos' | 'linux' | 'ios' | 'android' | 'web' {
   if (typeof navigator !== 'undefined') {
     const ua = navigator.userAgent.toLowerCase();
@@ -734,8 +805,8 @@ const state: AppState = {
   dockNotice: '',
   sessionListError: '',
   pendingSessionIds: [],
-  favoriteModels: JSON.parse(localStorage.getItem('hermes_flux_fav_models') || localStorage.getItem('hermes_aura_fav_models') || '[]'),
-  recentModels: JSON.parse(localStorage.getItem('hermes_flux_recent_models') || localStorage.getItem('hermes_aura_recent_models') || '[]'),
+  favoriteModels: safeParseJson<string[]>(localStorage.getItem('hermes_flux_fav_models') || localStorage.getItem('hermes_aura_fav_models'), []),
+  recentModels: safeParseJson<string[]>(localStorage.getItem('hermes_flux_recent_models') || localStorage.getItem('hermes_aura_recent_models'), []),
   modelSearchQuery: '',
   reasoningLevel: 'high',
   approvalMode: 'auto',
@@ -831,6 +902,35 @@ let activeStreamingLiveId: string | null = null;
  */
 let activeStreamingBotName: string | null = null;
 const sessionDraftMap = new Map<string, string>();
+const SESSION_DRAFT_STORAGE_KEY = 'hermes_flux_session_drafts';
+
+// 冷启动从本地存储恢复未发送的会话草稿，防止切走或重启丢失用户正在编辑的提问
+try {
+  const rawDrafts = typeof localStorage !== 'undefined' ? localStorage.getItem(SESSION_DRAFT_STORAGE_KEY) : null;
+  if (rawDrafts) {
+    const parsed = JSON.parse(rawDrafts);
+    if (parsed && typeof parsed === 'object') {
+      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof v === 'string' && v.trim()) {
+          sessionDraftMap.set(k, v);
+        }
+      }
+    }
+  }
+// gate-degrade: 本地草稿恢复失败时回落到空草稿，属于可选加速
+} catch {}
+
+function persistDraftsToStorage(): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const obj: Record<string, string> = {};
+    for (const [k, v] of sessionDraftMap.entries()) {
+      if (v.trim()) obj[k] = v;
+    }
+    localStorage.setItem(SESSION_DRAFT_STORAGE_KEY, JSON.stringify(obj));
+  // gate-degrade: 本地草稿存盘失败属于降级场景，不阻断主流程
+  } catch {}
+}
 const unreadSessionIds = new Set<string>();
 const unreadGroupRoomIds = new Set<string>();
 const unreadBotNames = new Set<string>();
@@ -887,6 +987,7 @@ function persistAvatarCache(): void {
       obj[k] = v;
     }
     localStorage.setItem(AVATAR_PERSISTENCE_KEY, JSON.stringify(obj));
+    void cacheService.writeAvatars(obj).catch(() => undefined);
   } catch (e) {
     console.warn('[Flux] Persist avatar cache failed:', e);
   }
@@ -1428,6 +1529,7 @@ async function enrichVisibleSessionPreviews(): Promise<void> {
 
   if (changed && gen === enrichPreviewGeneration) {
     syncProfileLastMessages();
+    persistSessionsToCache(state.sessions);
     render();
   }
 }
@@ -2777,6 +2879,7 @@ async function createNewSession(options?: { profile?: string; projectId?: string
   const currentInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
   if (state.activeSessionId && currentInput) {
     sessionDraftMap.set(state.activeSessionId, currentInput.value);
+    persistDraftsToStorage();
   }
 
   try {
@@ -2901,9 +3004,19 @@ async function deleteSession(id: string): Promise<void> {
     sessionMessagesCache.delete(id);
     sessionServerOffset.delete(id);
     sessionDraftMap.delete(id);
+    persistDraftsToStorage();
     unreadSessionIds.delete(id);
     activeRunningSessionIds.delete(id);
     defaultSessionHandleRegistry.unregister(id);
+
+    // 持久化缓存清理：清空该会话在 IndexedDB 中的消息通道并持久化最新索引
+    const deleteCacheRef: CacheChannelRef = {
+      profile: targetSession?.botName || state.profileName || 'default',
+      channel: 'session',
+      channelId: id,
+    };
+    void cacheService.dropChannel(deleteCacheRef).catch(() => undefined);
+    persistSessionsToCache(state.sessions);
 
     // 如果被删除的会话正在流式运行，安全重置流式看门狗与标志，彻底杜绝输入框被全局 isStreaming 锁死
     if (activeStreamingStoredSessionId === id) {
@@ -2944,6 +3057,7 @@ async function deleteSession(id: string): Promise<void> {
       sessionMessagesCache.delete(id);
       sessionServerOffset.delete(id);
       sessionDraftMap.delete(id);
+      persistDraftsToStorage();
       unreadSessionIds.delete(id);
       activeRunningSessionIds.delete(id);
       if (activeStreamingStoredSessionId === id) {
@@ -3126,6 +3240,7 @@ async function selectSession(id: string, options?: { preserveFocus?: boolean; bo
   if (state.activeSessionId && state.activeSessionId !== id) {
     if (currentInput) {
       sessionDraftMap.set(state.activeSessionId, currentInput.value);
+      persistDraftsToStorage();
     }
     if (state.rollbackArmed && state.rollbackArmed.sessionId === state.activeSessionId) {
       disarmRollbackOnLeave();
@@ -3712,6 +3827,11 @@ async function sendMessage(text: string): Promise<void> {
     finalText = `[${t('dock.attachmentHeader')}]\n${attachmentLines.join('\n')}\n\n${trimmed}`;
   }
 
+  if (state.activeSessionId) {
+    sessionDraftMap.delete(state.activeSessionId);
+    persistDraftsToStorage();
+  }
+
   const userMsgId = `usr-${Date.now()}`;
   const userMsg: MessageViewModel = {
     id: userMsgId,
@@ -3824,6 +3944,26 @@ async function sendMessage(text: string): Promise<void> {
       sessionHistoryTrust.set(state.activeSessionId, 'server-priority');
       sessionServerOffset.delete(state.activeSessionId);
       state.hasOlderMessages = false;
+
+      // 截断成功同步驱逐持久化缓存中的被截断消息（定理 24，彻底避免冷启动复活）
+      let survivorMap: Map<number, number | null> | null = null;
+      if (submitResult?.survivor_row_id_map && typeof submitResult.survivor_row_id_map === 'object') {
+        survivorMap = new Map();
+        for (const [k, v] of Object.entries(submitResult.survivor_row_id_map)) {
+          const numKey = Number(k);
+          if (Number.isFinite(numKey)) {
+            survivorMap.set(numKey, typeof v === 'number' && Number.isFinite(v) ? v : null);
+          }
+        }
+      }
+      const truncateCacheRef: CacheChannelRef = {
+        profile: activeStreamingBotName || state.profileName || 'default',
+        channel: 'session',
+        channelId: state.activeSessionId,
+      };
+      void cacheService.truncate(truncateCacheRef, armedRowId, survivorMap).catch((e) => {
+        console.warn('[Flux:cache] truncate cache failed:', e);
+      });
     }
 
     if (submitResult?.status && submitResult.status !== 'streaming' && submitResult.status !== 'queued') {
@@ -4269,6 +4409,11 @@ function applyTurnActions(actions: TurnAction[]): void {
 
         if (changed) {
           needsRender = true;
+          const targetSessionId = activeStreamingStoredSessionId || state.activeSessionId;
+          const msgsToPersist = targetSessionId === state.activeSessionId ? state.messages : (sessionMessagesCache.get(targetSessionId) || []);
+          if (targetSessionId && msgsToPersist.length > 0) {
+            persistTurnToCache(targetSessionId, activeStreamingBotName, msgsToPersist);
+          }
         }
         break;
       }
@@ -4316,6 +4461,10 @@ function applyTurnActions(actions: TurnAction[]): void {
           if (isFocused) {
             sessionMessagesCache.set(completedTargetId, [...state.messages]);
           }
+          const msgsToPersist = isFocused ? state.messages : (sessionMessagesCache.get(completedTargetId) || []);
+          if (msgsToPersist.length > 0) {
+            persistTurnToCache(completedTargetId, activeStreamingBotName, msgsToPersist);
+          }
           const completedSess = state.sessions.find((s) => s.id === completedTargetId);
           if (completedSess) {
             const finalMsg = isFocused
@@ -4327,6 +4476,7 @@ function applyTurnActions(actions: TurnAction[]): void {
             completedSess.timestamp = Date.now();
             completedSess.time = formatTimestamp(Date.now());
             state.sessions = [completedSess, ...state.sessions.filter((s) => s.id !== completedSess.id)];
+            persistSessionsToCache(state.sessions);
           }
         }
         // 状态严格独立：用"回合发起时的 Bot"收尾，与当前焦点解耦。
@@ -7251,6 +7401,7 @@ function bindModelDropdownEvents(): void {
         } else {
           state.favoriteModels.push(modelId);
         }
+        localStorage.setItem('hermes_flux_fav_models', JSON.stringify(state.favoriteModels));
         localStorage.setItem('hermes_aura_fav_models', JSON.stringify(state.favoriteModels));
         updateModelDropdownSubtree();
       }
@@ -7469,6 +7620,12 @@ async function init(): Promise<void> {
   // 冷启动先喂本地快照再连网：首屏不等网络（失败自动回落，不阻塞 connect）
   void restoreCacheToState();
   connect();
+
+  window.addEventListener('focus', () => {
+    if (gatewayClient && !state.isStreaming) {
+      void fetchProfiles().catch(() => undefined);
+    }
+  });
 }
 
 init();
