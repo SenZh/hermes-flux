@@ -18,7 +18,7 @@
 
 import type { SubagentTaskState } from '@hermes-flux/core';
 import { t } from '../../i18n/index.js';
-import { escapeHtml } from './MiddlePod.js';
+import { escapeHtml } from '../../utils/html.js';
 
 export interface WorkerDelegationCardProps {
   task: SubagentTaskState;

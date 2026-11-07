@@ -491,6 +491,20 @@ details[open] > summary > .tool-row__expand {
   color: var(--muted-foreground);
 }
 
+/* 运行中命令：等宽字体 + 更弱化，让用户一眼看到"在跑什么"而不与标题争抢
+   【设计意图 (Why)】多工具打包后只显示"N 个工具执行中"，用户会失去对当前动作的感知。 */
+.conv-package__cmd {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--conv-font-mono);
+  font-size: var(--conv-micro-size);
+  line-height: 20px;
+  color: var(--muted-foreground);
+  opacity: 0.85;
+}
+
 .conv-package__body,
 .tool-package__body {
   display: flex;

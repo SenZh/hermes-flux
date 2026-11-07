@@ -665,6 +665,14 @@ html[data-maximized="true"] #flux-app-root {
   background: color-mix(in srgb, var(--primary) 0%, transparent);
 }
 
+/* 拖拽锁定态必须比 hover 更强：细线加深 + 极轻底色，
+   否则用户按住拖动时无法确认"把手已被我抓住"。
+   底色控制在 12% 以内，保持发丝线美学，不做整块色带。 */
+.rail-resize-handle:active {
+  border-color: color-mix(in srgb, var(--primary) 65%, transparent) !important;
+  background: color-mix(in srgb, var(--primary) 12%, transparent) !important;
+}
+
 /* 左轨平滑折叠/展开动效：严格对齐宪法 I6 非对称时序与 GPU 独立图层加速 */
 #flux-left-rail,
 .flux-left-rail {
@@ -1033,7 +1041,8 @@ button {
 .session-item,
 .rail-group-item,
 .rail-primary-agent-card {
-  border: 1px solid transparent !important;
+  /* 视觉净化：列表行不画边框，选中态只用对比底色表达（历史 1px transparent 占位已无对应 hover 边框，属冗余） */
+  border: none !important;
 }
 .session-item:hover,
 .rail-group-item:hover,

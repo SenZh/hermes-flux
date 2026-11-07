@@ -71,13 +71,25 @@
 <body>
   <div id="flux-app-root"></div>
 
+  <!-- 由 CDP 测试用 esbuild 现场打包：壳层与左轨依赖 react，浏览器无法直接解析裸模块说明符 -->
+  <script src="/packages/desktop/__tests__/cdp/.tmp/e2e-entry.js"></script>
   <script type="module">
-    import { renderTitlebar } from '/packages/ui/dist/components/Titlebar/Titlebar.js';
-    import { renderLeftRail } from '/packages/ui/dist/components/LeftRail/LeftRail.js';
-    import { renderMiddlePod } from '/packages/ui/dist/components/MiddlePod/MiddlePod.js';
-    import { renderInputDock } from '/packages/ui/dist/components/InputDock/InputDock.js';
-    import { renderContextMenu } from '/packages/ui/dist/components/ContextMenu/ContextMenu.js';
-    import { renderAgentProfileEditorModal } from '/packages/ui/dist/components/Bot/AgentProfileEditorModal.js';
+    const {
+      renderTitlebar,
+      renderLeftRailHtml,
+      renderMiddlePod,
+      renderInputDock,
+      renderContextMenu,
+      renderAgentProfileEditorModal,
+    } = window.__e2e;
+
+    /** 旧模板签名兼容：把 isBotsGroupExpanded 映射到 React 模型的 isGroupsGroupExpanded */
+    const renderLeftRail = (props) =>
+      renderLeftRailHtml({
+        ...props,
+        searchQuery: props.searchQuery || '',
+        isGroupsGroupExpanded: props.isBotsGroupExpanded,
+      });
 
     window.cdpApp = {
       sessions: [
@@ -185,10 +197,50 @@
           })}
         `;
         root.innerHTML = html;
+        // 消息行由 React 真实挂载到宿主锚点（renderMiddlePod 只输出骨架）
+        const messageHost = document.getElementById('react-message-list-host');
+        if (messageHost && window.__e2e?.mountMessages) {
+          if (this._messageRoot) {
+            try { this._messageRoot.unmount(); } catch {}
+          }
+          this._messageRoot = window.__e2e.mountMessages(messageHost, this.messages);
+        }
         this.bindEvents();
       },
 
       bindEvents() {
+        // 群聊行内重命名：静态渲染的回调一律 noop，这里用原生事件接回 cdpApp 状态。
+        // 【防范的历史坑 (Pitfall)】确认按钮是 form 的 submit 按钮，不拦截 submit 会触发整页导航，
+        // 后续用例全部拿不到 window.cdpApp，表现为一连串 TypeError: undefined。
+        const renameInput = document.querySelector('.rail-group-rename-input');
+        const renameForm = document.querySelector('.rail-group-inline-rename-wrap form');
+        const commitRename = (e) => {
+          if (e) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+          const target = this.groupRooms.find(g => g.roomId === this.editingGroupRoomId);
+          if (target && renameInput) target.name = renameInput.value;
+          this.editingGroupRoomId = null;
+          this.render();
+        };
+        if (renameForm) {
+          renameForm.addEventListener('submit', commitRename, true);
+        }
+        const confirmRename = document.querySelector('.btn-confirm-group-rename');
+        if (confirmRename) {
+          confirmRename.onclick = commitRename;
+        }
+        const cancelRename = document.querySelector('.btn-cancel-group-rename');
+        if (cancelRename) {
+          cancelRename.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.editingGroupRoomId = null;
+            this.render();
+          };
+        }
+
         // Session context menu & click
         document.querySelectorAll('.session-item').forEach(el => {
           el.onclick = (e) => {

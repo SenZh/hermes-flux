@@ -17,7 +17,7 @@
 
 import type { AgentProfile } from '@hermes-flux/core';
 import { t } from '../../i18n/index.js';
-import { escapeHtml } from '../MiddlePod/MiddlePod.js';
+import { escapeHtml } from '../../utils/html.js';
 
 export interface GroupPromotionDialogProps {
   parentSessionId: string;

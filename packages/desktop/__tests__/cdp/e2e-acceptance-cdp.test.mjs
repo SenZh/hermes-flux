@@ -5,6 +5,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
+import esbuild from 'esbuild';
 
 const EDGE_PATH = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const CDP_PORT = 9338;
@@ -14,6 +15,20 @@ test('Hermes Flux Core Delivery - Real Headless Browser CDP Physical Acceptance 
     t.skip('Microsoft Edge not found on system');
     return;
   }
+
+  // 0. 现场打包渲染器：壳层与左轨依赖 react，浏览器无法解析裸模块说明符
+  const bundleOut = path.resolve('packages/desktop/__tests__/cdp/.tmp/e2e-entry.js');
+  fs.mkdirSync(path.dirname(bundleOut), { recursive: true });
+  await esbuild.build({
+    entryPoints: [path.resolve('packages/ui/__tests__/cdp/e2e-entry.mjs')],
+    outfile: bundleOut,
+    bundle: true,
+    format: 'iife',
+    platform: 'browser',
+    target: 'es2022',
+    define: { 'process.env.NODE_ENV': '"production"' },
+    logLevel: 'silent',
+  });
 
   // 1. Static HTTP Server for zero-CORS ES module importing
   const rootDir = path.resolve('.');
@@ -177,8 +192,8 @@ test('Hermes Flux Core Delivery - Real Headless Browser CDP Physical Acceptance 
   await t.test('2. CDP 物理验证: 工具执行卡片命令实时高亮与杜绝 [object Object]', async () => {
     const res = await cdpCall('Runtime.evaluate', {
       expression: `(() => {
-        const card = document.querySelector('.tool-execution-package-card');
-        const cmdBadge = document.querySelector('.tool-active-cmd-badge');
+        const card = document.querySelector('.conv-package');
+        const cmdBadge = document.querySelector('.conv-package__cmd');
         const allText = card ? card.innerText : '';
         return {
           hasCard: Boolean(card),
@@ -341,20 +356,23 @@ test('Hermes Flux Core Delivery - Real Headless Browser CDP Physical Acceptance 
         });
         window.cdpApp.render();
 
-        // 检查左轨 Bot 头像、会话行头像中是否成功渲染 img (此时活跃会话为 sess-2)
+        // Agent 行与群聊拼图行都必须落成真实 <img>
         const botImg = document.querySelector('.rail-pinned-bot-row[data-profile="arch-wang"] img');
-        const sessImg = document.querySelector('.session-item[data-id="sess-2"] img');
+        const groupImg = document.querySelector('.rail-group-item img');
+        // 普通会话行按设计不带头像（RailEntityRow 统一基准），显式断言防止回归成样式漂移
+        const sessionImg = document.querySelector('.session-item[data-id="sess-2"] img');
 
         // 模拟会话对账刷新（不带头像的二次渲染）
         window.cdpApp.render();
         const botImgAfter = document.querySelector('.rail-pinned-bot-row[data-profile="arch-wang"] img');
-        const sessImgAfter = document.querySelector('.session-item[data-id="sess-2"] img');
+        const groupImgAfter = document.querySelector('.rail-group-item img');
 
         return {
           hasBotImg: Boolean(botImg),
-          hasSessImg: Boolean(sessImg),
+          hasGroupImg: Boolean(groupImg),
+          hasSessionImg: Boolean(sessionImg),
           hasBotImgAfter: Boolean(botImgAfter),
-          hasSessImgAfter: Boolean(sessImgAfter)
+          hasGroupImgAfter: Boolean(groupImgAfter)
         };
       })()`,
       returnByValue: true,
@@ -362,8 +380,9 @@ test('Hermes Flux Core Delivery - Real Headless Browser CDP Physical Acceptance 
 
     const avInfo = avatarRes.result.value;
     assert.equal(avInfo.hasBotImg, true, '智能体行必须渲染真实图片头像');
-    assert.equal(avInfo.hasSessImg, true, '会话行必须渲染对应智能体的真实图片头像');
+    assert.equal(avInfo.hasGroupImg, true, '群聊行必须渲染成员头像拼图');
+    assert.equal(avInfo.hasSessionImg, false, '普通会话行按统一基准不渲染头像');
     assert.equal(avInfo.hasBotImgAfter, true, '重新渲染后智能体图片头像严禁被冲刷丢失');
-    assert.equal(avInfo.hasSessImgAfter, true, '重新渲染后会话行图片头像严禁被冲刷丢失');
+    assert.equal(avInfo.hasGroupImgAfter, true, '重新渲染后群聊头像严禁被冲刷丢失');
   });
 });

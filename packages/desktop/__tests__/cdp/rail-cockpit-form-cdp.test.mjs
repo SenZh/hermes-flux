@@ -245,7 +245,7 @@ test('rail-cockpit-form: 微轨按钮收编、header 形态与时间内联（真
         groupTimeRightDiff: Math.round(groupRight - groupTimeRight),
         railScrollbarWidth: railCs ? railCs.scrollbarWidth : null,
         scrollAreaScrollbarWidth: scrollCs ? scrollCs.scrollbarWidth : null,
-        stationIsPanel: stationEl ? stationEl.classList.contains('bg-panel') : false,
+        stationIsPanel: stationEl ? (stationEl.classList.contains('bg-panel') || stationEl.classList.contains('bg-sidebar')) : false,
       };
     })()`);
 
@@ -257,7 +257,7 @@ test('rail-cockpit-form: 微轨按钮收编、header 形态与时间内联（真
     assert.ok(check.groupTimeRightDiff <= 16, `群聊时间必须靠右对齐（当前差 ${check.groupTimeRightDiff}px）`);
     assert.equal(check.railScrollbarWidth, 'none', '左轨容器 scrollbarWidth 必须为 none');
     assert.equal(check.scrollAreaScrollbarWidth, 'none', '会话列表容器 scrollbarWidth 必须为 none');
-    assert.equal(check.stationIsPanel, true, '微轨必须使用 bg-panel 沉底，修复浅色模式下纯白刺眼');
+    assert.equal(check.stationIsPanel, true, '微轨必须使用语义沉底背景（bg-sidebar / bg-panel），修复浅色模式下纯白刺眼');
 
     // 状态指示点与时间同轴对齐、主工位卡去边框、微轨焦点保活
     const dotAlignment = await evaluate(`(() => {

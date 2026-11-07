@@ -10,6 +10,7 @@
  */
 
 import { t } from '../../i18n/index.js';
+import { escapeHtml } from '../../utils/html.js';
 import { renderMarkdownCore, formatInlineCodeOrLink as formatInlineCodeOrLinkLib, highlightCodeSyntax as highlightCodeSyntaxLib } from '../../lib/markdown.js';
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -527,14 +528,7 @@ export function renderToolCapsuleSlot(m: MessageViewModel): string {
 }
 
 
-export function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
+export { escapeHtml };
 
 const COMMON_FILE_EXTENSIONS = new Set([
   'html', 'htm', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp',

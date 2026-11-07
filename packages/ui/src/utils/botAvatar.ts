@@ -8,18 +8,12 @@
  */
 
 // gate-theme-allow: 适配全皮肤主题色彩，消除与暗黑界面的冲突
+import { escapeHtml } from './html.js';
 const XIAOFAWANG_YELLOW = 'var(--foreground)';
 // gate-theme-allow: 1:1 对齐官方 Bot 双眼瞳孔自然黑，属品牌资产固定色而非皮肤面
 const BOT_PUPIL_BLACK = '#18181B';
 
-export function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
+export { escapeHtml };
 
 /**
  * 群聊拼图头像：2 人左右分栏、3-4 人 2x2 网格。

@@ -269,8 +269,8 @@ function RenameGroup({ initialName, roomId, onConfirm, onCancel }: {
       onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); onCancel(); } }}
       autoFocus
     />
-    <Button type="submit" size="sm" className="h-6 rounded-sm px-2 text-micro" title={t('common.confirm')}>{t('common.confirm')}</Button>
-    <Button type="button" variant="ghost" size="sm" className="h-6 rounded-sm px-1 text-micro text-muted-foreground" title={t('common.cancel')} onClick={onCancel}>{t('common.cancel')}</Button>
+    <Button type="submit" size="sm" className="btn-confirm-group-rename h-6 rounded-sm px-2 text-micro" title={t('common.confirm')}>{t('common.confirm')}</Button>
+    <Button type="button" variant="ghost" size="sm" className="btn-cancel-group-rename h-6 rounded-sm px-1 text-micro text-muted-foreground" title={t('common.cancel')} onClick={onCancel}>{t('common.cancel')}</Button>
   </form>;
 }
 
@@ -402,7 +402,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
           {/* PR-3d 用户定案：header 字号行高放大一档，删 ⌄/› 文本箭头（折叠态由列表显隐与点击整行表达），
               右侧 + 为新建群聊入口；计数徽标沿用既有 visibleGroups.length，非新增数据面。 */}
           <div className="flex w-full items-center justify-between gap-1 px-2 py-1 text-muted-foreground hover:text-foreground transition-colors mb-1">
-            <button type="button" id="rail-groups-accordion-trigger" className="flex min-w-0 flex-1 items-center gap-2.5 text-left text-body font-semibold transition-colors" onClick={props.onToggleGroups}>
+            <button type="button" id="rail-groups-accordion-trigger" className="flex min-h-7 min-w-0 flex-1 items-center gap-2.5 text-left text-body font-semibold transition-colors" onClick={props.onToggleGroups}>
               <Users size={13} className="opacity-75 shrink-0" />
               <span>{t('rail.groups')}</span>
             </button>
@@ -429,7 +429,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
         <section className="mb-2">
           {/* 会话 header 同构：放大字号、删箭头、右侧 + 新建会话（复用 NewTaskModal solo 态）。 */}
           <div className="flex w-full items-center justify-between gap-1 px-2 py-1 text-muted-foreground hover:text-foreground transition-colors mb-1">
-            <button type="button" id="rail-sessions-accordion-trigger" className="flex min-w-0 flex-1 items-center gap-2.5 text-left text-body font-semibold transition-colors" onClick={props.onToggleSessions}>
+            <button type="button" id="rail-sessions-accordion-trigger" className="flex min-h-7 min-w-0 flex-1 items-center gap-2.5 text-left text-body font-semibold transition-colors" onClick={props.onToggleSessions}>
               <Layers size={13} className="opacity-75 shrink-0" />
               <span>{t('rail.conversations')}</span>
             </button>

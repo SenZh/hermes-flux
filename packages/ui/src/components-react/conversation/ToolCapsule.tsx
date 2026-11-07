@@ -188,6 +188,10 @@ export function ToolBlocks({ tools }: { tools: ConversationToolVM[] }): React.Re
   const runningCount = tools.filter((tool) => tool.status === 'running').length;
   const completedCount = tools.filter((tool) => tool.status === 'completed').length;
   const failedCount = tools.filter((tool) => tool.status === 'failed').length;
+  // 【设计意图 (Why)】打包卡片收起时用户仍需要知道"现在到底在跑什么命令"，
+  // 只给"N 个工具执行中"等于让用户盲等。
+  const runningTool = tools.find((tool) => tool.status === 'running');
+  const runningTarget = runningTool ? shortTarget(runningTool.args) : '';
   const statusSummary = hasRunning
     ? t('tool.executingSummary', {
         running: String(runningCount),
@@ -249,6 +253,11 @@ export function ToolBlocks({ tools }: { tools: ConversationToolVM[] }): React.Re
             <polyline points="6 9 12 15 18 9" />
           </svg>
           <span className="conv-package__title">{t('tool.packageTitle', { count: String(tools.length) })}</span>
+          {runningTarget ? (
+            <span className="conv-package__cmd" title={runningTarget}>
+              {runningTarget}
+            </span>
+          ) : null}
           <span className="conv-package__status">{statusSummary}</span>
         </summary>
         <div className="conv-package__body">{blocks}</div>
