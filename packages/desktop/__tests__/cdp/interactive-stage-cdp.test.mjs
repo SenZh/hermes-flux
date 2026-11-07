@@ -342,8 +342,8 @@ test('Main Chat Stage & Composer Dock - Live Headless Browser CDP Physical Verif
     assert.equal(val.streamingHasFooter, false, 'isStreaming: true 时末条助手行绝不能渲染 assistant-footer-bar');
     assert.equal(val.streamingHasTimeTag, false, 'isStreaming: true 时末条助手行绝不能渲染 time-tag');
     assert.equal(val.completedHasFooter, true, 'isStreaming: false 且为回合末条时必须呈现 assistant-footer-bar');
-    assert.equal(val.completedHasTimeTag, true, 'isStreaming: false 且为回合末条时必须呈现 time-tag');
-    assert.equal(val.completedTimeText, '10:00:02', 'time-tag 必须展示真实时间戳内容');
+    assert.equal(val.completedHasTimeTag, false, 'isStreaming: false 时助手行也不再渲染 time-tag（时间只保留在用户提问下方）');
+    assert.equal(val.completedTimeText, '', '助手行严禁渲染任何时间戳文本');
   });
 
   // 6.4 物理验证：工具插槽常驻锚点与 renderToolCapsuleSlot 判空契约

@@ -194,7 +194,6 @@ export function MessageRow({
               {message.durationMs ? (
                 <span className="duration-tag">{(message.durationMs / 1000).toFixed(1)}s</span>
               ) : null}
-              {message.timestamp ? <span className="time-tag">{message.timestamp}</span> : null}
             </>
           }
         />

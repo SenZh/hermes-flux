@@ -94,8 +94,8 @@ test('Interactive Stage UI Components - 对话区交互操作栏、Token仪表�
     assert.ok(completedHtml.includes('data-action="copy-msg"'), '最终生成完成必须包含复制');
     assert.ok(completedHtml.includes('data-action="fork-msg"'), '最终生成完成必须包含Fork');
     assert.ok(!completedHtml.includes('data-action="regenerate-msg"'), '最终生成完成不得包含重新生成按钮');
-    assert.ok(completedHtml.includes('time-tag'), '最终生成完成必须展示完成时间');
-    assert.ok(completedHtml.includes('14:34:00'), '最终生成完成必须展示精确时间');
+    assert.ok(!completedHtml.includes('time-tag'), '助手行不再重复展示时间，时间只保留在用户提问下方');
+    assert.ok(!completedHtml.includes('14:34:00'), '助手行严禁渲染时间戳文本');
 
     // 3.2 群聊助手行：禁止 Fork，但强显 Agent 昵称
     const html = renderOne(

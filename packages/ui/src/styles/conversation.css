@@ -185,9 +185,10 @@
   max-width: 82%;
   padding: 10px 16px;
   background: var(--chat-user-message-bg, var(--card));
-  border: 1px solid var(--border);
+  /* 气泡只用发丝线界定边界：用户看的是内容，不是一张浮起来的卡片 */
+  border: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
   border-radius: 14px 14px 4px 14px;
-  box-shadow: var(--shadow-card);
+  box-shadow: none;
   font-family: var(--conv-font-sans);
   font-size: var(--conv-text-size);
   line-height: 24px;
