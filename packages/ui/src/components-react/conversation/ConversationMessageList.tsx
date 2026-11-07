@@ -13,9 +13,15 @@ import * as React from 'react';
 import { t } from '../../i18n/index.js';
 import type { ConversationSnapshot } from './types.js';
 import { TurnGroup, groupTurns } from './TurnGroup.js';
+import { collectTouchedFiles } from '../../lib/fileRefs.js';
 
 export function ConversationMessageList({ snapshot }: { snapshot: ConversationSnapshot }): React.ReactElement {
   const turns = React.useMemo(() => groupTurns(snapshot.messages), [snapshot.messages]);
+  // 文件引用只在 Agent 真实读写过该文件时才可点击；按消息引用缓存，避免每次渲染重扫
+  const knownFiles = React.useMemo(
+    () => collectTouchedFiles(snapshot.messages.flatMap((message) => message.toolCalls ?? [])),
+    [snapshot.messages]
+  );
 
   return (
     <>
@@ -31,6 +37,7 @@ export function ConversationMessageList({ snapshot }: { snapshot: ConversationSn
           mode={snapshot.mode}
           isLastTurn={index === turns.length - 1}
           isStreaming={snapshot.isStreaming && index === turns.length - 1}
+          knownFiles={knownFiles}
         />
       ))}
     </>

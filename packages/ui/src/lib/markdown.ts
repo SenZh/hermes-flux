@@ -16,11 +16,40 @@ import DOMPurify from 'dompurify';
 import { t } from '../i18n/index.js';
 import { escapeHtml, isLikelyFilePath, isLikelyHttpUrl } from './text.js';
 import { renderFileTypeIcon } from './fileTypeIcons.js';
+import { isTouchedFileRef } from './fileRefs.js';
 import { highlightCode, isHighlightReady } from './highlight.js';
 
 /**
+ * 当前渲染批次内「会话真实读写过的文件」。
+ * 【设计意图 (Why)】marked 的 renderer 在模块初始化时绑定，拿不到每次调用的参数；
+ *   解析是同步的，用一次性的活动上下文传递上下文比给每个 renderer 再造一套实例更轻。
+ * 【约束与规则 (Rules)】只在 renderMarkdownCore 内同步设置，finally 必须恢复原值。
+ */
+let activeKnownFiles: readonly string[] = [];
+
+function fileRefLinked(ref: string): boolean {
+  return isTouchedFileRef(ref, activeKnownFiles);
+}
+
+/**
+ * 文件引用只有两种形态：
+ *   1. 会话里真实读写过 → 代码药丸 + 文件图标 + 点击预览；
+ *   2. 只是正文里提到 → 普通代码药丸，不画下划线、不给指针光标。
+ */
+function renderFileRef(text: string, rawText: string): string {
+  if (!fileRefLinked(text)) {
+    return `<code class="md-code md-file-ref" data-file-ref="${escapeHtml(text)}">${escapeHtml(rawText)}</code>`;
+  }
+  const tip = t('inspector.clickToPreview', { file: text });
+  return `<code class="md-code md-file-ref md-file-ref--linked tool-file-link content-interactive-link" data-preview-file="${escapeHtml(
+    text
+  )}" data-file-ref="${escapeHtml(text)}" title="${escapeHtml(tip)}">${renderFileTypeIcon(text)}${escapeHtml(rawText)}</code>`;
+}
+
+/**
  * 行内代码 / 文件引用 / URL 引用。
- * 【设计意图 (Why)】文件引用靠文件类型图标识别，而不是靠背景色块；普通代码只保留等宽字形。
+ * 【设计意图 (Why)】文件引用靠文件类型图标与可点击性识别，而不是靠无差别的下划线；
+ *   只有 Agent 真正读写过的文件才允许变成链接。
  */
 export function formatInlineCodeOrLink(rawText: string): string {
   const text = rawText.trim();
@@ -31,11 +60,8 @@ export function formatInlineCodeOrLink(rawText: string): string {
     return `<code class="md-code">${escapeHtml(rawText)}</code>`;
   }
 
-  const tip = isHttp
-    ? t('inspector.clickToOpenLink', { url: text })
-    : t('inspector.clickToPreview', { file: text });
-
   if (isHttp) {
+    const tip = t('inspector.clickToOpenLink', { url: text });
     return `<a class="md-link md-link--url tool-file-link content-interactive-link" data-preview-url="${escapeHtml(
       text
     )}" href="${escapeHtml(text)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(tip)}"><span class="md-link__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span><span class="md-link__label">${escapeHtml(
@@ -43,9 +69,7 @@ export function formatInlineCodeOrLink(rawText: string): string {
     )}</span></a>`;
   }
 
-  return `<a class="tool-file-link content-interactive-link" data-preview-file="${escapeHtml(
-    text
-  )}" title="${escapeHtml(tip)}" style="cursor: pointer;">${renderFileTypeIcon(text)}<span class="md-link__label">${escapeHtml(rawText)}</span></a>`;
+  return renderFileRef(text, rawText);
 }
 
 /** 单遍词法高亮（保留原有实现，shiki 需要异步管线，后续可替换）。 */
@@ -141,11 +165,14 @@ const parser = marked.use({
         )}" href="${escapeHtml(target)}" target="_blank" rel="noopener noreferrer"${titleAttr}>${label}</a>`;
       }
       if (isLikelyFilePath(target)) {
-        return `<a class="md-link md-link--file tool-file-link content-interactive-link" data-preview-file="${escapeHtml(
+        if (!fileRefLinked(target)) {
+          return `<span class="md-link md-link--file md-file-ref" data-file-ref="${escapeHtml(target)}"${titleAttr}>${label}</span>`;
+        }
+        return `<a class="md-link md-link--file md-file-ref md-file-ref--linked tool-file-link content-interactive-link" data-preview-file="${escapeHtml(
           target
-        )}" href="${escapeHtml(target)}" target="_blank" rel="noopener noreferrer"${titleAttr}>${renderFileTypeIcon(
+        )}" data-file-ref="${escapeHtml(target)}" href="${escapeHtml(target)}" target="_blank" rel="noopener noreferrer"${titleAttr}>${renderFileTypeIcon(
           target
-        )}${label}</a>`;
+        )}<span class="md-link__label">${label}</span></a>`;
       }
       return `<a class="md-link" href="${escapeHtml(target)}" target="_blank" rel="noopener noreferrer"${titleAttr}>${label}</a>`;
     },
@@ -245,14 +272,29 @@ function sanitize(html: string): string {
 const markdownRenderCache = new Map<string, string>();
 const MARKDOWN_CACHE_MAX = 500;
 
-export function renderMarkdownCore(md: string): string {
+export interface RenderMarkdownOptions {
+  /** 会话内 Agent 真实读写过的文件；只有命中集合的引用才渲染为可点击 */
+  knownFiles?: readonly string[];
+}
+
+export function renderMarkdownCore(md: string, options?: RenderMarkdownOptions): string {
   if (!md) return '';
 
-  const cached = markdownRenderCache.get(md);
+  const knownFiles = options?.knownFiles ?? [];
+  // 同一段正文在不同会话里可点击的引用不同，缓存键必须带上文件集合
+  const cacheKey = knownFiles.length ? `${md}\u0000${[...knownFiles].sort().join('\u0001')}` : md;
+  const cached = markdownRenderCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
   const normalized = convertTsvTables(healStreamingMarkdown(md));
-  const parsed = parser.parse(normalized) as string;
+  const previousKnownFiles = activeKnownFiles;
+  activeKnownFiles = knownFiles;
+  let parsed: string;
+  try {
+    parsed = parser.parse(normalized) as string;
+  } finally {
+    activeKnownFiles = previousKnownFiles;
+  }
   const withClasses = parsed
     .replace(/<table>/g, '<div class="md-table-wrap"><table class="md-table">')
     .replace(/<\/table>/g, '</table></div>')
@@ -266,7 +308,7 @@ export function renderMarkdownCore(md: string): string {
       const oldestKey = markdownRenderCache.keys().next().value;
       if (oldestKey) markdownRenderCache.delete(oldestKey);
     }
-    markdownRenderCache.set(md, result);
+    markdownRenderCache.set(cacheKey, result);
   }
 
   return result;

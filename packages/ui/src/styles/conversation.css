@@ -1017,47 +1017,65 @@ details[open] > summary > .tool-row__expand {
 
 /* ==========================================================================
    8. 文件链接与普通链接（对标 OpenChamber inlineMessageLinks）
+   【设计意图 (Why)】只有会话里真实读写过的文件才可点击；普通路径保持代码药丸，
+     不再无差别加下划线。URL 仍保留常显下划线，作为外部链接的惯例提示。
    ========================================================================== */
 
 .md-link {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
+  /* 用 inline 而不是 inline-flex：长路径/长 URL 必须能在行内换行，
+     flex 会把整个链接变成不可断行的原子盒，把段落撑破 */
+  display: inline;
   color: inherit;
   text-decoration: none;
-  cursor: pointer;
 }
 
 .md-link__label {
   color: var(--foreground);
+  text-decoration: none;
+}
+
+.md-link--url .md-link__label {
   text-decoration: underline;
   text-decoration-color: var(--border-subtle);
   text-underline-offset: 3px;
   transition: text-decoration-color 0.12s ease;
 }
 
-.md-link:hover .md-link__label {
+.md-link--url:hover .md-link__label {
   text-decoration-color: var(--primary);
 }
 
+/* 文件引用：默认只是代码药丸；只有命中真实读写集合才给出指针与悬停下划线 */
+.md-file-ref--linked {
+  cursor: pointer;
+}
+
+.md-file-ref--linked:hover {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-decoration-color: var(--primary);
+  text-underline-offset: 3px;
+}
+
+/* 文件类型图标与文字同轴：
+   旧实现用 inline-flex + align-items:baseline + align-self:center 混搭，
+   图标盒整体浮在基线上方，看起来“斜着翘起来”。
+   改用 inline 流 + vertical-align 微调，1.05em 盒高正好落在文字中腰。 */
 .md-file__icon,
 .md-link__icon {
-  display: inline-flex;
-  align-items: center;
-  align-self: center;
-  flex-shrink: 0;
+  display: inline-block;
+  width: 1.05em;
+  height: 1.05em;
+  margin-right: 4px;
+  line-height: 1;
+  vertical-align: -0.18em;
   color: var(--muted-foreground);
 }
 
-.md-file__icon svg {
-  width: 1.1em;
-  height: 1.1em;
-  display: block;
-}
-
+.md-file__icon svg,
 .md-link__icon svg {
-  width: 1em;
-  height: 1em;
+  width: 100%;
+  height: 100%;
   display: block;
 }
 

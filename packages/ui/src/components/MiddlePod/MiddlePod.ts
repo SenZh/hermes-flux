@@ -11,7 +11,7 @@
 
 import { t } from '../../i18n/index.js';
 import { escapeHtml } from '../../utils/html.js';
-import { renderMarkdownCore, formatInlineCodeOrLink as formatInlineCodeOrLinkLib, highlightCodeSyntax as highlightCodeSyntaxLib } from '../../lib/markdown.js';
+import { renderMarkdownCore, formatInlineCodeOrLink as formatInlineCodeOrLinkLib, highlightCodeSyntax as highlightCodeSyntaxLib, type RenderMarkdownOptions } from '../../lib/markdown.js';
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ToolBlocks } from '../../components-react/conversation/ToolCapsule.js';
@@ -596,6 +596,6 @@ export function highlightCodeSyntax(code: string): string {
   return highlightCodeSyntaxLib(code);
 }
 
-export function renderMarkdown(md: string): string {
-  return renderMarkdownCore(md);
+export function renderMarkdown(md: string, options?: RenderMarkdownOptions): string {
+  return renderMarkdownCore(md, options);
 }

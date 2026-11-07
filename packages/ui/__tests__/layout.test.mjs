@@ -352,26 +352,40 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     assert.equal(isLikelyHttpUrl('http://127.0.0.1:9119'), true, 'HTTP url must be recognized');
     assert.equal(isLikelyHttpUrl('not a url'), false, 'Non-url must not be recognized');
 
-    // 2. User exact screenshot scenario verification
+    // 2. 文件引用只有命中「会话真实读写过的文件」才可点击；
+    //    未命中时保持普通代码药丸，不画下划线、不给指针光标。
     const userMessageSample = `
 针对这套设计，已为您生成了高保真原型与渲染截图：
 - 源码文件: \`/opt/data/projects/hermes-flux/docs/prototypes/desktop-v4-workspace.html\`
 - 渲染截图 (群聊协同态): \`/opt/data/projects/hermes-flux/docs/prototypes/desktop-v4-preview-chat-v2.png\`
 - 渲染截图 (看板交付态): \`/opt/data/projects/hermes-flux/docs/prototypes/desktop-v4-preview-kanban.png\`
 `;
-    const rendered = renderMarkdown(userMessageSample);
+    const knownFiles = [
+      '/opt/data/projects/hermes-flux/docs/prototypes/desktop-v4-workspace.html',
+      '/opt/data/projects/hermes-flux/docs/prototypes/desktop-v4-preview-chat-v2.png',
+      '/opt/data/projects/hermes-flux/docs/prototypes/desktop-v4-preview-kanban.png',
+    ];
+    const rendered = renderMarkdown(userMessageSample, { knownFiles });
 
-    assert.ok(rendered.includes('class="tool-file-link content-interactive-link"'), 'File path inline code must be augmented with interactive classes');
+    assert.ok(rendered.includes('md-file-ref--linked'), '已读写的文件必须标记为可点击引用');
     assert.ok(rendered.includes('data-preview-file="/opt/data/projects/hermes-flux/docs/prototypes/desktop-v4-workspace.html"'), 'HTML prototype path must be bound to data-preview-file');
     assert.ok(rendered.includes('data-preview-file="/opt/data/projects/hermes-flux/docs/prototypes/desktop-v4-preview-chat-v2.png"'), 'PNG preview path must be bound to data-preview-file');
-    assert.ok(rendered.includes('cursor: pointer'), 'Interactive file capsule must have pointer cursor');
     assert.ok(rendered.includes('title='), 'Interactive file capsule must have descriptive title for accessibility');
 
-    // 3. Markdown standard link verification
+    const untouched = renderMarkdown('查看 `config.yaml` 的配置');
+    assert.ok(untouched.includes('md-file-ref'), '路径仍标记为文件引用');
+    assert.ok(!untouched.includes('md-file-ref--linked'), '未被读写过的文件不得标记为可点击');
+    assert.ok(!untouched.includes('data-preview-file'), '未被读写过的文件严禁绑定预览点击');
+
+    // 3. Markdown 标准链接：文件链接同样需要命中集合，http 链接始终可点击
     const mdLinkSample = '查看 [高保真原型文件](/opt/data/projects/hermes-flux/docs/prototypes/desktop-v4-workspace.html) 与 [在线文档](https://example.com/docs)';
-    const renderedMdLink = renderMarkdown(mdLinkSample);
+    const renderedMdLink = renderMarkdown(mdLinkSample, { knownFiles });
     assert.ok(renderedMdLink.includes('data-preview-file="/opt/data/projects/hermes-flux/docs/prototypes/desktop-v4-workspace.html"'), 'Markdown file link must have data-preview-file');
     assert.ok(renderedMdLink.includes('data-preview-url="https://example.com/docs"'), 'Markdown http link must have data-preview-url');
+
+    const unlinkedMdLink = renderMarkdown('[配置文件](/opt/never-read.yaml)');
+    assert.ok(!unlinkedMdLink.includes('data-preview-file'), '未命中集合的文件链接不得绑定预览点击');
+    assert.ok(!unlinkedMdLink.includes('<a '), '未命中集合的文件链接不得渲染成超链接');
 
     // 4. Negative mutation check: plain variable names and simple code must NOT be turned into tool-file-link
     const plainCode = '变量名是 `userProfileState`，方法是 `calculateTax()`';

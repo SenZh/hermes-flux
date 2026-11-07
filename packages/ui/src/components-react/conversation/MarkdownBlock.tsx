@@ -20,10 +20,12 @@ export interface MarkdownBlockProps {
   /** 流式直写锚点 ID，缺省时不生成 */
   anchorId?: string;
   className?: string;
+  /** 会话内 Agent 真实读写过的文件：只有命中集合的引用才可点击 */
+  knownFiles?: readonly string[];
 }
 
-export function MarkdownBlock({ content, anchorId, className }: MarkdownBlockProps): React.ReactElement | null {
-  const html = React.useMemo(() => renderMarkdown(content), [content]);
+export function MarkdownBlock({ content, anchorId, className, knownFiles }: MarkdownBlockProps): React.ReactElement | null {
+  const html = React.useMemo(() => renderMarkdown(content, { knownFiles }), [content, knownFiles]);
 
   // 文件类型图标依赖 document 中的 sprite；挂载一次即可，重复调用无副作用。
   React.useEffect(() => {

@@ -27,6 +27,8 @@ export interface MessageRowProps {
   isLastInTurn: boolean;
   mode: ConversationMode;
   isStreaming: boolean;
+  /** 会话内 Agent 真实读写过的文件（决定正文里的文件引用是否可点击） */
+  knownFiles?: readonly string[];
 }
 
 export function MessageRow({
@@ -35,6 +37,7 @@ export function MessageRow({
   isLastInTurn,
   mode,
   isStreaming,
+  knownFiles,
 }: MessageRowProps): React.ReactElement {
   const isUser = message.role === 'user';
   const thoughtSummary = message.thought ? message.thought.replace(/\s+/g, ' ').trim().slice(0, 60) : '';
@@ -91,7 +94,7 @@ export function MessageRow({
 
       <ToolSection messageId={message.id} tools={message.toolCalls ?? []} />
 
-      <MarkdownBlock content={message.content} anchorId={`msg-content-${message.id}`} className="conv-message__body" />
+      <MarkdownBlock content={message.content} anchorId={`msg-content-${message.id}`} className="conv-message__body" knownFiles={knownFiles} />
 
       {isLastInTurn && !isStreaming ? (
         <ConversationMessageFooter
