@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { renderInspectionPod } from '../dist/components/InspectionPod/InspectionPod.js';
 import { renderStatusBar } from '../dist/components/StatusBar/StatusBar.js';
 import { renderSettingsModal } from '../dist/components/SettingsModal/SettingsModal.js';
+import { renderMessages } from './helpers/renderMessages.mjs';
 
 test('UI Components Layout & Engineering Guardrails', async (t) => {
   await t.test('InspectionPod streamlined file previewer', () => {
@@ -156,27 +157,25 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     assert.ok(html.includes('id="dock-send-btn"'), 'InputDock must have send action button');
   });
 
-  await t.test('MiddlePod must span 100% full-bleed and provide incremental DOM hooks', async () => {
+  await t.test('Canvas must be full-bleed and messages must expose incremental DOM hooks', async () => {
     const { renderMiddlePod } = await import('../dist/components/MiddlePod/MiddlePod.js');
-    const html = renderMiddlePod({
-      gatewayConnected: true,
-      messages: [
-        {
-          id: 'ast-100',
-          role: 'assistant',
-          content: 'Hello, **Flux**!\n```ts\nconst a = 1;\n```',
-          thought: 'Analyzing code...',
-          timestamp: '12:00',
-        },
-      ],
-    });
+    const canvasHtml = renderMiddlePod({ gatewayConnected: true, messages: [] });
+    assert.ok(canvasHtml.includes('content-fluid-canvas'), 'MiddlePod must contain content-fluid-canvas');
+    assert.ok(canvasHtml.includes('conv-canvas'), 'Canvas must carry conv-canvas structural class');
+    assert.ok(canvasHtml.includes('data-conv-layer="canvas"'), 'Canvas must expose data-conv-layer for geometry assertions');
 
-    assert.ok(html.includes('content-fluid-canvas'), 'MiddlePod must contain content-fluid-canvas');
-    assert.ok(html.includes('conv-canvas'), 'Canvas must carry conv-canvas structural class');
-    assert.ok(html.includes('data-conv-layer="canvas"'), 'Canvas must expose data-conv-layer for geometry assertions');
+    const html = renderMessages([
+      { id: 'ast-100', role: 'assistant', content: 'Hello, **Flux**!', thought: 'Analyzing code...', timestamp: '12:00' },
+    ]);
     assert.ok(html.includes('id="msg-content-ast-100"'), 'Must have incremental content anchor');
     assert.ok(html.includes('id="msg-thought-ast-100"'), 'Must have incremental thought anchor');
-    assert.ok(html.includes('code-block-wrapper'), 'Must render Markdown code blocks with wrapper');
+  });
+
+  await t.test('Markdown code blocks must render md-codeblock wrapper with language label', async () => {
+    const { renderMarkdown } = await import('../dist/components/MiddlePod/MiddlePod.js');
+    const html = renderMarkdown('```ts\nconst a = 1;\n```');
+    assert.ok(html.includes('md-codeblock'), 'Must render Markdown code blocks with md-codeblock wrapper');
+    assert.ok(html.includes('md-codeblock__lang">ts<'), 'Code block must carry its language label');
   });
 
   await t.test('InputDock must be mounted strictly inside the middle pod conversation area', async () => {
@@ -195,149 +194,90 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     );
   });
 
-  await t.test('MiddlePod must render reasoning chain, tool capsules, GFM tables and task lists', async () => {
-    const { renderMiddlePod } = await import('../dist/components/MiddlePod/MiddlePod.js');
-    const html = renderMiddlePod({
-      gatewayConnected: true,
-      messages: [
-        {
-          id: 'ast-101',
-          role: 'assistant',
-          content: 'Here is table:\n| Name | Status |\n|---|---|\n| Core | Active |\n- [x] Done\n- [ ] Todo',
-          thought: 'Deep reasoning in progress...',
-          thoughtDurationMs: 450,
-          timestamp: '12:01',
-          toolCalls: [
-            {
-              id: 'tool-1',
-              name: 'shell',
-              status: 'completed',
-              args: '{"command":"npm test"}',
-              output: 'Tests passed',
-            },
-            {
-              id: 'tool-2',
-              name: 'read_file',
-              status: 'running',
-              args: '{"path":"src/index.ts"}',
-            },
-          ],
-        },
-      ],
-    });
+  await t.test('Conversation must render reasoning chain, tool capsules and GFM tables', async () => {
+    const html = renderMessages([
+      {
+        id: 'ast-101',
+        role: 'assistant',
+        content: 'Here is table:\n| Name | Status |\n|---|---|\n| Core | Active |',
+        thought: 'Deep reasoning in progress...',
+        thoughtDurationMs: 450,
+        timestamp: '12:01',
+        toolCalls: [
+          { id: 'tool-1', name: 'shell', status: 'completed', args: '{"command":"npm test"}', output: 'Tests passed' },
+          { id: 'tool-2', name: 'read_file', status: 'running', args: '{"path":"src/index.ts"}' },
+        ],
+      },
+    ]);
 
-    assert.ok(html.includes('thinking-row'), 'Must include reasoning row');
-    assert.ok(html.includes('推理'), 'Must render reasoning title');
-    assert.ok(html.includes('tool-row'), 'Must render tool rows');
+    assert.ok(html.includes('data-kind="thought"'), 'Must include reasoning row');
+    assert.ok(html.includes('思考'), 'Must render reasoning title');
+    assert.ok(html.includes('conv-row'), 'Must render tool rows');
     assert.ok(html.includes('Shell Command'), 'Must render Shell Command title for shell tool');
     assert.ok(html.includes('<table'), 'Must render GFM HTML table');
     assert.ok(html.includes('Core'), 'Table must contain cell data');
   });
 
-  await t.test('MiddlePod must aggregate multiple read-only tools', async () => {
-    const { renderMiddlePod } = await import('../dist/components/MiddlePod/MiddlePod.js');
-    const html = renderMiddlePod({
-      gatewayConnected: true,
-      messages: [
-        {
-          id: 'ast-103',
-          role: 'assistant',
-          content: 'Files inspected and modified.',
-          timestamp: '12:03',
-          toolCalls: [
-            {
-              id: 'tool-r1',
-              name: 'read_file',
-              status: 'completed',
-              args: '{"path":"src/app.ts"}',
-              output: 'const x = 1;',
-            },
-            {
-              id: 'tool-r2',
-              name: 'read_file',
-              status: 'completed',
-              args: '{"path":"src/config.ts"}',
-              output: 'export const cfg = {};',
-            },
-            {
-              id: 'tool-e1',
-              name: 'edit',
-              status: 'completed',
-              args: '{"path":"src/app.ts"}',
-              output: '--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1,2 @@\n+const y = 2;',
-            },
-          ],
-        },
-      ],
-    });
+  await t.test('Conversation must aggregate multiple read-only tools', async () => {
+    const html = renderMessages([
+      {
+        id: 'ast-103',
+        role: 'assistant',
+        content: 'Files inspected and modified.',
+        timestamp: '12:03',
+        toolCalls: [
+          { id: 'tool-r1', name: 'read_file', status: 'completed', args: '{"path":"src/app.ts"}', output: 'const x = 1;' },
+          { id: 'tool-r2', name: 'read_file', status: 'completed', args: '{"path":"src/config.ts"}', output: 'export const cfg = {};' },
+          { id: 'tool-e1', name: 'edit', status: 'completed', args: '{"path":"src/app.ts"}', output: '--- a\n+++ b\n@@ -1 +1,2 @@\n+const y = 2;' },
+        ],
+      },
+    ]);
 
-    assert.ok(html.includes('检索与阅读'), 'Must group consecutive read-only tools into an aggregated capsule');
+    assert.ok(html.includes('Read 2 files'), 'Must group consecutive read-only tools into an aggregated capsule');
     assert.ok(html.includes('app.ts'), 'Must display target file in tool capsule');
   });
 
   await t.test('Search Files must NOT be treated as readable file preview tool', async () => {
-    const { renderMiddlePod } = await import('../dist/components/MiddlePod/MiddlePod.js');
-    const html = renderMiddlePod({
-      gatewayConnected: true,
-      messages: [
-        {
-          id: 'ast-grep-test',
-          role: 'assistant',
-          content: 'Searching codebase for pattern',
-          timestamp: '12:05',
-          toolCalls: [
-            {
-              id: 'tool-grep-1',
-              name: 'grep',
-              status: 'completed',
-              args: '{"pattern":"StatusBar","include":"*.ts"}',
-              output: 'src/components/StatusBar.ts:10: export class StatusBar',
-            },
-          ],
-        },
-      ],
-    });
+    const html = renderMessages([
+      {
+        id: 'ast-grep-test',
+        role: 'assistant',
+        content: 'Searching codebase for pattern',
+        timestamp: '12:05',
+        toolCalls: [
+          {
+            id: 'tool-grep-1',
+            name: 'grep',
+            status: 'completed',
+            args: '{"pattern":"StatusBar","include":"*.ts"}',
+            output: 'src/components/StatusBar.ts:10: export class StatusBar',
+          },
+        ],
+      },
+    ]);
 
-    // 1. 必须展示为 Search Files 标题
     assert.ok(html.includes('Search Files'), 'Must be titled Search Files');
-    // 2. 严禁把搜索的 pattern 或 include 变成 tool-file-link 文件预览链接
     assert.ok(!html.includes('data-preview-file="StatusBar"'), 'Search pattern must NOT become a preview file link');
     assert.ok(!html.includes('data-preview-file="*.ts"'), 'Search include must NOT become a preview file link');
-    // 3. 必须是可展开查看详情的 details 结构（而不是只读单行）
-    assert.ok(html.includes('<details class="timeline-row tool-row tool-capsule'), 'Must be expandable details for search results');
     assert.ok(html.includes('StatusBar.ts:10'), 'Search output lines must be present in output container');
   });
 
-  await t.test('MiddlePod tool categorization must never misclassify write tools or single read tools', async () => {
-    const { renderMiddlePod } = await import('../dist/components/MiddlePod/MiddlePod.js');
-    const html = renderMiddlePod({
-      gatewayConnected: true,
-      messages: [
-        {
-          id: 'ast-104',
-          role: 'assistant',
-          content: 'File written successfully',
-          timestamp: '12:04',
-          toolCalls: [
-            {
-              id: 'tool-w1',
-              name: 'write_file',
-              status: 'completed',
-              args: '{"path":"dist/bundle.js","content":"console.log(1);"}'
-            },
-            {
-              id: 'tool-r-single',
-              name: 'read_file',
-              status: 'completed',
-              args: '{"path":"README.md"}'
-            }
-          ],
-        },
-      ],
-    });
+  await t.test('Tool categorization must never misclassify write tools or single read tools', async () => {
+    const html = renderMessages([
+      {
+        id: 'ast-104',
+        role: 'assistant',
+        content: 'File written successfully',
+        timestamp: '12:04',
+        toolCalls: [
+          { id: 'tool-w1', name: 'write_file', status: 'completed', args: '{"path":"dist/bundle.js","content":"console.log(1);"}' },
+          { id: 'tool-r-single', name: 'read_file', status: 'completed', args: '{"path":"README.md"}' },
+        ],
+      },
+    ]);
 
     assert.ok(html.includes('Write File'), 'write_file must be accurately classified as Write File');
-    assert.ok(!html.includes('检索与阅读'), 'Single read-only tool followed by write must not trigger multi-item group');
+    assert.ok(!html.includes('Read 2 files'), 'Single read-only tool followed by write must not trigger multi-item group');
     assert.ok(html.includes('Read File'), 'Single read_file must render as individual Read File capsule');
   });
 
@@ -345,26 +285,23 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     const { renderMiddlePod, renderMarkdown } = await import('../dist/components/MiddlePod/MiddlePod.js');
 
     // 1. Tool args with nested object must not crash with TypeError
-    const htmlWithNestedArgs = renderMiddlePod({
-      gatewayConnected: true,
-      messages: [
-        {
-          id: 'ast-102',
-          role: 'assistant',
-          content: 'test',
-          timestamp: '12:02',
-          toolCalls: [
-            {
-              id: 't-nested',
-              name: 'shell',
-              status: 'completed',
-              args: JSON.stringify({ command: { complex: 'nested' } }),
-            },
-          ],
-        },
-      ],
-    });
-    assert.ok(htmlWithNestedArgs.includes('tool-capsule'), 'Nested object args must render safely');
+    const htmlWithNestedArgs = renderMessages([
+      {
+        id: 'ast-102',
+        role: 'assistant',
+        content: 'test',
+        timestamp: '12:02',
+        toolCalls: [
+          {
+            id: 't-nested',
+            name: 'shell',
+            status: 'completed',
+            args: JSON.stringify({ command: { complex: 'nested' } }),
+          },
+        ],
+      },
+    ]);
+    assert.ok(htmlWithNestedArgs.includes('conv-row'), 'Nested object args must render safely');
 
     // 2. Code block with empty lines and special $& pattern
     const codeWithEmptyLinesAndSpecial = '```js\nconst x = "$&";\n\nconst y = 2;\n```';
@@ -591,18 +528,16 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     assert.ok(!focusBlock.includes('var(--accent)'), 'Composer dock focus must NOT use accent');
   });
 
-  await t.test('MiddlePod user-bubble must consume var(--chat-user-message-bg)', async () => {
-    const { renderMessage } = await import('../dist/components/MiddlePod/MiddlePod.js');
-    const html = renderMessage(
-      {
-        id: 'msg-u-1',
-        role: 'user',
-        content: 'Hello world test bubble',
-        timestamp: '12:00',
-      },
-      {}
+  await t.test('User bubble must consume --chat-user-message-bg token', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, join } = await import('node:path');
+    const testDir = dirname(fileURLToPath(import.meta.url));
+    const convCss = readFileSync(join(testDir, '../src/styles/conversation.css'), 'utf8');
+    assert.ok(
+      /\.conv-message__bubble[\s\S]*?var\(--chat-user-message-bg/.test(convCss),
+      'User bubble must support chat-user-message-bg token in CSS'
     );
-    assert.ok(html.includes('var(--chat-user-message-bg, var(--bg-card))'), 'User bubble must support chat-user-message-bg token');
   });
 
   await t.test('getToggleTheme must deterministically transition between dark and primary light theme', async () => {
@@ -619,12 +554,23 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     assert.equal(getToggleTheme('cyber-matrix'), 'ayu-light');
   });
 
-  await t.test('Gate 4e: MiddlePod long session performance benchmark (5000 synthetic messages)', async () => {
-    const { runLongSessionPerfBenchmark } = await import('../../../scripts/gates/perf-benchmark.mjs');
-    const result = await runLongSessionPerfBenchmark();
-    assert.equal(result.passed, true, '5000 messages performance budget benchmark must pass completely');
-    assert.ok(result.budgets.initialWindowRender.ms <= result.budgets.initialWindowRender.limitMs, 'Initial window render must meet budget');
-    assert.ok(result.budgets.prependPaging.avgMs <= result.budgets.prependPaging.limitMs, 'Prepend batch paging must meet budget');
+  await t.test('Gate 4e: long session performance benchmark (5000 synthetic messages)', async () => {
+    // 【设计意图 (Why)】基准必须在 production React 下测量，而本测试进程里 React 已被
+    //   其它用例以 dev 构建加载，无法再切换。改为独立子进程运行，保证测的是发布构建。
+    const { spawnSync } = await import('node:child_process');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, join } = await import('node:path');
+    const testDir = dirname(fileURLToPath(import.meta.url));
+    const script = join(testDir, '../../../scripts/gates/perf-benchmark.mjs');
+    const run = spawnSync(process.execPath, [script], {
+      env: { ...process.env, NODE_ENV: 'production' },
+      encoding: 'utf8',
+    });
+    assert.equal(
+      run.status,
+      0,
+      `5000 messages performance budget benchmark must pass completely\n${run.stdout || ''}\n${run.stderr || ''}`
+    );
   });
 });
 

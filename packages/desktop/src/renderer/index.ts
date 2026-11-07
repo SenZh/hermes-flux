@@ -22,7 +22,6 @@ import {
   renderSettingsModal,
   renderModelPickerMenu,
   renderModelPickerTree,
-  renderMessage,
   renderMarkdown,
   getCleanReasoningSummary,
   escapeHtml,
@@ -4865,7 +4864,6 @@ function render(): void {
           hasOlderMessages: state.hasOlderMessages,
           isLoadingOlder: state.isLoadingOlder,
           isStreaming: isStreamingActiveForCurrentSession(),
-          reactList: true,
           dockHtml: state.gatewayConnected
             ? renderInputDock({
                 selectedModel: state.selectedModel,
@@ -5199,7 +5197,6 @@ function render(): void {
           isLoadingOlder: state.isLoadingOlder,
           isStreaming: isStreamingActiveForCurrentSession(),
           sideAgentCapsules: state.sideAgentCapsules,
-          reactList: true,
         });
         canvasStructureDirty = false;
         syncReactMessageList(true);

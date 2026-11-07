@@ -4,7 +4,6 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { LeftRail } from '../../dist/components-react/LeftRail.js';
 import { buildLeftRailModel } from '../../dist/components-react/leftRailModel.js';
-import { renderMiddlePod } from '../../dist/components/MiddlePod/MiddlePod.js';
 import { renderNewTaskModal } from '../../dist/components/TaskModal/NewTaskModal.js';
 import { renderInputDock } from '../../dist/components/InputDock/InputDock.js';
 import { renderTitlebar } from '../../dist/components/Titlebar/Titlebar.js';
@@ -49,13 +48,12 @@ function renderLeftRail(props = {}) {
   }));
 }
 import { renderAgentProfileEditorModal } from '../../dist/components/Bot/AgentProfileEditorModal.js';
+import { renderMessages } from '../helpers/renderMessages.mjs';
 
 test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', async (t) => {
   await t.test('1. 发言者身份 Badge: 仅非 user 且有 sender 时渲染，变异断言角色隔离', () => {
     // 1.1 Assistant with sender -> 必须渲染 badge、名称与头像
-    const assistantHtml = renderMiddlePod({
-      gatewayConnected: true,
-      messages: [
+    const assistantHtml = renderMessages([
         {
           id: 'msg-group-1',
           role: 'assistant',
@@ -64,16 +62,13 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
           senderAvatar: 'data:image/png;base64,mock',
           timestamp: '14:20',
         },
-      ],
-    });
+      ]);
     assert.ok(assistantHtml.includes('message-sender-badge'), 'Assistant 消息必须包含发言者信息徽章');
     assert.ok(assistantHtml.includes('arch-wang'), '必须展示发言智能体名称');
     assert.ok(assistantHtml.includes('data:image/png;base64,mock'), '必须包含发言智能体头像');
 
     // 1.1b 群聊场景：多智能体连续发言（同为 assistant 但 sender 不同），第二位智能体必须完整呈现发言者身份与独立头像
-    const groupChatHtml = renderMiddlePod({
-      gatewayConnected: true,
-      messages: [
+    const groupChatHtml = renderMessages([
         {
           id: 'msg-g-1',
           role: 'assistant',
@@ -90,17 +85,14 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
           senderAvatar: 'data:image/png;base64,aura-avatar',
           timestamp: '14:21',
         },
-      ],
-    });
+      ], { mode: 'group' });
     assert.ok(groupChatHtml.includes('arch-wang'), '第一位发言智能体必须呈现');
     assert.ok(groupChatHtml.includes('data:image/png;base64,arch-avatar'), '第一位智能体头像必须呈现');
     assert.ok(groupChatHtml.includes('aura'), '第二位不同发言智能体必须呈现');
     assert.ok(groupChatHtml.includes('data:image/png;base64,aura-avatar'), '第二位智能体头像必须呈现（防连续 assistant 吞头像）');
 
     // 1.2 User message -> 严禁包含 message-sender-badge
-    const userHtml = renderMiddlePod({
-      gatewayConnected: true,
-      messages: [
+    const userHtml = renderMessages([
         {
           id: 'msg-user-1',
           role: 'user',
@@ -108,8 +100,7 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
           sender: 'user',
           timestamp: '14:21',
         },
-      ],
-    });
+      ]);
     assert.ok(!userHtml.includes('message-sender-badge'), 'User 消息严禁渲染发言者身份徽章');
   });
 
@@ -165,9 +156,7 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
 
   await t.test('3. 工具执行卡片: 单工具直通不打包、运行态自动展开、失败汇总与纯完成折叠', () => {
     // 3.1 极限边界：单个工具时必须直通，严禁渲染外层打包卡片
-    const singleToolHtml = renderMiddlePod({
-      gatewayConnected: true,
-      messages: [
+    const singleToolHtml = renderMessages([
         {
           id: 'msg-single-tool',
           role: 'assistant',
@@ -182,14 +171,11 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
           ],
           timestamp: '14:21',
         },
-      ],
-    });
-    assert.ok(!singleToolHtml.includes('tool-execution-package-card'), '单工具调用严禁渲染外层打包卡片');
+      ]);
+    assert.ok(!singleToolHtml.includes('conv-package'), '单工具调用严禁渲染外层打包卡片');
 
     // 3.2 运行态多工具：必须渲染打包卡片且默认 open 展开
-    const runningToolsHtml = renderMiddlePod({
-      gatewayConnected: true,
-      messages: [
+    const runningToolsHtml = renderMessages([
         {
           id: 'msg-tools-running',
           role: 'assistant',
@@ -200,18 +186,15 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
           ],
           timestamp: '14:22',
         },
-      ],
-    });
-    assert.ok(runningToolsHtml.includes('tool-execution-package-card'), '多工具必须渲染打包卡片');
+      ]);
+    assert.ok(runningToolsHtml.includes('conv-package'), '多工具必须渲染打包卡片');
     assert.ok(runningToolsHtml.includes('open'), '有正在执行的工具时卡片必须自动 open 展开');
     assert.ok(runningToolsHtml.includes('Running'), '包含运行中工具时必须显示正在执行状态');
     assert.ok(runningToolsHtml.includes('npm test'), '卡片头部必须实时渲染当前正在执行的命令');
     assert.ok(!runningToolsHtml.includes('[object Object]'), '严禁泄露 [object Object] 裸文本');
 
     // 3.3 负向异常多工具：包含失败工具时必须明确显示失败计数
-    const failedToolsHtml = renderMiddlePod({
-      gatewayConnected: true,
-      messages: [
+    const failedToolsHtml = renderMessages([
         {
           id: 'msg-tools-failed',
           role: 'assistant',
@@ -222,10 +205,9 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
           ],
           timestamp: '14:23',
         },
-      ],
-    });
+      ]);
     assert.ok(failedToolsHtml.includes('1 failed'), '包含失败工具时必须展示失败汇总文案');
-    assert.ok(!failedToolsHtml.includes('<details class="tool-execution-package-card" open'), '无运行态工具时严禁默认展开');
+    assert.ok(!failedToolsHtml.includes('<details class="conv-package" open'), '无运行态工具时严禁默认展开');
   });
 
   await t.test('4. 输入框自适应与智能折叠/展开', () => {

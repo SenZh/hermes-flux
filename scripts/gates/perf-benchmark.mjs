@@ -21,77 +21,59 @@
 
 import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
-
-// 导入生产真实模块（严格禁止 Mock 核心逻辑）
-import { renderMiddlePod } from '../../packages/ui/dist/components/MiddlePod/MiddlePod.js';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+import path from 'node:path';
 
 /**
- * 确定性合成会话生成器（固定随机种子，保证每次运行无抖动）
- * 生成 5000 条具有真实工业场景分布的消息：
- * - 40% 普通交互短文本
- * - 25% 复杂 Markdown（列表、粗体、GFM 表格、块引用）
- * - 15% 多语言代码块（Python、TS、Shell）
- * - 10% 深度折叠思考链（Thought Chain，数百字推理过程）
- * - 10% 工具调用链（Shell 命令、读写文件、多工具聚合）
+ * React 必须在 production 模式下测量。
+ * 【设计意图 (Why)】dev 构建带完整的 prop 校验与警告收集，SSR 50 条消息实测约 60ms，
+ *   而 production 构建只有 3~5ms，相差一个数量级。基准守护的是"发布产物的性能"，
+ *   用 dev 数字会把真实预算淹没在框架开销里。
+ * 【约束与规则 (Rules)】必须在任何 React 模块求值之前设置。
  */
-export function generateSynthetic5000Messages() {
-  const messages = [];
-  const roles = ['user', 'assistant'];
-
-  for (let i = 1; i <= 5000; i++) {
-    const role = roles[i % 2];
-    const category = i % 10;
-    let content = '';
-    let thought = '';
-    let toolCalls = undefined;
-
-    if (category < 4) {
-      // 40% 普通对话
-      content = `这是第 ${i} 轮交互指令：请核对网关长连接握手状态并给出诊断报告。`;
-    } else if (category < 6.5) {
-      // 25% 复杂 Markdown 与表格
-      content = `### 节点 ${i} 巡检报告\n\n| 指标 | 读数 | 状态 |\n|---|---|---|\n| RTT | ${10 + (i % 20)}ms | 正常 |\n| QPS | ${100 + i} | 高峰 |\n\n- [x] 链路心跳正常\n- [ ] 存量日志未刷盘\n\n> 核心断言：长会话渲染必须遵守窗口化约束。`;
-    } else if (category < 8) {
-      // 15% 代码块
-      content = `优化后的聚合函数如下：\n\`\`\`ts\nexport function aggregateBatch${i}(items: number[]): number {\n  // 高性能紧凑循环，避免中间数组分配\n  let sum = 0;\n  for (let k = 0; k < items.length; k++) sum += items[k];\n  return sum;\n}\n\`\`\``;
-    } else if (category === 8) {
-      // 10% 深度思考链
-      thought = `正在对第 ${i} 步推理链路进行拓扑展开：首先验证边界不变量，排除空指针与竞态条件；接着检查 DOM 节点预算；确认安全后推入输出管道。耗时预估 120ms。`;
-      content = `已完成深度推理，方案已收敛至最优路径。`;
-    } else {
-      // 10% 工具调用
-      toolCalls = [
-        {
-          id: `tc-${i}-1`,
-          name: 'shell',
-          status: 'completed',
-          args: JSON.stringify({ command: `git log --oneline -n ${i % 5}` }),
-          output: `commit a${i} feat: performance hardening`,
-        },
-        {
-          id: `tc-${i}-2`,
-          name: 'read_file',
-          status: 'completed',
-          args: JSON.stringify({ path: `packages/core/src/file_${i}.ts` }),
-          output: `export const version = ${i};`,
-        },
-      ];
-      content = `已执行 2 项前置工具查询并提取有效事实。`;
-    }
-
-    messages.push({
-      id: `msg-${i}`,
-      role,
-      content,
-      thought: thought || undefined,
-      thoughtDurationMs: thought ? 180 : undefined,
-      timestamp: `14:${String(Math.floor(i / 60) % 60).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}`,
-      toolCalls,
-    });
-  }
-
-  return messages;
+if (!process.env.NODE_ENV) {
+  process.env.NODE_ENV = 'production';
 }
+
+// react 只安装在 packages/ui 下，用该包的解析上下文加载，避免在根目录重复声明依赖
+const uiRequire = createRequire(pathToFileURL(path.resolve('packages/ui/package.json')));
+const React = uiRequire('react');
+const { renderToStaticMarkup } = uiRequire('react-dom/server');
+
+// 合成会话数据与浏览器侧性能门禁共用同一份生成器
+import { generateSynthetic5000Messages } from './synthetic-messages.mjs';
+
+/**
+ * UI 组件必须在设置 NODE_ENV 之后再求值。
+ * 【约束与规则 (Rules)】ESM 静态 import 会提前求值并连带加载 dev 版 React，
+ *   所以这里用动态 import；其余导入不受影响。
+ */
+const { ConversationMessageList } = await import(
+  '../../packages/ui/dist/components-react/conversation/index.js'
+);
+
+/**
+ * 渲染一批消息为静态 HTML，与生产 React 路径完全同构。
+ * 【设计意图 (Why)】消息行已 100% 由 React 渲染，基准必须打真实组件，
+ *   否则测的是已删除的模板路径，性能数字毫无意义。
+ */
+function renderMessages(messages, options = {}) {
+  return renderToStaticMarkup(
+    React.createElement(ConversationMessageList, {
+      snapshot: {
+        mode: 'scratchpad',
+        connection: 'connected',
+        messages,
+        isStreaming: false,
+        hasOlderMessages: Boolean(options.hasOlderMessages),
+        isLoadingOlder: false,
+      },
+    })
+  );
+}
+
+export { generateSynthetic5000Messages };
 
 /**
  * 运行完整长会话性能预算门禁套件
@@ -125,15 +107,10 @@ export async function runLongSessionPerfBenchmark() {
   // 核心架构约束：严禁直接全量 render 5000 条 DOM！必须首屏只渲染最新 50 条！
   const initialWindowSlice = messages.slice(-50);
   // 执行预热避免首调用 JIT 编译抖动
-  renderMiddlePod({ gatewayConnected: true, messages: initialWindowSlice.slice(0, 5), isLoadingOlder: false });
+  renderMessages(initialWindowSlice.slice(0, 5));
 
   const tWindowStart = performance.now();
-  const initialHtml = renderMiddlePod({
-    gatewayConnected: true,
-    messages: initialWindowSlice,
-    isLoadingOlder: false,
-    hasOlderMessages: true,
-  });
+  const initialHtml = renderMessages(initialWindowSlice, { hasOlderMessages: true });
   const windowMs = performance.now() - tWindowStart;
 
   report.budgets.initialWindowRender = {
@@ -168,12 +145,7 @@ export async function runLongSessionPerfBenchmark() {
     const tBatch = performance.now();
     currentWindow = [...olderBatch, ...currentWindow];
     // 渲染拼接后的窗口（模拟步进）
-    const batchHtml = renderMiddlePod({
-      gatewayConnected: true,
-      messages: currentWindow,
-      isLoadingOlder: false,
-      hasOlderMessages: startIdx > 0,
-    });
+    const batchHtml = renderMessages(currentWindow, { hasOlderMessages: startIdx > 0 });
     const stepMs = performance.now() - tBatch;
     batchTimes.push(stepMs);
     assert.ok(batchHtml.length > 0);

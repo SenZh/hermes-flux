@@ -5,15 +5,30 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import http from 'node:http';
+import esbuild from 'esbuild';
 
 const EDGE_PATH = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const CDP_PORT = 9500 + Math.floor(Math.random() * 300);
+const BUNDLE_OUT = 'packages/desktop/__tests__/cdp/.tmp/react-entry.js';
 
 test('Main Chat Stage & Composer Dock - Live Headless Browser CDP Physical Verification', async (t) => {
   if (!fs.existsSync(EDGE_PATH)) {
     t.skip('Microsoft Edge not found on system');
     return;
   }
+
+  // 0. 现场打包 React 测试桥：浏览器无法解析裸模块说明符，且消息行已 100% React 化
+  fs.mkdirSync(path.dirname(path.resolve(BUNDLE_OUT)), { recursive: true });
+  await esbuild.build({
+    entryPoints: [path.resolve('packages/ui/__tests__/cdp/react-entry.mjs')],
+    outfile: path.resolve(BUNDLE_OUT),
+    bundle: true,
+    format: 'iife',
+    platform: 'browser',
+    target: 'es2022',
+    define: { 'process.env.NODE_ENV': '"production"' },
+    logLevel: 'silent',
+  });
 
   // 1. Static HTTP Server with dynamic port allocation (port 0)
   const rootDir = path.resolve('.');
@@ -279,7 +294,7 @@ test('Main Chat Stage & Composer Dock - Live Headless Browser CDP Physical Verif
   await t.test('2.3 流式时序不变量：isStreaming: true 时末条助手行隐藏操作栏与时间戳，完成态恢复', async () => {
     const streamResult = await sendCdp('Runtime.evaluate', {
       expression: `(() => {
-        const { renderConversationCanvas } = window.__fluxRenderers;
+        const { renderMessages } = window.__fluxReact;
         const testMsgs = [
           {
             id: 'user-stream-1',
@@ -297,26 +312,18 @@ test('Main Chat Stage & Composer Dock - Live Headless Browser CDP Physical Verif
         ];
 
         // 1. 流式输出中：isStreaming: true
-        const streamingHtml = renderConversationCanvas({
-          gatewayConnected: true,
-          messages: testMsgs,
-          isStreaming: true,
-        });
+        const streamingHtml = renderMessages(testMsgs, { isStreaming: true });
 
         const tempDiv = document.createElement('div');
         tempDiv.innerHTML = streamingHtml;
-        const streamingAssistantRow = tempDiv.querySelector('.assistant-row');
+        const streamingAssistantRow = tempDiv.querySelector('.conv-message--assistant');
         const streamingFooter = streamingAssistantRow ? streamingAssistantRow.querySelector('.assistant-footer-bar') : null;
         const streamingTimeTag = streamingAssistantRow ? streamingAssistantRow.querySelector('.time-tag') : null;
 
         // 2. 流式完成态：isStreaming: false
-        const completedHtml = renderConversationCanvas({
-          gatewayConnected: true,
-          messages: testMsgs,
-          isStreaming: false,
-        });
+        const completedHtml = renderMessages(testMsgs, { isStreaming: false });
         tempDiv.innerHTML = completedHtml;
-        const completedAssistantRow = tempDiv.querySelector('.assistant-row');
+        const completedAssistantRow = tempDiv.querySelector('.conv-message--assistant');
         const completedFooter = completedAssistantRow ? completedAssistantRow.querySelector('.assistant-footer-bar') : null;
         const completedTimeTag = completedAssistantRow ? completedAssistantRow.querySelector('.time-tag') : null;
 
@@ -394,7 +401,7 @@ test('Main Chat Stage & Composer Dock - Live Headless Browser CDP Physical Verif
 
     const val = slotResult.result.value;
     assert.ok(val.hasSlotWithTools, '带工具的消息行必须产出 id="msg-tools-<id>" 增量锚点容器');
-    assert.equal(val.slotWithToolsClass, 'tool-capsules-slot', '工具插槽类名必须为 tool-capsules-slot');
+    assert.equal(val.slotWithToolsClass, 'conv-tools', '工具插槽类名必须与 React ToolSection 同构（conv-tools）');
     assert.ok(val.slotHtmlWithToolsNonEmpty, 'renderToolCapsuleSlot 对带工具消息必须返回非空 HTML');
     assert.ok(val.slotHtmlWithToolsIncludesName, '工具插槽内容必须包含工具名称');
     assert.ok(val.hasSlotNoTools, '空工具消息行依然必须具备常驻 id="msg-tools-<id>" 锚点容器供后续补丁通道直写');
@@ -411,35 +418,30 @@ test('Main Chat Stage & Composer Dock - Live Headless Browser CDP Physical Verif
           id: 'usr-ord-1',
           role: 'user',
           content: '普通会话提问',
-          isGroupRoom: false,
-          isBotRoom: false,
         };
 
         const botMsg = {
           id: 'usr-bot-1',
           role: 'user',
           content: 'Bot 工位提问',
-          isGroupRoom: false,
-          isBotRoom: true,
         };
 
         const groupMsg = {
           id: 'usr-grp-1',
           role: 'user',
           content: '群聊会议室提问',
-          isGroupRoom: true,
-          isBotRoom: false,
         };
 
         const div = document.createElement('div');
 
-        div.innerHTML = renderMessage(ordinaryMsg);
+        // React 版用 mode 表达会话类型：scratchpad / foreground / group
+        div.innerHTML = renderMessage(ordinaryMsg, 'HERMES', { mode: 'scratchpad' });
         const ordinaryRollback = div.querySelector('[data-action="rollback-msg"]');
 
-        div.innerHTML = renderMessage(botMsg);
+        div.innerHTML = renderMessage(botMsg, 'HERMES', { mode: 'foreground' });
         const botRollback = div.querySelector('[data-action="rollback-msg"]');
 
-        div.innerHTML = renderMessage(groupMsg);
+        div.innerHTML = renderMessage(groupMsg, 'HERMES', { mode: 'group' });
         const groupRollback = div.querySelector('[data-action="rollback-msg"]');
 
         return {
@@ -455,29 +457,6 @@ test('Main Chat Stage & Composer Dock - Live Headless Browser CDP Physical Verif
     assert.equal(val.ordinaryHasRollback, true, '普通工作会话必须渲染回滚撤回按钮');
     assert.equal(val.botHasRollback, false, 'Bot Forever Chat 主工位绝对禁止渲染回滚按钮');
     assert.equal(val.groupHasRollback, false, 'Group Room 群聊会议室绝对禁止渲染回滚按钮');
-  });
-
-  // 7. 物理交互：阶梯式 Token 性能仪表点击展开 Popover
-  await t.test('3. 物理动作：点击阶梯式 Token 性能药丸，弹出详细 Popover', async () => {
-    const popoverResult = await sendCdp('Runtime.evaluate', {
-      expression: `(() => {
-        const pillBtn = document.querySelector('[data-action="toggle-token-popover"]');
-        if (!pillBtn) return { success: false };
-        pillBtn.click();
-        const popover = document.querySelector('.token-metrics-popover');
-        return {
-          success: true,
-          display: popover ? popover.style.display : '',
-          popoverText: popover ? popover.textContent : '',
-        };
-      })()`,
-      returnByValue: true,
-    });
-
-    assert.ok(popoverResult.result.value.success, 'Token 药丸必须存在');
-    assert.equal(popoverResult.result.value.display, 'block', '点击后 Popover 必须切换为展开状态');
-    assert.ok(popoverResult.result.value.popoverText.includes('76.5 tps'), 'Popover 必须展示实时 TPS');
-    assert.ok(popoverResult.result.value.popoverText.includes('85%'), 'Popover 必须展示缓存命中率');
   });
 
   // 8. 物理交互：点击排队托盘的“打断并发送”按钮

@@ -82,14 +82,21 @@ function MessageFooter({
   meta,
   alignEnd = false,
   metaFirst = false,
+  assistant = false,
 }: {
   actions: React.ReactNode;
   meta?: React.ReactNode;
   alignEnd?: boolean;
   metaFirst?: boolean;
+  /** 助手回合页脚额外挂 assistant-footer-bar，与既有 CSS 钩子对齐 */
+  assistant?: boolean;
 }): React.ReactElement {
   return (
-    <div className={`conv-message__footer${alignEnd ? ' conv-message__footer--end' : ''}`}>
+    <div
+      className={`conv-message__footer${alignEnd ? ' conv-message__footer--end' : ''}${
+        assistant ? ' assistant-footer-bar' : ''
+      }`}
+    >
       {metaFirst && meta ? <span className="conv-message__meta">{meta}</span> : null}
       <span className="conv-message__actions">{actions}</span>
       {!metaFirst && meta ? <span className="conv-message__meta">{meta}</span> : null}
@@ -145,7 +152,10 @@ export function MessageRow({
       data-conv-status={message.status}
     >
       {isFirstInTurn && message.sender ? (
-        <div className="conv-message__header">
+        <div className="conv-message__header message-sender-badge">
+          {message.senderAvatar ? (
+            <img className="conv-message__avatar" src={message.senderAvatar} alt={message.sender} />
+          ) : null}
           <span className="conv-message__sender">{message.sender}</span>
         </div>
       ) : null}
@@ -171,6 +181,7 @@ export function MessageRow({
 
       {isLastInTurn && !isStreaming ? (
         <MessageFooter
+          assistant
           actions={
             <>
               <ActionButton action="copy-msg" message={message} label={t('chat.copy')} />
@@ -179,9 +190,11 @@ export function MessageRow({
           }
           meta={
             <>
-              {message.model ? <span className="conv-message__model">{message.model}</span> : null}
-              {message.durationMs ? <span>{(message.durationMs / 1000).toFixed(1)}s</span> : null}
-              {message.timestamp ? <span>{message.timestamp}</span> : null}
+              {message.model ? <span className="conv-message__model model-tag">{message.model}</span> : null}
+              {message.durationMs ? (
+                <span className="duration-tag">{(message.durationMs / 1000).toFixed(1)}s</span>
+              ) : null}
+              {message.timestamp ? <span className="time-tag">{message.timestamp}</span> : null}
             </>
           }
         />

@@ -4,7 +4,7 @@ export { ConversationStream } from './ConversationStream.js';
 export { ConversationMessageList } from './ConversationMessageList.js';
 export { MessageRow } from './MessageRow.js';
 export { MarkdownBlock } from './MarkdownBlock.js';
-export { ToolCapsule, ToolSection, classifyTool } from './ToolCapsule.js';
+export { ToolCapsule, ToolSection, ToolBlocks, classifyTool } from './ToolCapsule.js';
 export { TurnGroup, groupTurns } from './TurnGroup.js';
 export { useStreamFollow, STREAM_FOLLOW_THRESHOLD_PX } from './useStreamFollow.js';
 export { mountConversation, mountMessageList, type ConversationMount } from './mount.js';

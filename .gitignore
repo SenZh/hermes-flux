@@ -42,3 +42,6 @@ tmp-*.mjs
 .playwright-mcp/
 bun.lock
 
+
+# CDP 测试现场打包产物（每次运行重建）
+packages/desktop/__tests__/cdp/.tmp/

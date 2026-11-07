@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="obsidian-gold">
+<head>
+  <meta charset="UTF-8">
+  <title>Hermes Flux Conversation Performance Harness</title>
+  <!-- 必须加载生产同一份样式表：性能门禁要量的是含样式计算与布局的真实挂载 -->
+  <link rel="stylesheet" href="/packages/desktop/src/renderer/styles.css">
+  <link rel="stylesheet" href="/packages/ui/src/styles/conversation.css">
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: var(--background, #090a0f);
+      color: var(--foreground, #e8e9ec);
+    }
+    #perf-shell {
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+  </style>
+</head>
+<body>
+  <div id="perf-shell">
+    <div class="conversation-pod">
+      <div id="conversation-stream" data-conv-layer="stream">
+        <div class="conv-canvas" id="perf-stage"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 长任务观测必须在组件挂载前注册，否则漏掉首次渲染 -->
+  <script>
+    window.__longTasks = [];
+    try {
+      new PerformanceObserver(function (list) {
+        var entries = list.getEntries();
+        for (var i = 0; i < entries.length; i++) {
+          window.__longTasks.push({ start: entries[i].startTime, duration: entries[i].duration });
+        }
+      }).observe({ entryTypes: ['longtask'] });
+    } catch (e) {
+      window.__longTasksSupported = false;
+    }
+  </script>
+
+  <!-- 由 CDP 测试用 esbuild 现场打包生成，内含 React 与真实对话组件 -->
+  <script src="/packages/desktop/__tests__/cdp/.tmp/react-entry.js"></script>
+</body>
+</html>

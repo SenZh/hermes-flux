@@ -97,7 +97,9 @@ test('改名锚点：幽灵旧名在组件文件清零，新槽名计数稳定�
   }
   assert.equal((dock.match(/var\(--card-hover\)/g) ?? []).length, 3);
   assert.equal((dock.match(/var\(--popover\)/g) ?? []).length, 4);
-  assert.equal((mid.match(/var\(--popover\)/g) ?? []).length, 2);
+  // 工具胶囊模板链路已整体删除（流式补丁通道改用 ToolBlocks 组件静态渲染），
+  // 因此 MiddlePod 不再有任何 --popover 消费点。
+  assert.equal((mid.match(/var\(--popover\)/g) ?? []).length, 0, 'MiddlePod 工具模板删除后不得再残留 --popover 消费');
   // 旧模板曾直接内联消费 var(--background) 作为行底色；React 版改用语义 Token（bg-sidebar / bg-panel）
   assert.equal((railReact.match(/var\(--background\)/g) ?? []).length, 0, 'React 左轨不得直接消费 --background');
   assert.ok((railReact.match(/bg-sidebar|bg-panel|bg-card/g) ?? []).length > 0, 'React 左轨必须走语义背景 Token');

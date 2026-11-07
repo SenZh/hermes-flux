@@ -3,49 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <title>Hermes Flux Interactive Conversation Stage CDP Test Harness</title>
+  <!-- 生产同一份样式：React 组件只输出类名，必须由真实 CSS 提供外观与几何 -->
+  <link rel="stylesheet" href="/packages/desktop/src/renderer/styles.css">
+  <link rel="stylesheet" href="/packages/ui/src/styles/conversation.css">
   <style>
-    :root {
-      --bg-window: #090A0F;
-      --bg-rail: #0E1015;
-      --bg-panel: #111318;
-      --bg-card: #151720;
-      --bg-card-hover: #1B1E29;
-      --bg-card-active: #222634;
-      --bg-elevated: #1F2230;
-      --bg-input: #12141A;
-      --bg-code: #0A0B10;
-      --bg-backdrop: rgba(18, 20, 27, 0.88);
-      --accent: #F59E0B;
-      --accent-hover: #FBBF24;
-      --accent-dim: #D97706;
-      --accent-glow: rgba(245, 158, 11, 0.25);
-      --accent-subtle: rgba(245, 158, 11, 0.09);
-      --accent-border: rgba(245, 158, 11, 0.35);
-      --accent-text: #FEF3C7;
-      --accent-red: #EF4444;
-      --text-main: #F8FAFC;
-      --text-secondary: #94A3B8;
-      --text-muted: #64748B;
-      --text-faint: #334155;
-      --border-subtle: rgba(255, 255, 255, 0.06);
-      --border-medium: rgba(255, 255, 255, 0.09);
-      --border-strong: rgba(255, 255, 255, 0.16);
-      --specular-line: inset 0 1px 0 0 rgba(255, 255, 255, 0.10);
-      --shadow-window: 0 24px 70px -12px rgba(0, 0, 0, 0.85);
-      --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.45);
-      --shadow-dock: 0 20px 48px -10px rgba(0, 0, 0, 0.75);
-      --jade-pulse: #10B981;
-      --jade-glow: rgba(16, 185, 129, 0.45);
-      --font-sans: system-ui, -apple-system, sans-serif;
-      --font-mono: "JetBrains Mono", monospace;
-    }
     body {
       margin: 0;
       padding: 0;
       width: 100vw;
       height: 100vh;
-      background: var(--bg-window);
-      color: var(--text-main);
+      background: var(--background, #090a0f);
+      color: var(--foreground, #f8fafc);
       font-family: var(--font-sans);
       overflow: hidden;
       display: flex;
@@ -65,22 +33,12 @@
 <body>
   <div id="stage-container"></div>
 
-  <script type="module">
-    import {
-      renderConversationCanvas,
-      renderMessage,
-      renderToolCapsuleSlot,
-    } from '/packages/ui/dist/components/MiddlePod/MiddlePod.js';
-    import { renderInputDock } from '/packages/ui/dist/components/InputDock/InputDock.js';
+  <!-- 由 CDP 测试用 esbuild 现场打包生成，内含 React 与真实对话组件 -->
+  <script src="/packages/desktop/__tests__/cdp/.tmp/react-entry.js"></script>
+  <script>
+    const { renderConversationCanvas, renderInputDock } = window.__fluxRenderers;
+    const { mountMessages } = window.__fluxReact;
 
-    window.__fluxRenderers = {
-      renderConversationCanvas,
-      renderMessage,
-      renderToolCapsuleSlot,
-      renderInputDock,
-    };
-
-    // 模拟数据渲染
     const stage = document.getElementById('stage-container');
 
     const mockMessages = [
@@ -90,8 +48,6 @@
         role: 'user',
         content: '请用 TypeScript 实现一个带有单调递增时钟和自动退避的状态机。',
         timestamp: '14:28:05',
-        isGroupRoom: false,
-        isBotRoom: false,
       },
       {
         id: 'ast-turn-1',
@@ -100,19 +56,9 @@
         content: '这是经过架构防灾验证的五态 FSM 实现：\n\n```typescript\nexport class WebSocketFsm {\n  // 实现了全抖动退避\n}\n```',
         model: 'claude-3-7-sonnet',
         durationMs: 1850,
-        ttftMs: 240,
         timestamp: '14:28:07',
-        tokenMetrics: {
-          total: 1420,
-          input: 540,
-          output: 880,
-          tps: 76.5,
-          cacheHitPct: 85,
-          cacheRead: 459,
-        },
         thought: '深入分析 WebSocketFsm 架构契约与重连退避算法...',
         thoughtDurationMs: 800,
-        isGroupRoom: false,
       },
     ];
 
@@ -147,7 +93,11 @@
 
     stage.innerHTML = canvasHtml + dockHtml;
 
-    // 交互事件绑定（回滚回填、Token Popover 展开、手风琴切换）
+    // 消息行由 React 真实挂载到宿主锚点（与生产同构）
+    const messageHost = document.getElementById('react-message-list-host');
+    if (messageHost) mountMessages(messageHost, mockMessages);
+
+    // 交互事件绑定（回滚回填、手风琴切换）
     document.addEventListener('click', (e) => {
       const target = e.target;
       const btn = target.closest('button') || target.closest('[data-action]');
@@ -165,15 +115,6 @@
           textarea.value = text;
           textarea.focus();
           document.body.setAttribute('data-last-rollback', text);
-        }
-      }
-
-      if (action === 'toggle-token-popover') {
-        const popover = btn.parentElement.querySelector('.token-metrics-popover');
-        if (popover) {
-          const isOpen = popover.style.display === 'block';
-          popover.style.display = isOpen ? 'none' : 'block';
-          document.body.setAttribute('data-token-popover-open', String(!isOpen));
         }
       }
 

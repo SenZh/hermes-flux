@@ -145,7 +145,15 @@ function ReadGroup({ tools, now }: { tools: ConversationToolVM[]; now?: number }
   );
 }
 
-export function ToolSection({ messageId, tools }: ToolSectionProps): React.ReactElement {
+/**
+ * 工具区块内容（不含 #msg-tools 外壳）。
+ *
+ * 【设计意图 (Why)】
+ *   React 全量渲染与流式补丁通道必须产出同一份结构，否则流式期间一套样式、
+ *   收敛后又变成另一套，用户会看到明显的形态跳变。
+ *   把内容抽成独立组件后，两条通道都渲染 ToolBlocks。
+ */
+export function ToolBlocks({ tools }: { tools: ConversationToolVM[] }): React.ReactElement {
   // 只有存在未完成的运行项时才启用秒脉冲，完成态不空转定时器
   const hasRunning = tools.some((tool) => tool.status === 'running' && tool.durationMs === undefined);
   const now = useNow(hasRunning);
@@ -174,11 +182,7 @@ export function ToolSection({ messageId, tools }: ToolSectionProps): React.React
 
   // 单工具直通：多包一层折叠会让「一个命令」变成两次点击
   if (tools.length <= 1) {
-    return (
-      <div className="conv-tools" id={`msg-tools-${messageId}`}>
-        {blocks}
-      </div>
-    );
+    return <>{blocks}</>;
   }
 
   const runningCount = tools.filter((tool) => tool.status === 'running').length;
@@ -194,12 +198,9 @@ export function ToolSection({ messageId, tools }: ToolSectionProps): React.React
     ? t('tool.completedWithFailed', { completed: String(completedCount), failed: String(failedCount) })
     : t('tool.completedAll', { completed: String(completedCount) });
 
-  // 【防范的历史坑 (Pitfall)】#msg-tools-<id> 必须留在外层 div：
-  // 流式补丁通道会直写该容器的 innerHTML，锚点若是 details 会把 summary 一起冲掉。
   return (
-    <div className="conv-tools" id={`msg-tools-${messageId}`}>
-      <details className="conv-package" open={hasRunning || undefined}>
-        <summary className="conv-package__summary">
+    <details className="conv-package" open={hasRunning || undefined}>
+      <summary className="conv-package__summary">
           <span className="conv-package__icon">
             {hasRunning ? (
               <svg
@@ -252,6 +253,21 @@ export function ToolSection({ messageId, tools }: ToolSectionProps): React.React
         </summary>
         <div className="conv-package__body">{blocks}</div>
       </details>
+  );
+}
+
+/**
+ * 工具区块外壳：#msg-tools-<id> 锚点必须留在这一层。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   流式补丁通道直写该容器的 innerHTML，锚点若是 details 会把 summary 一起冲掉。
+ * 【约束与规则 (Rules)】
+ *   外壳只负责定位，不承载任何内容逻辑；内容一律走 ToolBlocks。
+ */
+export function ToolSection({ messageId, tools }: ToolSectionProps): React.ReactElement {
+  return (
+    <div className="conv-tools" id={`msg-tools-${messageId}`}>
+      <ToolBlocks tools={tools} />
     </div>
   );
 }
