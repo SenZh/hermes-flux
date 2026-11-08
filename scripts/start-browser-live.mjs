@@ -181,8 +181,9 @@ async function start() {
 
     // 2. 网关 REST 代理
     if (url.pathname === '/__gw/proxy') {
+      let body;
       try {
-        const body = await readBody(req);
+        body = await readBody(req);
         const result = await httpProxy(sessionCookie, {
           baseUrl: body.baseUrl || GW_BASE,
           path: body.path,
