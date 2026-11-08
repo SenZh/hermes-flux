@@ -152,7 +152,7 @@ import { DesktopCacheStore } from './cache/DesktopCacheStore.js';
  *   - 只在启动时读一次，不在渲染周期内读；
  *   - 写缓存失败不得影响主流程（由 DesktopCacheStore 内部降级）。
  */
-const cacheService = new CacheService(new DesktopCacheStore(), { sessionCap: 200, messageCap: 500 });
+const cacheService = new CacheService(new DesktopCacheStore(), { sessionCap: 500, messageCap: 2000 });
 
 /** 把缓存索引行还原成渲染层使用的会话结构。 */
 function toNormalizedSession(row: CachedSessionSummary): NormalizedSession {
@@ -218,8 +218,8 @@ function toCachedGroup(room: LeftRailGroupRoom): CachedSessionSummary {
   };
 }
 
-/** 消息缓存上限：与设计文档的"每会话 500 行"一致。 */
-const MESSAGE_CACHE_LIMIT = 500;
+/** 消息缓存上限：每会话 2000 行。 */
+const MESSAGE_CACHE_LIMIT = 2000;
 
 /** 把缓存消息行还原成渲染层消息视图。 */
 function toMessageViewModel(row: CachedMessageRow): MessageViewModel {
@@ -2101,9 +2101,9 @@ async function switchProfile(name: string): Promise<void> {
   await Promise.allSettled([fetchSessions(), fetchModelOptions()]);
 }
 
-// OpenChamber Standard Message Paging: Initial Window 50 items for instant cold launch
-const INITIAL_WINDOW_PAGE_SIZE = 50;
-const OLDER_BATCH_PAGE_SIZE = 30;
+// OpenChamber Standard Message Paging: Initial Window 100 items for instant cold launch
+const INITIAL_WINDOW_PAGE_SIZE = 100;
+const OLDER_BATCH_PAGE_SIZE = 50;
 const sessionMessagesCache = new Map<string, MessageViewModel[]>();
 const sessionServerOffset = new Map<string, number>();
 /** 截断成功后的会话历史权威源标记：'server-priority' 时禁用“本地更长则保留”合并守卫 */
