@@ -274,9 +274,9 @@ function renderGatewayOnboarding(props: MiddlePodProps): string {
         <div style="display: flex; flex-direction: column; gap: 6px;">
           <div style="display: flex; justify-content: space-between; align-items: baseline;">
             <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">网关连接地址 (Gateway URL)</label>
-            <span style="font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono);">支持 9119 / 8642 / 反代域名</span>
+            <span style="font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono);">${t('gateway.urlHint')}</span>
           </div>
-          <input type="text" id="onboarding-gateway-url" value="${escapeHtml(props.gatewayUrl || 'http://127.0.0.1:9119')}" placeholder="http://127.0.0.1:9119 或 https://..." style="
+          <input type="text" id="onboarding-gateway-url" value="${escapeHtml(props.gatewayUrl || '')}" placeholder="${t('gateway.urlPlaceholder')}" style="
             width: 100%;
             height: 38px;
             background: var(--bg-panel);
@@ -292,7 +292,7 @@ function renderGatewayOnboarding(props: MiddlePodProps): string {
           "/>
         </div>
 
-        <!-- Gateway 9119 Auth: Username & Password -->
+        <!-- Gateway Auth: Username & Password -->
         <div id="onboarding-section-dashboard" style="display: flex; flex-direction: column; gap: 10px;">
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
             <div style="display: flex; flex-direction: column; gap: 6px;">

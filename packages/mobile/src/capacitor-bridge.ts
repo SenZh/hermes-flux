@@ -160,7 +160,7 @@ export function createCapacitorPlatformBridge(): HermesMobileBridge {
         savedProfile = window.localStorage.getItem('hermes_aura_profile') || '';
       }
       return {
-        url: savedUrl || 'http://192.168.1.100:9119',
+        url: savedUrl,
         key: '',
         profile: savedProfile || 'default',
       };
@@ -172,7 +172,10 @@ export function createCapacitorPlatformBridge(): HermesMobileBridge {
       username?: string;
       password?: string;
     }): Promise<GatewayAuthResult> {
-      let baseUrl = (options.url || 'http://192.168.1.100:9119').trim();
+      let baseUrl = (options.url || '').trim();
+      if (!baseUrl) {
+        return { ok: false, message: '请先填写网关地址', latency: 0 };
+      }
       if (baseUrl.startsWith('ws://')) baseUrl = baseUrl.replace('ws://', 'http://');
       if (baseUrl.startsWith('wss://')) baseUrl = baseUrl.replace('wss://', 'https://');
       if (!baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) baseUrl = `https://${baseUrl}`;
@@ -275,7 +278,8 @@ export function createCapacitorPlatformBridge(): HermesMobileBridge {
       body?: any;
       params?: any;
     }): Promise<any> {
-      let base = (options.baseUrl || 'http://192.168.1.100:9119').trim();
+      let base = (options.baseUrl || '').trim();
+      if (!base) throw new Error('未配置网关地址');
       if (base.startsWith('ws://')) base = base.replace('ws://', 'http://');
       if (base.startsWith('wss://')) base = base.replace('wss://', 'https://');
       if (!base.startsWith('http://') && !base.startsWith('https://')) base = `https://${base}`;

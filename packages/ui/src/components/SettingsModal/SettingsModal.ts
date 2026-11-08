@@ -602,7 +602,7 @@ function renderGatewaysTab(props: SettingsModalProps): string {
               ${isConnected ? `<span style="font-size: var(--fs-caption); padding: 2px 6px; border-radius: 4px; background: var(--accent-subtle); color: var(--success); font-family: var(--font-mono); font-weight: 600;">${props.latencyMs}ms</span>` : ''}
             </div>
             <span style="font-size: var(--fs-caption); color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
-              ${escapeHtml(props.gatewayUrl || 'http://127.0.0.1:9119')}
+              ${escapeHtml(props.gatewayUrl || '')}
             </span>
           </div>
         </div>
@@ -652,7 +652,7 @@ function renderGatewaysTab(props: SettingsModalProps): string {
               <span style="font-size: var(--fs-body); font-weight: 600; color: var(--text-main);">${escapeHtml(t('settings.primaryNodeTitle'))}</span>
               <span style="font-size: var(--fs-micro); font-weight: 600; padding: 2px 6px; border-radius: 4px; background: var(--accent); color: var(--theme-thumb-color, var(--primary-foreground));">${escapeHtml(t('settings.activeNodeBadge'))}</span>
             </div>
-            <span style="font-size: var(--fs-caption); color: var(--text-muted); font-family: var(--font-mono); word-break: break-all;">${escapeHtml(props.gatewayUrl || 'http://127.0.0.1:9119')}</span>
+            <span style="font-size: var(--fs-caption); color: var(--text-muted); font-family: var(--font-mono); word-break: break-all;">${escapeHtml(props.gatewayUrl || '')}</span>
             <div style="display: flex; align-items: center; justify-content: space-between; font-size: var(--fs-caption); color: var(--text-secondary); margin-top: 4px;">
               <span>Profile: <strong style="font-family: var(--font-mono);">${escapeHtml(props.profileName || 'default')}</strong></span>
               <span style="color: var(--success); font-weight: 600;">● ${isConnected ? escapeHtml(t('settings.nodeStatusLive')) : escapeHtml(t('settings.nodeStatusStandby'))}</span>
@@ -679,7 +679,7 @@ function renderGatewaysTab(props: SettingsModalProps): string {
             <label style="font-size: var(--fs-caption); font-weight: 600; color: var(--text-secondary);">${escapeHtml(t('settings.gatewayUrlLabel'))}</label>
             <span style="font-size: var(--fs-micro); color: var(--text-muted); font-family: var(--font-mono);">${escapeHtml(t('settings.gatewayUrlHint'))}</span>
           </div>
-          <input type="text" id="settings-gateway-url" value="${escapeHtml(props.gatewayUrl || 'http://127.0.0.1:9119')}" placeholder="${escapeHtml(t('settings.gatewayUrlPlaceholder'))}" style="
+          <input type="text" id="settings-gateway-url" value="${escapeHtml(props.gatewayUrl || '')}" placeholder="${escapeHtml(t('settings.gatewayUrlPlaceholder'))}" style="
             width: 100%;
             height: 38px;
             background: var(--bg-card);

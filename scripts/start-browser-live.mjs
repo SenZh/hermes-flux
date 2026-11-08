@@ -17,9 +17,8 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
-// 优先从环境变量取，兜底使用本地已对齐网关地址；凭据一律由用户在连接面板输入，绝不落盘
-const GW_BASE = (process.env.FLUX_GATEWAY_URL || process.env.HERMES_GATEWAY_URL || 'https://fn-ai.codepower.cloud:1519').replace(/\/+$/, '');
-const GW_USER = process.env.FLUX_GATEWAY_USER || 'zhangsen';
+// 开源项目不内置默认网关：地址只能来自部署方环境变量或用户在连接面板填写，凭据绝不落盘
+const GW_BASE = (process.env.FLUX_GATEWAY_URL || process.env.HERMES_GATEWAY_URL || '').replace(/\/+$/, '');
 const PORT = Number(process.env.PORT) || 9120;
 
 let sessionCookie = '';
@@ -34,7 +33,8 @@ let sessionCookie = '';
  *   任一步失败都显式返回 ok:false，ticket 缺失等同失败，绝不降级为空字符串（Failure Is Not Empty）。
  */
 function normalizeGatewayUrl(rawUrl) {
-  let base = (rawUrl || GW_BASE).trim();
+  let base = (rawUrl || '').trim();
+  if (!base) return '';
   if (base.startsWith('ws://')) base = base.replace('ws://', 'http://');
   if (base.startsWith('wss://')) base = base.replace('wss://', 'https://');
   if (!base.startsWith('http://') && !base.startsWith('https://')) {
@@ -46,6 +46,7 @@ function normalizeGatewayUrl(rawUrl) {
 
 async function authenticateWithCredentials(baseUrl, username, password) {
   const base = normalizeGatewayUrl(baseUrl);
+  if (!base) throw new Error('未配置网关地址，请先在连接面板填写');
 
   // 1. 先探测 /api/status：判断是否免密或者服务是否正常
   let statusData = {};
@@ -108,6 +109,7 @@ async function authenticateWithCredentials(baseUrl, username, password) {
 
 async function httpProxy(cookie, { baseUrl, path: p, method = 'GET', params, body, ticket }) {
   const b = normalizeGatewayUrl(baseUrl);
+  if (!b) throw new Error('未配置网关地址');
 
   let fullUrl = `${b}${p.startsWith('/') ? '' : '/'}${p}`;
   if (params && typeof params === 'object') {
@@ -173,7 +175,7 @@ async function start() {
           typeof body.username === 'string' ? body.username : '',
           typeof body.password === 'string' ? body.password : '',
         );
-        return sendJson({ ok: true, ticket, latency: Date.now() - startAt, message: `认证就绪 · Gateway ${GW_BASE}` });
+        return sendJson({ ok: true, ticket, latency: Date.now() - startAt, message: `认证就绪 · Gateway ${body.url || body.baseUrl || GW_BASE || '未配置'}` });
       } catch (e) {
         return sendJson({ ok: false, message: e.message, latency: Date.now() - startAt });
       }
@@ -242,7 +244,7 @@ async function start() {
           isMaximized: async () => false,
           onWindowStateChange: () => () => {},
           getDefaultGatewayConfig: async () => ({
-            url: localStorage.getItem('hermes_flux_gateway_url') || '${GW_BASE}',
+            url: localStorage.getItem('hermes_flux_gateway_url') || '',
             key: '',
             profile: localStorage.getItem('hermes_flux_profile') || 'default'
           }),
@@ -264,14 +266,9 @@ async function start() {
           },
         };
         try {
-          if (!localStorage.getItem('hermes_flux_gateway_url')) {
-            localStorage.setItem('hermes_flux_gateway_url', '${GW_BASE}');
-          }
+          // 网关地址与用户名只能由用户在连接面板填写，首次启动不注入任何默认值
           if (!localStorage.getItem('hermes_flux_profile')) {
             localStorage.setItem('hermes_flux_profile', 'default');
-          }
-          if (!localStorage.getItem('hermes_flux_username')) {
-            localStorage.setItem('hermes_flux_username', '${GW_USER}');
           }
           if (!localStorage.getItem('hermes_flux_theme')) {
             localStorage.setItem('hermes_flux_theme', 'obsidian-gold');

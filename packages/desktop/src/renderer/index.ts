@@ -851,7 +851,7 @@ const state: AppState = {
   gatewayConnected: false,
   gatewayConnecting: Boolean(localStorage.getItem('hermes_flux_gateway_url') || localStorage.getItem('hermes_aura_gateway_url')),
   gatewayLatencyMs: 0,
-  gatewayUrl: localStorage.getItem('hermes_flux_gateway_url') || localStorage.getItem('hermes_aura_gateway_url') || 'http://127.0.0.1:9119',
+  gatewayUrl: localStorage.getItem('hermes_flux_gateway_url') || localStorage.getItem('hermes_aura_gateway_url') || '',
   username: localStorage.getItem('hermes_flux_username') || localStorage.getItem('hermes_aura_username') || '',
   password: localStorage.getItem('hermes_flux_password') || localStorage.getItem('hermes_aura_password') || '',
   isSettingsOpen: false,
@@ -1396,7 +1396,9 @@ function scheduleToolPatch(messageId: string): void {
 }
 
 function getEffectiveUrl(base: string): string {
-  let url = (base || 'http://127.0.0.1:9119').trim();
+  // 开源项目不内置任何默认网关，空地址必须原样返回空，交给连接面板要求用户填写
+  let url = (base || '').trim();
+  if (!url) return '';
   if (url.startsWith('ws://')) url = url.replace('ws://', 'http://');
   if (url.startsWith('wss://')) url = url.replace('wss://', 'https://');
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
@@ -4685,6 +4687,15 @@ async function connect(targetUrl?: string): Promise<void> {
     state.gatewayUrl = targetUrl;
   }
 
+  // 空地址不建立连接：地址必须由用户显式填写，首次启动停留在连接面板
+  if (!getEffectiveUrl(state.gatewayUrl)) {
+    state.gatewayConnected = false;
+    state.gatewayConnecting = false;
+    state.testStatus = undefined;
+    render();
+    return;
+  }
+
   // 确保新目标地址即时持久化，杜绝回退老地址
   localStorage.setItem('hermes_flux_gateway_url', state.gatewayUrl);
   localStorage.setItem('hermes_flux_username', state.username);
@@ -6297,8 +6308,13 @@ function bindEvents(): void {
   const settingsSaveBtn = document.getElementById('btn-settings-save-connect');
   if (settingsSaveBtn) {
     settingsSaveBtn.onclick = () => {
-      const urlInput = (document.getElementById('settings-gateway-url') as HTMLInputElement)?.value;
-      if (urlInput) state.gatewayUrl = urlInput.trim();
+      const urlInput = ((document.getElementById('settings-gateway-url') as HTMLInputElement)?.value || '').trim();
+      if (!urlInput) {
+        state.testStatus = { ok: false, message: t('gateway.urlRequired'), latency: 0 };
+        render();
+        return;
+      }
+      state.gatewayUrl = urlInput;
       state.username = (document.getElementById('settings-username') as HTMLInputElement)?.value || '';
       state.password = (document.getElementById('settings-password') as HTMLInputElement)?.value || '';
       state.profileName = (document.getElementById('settings-profile-name') as HTMLInputElement)?.value || 'default';
@@ -6371,16 +6387,19 @@ function bindEvents(): void {
   const onboardingTestBtn = document.getElementById('btn-test-connection');
   if (onboardingTestBtn) {
     onboardingTestBtn.onclick = async () => {
-      const urlInput = (document.getElementById('onboarding-gateway-url') as HTMLInputElement)?.value;
+      const urlInput = ((document.getElementById('onboarding-gateway-url') as HTMLInputElement)?.value || '').trim();
       const userInput = (document.getElementById('onboarding-username') as HTMLInputElement)?.value;
       const passInput = (document.getElementById('onboarding-password') as HTMLInputElement)?.value;
       const profileInput = (document.getElementById('onboarding-profile-name') as HTMLInputElement)?.value;
 
-      if (urlInput) {
-        state.gatewayUrl = urlInput;
-        localStorage.setItem('hermes_flux_gateway_url', urlInput);
-        localStorage.setItem('hermes_aura_gateway_url', urlInput);
+      if (!urlInput) {
+        state.testStatus = { ok: false, message: t('gateway.urlRequired'), latency: 0 };
+        render();
+        return;
       }
+      state.gatewayUrl = urlInput;
+      localStorage.setItem('hermes_flux_gateway_url', urlInput);
+      localStorage.setItem('hermes_aura_gateway_url', urlInput);
       if (userInput !== undefined) {
         state.username = userInput;
         localStorage.setItem('hermes_flux_username', userInput);
@@ -6408,7 +6427,13 @@ function bindEvents(): void {
   const onboardingSaveBtn = document.getElementById('btn-save-and-connect');
   if (onboardingSaveBtn) {
     onboardingSaveBtn.onclick = async () => {
-      state.gatewayUrl = (document.getElementById('onboarding-gateway-url') as HTMLInputElement)?.value || state.gatewayUrl;
+      const urlInput = ((document.getElementById('onboarding-gateway-url') as HTMLInputElement)?.value || '').trim();
+      if (!urlInput) {
+        state.testStatus = { ok: false, message: t('gateway.urlRequired'), latency: 0 };
+        render();
+        return;
+      }
+      state.gatewayUrl = urlInput;
       state.username = (document.getElementById('onboarding-username') as HTMLInputElement)?.value || '';
       state.password = (document.getElementById('onboarding-password') as HTMLInputElement)?.value || '';
       state.profileName = (document.getElementById('onboarding-profile-name') as HTMLInputElement)?.value || 'default';

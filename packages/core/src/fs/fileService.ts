@@ -368,7 +368,7 @@ export async function resolveFileContent(
   }
 
   // 4. 网关 REST 文件端点拉取 (支持网关静态文件直连 /api/files/download, /api/fs/read 等)
-  if (options.platformBridge?.httpProxy && !isHttp) {
+  if (options.platformBridge?.httpProxy && options.gatewayUrl && !isHttp) {
     const candidateEndpoints = [
       `/api/files/download?path=${encodeURIComponent(cleanTarget)}`,
       `/api/fs/read?path=${encodeURIComponent(cleanTarget)}&optional=true`,
@@ -379,7 +379,7 @@ export async function resolveFileContent(
     for (const endpoint of candidateEndpoints) {
       try {
         const res = await options.platformBridge.httpProxy({
-          baseUrl: options.gatewayUrl || 'http://127.0.0.1:9119',
+          baseUrl: options.gatewayUrl,
           path: endpoint,
           method: 'GET',
         });

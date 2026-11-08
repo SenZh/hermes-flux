@@ -109,7 +109,8 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
 
   ipcMain.handle('gateway:get-default-config', () => {
     return {
-      url: process.env.HERMES_GATEWAY_URL || 'http://127.0.0.1:9119',
+      // 开源项目不内置默认网关地址：只有用户显式设置的地址才允许回填
+      url: process.env.HERMES_GATEWAY_URL || '',
       key: '',
       profile: process.env.HERMES_PROFILE || 'default',
     };
@@ -118,7 +119,10 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle(
     'gateway:authenticate',
     async (_event, options: { url: string; username?: string; password?: string }) => {
-      let baseUrl = (options.url || 'http://127.0.0.1:9119').trim();
+      let baseUrl = (options.url || '').trim();
+      if (!baseUrl) {
+        return { ok: false, message: '请先填写网关地址', latency: 0 };
+      }
       if (baseUrl.startsWith('ws://')) baseUrl = baseUrl.replace('ws://', 'http://');
       if (baseUrl.startsWith('wss://')) baseUrl = baseUrl.replace('wss://', 'https://');
       if (!baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) baseUrl = `https://${baseUrl}`;
@@ -239,7 +243,8 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     body?: any;
     params?: any;
   }) => {
-    let base = (options.baseUrl || 'http://127.0.0.1:9119').trim();
+    let base = (options.baseUrl || '').trim();
+    if (!base) throw new Error('未配置网关地址');
     if (base.startsWith('ws://')) base = base.replace('ws://', 'http://');
     if (base.startsWith('wss://')) base = base.replace('wss://', 'https://');
     if (!base.startsWith('http://') && !base.startsWith('https://')) base = `https://${base}`;
