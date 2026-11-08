@@ -15,6 +15,7 @@ test('Delete Session Focus & InputDock Snapshot Invariants', async (t) => {
     // 1. Arrange: 准备生产快照基线
     const baseSnapshot = {
       selectedModel: 'anthropic/claude-3-7-sonnet',
+      currentProvider: 'anthropic',
       reasoningLevel: 'medium',
       approvalMode: 'auto',
       isStreaming: false,
@@ -23,6 +24,7 @@ test('Delete Session Focus & InputDock Snapshot Invariants', async (t) => {
       notice: '',
       activityStatus: undefined,
       modelCount: 12,
+      modelCatalogHash: 'anthropic:claude-3-7-sonnet:Sonnet 3.7',
       modelSearchQuery: '',
       recentModelsHash: 'model-a,model-b',
       favoriteModelsHash: 'model-a',
@@ -49,6 +51,16 @@ test('Delete Session Focus & InputDock Snapshot Invariants', async (t) => {
     assert.equal(hasDockSnapshotChanged(baseSnapshot, { ...baseSnapshot, modelMenuOpen: true }), true, '菜单开关变化必须触发更新');
     assert.equal(hasDockSnapshotChanged(baseSnapshot, { ...baseSnapshot, activityStatus: 'running' }), true, '活动状态变化必须触发更新');
     assert.equal(hasDockSnapshotChanged(baseSnapshot, { ...baseSnapshot, modelCount: 15 }), true, '模型总数变化必须触发更新');
+    assert.equal(
+      hasDockSnapshotChanged(baseSnapshot, { ...baseSnapshot, currentProvider: 'openrouter' }),
+      true,
+      'provider 变化必须触发更新（否则标签停在旧 provider 的价格与能力上）'
+    );
+    assert.equal(
+      hasDockSnapshotChanged(baseSnapshot, { ...baseSnapshot, modelCatalogHash: 'anthropic:claude-3-7-sonnet:Sonnet 3.7 Renamed' }),
+      true,
+      '目录内容变化必须触发更新（数量相同但显示名变了）'
+    );
     assert.equal(hasDockSnapshotChanged(baseSnapshot, { ...baseSnapshot, modelSearchQuery: 'claude' }), true, '检索词变化必须触发更新');
     assert.equal(hasDockSnapshotChanged(baseSnapshot, { ...baseSnapshot, recentModelsHash: 'model-c' }), true, '最近模型变化必须触发更新');
     assert.equal(hasDockSnapshotChanged(baseSnapshot, { ...baseSnapshot, favoriteModelsHash: 'model-b' }), true, '收藏模型变化必须触发更新');

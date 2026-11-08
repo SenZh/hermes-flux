@@ -5,6 +5,7 @@
 import { JsonRpcRequest, JsonRpcResponse, JsonRpcNotification, NormalizedSession, ModelDetail, AgentProfile } from './types.js';
 import { WebSocketFsm, FsmState } from './fsm.js';
 import { normalizeSessionsResult, extractAvailableModels, extractModelDetails } from '../models/types.js';
+import { buildModelCatalogView, type ModelCatalogEntry } from '../models/modelCatalog.js';
 import { createLogger } from '../log/logger.js';
 import { CONTRACT_METHODS } from './contracts/contractTable.generated.js';
 import { EXTRA_METHODS } from './contracts/extraMethods.js';
@@ -108,6 +109,19 @@ export interface SessionMessageRecord {
 export interface ModelCatalog {
   models: string[];
   details: ModelDetail[];
+  /**
+   * 归一化后的完整目录：扁平、带可读显示名与价格/能力元数据。
+   *
+   * 【设计意图 (Why)】
+   *   `models` / `details` 是历史契约（只给 ID 与粗粒度详情），前端渲染时仍要自己拼字符串。
+   *   `entries` 是新的权威视图：前端选择器、输入舱标签、设置页统一消费它，显示名不再各处漂移。
+   *
+   * 【规则 (Rules)】
+   *   `entries` 是 `models` 的子集来源：`models` = entries 去重 id + （若不在其中）根层当前模型。
+   *   当前模型可能因网关目录截断而缺失于 `providers[].models[]`，必须保留在 `models` 里，
+   *   但**不为它伪造 entry**（无 provider 归属与价格，不能造可渲染条目）。
+   */
+  entries: ModelCatalogEntry[];
   currentModel: string;
   currentProvider: string;
   ok: boolean;
@@ -755,25 +769,54 @@ export class HermesGatewayClient {
    * `model.options` answers `{ model, provider, providers: [{ slug, models }] }`.
    * Both the flattened model list and the provider that owns the active model are
    * kept, because `config.set` rejects a model id that several providers declare.
+   *
+   * 【设计意图 (Why)】
+   *   一次读取同时产出三份视图：`entries`（带可读显示名与价格/能力的权威扁平视图）、
+   *   `models`（纯 ID，兼容既有调用方）、`details`（历史粗粒度详情）。
+   *   三者同源，避免前端各自解析原始 payload 造成显示名漂移。
+   *
+   * 【防范的历史坑 (Pitfall)】
+   *   1. REST 兜底曾打 `/api/models`——该路由在网关上**不存在**（只有 `/api/model/options`、
+   *      `/api/model/info`、`/v1/models`）。WS 一断，兜底必然 404，等于没有兜底。
+   *   2. **漏传 `explicit_only`**：不传时网关会把它机器上"环境里恰好存在的凭据"
+   *      （如残留的 Nous 会话、CLI 借来的 token）也当成 provider 行返回。用户没买 Nous，
+   *      选择器里却挂着整行 72 个一模一样的模型，一选就失败。官方桌面端
+   *      `requestModelOptions` 的默认值就是 `explicitOnly = true`，注释写得很明确：
+   *      "Chat pickers default to true so only explicitly configured providers are listed (#56974)"。
+   *
+   * 【约束与规则 (Rules)】
+   *   - WS 与 REST 两条通道都必须携带 `explicit_only`，否则同一用户在不同网络条件下
+   *     会看到两套不同的 provider 列表；
+   *   - REST 用 `1` 而非 `true`：官方 `api/models.ts` 用 `explicit_only=1`，FastAPI 的
+   *     bool 解析两者都接受，但沿用官方拼法可避免某些代理对 `true` 字符串的兼容差异；
+   *   - 读取失败必须返回 `ok: false` 并携带 `error`，严禁用虚构模型列表填坑（Failure Is Not Empty）。
    */
+  private legacyModelDetails(payload: unknown): ModelDetail[] {
+    // 【规则】`extractModelDetails` 会把探针占位符 `<more:N>` 也当成模型，
+    // 导致 details 里出现不可选的伪条目，与 entries 视图不一致。这里统一剔除。
+    return extractModelDetails(payload).filter(
+      (detail) => !detail.id.startsWith('<') && !detail.id.endsWith('>'),
+    );
+  }
+
   public async getModelCatalog(profile = 'default', fallbackModels: string[] = []): Promise<ModelCatalog> {
     let lastError: string | undefined;
 
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       try {
-        const res = await this.call<Record<string, unknown>>('model.options', { profile });
-        const models = extractAvailableModels(res, []);
-        const details = extractModelDetails(res);
-        if (models.length > 0) {
+        const res = await this.call<Record<string, unknown>>('model.options', { profile, explicit_only: true });
+        const view = buildModelCatalogView(res);
+        if (view.ok) {
           return {
-            models,
-            details,
-            currentModel: typeof res?.model === 'string' ? res.model : '',
-            currentProvider: typeof res?.provider === 'string' ? res.provider : '',
+            models: view.models,
+            details: this.legacyModelDetails(res),
+            entries: view.entries,
+            currentModel: view.currentModel,
+            currentProvider: view.currentProvider,
             ok: true,
           };
         }
-        lastError = '网关返回的模型列表为空';
+        lastError = view.error;
       } catch (wsErr) {
         lastError = describeError(wsErr);
         console.warn('[HermesGatewayClient] WS model.options failed, trying REST fallback:', lastError);
@@ -784,23 +827,22 @@ export class HermesGatewayClient {
 
     if (this.restFallbackHandler) {
       try {
-        const restResult = await this.restFallbackHandler('/api/models', {
+        const restResult = await this.restFallbackHandler('/api/model/options', {
           method: 'GET',
-          params: { profile },
+          params: { profile, explicit_only: 1 },
         });
-        const models = extractAvailableModels(restResult, []);
-        const details = extractModelDetails(restResult);
-        const restObj = restResult && typeof restResult === 'object' ? (restResult as Record<string, unknown>) : null;
-        if (models.length > 0) {
+        const view = buildModelCatalogView(restResult);
+        if (view.ok) {
           return {
-            models,
-            details,
-            currentModel: typeof restObj?.model === 'string' ? restObj.model : '',
-            currentProvider: typeof restObj?.provider === 'string' ? restObj.provider : '',
+            models: view.models,
+            details: this.legacyModelDetails(restResult),
+            entries: view.entries,
+            currentModel: view.currentModel,
+            currentProvider: view.currentProvider,
             ok: true,
           };
         }
-        lastError = 'REST 模型接口返回为空';
+        lastError = view.error ?? 'REST 模型接口返回为空';
       } catch (restErr) {
         lastError = describeError(restErr);
         console.warn('[HermesGatewayClient] REST model fallback also failed:', lastError);
@@ -810,6 +852,7 @@ export class HermesGatewayClient {
     return {
       models: extractAvailableModels(null, fallbackModels),
       details: [],
+      entries: [],
       currentModel: '',
       currentProvider: '',
       ok: false,

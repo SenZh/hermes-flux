@@ -11,6 +11,7 @@
  */
 
 import { t } from '../../i18n/index.js';
+import { formatModelDisplayName, modelLabelFromCatalog, parseModelDisplay, type ModelCatalogEntry } from '@hermes-flux/core';
 
 export interface InputAttachmentItem {
   id: string;
@@ -61,6 +62,25 @@ export interface InputDockProps {
     contextLength?: number;
     supportsVision?: boolean;
   }>;
+  /**
+   * 归一化模型目录（core `getModelCatalog().entries`）。
+   *
+   * 【设计意图 (Why)】
+   *   这是唯一能同时给出「完整可读名 + 价格 + 能力」的数据源。
+   *   传入后输入舱标签与选择器行一律按它渲染，不再从 `models` 裸 ID 现拼字符串。
+   *
+   * 【规则 (Rules)】
+   *   优先级高于 `modelDetails` / `models`；缺失时回退到 core 的纯函数派生。
+   */
+  modelCatalog?: ModelCatalogEntry[];
+  /**
+   * 当前 provider slug（网关 `model.options` 根层的 `provider`）。
+   *
+   * 【规则 (Rules)】
+   *   同一模型 ID 可能被多个 provider 提供，显示时以 `(model, provider)` 二元组定位条目；
+   *   为空/`auto` 时退化为仅按模型 ID 匹配。
+   */
+  currentProvider?: string;
   favoriteModels?: string[];
   recentModels?: string[];
   modelSearchQuery?: string;
@@ -174,8 +194,8 @@ export function renderInputDock(props: InputDockProps): string {
   const activityStatus = (props.activityStatus || '').trim();
 
   // Model display label
-  const selectedDetail = props.modelDetails?.find((m) => m.id === props.selectedModel);
-  const modelLabel = selectedDetail ? selectedDetail.displayName || selectedDetail.name : props.selectedModel || 'Hermes Agent';
+  // 【规则】统一走 core 派生：目录命中优先，未命中按 ID 派生；绝不把裸 ID 直接显示给用户
+  const modelLabel = resolveDockModelLabel(props);
 
   const activityPillHtml = activityStatus
     ? `
@@ -298,7 +318,7 @@ export function renderInputDock(props: InputDockProps): string {
             <div class="pill-dropdown-wrapper">
               <button id="dock-model-selector-btn" class="composer-ctrl" title="${t('dock.selectModel')}">
                 <svg class="composer-ctrl__icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2"/></svg>
-                <span id="current-model-label" class="composer-ctrl__label">${escapeHtml(props.selectedModel || t('dock.selectModel'))}</span>
+                <span id="current-model-label" class="composer-ctrl__label">${escapeHtml(modelLabel)}</span>
                 <span class="composer-ctrl__caret" style="font-size: 9px;">▾</span>
               </button>
 
@@ -764,19 +784,143 @@ function formatContextLength(tokens?: number): string {
 }
 
 /**
+ * 模型选择器与输入舱标签的统一显示解析 (Dock Model Label Resolution)
+ *
+ * 【设计意图 (Why)】
+ *   输入舱标签与选择器行必须共用同一条解析链，否则同一模型会出现两种写法
+ *   （标签写 `Gemini 3.8 Flash`、菜单里写 `gemini-3.8-flash`）。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   旧实现只查 `modelDetails`，而 `modelDetails` 的 `displayName` 曾被拼成
+ *   `${name} (${provider})`，导致标签拖着 `(cpa)` 尾巴；且 `modelDetails` 缺失时直接落到裸 ID。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 目录命中 → 用目录 `displayName`（完整可读名，含全部后缀）；
+ *   2. 目录未命中 → 用 core 纯函数按 ID 派生，保证任何情况都不是机器串直出；
+ *   3. 定位条目一律走 core 的 `modelLabelFromCatalog`，禁止在 ui 侧另写一套匹配规则。
+ */
+export function resolveDockModelLabel(
+  props: Pick<InputDockProps, 'selectedModel' | 'modelCatalog' | 'currentProvider'>,
+): string {
+  const { selectedModel } = props;
+  if (!selectedModel) return t('dock.selectModel');
+
+  if (props.modelCatalog && props.modelCatalog.length > 0) {
+    return modelLabelFromCatalog(props.modelCatalog, selectedModel, props.currentProvider ?? '');
+  }
+
+  return formatModelDisplayName(selectedModel) || selectedModel;
+}
+
+/** 选择器行的统一形状：无论数据来自 `modelCatalog` 还是历史 `modelDetails`，都归一到这一结构。 */
+interface ModelPickerRow {
+  id: string;
+  provider: string;
+  /** provider 展示名（`Nous Portal` / `xAI Grok OAuth` …），用于分组标题 */
+  providerName: string;
+  name: string;
+  displayName: string;
+  variant: string;
+  quant: string;
+  context: string;
+  route: string;
+  date: string;
+  vendor: string;
+  contextLength?: number;
+  supportsVision?: boolean;
+  unavailable?: boolean;
+  featured?: boolean;
+  providerWarning?: string;
+}
+
+/**
+ * 把三种历史数据源收敛为统一选择器行 (Picker Row Resolution)
+ *
+ * 【设计意图 (Why)】
+ *   选择器同时被"新目录"与"旧 modelDetails / 裸 models"三种入参驱动。
+ *   若各分支各自拼显示名，会出现同一模型在不同入参下名不一致。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   旧实现直接拿 `d.name` 渲染，而 `name` 往往是完整 ID（如 `group/deepseek-v4.1-flash`）；
+ *   降级分支更是直接把裸 ID 当 displayName，等于把机器串原样呈现。
+ *
+ * 【约束与规则 (Rules)】
+ *   - `modelCatalog` 优先，其已含派生结果，直接复用不重算；
+ *   - 其余分支统一过一次 core 派生，保证显示名风格一致；
+ *   - **`name` 必须是完整可读名**，标签（variant/quant/context）只做视觉强调，不得从名字里扣掉。
+ */
+export function resolveModelPickerRows(
+  props: Pick<InputDockProps, 'modelCatalog' | 'modelDetails' | 'models'>,
+): ModelPickerRow[] {
+  if (props.modelCatalog && props.modelCatalog.length > 0) {
+    return props.modelCatalog.map((entry) => ({
+      id: entry.id,
+      provider: entry.providerSlug,
+      providerName: entry.providerName,
+      name: entry.name,
+      displayName: entry.displayName,
+      variant: entry.variant,
+      quant: entry.quant,
+      context: entry.context,
+      route: entry.route,
+      date: entry.date,
+      vendor: entry.vendor,
+      contextLength: entry.contextLength,
+      supportsVision: entry.supportsVision,
+      unavailable: entry.unavailable,
+      featured: entry.featured,
+      providerWarning: entry.providerWarning,
+    }));
+  }
+
+  if (props.modelDetails && props.modelDetails.length > 0) {
+    // 【规则】历史 modelDetails 一律重派生，不复用其 displayName：
+    // 旧值可能是 `${name} (${provider})` 这类拼接串，属不可靠数据。
+    return props.modelDetails.map((detail) => {
+      const parts = parseModelDisplay(detail.id, detail.provider);
+      return {
+        id: detail.id,
+        provider: detail.provider,
+        providerName: detail.provider || 'DEFAULT',
+        name: parts.name || detail.name,
+        displayName: parts.name,
+        variant: parts.variant,
+        quant: parts.quant,
+        context: parts.context,
+        route: parts.route,
+        date: parts.date,
+        vendor: parts.vendor,
+        contextLength: detail.contextLength,
+        supportsVision: detail.supportsVision,
+      };
+    });
+  }
+
+  const ids = props.models && props.models.length > 0 ? props.models : [];
+  return ids.map((id) => {
+    const parts = parseModelDisplay(id);
+    return {
+      id,
+      provider: 'DEFAULT',
+      providerName: 'DEFAULT',
+      name: parts.name || id,
+      displayName: parts.name || id,
+      variant: parts.variant,
+      quant: parts.quant,
+      context: parts.context,
+      route: parts.route,
+      date: parts.date,
+      vendor: parts.vendor,
+    };
+  });
+}
+
+/**
  * Provider 折叠手风琴模型选择器 (Provider Accordion)
  */
 export function renderModelPickerTree(props: InputDockProps): string {
   const query = (props.modelSearchQuery || '').trim().toLowerCase();
-  let allDetails = props.modelDetails && props.modelDetails.length > 0 ? props.modelDetails : [];
-  if (allDetails.length === 0 && props.models && props.models.length > 0) {
-    allDetails = props.models.map((m) => ({
-      id: m,
-      provider: 'DEFAULT',
-      name: m,
-      displayName: m,
-    }));
-  }
+  const allDetails = resolveModelPickerRows(props);
   const favorites = new Set(props.favoriteModels || []);
   const recents = props.recentModels || [];
   const collapsedSet = new Set(props.collapsedProviders || []);
@@ -842,20 +986,25 @@ export function renderModelPickerTree(props: InputDockProps): string {
     ${
       Object.keys(providerGroups).length > 0
         ? Object.entries(providerGroups)
-            .map(([providerName, models]) => {
-              const upperName = providerName.toUpperCase();
-              const isCollapsed = collapsedSet.has(providerName);
+            .map(([providerSlug, models]) => {
+              // 【规则】分组标题用 provider 展示名（`Nous Portal` / `xAI Grok OAuth`），
+              // 而不是大写 slug（`CPA` / `NOUS` / `XAI-OAUTH`）——slug 是路由标识，不是给人看的名字。
+              const displayName = models[0]?.providerName || providerSlug;
+              const upperName = `${providerSlug} ${displayName}`.toUpperCase();
+              const isCollapsed = collapsedSet.has(providerSlug);
               let icon = '⬡';
               if (upperName.includes('OPENCODE')) icon = '📱';
               else if (upperName.includes('CURSOR')) icon = '⬡';
               else if (upperName.includes('ANTHROPIC') || upperName.includes('CLAUDE')) icon = '🧠';
               else if (upperName.includes('OPENAI')) icon = '⚡';
               else if (upperName.includes('DEEPSEEK')) icon = '🐋';
+              else if (upperName.includes('XAI') || upperName.includes('GROK')) icon = '🤖';
+              else if (upperName.includes('GOOGLE') || upperName.includes('GEMINI')) icon = '✦';
 
               return `
-            <div class="model-provider-group" data-provider="${escapeHtml(providerName)}" style="margin-bottom: 6px;">
+            <div class="model-provider-group" data-provider="${escapeHtml(providerSlug)}" style="margin-bottom: 6px;">
               <!-- Accordion Header -->
-              <div class="model-provider-group-header" data-provider="${escapeHtml(providerName)}" style="
+              <div class="model-provider-group-header" data-provider="${escapeHtml(providerSlug)}" style="
                 padding: 5px 12px;
                 font-size: 11px;
                 font-weight: 700;
@@ -871,7 +1020,7 @@ export function renderModelPickerTree(props: InputDockProps): string {
                 <div style="display: flex; align-items: center; gap: 6px;">
                   <span style="opacity: 0.5;">::</span>
                   <span>${icon}</span>
-                  <span>${escapeHtml(upperName)}</span>
+                  <span>${escapeHtml(displayName)}</span>
                   <span style="font-size: 10px; color: var(--text-muted); font-weight: 400;">(${models.length})</span>
                 </div>
                 <span class="provider-accordion-arrow" style="font-size: 9px; opacity: 0.6;">${isCollapsed ? '▸' : '▾'}</span>
@@ -894,45 +1043,76 @@ export function renderModelPickerMenu(props: InputDockProps): string {
 }
 
 function renderModelItemRow(
-  item: { id: string; provider: string; name: string; contextLength?: number; supportsVision?: boolean },
+  item: ModelPickerRow,
   selectedModel: string,
   isFav: boolean
 ): string {
   const isSelected = item.id === selectedModel;
   const contextBadge = item.contextLength ? formatContextLength(item.contextLength) : '';
+  const locked = Boolean(item.unavailable);
+  const lockHint = locked
+    ? escapeHtml(item.providerWarning || t('dock.modelUnavailable'))
+    : escapeHtml(item.id);
 
   return `
-    <div class="model-option ${isSelected ? 'active' : ''}" data-model="${escapeHtml(item.id)}" data-provider="${escapeHtml(item.provider)}" style="
+    <div class="model-option ${isSelected ? 'active' : ''} ${locked ? 'is-locked' : ''}" data-model="${escapeHtml(item.id)}" data-provider="${escapeHtml(item.provider)}" data-locked="${locked ? 'true' : 'false'}" title="${lockHint}" style="
       padding: 6px 12px;
       font-size: 12px;
       color: ${isSelected ? 'var(--accent)' : 'var(--text-main)'};
       background: ${isSelected ? 'var(--accent-subtle)' : 'transparent'};
-      cursor: pointer;
+      cursor: ${locked ? 'not-allowed' : 'pointer'};
+      opacity: ${locked ? '0.45' : '1'};
       display: flex;
       align-items: center;
       justify-content: space-between;
       transition: background 0.1s ease;
-    " onmouseenter="if (!this.classList.contains('active')) this.style.background='var(--card-hover)'" onmouseleave="if (!this.classList.contains('active')) this.style.background='transparent'">
-      <div style="display: flex; align-items: center; gap: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+    " onmouseenter="if (!this.classList.contains('active') && this.dataset.locked !== 'true') this.style.background='var(--card-hover)'" onmouseleave="if (!this.classList.contains('active')) this.style.background='transparent'">
+      <div style="display: flex; align-items: center; gap: 8px; overflow: hidden; min-width: 0; flex: 1 1 auto; white-space: nowrap;">
         <span class="btn-toggle-favorite" data-model="${escapeHtml(item.id)}" style="
           color: ${isFav ? 'var(--accent)' : 'var(--text-faint)'};
-          font-size: 12px;
+          font-size: var(--fs-caption);
           cursor: pointer;
           flex-shrink: 0;
         ">${isFav ? '★' : '☆'}</span>
-        <span style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; color: inherit;">${escapeHtml(item.name || item.id)}</span>
+        <span style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; color: inherit;">${escapeHtml(item.name)}</span>
+        ${renderModelBadge(item.variant, 'var(--foreground)', 'var(--secondary)')}
+        ${renderModelBadge([item.quant, item.context].filter(Boolean).join(' · '), 'var(--muted-foreground)', 'var(--secondary)')}
       </div>
       <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
-        ${item.supportsVision ? '<span style="font-size: 9.5px; padding: 0 4px; background: var(--accent-subtle); color: var(--accent); border-radius: 3px;">VISION</span>' : ''}
+        ${locked ? `<span style="font-size: var(--fs-micro); padding: 0 4px; background: var(--secondary); color: var(--muted-foreground); border-radius: 4px;">${escapeHtml(t('dock.modelLockedBadge'))}</span>` : ''}
+        ${item.supportsVision ? '<span style="font-size: var(--fs-micro); padding: 0 4px; background: var(--secondary); color: var(--muted-foreground); border-radius: 4px;">VISION</span>' : ''}
         ${
           contextBadge
-            ? `<span style="font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono);">${contextBadge}</span>`
+            ? `<span style="font-size: var(--fs-micro); color: var(--muted-foreground); font-family: var(--font-mono);">${contextBadge}</span>`
             : ''
         }
-        ${isSelected ? '<span style="font-size: 11px; color: var(--accent); font-weight: 700;">✓</span>' : ''}
+        ${isSelected ? '<span style="font-size: var(--fs-caption); color: var(--accent); font-weight: 700;">✓</span>' : ''}
       </div>
     </div>
   `;
+}
+
+/**
+ * 行内标签 (Inline Model Badge)
+ *
+ * 【设计意图 (Why)】
+ *   变体（Fast / Flash）、量化（Q4_K_M）、上下文（1M）在完整名字里已经出现过，
+ *   标签只是**视觉强调**，让眼睛快速抓到型号差异；它不承担信息完整性责任。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   1. 标签未声明 `flex-shrink: 0`：flex 默认 `shrink:1`，窄容器下标签被压扁裁切，
+ *      文字溢出自带背景的框外。必须禁止收缩，让**名字**去省略。
+ *   2. 用 accent/primary 作前景 + 其 subtle 变体作底：obsidian 主题下两者都是 `#FFFFFF`，
+ *      其 subtle 是 6% 白底 —— 白字压 6% 白底，完全不可读。
+ *      必须用「实底表面 + 前景文字」：`--secondary` 作底，`--foreground` / `--muted-foreground` 作字。
+ *   3. 用规格外字号：设计系统只有 7 档，标签必须落在 `--fs-micro`。
+ *
+ * 【约束与规则 (Rules)】
+ *   文案为空时严格返回空串，不留空标签占位。
+ */
+function renderModelBadge(text: string, color: string, background: string): string {
+  if (!text) return '';
+  return `<span style="flex-shrink: 0; white-space: nowrap; font-size: var(--fs-micro); line-height: 1.4; padding: 0 4px; border-radius: 4px; color: ${color}; background: ${background};">${escapeHtml(text)}</span>`;
 }
 
 /**
@@ -941,6 +1121,22 @@ function renderModelItemRow(
  */
 export interface RenderInputDockSnapshot {
   selectedModel: string;
+  /**
+   * 当前 provider slug。
+   *
+   * 【设计意图 (Why)】
+   *   同一模型 ID 可能被多个 provider 提供，切换 provider 而不换模型时，
+   *   标签与归属必须随之刷新——否则界面会停在旧 provider 的价格与能力上。
+   */
+  currentProvider?: string;
+  /**
+   * 模型目录指纹（由 core `modelCatalogFingerprint` 计算）。
+   *
+   * 【设计意图 (Why)】
+   *   目录刷新后即使 `selectedModel` 未变，显示名或可选状态也可能变化。
+   *   仅比对 `modelCount` 会漏掉"数量相同但内容不同"的刷新。
+   */
+  modelCatalogHash?: string;
   reasoningLevel: string;
   approvalMode: string;
   isStreaming: boolean;
@@ -980,6 +1176,7 @@ export function hasDockSnapshotChanged(
   if (!last) return true;
   return (
     last.selectedModel !== curr.selectedModel ||
+    last.currentProvider !== curr.currentProvider ||
     last.reasoningLevel !== curr.reasoningLevel ||
     last.approvalMode !== curr.approvalMode ||
     last.isStreaming !== curr.isStreaming ||
@@ -988,6 +1185,7 @@ export function hasDockSnapshotChanged(
     last.notice !== curr.notice ||
     last.activityStatus !== curr.activityStatus ||
     last.modelCount !== curr.modelCount ||
+    last.modelCatalogHash !== curr.modelCatalogHash ||
     last.modelSearchQuery !== curr.modelSearchQuery ||
     last.recentModelsHash !== curr.recentModelsHash ||
     last.favoriteModelsHash !== curr.favoriteModelsHash ||

@@ -102,8 +102,8 @@ test('InputDock Enhanced - 队列托盘、附件托盘、手风琴模型器与Po
 
     const html = renderModelPickerTree(props);
     assert.ok(html.includes('model-provider-group'), '包含厂商分组');
-    assert.ok(html.includes('ANTHROPIC'), '包含 Anthropic 厂商标题');
-    assert.ok(html.includes('OPENAI'), '包含 OpenAI 厂商标题');
+    assert.ok(html.includes('Anthropic'), '包含 Anthropic 厂商标题');
+    assert.ok(html.includes('OpenAI'), '包含 OpenAI 厂商标题');
     assert.ok(html.includes('VISION'), '包含 Vision 多模态微标');
     assert.ok(html.includes('20万'), '包含上下文长度');
 

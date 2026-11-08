@@ -92,6 +92,9 @@ import {
   type TurnAction,
   type NormalizedSession,
   type ModelDetail,
+  type ModelCatalogEntry,
+  modelLabelFromCatalog,
+  modelCatalogFingerprint,
   type AgentProfile,
   type ProjectSummary,
   ProfileService,
@@ -487,6 +490,19 @@ interface AppState {
   selectedModel: string;
   availableModels: string[];
   modelDetails: ModelDetail[];
+  /** 归一化后的模型目录（带可读显示名 / 价格 / 能力），选择器与输入舱标签的唯一数据源 */
+  modelCatalog: ModelCatalogEntry[];
+  /**
+   * 模型目录指纹，随 `modelCatalog` 一起在拉取时计算一次。
+   *
+   * 【设计意图 (Why)】
+   *   `render()` 在流式输出期间每帧都会执行；若在快照里现算 `map().join()`，
+   *   72 个模型的字符串拼接会被无意义地重复几十次/秒。
+   *
+   * 【规则 (Rules)】
+   *   只允许在目录被赋值的地方同步更新，禁止在渲染路径里重算。
+   */
+  modelCatalogHash: string;
   currentProvider: string;
   profiles: AgentProfile[];
   profileName: string;
@@ -803,6 +819,8 @@ const state: AppState = {
   selectedModel: '',
   availableModels: [],
   modelDetails: [],
+  modelCatalog: [],
+  modelCatalogHash: '',
   currentProvider: '',
   profiles: [],
   projects: [],
@@ -1989,6 +2007,8 @@ async function fetchModelOptions(options: { clearNotice?: boolean } = {}): Promi
   if (!gatewayClient) {
     state.availableModels = [];
     state.modelDetails = [];
+    state.modelCatalog = [];
+    state.modelCatalogHash = '';
     state.dockNotice = '未连接网关，暂时无法获取模型列表';
     render();
     return;
@@ -1998,6 +2018,12 @@ async function fetchModelOptions(options: { clearNotice?: boolean } = {}): Promi
 
   if (!catalog.ok) {
     // No fabricated fallback models: an invented list is worse than an honest error.
+    // 【规则】失败时同时清空目录与指纹：保留旧目录会让用户以为当前列表仍有效，
+    // 而它可能已与网关真实状态脱节（切过去必然失败）。
+    state.availableModels = [];
+    state.modelDetails = [];
+    state.modelCatalog = [];
+    state.modelCatalogHash = '';
     state.dockNotice = `模型列表加载失败: ${catalog.error || '网关未返回数据'}`;
     render();
     return;
@@ -2005,6 +2031,8 @@ async function fetchModelOptions(options: { clearNotice?: boolean } = {}): Promi
 
   state.availableModels = catalog.models;
   state.modelDetails = catalog.details;
+  state.modelCatalog = catalog.entries;
+  state.modelCatalogHash = modelCatalogFingerprint(catalog.entries);
   state.currentProvider = catalog.currentProvider;
   if (catalog.currentModel) {
     state.selectedModel = catalog.currentModel;
@@ -4234,8 +4262,11 @@ function updateActivityPill(statusText?: string): void {
     return;
   }
 
-  const selectedDetail = state.modelDetails?.find((m) => m.id === state.selectedModel);
-  const modelLabel = selectedDetail ? selectedDetail.displayName || selectedDetail.name : state.selectedModel || 'Hermes Agent';
+  // 【规则】显示名统一走 core 派生目录，禁止在此处各自拼 `displayName || name || id`
+  const modelLabel =
+    modelLabelFromCatalog(state.modelCatalog, state.selectedModel, state.currentProvider) ||
+    state.selectedModel ||
+    'Hermes Agent';
 
   if (existingPill) {
     const textSpan = existingPill.querySelector('span:last-child');
@@ -5273,6 +5304,7 @@ function render(): void {
   const isStreamingCurrent = isStreamingActiveForCurrentSession();
   const currentDockSnapshot: RenderInputDockSnapshot = {
     selectedModel: state.selectedModel,
+    currentProvider: state.currentProvider,
     reasoningLevel: state.reasoningLevel,
     approvalMode: state.approvalMode,
     isStreaming: isStreamingCurrent,
@@ -5281,6 +5313,7 @@ function render(): void {
     notice: state.dockNotice,
     activityStatus: isStreamingCurrent ? state.agentActivityStatus : undefined,
     modelCount: state.availableModels.length,
+    modelCatalogHash: state.modelCatalogHash,
     modelSearchQuery: state.modelSearchQuery,
     recentModelsHash: state.recentModels.join(','),
     favoriteModelsHash: state.favoriteModels.join(','),
@@ -5342,6 +5375,8 @@ function render(): void {
                 selectedModel: state.selectedModel,
                 models: state.availableModels,
                 modelDetails: state.modelDetails,
+                modelCatalog: state.modelCatalog,
+                currentProvider: state.currentProvider,
                 favoriteModels: state.favoriteModels,
                 recentModels: state.recentModels,
                 modelSearchQuery: state.modelSearchQuery,
@@ -5522,6 +5557,8 @@ function render(): void {
           selectedModel: state.selectedModel,
           models: state.availableModels,
           modelDetails: state.modelDetails,
+          modelCatalog: state.modelCatalog,
+          currentProvider: state.currentProvider,
           favoriteModels: state.favoriteModels,
           recentModels: state.recentModels,
           modelSearchQuery: state.modelSearchQuery,
@@ -7442,8 +7479,11 @@ function bindModelDropdownEvents(): void {
   document.querySelectorAll('.model-option').forEach((opt) => {
     (opt as HTMLElement).onclick = (e) => {
       e.stopPropagation();
-      const model = (e.currentTarget as HTMLElement).getAttribute('data-model');
-      const provider = (e.currentTarget as HTMLElement).getAttribute('data-provider') || undefined;
+      const target = e.currentTarget as HTMLElement;
+      // 【规则】网关标记不可用的模型禁止发起切换：必然被 config.set 拒绝，白跑一次失败
+      if (target.dataset.locked === 'true') return;
+      const model = target.getAttribute('data-model');
+      const provider = target.getAttribute('data-provider') || undefined;
       const dropdown = document.getElementById('dock-model-dropdown');
       if (dropdown) dropdown.style.display = 'none';
       state.modelMenuOpen = false;
@@ -7459,6 +7499,8 @@ function updateModelDropdownSubtree(): void {
     selectedModel: state.selectedModel,
     models: state.availableModels,
     modelDetails: state.modelDetails,
+    modelCatalog: state.modelCatalog,
+    currentProvider: state.currentProvider,
     favoriteModels: state.favoriteModels,
     recentModels: state.recentModels,
     modelSearchQuery: state.modelSearchQuery,

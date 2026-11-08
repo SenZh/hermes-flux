@@ -38,6 +38,7 @@
 | **设计系统** | [`docs/design-system/04-tokens-and-design-system-spec.md`](docs/design-system/04-tokens-and-design-system-spec.md) | 几何/字体栈/DTCG 跨姿态通用；Slate 色表与 Shadow 物理层级仅 editorial/marketing 姿态；Hermes Flux 默认 tool 姿态 |
 | **踩坑登记表** | [`docs/architecture/pitfall-registry.md`](docs/architecture/pitfall-registry.md) | 踩坑记录 ➔ 根因 ➔ 守卫探针映射（P-001 ~ P-021） |
 | **动效与宿主隔离** | [`docs/architecture/motion-system-and-host-isolation-spec.md`](docs/architecture/motion-system-and-host-isolation-spec.md) | 跨端通用动效引擎、Version CAS 状态机、动态 Token 探测、Grid 折叠契约与宿主渐进改造规范 |
+| **配置与多网关缓存** | [`docs/architecture/client-settings-and-multi-gateway-cache-spec.md`](docs/architecture/client-settings-and-multi-gateway-cache-spec.md) | 分桶命名空间通用配置、多网关独立凭据与物理隔离、冷启动静默连接免弹窗 |
 | **工程纪律总纲** | [`ENGINEERING_DISCIPLINE.md`](ENGINEERING_DISCIPLINE.md) | 工业级工程防御体系、AST 防 AI 糊弄 15 条棘轮、长会话性能预算与平台避坑军规 |
 | **研发路线图** | [`docs/roadmap.md`](docs/roadmap.md) | 全局研发路线图、已落地特性看板、已知缺陷跟踪 |
 
