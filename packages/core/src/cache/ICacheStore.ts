@@ -20,8 +20,8 @@
 
 import type { CacheChannelRef, CachedMessageRow } from './types.js';
 
-/** 索引键：会话索引、Agent 索引、头像表、同步元数据。 */
-export type CacheIndexKey = 'sessions' | 'agents' | 'avatars' | 'sync-meta';
+/** 索引键：会话索引、Agent 索引、头像表、同步元数据、多网关注册表、通用设置。 */
+export type CacheIndexKey = 'sessions' | 'agents' | 'avatars' | 'sync-meta' | 'gateways' | 'settings';
 
 /** 消息列表查询。 */
 export interface MessageListQuery extends CacheChannelRef {

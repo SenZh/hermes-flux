@@ -87,6 +87,44 @@ test('回滚事务与工具补丁队列 - 生产模块真实单测与变异检�
     assert.deepEqual(planSessionLoadMerge([], [{ id: 'usr-1', role: 'user' }], true), [], 'server-priority 空权威必须清空');
   });
 
+  await t.test('2c-2. planSessionLoadMerge: 增量追加与窗口滑动合并（含未落盘尾部保护）', () => {
+    // 场景 1：服务端返回全局递增的新消息（例如本地已有 1-3，服务端返回 4-5，首尾 rowId 单调递增）
+    const existingOld = [
+      { id: 'row-1', rowId: 1, role: 'user' },
+      { id: 'row-2', rowId: 2, role: 'assistant' },
+      { id: 'row-3', rowId: 3, role: 'user' },
+    ];
+    const parsedNew = [
+      { id: 'row-4', rowId: 4, role: 'assistant' },
+      { id: 'row-5', rowId: 5, role: 'user' },
+    ];
+    const appended = planSessionLoadMerge(parsedNew, existingOld, false);
+    assert.deepEqual(
+      appended.map((m) => m.id),
+      ['row-1', 'row-2', 'row-3', 'row-4', 'row-5'],
+      '纯递增新消息必须安全追加到本地历史之后，绝不忽略'
+    );
+
+    // 场景 2：局部窗口滑动重叠（本地有 1, 2, 3，服务端返回 2, 3, 4，且本地包含正在发送的未落盘提问 usr-pending）
+    const existingWithPending = [
+      { id: 'row-1', rowId: 1, role: 'user' },
+      { id: 'row-2', rowId: 2, role: 'assistant' },
+      { id: 'row-3', rowId: 3, role: 'user' },
+      { id: 'usr-pending', role: 'user' }, // 未落盘消息，无 rowId
+    ];
+    const parsedWindow = [
+      { id: 'row-2', rowId: 2, role: 'assistant' },
+      { id: 'row-3', rowId: 3, role: 'user' },
+      { id: 'row-4', rowId: 4, role: 'assistant' },
+    ];
+    const windowMerged = planSessionLoadMerge(parsedWindow, existingWithPending, false);
+    assert.deepEqual(
+      windowMerged.map((m) => m.id),
+      ['row-1', 'row-2', 'row-3', 'row-4', 'usr-pending'],
+      '窗口重叠时必须拼接新消息同时完整保留本地未落盘尾部，符合 Failure-Is-Not-Empty 原则'
+    );
+  });
+
   await t.test('2d. planRollbackLeaveRestore: armed 会话匹配才恢复快照，跨会话只丢弃不污染', () => {
     const snapshot = [
       { id: 'usr-1', rowId: 101, role: 'user', content: 'A' },

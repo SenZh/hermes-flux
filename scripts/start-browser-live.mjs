@@ -33,8 +33,44 @@ let sessionCookie = '';
  * 【约束与规则 (Rules)】登录 → 提取 Set-Cookie → 带 Cookie 换 ticket 三步必须全部成功；
  *   任一步失败都显式返回 ok:false，ticket 缺失等同失败，绝不降级为空字符串（Failure Is Not Empty）。
  */
+function normalizeGatewayUrl(rawUrl) {
+  let base = (rawUrl || GW_BASE).trim();
+  if (base.startsWith('ws://')) base = base.replace('ws://', 'http://');
+  if (base.startsWith('wss://')) base = base.replace('wss://', 'https://');
+  if (!base.startsWith('http://') && !base.startsWith('https://')) {
+    const isLoopback = /^(127\.0\.0\.1|localhost)(:\d+)?$/i.test(base) || base.startsWith('127.0.0.1:') || base.startsWith('localhost:');
+    base = isLoopback ? `http://${base}` : `https://${base}`;
+  }
+  return base.replace(/\/+$/, '');
+}
+
 async function authenticateWithCredentials(baseUrl, username, password) {
-  const base = (baseUrl || GW_BASE).replace(/\/+$/, '');
+  const base = normalizeGatewayUrl(baseUrl);
+
+  // 1. 先探测 /api/status：判断是否免密或者服务是否正常
+  let statusData = {};
+  try {
+    const statusRes = await fetch(`${base}/api/status`, { headers: { Accept: 'application/json' } });
+    if (statusRes.ok) {
+      statusData = await statusRes.json().catch(() => ({}));
+    }
+  } catch (err) {
+    // 忽略 status 探测错误，继续走认证通道
+  }
+
+  // 免密网关判定：如果不需要认证，且用户没有输入密码，直接放行无需 Basic Auth
+  if (statusData && statusData.auth_required === false && !password) {
+    return null;
+  }
+
+  // 若无用户名密码且网关需要认证，抛出清晰提示
+  if (!username && !password) {
+    if (statusData.auth_required) {
+      throw new Error('该网关开启了安全拦截，必须输入用户名与密码');
+    }
+    return null;
+  }
+
   const loginRes = await fetch(`${base}/auth/password-login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json', Origin: base },
@@ -71,23 +107,44 @@ async function authenticateWithCredentials(baseUrl, username, password) {
 }
 
 async function httpProxy(cookie, { baseUrl, path: p, method = 'GET', params, body, ticket }) {
-  const b = (baseUrl || GW_BASE).replace(/\/$/, '');
-  const url = new URL(`${b}${p}`);
-  if (params) {
+  const b = normalizeGatewayUrl(baseUrl);
+
+  let fullUrl = `${b}${p.startsWith('/') ? '' : '/'}${p}`;
+  if (params && typeof params === 'object') {
+    const q = new URLSearchParams();
     for (const [k, v] of Object.entries(params)) {
-      if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
+      if (typeof v !== 'undefined' && v !== null) q.append(k, String(v));
     }
+    const qs = q.toString();
+    if (qs) fullUrl += (fullUrl.includes('?') ? '&' : '?') + qs;
   }
-  // REST 降级通道与桌面主进程 ipc.ts:268-270 对齐，透传 X-WS-Ticket，否则网关按无凭证拒绝
-  const headers = { Accept: 'application/json', Cookie: cookie, ...(body ? { 'Content-Type': 'application/json' } : {}) };
+
+  // REST 降级通道与桌面主进程 ipc.ts 对齐，注入 Origin、Cookie 与 X-WS-Ticket
+  const headers = {
+    Accept: 'application/json',
+    Origin: b,
+    ...(cookie ? { Cookie: cookie } : {}),
+  };
   if (ticket) headers['X-WS-Ticket'] = ticket;
-  const res = await fetch(url, {
+
+  const fetchOptions = {
     method,
     headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const text = await res.text();
-  try { return JSON.parse(text); } catch { return text; }
+  };
+  if (body && method !== 'GET') {
+    headers['Content-Type'] = 'application/json';
+    fetchOptions.body = JSON.stringify(body);
+  }
+
+  const res = await fetch(fullUrl, fetchOptions);
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+  }
+  const contentType = (res.headers.get('content-type') || '').toLowerCase();
+  if (contentType.includes('application/json')) {
+    return await res.json();
+  }
+  return await res.text();
 }
 
 function readBody(req) {
@@ -136,6 +193,7 @@ async function start() {
         });
         return sendJson(result ?? null);
       } catch (err) {
+        console.error('[Browser Live Proxy Error]', err.message, body?.path);
         res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
         return res.end(JSON.stringify({ error: String(err) }));
       }
@@ -182,7 +240,11 @@ async function start() {
           getSystemInfo: async () => ({ platform: 'windows', arch: 'x64' }),
           isMaximized: async () => false,
           onWindowStateChange: () => () => {},
-          getDefaultGatewayConfig: async () => ({ url: '${GW_BASE}', key: '', profile: 'default' }),
+          getDefaultGatewayConfig: async () => ({
+            url: localStorage.getItem('hermes_flux_gateway_url') || '${GW_BASE}',
+            key: '',
+            profile: localStorage.getItem('hermes_flux_profile') || 'default'
+          }),
           authenticateGateway: async (options) => {
             const r = await fetch('/__gw/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options || {}) });
             return await r.json();
@@ -201,10 +263,18 @@ async function start() {
           },
         };
         try {
-          localStorage.setItem('hermes_flux_gateway_url', '${GW_BASE}');
-          localStorage.setItem('hermes_flux_profile', 'default');
-          localStorage.setItem('hermes_flux_username', '${GW_USER}');
-          localStorage.setItem('hermes_flux_theme', 'obsidian-gold');
+          if (!localStorage.getItem('hermes_flux_gateway_url')) {
+            localStorage.setItem('hermes_flux_gateway_url', '${GW_BASE}');
+          }
+          if (!localStorage.getItem('hermes_flux_profile')) {
+            localStorage.setItem('hermes_flux_profile', 'default');
+          }
+          if (!localStorage.getItem('hermes_flux_username')) {
+            localStorage.setItem('hermes_flux_username', '${GW_USER}');
+          }
+          if (!localStorage.getItem('hermes_flux_theme')) {
+            localStorage.setItem('hermes_flux_theme', 'obsidian-gold');
+          }
           // 默认进入随窗口大小弹性自适应模式
           const oldW = localStorage.getItem('hermes_flux_rail_w_left');
           if (oldW === '264' || oldW === '296') {

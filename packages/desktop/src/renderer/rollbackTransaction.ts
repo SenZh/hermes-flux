@@ -79,8 +79,36 @@ export function planSessionLoadMerge<T extends { id: string; rowId?: number }>(
   const matchIdx = lastParsed ? existing.findIndex((m) => matchKey(m, lastParsed)) : -1;
 
   if (existing.length > parsed.length) {
-    // 无法对齐末尾（不同源）：整体保留本地更长列表
     if (matchIdx < 0) {
+      // 检查 parsed 是否整体是 existing 之后的新消息（按 rowId 单调递增判定）
+      const firstParsed = parsed[0];
+      const lastExisting = existing[existing.length - 1];
+      if (
+        firstParsed &&
+        lastExisting &&
+        typeof firstParsed.rowId === 'number' &&
+        typeof lastExisting.rowId === 'number' &&
+        firstParsed.rowId > lastExisting.rowId
+      ) {
+        return [...existing, ...parsed];
+      }
+      // 检查 parsed 内部是否存在任何消息能够对齐 existing（向前兼容循环查找，避免调用 ES2023 findLastIndex）
+      let anyMatchExistingIdx = -1;
+      for (let i = existing.length - 1; i >= 0; i--) {
+        if (parsed.some((p) => matchKey(p, existing[i]))) {
+          anyMatchExistingIdx = i;
+          break;
+        }
+      }
+      if (anyMatchExistingIdx >= 0) {
+        const matchedItem = existing[anyMatchExistingIdx];
+        const matchedParsedIdx = parsed.findIndex((p) => matchKey(p, matchedItem));
+        const head = existing.slice(0, anyMatchExistingIdx + 1);
+        const middle = parsed.slice(matchedParsedIdx + 1);
+        // 保护在途未落盘消息：如果 existing 尾部包含没有 rowId 的临时用户消息，必须保留
+        const uncommittedTail = existing.slice(anyMatchExistingIdx + 1).filter((m) => typeof m.rowId !== 'number' || m.rowId <= 0);
+        return [...head, ...middle, ...uncommittedTail];
+      }
       return [...existing];
     }
     // 能对齐末尾且本地末尾还有未落盘尾部（例如刚发出的提问）

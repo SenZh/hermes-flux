@@ -20,6 +20,7 @@ import {
   buildLeftRailModel,
   formatLeftRailTime,
   renderSettingsModal,
+  type SettingsTab,
   renderModelPickerMenu,
   renderModelPickerTree,
   renderMarkdown,
@@ -551,7 +552,7 @@ interface AppState {
   username: string;
   password: string;
   isSettingsOpen: boolean;
-  settingsTab: 'gateway' | 'appearance' | 'about';
+  settingsTab: SettingsTab;
   sessions: NormalizedSession[];
   messages: MessageViewModel[];
   hasOlderMessages: boolean;
@@ -854,7 +855,7 @@ const state: AppState = {
   username: localStorage.getItem('hermes_flux_username') || localStorage.getItem('hermes_aura_username') || '',
   password: localStorage.getItem('hermes_flux_password') || localStorage.getItem('hermes_aura_password') || '',
   isSettingsOpen: false,
-  settingsTab: 'gateway',
+  settingsTab: 'providers',
   sessions: [],
   messages: [],
   hasOlderMessages: false,
@@ -1398,7 +1399,10 @@ function getEffectiveUrl(base: string): string {
   let url = (base || 'http://127.0.0.1:9119').trim();
   if (url.startsWith('ws://')) url = url.replace('ws://', 'http://');
   if (url.startsWith('wss://')) url = url.replace('wss://', 'https://');
-  if (!url.startsWith('http://') && !url.startsWith('https://')) url = `https://${url}`;
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    const isLoopback = /^(127\.0\.0\.1|localhost)(:\d+)?$/i.test(url) || url.startsWith('127.0.0.1:') || url.startsWith('localhost:');
+    url = isLoopback ? `http://${url}` : `https://${url}`;
+  }
   return url.replace(/\/+$/, '');
 }
 
@@ -4666,7 +4670,31 @@ function handleInspectorEvent(params: unknown): void {
   }
 }
 
-async function connect(): Promise<void> {
+let connectionEpoch = 0;
+
+async function connect(targetUrl?: string): Promise<void> {
+  const epoch = ++connectionEpoch;
+
+  // 1. 彻底断开旧客户端，停止一切在途重连定时器与后台网络噪音
+  if (gatewayClient) {
+    gatewayClient.disconnect();
+    gatewayClient = null;
+  }
+
+  if (targetUrl) {
+    state.gatewayUrl = targetUrl;
+  }
+
+  // 确保新目标地址即时持久化，杜绝回退老地址
+  localStorage.setItem('hermes_flux_gateway_url', state.gatewayUrl);
+  localStorage.setItem('hermes_flux_username', state.username);
+  localStorage.setItem('hermes_flux_password', state.password);
+  localStorage.setItem('hermes_flux_profile', state.profileName);
+  localStorage.setItem('hermes_aura_gateway_url', state.gatewayUrl);
+  localStorage.setItem('hermes_aura_username', state.username);
+  localStorage.setItem('hermes_aura_password', state.password);
+  localStorage.setItem('hermes_aura_profile', state.profileName);
+
   state.gatewayConnecting = true;
   state.testStatus = undefined;
   render();
@@ -4677,6 +4705,10 @@ async function connect(): Promise<void> {
       state.username,
       state.password
     );
+
+    // 过期代际保护：若在探测期间用户触发了新连接，丢弃陈旧响应
+    if (epoch !== connectionEpoch) return;
+
     state.gatewayLatencyMs = test.latency;
     state.testStatus = test;
 
@@ -4688,25 +4720,12 @@ async function connect(): Promise<void> {
     }
 
     currentTicket = test.ticket;
-    localStorage.setItem('hermes_flux_gateway_url', state.gatewayUrl);
-    localStorage.setItem('hermes_flux_username', state.username);
-    localStorage.setItem('hermes_flux_password', state.password);
-    localStorage.setItem('hermes_flux_profile', state.profileName);
-    localStorage.setItem('hermes_aura_gateway_url', state.gatewayUrl);
-    localStorage.setItem('hermes_aura_username', state.username);
-    localStorage.setItem('hermes_aura_password', state.password);
-    localStorage.setItem('hermes_aura_profile', state.profileName);
 
     // Build WS URL
     const baseUrl = getEffectiveUrl(state.gatewayUrl);
     let wsUrl = baseUrl.replace('http://', 'ws://').replace('https://', 'wss://') + '/api/ws';
     if (test.ticket) {
       wsUrl += `?ticket=${encodeURIComponent(test.ticket)}`;
-    }
-
-    if (gatewayClient) {
-      gatewayClient.disconnect();
-      gatewayClient = null;
     }
 
     gatewayClient = new HermesGatewayClient({
@@ -4733,12 +4752,20 @@ async function connect(): Promise<void> {
     gatewayClient.onNotification('event', (params: unknown) => {
       const runningStoredIds = Array.from(activeRunningSessionIds);
       const runningLiveIds = defaultSessionHandleRegistry.getLiveIds(runningStoredIds);
+      const activeLiveMapped = state.activeSessionId ? defaultSessionHandleRegistry.toLiveId(state.activeSessionId) : null;
+      const activeStoredMapped = state.activeLiveSessionId ? defaultSessionHandleRegistry.toStoredId(state.activeLiveSessionId) : null;
+      const streamingLiveMapped = activeStreamingStoredSessionId ? defaultSessionHandleRegistry.toLiveId(activeStreamingStoredSessionId) : null;
+      const streamingStoredMapped = activeStreamingLiveId ? defaultSessionHandleRegistry.toStoredId(activeStreamingLiveId) : null;
 
       const activeIds = [
         state.activeLiveSessionId,
         state.activeSessionId,
+        activeLiveMapped,
+        activeStoredMapped,
         activeStreamingLiveId,
         activeStreamingStoredSessionId,
+        streamingLiveMapped,
+        streamingStoredMapped,
         ...runningStoredIds,
         ...runningLiveIds,
       ].filter((id): id is string => Boolean(id));
@@ -4754,12 +4781,22 @@ async function connect(): Promise<void> {
 
     // Subscribe to FSM transitions (CONNECTING, CONNECTED, DISCONNECTED)
     gatewayClient.getFsm().onStateChange((fsmState) => {
+      // 过期代际保护
+      if (epoch !== connectionEpoch) return;
+
       const isConnected = fsmState === 'CONNECTED' || fsmState === 'HANDSHAKING';
       const isConnecting = fsmState === 'CONNECTING';
 
       if (state.gatewayConnected !== isConnected || state.gatewayConnecting !== isConnecting) {
         state.gatewayConnected = isConnected;
         state.gatewayConnecting = isConnecting;
+
+        // 防刷新保护：若用户正在弹窗或文本框打字，非连通变动不重绘 DOM 树
+        const isUserEditing = document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA');
+        if (state.isSettingsOpen && isUserEditing && !isConnected) {
+          return;
+        }
+
         render();
 
         if (isConnected) {
@@ -5214,7 +5251,7 @@ function mountReactShellComponents(): void {
       onClose: () => desktopApi?.close(),
       onToggleLeftRail: () => { state.leftRailCollapsed = !state.leftRailCollapsed; render(); },
       onToggleInspector: () => { state.inspectorCollapsed = !state.inspectorCollapsed; render(); },
-      onOpenSettings: () => { state.isSettingsOpen = true; state.settingsTab = 'gateway'; render(); },
+      onOpenSettings: () => { state.isSettingsOpen = true; state.settingsTab = 'providers'; render(); },
       onToggleTheme: () => {
         state.theme = getToggleTheme(state.theme);
         localStorage.setItem('hermes_flux_theme', state.theme);
@@ -5241,6 +5278,13 @@ function render(): void {
   const inputHadFocus = Boolean(existingInput) && document.activeElement === existingInput;
   const caretStart = existingInput?.selectionStart ?? draftText.length;
   const caretEnd = existingInput?.selectionEnd ?? draftText.length;
+
+  // 通用保护当前聚焦的任何输入框（避免设置弹窗打字时被后台事件冲刷丢失焦点与文本）
+  const activeEl = document.activeElement as HTMLElement | null;
+  const activeInputId = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA') ? activeEl.id : null;
+  const activeInputVal = activeEl && 'value' in activeEl ? (activeEl as HTMLInputElement).value : '';
+  const activeCaretStart = activeEl && 'selectionStart' in activeEl ? (activeEl as HTMLInputElement).selectionStart : null;
+  const activeCaretEnd = activeEl && 'selectionEnd' in activeEl ? (activeEl as HTMLInputElement).selectionEnd : null;
 
   const forcedBottom = pendingScrollToBottom;
   pendingScrollToBottom = false;
@@ -5729,6 +5773,19 @@ function render(): void {
 
   bindEvents();
 
+  // 恢复非 Dock 输入框的焦点与光标位置（防止设置弹窗打字被打断）
+  if (activeInputId && activeInputId !== 'dock-prompt-input') {
+    const restoredEl = document.getElementById(activeInputId) as HTMLInputElement | null;
+    if (restoredEl) {
+      if (typeof activeInputVal === 'string' && restoredEl.value !== activeInputVal) restoredEl.value = activeInputVal;
+      restoredEl.focus({ preventScroll: true });
+      if (activeCaretStart !== null && activeCaretEnd !== null) {
+        // gate-degrade: 元素不支持 selectionRange 时的安全回落，降级为默认聚焦
+        try { restoredEl.setSelectionRange(activeCaretStart, activeCaretEnd); } catch { /* 忽略不支持选区的输入类型 */ }
+      }
+    }
+  }
+
   // Popper 增量同步：只替换 #composer-popper-mount 子树，绝不重建 dock / textarea
   syncComposerPoppers();
 
@@ -6155,6 +6212,50 @@ function bindEvents(): void {
     };
   });
 
+  // Settings: Live Inputs & Double Binding
+  const gwUrlInput = document.getElementById('settings-gateway-url') as HTMLInputElement | null;
+  if (gwUrlInput) {
+    gwUrlInput.oninput = () => {
+      state.gatewayUrl = gwUrlInput.value.trim();
+      localStorage.setItem('hermes_flux_gateway_url', state.gatewayUrl);
+      localStorage.setItem('hermes_aura_gateway_url', state.gatewayUrl);
+    };
+  }
+  const gwUserInput = document.getElementById('settings-username') as HTMLInputElement | null;
+  if (gwUserInput) {
+    gwUserInput.oninput = () => {
+      state.username = gwUserInput.value;
+      localStorage.setItem('hermes_flux_username', state.username);
+      localStorage.setItem('hermes_aura_username', state.username);
+    };
+  }
+  const gwPassInput = document.getElementById('settings-password') as HTMLInputElement | null;
+  if (gwPassInput) {
+    gwPassInput.oninput = () => {
+      state.password = gwPassInput.value;
+      localStorage.setItem('hermes_flux_password', state.password);
+      localStorage.setItem('hermes_aura_password', state.password);
+    };
+  }
+  const gwProfileInput = document.getElementById('settings-profile-name') as HTMLInputElement | null;
+  if (gwProfileInput) {
+    gwProfileInput.oninput = () => {
+      state.profileName = gwProfileInput.value || 'default';
+      localStorage.setItem('hermes_flux_profile', state.profileName);
+      localStorage.setItem('hermes_aura_profile', state.profileName);
+    };
+  }
+  const settingsMenuSearch = document.getElementById('settings-menu-search') as HTMLInputElement | null;
+  if (settingsMenuSearch) {
+    settingsMenuSearch.oninput = () => {
+      const q = settingsMenuSearch.value.toLowerCase().trim();
+      document.querySelectorAll('.settings-tab-btn').forEach((btn) => {
+        const text = btn.textContent?.toLowerCase() || '';
+        (btn as HTMLElement).style.display = (!q || text.includes(q)) ? 'flex' : 'none';
+      });
+    };
+  }
+
   // Settings: Test & Save Buttons
   const settingsTestBtn = document.getElementById('btn-settings-test-connection');
   if (settingsTestBtn) {
@@ -6165,9 +6266,9 @@ function bindEvents(): void {
       const profileInput = (document.getElementById('settings-profile-name') as HTMLInputElement)?.value;
 
       if (urlInput) {
-        state.gatewayUrl = urlInput;
-        localStorage.setItem('hermes_flux_gateway_url', urlInput);
-        localStorage.setItem('hermes_aura_gateway_url', urlInput);
+        state.gatewayUrl = urlInput.trim();
+        localStorage.setItem('hermes_flux_gateway_url', state.gatewayUrl);
+        localStorage.setItem('hermes_aura_gateway_url', state.gatewayUrl);
       }
       if (userInput !== undefined) {
         state.username = userInput;
@@ -6186,7 +6287,7 @@ function bindEvents(): void {
       }
 
       settingsTestBtn.innerText = '正在测试...';
-      const res = await testConnection(urlInput, userInput, passInput);
+      const res = await testConnection(state.gatewayUrl, userInput, passInput);
       state.testStatus = res;
       settingsTestBtn.innerText = '连通性测试';
       render();
@@ -6196,11 +6297,11 @@ function bindEvents(): void {
   const settingsSaveBtn = document.getElementById('btn-settings-save-connect');
   if (settingsSaveBtn) {
     settingsSaveBtn.onclick = () => {
-      state.gatewayUrl = (document.getElementById('settings-gateway-url') as HTMLInputElement)?.value || state.gatewayUrl;
+      const urlInput = (document.getElementById('settings-gateway-url') as HTMLInputElement)?.value;
+      if (urlInput) state.gatewayUrl = urlInput.trim();
       state.username = (document.getElementById('settings-username') as HTMLInputElement)?.value || '';
       state.password = (document.getElementById('settings-password') as HTMLInputElement)?.value || '';
       state.profileName = (document.getElementById('settings-profile-name') as HTMLInputElement)?.value || 'default';
-      state.isSettingsOpen = false;
       connect();
     };
   }
@@ -6229,6 +6330,40 @@ function bindEvents(): void {
           }
         }
       }
+    };
+  }
+
+  // Onboarding Live Inputs & Double Binding
+  const obUrlInput = document.getElementById('onboarding-gateway-url') as HTMLInputElement | null;
+  if (obUrlInput) {
+    obUrlInput.oninput = () => {
+      state.gatewayUrl = obUrlInput.value.trim();
+      localStorage.setItem('hermes_flux_gateway_url', state.gatewayUrl);
+      localStorage.setItem('hermes_aura_gateway_url', state.gatewayUrl);
+    };
+  }
+  const obUserInput = document.getElementById('onboarding-username') as HTMLInputElement | null;
+  if (obUserInput) {
+    obUserInput.oninput = () => {
+      state.username = obUserInput.value;
+      localStorage.setItem('hermes_flux_username', state.username);
+      localStorage.setItem('hermes_aura_username', state.username);
+    };
+  }
+  const obPassInput = document.getElementById('onboarding-password') as HTMLInputElement | null;
+  if (obPassInput) {
+    obPassInput.oninput = () => {
+      state.password = obPassInput.value;
+      localStorage.setItem('hermes_flux_password', state.password);
+      localStorage.setItem('hermes_aura_password', state.password);
+    };
+  }
+  const obProfileInput = document.getElementById('onboarding-profile-name') as HTMLInputElement | null;
+  if (obProfileInput) {
+    obProfileInput.oninput = () => {
+      state.profileName = obProfileInput.value || 'default';
+      localStorage.setItem('hermes_flux_profile', state.profileName);
+      localStorage.setItem('hermes_aura_profile', state.profileName);
     };
   }
 
@@ -7681,8 +7816,10 @@ async function init(): Promise<void> {
       if (desktopApi?.getDefaultGatewayConfig) {
         const def = await desktopApi.getDefaultGatewayConfig();
         if (def) {
-          if (def.url && !localStorage.getItem('hermes_aura_gateway_url')) state.gatewayUrl = def.url;
-          if (def.profile && !localStorage.getItem('hermes_aura_profile')) state.profileName = def.profile;
+          const savedUrl = localStorage.getItem('hermes_flux_gateway_url') || localStorage.getItem('hermes_aura_gateway_url');
+          if (def.url && !savedUrl) state.gatewayUrl = def.url;
+          const savedProfile = localStorage.getItem('hermes_flux_profile') || localStorage.getItem('hermes_aura_profile');
+          if (def.profile && !savedProfile) state.profileName = def.profile;
         }
       }
     } catch (e) {

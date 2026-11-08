@@ -93,9 +93,36 @@ export interface CachedMessageRow {
 
 /** 通道引用：定位一个会话或一个房间的消息集合。 */
 export interface CacheChannelRef {
+  /** 归属网关 ID（支持多网关独立隔离，可选向后兼容） */
+  gatewayId?: string;
   profile: string;
   channel: CacheChannel;
   channelId: string;
+}
+
+/** 网关认证方式 */
+export type GatewayAuthType = 'basic' | 'token' | 'none';
+
+/** 单个网关连接档案配置实体 */
+export interface GatewayConnectionProfile {
+  id: string;
+  name: string;
+  url: string;
+  authType: GatewayAuthType;
+  username?: string;
+  password?: string;
+  token?: string;
+  defaultProfile?: string;
+  lastConnectedAt?: number;
+  lastLatencyMs?: number;
+  isDefault?: boolean;
+}
+
+/** 多网关注册表容器（存储在持久化信封中） */
+export interface GatewayRosterState {
+  activeGatewayId: string;
+  defaultGatewayId: string;
+  items: GatewayConnectionProfile[];
 }
 
 /** 持久化信封：所有索引类缓存统一使用，便于版本判定。 */
