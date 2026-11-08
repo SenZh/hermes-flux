@@ -25,6 +25,7 @@ export * from './components/MiddlePod/MiddlePod.js';
 export { mountFileTypeSprite, renderFileTypeIcon, resolveFileTypeIcon } from './lib/fileTypeIcons.js';
 export { warmUpHighlighting, isHighlightReady } from './lib/highlight.js';
 export { extractToolTarget, isLikelyFilePath } from './lib/text.js';
+export { collectTouchedFiles } from './lib/fileRefs.js';
 export {
   UI_FONT_OPTIONS,
   MONO_FONT_OPTIONS,

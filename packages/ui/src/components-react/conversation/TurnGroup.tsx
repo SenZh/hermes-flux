@@ -18,6 +18,8 @@ import { MessageRow } from './MessageRow.js';
 export interface TurnGroupProps {
   messages: ConversationMessageVM[];
   mode: ConversationMode;
+  /** 语言标识：memo 后也必须让已挂载消息随语言切换重新渲染。 */
+  locale?: string;
   isLastTurn: boolean;
   isStreaming: boolean;
   /** 会话内 Agent 真实读写过的文件（决定正文里的文件引用是否可点击） */
@@ -28,6 +30,7 @@ const areEqual = (prev: TurnGroupProps, next: TurnGroupProps): boolean => {
   if (prev.mode !== next.mode || prev.isLastTurn !== next.isLastTurn || prev.isStreaming !== next.isStreaming) {
     return false;
   }
+  if (prev.locale !== next.locale) return false;
   // knownFiles 在列表层按 messages 引用缓存，直接比引用即可
   if (prev.knownFiles !== next.knownFiles) return false;
   if (prev.messages.length !== next.messages.length) return false;
@@ -94,6 +97,7 @@ function aggregateTurnTools(
 export const TurnGroup = React.memo(function TurnGroup({
   messages,
   mode,
+  locale,
   isLastTurn,
   isStreaming,
   knownFiles,
@@ -117,6 +121,7 @@ export const TurnGroup = React.memo(function TurnGroup({
           isFirstInTurn={index === 0}
           isLastInTurn={index === lastIndex}
           mode={mode}
+          locale={locale}
           isStreaming={isStreaming && index === lastIndex}
           knownFiles={knownFiles}
         />

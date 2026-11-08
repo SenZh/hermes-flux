@@ -75,6 +75,12 @@ async function buildAll() {
     target: 'es2022',
     format: 'esm',
     sourcemap: true,
+    // 【设计意图 (Why)】React 的 development 构建会保留 DevTools 提示、双调用 render 与额外校验，
+    // 实测会把一次会话切换的渲染成本放大近一倍。桌面产物默认走 production，
+    // 需要调试 React 警告时用 NODE_ENV=development 重新构建即可。
+    define: {
+      'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV === 'development' ? 'development' : 'production'),
+    },
   });
   console.log('  ✔ Renderer script compiled');
 
@@ -127,7 +133,19 @@ async function buildAll() {
     format: 'esm',
     sourcemap: true,
   });
-  console.log('  ✔ Interactive-stage pure modules compiled (rollbackTransaction, toolPatchQueue, conversationPush, settingsController)');
+  // 消息窗口与 Profile 刷新是热路径纯逻辑，独立产物供行为级单测直接导入（不依赖 DOM）。
+  for (const moduleName of ['messageWindow', 'profileRefresh']) {
+    await esbuild.build({
+      entryPoints: [path.join(rootDir, `src/renderer/${moduleName}.ts`)],
+      outfile: path.join(rootDir, `dist/renderer/${moduleName}.mjs`),
+      bundle: true,
+      platform: 'node',
+      target: 'node20',
+      format: 'esm',
+      sourcemap: true,
+    });
+  }
+  console.log('  ✔ Interactive-stage pure modules compiled (rollbackTransaction, toolPatchQueue, conversationPush, settingsController, messageWindow, profileRefresh)');
 
   // 4. Copy static assets
   fs.copyFileSync(

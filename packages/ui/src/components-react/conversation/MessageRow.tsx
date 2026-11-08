@@ -26,12 +26,14 @@ export interface MessageRowProps {
   isFirstInTurn: boolean;
   isLastInTurn: boolean;
   mode: ConversationMode;
+  /** 语言标识：参与 memo 浅比较，确保语言切换后已挂载行重新渲染。 */
+  locale?: string;
   isStreaming: boolean;
   /** 会话内 Agent 真实读写过的文件（决定正文里的文件引用是否可点击） */
   knownFiles?: readonly string[];
 }
 
-export function MessageRow({
+export const MessageRow = React.memo(function MessageRow({
   message,
   isFirstInTurn,
   isLastInTurn,
@@ -113,4 +115,4 @@ export function MessageRow({
       ) : null}
     </div>
   );
-}
+});

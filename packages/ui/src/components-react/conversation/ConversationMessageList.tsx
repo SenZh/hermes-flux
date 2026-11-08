@@ -17,11 +17,24 @@ import { collectTouchedFiles } from '../../lib/fileRefs.js';
 
 export function ConversationMessageList({ snapshot }: { snapshot: ConversationSnapshot }): React.ReactElement {
   const turns = React.useMemo(() => groupTurns(snapshot.messages), [snapshot.messages]);
-  // 文件引用只在 Agent 真实读写过该文件时才可点击；按消息引用缓存，避免每次渲染重扫
-  const knownFiles = React.useMemo(
-    () => collectTouchedFiles(snapshot.messages.flatMap((message) => message.toolCalls ?? [])),
-    [snapshot.messages]
-  );
+  // 文件引用只在 Agent 真实读写过该文件时才可点击；按工具数组引用缓存，避免每次渲染重扫。
+  // 【设计意图 (Why)】knownFiles 保持稳定引用，让 TurnGroup / MessageRow 的 memo 在消息与工具都未变时
+  //   真正跳过 Markdown 重算；否则每次快照都返回新数组，已挂载消息会整屏重算。
+  // 【约束与规则 (Rules)】仅在工具调用数组引用变化时重算。流式末条的 toolCalls 会随回合收敛重建，
+  //   此时 knownFiles 换引用并触发一次全量校正是必要成本——工具输出可能新增文件，不能沿用旧集合。
+  const knownFilesRef = React.useRef<{ tools: ReadonlyArray<unknown>; files: readonly string[] }>({ tools: [], files: [] });
+  const computedKnownFiles = React.useMemo(() => {
+    const tools = snapshot.messages.map((message) => message.toolCalls);
+    const previous = knownFilesRef.current;
+    const unchanged = tools.length === previous.tools.length
+      && tools.every((tool, index) => tool === previous.tools[index]);
+    if (unchanged) return previous.files;
+    const files = collectTouchedFiles(snapshot.messages.flatMap((message) => message.toolCalls ?? []));
+    knownFilesRef.current = { tools, files };
+    return files;
+  }, [snapshot.messages]);
+  // 宿主按完整会话计算 knownFiles（窗口外工具也会影响可点击性）；旧调用方无此字段时回退到窗口内自算。
+  const knownFiles = snapshot.knownFiles ?? computedKnownFiles;
 
   return (
     <>
@@ -35,6 +48,7 @@ export function ConversationMessageList({ snapshot }: { snapshot: ConversationSn
           key={turn[0]?.id ?? `turn-${index}`}
           messages={turn}
           mode={snapshot.mode}
+          locale={snapshot.locale}
           isLastTurn={index === turns.length - 1}
           isStreaming={snapshot.isStreaming && index === turns.length - 1}
           knownFiles={knownFiles}

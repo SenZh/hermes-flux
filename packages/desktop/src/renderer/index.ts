@@ -40,6 +40,8 @@ import {
   type LeftRailGroupRoom,
   type LeftRailActiveFocus,
   type LeftRailTab,
+  type LeftRailSession,
+  type LeftRailProfile,
   renderNewTaskModal,
   renderContextMenu,
   type ContextMenuProps,
@@ -63,12 +65,14 @@ import {
   mountMessageList,
   type ConversationMount,
   type ConversationSnapshot,
+  type ConversationMessageVM,
   mountFileTypeSprite,
   warmUpHighlighting,
   loadFontPreferences,
   saveFontPreferences,
   applyFontPreferences,
   setLocale,
+  collectTouchedFiles,
   type FontPreferences,
 } from '@hermes-flux/ui';
 
@@ -82,6 +86,8 @@ import { applyOptimisticCut, planSessionLoadMerge, planRollbackLeaveRestore, tak
 import { createToolPatchQueue } from './toolPatchQueue.js';
 import { decideConversationPush } from './conversationPush.js';
 import { createSettingsController, resolveGatewayPassword } from './settingsController.js';
+import { planMessageWindow, expandMessageWindowStart } from './messageWindow.js';
+import { profilesDiffer } from './profileRefresh.js';
 
 import {
   HermesGatewayClient,
@@ -1225,6 +1231,13 @@ const STICK_TO_BOTTOM_THRESHOLD_PX = 48;
  * viewport never flashes at the old position for a frame.
  */
 let pendingScrollToBottom = false;
+/**
+ * 一次性抑制“贴底跟随”。
+ * 【设计意图 (Why)】窗口扩展时若当前恰好也满足“距底 ≤48px”，render 会误判为贴底并直接跳到底部，
+ *   随后锚点补偿再拉回顶部，用户会看到一次“跳底再弹回”的闪跳。
+ * 【约束与规则】只影响触发它的那一次 render，渲染结束立即复位。
+ */
+let suppressPinBottomOnce = false;
 
 function isStreamNearBottom(stream: HTMLElement | null): boolean {
   if (!stream) return false;
@@ -1832,7 +1845,11 @@ async function fetchProjects(): Promise<void> {
 }
 
 /** 会话与项目归属动态映射：委派 core 纯函数进行多维度路径与标识映射 */
+/** 项目成员关系版本：syncProjectSessions 原地改 proj.sessions，数组引用不变，必须靠版本号驱动快照失效。 */
+let projectsVersion = 0;
+
 function syncProjectSessions(): void {
+  projectsVersion += 1;
   for (const proj of state.projects) {
     proj.sessions = state.sessions.filter((s: NormalizedSession) =>
       doesSessionBelongToProject(s, proj)
@@ -1985,6 +2002,13 @@ async function openBotChat(botProfile: string): Promise<void> {
   const client = gatewayClient;
   if (!botProfile || !client) return;
 
+  // 【失败回退 (Rules)】记录进入前的焦点与 Profile：冷路径失败时完整恢复，
+  // 绝不把用户困在空白工位，也不让左侧选中 Agent 与实际 Profile 上下文错配。
+  const outgoingFocus = state.activeFocus;
+  const outgoingSessionId = state.activeSessionId;
+  const outgoingProfileName = state.profileName;
+  const wasBotFocused = state.activeFocus.type === 'bot' && state.activeFocus.botName === botProfile;
+
   state.profileName = botProfile;
   // 切入 Bot 专职工位前解除普通会话挂起回滚，防跨域泄漏
   disarmRollbackOnLeave();
@@ -2000,12 +2024,35 @@ async function openBotChat(botProfile: string): Promise<void> {
   // 1. 若内存缓存已持有该 Bot 的 Forever Chat ID，0ms 瞬间秒开切入！
   const cachedSessionId = botForeverChatCache.get(botProfile);
   if (cachedSessionId) {
+    // 【设计意图 (Why)】selectSession 的同步段会经 loadMessages 渲染一次（缓存命中 2688 / 未命中清屏 2699）；
+    // 只有它在 3329 行因“同一会话已挂载”早退时才需要补一次渲染。
+    // 【防范的历史坑 (Pitfall)】这里曾无条件再 render() 一次，导致 Agent 点击链路每次多付一整轮
+    // 左轨、标题栏与消息列表绘制，点击处理耗时约为普通会话的两倍。
+    const alreadyMounted = state.activeSessionId === cachedSessionId
+      && Boolean(state.activeLiveSessionId)
+      && state.messages.length > 0;
     void selectSession(cachedSessionId, { preserveFocus: true });
     void fetchModelOptions({ clearNotice: true });
-    render();
+    if (alreadyMounted) {
+      // selectSession 早退不会渲染；未读点已在 applyEnteredRead 中清除，这里同步刷新左轨并保持输入舱焦点。
+      if (wasBotFocused) restoreComposerFocus();
+      render();
+    }
     return;
   }
 
+  // 2. 首次探查前先给出首帧反馈：把旧会话落内存缓存、清空视口，再显示目标 Bot 的空态。
+  // 【防范的历史坑 (Pitfall)】历史实现只 render() 不清空 messages，等待 session.list 的近 1 秒里
+  //   “新 Bot 标题 + 旧会话内容”并置，用户会误以为点错或没点上。
+  if (outgoingSessionId && state.messages.length > 0) {
+    sessionMessagesCache.set(outgoingSessionId, [...state.messages]);
+  }
+  state.messages = [];
+  state.hasOlderMessages = false;
+  state.isLoadingOlder = false;
+  state.activeSessionId = '';
+  state.activeLiveSessionId = '';
+  pendingScrollToBottom = true;
   render();
 
   try {
@@ -2021,15 +2068,39 @@ async function openBotChat(botProfile: string): Promise<void> {
     const foreverChat = guarded.value;
     botForeverChatCache.set(botProfile, foreverChat.sessionId);
 
+    // 【竞态守卫 (Rules)】await 期间用户可能已切到别的 Bot/会话。只有仍瞄准本 Bot 时才提交焦点与渲染，
+    // 否则迟到的冷路径会把视口和焦点掰回旧目标，造成“焦点在 A、内容在 B”的连点错配（历史坑）。
+    if (state.activeFocus.type !== 'bot' || state.activeFocus.botName !== botProfile) return;
     state.activeFocus = { type: 'bot', botName: botProfile };
     await selectSession(foreverChat.sessionId, { preserveFocus: true });
+    if (state.activeFocus.type !== 'bot' || state.activeFocus.botName !== botProfile) return;
     state.activeFocus = { type: 'bot', botName: botProfile };
     render();
   } catch (err) {
     if (activeLoadMessagesGeneration !== guard.generation || state.activeFocus.type !== 'bot' || state.activeFocus.botName !== botProfile) return;
     console.error('[Flux] Failed to resolve Forever Chat for bot:', botProfile, err);
     state.dockNotice = t('dock.enterBotChatFailed', { name: botProfile, error: describeRpcError(err) });
-    render();
+    // 失败不能停在空白工位：先恢复进入前的 Profile，再按原焦点回退；回退本身也走代际守卫。
+    state.profileName = outgoingProfileName;
+    localStorage.setItem('hermes_flux_profile', outgoingProfileName);
+    localStorage.setItem('hermes_aura_profile', outgoingProfileName);
+    if (outgoingFocus.type === 'session' && outgoingSessionId) {
+      void selectSession(outgoingSessionId);
+    } else if (outgoingFocus.type === 'group') {
+      void openGroupRoom(outgoingFocus.roomId);
+    } else if (outgoingFocus.type === 'bot') {
+      const outgoingForeverId = botForeverChatCache.get(outgoingFocus.botName);
+      if (outgoingForeverId) {
+        state.activeFocus = { type: 'bot', botName: outgoingFocus.botName };
+        void selectSession(outgoingForeverId, { preserveFocus: true });
+        render();
+      } else {
+        // 上一个 Bot 也没有缓存：保持空态但不要递归触发第二次冷路径，避免失败风暴。
+        render();
+      }
+    } else {
+      render();
+    }
     return;
   }
 
@@ -2076,11 +2147,28 @@ async function fetchModelOptions(options: { clearNotice?: boolean } = {}): Promi
   render();
 }
 
-async function fetchProfiles(): Promise<void> {
+/** 服务端改了 Bot 显示名后，把旧会话上的 botDisplayName 一并收敛，避免左轨归属匹配失配。 */
+function syncSessionBotDisplayNames(profiles: AgentProfile[]): void {
+  const byName = new Map(profiles.map((p) => [p.name.toLowerCase(), p]));
+  let changed = false;
+  for (const s of state.sessions) {
+    if (!s.botName) continue;
+    const profile = byName.get(s.botName.toLowerCase());
+    if (profile && s.botDisplayName !== profile.displayName) {
+      s.botDisplayName = profile.displayName;
+      changed = true;
+    }
+  }
+  if (changed) syncProjectSessions();
+}
+
+async function fetchProfiles(options: { refresh?: boolean } = {}): Promise<void> {
   const client = gatewayClient;
   if (!client) return;
+  const generation = ++profileFetchGeneration;
   try {
     const list = await client.listProfiles();
+    if (generation !== profileFetchGeneration) return;
     // 1. 命中持久缓存，0ms 秒开回填头像资产
     for (const p of list) {
       if (!p.avatar) {
@@ -2088,19 +2176,29 @@ async function fetchProfiles(): Promise<void> {
         if (cached) p.avatar = cached;
       }
     }
+    // 定时/聚焦刷新：关键展示字段完全一致时直接返回，不产生 render、资产拉取与预取。
+    if (options.refresh && !profilesDiffer(state.profiles, list)) return;
+    const profileTopologyChanged = options.refresh && (
+      state.profiles.length !== list.length
+      || list.some((p) => !state.profiles.some((old) => old.name === p.name))
+    );
     state.profiles = list;
     persistAgentsToCache(list);
+    syncSessionBotDisplayNames(list);
     syncProfileLastMessages();
     render();
 
-    // 2. 并发向网关拉取 Bot 真实高清头像资产 (profiles.get_asset)，严格 await 杜绝会话时序冲刷
+    // 2. 已有头像只回填内存缓存；缺失的才向网关拉取 (profiles.get_asset)。
+    for (const p of list) {
+      if (!p.avatar) continue;
+      profileAvatarCache.set(p.name.toLowerCase(), p.avatar);
+      if (p.displayName) profileAvatarCache.set(p.displayName.toLowerCase(), p.avatar);
+    }
+    // 主工位预取必须与头像拉取并行启动：任意一个头像请求慢/挂起，都不能阻塞 Forever Chat 缓存，
+    // 否则首次点击 Agent 仍会掉回 session.list 冷路径（约 1 秒空窗）。
+    void warmBotForeverChats(list, client);
     await Promise.allSettled(
-      list.map(async (p) => {
-        if (p.avatar) {
-          profileAvatarCache.set(p.name.toLowerCase(), p.avatar);
-          if (p.displayName) profileAvatarCache.set(p.displayName.toLowerCase(), p.avatar);
-          return;
-        }
+      list.filter((p) => !p.avatar).map(async (p) => {
         try {
           const assetBase64 = await profileService.getAsset(p.name, 'avatar', client);
           if (assetBase64) {
@@ -2124,32 +2222,99 @@ async function fetchProfiles(): Promise<void> {
           // 显式记录失败原因：头像拉取异常不得伪装成"没有头像"
           console.warn(`[Flux] profiles.get_asset failed for ${p.name}:`, e);
         }
-
-        // 3. 异步探查该 Bot 的专职终身主工位最新真实对话（建立缓存与收敛状态）
-        try {
-          const forever = await profileService.getOrCreateForeverChat(p.name, client);
-          if (forever && forever.sessionId) {
-            botForeverChatCache.set(p.name, forever.sessionId);
-            const histRes = await client.fetchSessionMessages(forever.sessionId, { limit: 1, offset: 0, order: 'latest' });
-            if (histRes.status === 'success' && histRes.messages.length > 0) {
-              const last = histRes.messages[0];
-              const parts = Array.isArray(last.parts) ? (last.parts as Array<{ type?: string; text?: string }>) : [];
-              const textPart = parts.find((pt) => pt.type === 'text');
-              const previewText = textPart?.text || (typeof last.content === 'string' ? last.content : '');
-              const ts = last.created_at || last.timestamp;
-              const numTs = typeof ts === 'number' ? (ts > 1e11 ? ts : ts * 1000) : typeof ts === 'string' ? Date.parse(ts) || Date.now() : Date.now();
-              updateBotLatestActivity(p.name, previewText, numTs);
-              render();
-            }
-          }
-        // gate-degrade: 单条主工位探测失败按跳过处理，不影响其余 Bot 资产渲染
-        } catch {
-          // 容错放行
-        }
       })
     );
+
+    // 【防范的历史坑 (Pitfall)】历史实现把预取放在 `if (p.avatar) { …; return; }` 之后：
+    //   头像一旦从持久缓存回填，该 return 就会永久跳过主工位预取，导致第二次启动起首次点击
+    //   任一 Agent 必走 session.list 冷路径，出现约 1 秒空白。
+    // 服务端新增/删除了 Agent（profile 主键变化）时，会话归属需要重新对齐。
+    if (profileTopologyChanged) void fetchSessions();
   } catch (e) {
     console.warn('[Flux] fetchProfiles failed:', e);
+  }
+}
+
+/**
+ * 后台预热每个 Bot 的终身主工位：建立 Forever Chat 缓存与卡片最近动态。
+ * 【并发规则】最多 3 路并发，避免 Bot 数量增长时对网关造成瞬时惊群。
+ * 【失败策略】单个 Bot 失败只跳过自身，不影响其余 Bot 与首屏（gate-degrade）。
+ */
+async function warmBotForeverChats(
+  list: AgentProfile[],
+  client: NonNullable<typeof gatewayClient>,
+): Promise<void> {
+  const queue = [...list];
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const p = queue.shift();
+      if (!p) return;
+      // 已建立过主工位缓存的 Bot 无需重复探查，避免定时刷新在网关侧制造无意义 RPC。
+      if (botForeverChatCache.has(p.name)) continue;
+      try {
+        const forever = await profileService.getOrCreateForeverChat(p.name, client);
+        if (!forever?.sessionId) continue;
+        botForeverChatCache.set(p.name, forever.sessionId);
+        const histRes = await client.fetchSessionMessages(forever.sessionId, { limit: 1, offset: 0, order: 'latest' });
+        if (histRes.status === 'success' && histRes.messages.length > 0) {
+          const last = histRes.messages[0];
+          const parts = Array.isArray(last.parts) ? (last.parts as Array<{ type?: string; text?: string }>) : [];
+          const textPart = parts.find((pt) => pt.type === 'text');
+          const previewText = textPart?.text || (typeof last.content === 'string' ? last.content : '');
+          const ts = last.created_at || last.timestamp;
+          const numTs = typeof ts === 'number' ? (ts > 1e11 ? ts : ts * 1000) : typeof ts === 'string' ? Date.parse(ts) || Date.now() : Date.now();
+          updateBotLatestActivity(p.name, previewText, numTs);
+          render();
+        }
+      // gate-degrade: 单条主工位探测失败按跳过处理，不影响其余 Bot 资产渲染
+      } catch {
+        // 容错放行
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(3, queue.length) }, () => worker()));
+}
+
+/** 定时刷新 Bot Profile：服务端改名/改描述/换模型后，最迟一分钟内自动同步。 */
+const PROFILE_REFRESH_INTERVAL_MS = 60_000;
+const PROFILE_REFRESH_MIN_GAP_MS = 15_000;
+let profileAutoRefreshTimer: ReturnType<typeof setInterval> | null = null;
+let lastProfileRefreshAt = 0;
+let profileRefreshInFlight = false;
+/** Profile 拉取代际：先发后至的旧响应不得覆盖新快照。 */
+let profileFetchGeneration = 0;
+
+function stopProfileAutoRefresh(): void {
+  if (profileAutoRefreshTimer) {
+    clearInterval(profileAutoRefreshTimer);
+    profileAutoRefreshTimer = null;
+  }
+}
+
+function startProfileAutoRefresh(): void {
+  stopProfileAutoRefresh();
+  profileAutoRefreshTimer = setInterval(() => { void refreshProfilesFromServer(); }, PROFILE_REFRESH_INTERVAL_MS);
+}
+
+/**
+ * 从网关重新读取 Agent Profile。
+ * 【规则】只在已连接且页面可见时执行；15 秒冷却吸收窗口焦点抖动；
+ *   失败静默（连接态由 FSM 负责），内容不变时 fetchProfiles 内部直接返回，不产生重绘。
+ */
+async function refreshProfilesFromServer(): Promise<void> {
+  if (!gatewayClient || !state.gatewayConnected || profileRefreshInFlight) return;
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+  const now = Date.now();
+  if (now - lastProfileRefreshAt < PROFILE_REFRESH_MIN_GAP_MS) return;
+  lastProfileRefreshAt = now;
+  profileRefreshInFlight = true;
+  try {
+    await fetchProfiles({ refresh: true });
+  // gate-degrade: 定时刷新失败保持现状，下一轮继续；连接态由 FSM 负责。
+  } catch {
+    // 定时刷新失败保持现状，下一轮继续；连接态由 FSM 负责。
+  } finally {
+    profileRefreshInFlight = false;
   }
 }
 
@@ -2165,6 +2330,65 @@ async function switchProfile(name: string): Promise<void> {
 // OpenChamber Standard Message Paging: Initial Window 100 items for instant cold launch
 const INITIAL_WINDOW_PAGE_SIZE = 100;
 const OLDER_BATCH_PAGE_SIZE = 50;
+/**
+ * 消息列表初始挂载窗口。
+ * 【设计意图 (Why)】Bot 终身主工位会累积上百条历史；进入会话时把整表一次挂载，
+ *   会让点击路径承担全量组件与 Markdown 构建成本。首屏只挂最近 N 条，
+ *   向上滚动时先扩展本地窗口、耗尽后再走服务端分页。
+ * 【约束与规则 (Rules)】窗口必须覆盖最后一条消息，流式直写锚点才不会缺失。
+ */
+const INITIAL_RENDER_WINDOW = 24;
+const RENDER_WINDOW_STEP = 40;
+let messageWindowSessionId = '';
+let messageWindowStart = 0;
+let messageWindowUserExpanded = false;
+/**
+ * 滚动扩窗锁必须是模块级：render() 每次都会重绑 onscroll，局部锁会被新闭包重置，
+ * 同一次手势就能连续扩窗，把锚点补偿推到列表底部。
+ */
+let streamScrollCooldown = false;
+
+/**
+ * 维护消息挂载窗口。
+ * 【规则】切会话时重置为末尾窗口；用户主动向上翻阅后不再自动回末尾，
+ *   仅在新消息导致窗口越界时兜底收敛，避免打断正在看历史的读者。
+ */
+function ensureMessageWindow(total: number): void {
+  const sessionChanged = messageWindowSessionId !== state.activeSessionId;
+  if (sessionChanged) messageWindowSessionId = state.activeSessionId;
+  const stream = document.getElementById('conversation-stream');
+  const plan = planMessageWindow({
+    total,
+    start: messageWindowStart,
+    userExpanded: messageWindowUserExpanded,
+    sessionChanged,
+    followBottom: stream ? isStreamNearBottom(stream) : true,
+    initialWindow: INITIAL_RENDER_WINDOW,
+  });
+  messageWindowStart = plan.start;
+  messageWindowUserExpanded = plan.userExpanded;
+}
+
+/** 向上扩展本地窗口；返回 true 表示本次滚动已由本地消息满足，无需请求服务端。 */
+function expandMessageWindow(): boolean {
+  const nextStart = expandMessageWindowStart(messageWindowStart, RENDER_WINDOW_STEP);
+  if (nextStart === messageWindowStart) return false;
+  const anchor = captureStreamAnchor();
+  messageWindowStart = nextStart;
+  messageWindowUserExpanded = true;
+  canvasStructureDirty = true;
+  // 窗口扩展只允许“保持锚点”，绝不允许贴底跟随抢走本次滚动。
+  suppressPinBottomOnce = true;
+  render();
+  // 【滚动锚定 (Rules)】窗口向前扩展会把历史插到顶部。React 提交可能晚于 render 的同步锚点校正，
+  // 因此连续两帧重新对齐到扩展前可见的那条消息，读者视口不会被最老的历史顶走。
+  const reapplyAnchor = (): void => applyStreamAnchor(anchor, false);
+  requestAnimationFrame(() => {
+    reapplyAnchor();
+    requestAnimationFrame(reapplyAnchor);
+  });
+  return true;
+}
 const sessionMessagesCache = new Map<string, MessageViewModel[]>();
 const sessionServerOffset = new Map<string, number>();
 /** 截断成功后的会话历史权威源标记：'server-priority' 时禁用“本地更长则保留”合并守卫 */
@@ -2550,6 +2774,9 @@ async function loadOlderMessages(): Promise<void> {
       const batch = parseRawMessages(outcome.messages);
       sessionServerOffset.set(sessionId, currentOffset + outcome.messages.length);
       state.messages = [...batch, ...state.messages];
+      // 用户已主动向上翻阅：把本轮新加载的批次纳入挂载窗口，后续滚动再继续分页。
+      messageWindowStart = 0;
+      messageWindowUserExpanded = true;
       sessionMessagesCache.set(sessionId, state.messages);
       const isRoom = hostedRoomIds.has(sessionId) || state.groupRooms.some((g) => g.roomId === sessionId);
       const olderCacheRef: CacheChannelRef = {
@@ -3362,6 +3589,9 @@ async function selectSession(id: string, options?: { preserveFocus?: boolean; bo
   lastMessagesSnapshot = null;
 
   await loadMessages(id, options?.botName);
+
+  // 【竞态守卫 (Rules)】等待历史期间用户可能已经切走：迟到的会话绝对不得把草稿与焦点写进新会话的输入框。
+  if (state.activeSessionId !== id) return;
 
   // Restore draft for incoming session without clobbering live typing
   const restoredInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
@@ -4706,6 +4936,7 @@ async function connect(targetUrl?: string): Promise<void> {
   const epoch = ++connectionEpoch;
 
   // 1. 彻底断开旧客户端，停止一切在途重连定时器与后台网络噪音
+  stopProfileAutoRefresh();
   if (gatewayClient) {
     gatewayClient.disconnect();
     gatewayClient = null;
@@ -4839,6 +5070,7 @@ async function connect(targetUrl?: string): Promise<void> {
         render();
 
         if (isConnected) {
+          startProfileAutoRefresh();
           Promise.allSettled([fetchProfiles().then(() => Promise.allSettled([fetchSessions(), fetchGroupRooms(), prefetchSlashCatalog()])), fetchModelOptions(), fetchProjects()]);
         }
       }
@@ -4849,6 +5081,7 @@ async function connect(targetUrl?: string): Promise<void> {
       state.gatewayConnected = true;
       state.gatewayConnecting = false;
       render();
+      startProfileAutoRefresh();
       Promise.allSettled([fetchProfiles().then(() => Promise.allSettled([fetchSessions(), fetchGroupRooms(), prefetchSlashCatalog()])), fetchModelOptions(), fetchProjects()]);
     }
   } catch (err: any) {
@@ -4866,6 +5099,7 @@ async function connect(targetUrl?: string): Promise<void> {
 }
 
 function disconnect(): void {
+  stopProfileAutoRefresh();
   if (gatewayClient) {
     gatewayClient.disconnect();
     gatewayClient = null;
@@ -5003,6 +5237,22 @@ let lastMessagesSnapshot: RenderMessagesSnapshot | null = null;
 let lastInputDockSnapshot: RenderInputDockSnapshot | null = null;
 let updateReactTitlebar: (() => void) | null = null;
 let updateReactLeftRail: (() => void) | null = null;
+/** 左轨/标题栏快照指纹：内容不变时跳过 React 推送，避免每次 render 都全量协调 42+ 行。 */
+let lastTitlebarSnapshotJson = '';
+let lastPushedLeftRailSnapshot: LeftRailSnapshot | null = null;
+
+/**
+ * 快照指纹。
+ * 【规则】不可序列化时降级为“每次都推送”：宁可多渲染，也绝不能漏掉一次真实更新。
+ */
+function snapshotFingerprint(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? '';
+  } catch {
+    return `__unserializable_${Date.now()}_${Math.random()}`;
+  }
+}
+
 let inspectorMotionController: ReturnType<typeof attachMotionController> | null = null;
 let lastInspectorCollapsed = true;
 
@@ -5110,6 +5360,129 @@ function syncComposerPoppers(): void {
     renderMentionPopper(state.mentionItems, state.mentionPopperOpen);
 }
 
+/**
+ * 左轨实体装饰缓存。
+ * 【设计意图 (Why)】左轨每一帧都把 42+ 个会话、群聊与 Agent 重新展开成新对象，
+ *   React.memo 的行组件按引用比较会全部失效。按源对象 + 渲染字段指纹复用装饰对象，
+ *   让未变化的行保持同一引用，只重渲染真正变化的行。
+ * 【防范的历史坑 (Pitfall)】不能只缓存首次结果：会话 preview/timestamp 会被原地更新，
+ *   必须把全部渲染字段纳入指纹。
+ */
+interface RailDecorCacheEntry<T> { stamp: string; value: T }
+const railSessionDecorCache = new WeakMap<LeftRailSession, RailDecorCacheEntry<LeftRailSession>>();
+const railGroupDecorCache = new WeakMap<LeftRailGroupRoom, RailDecorCacheEntry<LeftRailGroupRoom>>();
+const railProfileDecorCache = new WeakMap<LeftRailProfile, RailDecorCacheEntry<LeftRailProfile>>();
+let lastDecoratedSessions: LeftRailSession[] = [];
+let lastDecoratedGroups: LeftRailGroupRoom[] = [];
+let lastDecoratedProfiles: LeftRailProfile[] = [];
+
+interface LeftRailSnapshotInputs {
+  sessions: LeftRailSession[];
+  groups: LeftRailGroupRoom[];
+  profiles: LeftRailProfile[];
+  projects: LeftRailProject[];
+  projectsVersion: number;
+  activeSessionId: string;
+  activeFocus: LeftRailActiveFocus;
+  profileName: string;
+  activeRailTab: LeftRailTab;
+  searchQuery: string;
+  isSessionsGroupExpanded: boolean;
+  isGroupsGroupExpanded: boolean;
+  error: string;
+  collapsed: boolean;
+  editingGroupRoomId?: string;
+}
+let lastLeftRailSnapshot: LeftRailSnapshot | null = null;
+let lastLeftRailInputs: LeftRailSnapshotInputs | null = null;
+
+function sameLeftRailInputs(prev: LeftRailSnapshotInputs, next: LeftRailSnapshotInputs): boolean {
+  return prev.sessions === next.sessions
+    && prev.groups === next.groups
+    && prev.profiles === next.profiles
+    && prev.projects === next.projects
+    && prev.projectsVersion === next.projectsVersion
+    && prev.activeSessionId === next.activeSessionId
+    && prev.activeFocus === next.activeFocus
+    && prev.profileName === next.profileName
+    && prev.activeRailTab === next.activeRailTab
+    && prev.searchQuery === next.searchQuery
+    && prev.isSessionsGroupExpanded === next.isSessionsGroupExpanded
+    && prev.isGroupsGroupExpanded === next.isGroupsGroupExpanded
+    && prev.error === next.error
+    && prev.collapsed === next.collapsed
+    && prev.editingGroupRoomId === next.editingGroupRoomId;
+}
+
+/** 元素引用完全一致时复用旧数组，保证行组件收到的数组 prop 也稳定。 */
+function stableArray<T>(next: T[], previous: T[]): T[] {
+  return next.length === previous.length && next.every((item, index) => item === previous[index]) ? previous : next;
+}
+
+function decorateRailSessions(): LeftRailSession[] {
+  const next = state.sessions.map((s) => {
+    const activityState = resolveActivityState(s.id, {
+      runningIds: activeRunningSessionIds,
+      unreadIds: unreadSessionIds,
+      streamingId: activeStreamingStoredSessionId,
+    });
+    const cached = railSessionDecorCache.get(s);
+    if (cached
+      && cached.value.title === s.title
+      && cached.value.preview === s.preview
+      && cached.value.time === s.time
+      && cached.value.timestamp === s.timestamp
+      && cached.value.isArchived === s.isArchived
+      && cached.value.isPinned === s.pinned
+      && cached.value.botName === s.botName
+      && cached.value.botDisplayName === s.botDisplayName
+      && cached.value.botAvatar === s.botAvatar
+      && cached.value.activityState === activityState) {
+      return cached.value;
+    }
+    const value: LeftRailSession = { ...s, isPinned: s.pinned, activityState };
+    railSessionDecorCache.set(s, { stamp: '', value });
+    return value;
+  });
+  lastDecoratedSessions = stableArray(next, lastDecoratedSessions);
+  return lastDecoratedSessions;
+}
+
+function decorateRailGroups(): LeftRailGroupRoom[] {
+  const next = state.groupRooms.map((g) => {
+    const activityState = resolveActivityState(g.roomId, {
+      runningIds: activeRunningGroupRoomIds,
+      unreadIds: unreadGroupRoomIds,
+    });
+    const stamp = [g.name, (g.members || []).join('\u0002'), g.lastMessage, g.updatedAt, g.createdAt, activityState].join('\u0001');
+    const cached = railGroupDecorCache.get(g);
+    if (cached && cached.stamp === stamp) return cached.value;
+    const value: LeftRailGroupRoom = { ...g, activityState };
+    railGroupDecorCache.set(g, { stamp, value });
+    return value;
+  });
+  lastDecoratedGroups = stableArray(next, lastDecoratedGroups);
+  return lastDecoratedGroups;
+}
+
+function decorateRailProfiles(): LeftRailProfile[] {
+  const next = state.profiles.map((p) => {
+    const avatar = p.avatar || resolveAgentAvatar(p.name) || (p.displayName ? resolveAgentAvatar(p.displayName) : '') || '';
+    const activityState = resolveActivityState(p.name, {
+      runningIds: activeRunningBotNames,
+      unreadIds: unreadBotNames,
+    });
+    const stamp = [p.name, p.displayName, avatar, p.description, p.lastMessage, p.lastTime, p.timestamp, p.isDefault ? 1 : 0, activityState].join('\u0001');
+    const cached = railProfileDecorCache.get(p);
+    if (cached && cached.stamp === stamp) return cached.value;
+    const value: LeftRailProfile = { ...p, avatar, activityState };
+    railProfileDecorCache.set(p, { stamp, value });
+    return value;
+  });
+  lastDecoratedProfiles = stableArray(next, lastDecoratedProfiles);
+  return lastDecoratedProfiles;
+}
+
 function getTitlebarSnapshot(): TitlebarSnapshot {
   return createTitlebarSnapshot({
     platform: state.platform,
@@ -5146,31 +5519,32 @@ function getTitlebarSnapshot(): TitlebarSnapshot {
  * 三态装饰严格按域隔离：会话读会话集合、群聊读群聊集合、Bot 只读 Bot 集合，互不冒泡。
  */
 function getLeftRailSnapshot(): LeftRailSnapshot {
-  const sessions = state.sessions.map((s) => ({
-    ...s,
-    activityState: resolveActivityState(s.id, {
-      runningIds: activeRunningSessionIds,
-      unreadIds: unreadSessionIds,
-      streamingId: activeStreamingStoredSessionId,
-    }),
-  }));
-  const groups = state.groupRooms.map((g) => ({
-    ...g,
-    activityState: resolveActivityState(g.roomId, {
-      runningIds: activeRunningGroupRoomIds,
-      unreadIds: unreadGroupRoomIds,
-    }),
-  }));
-  const profiles = state.profiles.map((p) => ({
-    ...p,
-    // 强制穿透：优先从全局头像缓存解析真实头像资产，消除时序冲刷导致的头像丢失
-    avatar: p.avatar || resolveAgentAvatar(p.name) || (p.displayName ? resolveAgentAvatar(p.displayName) : '') || '',
-    activityState: resolveActivityState(p.name, {
-      runningIds: activeRunningBotNames,
-      unreadIds: unreadBotNames,
-    }),
-  }));
-  return {
+  const sessions = decorateRailSessions();
+  const groups = decorateRailGroups();
+  // 强制穿透：优先从全局头像缓存解析真实头像资产，消除时序冲刷导致的头像丢失
+  const profiles = decorateRailProfiles();
+  const inputs: LeftRailSnapshotInputs = {
+    sessions,
+    groups,
+    profiles,
+    projects: state.projects,
+    projectsVersion,
+    activeSessionId: state.activeSessionId,
+    activeFocus: state.activeFocus,
+    profileName: state.profileName,
+    activeRailTab: state.activeRailTab,
+    searchQuery: state.sessionSearchQuery,
+    isSessionsGroupExpanded: state.isSessionsGroupExpanded !== false,
+    isGroupsGroupExpanded: state.isGroupsGroupExpanded !== false,
+    error: state.sessionListError,
+    collapsed: state.leftRailCollapsed,
+    editingGroupRoomId: state.editingGroupRoomId,
+  };
+  if (lastLeftRailSnapshot && lastLeftRailInputs && sameLeftRailInputs(lastLeftRailInputs, inputs)) {
+    return lastLeftRailSnapshot;
+  }
+  lastLeftRailInputs = inputs;
+  lastLeftRailSnapshot = {
     model: buildLeftRailModel({
       activeSessionId: state.activeSessionId,
       activeFocus: state.activeFocus,
@@ -5190,6 +5564,7 @@ function getLeftRailSnapshot(): LeftRailSnapshot {
     editingGroupRoomId: state.editingGroupRoomId,
     groupAvatars: profiles,
   };
+  return lastLeftRailSnapshot;
 }
 
 let reactMessageList: ConversationMount | null = null;
@@ -5197,42 +5572,105 @@ let reactMessageListHost: HTMLElement | null = null;
 let renderedMessageIds = new Set<string>();
 let lastSeenStreaming = false;
 
+/**
+ * 消息视图对象身份缓存。
+ * 【设计意图 (Why)】TurnGroup / MessageRow 的 memo 按 message 对象引用比较；
+ *   每次快照都 map 出新对象会让所有已挂载消息行整体失效，切换长会话时重复做全量 Markdown 渲染。
+ * 【约束与规则 (Rules)】只缓存非末条消息：末条在流式期间内容原地增长且 status 会切换，必须重建。
+ *   键使用源 MessageViewModel 对象引用；REST 合并/回滚替换源对象时缓存自然失效。
+ */
+const conversationVmCache = new WeakMap<MessageViewModel, {
+  vm: ConversationMessageVM;
+  content: string;
+  thought?: string;
+  toolsRef?: MessageViewModel['toolCalls'];
+  toolsSignature: string;
+}>();
+
+let knownFilesToolsRef: readonly (MessageViewModel['toolCalls'])[] = [];
+let knownFilesValue: readonly string[] = [];
+
+/**
+ * 会话级文件引用集合。
+ * 【设计意图 (Why)】knownFiles 的契约是“整个会话真实读写过的文件”，
+ *   不能只扫窗口内 24 条消息，否则窗口外的工具调用会让窗口内引用错误地不可点击。
+ * 【规则】按完整 state.messages 的 toolCalls 数组引用做稳定缓存，窗口收缩不影响结果。
+ */
+function resolveSessionKnownFiles(): readonly string[] {
+  const tools = state.messages.map((message) => message.toolCalls);
+  const unchanged = tools.length === knownFilesToolsRef.length
+    && tools.every((tool, index) => tool === knownFilesToolsRef[index]);
+  if (unchanged) return knownFilesValue;
+  knownFilesToolsRef = tools;
+  knownFilesValue = collectTouchedFiles(state.messages.flatMap((message) => message.toolCalls ?? []));
+  return knownFilesValue;
+}
+
 /** 把当前会话状态映射为对话区只读视图模型；不做任何排序或解析。 */
 function buildConversationSnapshot(): ConversationSnapshot {
   const focusType = state.activeFocus.type;
   const streaming = isStreamingActiveForCurrentSession();
-  const lastMessageId = state.messages[state.messages.length - 1]?.id;
+  ensureMessageWindow(state.messages.length);
+  const windowedMessages = state.messages.slice(messageWindowStart);
+  const lastMessageId = windowedMessages[windowedMessages.length - 1]?.id;
   return {
     mode: focusType === 'group' ? 'group' : focusType === 'bot' ? 'foreground' : 'scratchpad',
     connection: state.gatewayConnected ? 'connected' : state.gatewayConnecting ? 'connecting' : 'disconnected',
     isStreaming: streaming,
-    hasOlderMessages: state.hasOlderMessages,
+    // 本地窗口之外还有已加载历史时，也必须显示“向上滚动查看更早历史”的提示。
+    hasOlderMessages: state.hasOlderMessages || messageWindowStart > 0,
     isLoadingOlder: state.isLoadingOlder,
     profileName: state.profileName,
-    messages: state.messages.map((m) => ({
-      id: m.id,
-      rowId: m.rowId,
-      role: m.role,
-      content: m.content,
-      sender: m.sender,
-      senderAvatar: m.senderAvatar,
-      model: m.model,
-      thought: m.thought,
-      thoughtDurationMs: m.thoughtDurationMs,
-      durationMs: m.durationMs,
-      timestamp: m.timestamp,
-      status: streaming && m.id === lastMessageId ? 'streaming' : undefined,
-      isStreaming: streaming && m.id === lastMessageId,
-      toolCalls: m.toolCalls?.map((tc) => ({
-        id: tc.id,
-        name: tc.name,
-        status: tc.status,
-        args: tc.args,
-        output: tc.output,
-        durationMs: tc.durationMs,
-        startedAt: tc.startTime,
-      })),
-    })),
+    knownFiles: resolveSessionKnownFiles(),
+    locale: state.lang,
+    messages: windowedMessages.map((m) => {
+      const isLast = m.id === lastMessageId;
+      const toolsSignature = m.toolCalls?.map((tc) => `${tc.id}:${tc.status}:${tc.output?.length ?? 0}:${tc.args?.length ?? 0}`).join('|') ?? '';
+      if (!isLast) {
+        const cached = conversationVmCache.get(m);
+        if (cached
+          && cached.content === m.content
+          && cached.thought === m.thought
+          && cached.toolsRef === m.toolCalls
+          && cached.toolsSignature === toolsSignature) {
+          return cached.vm;
+        }
+      }
+      const vm: ConversationMessageVM = {
+        id: m.id,
+        rowId: m.rowId,
+        role: m.role,
+        content: m.content,
+        sender: m.sender,
+        senderAvatar: m.senderAvatar,
+        model: m.model,
+        thought: m.thought,
+        thoughtDurationMs: m.thoughtDurationMs,
+        durationMs: m.durationMs,
+        timestamp: m.timestamp,
+        status: streaming && isLast ? 'streaming' : undefined,
+        isStreaming: streaming && isLast,
+        toolCalls: m.toolCalls?.map((tc) => ({
+          id: tc.id,
+          name: tc.name,
+          status: tc.status,
+          args: tc.args,
+          output: tc.output,
+          durationMs: tc.durationMs,
+          startedAt: tc.startTime,
+        })),
+      };
+      if (!isLast) {
+        conversationVmCache.set(m, {
+          vm,
+          content: m.content,
+          thought: m.thought,
+          toolsRef: m.toolCalls,
+          toolsSignature,
+        });
+      }
+      return vm;
+    }),
   };
 }
 
@@ -5251,7 +5689,8 @@ function syncReactMessageList(force = false): void {
     lastSeenStreaming = false;
     return;
   }
-  const currentIds = state.messages.map((m) => m.id);
+  ensureMessageWindow(state.messages.length);
+  const currentIds = state.messages.slice(messageWindowStart).map((m) => m.id);
   if (reactMessageListHost !== host) {
     reactMessageList?.unmount();
     reactMessageList = mountMessageList(host, buildConversationSnapshot);
@@ -5533,8 +5972,24 @@ function mountReactShellComponents(): void {
   if (leftRailHost && !updateReactLeftRail) {
     updateReactLeftRail = mountLeftRail(leftRailHost, getLeftRailSnapshot, createLeftRailActions());
   }
-  updateReactTitlebar?.();
-  updateReactLeftRail?.();
+  // 【设计意图 (Why)】绝大多数 render 并不改变左轨/标题栏内容（流式 token、dock 通知、消息追加等）。
+  // 无条件 root.render 会把 42+ 行会话列表整棵协调一遍，白白占用主线程。
+  // 【规则】左轨快照按输入引用缓存（O(1) 比较），绝不用 JSON.stringify 全量序列化——
+  //   89 个会话的快照序列化实测 15~20ms，比它想省下的渲染还贵。
+  if (updateReactTitlebar) {
+    const fingerprint = snapshotFingerprint(getTitlebarSnapshot());
+    if (fingerprint !== lastTitlebarSnapshotJson) {
+      lastTitlebarSnapshotJson = fingerprint;
+      updateReactTitlebar();
+    }
+  }
+  if (updateReactLeftRail) {
+    const snapshot = getLeftRailSnapshot();
+    if (snapshot !== lastPushedLeftRailSnapshot) {
+      lastPushedLeftRailSnapshot = snapshot;
+      updateReactLeftRail();
+    }
+  }
   syncReactSettings();
   syncReactMessageList();
 }
@@ -5557,11 +6012,15 @@ function render(): void {
   const activeCaretStart = activeEl && 'selectionStart' in activeEl ? (activeEl as HTMLInputElement).selectionStart : null;
   const activeCaretEnd = activeEl && 'selectionEnd' in activeEl ? (activeEl as HTMLInputElement).selectionEnd : null;
 
-  const forcedBottom = pendingScrollToBottom;
+  const suppressPinOnce = suppressPinBottomOnce;
+  suppressPinBottomOnce = false;
+  const forcedBottom = suppressPinOnce ? false : pendingScrollToBottom;
   pendingScrollToBottom = false;
   const streamEl = document.getElementById('conversation-stream');
   const wasNearBottom = isStreamNearBottom(streamEl);
-  const pinBottom = forcedBottom || wasNearBottom;
+  // 【滚动不变量 (Rules)】窗口扩展触发的一次性抑制必须同时压住 forcedBottom 与 wasNearBottom：
+  // 内容仅略超一屏时，scrollTop=0 同时满足“触顶扩展”与“贴底跟随”，只压前者仍会跳底再弹回。
+  const pinBottom = suppressPinOnce ? false : (forcedBottom || wasNearBottom);
   const streamAnchor = captureStreamAnchor();
 
   document.documentElement.setAttribute('data-theme', state.theme);
@@ -5854,8 +6313,11 @@ function render(): void {
     // 仅在 dockChanged（模型/流式/通知/禁用态变化）或不存在 existingDock 时执行替换，否则原生节点绝对不动。
     const existingDock = root.querySelector('.input-dock-container');
     const dockChanged = hasDockSnapshotChanged(lastInputDockSnapshot, currentDockSnapshot);
+    // 【设计意图 (Why)】renderInputDock 会展开全 provider × 全模型的选择器 HTML；
+    // 只有 dock 需要新增或内容指纹变化时才构建，避免每次 render（流式收敛、左轨交互）白付这笔字符串成本。
+    const shouldBuildDock = state.gatewayConnected && (!existingDock || dockChanged);
 
-    const nextDockHtml = state.gatewayConnected
+    const nextDockHtml = shouldBuildDock
       ? renderInputDock({
           selectedModel: state.selectedModel,
           models: state.availableModels,
@@ -5884,10 +6346,10 @@ function render(): void {
       : '';
 
     if (existingDock) {
-      if (!nextDockHtml) {
+      if (!state.gatewayConnected) {
         existingDock.remove();
         lastInputDockSnapshot = null;
-      } else if (dockChanged) {
+      } else if (dockChanged && nextDockHtml) {
         existingDock.outerHTML = nextDockHtml;
         lastInputDockSnapshot = currentDockSnapshot;
       }
@@ -7171,20 +7633,26 @@ function bindEvents(): void {
 
   // Scroll stream: Auto-load older messages on top reach with requestAnimationFrame & cooldown lock
   const streamEl = document.getElementById('conversation-stream');
-  let scrollCooldown = false;
   if (streamEl) {
     streamEl.onscroll = () => {
-      if (scrollCooldown || state.isLoadingOlder || !state.hasOlderMessages) return;
+      if (streamScrollCooldown || state.isLoadingOlder) return;
 
       if (streamEl.scrollTop < 120) {
-        scrollCooldown = true;
+        // 先扩展本地挂载窗口：已加载但未挂载的更早消息无需请求服务端。
+        // 【竞态守卫 (Rules)】必须先上锁再扩展：render 插入历史会同步触发新的 scroll 事件，
+        // 若等 expand 返回后才上锁，同一次手势会连扩两批，把锚点补偿推到列表底部。
+        streamScrollCooldown = true;
+        const expanded = expandMessageWindow();
+        setTimeout(() => { streamScrollCooldown = false; }, 300);
+        if (expanded) return;
+        if (!state.hasOlderMessages) return;
         requestAnimationFrame(async () => {
           try {
             await loadOlderMessages();
           } finally {
             // Cool-down delay (150ms) to absorb momentum scroll bounce & prevent cascading re-entrancy
             setTimeout(() => {
-              scrollCooldown = false;
+              streamScrollCooldown = false;
             }, 150);
           }
         });
@@ -7921,8 +8389,13 @@ async function init(): Promise<void> {
     if (now - lastFocusRefreshAt < 5000) return;
     lastFocusRefreshAt = now;
     if (gatewayClient && !state.isStreaming) {
-      void fetchProfiles().catch(() => undefined);
+      void refreshProfilesFromServer();
     }
+  });
+
+  // 页面从隐藏恢复但未触发窗口 focus 时，也要及时同步服务端改名/改描述。
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') void refreshProfilesFromServer();
   });
 }
 

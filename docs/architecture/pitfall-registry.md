@@ -189,6 +189,36 @@
 | 守卫 | ① 皮肤块由 `skins-sot` 字节级 check 兜底（当前唯一防线）；② 波③给 styles.css 新增组件级色值规则前，必须先把 css 接入扫描面或以守卫测试逐条兜底（tech-design §5 波③准入项） |
 | 复现命令 | `node scripts/gates/run.mjs --json` 观察 scannedFiles 集合 |
 
+## P-020 Agent 点击同一次交互重复全量渲染（左轨 JSON 指纹反噬）
+
+| 项目 | 内容 |
+|---|---|
+| 症状 | 从普通会话点击 Agent 明显不跟手：点击处理 64~73ms、到画面更新 104~144ms，普通会话仅 24~31ms / 56~64ms |
+| 根因 | ① `openBotChat` 缓存命中分支在 `selectSession → loadMessages` 已 render 后再无条件 `render()` 一次；② 为跳过无关渲染，曾对 89 个会话的左轨快照做 `JSON.stringify` 指纹，单次 15~20ms，比它省下的渲染还贵；③ 渲染层以 React development 模式打包，切换帧成本接近翻倍 |
+| 识别特征 | 同一次点击出现两条 `[Flux:render]`；Profiler 中 `snapshotFingerprint` self time 占 15ms 以上；控制台出现 React DevTools 提示 |
+| 守卫 | ① `packages/desktop/__tests__/unit/agent-switch-performance.test.mjs` 锁定“缓存命中只允许一次受保护 render”“禁止快照 JSON 指纹”“production NODE_ENV”；② 左轨按输入引用 O(1) 缓存、行组件 memo；③ 实测 Agent 点击 handler 9~11ms、duration 32~48ms |
+| 复现命令 | CDP `PerformanceObserver({type:'event'})` 对普通会话/Agent 交替真实点击取 p50 |
+
+## P-021 头像缓存提前 return 永久跳过 Forever Chat 预取（首点 Agent 空窗约 1 秒）
+
+| 项目 | 内容 |
+|---|---|
+| 症状 | 首次启动正常，第二次启动起第一次点某个 Agent 要等 0.6~1.1 秒才出现内容；界面上是新 Bot 标题挂着旧会话内容 |
+| 根因 | `fetchProfiles` 中 `if (p.avatar) { …; return; }` 位于主工位预取之前；头像一旦从持久缓存回填，该 `return` 就永久跳过 `getOrCreateForeverChat`，`botForeverChatCache` 永远为空，首次点击只能串行走 `session.list → session.resume → REST` |
+| 识别特征 | 日志中第一次点 Agent 出现 `session.list`，之后同页面再点就秒开；清空头像缓存后问题消失 |
+| 守卫 | ① 头像拉取与主工位预取彻底拆开，预取覆盖所有 profile、分批并发 3；② `agent-switch-performance.test.mjs` 断言 fetchProfiles 代码段不得出现 `if (p.avatar) {`；③ 冷路径首帧清屏 + 失败回退 + await 后竞态守卫 |
+| 复现命令 | 在有头像持久缓存的 profile 下刷新页面，点一个未打开过的 Agent，观察首帧与消息出现时间 |
+
+## P-022 长会话全量挂载 + knownFiles 引用抖动 + 窗口滑动抽走阅读位置
+
+| 项目 | 内容 |
+|---|---|
+| 症状 | 进入消息较多的 Agent 主工位时整屏重建；向上翻历史时内容突然上移或跳到底部再弹回；已挂载消息的 Markdown 反复重算 |
+| 根因 | ① 消息列表没有窗口化，进入会话一次挂载全部历史；② `knownFiles` 每次渲染返回新数组，击穿 `TurnGroup/MessageRow` 的 memo；③ 窗口扩展路径没有抑制 `pinBottom`，且消息增长时无条件把窗口起点前移，抽走读者正在看的那一行 |
+| 识别特征 | 切换前后 `[data-msg-id]` 数量等于全量消息数；滚动到顶部后 `scrollTop` 变成 0 或 `scrollHeight`；Profiler 中 `StreamRow` / `renderWithHooks` 随消息数线性增长 |
+| 守卫 | ① 首屏只挂 24 条，顶部滚动先扩展本地窗口、耗尽后才分页；② 扩展前 `captureStreamAnchor` + 双帧 `applyStreamAnchor` 保持阅读位置，`suppressPinBottomOnce` 禁止贴底抢滚动；③ 读者离开底部时冻结窗口起点；④ VM/knownFiles 引用稳定 + `MessageRow` memo；⑤ `agent-switch-performance.test.mjs` 接线守卫 |
+| 注意 | 当前是“首屏窗口化 + 渐进扩展”，翻很多页后 DOM 仍会累积；完整虚拟列表（固定 ~100 活跃节点）仍需单独立项 |
+
 ---
 
 ## 守卫总览
@@ -213,3 +243,4 @@
 | Popper DOM 稳定性守卫 | CDP 场景 + 快照字段约束 | P-017 |
 | 皮肤单一真值守卫 | `npm test`（skins-sot 10 用例 + emit check） | P-018 |
 | CSS 扫描盲区兜底 | `npm test`（skins-sot 幂等/对账）+ 波③接扫描面 | P-019 |
+| Agent 切换性能/预取/窗口化守卫 | `npm test`（agent-switch-performance）+ CDP event timing | P-020、P-021、P-022 |

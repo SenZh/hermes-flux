@@ -93,7 +93,7 @@ function RowTime({ timestamp, fallback }: { timestamp?: number; fallback?: strin
 }
 
 /** 微轨 Agent 按钮单一实现，消灭大总管与其他 Agent 的双标分裂 */
-function AgentStationItem({
+const AgentStationItem = React.memo(function AgentStationItem({
   agent,
   active,
   onClick,
@@ -118,7 +118,7 @@ function AgentStationItem({
     {agent.activityState === 'running' && <span className="activity-pulse-indicator absolute -right-0.5 -top-0.5 size-2 rounded-full bg-primary ring-2 ring-primary/20" title={t('rail.activityRunning')} data-status="running" />}
     {agent.activityState === 'unread' && <span className="activity-unread-badge absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-success ring-2 ring-success/20" title={t('rail.activityUnread')} data-status="unread" />}
   </Button>;
-}
+}, (prev, next) => prev.agent === next.agent && prev.active === next.active);
 
 /**
  * 左侧实体行通用组件 (RailEntityRow)。
@@ -188,7 +188,7 @@ export function RailEntityRow({
  * 会话行（消费统一的 RailEntityRow 组件）。
  * 普通会话不支持头像，样式完全作为全局统一基准。
  */
-function SessionRow({ session, active, compact, onSelect, onMenu }: {
+const SessionRow = React.memo(function SessionRow({ session, active, compact, onSelect, onMenu }: {
   session: LeftRailSession;
   active: boolean;
   compact?: boolean;
@@ -213,13 +213,13 @@ function SessionRow({ session, active, compact, onSelect, onMenu }: {
       'data-bot': session.botName || '',
     }}
   />;
-}
+}, (prev, next) => prev.session === next.session && prev.active === next.active && prev.compact === next.compact);
 
 /**
  * 群聊行（消费统一的 RailEntityRow 组件）。
  * 传入多人拼贴头像 CollageAvatar，其余尺寸排版与普通会话 100% 对齐。
  */
-function GroupRow({ group, profiles, active, editing, onSelect, onMenu, onConfirmRename, onCancelRename }: {
+const GroupRow = React.memo(function GroupRow({ group, profiles, active, editing, onSelect, onMenu, onConfirmRename, onCancelRename }: {
   group: LeftRailGroupRoom;
   profiles: LeftRailProfile[];
   active: boolean;
@@ -250,7 +250,7 @@ function GroupRow({ group, profiles, active, editing, onSelect, onMenu, onConfir
       'data-room-id': group.roomId,
     }}
   />;
-}
+}, (prev, next) => prev.group === next.group && prev.profiles === next.profiles && prev.active === next.active && prev.editing === next.editing);
 
 function RenameGroup({ initialName, roomId, onConfirm, onCancel }: {
   initialName: string;

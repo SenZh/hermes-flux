@@ -52,6 +52,10 @@ export interface ConversationSnapshot {
   mode: ConversationMode;
   connection: ConnectionStatus;
   messages: ConversationMessageVM[];
+  /** 整个会话真实读写过的文件；必须由宿主按完整消息集合计算，不能随窗口收缩。 */
+  knownFiles?: readonly string[];
+  /** 当前语言标识；纳入行组件比较，切换语言后已挂载消息也要重新渲染。 */
+  locale?: string;
   isStreaming: boolean;
   hasOlderMessages?: boolean;
   isLoadingOlder?: boolean;
