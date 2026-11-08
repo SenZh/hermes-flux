@@ -118,7 +118,16 @@ async function buildAll() {
     format: 'esm',
     sourcemap: true,
   });
-  console.log('  ✔ Interactive-stage pure modules compiled (rollbackTransaction, toolPatchQueue, conversationPush)');
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/settingsController.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/settingsController.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    sourcemap: true,
+  });
+  console.log('  ✔ Interactive-stage pure modules compiled (rollbackTransaction, toolPatchQueue, conversationPush, settingsController)');
 
   // 4. Copy static assets
   fs.copyFileSync(

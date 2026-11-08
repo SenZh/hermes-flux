@@ -17,10 +17,18 @@ import {
   renderInspectionPod,
   mountTitlebar,
   mountLeftRail,
+  mountSettingsModal,
+  type SettingsSectionId,
+  type SettingsSnapshot,
+  type SettingsActions,
+  type GatewayDraft,
+  type SettingsLoadable,
+  type ProviderDirectoryRow as SettingsProviderRow,
+  type McpServerRow as SettingsMcpRow,
+  type SkillRow as SettingsSkillRow,
+  type SettingsProfileRow,
   buildLeftRailModel,
   formatLeftRailTime,
-  renderSettingsModal,
-  type SettingsTab,
   renderModelPickerMenu,
   renderModelPickerTree,
   renderMarkdown,
@@ -60,6 +68,7 @@ import {
   loadFontPreferences,
   saveFontPreferences,
   applyFontPreferences,
+  setLocale,
   type FontPreferences,
 } from '@hermes-flux/ui';
 
@@ -72,6 +81,7 @@ import {
 import { applyOptimisticCut, planSessionLoadMerge, planRollbackLeaveRestore, takeServerPriority, extractDurableRowId, bindTurnRowIds, resolveRollbackTarget } from './rollbackTransaction.js';
 import { createToolPatchQueue } from './toolPatchQueue.js';
 import { decideConversationPush } from './conversationPush.js';
+import { createSettingsController, resolveGatewayPassword } from './settingsController.js';
 
 import {
   HermesGatewayClient,
@@ -96,6 +106,10 @@ import {
   type ModelCatalogEntry,
   modelLabelFromCatalog,
   modelCatalogFingerprint,
+  buildProviderDirectory,
+  buildMcpServerRows,
+  buildSkillRows,
+  normalizeAgentProfile,
   type AgentProfile,
   type ProjectSummary,
   ProfileService,
@@ -552,7 +566,14 @@ interface AppState {
   username: string;
   password: string;
   isSettingsOpen: boolean;
-  settingsTab: SettingsTab;
+  settingsSection: SettingsSectionId;
+  /** 设置中心的网关数据快照：每个域各自持有加载态，禁止用一个 boolean 混住"没数据"与"加载失败"。 */
+  settingsProviders: SettingsLoadable<SettingsProviderRow[]>;
+  settingsProfiles: SettingsLoadable<SettingsProfileRow[]>;
+  settingsMcp: SettingsLoadable<SettingsMcpRow[]>;
+  settingsSkills: SettingsLoadable<SettingsSkillRow[]>;
+  settingsBusy: boolean;
+  appVersion?: string;
   sessions: NormalizedSession[];
   messages: MessageViewModel[];
   hasOlderMessages: boolean;
@@ -855,7 +876,13 @@ const state: AppState = {
   username: localStorage.getItem('hermes_flux_username') || localStorage.getItem('hermes_aura_username') || '',
   password: localStorage.getItem('hermes_flux_password') || localStorage.getItem('hermes_aura_password') || '',
   isSettingsOpen: false,
-  settingsTab: 'providers',
+  settingsSection: 'appearance',
+  settingsProviders: { status: 'idle' },
+  settingsProfiles: { status: 'idle' },
+  settingsMcp: { status: 'idle' },
+  settingsSkills: { status: 'idle' },
+  settingsBusy: false,
+  appVersion: undefined,
   sessions: [],
   messages: [],
   hasOlderMessages: false,
@@ -2843,6 +2870,7 @@ async function loadMessages(sessionId: string, targetBotName?: string): Promise<
           const wsServerPriority = takeServerPriority(sessionHistoryTrust, sessionId);
           const merged = planSessionLoadMerge(parsed, existing, wsServerPriority);
           sessionMessagesCache.set(sessionId, merged);
+          persistMessagesToCache(cacheRef, merged, cacheFenceMax);
           syncActiveSessionPreviewToRail(sessionId, merged, resolvedBotName);
           if (merged.length > INITIAL_WINDOW_PAGE_SIZE) {
             state.messages = merged.slice(-INITIAL_WINDOW_PAGE_SIZE);
@@ -5247,6 +5275,233 @@ function syncReactMessageList(force = false): void {
   }
 }
 
+/* --------------------------------------------------------------------------
+ * 设置中心：快照构造、动作表与网关数据装载
+ * -------------------------------------------------------------------------- */
+
+let updateReactSettings: (() => void) | null = null;
+let lastSettingsSnapshotJson = '';
+let settingsController: ReturnType<typeof createSettingsController> | null = null;
+
+/** 当前生效的语言：state.lang 是唯一真值，i18n 模块只做消费者。 */
+function syncLocale(): void {
+  setLocale(state.lang === 'en' ? 'en-US' : 'zh-CN');
+}
+
+/**
+ * 设置编排控制器（惰性构造，全进程单例）。
+ * 【约束】所有状态读写仍以 `state` 为唯一真源，控制器只通过 deps 操作它。
+ */
+function getSettingsController(): ReturnType<typeof createSettingsController> {
+  if (settingsController) return settingsController;
+  settingsController = createSettingsController({
+    isConnected: () => Boolean(gatewayClient) && state.gatewayConnected,
+    profileName: () => state.profileName || 'default',
+    currentProvider: () => state.currentProvider,
+    call: <T,>(method: string, params?: Record<string, unknown>) => {
+      if (!gatewayClient) return Promise.reject(new Error(t('settings.loadFailed'))) as Promise<T>;
+      return gatewayClient.call<T>(method, params);
+    },
+    render: () => render(),
+    translate: (key) => t(key),
+    describeError: (error) => describeRpcError(error),
+    getProviders: () => state.settingsProviders,
+    setProviders: (value) => { state.settingsProviders = value; },
+    getProfiles: () => state.settingsProfiles,
+    setProfiles: (value) => { state.settingsProfiles = value; },
+    getMcp: () => state.settingsMcp,
+    setMcp: (value) => { state.settingsMcp = value; },
+    getSkills: () => state.settingsSkills,
+    setSkills: (value) => { state.settingsSkills = value; },
+    setBusy: (busy) => { state.settingsBusy = busy; },
+    onCatalogChanged: () => { void fetchModelOptions({ clearNotice: false }); },
+    notify: (message) => showToast(message),
+    warn: (message, meta) => bootLog.warn(message, meta),
+  });
+  return settingsController;
+}
+
+function toSettingsProfileRows(profiles: AgentProfile[]): SettingsProfileRow[] {
+  return profiles.map((profile) => ({
+    name: profile.name,
+    displayName: profile.displayName || profile.name,
+    model: profile.model || undefined,
+    description: profile.description || undefined,
+    isDefault: profile.isDefault === true,
+  }));
+}
+
+/**
+ * 提供商行的"使用中"标记必须跟随**当前** provider，而不是装载那一刻的快照：
+ * 目录可能在 `model.options` 回包前就加载完成，那时 currentProvider 仍为空，
+ * 若不在此重算，界面会一直把错误的行标成使用中（真实网关 CDP 已复现）。
+ */
+function withCurrentProvider(
+  value: SettingsSnapshot['providers'],
+): SettingsSnapshot['providers'] {
+  if (value.status !== 'ready' || !state.currentProvider) return value;
+  const current = state.currentProvider.toLowerCase();
+  let changed = false;
+  const data = value.data.map((row) => {
+    const isCurrent = row.slug.toLowerCase() === current;
+    if (isCurrent === row.isCurrent) return row;
+    changed = true;
+    return { ...row, isCurrent };
+  });
+  return changed ? { ...value, data } : value;
+}
+
+function getSettingsSnapshot(): SettingsSnapshot {
+  return {
+    isOpen: state.isSettingsOpen,
+    section: state.settingsSection,
+    theme: state.theme,
+    locale: state.lang === 'en' ? 'en' : 'zh',
+    fontPrefs: fontPreferences,
+    providers: withCurrentProvider(state.settingsProviders),
+    profiles: state.settingsProfiles,
+    mcp: state.settingsMcp,
+    skills: state.settingsSkills,
+    gateway: {
+      url: state.gatewayUrl,
+      username: state.username,
+      // 密码永不进入快照 JSON（它会被指纹缓存、也可能被 DevTools 导出）。
+      hasStoredPassword: Boolean(state.password),
+      profileName: state.profileName,
+      status: state.gatewayConnected ? 'connected' : state.gatewayConnecting ? 'connecting' : 'disconnected',
+      latencyMs: state.gatewayLatencyMs,
+      test: state.testStatus,
+    },
+    appVersion: state.appVersion,
+    platform: state.platform,
+    busy: state.settingsBusy,
+  };
+}
+
+/**
+ * 提供商目录装载。
+ * 【设计意图】`include_unconfigured: true` 是设置页与模型选择器的唯一差别：
+ *   选择器只列能用的，设置页必须把未配置的也列出来，否则用户没有入口填密钥。
+ * 【约束与规则】失败必须落成 error 态并带原始信息，禁止降级成空数组。
+ */
+/** 按当前 section 懒加载对应数据；幂等、并发收敛由控制器统一保证。 */
+function ensureSettingsSectionData(section: SettingsSectionId, force = false): void {
+  getSettingsController().ensureSection(section, force);
+}
+
+/** 连接表单提交：先落 state + localStorage，再走真实 connect()。 */
+function applyGatewayDraft(draft: GatewayDraft): void {
+  state.gatewayUrl = draft.url.trim();
+  state.username = draft.username;
+  // 表单留空 = 沿用已保存的密码；避免把空密码写回、也避免把明文回填给 React。
+  state.password = resolveGatewayPassword(draft.password, state.password);
+  state.profileName = draft.profileName.trim() || 'default';
+  localStorage.setItem('hermes_flux_gateway_url', state.gatewayUrl);
+  localStorage.setItem('hermes_aura_gateway_url', state.gatewayUrl);
+  localStorage.setItem('hermes_flux_username', state.username);
+  localStorage.setItem('hermes_aura_username', state.username);
+  localStorage.setItem('hermes_flux_password', state.password);
+  localStorage.setItem('hermes_aura_password', state.password);
+  localStorage.setItem('hermes_flux_profile', state.profileName);
+  localStorage.setItem('hermes_aura_profile', state.profileName);
+}
+
+function createSettingsActions(): SettingsActions {
+  return {
+    onClose: () => {
+      state.isSettingsOpen = false;
+      render();
+    },
+    onSelectSection: (section) => {
+      state.settingsSection = section;
+      ensureSettingsSectionData(section);
+      render();
+    },
+    onThemeChange: (theme) => {
+      state.theme = resolveSkinId(theme);
+      localStorage.setItem('hermes_flux_theme', state.theme);
+      localStorage.setItem('hermes_aura_theme', state.theme);
+      render();
+    },
+    onLocaleChange: (locale) => {
+      state.lang = locale === 'en' ? 'en' : 'zh';
+      localStorage.setItem('hermes_flux_lang', state.lang);
+      syncLocale();
+      render();
+    },
+    onFontPrefsChange: (prefs) => {
+      fontPreferences = prefs;
+      saveFontPreferences(prefs);
+      applyFontPreferences(prefs);
+      render();
+    },
+    onRefreshProviders: () => { void getSettingsController().loadProviders(); },
+    onSaveProviderKey: (slug, apiKey) => getSettingsController().saveProviderKey(slug, apiKey),
+    onDisconnectProvider: (slug) =>
+      new Promise((resolve) => {
+        const controller = getSettingsController();
+        // 断开提供商会删除已保存的密钥且网关无还原接口，必须先二次确认。
+        state.confirmModal = {
+          title: t('settings.disconnectConfirmTitle'),
+          message: t('settings.disconnectConfirmMessage', { slug }),
+          confirmLabel: t('settings.disconnect'),
+          cancelLabel: t('settings.cancel'),
+          isDanger: true,
+          onConfirm: async () => { resolve(await controller.disconnectProvider(slug)); },
+          onCancel: () => resolve({ ok: false, cancelled: true }),
+        };
+        render();
+      }),
+    onRefreshProfiles: () => { void getSettingsController().loadProfiles(); },
+    onOpenAgent: (name) => {
+      state.isSettingsOpen = false;
+      state.editingAgentProfileName = name;
+      state.isAgentEditorOpen = true;
+      render();
+    },
+    onRefreshExtensions: () => { void getSettingsController().loadExtensions(); },
+    onReloadSkills: () => getSettingsController().reloadSkills(),
+    onTestGateway: (draft) => {
+      applyGatewayDraft(draft);
+      void getSettingsController().runBusy(async () => {
+        state.testStatus = await testConnection(state.gatewayUrl, state.username, state.password);
+      });
+    },
+    onConnectGateway: (draft) => {
+      applyGatewayDraft(draft);
+      if (!state.gatewayUrl) {
+        state.testStatus = { ok: false, message: t('gateway.urlRequired'), latency: 0 };
+        render();
+        return;
+      }
+      void connect();
+    },
+    onDisconnectGateway: () => { disconnect(); },
+  };
+}
+
+/** 设置快照指纹：内容不变就不推 React，避免流式输出期间每帧重渲染整棵设置树。 */
+function syncReactSettings(): void {
+  const host = document.getElementById('react-settings-host');
+  if (!host) return;
+  if (!updateReactSettings) {
+    updateReactSettings = mountSettingsModal(host, getSettingsSnapshot, createSettingsActions());
+    lastSettingsSnapshotJson = '';
+  }
+  // 关闭态零成本：设置树整体卸载后没有必要每帧序列化一份 50+ provider 的快照。
+  if (!state.isSettingsOpen) {
+    if (lastSettingsSnapshotJson === '') return;
+    lastSettingsSnapshotJson = '';
+    updateReactSettings();
+    return;
+  }
+  const snapshot = getSettingsSnapshot();
+  const json = JSON.stringify(snapshot);
+  if (json === lastSettingsSnapshotJson) return;
+  lastSettingsSnapshotJson = json;
+  updateReactSettings();
+}
+
 function mountReactShellComponents(): void {
   const titlebarHost = document.getElementById('react-titlebar-host');
   const leftRailHost = document.getElementById('react-leftrail-host');
@@ -5262,7 +5517,11 @@ function mountReactShellComponents(): void {
       onClose: () => desktopApi?.close(),
       onToggleLeftRail: () => { state.leftRailCollapsed = !state.leftRailCollapsed; render(); },
       onToggleInspector: () => { state.inspectorCollapsed = !state.inspectorCollapsed; render(); },
-      onOpenSettings: () => { state.isSettingsOpen = true; state.settingsTab = 'providers'; render(); },
+      onOpenSettings: () => {
+        state.isSettingsOpen = true;
+        ensureSettingsSectionData(state.settingsSection);
+        render();
+      },
       onToggleTheme: () => {
         state.theme = getToggleTheme(state.theme);
         localStorage.setItem('hermes_flux_theme', state.theme);
@@ -5276,6 +5535,7 @@ function mountReactShellComponents(): void {
   }
   updateReactTitlebar?.();
   updateReactLeftRail?.();
+  syncReactSettings();
   syncReactMessageList();
 }
 
@@ -5473,20 +5733,8 @@ function render(): void {
         })}
       </div>
 
-      ${renderSettingsModal({
-        isOpen: state.isSettingsOpen,
-        activeTab: state.settingsTab,
-        gatewayUrl: state.gatewayUrl,
-        username: state.username,
-        password: state.password,
-        profileName: state.profileName,
-        theme: state.theme,
-        lang: state.lang,
-        connectionStatus: state.gatewayConnected ? 'connected' : state.gatewayConnecting ? 'connecting' : 'disconnected',
-        latencyMs: state.gatewayLatencyMs,
-        testStatus: state.testStatus,
-        fontPrefs: fontPreferences,
-      })}
+      <!-- 设置中心 React 岛宿主：常驻挂载，关闭态由组件返回 null 表达，绝不 outerHTML 覆写 -->
+      <div id="react-settings-host" style="display: contents;"></div>
 
       ${renderNewTaskModal({
         isOpen: state.isNewTaskModalOpen,
@@ -5649,27 +5897,7 @@ function render(): void {
       lastInputDockSnapshot = currentDockSnapshot;
     }
 
-    // Settings Modal
-    const modalRoot = document.getElementById('flux-settings-modal-root');
-    const nextModalHtml = renderSettingsModal({
-      isOpen: state.isSettingsOpen,
-      activeTab: state.settingsTab,
-      gatewayUrl: state.gatewayUrl,
-      username: state.username,
-      password: state.password,
-      profileName: state.profileName,
-      theme: state.theme,
-      lang: state.lang,
-      connectionStatus: state.gatewayConnected ? 'connected' : state.gatewayConnecting ? 'connecting' : 'disconnected',
-      latencyMs: state.gatewayLatencyMs,
-      testStatus: state.testStatus,
-      fontPrefs: fontPreferences,
-    });
-    if (modalRoot) {
-      modalRoot.outerHTML = nextModalHtml;
-    } else {
-      root.insertAdjacentHTML('beforeend', nextModalHtml);
-    }
+    // 设置中心由 React 岛自管子树（见 mountReactSettings），此处不再做任何 DOM 替换。
 
     // New Task & Group Modal
     const taskModalRoot = document.getElementById('new-task-modal-overlay');
@@ -6146,188 +6374,9 @@ function bindEvents(): void {
     };
   }
 
-  // Settings
-  const btnCloseSettings = document.getElementById('btn-close-settings');
-  if (btnCloseSettings) {
-    btnCloseSettings.onclick = () => {
-      state.isSettingsOpen = false;
-      render();
-    };
-  }
-
-  const modalBackdrop = document.querySelector('.settings-modal-backdrop') as HTMLElement;
-  if (modalBackdrop) {
-    modalBackdrop.onclick = (e) => {
-      if (e.target === modalBackdrop) {
-        state.isSettingsOpen = false;
-        render();
-      }
-    };
-  }
-
-  document.querySelectorAll('.settings-tab-btn').forEach((btn) => {
-    (btn as HTMLElement).onclick = (e) => {
-      const tab = (e.currentTarget as HTMLElement).getAttribute('data-tab') as any;
-      if (tab) {
-        state.settingsTab = tab;
-        render();
-      }
-    };
-  });
-
-  document.querySelectorAll('.settings-theme-btn').forEach((btn) => {
-    (btn as HTMLElement).onclick = (e) => {
-      const theme = (e.currentTarget as HTMLElement).getAttribute('data-theme') as any;
-      if (theme) {
-        state.theme = theme;
-        localStorage.setItem('hermes_flux_theme', theme);
-        localStorage.setItem('hermes_aura_theme', theme);
-        render();
-      }
-    };
-  });
-
-  // 字体配置：直接写 :root 并落盘，不触发整页重绘，保证改动即时可见且不丢滚动位置
-  document.querySelectorAll<HTMLSelectElement>('.settings-font-select').forEach((select) => {
-    select.onchange = () => {
-      const kind = select.dataset.fontKind;
-      const next = { ...fontPreferences };
-      if (kind === 'ui') next.uiFont = select.value as typeof next.uiFont;
-      if (kind === 'mono') next.monoFont = select.value as typeof next.monoFont;
-      fontPreferences = next;
-      saveFontPreferences(next);
-      applyFontPreferences(next);
-    };
-  });
-
-  document.querySelectorAll<HTMLButtonElement>('.settings-font-scale-btn').forEach((btn) => {
-    btn.onclick = () => {
-      const scale = btn.dataset.scale as typeof fontPreferences.sizeScale;
-      const next = { ...fontPreferences, sizeScale: scale };
-      fontPreferences = next;
-      saveFontPreferences(next);
-      applyFontPreferences(next);
-      document.querySelectorAll('.settings-font-scale-btn').forEach((b) => {
-        const active = (b as HTMLElement).dataset.scale === scale;
-        b.classList.toggle('active', active);
-      });
-    };
-  });
-
-  // Agent Profile Switcher Chips
-  document.querySelectorAll('.btn-profile-chip').forEach((btn) => {
-    (btn as HTMLElement).onclick = (e) => {
-      e.stopPropagation();
-      const profile = (btn as HTMLElement).dataset.profile;
-      if (profile) switchProfile(profile);
-    };
-  });
-
-  // Settings: Live Inputs & Double Binding
-  const gwUrlInput = document.getElementById('settings-gateway-url') as HTMLInputElement | null;
-  if (gwUrlInput) {
-    gwUrlInput.oninput = () => {
-      state.gatewayUrl = gwUrlInput.value.trim();
-      localStorage.setItem('hermes_flux_gateway_url', state.gatewayUrl);
-      localStorage.setItem('hermes_aura_gateway_url', state.gatewayUrl);
-    };
-  }
-  const gwUserInput = document.getElementById('settings-username') as HTMLInputElement | null;
-  if (gwUserInput) {
-    gwUserInput.oninput = () => {
-      state.username = gwUserInput.value;
-      localStorage.setItem('hermes_flux_username', state.username);
-      localStorage.setItem('hermes_aura_username', state.username);
-    };
-  }
-  const gwPassInput = document.getElementById('settings-password') as HTMLInputElement | null;
-  if (gwPassInput) {
-    gwPassInput.oninput = () => {
-      state.password = gwPassInput.value;
-      localStorage.setItem('hermes_flux_password', state.password);
-      localStorage.setItem('hermes_aura_password', state.password);
-    };
-  }
-  const gwProfileInput = document.getElementById('settings-profile-name') as HTMLInputElement | null;
-  if (gwProfileInput) {
-    gwProfileInput.oninput = () => {
-      state.profileName = gwProfileInput.value || 'default';
-      localStorage.setItem('hermes_flux_profile', state.profileName);
-      localStorage.setItem('hermes_aura_profile', state.profileName);
-    };
-  }
-  const settingsMenuSearch = document.getElementById('settings-menu-search') as HTMLInputElement | null;
-  if (settingsMenuSearch) {
-    settingsMenuSearch.oninput = () => {
-      const q = settingsMenuSearch.value.toLowerCase().trim();
-      document.querySelectorAll('.settings-tab-btn').forEach((btn) => {
-        const text = btn.textContent?.toLowerCase() || '';
-        (btn as HTMLElement).style.display = (!q || text.includes(q)) ? 'flex' : 'none';
-      });
-    };
-  }
-
-  // Settings: Test & Save Buttons
-  const settingsTestBtn = document.getElementById('btn-settings-test-connection');
-  if (settingsTestBtn) {
-    settingsTestBtn.onclick = async () => {
-      const urlInput = (document.getElementById('settings-gateway-url') as HTMLInputElement)?.value;
-      const userInput = (document.getElementById('settings-username') as HTMLInputElement)?.value;
-      const passInput = (document.getElementById('settings-password') as HTMLInputElement)?.value;
-      const profileInput = (document.getElementById('settings-profile-name') as HTMLInputElement)?.value;
-
-      if (urlInput) {
-        state.gatewayUrl = urlInput.trim();
-        localStorage.setItem('hermes_flux_gateway_url', state.gatewayUrl);
-        localStorage.setItem('hermes_aura_gateway_url', state.gatewayUrl);
-      }
-      if (userInput !== undefined) {
-        state.username = userInput;
-        localStorage.setItem('hermes_flux_username', userInput);
-        localStorage.setItem('hermes_aura_username', userInput);
-      }
-      if (passInput !== undefined) {
-        state.password = passInput;
-        localStorage.setItem('hermes_flux_password', passInput);
-        localStorage.setItem('hermes_aura_password', passInput);
-      }
-      if (profileInput !== undefined) {
-        state.profileName = profileInput || 'default';
-        localStorage.setItem('hermes_flux_profile', state.profileName);
-        localStorage.setItem('hermes_aura_profile', state.profileName);
-      }
-
-      settingsTestBtn.innerText = '正在测试...';
-      const res = await testConnection(state.gatewayUrl, userInput, passInput);
-      state.testStatus = res;
-      settingsTestBtn.innerText = '连通性测试';
-      render();
-    };
-  }
-
-  const settingsSaveBtn = document.getElementById('btn-settings-save-connect');
-  if (settingsSaveBtn) {
-    settingsSaveBtn.onclick = () => {
-      const urlInput = ((document.getElementById('settings-gateway-url') as HTMLInputElement)?.value || '').trim();
-      if (!urlInput) {
-        state.testStatus = { ok: false, message: t('gateway.urlRequired'), latency: 0 };
-        render();
-        return;
-      }
-      state.gatewayUrl = urlInput;
-      state.username = (document.getElementById('settings-username') as HTMLInputElement)?.value || '';
-      state.password = (document.getElementById('settings-password') as HTMLInputElement)?.value || '';
-      state.profileName = (document.getElementById('settings-profile-name') as HTMLInputElement)?.value || 'default';
-      connect();
-    };
-  }
-
-  const disconnectBtn = document.getElementById('btn-disconnect-gateway');
-  if (disconnectBtn) {
-    disconnectBtn.onclick = () => {
-      disconnect();
-    };
-  }
+  // 设置中心已由 React 岛接管：导航、主题、字体、语言、连接表单与提供商密钥全部走
+  // mountSettingsModal 的 props/回调。此处严禁再注册第二套 DOM 事件，
+  // 否则同一控件会同时存在模板 onclick 与 React 合成事件，产生双重派发。
 
   // 左轨（微轨 + 抽屉）已由 React 岛接管：搜索、手风琴、行点击、右键菜单、行内重命名、
   // 底部快捷入口与拖拽全部走 mountLeftRail 的 props/回调，这里严禁再注册第二套事件，
@@ -7683,6 +7732,12 @@ window.addEventListener('keydown', (e) => {
     state.inspectorCollapsed = !state.inspectorCollapsed;
     render();
   }
+  if ((e.ctrlKey || e.metaKey) && e.key === ',') {
+    e.preventDefault();
+    state.isSettingsOpen = !state.isSettingsOpen;
+    if (state.isSettingsOpen) ensureSettingsSectionData(state.settingsSection);
+    render();
+  }
   if (e.key === 'Escape') {
     if (state.confirmModal) {
       const modal = state.confirmModal;
@@ -7804,6 +7859,8 @@ async function init(): Promise<void> {
   // 文件类型图标 sprite 只注入一次；Markdown 与工具行都靠 <use href="#id"> 引用。
   mountFileTypeSprite();
   applyFontPreferences(fontPreferences);
+  // 语言是全局单例：启动时必须把持久化偏好写进 i18n 模块，否则 t() 永远返回默认语言。
+  syncLocale();
   // 代码高亮引擎空闲预热：首屏先用轻量高亮，避免 300ms 的语法编译阻塞首屏。
   warmUpHighlighting();
 
@@ -7831,6 +7888,7 @@ async function init(): Promise<void> {
     try {
       const sys = await desktopApi.getSystemInfo();
       state.platform = sys.platform || 'windows';
+      state.appVersion = typeof sys.appVersion === 'string' ? sys.appVersion : undefined;
       state.isMaximized = await desktopApi.isMaximized();
 
       desktopApi.onWindowStateChange((ws) => {

@@ -627,6 +627,68 @@
           ]
         }
       ]
+    },
+    {
+      "module": "extensions",
+      "cases": [
+        {
+          "module": "extensions",
+          "method": "mcp.servers.status",
+          "ok": true,
+          "params": {
+            "profile": "default"
+          },
+          "resultKeys": [
+            "servers",
+            "checked_at"
+          ]
+        },
+        {
+          "module": "extensions",
+          "method": "skills.manage",
+          "ok": true,
+          "params": {
+            "profile": "default",
+            "action": "list"
+          },
+          "resultKeys": [
+            "skills"
+          ]
+        },
+        {
+          "module": "extensions",
+          "method": "skills.reload",
+          "ok": true,
+          "params": {
+            "profile": "default"
+          },
+          "resultKeys": [
+            "output",
+            "result"
+          ]
+        },
+        {
+          "module": "extensions",
+          "method": "model.save_key",
+          "ok": false,
+          "skipped": true,
+          "reason": "写操作会覆盖用户真实 API Key 且无法还原，仅由 CDP 场景在无凭据沙箱手工验证"
+        },
+        {
+          "module": "extensions",
+          "method": "model.disconnect",
+          "ok": false,
+          "skipped": true,
+          "reason": "断开提供商会破坏用户已配置的凭据，禁止在真实网关上执行"
+        },
+        {
+          "module": "extensions",
+          "method": "reload.env",
+          "ok": false,
+          "skipped": true,
+          "reason": "环境热重载会改变运行中的凭据状态，须与 model.save_key 成对执行，禁止单独探针"
+        }
+      ]
     }
   ],
   "cases": [
@@ -1309,6 +1371,73 @@
       "method": "prompt.background",
       "skipped": true,
       "reason": "后台子代理旁路呼叫需活跃会话与跨 profile 计算宿主，应答经事件流异步到达，离线探针显式跳过，由契约表与路由单测守护"
+    },
+    {
+      "module": "extensions",
+      "method": "mcp.servers.status",
+      "ok": true,
+      "params": {
+        "profile": "default"
+      },
+      "resultKeys": [
+        "servers",
+        "checked_at"
+      ],
+      "gatewayVersion": "0.21.6",
+      "recordedAt": "2026-11-08T13:18:53.038Z",
+      "note": "本机回环网关实测录制；主基线其余条目录制自 0.22.5"
+    },
+    {
+      "module": "extensions",
+      "method": "skills.manage",
+      "ok": true,
+      "params": {
+        "profile": "default",
+        "action": "list"
+      },
+      "resultKeys": [
+        "skills"
+      ],
+      "gatewayVersion": "0.21.6",
+      "recordedAt": "2026-11-08T13:18:53.038Z",
+      "note": "本机回环网关实测录制；主基线其余条目录制自 0.22.5"
+    },
+    {
+      "module": "extensions",
+      "method": "skills.reload",
+      "ok": true,
+      "params": {
+        "profile": "default"
+      },
+      "resultKeys": [
+        "output",
+        "result"
+      ],
+      "gatewayVersion": "0.21.6",
+      "recordedAt": "2026-11-08T13:18:53.038Z",
+      "note": "本机回环网关实测录制；主基线其余条目录制自 0.22.5"
+    },
+    {
+      "module": "extensions",
+      "method": "model.save_key",
+      "ok": false,
+      "skipped": true,
+      "reason": "写操作会覆盖用户真实 API Key 且无法还原，仅由 CDP 场景在无凭据沙箱手工验证"
+    },
+    {
+      "module": "extensions",
+      "method": "model.disconnect",
+      "ok": false,
+      "skipped": true,
+      "reason": "断开提供商会破坏用户已配置的凭据，禁止在真实网关上执行"
+    },
+    {
+      "module": "extensions",
+      "method": "reload.env",
+      "ok": false,
+      "skipped": true,
+      "reason": "环境热重载会改变运行中的凭据状态，须与 model.save_key 成对执行，禁止单独探针"
     }
-  ]
+  ],
+  "note": "主基线录制自 0.22.5；extensions 模块（mcp.servers.status / skills.manage / skills.reload）录制自 0.21.6 @ 2026-11-08T13:22:20.724Z，逐条带 gatewayVersion 标注。"
 }

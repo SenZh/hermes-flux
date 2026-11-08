@@ -1,0 +1,9 @@
+{
+  "method": "mcp.servers.status",
+  "recordedAt": "2026-11-08T13:22:20.724Z",
+  "gatewayVersion": "0.21.6",
+  "result": {
+    "servers": [],
+    "checked_at": 1794144142203
+  }
+}

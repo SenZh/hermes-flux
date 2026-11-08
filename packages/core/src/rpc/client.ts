@@ -7,11 +7,19 @@ import { WebSocketFsm, FsmState } from './fsm.js';
 import { normalizeSessionsResult, extractAvailableModels, extractModelDetails } from '../models/types.js';
 import { buildModelCatalogView, type ModelCatalogEntry } from '../models/modelCatalog.js';
 import { createLogger } from '../log/logger.js';
+import { redactSensitive } from '../log/redact.js';
 import { CONTRACT_METHODS } from './contracts/contractTable.generated.js';
 import { EXTRA_METHODS } from './contracts/extraMethods.js';
 import { normalizeAgentProfile } from './profileNormalize.js';
 
 const log = createLogger('rpc');
+
+/** 单个 RPC 的参数脱敏口径：通用键名 + method 级额外字段。 */
+function redactParams(method: string, params: unknown): unknown {
+  return redactSensitive(params, {
+    extraKeys: method === 'mcp.servers.set_api_key' ? ['value'] : [],
+  });
+}
 
 /**
  * 契约守卫开关。
@@ -528,7 +536,8 @@ export class HermesGatewayClient {
       method,
       unknownFields,
       allowedFields: spec.params,
-      params,
+      // 契约违规发生在参数已被接收之后，日志同样可能带明文凭据，必须同口径脱敏。
+      params: redactParams(method, params),
     });
     throw error;
   }
@@ -549,7 +558,14 @@ export class HermesGatewayClient {
       params,
     };
 
-    log.debug('rpc call', { id, method, params });
+    // 【规则】params 必须先过脱敏：model.save_key 的 api_key、登录密码、token
+    // 一旦进入文件日志就是明文凭据泄露（见 log/redact.ts 的历史坑说明）。
+    // mcp.servers.set_api_key 的凭据字段名是 value，单看键名无法判定，按 method 补。
+    log.debug('rpc call', {
+      id,
+      method,
+      params: redactParams(method, params),
+    });
 
     return new Promise<T>((resolve, reject) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {

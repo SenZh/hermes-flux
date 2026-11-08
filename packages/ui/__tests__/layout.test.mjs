@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { renderInspectionPod } from '../dist/components/InspectionPod/InspectionPod.js';
 import { renderStatusBar } from '../dist/components/StatusBar/StatusBar.js';
-import { renderSettingsModal } from '../dist/components/SettingsModal/SettingsModal.js';
 import { renderMessages } from './helpers/renderMessages.mjs';
 
 test('UI Components Layout & Engineering Guardrails', async (t) => {
@@ -403,91 +402,6 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     const renderedPlain = renderMarkdown(plainCode);
     assert.ok(!renderedPlain.includes('data-preview-file="userProfileState"'), 'Plain variable must not have data-preview-file');
     assert.ok(!renderedPlain.includes('tool-file-link'), 'Plain variable code must not have tool-file-link class');
-  });
-
-  await t.test('renderSettingsModal appearance tab renders correctly without comment leaks', () => {
-    const htmlOpen = renderSettingsModal({
-      isOpen: true,
-      activeTab: 'appearance',
-      gatewayUrl: 'ws://127.0.0.1:9119',
-      profileName: 'default',
-      theme: 'jade-white',
-      lang: 'zh',
-      connectionStatus: 'connected',
-      latencyMs: 12,
-    });
-
-    assert.ok(htmlOpen.includes('data-theme="obsidian-gold"'), 'Must render obsidian-gold button');
-    assert.ok(htmlOpen.includes('data-theme="ayu-light"'), 'Must render ayu-light button');
-    assert.ok(htmlOpen.includes('data-theme="jade-white"'), 'Must render jade-white button');
-    assert.ok(htmlOpen.includes('data-theme="cyber-matrix"'), 'Must render cyber-matrix button');
-    assert.ok(htmlOpen.includes('theme-preview-card-dark'), 'Must use theme-preview-card-dark class');
-    assert.ok(htmlOpen.includes('theme-preview-card-ayu'), 'Must use theme-preview-card-ayu class');
-    assert.ok(htmlOpen.includes('theme-preview-card-light'), 'Must use theme-preview-card-light class');
-    assert.ok(htmlOpen.includes('theme-preview-card-cyber'), 'Must use theme-preview-card-cyber class');
-    assert.ok(htmlOpen.includes('theme-preview-title'), 'Must use theme-preview-title class');
-    assert.ok(htmlOpen.includes('theme-preview-sub'), 'Must use theme-preview-sub class');
-    // Invariant: No gate comments must ever leak into the rendered HTML output
-    assert.ok(!htmlOpen.includes('gate-theme-allow'), 'HTML output must NOT contain gate-theme-allow comment text');
-    assert.ok(!htmlOpen.includes('/*'), 'HTML output must NOT contain raw CSS comment markers');
-
-    const htmlClosed = renderSettingsModal({
-      isOpen: false,
-      activeTab: 'appearance',
-      gatewayUrl: 'ws://127.0.0.1:9119',
-      profileName: 'default',
-      theme: 'jade-white',
-      lang: 'zh',
-      connectionStatus: 'connected',
-      latencyMs: 12,
-    });
-    assert.ok(htmlClosed.includes('display: none'), 'Closed modal must render hidden shell');
-  });
-
-  await t.test('renderSettingsModal active theme selection must be mutually exclusive and accurate', () => {
-    // 1. ayu-light active
-    const htmlAyu = renderSettingsModal({
-      isOpen: true,
-      activeTab: 'appearance',
-      gatewayUrl: 'ws://127.0.0.1:9119',
-      profileName: 'default',
-      theme: 'ayu-light',
-      lang: 'zh',
-      connectionStatus: 'connected',
-      latencyMs: 12,
-    });
-    assert.ok(htmlAyu.includes('theme-preview-card-ayu active'), 'ayu-light must be marked active');
-    assert.ok(!htmlAyu.includes('theme-preview-card-dark active'), 'obsidian-gold must NOT be active when ayu-light is selected');
-    assert.ok(!htmlAyu.includes('theme-preview-card-light active'), 'jade-white must NOT be active when ayu-light is selected');
-    assert.ok(!htmlAyu.includes('theme-preview-card-cyber active'), 'cyber-matrix must NOT be active when ayu-light is selected');
-
-    // 2. obsidian-gold active
-    const htmlDark = renderSettingsModal({
-      isOpen: true,
-      activeTab: 'appearance',
-      gatewayUrl: 'ws://127.0.0.1:9119',
-      profileName: 'default',
-      theme: 'obsidian-gold',
-      lang: 'zh',
-      connectionStatus: 'connected',
-      latencyMs: 12,
-    });
-    assert.ok(htmlDark.includes('theme-preview-card-dark active'), 'obsidian-gold must be marked active');
-    assert.ok(!htmlDark.includes('theme-preview-card-ayu active'), 'ayu-light must NOT be active');
-
-    // 3. cyber-matrix active
-    const htmlCyber = renderSettingsModal({
-      isOpen: true,
-      activeTab: 'appearance',
-      gatewayUrl: 'ws://127.0.0.1:9119',
-      profileName: 'default',
-      theme: 'cyber-matrix',
-      lang: 'zh',
-      connectionStatus: 'connected',
-      latencyMs: 12,
-    });
-    assert.ok(htmlCyber.includes('theme-preview-card-cyber active'), 'cyber-matrix must be marked active');
-    assert.ok(!htmlCyber.includes('theme-preview-card-ayu active'), 'ayu-light must NOT be active');
   });
 
   await t.test('highlightCodeSyntax must accurately highlight JSX tags, attributes, and block comments', async () => {

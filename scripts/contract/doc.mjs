@@ -122,15 +122,16 @@ const MODULE_TITLES = {
   rollback: '代码时光机',
   subagent: '子代理委派',
   prompt: '对话提交与旁路',
+  extensions: '扩展（MCP / 技能 / 提供商凭据）',
   events: '下行事件流',
 };
 
-const MODULE_ORDER = ['system', 'profiles', 'sessions', 'groups', 'projects', 'rollback', 'subagent', 'prompt', 'events'];
+const MODULE_ORDER = ['system', 'profiles', 'sessions', 'groups', 'projects', 'rollback', 'subagent', 'prompt', 'extensions', 'events'];
 
 function moduleOf(method, probeModules) {
   if (probeModules.has(method)) return probeModules.get(method);
   const prefix = method.split('.')[0];
-  return ['system', 'profiles', 'sessions', 'groups', 'projects', 'rollback', 'subagent', 'prompt'].includes(prefix)
+  return ['system', 'profiles', 'sessions', 'groups', 'projects', 'rollback', 'subagent', 'prompt', 'extensions'].includes(prefix)
     ? prefix
     : 'system';
 }
@@ -317,8 +318,9 @@ function buildContext() {
       if (c.ok) {
         probe.set(c.method, {
           covered: true,
-          gatewayVersion: index.gatewayVersion,
-          recordedAt: index.recordedAt,
+          // 逐条优先取 case 自带的录制版本：混合基线里不同模块可能录制自不同网关
+          gatewayVersion: c.gatewayVersion || index.gatewayVersion,
+          recordedAt: c.recordedAt || index.recordedAt,
           expectedGuard: c.expectedGuard,
           note: c.note,
         });

@@ -1,0 +1,20 @@
+{
+  "method": "skills.reload",
+  "recordedAt": "2026-11-08T13:22:20.724Z",
+  "gatewayVersion": "0.21.6",
+  "result": {
+    "output": "Reloading skills...\nNo new skills detected.\n51 skill(s) available",
+    "result": {
+      "added": [],
+      "removed": [],
+      "unchanged": [
+        "airtable",
+        "architecture-diagram",
+        "arxiv",
+        "<more:48>"
+      ],
+      "total": 51,
+      "commands": 51
+    }
+  }
+}

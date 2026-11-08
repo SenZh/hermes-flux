@@ -66,9 +66,10 @@
   --font-ui: var(--font-sans);
   --font-code: var(--font-mono);
   /* 字号档位引用节奏层 --fs-*，使 Tailwind 的 text-* 与 styles.css 同源。
-     设计意图(Why)：若在这里再写一遍 20/16/14/13/12/11/10/9px，就等于第二套字号真值；
+     设计意图(Why)：若在这里再写一遍 20/16/14/13/12/11/10px，就等于第二套字号真值；
      引用变量后改 --fs-* 一处，组件 utility 与状态栏等直接消费者同时生效。
-     约束与规则(Rules)：禁止在此写死 px；--fs-* 的唯一真值面在 styles.css :root 节奏层。 */
+     约束与规则(Rules)：禁止在此写死 px；--fs-* 的唯一真值面在 styles.css :root 节奏层。
+     当前 7 档：20 / 16 / 14 / 13 / 12 / 11 / 10px（micro 必须是最小档）。 */
   --text-hero: var(--fs-hero, 20px);
   --text-title: var(--fs-title, 16px);
   --text-section: var(--fs-section, 14px);
@@ -89,13 +90,18 @@
  * 防范的历史坑(Pitfall)：只在个别组件上覆盖背景，会让"新写一个按钮又变白"反复发生；
  *   把基线写在 layer 之外又会压过 utilities（实测搜索框丢失面板底色与边框）。
  * 约束与规则(Rules)：必须落在 base 层，让组件自身的 utility 永远赢；
- *   作用域严格限定在 .flux-left-rail 宿主内，绝不声明到全局元素选择器。
+ *   作用域严格限定在 React 岛宿主（.flux-left-rail 左轨 / .flux-settings 设置中心）内，
+ *   绝不声明到全局元素选择器。
  */
 @layer base {
   .flux-left-rail button,
   .flux-left-rail input,
   .flux-left-rail textarea,
-  .flux-left-rail select {
+  .flux-left-rail select,
+  .flux-settings button,
+  .flux-settings input,
+  .flux-settings textarea,
+  .flux-settings select {
     font: inherit;
     color: inherit;
     letter-spacing: inherit;
@@ -105,20 +111,25 @@
     margin: 0;
   }
 
-  .flux-left-rail button {
+  .flux-left-rail button,
+  .flux-settings button {
     cursor: pointer;
     text-align: inherit;
     appearance: none;
   }
 
-  .flux-left-rail :focus-visible {
+  .flux-left-rail :focus-visible,
+  .flux-settings :focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
   }
 
   .flux-left-rail *,
   .flux-left-rail *::before,
-  .flux-left-rail *::after {
+  .flux-left-rail *::after,
+  .flux-settings *,
+  .flux-settings *::before,
+  .flux-settings *::after {
     box-sizing: border-box;
   }
 }

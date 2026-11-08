@@ -1,0 +1,54 @@
+{
+  "method": "skills.manage",
+  "recordedAt": "2026-11-08T13:22:20.724Z",
+  "gatewayVersion": "0.21.6",
+  "result": {
+    "skills": {
+      "autonomous-ai-agents": [
+        "claude-code",
+        "codex",
+        "computer-use",
+        "<more:2>"
+      ],
+      "creative": [
+        "architecture-diagram",
+        "ascii-video",
+        "baoyu-infographic",
+        "<more:7>"
+      ],
+      "email": [
+        "email-inbox-triage",
+        "himalaya"
+      ],
+      "media": [
+        "gif-search",
+        "songsee",
+        "youtube-content"
+      ],
+      "note-taking": [
+        "obsidian"
+      ],
+      "productivity": [
+        "airtable",
+        "box",
+        "document-to-action-items",
+        "<more:11>"
+      ],
+      "research": [
+        "arxiv",
+        "competitor-news-monitor",
+        "grounded-citations",
+        "<more:1>"
+      ],
+      "software-development": [
+        "codebase-inspection",
+        "dogfood",
+        "github",
+        "<more:8>"
+      ],
+      "web": [
+        "blocked-page-recovery"
+      ]
+    }
+  }
+}

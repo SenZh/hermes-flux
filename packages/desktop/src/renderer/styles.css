@@ -66,8 +66,7 @@
   --fs-body: 13px;
   --fs-aux: 12px;
   --fs-caption: 11px;
-  --fs-overline: 10px;
-  --fs-micro: 9px;
+  --fs-micro: 10px;
 
   --radius-window: 12px;
   --radius-panel: 8px;
@@ -121,10 +120,10 @@
   --muted: #1B1C23;
   --foreground: #E8E9EC;
   --text-main: #E8E9EC;
-  --secondary-foreground: #8E939E;
-  --text-secondary: #8E939E;
-  --muted-foreground: #636773;
-  --text-muted: #636773;
+  --secondary-foreground: #9CA3AF;
+  --text-secondary: #9CA3AF;
+  --muted-foreground: #8E949E;
+  --text-muted: #8E949E;
   --faint: #3E4148;
   --text-faint: #3E4148;
   --primary: #FFFFFF;
@@ -208,8 +207,8 @@
   --text-main: #111827;
   --secondary-foreground: #4B5563;
   --text-secondary: #4B5563;
-  --muted-foreground: #9CA3AF;
-  --text-muted: #9CA3AF;
+  --muted-foreground: #616873;
+  --text-muted: #616873;
   --faint: #D1D5DB;
   --text-faint: #D1D5DB;
   --primary: #0D7A5E;
@@ -292,8 +291,8 @@
   --text-main: #1F2328;
   --secondary-foreground: #57606A;
   --text-secondary: #57606A;
-  --muted-foreground: #8C959F;
-  --text-muted: #8C959F;
+  --muted-foreground: #5F6B7A;
+  --text-muted: #5F6B7A;
   --faint: #AFB8C1;
   --text-faint: #AFB8C1;
   --primary: #2563EB;
@@ -308,8 +307,8 @@
   --accent-subtle: rgba(37, 99, 235, 0.08);
   --primary-border: rgba(37, 99, 235, 0.28);
   --accent-border: rgba(37, 99, 235, 0.28);
-  --primary-foreground: #1D4ED8;
-  --accent-text: #1D4ED8;
+  --primary-foreground: #FFFFFF;
+  --accent-text: #FFFFFF;
   --ring: #2563EB;
   --success: #10B981;
   --jade-pulse: #10B981;
@@ -374,10 +373,10 @@
   --muted: #FFFFFF;
   --foreground: #24292F;
   --text-main: #24292F;
-  --secondary-foreground: #57606A;
-  --text-secondary: #57606A;
-  --muted-foreground: #6E7781;
-  --text-muted: #6E7781;
+  --secondary-foreground: #4A535C;
+  --text-secondary: #4A535C;
+  --muted-foreground: #5C6670;
+  --text-muted: #5C6670;
   --faint: #AFB8C1;
   --text-faint: #AFB8C1;
   --primary: #4AA8C8;
@@ -392,8 +391,8 @@
   --accent-subtle: rgba(74, 168, 200, 0.08);
   --primary-border: rgba(74, 168, 200, 0.35);
   --accent-border: rgba(74, 168, 200, 0.35);
-  --primary-foreground: #2F9BCE;
-  --accent-text: #2F9BCE;
+  --primary-foreground: #0E0F13;
+  --accent-text: #0E0F13;
   --ring: #4AA8C8;
   --success: #5FB978;
   --jade-pulse: #5FB978;
@@ -476,8 +475,8 @@
   --accent-subtle: rgba(0, 229, 255, 0.09);
   --primary-border: rgba(0, 229, 255, 0.35);
   --accent-border: rgba(0, 229, 255, 0.35);
-  --primary-foreground: #E0FCFF;
-  --accent-text: #E0FCFF;
+  --primary-foreground: #0E0F13;
+  --accent-text: #0E0F13;
   --ring: #00E5FF;
   --success: #10B981;
   --jade-pulse: #10B981;
@@ -1142,65 +1141,6 @@ blockquote {
   color: var(--text-secondary) !important;
 }
 
-/* Settings Modal Theme Swatch Cards */
-.theme-preview-card-dark {
-  background: #090A0F !important;
-  color: #F8FAFC !important;
-}
-.theme-preview-card-dark .theme-preview-title {
-  color: #F59E0B !important;
-}
-.theme-preview-card-dark .theme-preview-sub {
-  color: #94A3B8 !important;
-}
-
-.theme-preview-card-light {
-  background: #F8FAFC !important;
-  color: #0F172A !important;
-}
-.theme-preview-card-light .theme-preview-title {
-  color: #0D7A5E !important;
-}
-.theme-preview-card-light .theme-preview-sub {
-  color: #64748B !important;
-}
-
-.theme-preview-card-warm {
-  background: #F9F9F8 !important;
-  color: #1F2328 !important;
-}
-.theme-preview-card-warm .theme-preview-title {
-  color: #2563EB !important;
-}
-.theme-preview-card-warm .theme-preview-sub {
-  color: #57606A !important;
-}
-
-.theme-preview-card-ayu {
-  background: #FAF9F8 !important;
-  color: #24292F !important;
-}
-.theme-preview-card-ayu .theme-preview-title {
-  color: #4AA8C8 !important;
-}
-.theme-preview-card-ayu .theme-preview-sub {
-  color: #6E7781 !important;
-}
-
-.theme-preview-card-cyber {
-  background: #080C0A !important;
-  color: #ECFDF5 !important;
-}
-.theme-preview-card-cyber .theme-preview-title {
-  color: #00E5FF !important;
-}
-.theme-preview-card-cyber .theme-preview-sub {
-  color: #86EFAC !important;
-}
-
-.settings-theme-btn.active {
-  box-shadow: 0 0 0 2px var(--accent), 0 4px 12px var(--accent-glow) !important;
-}
 
 /* Specific component tuning for Warm Paper mode (matching reference image) */
 [data-theme="warm-paper"] #flux-left-rail,

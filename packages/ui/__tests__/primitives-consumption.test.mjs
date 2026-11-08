@@ -22,9 +22,9 @@ const PRIMITIVES_DIR = path.join(UI_SRC, 'components-react/primitives');
  * 【约束】consumed 至少一项；pending 的每项必须写清消费它的后续 PR，禁止"以后再说"。
  */
 const CONSUMPTION = {
-  Button: { state: 'consumed', consumers: ['components-react/LeftRail.tsx'] },
-  Input: { state: 'consumed', consumers: ['components-react/LeftRail.tsx'] },
-  Badge: { state: 'consumed', consumers: ['components-react/LeftRail.tsx'] },
+  Button: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx'] },
+  Input: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx'] },
+  Badge: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx'] },
   Dialog: { state: 'pending', target: 'SettingsModal / Modal 族迁移 PR（波③）' },
   Menu: { state: 'pending', target: 'ContextMenu 舱迁移 PR（波③，右键菜单三态收编）' },
   Switch: { state: 'pending', target: 'SettingsModal 布尔开关迁移 PR（波③）' },

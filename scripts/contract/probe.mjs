@@ -126,7 +126,19 @@ async function authenticate() {
   }
 
   if (!statusJson.auth_required) {
-    return { cookies: '', version: statusJson.version || 'unknown' };
+    /**
+     * 回环免密模式（Hermes 0.21+ / `hermes serve`）：
+     * 免密网关仍会对 /api/* 与 WS 升级做来源校验，必须带上首页注入的会话令牌。
+     * 令牌只存在于 `GET /` 的 HTML 里（`__HERMES_SESSION_TOKEN__`），
+     * 非 gated 模式下 WS 走 `?token=`、REST 走 `X-Hermes-Session-Token` 头。
+     */
+    const home = await request('/');
+    const match = /__HERMES_SESSION_TOKEN__\s*=\s*["']([^"']+)["']/.exec(home.text || '');
+    return {
+      cookies: '',
+      version: statusJson.version || 'unknown',
+      loopbackToken: match ? match[1] : '',
+    };
   }
   if (!USER || !PASSWORD) {
     throw new Error('网关要求认证，但未设置 HERMES_GATEWAY_USER / HERMES_GATEWAY_PASSWORD');
@@ -139,10 +151,10 @@ async function authenticate() {
   if (login.status !== 200) {
     throw new Error(`登录失败 HTTP ${login.status}: ${login.text.slice(0, 200)}`);
   }
-  return { cookies: login.cookies, version: statusJson.version || 'unknown' };
+  return { cookies: login.cookies, version: statusJson.version || 'unknown', loopbackToken: '' };
 }
 
-async function openSocket(cookies) {
+async function openSocket(cookies, loopbackToken = '') {
   const ticketRes = await request('/api/auth/ws-ticket', { method: 'POST', headers: { Cookie: cookies } });
   let ticket = '';
   try {
@@ -153,7 +165,9 @@ async function openSocket(cookies) {
 
   const wsUrl = new URL('/api/ws', BASE_URL);
   wsUrl.protocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+  // 回环免密模式用 ?token=<首页注入令牌>；gated 模式用 ?ticket=<单次票据>
   if (ticket) wsUrl.searchParams.set('ticket', ticket);
+  else if (loopbackToken) wsUrl.searchParams.set('token', loopbackToken);
 
   const ws = new WebSocket(wsUrl.toString());
   let nextId = 1;
@@ -572,6 +586,38 @@ function buildModules(ctx) {
     },
 
     {
+      module: 'extensions',
+      // 设置中心的「扩展」页：MCP 运行态与技能清单都是纯读接口，任何网关都可安全探针。
+      // model.save_key / model.disconnect 是破坏性写操作，绝不进探针（见下方 skip 说明）。
+      cases: [
+        { method: 'mcp.servers.status', params: () => ({ profile }) },
+        { method: 'skills.manage', params: () => ({ profile, action: 'list' }) },
+        {
+          method: 'skills.reload',
+          // 热重载会重新扫描磁盘技能目录，属幂等只读重建；输出里含本机绝对路径，由 sanitize 脱敏
+          params: () => ({ profile }),
+        },
+        {
+          method: 'model.save_key',
+          // 探针会用假密钥覆盖用户真实凭据，且网关无对应"还原"接口——永久禁止真实执行。
+          params: () => ({ slug: ctx.probeBot }),
+          skip: () => '写操作会覆盖用户真实 API Key 且无法还原，仅由 CDP 场景在无凭据沙箱手工验证',
+        },
+        {
+          method: 'model.disconnect',
+          params: () => ({ slug: ctx.probeBot }),
+          skip: () => '断开提供商会破坏用户已配置的凭据，禁止在真实网关上执行',
+        },
+        {
+          method: 'reload.env',
+          params: () => ({}),
+          // 热重载 .env 会立刻改变运行中的凭据状态；用假密钥探针的副作用不可控，永久跳过
+          skip: () => '环境热重载会改变运行中的凭据状态，须与 model.save_key 成对执行，禁止单独探针',
+        },
+      ],
+    },
+
+    {
       module: 'prompt',
       // prompt.* 必须在**自己的**会话上跑：sessions 模块的临时会话已被清理，
       // 而且提交后会话会变成 active，删除前必须先 close（否则 4023）。
@@ -697,10 +743,10 @@ async function sweepProbeSessions(call, profile) {
 }
 
 async function main() {
-  const { cookies, version } = await authenticate();
+  const { cookies, version, loopbackToken } = await authenticate();
   console.log(`[probe] 网关版本: ${version}${CHECK_ONLY ? '（只比对漂移，不写盘）' : ''}`);
 
-  const { ws, call } = await openSocket(cookies);
+  const { ws, call } = await openSocket(cookies, loopbackToken);
 
   // 上下文：profile、可用于建群的成员、临时目录前缀
   const ctx = {
