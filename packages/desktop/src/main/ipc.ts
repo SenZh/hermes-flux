@@ -7,7 +7,21 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { appendExternalLogRecord, getLogDir } from './logFile';
+import { resolveTitlebarMaximized, resolveWindowToggle } from './windowControl';
 import type { LogRecord } from '@hermes-flux/core';
+
+/**
+ * 读取标题栏应呈现的"还原"语义位。
+ * 约束：窗口已销毁时主进程不得再触碰原生句柄（多窗口重建期间会抛异常），
+ * 直接按"非最大化"降级，由后续新窗口的广播重新对齐。
+ */
+function readTitlebarMaximized(win: BrowserWindow): boolean {
+  if (win.isDestroyed()) return false;
+  return resolveTitlebarMaximized({
+    isFullScreen: win.isFullScreen(),
+    isMaximized: win.isMaximized(),
+  });
+}
 
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   let activeGatewayCookies = '';
@@ -46,13 +60,29 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     mainWindow.minimize();
   });
 
+  /**
+   * 设计意图 (Why)：全屏（macOS 绿点 / F11 / setFullScreen）与最大化在标题栏共用同一个
+   *   "最大化/还原"按钮。全屏态下该按钮必须是退出全屏的唯一显式出口，否则按钮完全失活。
+   * 防范的历史坑 (Pitfall)：历史实现只判断 isMaximized()，全屏窗口下两个分支都不命中
+   *   —— unmaximize() 对全屏无效、maximize() 被系统忽略，用户点按钮毫无反应。
+   * 约束与规则 (Rules)：三向决策由 windowControl.resolveWindowToggle 统一裁定（可单测）；
+   *   本函数只执行副作用。返回值必须回读窗口真值，禁止硬编码，否则图标与窗口态撕裂。
+   */
   ipcMain.handle('window:maximize', () => {
-    if (mainWindow.isMaximized()) {
+    const decision = resolveWindowToggle({
+      isFullScreen: mainWindow.isFullScreen(),
+      isMaximized: mainWindow.isMaximized(),
+    });
+    if (decision === 'exit-full-screen') {
+      mainWindow.setFullScreen(false);
+    } else if (decision === 'unmaximize') {
       mainWindow.unmaximize();
     } else {
       mainWindow.maximize();
     }
-    return mainWindow.isMaximized();
+    // 退出全屏是异步过渡，此处读到的可能是过渡中的旧值；leave-full-screen 事件会广播
+    // 过渡完成后的真值，因此这里只保证"不会永久停在与窗口态相反的一侧"。
+    return readTitlebarMaximized(mainWindow);
   });
 
   ipcMain.handle('window:unmaximize', () => {
@@ -64,7 +94,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   });
 
   ipcMain.handle('window:is-maximized', () => {
-    return mainWindow.isMaximized();
+    // 全屏与最大化共享标题栏"还原"图标语义，只报 isMaximized() 会让启动/重同步
+    // 把全屏窗口的图标打回"最大化"，与窗口实际状态不符。
+    return readTitlebarMaximized(mainWindow);
   });
 
   ipcMain.handle('window:activate', () => {

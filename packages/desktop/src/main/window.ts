@@ -6,6 +6,7 @@
 import { BrowserWindow, Menu, MenuItem, app } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
+import { resolveTitlebarMaximized } from './windowControl';
 
 export function createMainWindow(): BrowserWindow {
   const isWin = process.platform === 'win32';
@@ -72,6 +73,28 @@ export function createMainWindow(): BrowserWindow {
 
   win.on('unmaximize', () => {
     win.webContents.send('window:state-changed', { isMaximized: false });
+  });
+
+  /**
+   * 设计意图 (Why)：全屏与最大化在标题栏共用同一个"还原"图标，进入/退出全屏必须同步广播，
+   *   否则全屏后图标停在"最大化"，点击行为与图标预期相反。
+   * 防范的历史坑 (Pitfall)：历史只监听 maximize/unmaximize，全屏切换完全不广播，
+   *   渲染层无从得知窗口已进入全屏。
+   * 约束与规则 (Rules)：退出全屏必须回读 isMaximized() 真值 —— 从最大化态进全屏再退出时
+   *   窗口会恢复最大化，硬编码 false 会让图标与实际窗口态反向。
+   */
+  win.on('enter-full-screen', () => {
+    win.webContents.send('window:state-changed', {
+      isMaximized: resolveTitlebarMaximized({ isFullScreen: true, isMaximized: win.isMaximized() }),
+    });
+  });
+
+  win.on('leave-full-screen', () => {
+    // 退出全屏后 isFullScreen 已为 false，此处必须回读窗口真实的 isMaximized()，
+    // 从最大化态进全屏再退出会恢复最大化，硬编码 false 会让图标与实际窗口态反向。
+    win.webContents.send('window:state-changed', {
+      isMaximized: resolveTitlebarMaximized({ isFullScreen: false, isMaximized: win.isMaximized() }),
+    });
   });
 
   // Native desktop context menu: enable standard Copy/Cut/Paste/SelectAll across the app
