@@ -115,10 +115,10 @@
   --radius-pill:   9999px; /* 状态胶囊、徽标 */
 
   /* 核心几何单源尺寸 */
-  --geo-titlebar:        42px;   /* 顶栏固定高度 */
-  --geo-micro-rail:      52px;   /* 左侧微轨宽度 */
-  --geo-context-drawer:  212px;  /* 左侧抽屉宽度 */
-  --geo-left-rail:       264px;  /* 左双轨基线宽度 (52 + 212) */
+  --geo-titlebar:        42px;   /* 顶栏内容高；含 1px 下边框后总高 43px */
+  --geo-micro-rail:      clamp(58px, 4.2vw, 72px); /* 左侧微轨宽度（折叠态补偿 1px 右边框） */
+  --geo-context-drawer:  244px;  /* 设计参照；实际由 flex-1 吸收剩余（运行时约 202px） */
+  --geo-left-rail:       296px;  /* 设计参照；展开态真值由 --rail-w-left 决定（默认 264px） */
   --geo-resize-handle:   6px;    /* 拖拽把手基准宽度 */
   --geo-inspector-pod:   410px;  /* 右侧检查舱基准宽度 */
   --geo-input-dock:      740px;  /* 底部输入舱黄金收敛限宽 */

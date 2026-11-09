@@ -221,6 +221,17 @@
 
 ---
 
+## P-023 顶栏 42px 语义（含边框 vs 内容高）与微轨 1px 边框补偿缺失
+
+| 项目 | 内容 |
+|---|---|
+| 症状 | 窗控三键与顶栏图标相对视觉中心偏 0.5~1px；折叠态微轨 42px 站点卡左右留白不对称；移动端左轨/检查舱与顶栏之间出现 1px 缝隙 |
+| 根因 | ① `.flux-titlebar` 在 `box-sizing: border-box` 下把 `height: 42px` 当作含边框总高，1px 下边框吃掉内容区；② 微轨外层 `border-r` 同样吃掉内容区 1px，而组件只声明 `clamp(...)`；③ 依赖顶栏高度的 `fixed` 定位（移动端左轨、检查舱 Sheet）与 Capacitor 注入 CSS 各自硬编码 42px，未随语义变更同步 |
+| 识别特征 | 顶栏 `getBoundingClientRect().height === 42` 且 `border-bottom-width === 1`；折叠态 `#flux-station-rail` 内容宽 = clamp 值 − 1；`styles.css` 内存在 `top: calc(42px + …)` |
+| 守卫 | `packages/desktop/__tests__/unit/titlebar-geometry.test.mjs`（高度/min-height 同源唯一、responsive top 全量补偿、死选择器、mobile 注入同源、字符串版 Titlebar 内联同源、组件 fallback 与 :root/`LEFT_RAIL_WIDTH` 逐字一致、检查舱选择器实名且 tablet 视口定位生效）+ `packages/ui/__tests__/helpers/rail-geometry.mjs`（外层/内层宽度精确相等，单侧去掉 1px 即红） |
+| 注意事项 | `--geo-titlebar` 语义是**内容高**，外围总高恒为 `calc(var(--geo-titlebar) + 1px)`；任何新增依赖顶栏高度的定位必须使用该表达式。微轨 `+1px` 为无条件补偿，展开态由抽屉预算吸收（落在 6px 把手余量内） |
+| 已知债务 | ① `window:is-maximized` 仍用布尔压缩"最大化/全屏"两态（建议后续改判别联合 `mode: 'normal' \| 'maximized' \| 'fullscreen'`）；② 多窗口 `activate` 分支会重复 `registerIpcHandlers`，且 `readTitlebarMaximized` 的 `isDestroyed` 守卫在 `window:maximize` 路径不可达（先读 `isFullScreen()` 即抛），需改为一次性注册 + `BrowserWindow.getFocusedWindow()` |
+
 ## 守卫总览
 
 | 守卫 | 命令 | 拦住的坑 |
@@ -244,3 +255,4 @@
 | 皮肤单一真值守卫 | `npm test`（skins-sot 10 用例 + emit check） | P-018 |
 | CSS 扫描盲区兜底 | `npm test`（skins-sot 幂等/对账）+ 波③接扫描面 | P-019 |
 | Agent 切换性能/预取/窗口化守卫 | `npm test`（agent-switch-performance）+ CDP event timing | P-020、P-021、P-022 |
+| 顶栏/微轨几何单真值守卫 | `npm test`（titlebar-geometry + rail-geometry helpers） | P-023 |
