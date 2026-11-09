@@ -57,9 +57,10 @@ export function ConversationStage({
           <StateBlock title={snapshot.emptyTitle ?? t('conversation.emptyTitle')} hint={snapshot.emptyHint} />
         ) : (
           <>
-            {snapshot.hasOlderMessages ? (
-              <div className="conv-history-indicator" data-loading={snapshot.isLoadingOlder ? 'true' : 'false'}>
-                {snapshot.isLoadingOlder ? t('conversation.loadingOlder') : t('conversation.olderHint')}
+            {snapshot.isLoadingOlder ? (
+              <div className="conv-history-indicator" data-loading="true">
+                <span className="conv-history-indicator__spinner" />
+                <span>{t('conversation.loadingOlder')}</span>
               </div>
             ) : null}
             {turns.map((turn, index) => (

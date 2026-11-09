@@ -21,11 +21,14 @@ export interface ConversationPushInput {
   justStoppedStreaming: boolean;
   /** 强制推送（首次挂载、host 替换、状态切换） */
   force: boolean;
+  /** 是否正在拉取更早历史状态发生变化（避免小菊花挂死） */
+  loadingOlderChanged?: boolean;
 }
 
 export function decideConversationPush(input: ConversationPushInput): boolean {
   if (input.force) return true;
   if (input.justStoppedStreaming) return true;
+  if (input.loadingOlderChanged) return true;
   // 集合收缩：回滚截断、取消回滚、快照恢复都会让消息变少或整体替换，
   // 没有新 id 也必须推送，否则 React 继续显示已被删除的消息。
   if (input.nextIds.length !== input.prevIds.size) return true;

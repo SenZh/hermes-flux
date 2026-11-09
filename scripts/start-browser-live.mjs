@@ -22,6 +22,7 @@ const GW_BASE = (process.env.FLUX_GATEWAY_URL || process.env.HERMES_GATEWAY_URL 
 const PORT = Number(process.env.PORT) || 9120;
 
 let sessionCookie = '';
+let lastKnownBaseUrl = '';
 
 /**
  * 【设计意图 (Why)】浏览器直跑模式下，凭据由用户在连接面板输入并经 PAL 桥透传到 /__gw/auth，
@@ -61,6 +62,21 @@ async function authenticateWithCredentials(baseUrl, username, password) {
 
   // 免密网关判定：如果不需要认证，且用户没有输入密码，直接放行无需 Basic Auth
   if (statusData && statusData.auth_required === false && !password) {
+    return null;
+  }
+
+  // 复用已建立的会话 Cookie 换取 ticket
+  if (sessionCookie && !username && !password) {
+    try {
+      const ticketRes = await fetch(`${base}/api/auth/ws-ticket`, {
+        method: 'POST',
+        headers: { Accept: 'application/json', Cookie: sessionCookie, Origin: base },
+      });
+      if (ticketRes.ok) {
+        const ticketData = await ticketRes.json().catch(() => ({}));
+        if (ticketData?.ticket) return ticketData.ticket;
+      }
+    } catch {}
     return null;
   }
 
@@ -186,8 +202,10 @@ async function start() {
       let body;
       try {
         body = await readBody(req);
+        const targetBase = body?.baseUrl || lastKnownBaseUrl || GW_BASE;
+        if (body?.baseUrl) lastKnownBaseUrl = body.baseUrl;
         const result = await httpProxy(sessionCookie, {
-          baseUrl: body.baseUrl || GW_BASE,
+          baseUrl: targetBase,
           path: body.path,
           method: body.method,
           params: body.params,

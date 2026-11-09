@@ -18,6 +18,7 @@ import { ToolBlocks } from '../../components-react/conversation/ToolCapsule.js';
 
 export interface MessageViewModel {
   id: string;
+  sessionId?: string;
   rowId?: number;
   role: 'user' | 'assistant' | 'system';
   content: string;

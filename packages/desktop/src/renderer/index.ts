@@ -86,7 +86,7 @@ import { applyOptimisticCut, planSessionLoadMerge, planRollbackLeaveRestore, tak
 import { createToolPatchQueue } from './toolPatchQueue.js';
 import { decideConversationPush } from './conversationPush.js';
 import { createSettingsController, resolveGatewayPassword } from './settingsController.js';
-import { planMessageWindow, expandMessageWindowStart } from './messageWindow.js';
+import { planMessageWindow, expandMessageWindowStart, computeHasOlderMessages } from './messageWindow.js';
 import { profilesDiffer } from './profileRefresh.js';
 
 import {
@@ -157,6 +157,8 @@ import {
   type CachedAgentSummary,
   type CachedMessageRow,
   type CacheChannelRef,
+  planOlderBatchPrependMerge,
+  resolveLineageChain,
 } from '@hermes-flux/core';
 
 import { DesktopCacheStore } from './cache/DesktopCacheStore.js';
@@ -486,6 +488,8 @@ declare global {
     /** E2E / CDP 对账触发器：全量刷新并对账会话列表 */
     __fluxFetchSessions?: () => Promise<void>;
     __fluxRender?: () => void;
+    __fluxSelectSession?: (id: string, options?: { preserveFocus?: boolean; botName?: string }) => Promise<void>;
+    __fluxLoadOlderMessages?: () => Promise<void>;
     /** E2E / CDP 消息微操作栏动作派发器 */
     __fluxMessageActions?: {
       handleCopyMessage: (btn: HTMLElement) => Promise<void>;
@@ -952,6 +956,8 @@ const logScroll = createLogger('scroll');
 
 (window as any).__fluxState = state;
 (window as any).__fluxConnect = connect;
+window.__fluxSelectSession = selectSession;
+window.__fluxLoadOlderMessages = loadOlderMessages;
 window.__fluxFetchSessions = fetchSessions;
 /** CDP 验证钩子：与 __fluxState/__fluxConnect 同一调试面。verify-hermes-flux harness 已声明依赖 window.__fluxRender；
  *  禁止业务代码调用，仅测试驱动"注入快照 → 重绘 → 出图"取证链路使用。 */
@@ -1582,7 +1588,7 @@ async function enrichVisibleSessionPreviews(): Promise<void> {
   await Promise.all(
     targets.map(async (t) => {
       try {
-        const last = await client.fetchLastMessage(t.id, { profile: t.botName || currentBot });
+        const last = await client.fetchLastMessage(t.id, { profile: t.botName || 'default' });
         if (last && last.text) {
           updates.set(t.id, { text: last.text, ts: last.timestamp || t.timestamp });
           sessionPreviewCache.set(t.id, {
@@ -1929,6 +1935,7 @@ async function openGroupRoom(roomId: string): Promise<void> {
   state.activeSessionId = roomId;
   state.activeLiveSessionId = roomId;
   state.isLoadingOlder = false;
+  state.hasOlderMessages = false;
   const generation = ++activeLoadMessagesGeneration;
   const guard = { sessionId: roomId, generation };
 
@@ -2255,7 +2262,7 @@ async function warmBotForeverChats(
         const forever = await profileService.getOrCreateForeverChat(p.name, client);
         if (!forever?.sessionId) continue;
         botForeverChatCache.set(p.name, forever.sessionId);
-        const histRes = await client.fetchSessionMessages(forever.sessionId, { limit: 1, offset: 0, order: 'latest' });
+        const histRes = await client.fetchSessionMessages(forever.sessionId, { limit: 1, offset: 0, order: 'latest', profile: p.name });
         if (histRes.status === 'success' && histRes.messages.length > 0) {
           const last = histRes.messages[0];
           const parts = Array.isArray(last.parts) ? (last.parts as Array<{ type?: string; text?: string }>) : [];
@@ -2329,7 +2336,8 @@ async function switchProfile(name: string): Promise<void> {
 
 // OpenChamber Standard Message Paging: Initial Window 100 items for instant cold launch
 const INITIAL_WINDOW_PAGE_SIZE = 100;
-const OLDER_BATCH_PAGE_SIZE = 50;
+/** 向早翻页单页条数。网关 /messages 单页真实上限实测 500（超限静默截断到 500），取满把回溯轮次降到 1/5。 */
+const OLDER_BATCH_PAGE_SIZE = 500;
 /**
  * 消息列表初始挂载窗口。
  * 【设计意图 (Why)】Bot 终身主工位会累积上百条历史；进入会话时把整表一次挂载，
@@ -2347,6 +2355,9 @@ let messageWindowUserExpanded = false;
  * 同一次手势就能连续扩窗，把锚点补偿推到列表底部。
  */
 let streamScrollCooldown = false;
+let lastStreamScrollTop = 0;
+/** 上一轮"正在加载更早历史"的起始时刻，用于熔断被节流打断的陈旧加载锁 */
+let olderLoadingStartedAt = 0;
 
 /**
  * 维护消息挂载窗口。
@@ -2391,6 +2402,7 @@ function expandMessageWindow(): boolean {
 }
 const sessionMessagesCache = new Map<string, MessageViewModel[]>();
 const sessionServerOffset = new Map<string, number>();
+const sessionParentOffsetMap = new Map<string, number>();
 /** 截断成功后的会话历史权威源标记：'server-priority' 时禁用“本地更长则保留”合并守卫 */
 const sessionHistoryTrust = new Map<string, 'server-priority'>();
 /** core 交互区领域服务单例（截断/分支/目录的唯一 wire 载荷构造入口） */
@@ -2692,6 +2704,7 @@ function parseRawMessages(list: any[]): MessageViewModel[] {
         const numTs = typeof rawTs === 'number' ? (rawTs > 1e11 ? rawTs : rawTs * 1000) : Date.parse(rawTs) || Date.now();
         parsedMessages.push({
           id: String(m.row_id ?? m.id ?? `msg-${idx}`),
+          rowId: extractDurableRowId(m),
           role: 'assistant',
           content: '',
           thought: '',
@@ -2723,6 +2736,7 @@ function parseRawMessages(list: any[]): MessageViewModel[] {
     const rowIdNum = extractDurableRowId(m);
     const scopedMsg: MessageViewModel = {
       id: String(m.row_id ?? m.id ?? `msg-${idx}`),
+      sessionId: typeof m.session_id === 'string' ? m.session_id : undefined,
       rowId: rowIdNum,
       role: (rawRole === 'user' || rawRole === 'system' ? rawRole : 'assistant') as MessageViewModel['role'],
       content: rawText,
@@ -2742,78 +2756,150 @@ function parseRawMessages(list: any[]): MessageViewModel[] {
 
 async function loadOlderMessages(): Promise<void> {
   const sessionId = state.activeSessionId;
-  if (!sessionId || state.isLoadingOlder || !gatewayClient) return;
-
-  const currentOffset = sessionServerOffset.get(sessionId) || 0;
-  const guard = { sessionId, generation: activeLoadMessagesGeneration };
-  state.isLoadingOlder = true;
-  const startedAt = performance.now();
-  const stream = document.getElementById('conversation-stream');
-  const prevScrollHeight = stream ? stream.scrollHeight : 0;
-  const prevScrollTop = stream ? stream.scrollTop : 0;
-
-  try {
-    const guarded = await runGuarded(
-      guard,
-      () => ({ sessionId: state.activeSessionId, generation: activeLoadMessagesGeneration }),
-      () => undefined,
-      () => gatewayClient!.fetchSessionMessages(sessionId, {
-        limit: OLDER_BATCH_PAGE_SIZE,
-        offset: currentOffset,
-        order: 'latest',
-      }),
-      logSession,
-    );
-    if (guarded.status === 'discarded') {
+  if (!sessionId || !gatewayClient) return;
+  if (state.isLoadingOlder) {
+    // 【熔断 (Rules)】后台标签页会节流渲染帧，上一轮可能在关闭加载态前被打断。
+    // 超过 20 秒仍是 true，视为陈旧锁，强制复位后继续拉取，避免永久卡在"正在加载更早历史"。
+    if (performance.now() - olderLoadingStartedAt > 20000) {
       state.isLoadingOlder = false;
+    } else {
       return;
     }
-    const outcome = guarded.value;
+  }
 
-    if (outcome.status === 'success' && outcome.messages.length > 0) {
-      const batch = parseRawMessages(outcome.messages);
-      sessionServerOffset.set(sessionId, currentOffset + outcome.messages.length);
-      state.messages = [...batch, ...state.messages];
-      // 用户已主动向上翻阅：把本轮新加载的批次纳入挂载窗口，后续滚动再继续分页。
-      messageWindowStart = 0;
-      messageWindowUserExpanded = true;
-      sessionMessagesCache.set(sessionId, state.messages);
-      const isRoom = hostedRoomIds.has(sessionId) || state.groupRooms.some((g) => g.roomId === sessionId);
-      const olderCacheRef: CacheChannelRef = {
-        profile: isRoom ? '' : (state.profileName || 'default'),
-        channel: isRoom ? 'room' : 'session',
-        channelId: sessionId,
-      };
-      persistMessagesToCache(olderCacheRef, state.messages, 0);
-      const earliestRow = state.messages[0]?.rowId;
-      const isEarliestReached = typeof earliestRow === 'number' && earliestRow <= 1;
-      state.hasOlderMessages = !isEarliestReached && outcome.messages.length >= OLDER_BATCH_PAGE_SIZE;
-      render();
+  // 【AGENTS.md 三态隔离铁律】群聊研讨室严格走 groups.* 协议，绝对禁止打单会话 REST
+  const isRoom = hostedRoomIds.has(sessionId) || state.groupRooms.some((g) => g.roomId === sessionId) || state.activeFocus.type === 'group';
+  if (isRoom) {
+    state.isLoadingOlder = false;
+    return;
+  }
 
-      requestAnimationFrame(() => {
-        const nextStream = document.getElementById('conversation-stream');
-        if (!nextStream) {
+  // 精准解析当前会话归属的 Profile（杜绝专职 Agent 漏传 profile 报 404 根因）
+  const resolvedProfile = state.sessions.find((s) => s.id === sessionId)?.botName
+    || (state.activeFocus.type === 'bot' ? state.activeFocus.botName : state.profileName)
+    || 'default';
+
+  const guard = { sessionId, generation: activeLoadMessagesGeneration };
+  state.isLoadingOlder = true;
+  olderLoadingStartedAt = performance.now();
+  const startedAt = performance.now();
+  const anchor = captureStreamAnchor();
+
+  try {
+    // 完整血缘链条 [D, C, B, A]，环形自动熔断
+    const lineageChain = resolveLineageChain(sessionId, state.sessions);
+    let batchAppended = false;
+    // 单次调用最多推进的页数：防止"整页都是已缓存重复"时无净增死循环
+    let attempts = 0;
+    const MAX_PAGE_ATTEMPTS = 8;
+
+    for (const targetId of lineageChain) {
+      if (batchAppended || attempts >= MAX_PAGE_ATTEMPTS) break;
+
+      const cursorKey = `${sessionId}:${targetId}`;
+      if (sessionServerOffset.get(`${cursorKey}:exhausted`) === 1) continue;
+
+      while (attempts < MAX_PAGE_ATTEMPTS) {
+        attempts += 1;
+
+        const queryOffset = sessionParentOffsetMap.get(cursorKey)
+          ?? (targetId === sessionId ? (sessionServerOffset.get(sessionId) ?? 0) : 0);
+
+        const guarded = await runGuarded(
+          guard,
+          () => ({ sessionId: state.activeSessionId, generation: activeLoadMessagesGeneration }),
+          () => undefined,
+          () => gatewayClient!.fetchSessionMessages(targetId, {
+            limit: OLDER_BATCH_PAGE_SIZE,
+            offset: queryOffset,
+            order: 'latest',
+            profile: resolvedProfile,
+            // 【根因修复】必须包含被上下文压缩归档的原始消息。
+            // 默认 include_compacted=false 只返回活动表，翻到压缩摘要节点就"到底"，
+            // 用户永远看不到更早的真实历史（这正是 10/17 之前拉不出来的原因）。
+            includeCompacted: true,
+          }),
+          logSession,
+        );
+        if (guarded.status === 'discarded') {
           state.isLoadingOlder = false;
           return;
         }
-        const addedHeight = nextStream.scrollHeight - prevScrollHeight;
-        nextStream.scrollTop = prevScrollTop + addedHeight;
+        const outcome = guarded.value;
 
-        requestAnimationFrame(() => {
-          const settled = document.getElementById('conversation-stream');
-          if (settled) {
-            const settledAdded = settled.scrollHeight - prevScrollHeight;
-            const drift = settledAdded - addedHeight;
-            if (Math.abs(drift) >= 1) settled.scrollTop += drift;
-          }
-          state.isLoadingOlder = false;
+        if (outcome.status !== 'success' || outcome.messages.length === 0) {
+          // 该节点已见底，转向上一级血缘
+          sessionServerOffset.set(`${cursorKey}:exhausted`, 1);
+          break;
+        }
 
-          logScroll.debug('older batch prepended via REST pagination', {
-            batch: batch.length,
-            totalLoaded: state.messages.length,
-            ms: Math.round((performance.now() - startedAt) * 10) / 10,
-          });
+        const returned = outcome.pagination?.returned ?? outcome.messages.length;
+        sessionParentOffsetMap.set(cursorKey, queryOffset + returned);
+        if (targetId === sessionId) sessionServerOffset.set(sessionId, queryOffset + returned);
+
+        // 压缩摘要节点是纯机器交接文本；原始消息已随 include_compacted 一并返回，跳过它避免中间夹一条机器块
+        const payload = outcome.messages.filter((m) => {
+          const text = typeof m.content === 'string' ? m.content : '';
+          return !text.startsWith('[CONTEXT COMPACTION');
         });
+        const batch = parseRawMessages(payload.length > 0 ? payload : outcome.messages);
+
+        const before = state.messages.length;
+        state.messages = planOlderBatchPrependMerge(batch, state.messages);
+        const added = state.messages.length - before;
+
+        if (added <= 0) {
+          // 整页都是本地缓存已有的行：游标已前进，继续拉下一页
+          if (returned < OLDER_BATCH_PAGE_SIZE) {
+            sessionServerOffset.set(`${cursorKey}:exhausted`, 1);
+            break;
+          }
+          continue;
+        }
+
+        // 【挂载窗口预算 (Rules)】只把本轮新增的这批历史纳入挂载窗口，并保留少量上文做锚点缓冲。
+        // 曾经直接置 0 会让 4000 行历史全量挂载，每轮渲染都在重建整棵 React 树，
+        // 单轮耗时从 200ms 涨到 4s，观感等同于"翻不动"。
+        messageWindowStart = Math.max(0, added - 8);
+        messageWindowUserExpanded = true;
+        sessionMessagesCache.set(sessionId, state.messages);
+
+        // 缓存分桶纯洁性：只把当前会话自身的消息落盘，父会话历史只在内存合成
+        if (targetId === sessionId) {
+          persistMessagesToCache(
+            { profile: resolvedProfile, channel: 'session', channelId: sessionId },
+            state.messages,
+            0,
+          );
+        }
+
+        if (returned < OLDER_BATCH_PAGE_SIZE) {
+          sessionServerOffset.set(`${cursorKey}:exhausted`, 1);
+        }
+        const remainingUnexhausted = lineageChain.some(
+          (id) => sessionServerOffset.get(`${sessionId}:${id}:exhausted`) !== 1,
+        );
+        state.hasOlderMessages = returned >= OLDER_BATCH_PAGE_SIZE || remainingUnexhausted;
+        batchAppended = true;
+        break;
+      }
+    }
+
+    if (batchAppended) {
+      // 【状态收敛铁律】必须先同步关闭加载态再渲染：
+      // rAF 在窗口不可见/后台标签页会被节流甚至永不触发，曾导致 isLoadingOlder 永久为 true，
+      // 之后所有翻页请求在第一行守卫处被吞掉，界面永久卡在"正在加载更早历史"。
+      state.isLoadingOlder = false;
+      render();
+      const reapplyAnchor = (): void => applyStreamAnchor(anchor, false);
+      reapplyAnchor();
+      requestAnimationFrame(() => {
+        reapplyAnchor();
+        requestAnimationFrame(reapplyAnchor);
+      });
+      logScroll.debug('older batch prepended via element anchor', {
+        totalLoaded: state.messages.length,
+        ms: Math.round((performance.now() - startedAt) * 10) / 10,
       });
       return;
     }
@@ -2821,6 +2907,7 @@ async function loadOlderMessages(): Promise<void> {
     console.warn('[Flux] loadOlderMessages failed:', err);
   }
 
+  // 全部血缘节点耗尽或拉取不到更早消息：彻底收敛，停掉顶部加载动画
   state.hasOlderMessages = false;
   state.isLoadingOlder = false;
   render();
@@ -2910,7 +2997,7 @@ async function loadMessages(sessionId: string, targetBotName?: string): Promise<
   if (cached && cached.length > 0) {
     state.messages = [...cached];
     syncActiveSessionPreviewToRail(sessionId, state.messages, resolvedBotName);
-    state.hasOlderMessages = (sessionServerOffset.get(sessionId) || 0) >= INITIAL_WINDOW_PAGE_SIZE;
+    state.hasOlderMessages = computeHasOlderMessages(state.messages, sessionServerOffset.get(sessionId) || 0, INITIAL_WINDOW_PAGE_SIZE);
     pendingScrollToBottom = true;
     render();
     scrollStreamToBottom('cache hit');
@@ -2944,6 +3031,8 @@ async function loadMessages(sessionId: string, targetBotName?: string): Promise<
       if (opened.rows.length > 0 && stillCurrent && state.messages.length === 0) {
         state.messages = opened.rows.map(toMessageViewModel).reverse();
         sessionMessagesCache.set(sessionId, state.messages);
+        sessionServerOffset.set(sessionId, Math.max(sessionServerOffset.get(sessionId) || 0, opened.rows.length));
+        state.hasOlderMessages = computeHasOlderMessages(state.messages, opened.rows.length, INITIAL_WINDOW_PAGE_SIZE);
         pendingScrollToBottom = true;
         render();
         scrollStreamToBottom('persistent cache hit');
@@ -2970,6 +3059,8 @@ async function loadMessages(sessionId: string, targetBotName?: string): Promise<
       limit: INITIAL_WINDOW_PAGE_SIZE,
       order: 'latest',
       profile: resolvedBotName,
+      // 首屏与后续翻页必须同口径：包含被压缩归档的原始消息，否则 offset 基数错位
+      includeCompacted: true,
     });
 
     // 竞态守卫：若在网络异步等待期间用户已切到其他会话，坚决终止，绝对禁止污染当前视口与缓存！
@@ -2989,11 +3080,14 @@ async function loadMessages(sessionId: string, targetBotName?: string): Promise<
       sessionMessagesCache.set(sessionId, merged);
       persistMessagesToCache(cacheRef, merged, cacheFenceMax);
       syncActiveSessionPreviewToRail(sessionId, merged, resolvedBotName);
-      sessionServerOffset.set(sessionId, Math.max(sessionServerOffset.get(sessionId) || 0, outcome.pagination?.returned || outcome.messages.length));
+      const serverKnownCount = outcome.pagination?.returned ?? outcome.messages.length;
+      // 【分页游标权威性 (Rules)】offset 必须严格等于服务端已返回的条数，
+      // 绝不能混入本地缓存长度：缓存可能含父会话穿透消息，混入会让游标跳条或反复拉同一页。
+      sessionServerOffset.set(sessionId, serverKnownCount);
       state.messages = merged;
-      const earliestRow = merged[0]?.rowId;
-      const isEarliestReached = typeof earliestRow === 'number' && earliestRow <= 1;
-      state.hasOlderMessages = !isEarliestReached && Boolean((outcome.pagination?.returned ?? outcome.messages.length) >= INITIAL_WINDOW_PAGE_SIZE);
+      state.hasOlderMessages = merged.length > serverKnownCount
+        ? true
+        : computeHasOlderMessages(merged, serverKnownCount, INITIAL_WINDOW_PAGE_SIZE);
       state.dockNotice = '';
       pendingScrollToBottom = true;
       render();
@@ -3099,13 +3193,9 @@ async function loadMessages(sessionId: string, targetBotName?: string): Promise<
           sessionMessagesCache.set(sessionId, merged);
           persistMessagesToCache(cacheRef, merged, cacheFenceMax);
           syncActiveSessionPreviewToRail(sessionId, merged, resolvedBotName);
-          if (merged.length > INITIAL_WINDOW_PAGE_SIZE) {
-            state.messages = merged.slice(-INITIAL_WINDOW_PAGE_SIZE);
-            state.hasOlderMessages = true;
-          } else {
-            state.messages = merged;
-            state.hasOlderMessages = false;
-          }
+          state.messages = merged;
+          sessionServerOffset.set(sessionId, Math.max(sessionServerOffset.get(sessionId) || 0, merged.length));
+          state.hasOlderMessages = computeHasOlderMessages(merged, merged.length, INITIAL_WINDOW_PAGE_SIZE);
           pendingScrollToBottom = true;
           render();
           scrollStreamToBottom('ws fallback loaded');
@@ -4505,12 +4595,38 @@ function armCapsuleTimers(taskId: string): void {
   }, 600000);
 }
 
-function formatTimestamp(ts: number | string): string {
+/**
+ * 用户输入与 Agent 输出时间格式化器
+ * 【设计意图 (Why)】
+ *   统一全端消息时间显示逻辑：当天消息只显示时间（HH:mm），跨天/往日消息必须展示日期+时间（M/d HH:mm），
+ *   跨年消息显示完整年月日时间（yyyy/M/d HH:mm）。
+ *   确保用户翻阅历史时，对过去的交互时间一目了然。
+ */
+function formatTimestamp(ts: number | string, now: Date = new Date()): string {
   if (typeof ts === 'string') return ts;
+  if (!ts || !Number.isFinite(ts) || ts <= 0) return '';
   const d = new Date(ts > 1e11 ? ts : ts * 1000);
-  const h = d.getHours();
-  const m = d.getMinutes();
-  return `${h < 10 ? '0' : ''}${h}:${m < 10 ? '0' : ''}${m}`;
+  if (!Number.isFinite(d.getTime())) return '';
+
+  const h = String(d.getHours()).padStart(2, '0');
+  const m = String(d.getMinutes()).padStart(2, '0');
+  const timeStr = `${h}:${m}`;
+
+  const isSameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+
+  if (isSameDay) {
+    return timeStr;
+  }
+
+  const isSameYear = d.getFullYear() === now.getFullYear();
+  if (isSameYear) {
+    return `${d.getMonth() + 1}/${d.getDate()} ${timeStr}`;
+  }
+
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${timeStr}`;
 }
 
 function updateActivityPill(statusText?: string): void {
@@ -5617,8 +5733,8 @@ function buildConversationSnapshot(): ConversationSnapshot {
     mode: focusType === 'group' ? 'group' : focusType === 'bot' ? 'foreground' : 'scratchpad',
     connection: state.gatewayConnected ? 'connected' : state.gatewayConnecting ? 'connecting' : 'disconnected',
     isStreaming: streaming,
-    // 本地窗口之外还有已加载历史时，也必须显示“向上滚动查看更早历史”的提示。
-    hasOlderMessages: state.hasOlderMessages || messageWindowStart > 0,
+    // 本地未挂载行由滚动事件中的 expandMessageWindow() 平滑物理延展，仅当服务端真有更早历史时才展示拉取提示
+    hasOlderMessages: state.hasOlderMessages,
     isLoadingOlder: state.isLoadingOlder,
     profileName: state.profileName,
     knownFiles: resolveSessionKnownFiles(),
@@ -5674,6 +5790,8 @@ function buildConversationSnapshot(): ConversationSnapshot {
   };
 }
 
+let lastSeenLoadingOlder = false;
+
 /**
  * 同步 React 消息列表。
  * 【设计意图】流式期间不推送新快照，正文由锚点直写；只在出现新消息行或回合结束时收敛，
@@ -5687,6 +5805,7 @@ function syncReactMessageList(force = false): void {
     reactMessageListHost = null;
     renderedMessageIds = new Set();
     lastSeenStreaming = false;
+    lastSeenLoadingOlder = false;
     return;
   }
   ensureMessageWindow(state.messages.length);
@@ -5697,16 +5816,22 @@ function syncReactMessageList(force = false): void {
     reactMessageListHost = host;
     renderedMessageIds = new Set(currentIds);
     lastSeenStreaming = isStreamingActiveForCurrentSession();
+    lastSeenLoadingOlder = state.isLoadingOlder;
     return;
   }
   const streaming = isStreamingActiveForCurrentSession();
   const justStoppedStreaming = lastSeenStreaming && !streaming;
   lastSeenStreaming = streaming;
+
+  const loadingOlderChanged = lastSeenLoadingOlder !== state.isLoadingOlder;
+  lastSeenLoadingOlder = state.isLoadingOlder;
+
   const shouldPush = decideConversationPush({
     prevIds: renderedMessageIds,
     nextIds: currentIds,
     justStoppedStreaming,
     force,
+    loadingOlderChanged,
   });
   if (shouldPush && reactMessageList) {
     reactMessageList.update();
@@ -7635,20 +7760,43 @@ function bindEvents(): void {
   const streamEl = document.getElementById('conversation-stream');
   if (streamEl) {
     streamEl.onscroll = () => {
+      // 下滑方向手势：即刻释放冷却锁，彻底消除手势对抗感（对标 OpenChamber 动量释放）
+      if (streamEl.scrollTop > lastStreamScrollTop + 4) {
+        streamScrollCooldown = false;
+      }
+      lastStreamScrollTop = streamEl.scrollTop;
+
       if (streamScrollCooldown || state.isLoadingOlder) return;
 
-      if (streamEl.scrollTop < 120) {
+      if (streamEl.scrollTop < 240) {
+        // 【AGENTS.md 三态隔离】群聊研讨室严禁发起单会话翻页
+        if (state.activeFocus.type === 'group') return;
+
         // 先扩展本地挂载窗口：已加载但未挂载的更早消息无需请求服务端。
         // 【竞态守卫 (Rules)】必须先上锁再扩展：render 插入历史会同步触发新的 scroll 事件，
         // 若等 expand 返回后才上锁，同一次手势会连扩两批，把锚点补偿推到列表底部。
         streamScrollCooldown = true;
         const expanded = expandMessageWindow();
-        setTimeout(() => { streamScrollCooldown = false; }, 300);
+        // 150ms 动量吸收窗，吸收触顶回弹波谷，防惯性滚动雪崩
+        setTimeout(() => { streamScrollCooldown = false; }, 150);
         if (expanded) return;
         if (!state.hasOlderMessages) return;
         requestAnimationFrame(async () => {
           try {
-            await loadOlderMessages();
+            // 【持续触顶连拉 (Rules)】用户停在顶部不松手时连续补页，直到
+            //   ① 视口被新增内容顶离顶部 ② 历史真正耗尽 ③ 达到单手势上限。
+            //   压缩归档场景下一次手势最多跨越 40 页，否则 4000+ 行历史要滑几十次才到更早日期，
+            //   用户看到的就是"一直转圈却翻不动"。
+            let chain = 0;
+            do {
+              const before = state.messages.length;
+              await loadOlderMessages();
+              chain += 1;
+              const el = document.getElementById('conversation-stream');
+              const stillAtTop = Boolean(el && el.scrollTop < 60);
+              if (state.messages.length === before) break;
+              if (!stillAtTop || !state.hasOlderMessages) break;
+            } while (chain < 40);
           } finally {
             // Cool-down delay (150ms) to absorb momentum scroll bounce & prevent cascading re-entrancy
             setTimeout(() => {

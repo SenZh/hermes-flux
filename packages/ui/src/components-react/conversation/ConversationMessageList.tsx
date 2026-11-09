@@ -36,11 +36,25 @@ export function ConversationMessageList({ snapshot }: { snapshot: ConversationSn
   // 宿主按完整会话计算 knownFiles（窗口外工具也会影响可点击性）；旧调用方无此字段时回退到窗口内自算。
   const knownFiles = snapshot.knownFiles ?? computedKnownFiles;
 
+  // 【加载提示延迟出现 (Why)】桌面端单页往返 600~900ms，若每轮都立刻闪出转圈，
+  // 用户看到的是持续闪烁的"正在加载"，观感等同于卡死。
+  // 约定：超过 400ms 仍未完成才显示，快速页完全无感。
+  const [showLoading, setShowLoading] = React.useState(false);
+  React.useEffect(() => {
+    if (!snapshot.isLoadingOlder) {
+      setShowLoading(false);
+      return;
+    }
+    const timer = setTimeout(() => setShowLoading(true), 400);
+    return () => clearTimeout(timer);
+  }, [snapshot.isLoadingOlder]);
+
   return (
     <>
-      {snapshot.hasOlderMessages ? (
-        <div className="conv-history-indicator" data-loading={snapshot.isLoadingOlder ? 'true' : 'false'}>
-          {snapshot.isLoadingOlder ? t('conversation.loadingOlder') : t('conversation.olderHint')}
+      {showLoading ? (
+        <div className="conv-history-indicator" data-loading="true">
+          <span className="conv-history-indicator__spinner" />
+          <span>{t('conversation.loadingOlder')}</span>
         </div>
       ) : null}
       {turns.map((turn, index) => (

@@ -20,6 +20,7 @@ import { StreamRow } from './StreamRow.js';
 import { ToolSection } from './ToolCapsule.js';
 import { ConversationMessageFooter } from './MessageFooter.js';
 import type { ConversationMode, ConversationMessageVM } from './types.js';
+import { sanitizeCompactedMessage } from '@hermes-flux/core';
 
 export interface MessageRowProps {
   message: ConversationMessageVM;
@@ -40,11 +41,30 @@ export const MessageRow = React.memo(function MessageRow({
   mode,
   isStreaming,
   knownFiles,
-}: MessageRowProps): React.ReactElement {
+}: MessageRowProps): React.ReactElement | null {
   const isUser = message.role === 'user';
   const thoughtSummary = message.thought ? message.thought.replace(/\s+/g, ' ').trim().slice(0, 60) : '';
 
+  // 动态投影：剥离 [CONTEXT COMPACTION] 机器技术总结，气泡只展示人类提问
+  const compactedInfo = React.useMemo(() => {
+    return isUser ? sanitizeCompactedMessage(message.content || '') : null;
+  }, [isUser, message.content]);
+
+  const [isCompactedOpen, setIsCompactedOpen] = React.useState(false);
+
+  // 【消除空白占位 Bug 2 根因】：如果助手行既无正文、又无思考、且无工具调用，直接返回 null，严禁渲染空占位 DOM
+  const hasContent = Boolean(message.content && message.content.trim());
+  const hasThought = Boolean(message.thought && message.thought.trim());
+  const hasTools = Boolean(message.toolCalls && message.toolCalls.length > 0);
+  if (!isUser && !hasContent && !hasThought && !hasTools) {
+    return null;
+  }
+
   if (isUser) {
+    const displayContent = compactedInfo?.isHandoffCompaction
+      ? compactedInfo.displayContent
+      : message.content;
+
     return (
       <div
         className="conv-message conv-message--user"
@@ -52,7 +72,30 @@ export const MessageRow = React.memo(function MessageRow({
         data-msg-id={message.id}
         data-row-id={message.rowId ?? ''}
       >
-        <div className="conv-message__bubble">{message.content}</div>
+        {compactedInfo?.isHandoffCompaction && compactedInfo.compactedSummary ? (
+          <div>
+            <div
+              className="conv-handoff-pill"
+              role="button"
+              tabIndex={0}
+              onClick={() => setIsCompactedOpen((prev) => !prev)}
+            >
+              <span className="conv-handoff-pill__dot" />
+              <span>{t('conversation.contextCompacted')}</span>
+              <span style={{ opacity: 0.6 }}>
+                {isCompactedOpen ? t('conversation.hideCompactedContext') : t('conversation.viewCompactedContext')}
+              </span>
+            </div>
+            {isCompactedOpen ? (
+              <div className="conv-handoff-panel">{compactedInfo.compactedSummary}</div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {displayContent ? (
+          <div className="conv-message__bubble">{displayContent}</div>
+        ) : null}
+
         <ConversationMessageFooter
           message={message}
           mode={mode}

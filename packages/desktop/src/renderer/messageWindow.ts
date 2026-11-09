@@ -62,3 +62,45 @@ export function expandMessageWindowStart(start: number, step: number): number {
   const normalizedStep = Number.isFinite(step) && step > 0 ? Math.floor(step) : 0;
   return Math.max(0, normalizedStart - normalizedStep);
 }
+
+/**
+ * 判定会话是否可能包含更早的远端服务端历史。
+ *
+ * 【设计意图 (Why)】
+ *   将服务端更早历史存在性判定从散落的各个加载路径收敛为统一纯函数，
+ *   彻底消除内存秒开恢复、持久化恢复、REST 返回与 WS 降级四处逻辑重复与边界双标。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   1. 曾用 "返回数 >= pageSize" 判定见底：网关单页上限低于请求值时，超长会话被永久误判为已到头；
+ *   2. 内存秒开时仅看 offset，忽略了 earliestRow <= 1，切回会话瞬间误弹更早历史提示；
+ *   3. 将前端虚拟渲染窗口起点（messageWindowStart > 0）与远端历史混流，导致本地已缓存但首屏未挂载时误报；
+ *   4. 弱网或空消息时因 rowId 缺失误报或抛错。
+ *
+ * 【约束与规则 (Rules)】
+ *   - 唯一物理权威依据是最老一条有效 rowId 是否已达物理首行：<= 1 即见底，> 1 即仍有更早历史；
+ *   - 若本次请求服务端显式返回 0 条（已到头），返回 false；
+ *   - 严禁将本地虚拟窗口起点（messageWindowStart）混入此判定；
+ *   - 必须为纯函数，具备可证伪测试能力。
+ */
+export function computeHasOlderMessages(
+  messages: readonly { rowId?: number }[],
+  offsetOrCount?: number,
+  pageSize?: number
+): boolean {
+  if (!Array.isArray(messages) || messages.length === 0) return false;
+  // 若本次拉取明确返回 0 条，证明服务端已无更早历史
+  if (typeof offsetOrCount === 'number' && offsetOrCount === 0) return false;
+  let earliestRow: number | undefined;
+  for (const m of messages) {
+    if (typeof m.rowId === 'number' && Number.isInteger(m.rowId) && m.rowId > 0) {
+      earliestRow = m.rowId;
+      break;
+    }
+  }
+  if (typeof earliestRow === 'number') {
+    return earliestRow > 1;
+  }
+  // 兜底：无持久化数字 rowId 时，按是否有消息保守返回 true
+  return true;
+}
+
