@@ -692,7 +692,24 @@ export class HermesGatewayClient {
    */
   public async fetchSessionMessages(
     sessionId: string,
-    options: { limit?: number; offset?: number; order?: 'latest' | 'oldest'; profile?: string } = {}
+    options: {
+      limit?: number;
+      offset?: number;
+      order?: 'latest' | 'oldest';
+      profile?: string;
+      /**
+       * 是否包含被上下文压缩（compaction）归档的原始消息。
+       *
+       * 【设计意图 (Why)】
+       *   网关在上下文超限时会把旧消息标记 `compacted=1` 并在活动表插入一条压缩摘要节点。
+       *   默认 `false` 只返回活动表，用户向上翻页到摘要节点就"到底了"，
+       *   而原始历史其实完好保存在库中。翻页与首屏必须传 `true` 才能连续回溯。
+       *
+       * 【约束与规则 (Rules)】
+       *   首屏与翻页必须使用同一个取值，否则 offset 基数错位会导致跳条或重复。
+       */
+      includeCompacted?: boolean;
+    } = {}
   ): Promise<SessionMessagesOutcome> {
     if (!this.restFallbackHandler) {
       return { status: 'error', error: '未注入 REST 通信代理处理器' };
@@ -708,6 +725,7 @@ export class HermesGatewayClient {
             offset: options.offset ?? 0,
             order: options.order ?? 'latest',
             ...(options.profile ? { profile: options.profile } : {}),
+            ...(options.includeCompacted ? { include_compacted: true } : {}),
           },
         }
       );

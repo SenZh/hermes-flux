@@ -130,7 +130,7 @@ export function normalizeSessionsResult(payload: any): Array<{
         projectId: typeof s.project_id === 'string' ? s.project_id : typeof s.projectId === 'string' ? s.projectId : undefined,
         projectName: typeof s.project_name === 'string' ? s.project_name : typeof s.projectName === 'string' ? s.projectName : undefined,
         cwd: typeof s.cwd === 'string' ? s.cwd : typeof s.path === 'string' ? s.path : undefined,
-        parentSessionId: typeof s.parent_session_id === 'string' ? s.parent_session_id : undefined,
+        parentSessionId: typeof s.parent_session_id === 'string' ? s.parent_session_id : typeof s._reset_from === 'string' ? s._reset_from : typeof s.parentSessionId === 'string' ? s.parentSessionId : undefined,
         source: typeof s.source === 'string' ? s.source : undefined,
         isSubagent: Boolean(s.is_subagent || s.is_internal_child || s.source === 'subagent'),
       };

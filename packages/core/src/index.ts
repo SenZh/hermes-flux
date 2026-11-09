@@ -38,4 +38,8 @@ export * from './session/truncatePlan.js';
 export * from './motion/index.js';
 export * from './session/unifiedSessionList.js';
 export * from './cache/index.js';
+export * from './session/conversationContext.js';
+export * from './session/olderBatchMerge.js';
+export * from './session/lineage.js';
+export * from './session/compactionFilter.js';
 export type { AttachedImageResult, PromptSubmitResult, CommandDispatchResult, SlashExecResult, CompleteSlashResult, CompletePathParams, CompletionItemsResult, SessionHistoryResult, GroupsSendResult } from './rpc/contracts/gateway-contract.generated.js';

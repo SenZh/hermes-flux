@@ -9,7 +9,7 @@
 | `profiles.create` | `profile` `name` `description` `clone_from` `clone_all` `clone_channels` `no_skills` `no_alias` `soul` `model` `provider` `share_auth` `mirror_credentials` | `ok` `name` `path` `soul_written` `model_set` `mirrored` | `packages/core/src/profile/profileService.ts:128` | ✅ 0.22.5 |
 | `profiles.describe` | `profile` `name` | `name` `description` `soul` `model` `skills` `toolsets` `toolsets_pinned` `mcp_servers` | `packages/core/src/profile/profileService.ts:95` | ✅ 0.22.5 |
 | `profiles.get_asset` | `profile` `name` `asset` | `found` `mime` `size` `data` | `packages/core/src/profile/profileService.ts:193` | ✅ 0.22.5 |
-| `profiles.list` | `profile` `include_sessions` | `profiles` `bot_mode_protocol` `install_id` | `packages/core/src/profile/profileService.ts:71`<br>`packages/core/src/rpc/client.ts:893`<br>`packages/desktop/src/renderer/settingsController.ts:187` | ✅ 0.22.5 |
+| `profiles.list` | `profile` `include_sessions` | `profiles` `bot_mode_protocol` `install_id` | `packages/core/src/profile/profileService.ts:71`<br>`packages/core/src/rpc/client.ts:911`<br>`packages/desktop/src/renderer/settingsController.ts:187` | ✅ 0.22.5 |
 | `profiles.set_asset` | `profile` `name` `asset` `data` `clear` | `ok` `asset` `size` `removed` | `packages/core/src/profile/profileService.ts:214` | ✅ 0.22.5 |
 
 ## 明细
@@ -54,7 +54,7 @@
 - 真实探针：已通过（网关 0.22.5，录制于 2026-11-01T01:59:35.303Z）
 - 调用点：
   - `packages/core/src/profile/profileService.ts:71`
-  - `packages/core/src/rpc/client.ts:893`
+  - `packages/core/src/rpc/client.ts:911`
   - `packages/desktop/src/renderer/settingsController.ts:187`
 
 ### `profiles.set_asset`
