@@ -79,7 +79,9 @@
      约束与规则(Rules)：本段是 CSS 侧唯一定义面，数值必须与 tokens.ts 的 DIMENSIONS 一致。 */
   --geo-titlebar: 42px;
   --geo-micro-rail: clamp(58px, 4.2vw, 72px);
+  /* 仅被 .flux-context-drawer 的 width/min-width 声明引用，实际被 Tailwind flex-1/min-w-0 覆盖 */
   --geo-context-drawer: 244px;
+  /* 设计参照值：展开态真值由 --rail-w-left 决定（默认 264px，可拖 264~480），本值当前无消费者 */
   --geo-left-rail: 296px;
   /* 拖拽把手唯一几何真值源：左右把手共用同一宽度，杜绝两套实现各写各的。 */
   --geo-resize-handle: 6px;
@@ -546,9 +548,14 @@
 .status-location { opacity: 0.7; }
 /* 延迟读数走 caption 档 muted 前景：同字号同色系，只靠等宽数字与间距区分层级 */
 .status-latency { font-variant-numeric: tabular-nums; }
+/* 设计意图 (Why)：顶栏主体操作与窗控区必须完整锁定 42px 物理内容高度。
+   防范的历史坑 (Pitfall)：box-sizing: border-box 下直接写 height: 42px，1px 下边框会
+   吃掉内容区，窗控三键与图标相对整栏视觉中心发生 1px 垂直偏心。
+   约束与规则 (Rules)：内部元素 height: 100% 精准对应 42px；含边框的外围总高为
+   calc(var(--geo-titlebar) + 1px)，所有依赖顶栏高度的 fixed 定位必须同步该表达式。 */
 .flux-titlebar {
-  height: calc(42px + env(safe-area-inset-top, 0px));
-  min-height: 42px;
+  height: calc(var(--geo-titlebar) + 1px + env(safe-area-inset-top, 0px));
+  min-height: calc(var(--geo-titlebar) + 1px + env(safe-area-inset-top, 0px));
   padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) 0 env(safe-area-inset-left, 0px);
   box-sizing: border-box;
   display: flex;
@@ -942,7 +949,7 @@ button {
   .flux-left-rail {
     position: fixed !important;
     left: 0;
-    top: calc(42px + env(safe-area-inset-top, 0px));
+    top: calc(var(--geo-titlebar) + 1px + env(safe-area-inset-top, 0px));
     bottom: 0;
     width: min(300px, 80vw) !important;
     min-width: 0 !important;
@@ -975,12 +982,12 @@ button {
   }
 
   /* 移动端右侧检查舱收敛为全屏浮动 Sheet，贴合顶栏与安全区 */
-  #flux-inspection-pod,
-  .flux-inspection-pod {
+  #flux-inspector-pod,
+  .flux-inspector-pod {
     position: fixed !important;
     left: 0 !important;
     right: 0 !important;
-    top: calc(42px + env(safe-area-inset-top, 0px));
+    top: calc(var(--geo-titlebar) + 1px + env(safe-area-inset-top, 0px));
     bottom: 0;
     width: 100% !important;
     max-width: 100% !important;

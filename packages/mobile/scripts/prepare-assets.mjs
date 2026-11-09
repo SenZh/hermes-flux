@@ -89,7 +89,8 @@ if (fs.existsSync(cssPath)) {
   header.titlebar,
   #flux-titlebar {
     padding-top: env(safe-area-inset-top, 0px) !important;
-    height: calc(42px + env(safe-area-inset-top, 0px)) !important;
+    /* 与桌面端同源：42px 内容高 + 1px 下边框，避免 border-box 吃掉内容区 */
+    height: calc(var(--geo-titlebar, 42px) + 1px + env(safe-area-inset-top, 0px)) !important;
   }
 
   /* 3. 底部悬浮输入舱软键盘避让与底部指示条避让 */

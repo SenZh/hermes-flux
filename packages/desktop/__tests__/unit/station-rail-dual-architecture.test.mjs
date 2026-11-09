@@ -7,6 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { renderLeftRailHtml } from '../../../../packages/ui/dist/index.js';
+import { assertCollapsedRailGeometry } from '../../../../packages/ui/__tests__/helpers/rail-geometry.mjs';
 const NOW = new Date(2026, 10, 3, 15, 30).getTime();
 
 function renderRail(props = {}) {
@@ -90,7 +91,7 @@ test('Station Rail Dual Architecture & State Invariants (React)', async (t) => {
     const collapsed = renderRail({ collapsed: true, profiles: baseProfiles, profileName: 'default' });
 
     assert.ok(collapsed.includes('id="flux-station-rail"'), '折叠态下 52px 物理微轨绝对禁止被移除');
-    assert.ok(collapsed.includes('var(--geo-micro-rail, 52px)'), '折叠态总宽必须精准收敛为 52px');
+    assertCollapsedRailGeometry(collapsed);
     assert.ok(collapsed.includes('data-station-profile="arch-wang"'), '折叠态下微轨头像必须依然可点击');
     assert.equal(collapsed.includes('flux-context-drawer'), false, '折叠态抽屉必须整体不渲染');
 

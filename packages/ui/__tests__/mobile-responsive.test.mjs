@@ -18,6 +18,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { renderTitlebar } from '../dist/components/Titlebar/Titlebar.js';
 import { LeftRail } from '../dist/components-react/LeftRail.js';
 import { buildLeftRailModel } from '../dist/components-react/leftRailModel.js';
+import { assertCollapsedRailGeometry } from './helpers/rail-geometry.mjs';
 
 /** 左轨 React 岛测试渲染入口，语义与旧 renderLeftRail(props) 一一对应。 */
 function renderLeftRail(props = {}) {
@@ -175,7 +176,7 @@ test('Mobile & Cross-Platform Responsive Layout Invariants', async (t) => {
     });
 
     assert.ok(collapsedHtml.includes('rail-collapsed'), '折叠态必须带有 rail-collapsed 类');
-    assert.ok(collapsedHtml.includes('var(--geo-micro-rail, 52px)'), '折叠态总宽必须收敛到 52px 微轨');
+    assertCollapsedRailGeometry(collapsedHtml);
     assert.equal(collapsedHtml.includes('flux-context-drawer'), false, '折叠态抽屉整体不渲染，不留空占位');
   });
 });

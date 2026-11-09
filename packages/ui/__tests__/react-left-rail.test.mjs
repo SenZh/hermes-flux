@@ -12,6 +12,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { LeftRail } from '../dist/components-react/LeftRail.js';
 import { buildLeftRailModel, formatLeftRailTime, toSnippet, isAgentScopeActive } from '../dist/components-react/leftRailModel.js';
+import { assertCollapsedRailGeometry } from './helpers/rail-geometry.mjs';
 
 const NOW = new Date(2026, 10, 3, 15, 30).getTime();
 
@@ -252,7 +253,7 @@ test('左轨组件：会话行形态与关键交互契约', async (t) => {
   await t.test('折叠态只留 52px 微轨，抽屉与把手都不渲染', () => {
     const markup = render({}, { collapsed: true });
     assert.ok(markup.includes('rail-collapsed'));
-    assert.ok(markup.includes('var(--geo-micro-rail, 52px)'));
+    assertCollapsedRailGeometry(markup);
     assert.equal(markup.includes('flux-context-drawer'), false);
     assert.equal(markup.includes('rail-resize-handle'), false);
   });

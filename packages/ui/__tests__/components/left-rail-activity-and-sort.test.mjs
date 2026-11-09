@@ -11,6 +11,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { LeftRail } from '../../dist/components-react/LeftRail.js';
 import { buildLeftRailModel } from '../../dist/components-react/leftRailModel.js';
+import { assertCollapsedRailGeometry } from '../helpers/rail-geometry.mjs';
 
 const NOW = new Date(2026, 10, 3, 15, 30).getTime();
 
@@ -88,7 +89,7 @@ test('双轨架构：52px 微轨常驻且可无限滚动', async (t) => {
     const markup = renderRail({ collapsed: true });
     assert.ok(markup.includes('rail-collapsed'));
     assert.ok(markup.includes('id="flux-station-rail"'), '折叠态微轨绝不可消失');
-    assert.ok(markup.includes('var(--geo-micro-rail, 52px)'), '折叠态总宽必须收敛为 52px');
+    assertCollapsedRailGeometry(markup);
     assert.equal(markup.includes('flux-context-drawer'), false);
   });
 });
