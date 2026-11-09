@@ -6,6 +6,9 @@
   "workspaces": [
     "packages/*"
   ],
+  "engines": {
+    "node": ">=22.18.0"
+  },
   "scripts": {
     "build:core": "tsc --build packages/core/tsconfig.json",
     "build:ui": "tsc --build packages/ui/tsconfig.json",
