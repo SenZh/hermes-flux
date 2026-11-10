@@ -5,6 +5,7 @@ import { useMotionPresence } from '../motion/index.js';
 import { Badge } from './primitives/Badge.js';
 import { Button } from './primitives/Button.js';
 import { Input } from './primitives/Input.js';
+import { Skeleton } from './primitives/Skeleton.js';
 import { renderBotAvatar, renderGroupCollageAvatar } from '../utils/botAvatar.js';
 import {
   formatLeftRailTime,
@@ -92,6 +93,14 @@ function RowTime({ timestamp, fallback }: { timestamp?: number; fallback?: strin
   return <time className="shrink-0 font-code text-caption text-muted-foreground tabular-nums" dateTime={iso}>{value}</time>;
 }
 
+/**
+ * 微轨 Agent 骨架的几何类。
+ * 【约束与规则 (Rules)】必须与 AgentStationItem 的 42px 站点卡逐像素一致，
+ * 直接复用同一个字面量，数据到达时不得产生布局跳动。
+ */
+// gate-theme-allow: 与 AgentStationItem 的 42px 站点卡逐像素对齐，骨架→真实卡不得跳动
+const STATION_SKELETON_CLASS = 'size-[42px] shrink-0 rounded-panel';
+
 /** 微轨 Agent 按钮单一实现，消灭大总管与其他 Agent 的双标分裂 */
 const AgentStationItem = React.memo(function AgentStationItem({
   agent,
@@ -140,6 +149,15 @@ export interface RailEntityRowProps {
   timeFallback?: string;
   activityState?: LeftRailSession['activityState'];
   titleAttr?: string;
+  /**
+   * 骨架占位行。
+   * 【设计意图 (Why)】骨架必须与真实行共用同一个行组件，几何与字阶才有单一真值；
+   *   自建第二条同构 DOM 就是样式漂移的开始（48px vs 实测 52px）。
+   * 【约束与规则 (Rules)】loading 时禁用点击、不渲染时间与活动点，仅保留头像槽位与两条占位条。
+   */
+  loading?: boolean;
+  /** 骨架行的 data-skeleton 标记（仅 loading 时输出），供探针区分会话行与主工位卡。 */
+  skeletonSlot?: string;
   onClick?: () => void;
   onContextMenu?: (event: React.MouseEvent) => void;
   dataAttributes?: Record<string, string>;
@@ -156,31 +174,41 @@ export function RailEntityRow({
   timeFallback,
   activityState,
   titleAttr,
+  loading = false,
+  skeletonSlot = 'session',
   onClick,
   onContextMenu,
   dataAttributes,
 }: RailEntityRowProps): React.ReactElement {
   return <button
     type="button"
+    disabled={loading}
+    aria-busy={loading}
     className={`${className} group relative flex w-full items-center gap-2 rounded-card px-2 py-1.5 text-left transition-colors duration-150 ${compact ? 'min-h-8' : 'min-h-12'} ${active ? 'active bg-card-active text-foreground' : 'hover:bg-card-hover/80 text-secondary-foreground hover:text-foreground'}`}
     title={titleAttr}
-    onClick={onClick}
-    onContextMenu={onContextMenu}
-    {...dataAttributes}
+    onClick={loading ? undefined : onClick}
+    onContextMenu={loading ? undefined : onContextMenu}
+    {...(loading ? { 'data-skeleton': skeletonSlot } : dataAttributes)}
   >
     {avatar && <span aria-hidden="true" className="shrink-0 flex items-center justify-center">{avatar}</span>}
-    <span className="flex min-w-0 flex-1 flex-col gap-1.5">
-      <span className="flex min-w-0 items-center justify-between gap-2">
-        <span className="truncate text-body font-medium leading-snug text-foreground">{title}</span>
-        <span className="ml-auto flex shrink-0 items-center gap-1.5">
-          <ActivityDot state={activityState} />
-          <RowTime timestamp={timestamp} fallback={timeFallback} />
-        </span>
+    {loading
+      ? <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+        {/* h-5 / h-4 对齐真实行的 text-body(19px) 与 text-aux(16px) 行盒，骨架→真实行不跳动。 */}
+        <Skeleton className="h-5 w-2/3 rounded-pill" />
+        <Skeleton className="h-4 w-1/2 rounded-pill" />
       </span>
-      {!compact && subtitle && (
-        <span className="truncate text-aux font-normal leading-snug text-muted-foreground/90">{subtitle}</span>
-      )}
-    </span>
+      : <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <span className="flex min-w-0 items-center justify-between gap-2">
+          <span className="truncate text-body font-medium leading-snug text-foreground">{title}</span>
+          <span className="ml-auto flex shrink-0 items-center gap-1.5">
+            <ActivityDot state={activityState} />
+            <RowTime timestamp={timestamp} fallback={timeFallback} />
+          </span>
+        </span>
+        {!compact && subtitle && (
+          <span className="truncate text-aux font-normal leading-snug text-muted-foreground/90">{subtitle}</span>
+        )}
+      </span>}
   </button>;
 }
 
@@ -306,6 +334,10 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
   const { model } = props;
   const focus = model.currentFocus;
   const profile = model.selectedAgent;
+  /** Agent 域未就绪：微轨与主工位卡只出骨架，任何默认助理身份都不得出现。 */
+  const profilesLoading = model.profilesPhase === 'loading';
+  /** 会话域未就绪：会话区只出骨架行，"暂无历史会话"是数据到达后才能下的结论。 */
+  const sessionsLoading = model.sessionsPhase === 'loading';
   const drawerPresence = useMotionPresence(!props.collapsed);
   // 微轨几何：内层微轨无条件补偿 1px 右边框 —— border-box 下该边框会吃掉内容区 1px，
   // 否则 42px 站点卡在（真值 clamp(58px, 4.2vw, 72px) 减 1px）的内容区里左右留白各差 0.5px。
@@ -335,22 +367,31 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
     style={{ flex: `0 0 ${railWidth}`, width: railWidth, minWidth: railWidth, maxWidth: railWidth }}
     data-testid="react-left-rail"
   >
-    <div id="flux-station-rail" className="flex shrink-0 flex-col items-center gap-2 border-r border-border-subtle bg-sidebar py-2.5" style={{ width: microRailWidth }}>
-      <AgentStationItem
-        agent={model.defaultAgent}
-        active={isAgentActive(model.defaultAgent.name)}
-        onClick={() => props.onSelectBot('default')}
-        onContextMenu={(event) => openBotMenu(event, 'default')}
-      />
-      <div className="station-agents-scroll flex min-h-0 w-full flex-1 flex-col items-center gap-2 overflow-y-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {model.otherAgents.map((agent) => <AgentStationItem
-          key={agent.name}
-          agent={agent}
-          active={isAgentActive(agent.name)}
-          onClick={() => props.onSelectBot(agent.name)}
-          onContextMenu={(event) => openBotMenu(event, agent.name)}
-        />)}
-      </div>
+    <div id="flux-station-rail" className="flex shrink-0 flex-col items-center gap-2 border-r border-border-subtle bg-sidebar py-2.5" style={{ width: microRailWidth }} aria-busy={profilesLoading}>
+      {profilesLoading ? <>
+        {/* 与真实结构同形：首卡在滚动区外，其余在 flex-1 滚动区内，底部导航按钮才不会上移。 */}
+        <Skeleton slot="agent" className={STATION_SKELETON_CLASS} />
+        <div className="station-agents-scroll flex min-h-0 w-full flex-1 flex-col items-center gap-2 overflow-y-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <Skeleton slot="agent" className={STATION_SKELETON_CLASS} />
+          <Skeleton slot="agent" className={STATION_SKELETON_CLASS} />
+        </div>
+      </> : <>
+        <AgentStationItem
+          agent={model.defaultAgent}
+          active={isAgentActive(model.defaultAgent.name)}
+          onClick={() => props.onSelectBot('default')}
+          onContextMenu={(event) => openBotMenu(event, 'default')}
+        />
+        <div className="station-agents-scroll flex min-h-0 w-full flex-1 flex-col items-center gap-2 overflow-y-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {model.otherAgents.map((agent) => <AgentStationItem
+            key={agent.name}
+            agent={agent}
+            active={isAgentActive(agent.name)}
+            onClick={() => props.onSelectBot(agent.name)}
+            onContextMenu={(event) => openBotMenu(event, agent.name)}
+          />)}
+        </div>
+      </>}
       <div className="flex w-full flex-col items-center gap-1.5 border-t border-border-subtle pt-2">
         <Button id="rail-station-groups-btn" variant="ghost" size="icon" className="relative size-[38px] rounded-panel text-secondary-foreground hover:bg-card-hover hover:text-foreground transition-colors" title={t('rail.groups')} onClick={() => props.onSetTab('groups')}>
           <Users size={16} />
@@ -381,23 +422,31 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
             onChange={(event) => props.onSearchChange(event.currentTarget.value)}
           />
         </label>
-        <RailEntityRow
-          className="rail-pinned-bot-row rail-primary-agent-card"
-          active={isBotFocused(focus, profile.name)}
-          avatar={<Avatar profile={profile} size={36} />}
-          title={profile.displayName || profile.name}
-          subtitle={toSnippet(profile.lastMessage || profile.description) || t('rail.defaultBotSnippet')}
-          timestamp={profile.timestamp}
-          timeFallback={profile.lastTime}
-          activityState={profile.activityState}
-          titleAttr={t('rail.enterBotChat', { name: profile.displayName || profile.name })}
-          onClick={() => props.onSelectBot(profile.name)}
-          onContextMenu={(event) => openBotMenu(event, profile.name)}
-          dataAttributes={{
-            'data-primary-bot': profile.name,
-            'data-profile': profile.name,
-          }}
-        />
+        {profilesLoading
+          ? <RailEntityRow
+            active={false}
+            loading
+            skeletonSlot="agent-card"
+            avatar={<Skeleton className="size-9 shrink-0 rounded-pill" />}
+            title=""
+          />
+          : <RailEntityRow
+            className="rail-pinned-bot-row rail-primary-agent-card"
+            active={isBotFocused(focus, profile.name)}
+            avatar={<Avatar profile={profile} size={36} />}
+            title={profile.displayName || profile.name}
+            subtitle={toSnippet(profile.lastMessage || profile.description) || t('rail.defaultBotSnippet')}
+            timestamp={profile.timestamp}
+            timeFallback={profile.lastTime}
+            activityState={profile.activityState}
+            titleAttr={t('rail.enterBotChat', { name: profile.displayName || profile.name })}
+            onClick={() => props.onSelectBot(profile.name)}
+            onContextMenu={(event) => openBotMenu(event, profile.name)}
+            dataAttributes={{
+              'data-primary-bot': profile.name,
+              'data-profile': profile.name,
+            }}
+          />}
       </div>
 
       {model.showChatDeck && <div className="session-scroll-area min-h-0 flex-1 overflow-y-auto px-1.5 pb-3 mr-[var(--geo-resize-handle)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" id="session-list-container">
@@ -443,18 +492,20 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
             </Button>
           </div>
           <div id="rail-sessions-nested-list" className="flex flex-col gap-2" style={{ display: model.isSessionsOpen ? 'flex' : 'none' }}>
-            {model.activeSessions.length > 0
-              ? model.activeSessions.map((session) => <SessionRow
-                key={session.id}
-                session={session}
-                active={isSessionFocused(focus, session.id)}
-                onSelect={() => props.onSelectSession(session.id, session.botName)}
-                onMenu={(x, y) => props.onOpenSessionMenu(session.id, session.title, x, y)}
-              />)
-              : <div className="flex flex-col items-center gap-1 px-2 py-5 text-center">
-                <span className="text-aux text-muted-foreground">{model.error ? t('rail.errorTitle') : t('rail.emptyTitle')}</span>
-                <span className="text-caption text-faint">{model.error ? t('rail.errorSub') : t('rail.emptySub')}</span>
-              </div>}
+            {sessionsLoading
+              ? <>{[0, 1, 2, 3].map((slot) => <RailEntityRow key={`session-skeleton-${slot}`} className="session-item" active={false} loading title="" />)}</>
+              : model.activeSessions.length > 0
+                ? model.activeSessions.map((session) => <SessionRow
+                  key={session.id}
+                  session={session}
+                  active={isSessionFocused(focus, session.id)}
+                  onSelect={() => props.onSelectSession(session.id, session.botName)}
+                  onMenu={(x, y) => props.onOpenSessionMenu(session.id, session.title, x, y)}
+                />)
+                : <div className="flex flex-col items-center gap-1 px-2 py-5 text-center">
+                  <span className="text-aux text-muted-foreground">{model.error ? t('rail.errorTitle') : t('rail.emptyTitle')}</span>
+                  <span className="text-caption text-faint">{model.error ? t('rail.errorSub') : t('rail.emptySub')}</span>
+                </div>}
           </div>
         </section>
 

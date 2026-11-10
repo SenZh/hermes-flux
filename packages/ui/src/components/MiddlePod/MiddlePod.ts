@@ -16,6 +16,7 @@ import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { MessageDisplayKind, MessageDisplayMetadata } from '@hermes-flux/core';
 import { ToolBlocks } from '../../components-react/conversation/ToolCapsule.js';
+import type { DataPhase } from '../../components-react/loadPhase.js';
 
 export interface MessageViewModel {
   id: string;
@@ -74,6 +75,8 @@ export interface MiddlePodProps {
   password?: string;
   profileName?: string;
   messages: MessageViewModel[];
+  /** 当前会话历史的到达相位；loading 时画布交还 React 宿主渲染骨架，不输出欢迎空态。 */
+  messagesPhase?: DataPhase;
   testStatus?: { ok?: boolean; message?: string; latency?: number };
   dockHtml?: string;
   hasOlderMessages?: boolean;
@@ -138,6 +141,18 @@ export function renderContextGauge(usage?: ContextGaugeUsage): string {
  *   2. 禁止在此函数内新增消息行渲染逻辑，否则又会分裂出第二套结构。
  */
 export function renderConversationCanvas(props: MiddlePodProps): string {
+  // 【骨架优先 (Rules)】历史尚未到达（含连接中）时只输出 React 宿主：
+  //   骨架由 ConversationSkeleton 单一实现渲染，模板层不得再拼一套骨架 HTML。
+  //   旧调用方未提供相位时按 ready 处理，行为与改造前一致。
+  if (props.messagesPhase === 'loading' && props.messages.length === 0) {
+    return `
+      <div class="content-fluid-canvas conv-canvas" data-conv-layer="canvas">
+        ${renderContextGauge(props.contextUsage)}
+        <div id="react-message-list-host" style="display:contents"></div>
+      </div>
+    `;
+  }
+
   if (props.gatewayConnecting) {
     return `
       <div class="content-fluid-canvas conv-canvas" data-conv-layer="canvas">

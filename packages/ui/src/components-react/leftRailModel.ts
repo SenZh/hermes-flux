@@ -10,6 +10,7 @@
  */
 
 import { t } from '../i18n/index.js';
+import { resolveDataPhase, type DataPhase } from './loadPhase.js';
 import type {
   ActivityState,
   LeftRailActiveFocus,
@@ -22,6 +23,7 @@ import type {
 
 export type {
   ActivityState,
+  DataPhase,
   LeftRailActiveFocus,
   LeftRailGroupRoom,
   LeftRailProfile,
@@ -42,6 +44,10 @@ export interface LeftRailModelInput {
   searchQuery: string;
   isSessionsGroupExpanded?: boolean;
   isGroupsGroupExpanded?: boolean;
+  /** Agent 域首次到达相位；缺省 ready。 */
+  profilesPhase?: DataPhase;
+  /** 会话域首次到达相位；缺省 ready。 */
+  sessionsPhase?: DataPhase;
   error?: string;
 }export interface LeftRailModel {
   currentFocus: LeftRailActiveFocus;
@@ -57,6 +63,10 @@ export interface LeftRailModelInput {
   isGroupsOpen: boolean;
   hasRunningGroup: boolean;
   hasUnreadGroup: boolean;
+  /** Agent 域首次到达相位：loading 时微轨与主工位卡只出骨架，不伪造默认助理。 */
+  profilesPhase: DataPhase;
+  /** 会话域首次到达相位：loading 时会话区只出骨架行，不说"暂无历史会话"。 */
+  sessionsPhase: DataPhase;
   /** 当前抽屉视图是否呈现项目卡片甲板 */
   showProjectsDeck: boolean;
   /** 当前抽屉视图是否呈现会话/群聊列表 */
@@ -222,6 +232,8 @@ export function buildLeftRailModel(input: LeftRailModelInput): LeftRailModel {
     isGroupsOpen: input.isGroupsGroupExpanded !== false,
     hasRunningGroup: visibleGroups.some((g) => g.activityState === 'running'),
     hasUnreadGroup: visibleGroups.some((g) => g.activityState === 'unread'),
+    profilesPhase: resolveDataPhase(input.profilesPhase),
+    sessionsPhase: resolveDataPhase(input.sessionsPhase),
     showProjectsDeck,
     showChatDeck: !showProjectsDeck,
     error,

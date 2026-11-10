@@ -2,6 +2,7 @@ export * from './types.js';
 export { ConversationStage } from './ConversationStage.js';
 export { ConversationStream } from './ConversationStream.js';
 export { ConversationMessageList } from './ConversationMessageList.js';
+export { ConversationSkeleton } from './ConversationSkeleton.js';
 export { MessageRow } from './MessageRow.js';
 export { ConversationMessageFooter } from './MessageFooter.js';
 export { MarkdownBlock } from './MarkdownBlock.js';

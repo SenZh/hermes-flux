@@ -11,6 +11,7 @@
  */
 
 import type { MessageDisplayKind, MessageDisplayMetadata } from '@hermes-flux/core';
+import type { DataPhase } from '../loadPhase.js';
 
 export type ConversationMode = 'scratchpad' | 'foreground' | 'group';
 export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected';
@@ -80,6 +81,15 @@ export interface ConversationSnapshot {
   /** 当前语言标识；纳入行组件比较，切换语言后已挂载消息也要重新渲染。 */
   locale?: string;
   isStreaming: boolean;
+  /**
+   * 当前会话历史的到达相位。
+   *
+   * 【设计意图 (Why)】宿主在清空视口到历史落地之间必须声明 loading，视图才能用骨架占位；
+   *   否则这段空窗会被渲染成"开始新的对话"的空态，等于向用户断言会话是空的。
+   *
+   * 【约束与规则 (Rules)】缺省 ready：旧调用方行为不变；只有本帧没有任何消息时才出骨架。
+   */
+  messagesPhase?: DataPhase;
   hasOlderMessages?: boolean;
   isLoadingOlder?: boolean;
   profileName?: string;

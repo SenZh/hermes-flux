@@ -13,6 +13,7 @@
 import * as React from 'react';
 import { t } from '../../i18n/index.js';
 import type { ConversationActions, ConversationSnapshot } from './types.js';
+import { ConversationSkeleton } from './ConversationSkeleton.js';
 import { ConversationStream } from './ConversationStream.js';
 import { TurnGroup, groupTurns } from './TurnGroup.js';
 import { selectVisibleMessages } from './visibility.js';
@@ -47,15 +48,19 @@ export function ConversationStage({
   return (
     <main className="flux-middle-pod conversation-pod" data-conv-layer="stage" data-conv-mode={snapshot.mode}>
       <ConversationStream snapshot={snapshot}>
-        {snapshot.connection === 'connecting' ? (
-          <StateBlock title={t('conversation.connecting')} />
-        ) : snapshot.connection === 'disconnected' ? (
+        {snapshot.connection === 'disconnected' ? (
           (onboarding ?? (
             <StateBlock
               title={t('conversation.disconnected')}
               hint={t('conversation.disconnectedHint')}
             />
           ))
+        ) : snapshot.messagesPhase === 'loading' && turns.length === 0 ? (
+          // 连接中与历史拉取中都属于「内容尚未到达」：只给骨架，不给任何默认文案。
+          // 已有消息（含流式中）时绝不覆盖，骨架只在真空窗里出现。
+          <ConversationSkeleton />
+        ) : snapshot.connection === 'connecting' ? (
+          <StateBlock title={t('conversation.connecting')} />
         ) : turns.length === 0 ? (
           <StateBlock title={snapshot.emptyTitle ?? t('conversation.emptyTitle')} hint={snapshot.emptyHint} />
         ) : (
