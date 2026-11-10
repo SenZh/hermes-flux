@@ -142,7 +142,7 @@ export function renderConversationCanvas(props: MiddlePodProps): string {
     return `
       <div class="content-fluid-canvas conv-canvas" data-conv-layer="canvas">
         ${renderContextGauge(props.contextUsage)}
-        <div style="max-width: 480px; margin: 120px auto 0; text-align: center; color: var(--text-muted); font-size: var(--text-meta); display: flex; flex-direction: column; align-items: center; gap: 10px;">
+        <div style="max-width: 480px; margin: 120px auto 0; text-align: center; color: var(--text-muted); font-size: var(--chat-text-meta); display: flex; flex-direction: column; align-items: center; gap: 10px;">
           <span style="font-size: 20px; animation: pulse 1.5s infinite;">⚡</span>
           <span>${t('conversation.connecting')}</span>
         </div>

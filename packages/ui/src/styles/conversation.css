@@ -36,19 +36,21 @@
   --conv-font-sans: var(--font-sans);
   --conv-font-mono: var(--font-mono);
 
-  /* 阅读尺度（对标 OpenChamber: --text-markdown: 0.9375rem(15px), line-height: 1.625(26px)）
-     【设计意图 (Why)】所有可读文字都必须挂在 --text-* 语义 Token 上，
+  /* 阅读尺度（对标 OpenChamber: 正文 15px / 行高 26px）
+     【设计意图 (Why)】所有可读文字都必须挂在 --chat-text-* 语义 Token 上，
        否则用户在设置里调整字号时，只有正文变、执行轨迹不变。
-     【约束与规则 (Rules)】本区块内禁止再引用 --fs-* 固定字阶。 */
-  --conv-text-size: var(--text-markdown);
+     【约束与规则 (Rules)】本区块内禁止再引用 --fs-* 固定字阶；
+       变量名必须带 chat- 前缀——--text-* 是 Tailwind 的字号命名空间，
+       两者同名会让设置里调字号时把组件字阶一起改掉（历史缺陷，见 fontPreferences.ts 注释）。 */
+  --conv-text-size: var(--chat-text-markdown);
   --conv-text-lh: 26px;
   --conv-para-margin: 14px;
-  --conv-code-size: var(--text-code);
+  --conv-code-size: var(--chat-text-code);
   --conv-code-lh: 20px;
   /* 执行轨迹行标签（思考 / Shell Command 等）与元数据、辅助文字 */
-  --conv-label-size: var(--text-ui-label);
-  --conv-meta-size: var(--text-meta);
-  --conv-micro-size: var(--text-micro);
+  --conv-label-size: var(--chat-text-ui-label);
+  --conv-meta-size: var(--chat-text-meta);
+  --conv-micro-size: var(--chat-text-micro);
 
   /* OpenChamber 风格的表面衬底色 */
   --conv-code-pill-bg: color-mix(in oklab, var(--foreground) 7%, transparent);
@@ -1296,7 +1298,7 @@ details[open] > summary > .tool-row__expand {
      1. 输入舱只用 --foreground / --primary / --muted-foreground 语义色，禁止硬编码；
      2. 控件默认零背景零边框，hover 只降不透明度，禁止出现整块底色；
      3. 圆角与对话区代码块同源（--radius-window），阴影严格为 none；
-     4. 字号挂 --text-markdown / --text-meta，跟随设置里的字号档位同步缩放。
+     4. 字号挂 --chat-text-markdown / --chat-text-meta，跟随设置里的字号档位同步缩放。
    ========================================================================== */
 
 .input-card-box.composer-dock {
@@ -1344,7 +1346,7 @@ details[open] > summary > .tool-row__expand {
   background: transparent;
   color: var(--foreground);
   font-family: var(--font-sans);
-  font-size: var(--text-markdown);
+  font-size: var(--chat-text-markdown);
   line-height: 24px;
   box-sizing: border-box;
   overflow-y: auto;
@@ -1369,7 +1371,7 @@ details[open] > summary > .tool-row__expand {
   background: transparent;
   color: var(--muted-foreground);
   font-family: var(--font-sans);
-  font-size: var(--text-meta);
+  font-size: var(--chat-text-meta);
   cursor: pointer;
   opacity: 0.7;
   transition: opacity 0.12s ease;
@@ -1419,7 +1421,7 @@ details[open] > summary > .tool-row__expand {
   background: transparent;
   color: var(--foreground);
   font-family: var(--font-sans);
-  font-size: var(--text-meta);
+  font-size: var(--chat-text-meta);
   font-weight: 500;
   line-height: 1;
   cursor: pointer;
@@ -1843,7 +1845,7 @@ details[open] > summary > .tool-row__expand {
   flex: none;
   min-width: 2.25rem;
   font-family: var(--conv-font-mono);
-  font-size: var(--text-micro);
+  font-size: var(--chat-text-micro);
   color: var(--muted-foreground);
   text-align: right;
   font-variant-numeric: tabular-nums;
