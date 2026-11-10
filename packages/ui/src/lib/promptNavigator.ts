@@ -209,22 +209,28 @@ export function planTickWindow(
  * 计算一根横杠的视觉宽度。
  *
  * 【设计意图 (Why)】
- *   单纯等宽会让轨道变成一根没有焦点的刻度尺；用距离衰减把当前轮次做成视觉焦点，
- *   读者一眼就能看出"我读到的这一轮在哪里"。
+ *   单纯等宽会让轨道变成一根没有焦点的刻度尺；用邻近放大把鼠标所在轮次做成视觉焦点。
+ *   没有悬停时全部保持基准宽，读者一眼就能看到完整轨道，而不是半截消失的刻度。
  *
  * 【防范的历史坑 (Pitfall)】
- *   曾把衰减系数乘在已含悬停放大的宽度上，悬停时相邻横杠反而比当前项更宽，
- *   出现"高亮在左、视觉焦点在右"的错觉。
+ *   曾把「邻近放大增量」当成「总宽度衰减」：`width = base * factor`，距离 4 直接归零。
+ *   结果 30 根 tick 里只有焦点一侧的十几根可见，另一侧全是 0 宽，用户以为轨道没渲染。
  *
  * 【约束与规则 (Rules)】
- *   1. 基准 10px，当前项 14px，悬停 20px（悬停优先于当前项）；
- *   2. 距离衰减 `[1, 0.6, 0.35, 0.15]`，距离 >= 4 归零；
- *   3. 距离非有限或为负按 0 处理，结果保留两位小数以稳定内联样式字符串。
+ *   1. 基准 10px，当前项 14px，悬停中心 20px；
+ *   2. 只放大，不缩小：`width = base + (20 - base) * factor`；
+ *   3. 距离衰减 `[1, 0.6, 0.35, 0.15]`，距离 4 及以上增量归零但保留基准宽；
+ *   4. `hasHighlight` 为假时不做邻近放大，所有 tick 保持基准宽。
  */
-export function tickWidth(distance: number, isActive: boolean, isHighlighted: boolean): number {
-  const base = isHighlighted ? 20 : isActive ? 14 : 10;
+export function tickWidth(
+  distance: number,
+  isActive: boolean,
+  isHighlighted: boolean,
+  hasHighlight = false
+): number {
+  const base = isActive ? 14 : 10;
+  if (!hasHighlight) return base;
   const step = isFiniteNumber(distance) && distance > 0 ? Math.floor(distance) : 0;
-  if (step >= TICK_WIDTH_DECAY.length) return 0;
-  const factor = TICK_WIDTH_DECAY[step];
-  return Math.round(base * factor * 100) / 100;
+  const factor = step >= TICK_WIDTH_DECAY.length ? 0 : TICK_WIDTH_DECAY[step];
+  return Math.round((base + (20 - base) * factor) * 100) / 100;
 }

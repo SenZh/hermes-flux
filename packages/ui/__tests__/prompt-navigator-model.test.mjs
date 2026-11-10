@@ -155,23 +155,24 @@ test('TC-012 当前项在末条，hasMoreBelow=false', () => {
   assert.equal(plan.hasMoreBelow, false);
 });
 
-test('TC-013 宽度衰减在距离 0 到 4 的取值', () => {
+test('TC-013 无悬停时全部保持基准宽，不衰减', () => {
   assert.equal(tickWidth(0, false, false), 10);
-  assert.equal(tickWidth(1, false, false), 6);
-  assert.equal(tickWidth(2, false, false), 3.5);
-  assert.equal(tickWidth(3, false, false), 1.5);
-  assert.equal(tickWidth(4, false, false), 0);
-  assert.equal(tickWidth(9, false, false), 0);
-  // 负距离按 0 处理，不得变成负宽度
+  assert.equal(tickWidth(1, false, false), 10);
+  assert.equal(tickWidth(29, false, false), 10);
+  assert.equal(tickWidth(0, true, false), 14);
+  // 负距离与非有限距离都不得变成负宽度
   assert.equal(tickWidth(-3, false, false), 10);
+  assert.equal(tickWidth(Number.NaN, false, false), 10);
 });
 
-test('TC-014 当前 14、悬停 20、普通 10', () => {
-  assert.equal(tickWidth(0, true, false), 14);
-  assert.equal(tickWidth(0, false, true), 20);
-  assert.equal(tickWidth(0, true, true), 20, '悬停优先于当前项');
-  assert.equal(tickWidth(0, false, false), 10);
-  assert.equal(tickWidth(1, true, false), 8.4);
+test('TC-014 悬停时中心 20，邻近按增量放大，距离 4 回到基准宽', () => {
+  assert.equal(tickWidth(0, false, true, true), 20);
+  assert.equal(tickWidth(0, true, true, true), 20, '当前项悬停同样 20');
+  assert.equal(tickWidth(1, false, false, true), 16);
+  assert.equal(tickWidth(2, false, false, true), 13.5);
+  assert.equal(tickWidth(3, false, false, true), 11.5);
+  assert.equal(tickWidth(4, false, false, true), 10, '距离 4 只保留基准宽，绝不归零');
+  assert.equal(tickWidth(1, true, false, true), 17.6);
 });
 
 test('TC-015 预览含尖括号与引号时按纯文本输出', () => {
