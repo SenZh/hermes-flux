@@ -175,6 +175,8 @@ import {
   type CachedMessageRow,
   type CacheChannelRef,
   planOlderBatchPrependMerge,
+  planOlderPagination,
+  countLocalCoveredRows,
   resolveLineageChain,
   isKnownDisplayKind,
   type MessageDisplayKind,
@@ -323,7 +325,12 @@ function toCachedMessage(view: MessageViewModel, ref: CacheChannelRef): CachedMe
   };
 }
 
-/** 把一次 REST 窗口写入持久化缓存（异步，失败只降级为纯内存）。 */
+/**
+ * 把一次 REST 窗口写入持久化缓存（异步，失败只降级为纯内存）。
+ *
+ * 【缓存分桶纯洁性 (Rules)】只落盘明确属于本会话的行。父会话血缘行一旦写进本会话分桶，
+ *   缓存恢复时丢失 sessionId，会被当成本会话覆盖量，把向早翻页的游标抬过服务端末尾。
+ */
 function persistMessagesToCache(
   ref: CacheChannelRef,
   messages: MessageViewModel[],
@@ -331,6 +338,7 @@ function persistMessagesToCache(
 ): void {
   const rows: CachedMessageRow[] = [];
   for (const message of messages) {
+    if (message.sessionId && message.sessionId !== ref.channelId) continue;
     const row = toCachedMessage(message, ref);
     if (row) rows.push(row);
   }
@@ -3159,6 +3167,23 @@ function releasePromptJump(seq: number): void {
 const sessionMessagesCache = new Map<string, MessageViewModel[]>();
 const sessionServerOffset = new Map<string, number>();
 const sessionParentOffsetMap = new Map<string, number>();
+/**
+ * 本地覆盖下界回退标记（每个 cursorKey 一次）。
+ *
+ * 【设计意图 (Why)】旧版本缓存可能混入父会话行，使「本地已覆盖行数」高估；
+ *   若高估的游标越过服务端末尾，网关会返回 0 条并被误判为"已到最早"。
+ *   首次撞空时退回保守游标重拉一次，宁可重叠也不丢历史。
+ */
+const sessionOvershootRetry = new Set<string>();
+
+/** 会话游标失效时一并清理"高估回退"标记，避免下次打开会话永久失去本地下界。 */
+function forgetOlderCursorState(sessionId: string): void {
+  sessionServerOffset.delete(sessionId);
+  const prefix = `${sessionId}:`;
+  for (const key of [...sessionOvershootRetry]) {
+    if (key.startsWith(prefix)) sessionOvershootRetry.delete(key);
+  }
+}
 /** 截断成功后的会话历史权威源标记：'server-priority' 时禁用“本地更长则保留”合并守卫 */
 const sessionHistoryTrust = new Map<string, 'server-priority'>();
 /** core 交互区领域服务单例（截断/分支/目录的唯一 wire 载荷构造入口） */
@@ -3347,6 +3372,24 @@ async function loadOlderMessages(): Promise<void> {
   olderLoadingStartedAt = performance.now();
   const startedAt = performance.now();
   const anchor = captureStreamAnchor();
+  /** 任一页网络/协议失败：本轮不推进耗尽结论，保留"还有更早历史"的入口。 */
+  let fetchFailed = false;
+
+  /**
+   * 当前会话在本地列表中的最早持久行。
+   *
+   * 【设计意图 (Why)】批次命中这一行时，它的批内下标就是本地真实覆盖边界，
+   *   比「按 returned 累加」精确，能立刻收敛游标。
+   * 【约束与规则 (Rules)】父会话血缘行与无持久 rowId 的临时消息都不参与判定。
+   */
+  const sessionEarliestRowId = (): number | null => {
+    for (const m of state.messages) {
+      if (typeof m.rowId !== 'number' || m.rowId <= 0) continue;
+      if (m.sessionId && m.sessionId !== sessionId) continue;
+      return m.rowId;
+    }
+    return null;
+  };
 
   try {
     // 完整血缘链条 [D, C, B, A]，环形自动熔断
@@ -3354,7 +3397,9 @@ async function loadOlderMessages(): Promise<void> {
     let batchAppended = false;
 
     // 0. 本地持久化缓存优先（Cache-First）：若本地 IndexedDB 存有比当前更早的行，0ms 极速呈现，避免网络往返
-    const oldestRowId = state.messages.find((m) => typeof m.rowId === 'number' && m.rowId > 0)?.rowId;
+    // 【分桶口径 (Rules)】必须用本会话自己的最早行做上界；头部若是父会话血缘行，
+    //   用它的 rowId 会让读取区间落到本会话根本没缓存过的区段。
+    const oldestRowId = sessionEarliestRowId();
     if (typeof oldestRowId === 'number' && oldestRowId > 1) {
       try {
         const cacheRef: CacheChannelRef = { profile: resolvedProfile, channel: 'session', channelId: sessionId };
@@ -3362,7 +3407,7 @@ async function loadOlderMessages(): Promise<void> {
         if (localOlderRows.length > 0) {
           const cachedBatch = localOlderRows.map(toMessageViewModel).reverse();
           const before = state.messages.length;
-          state.messages = planOlderBatchPrependMerge(cachedBatch, state.messages);
+          state.messages = planOlderBatchPrependMerge(cachedBatch, state.messages, { timelineSessionId: sessionId, fallbackSessionId: sessionId });
           const added = state.messages.length - before;
           if (added > 0) {
             // 新批次插在列表头部，窗口对齐到本批末尾附近，末端由容量推导保持区间有界
@@ -3391,8 +3436,24 @@ async function loadOlderMessages(): Promise<void> {
       while (attempts < MAX_PAGE_ATTEMPTS) {
         attempts += 1;
 
-        const queryOffset = sessionParentOffsetMap.get(cursorKey)
+        const storedOffset = sessionParentOffsetMap.get(cursorKey)
           ?? (targetId === sessionId ? (sessionServerOffset.get(sessionId) ?? 0) : 0);
+        /**
+         * 【游标对齐 (Rules)】请求起点必须抬到本地已覆盖行数。
+         * 首屏 REST 只回 100 行却合并保留了本地更长的历史时，游标会停在 100；
+         * 从 100 起每轮再加 500，很快就越过本地真实覆盖边界，中途整段历史再也拉不到。
+         */
+        const earliestLocalRowId = targetId === sessionId ? sessionEarliestRowId() : null;
+        const floorSuppressed = sessionOvershootRetry.has(cursorKey);
+        const { queryOffset } = planOlderPagination({
+          storedOffset,
+          localCoveredRows: targetId === sessionId && !floorSuppressed
+            ? countLocalCoveredRows(state.messages, sessionId)
+            : 0,
+          returned: 0,
+          batchRowIds: [],
+          earliestLocalRowId,
+        });
 
         const guarded = await runGuarded(
           guard,
@@ -3416,15 +3477,45 @@ async function loadOlderMessages(): Promise<void> {
         }
         const outcome = guarded.value;
 
-        if (outcome.status !== 'success' || outcome.messages.length === 0) {
+        if (outcome.status !== 'success') {
+          // 【失败不等于到底 (Rules)】网络/协议失败只退出本轮，绝不把失败当成"已到最早"，
+          // 否则一次抖动就会永久黑掉全部更早历史（Failure Is Not Empty）。
+          fetchFailed = true;
+          break;
+        }
+        if (outcome.messages.length === 0) {
+          /**
+           * 【高估兜底 (Rules)】若本次起点是被本地覆盖下界抬起来的，且一页都拿不到，
+           * 说明下界可能高估（旧缓存混入过父会话行）。先退回保守游标重拉一次，
+           * 宁可重叠也不把服务端仍有的一整段历史判成"已到最早"。
+           */
+          if (targetId === sessionId && !floorSuppressed && queryOffset > storedOffset) {
+            sessionOvershootRetry.add(cursorKey);
+            sessionServerOffset.set(sessionId, storedOffset);
+            continue;
+          }
           // 该节点已见底，转向上一级血缘
           sessionServerOffset.set(`${cursorKey}:exhausted`, 1);
           break;
         }
 
         const returned = outcome.pagination?.returned ?? outcome.messages.length;
-        sessionParentOffsetMap.set(cursorKey, queryOffset + returned);
-        if (targetId === sessionId) sessionServerOffset.set(sessionId, queryOffset + returned);
+        /**
+         * 【保守收敛 (Rules)】批次若命中本地最早行，只推进到该行的批次位置，
+         *   多拉一轮重叠也不跳过省下的行；推进上界严格不超过 `queryOffset + returned`。
+         */
+        const batchRowIds = outcome.messages
+          .map((m) => extractDurableRowId(m))
+          .filter((id): id is number => typeof id === 'number');
+        const cursorPlan = planOlderPagination({
+          storedOffset: queryOffset,
+          localCoveredRows: 0,
+          returned,
+          batchRowIds,
+          earliestLocalRowId: targetId === sessionId ? earliestLocalRowId : null,
+        });
+        sessionParentOffsetMap.set(cursorKey, cursorPlan.nextOffset);
+        if (targetId === sessionId) sessionServerOffset.set(sessionId, cursorPlan.nextOffset);
 
         // 压缩摘要节点是纯机器交接文本，原始消息已随 include_compacted 一并返回。
         // 【行序守恒 (Rules)】这里绝不能删 hidden 行：本地数组必须与服务端数组逐行对应，
@@ -3438,7 +3529,7 @@ async function loadOlderMessages(): Promise<void> {
         const batch = parseRawMessages(payload);
 
         const before = state.messages.length;
-        state.messages = planOlderBatchPrependMerge(batch, state.messages);
+        state.messages = planOlderBatchPrependMerge(batch, state.messages, { timelineSessionId: targetId, fallbackSessionId: sessionId });
         const added = state.messages.length - before;
 
         if (added <= 0) {
@@ -3501,8 +3592,9 @@ async function loadOlderMessages(): Promise<void> {
     console.warn('[Flux] loadOlderMessages failed:', err);
   }
 
-  // 全部血缘节点耗尽或拉取不到更早消息：彻底收敛，停掉顶部加载动画
-  state.hasOlderMessages = false;
+  // 全部血缘节点耗尽或拉取不到更早消息：彻底收敛，停掉顶部加载动画。
+  // 【失败不等于到底 (Rules)】本轮有网络/协议失败时保留"还有更早历史"的入口，等下次重试。
+  if (!fetchFailed) state.hasOlderMessages = false;
   state.isLoadingOlder = false;
   render();
 }
@@ -3656,7 +3748,11 @@ async function loadMessagesInner(sessionId: string, targetBotName?: string): Pro
       if (opened.rows.length > 0 && stillCurrent && state.messages.length === 0) {
         state.messages = opened.rows.map(toMessageViewModel).reverse();
         sessionMessagesCache.set(sessionId, state.messages);
-        sessionServerOffset.set(sessionId, Math.max(sessionServerOffset.get(sessionId) || 0, opened.rows.length));
+        // 【游标口径 (Rules)】与首屏 REST 同源：都用本地可归属覆盖行数，避免两条路径分叉出两套下界。
+        sessionServerOffset.set(sessionId, Math.max(
+          sessionServerOffset.get(sessionId) || 0,
+          countLocalCoveredRows(state.messages, sessionId),
+        ));
         state.hasOlderMessages = computeHasOlderMessages(state.messages, opened.rows.length, INITIAL_WINDOW_PAGE_SIZE);
         pendingScrollToBottom = true;
         render();
@@ -3706,8 +3802,11 @@ async function loadMessagesInner(sessionId: string, targetBotName?: string): Pro
       persistMessagesToCache(cacheRef, merged, cacheFenceMax);
       syncActiveSessionPreviewToRail(sessionId, merged, resolvedBotName);
       const serverKnownCount = outcome.pagination?.returned ?? outcome.messages.length;
-      // 【分页游标权威性 (Rules)】offset 保持单调递增，绝不能把本地已有持久化缓存的更大游标倒退覆盖成 100
-      const currentKnown = Math.max(sessionServerOffset.get(sessionId) || 0, serverKnownCount);
+      // 【分页游标权威性 (Rules)】offset 保持单调递增，绝不能把本地已有持久化缓存的更大游标倒退覆盖成 100；
+      // 【游标下界 (Rules)】本地合并保留的历史可能比本次 REST 返回更长，游标必须一并抬到本地覆盖行数，
+      // 否则下一轮向早翻页会从落差点起步，跳过一整段从未加载的真实历史。
+      const localCoveredRows = countLocalCoveredRows(merged, sessionId);
+      const currentKnown = Math.max(sessionServerOffset.get(sessionId) || 0, serverKnownCount, localCoveredRows);
       sessionServerOffset.set(sessionId, currentKnown);
       state.messages = merged;
       state.hasOlderMessages = merged.length > serverKnownCount
@@ -3819,7 +3918,11 @@ async function loadMessagesInner(sessionId: string, targetBotName?: string): Pro
           persistMessagesToCache(cacheRef, merged, cacheFenceMax);
           syncActiveSessionPreviewToRail(sessionId, merged, resolvedBotName);
           state.messages = merged;
-          sessionServerOffset.set(sessionId, Math.max(sessionServerOffset.get(sessionId) || 0, merged.length));
+          sessionServerOffset.set(sessionId, Math.max(
+            sessionServerOffset.get(sessionId) || 0,
+            merged.length,
+            countLocalCoveredRows(merged, sessionId),
+          ));
           state.hasOlderMessages = computeHasOlderMessages(merged, merged.length, INITIAL_WINDOW_PAGE_SIZE);
           pendingScrollToBottom = true;
           render();
@@ -4037,7 +4140,7 @@ async function deleteSession(id: string): Promise<void> {
     state.sessions = state.sessions.filter((s) => !outcome.pruneIds.includes(s.id));
     state.pendingSessionIds = state.pendingSessionIds.filter((pid) => pid !== id);
     sessionMessagesCache.delete(id);
-    sessionServerOffset.delete(id);
+    forgetOlderCursorState(id);
     sessionDraftMap.delete(id);
     persistDraftsToStorage();
     unreadSessionIds.delete(id);
@@ -4090,7 +4193,7 @@ async function deleteSession(id: string): Promise<void> {
       state.sessions = state.sessions.filter((s) => s.id !== id);
       state.pendingSessionIds = state.pendingSessionIds.filter((pid) => pid !== id);
       sessionMessagesCache.delete(id);
-      sessionServerOffset.delete(id);
+      forgetOlderCursorState(id);
       sessionDraftMap.delete(id);
       persistDraftsToStorage();
       unreadSessionIds.delete(id);
@@ -4986,7 +5089,7 @@ async function sendMessage(text: string): Promise<void> {
     if (armedRowId !== null && state.activeSessionId) {
       // 截断成功：本会话历史以服务端为准，禁用“本地更长则保留”合并守卫，防已删消息复活
       sessionHistoryTrust.set(state.activeSessionId, 'server-priority');
-      sessionServerOffset.delete(state.activeSessionId);
+      forgetOlderCursorState(state.activeSessionId);
       state.hasOlderMessages = false;
 
       // 截断成功同步驱逐持久化缓存中的被截断消息（定理 24，彻底避免冷启动复活）
