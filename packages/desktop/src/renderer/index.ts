@@ -86,7 +86,14 @@ import { applyOptimisticCut, planSessionLoadMerge, planRollbackLeaveRestore, tak
 import { createToolPatchQueue } from './toolPatchQueue.js';
 import { decideConversationPush } from './conversationPush.js';
 import { createSettingsController, resolveGatewayPassword } from './settingsController.js';
-import { planMessageWindow, expandMessageWindowStart, computeHasOlderMessages } from './messageWindow.js';
+import {
+  planMessageWindow,
+  expandMessageWindowStart,
+  slideMessageWindowDown,
+  windowEndFor,
+  windowStartAroundIndex,
+  computeHasOlderMessages,
+} from './messageWindow.js';
 import { profilesDiffer } from './profileRefresh.js';
 
 import {
@@ -244,8 +251,8 @@ function toCachedGroup(room: LeftRailGroupRoom): CachedSessionSummary {
   };
 }
 
-/** 消息缓存上限：每会话 2000 行。 */
-const MESSAGE_CACHE_LIMIT = 2000;
+/** 消息缓存上限：每会话 5000 行。 */
+const MESSAGE_CACHE_LIMIT = 5000;
 
 /** 把缓存消息行还原成渲染层消息视图。 */
 function toMessageViewModel(row: CachedMessageRow): MessageViewModel {
@@ -2347,8 +2354,16 @@ const OLDER_BATCH_PAGE_SIZE = 500;
  */
 const INITIAL_RENDER_WINDOW = 24;
 const RENDER_WINDOW_STEP = 40;
+/**
+ * 挂载容量硬上限。
+ * 【设计意图 (Why)】长会话向上回溯时窗口只扩不缩，实测挂载到 105 回合 / 11568 节点后
+ *   拖拽帧间隔从 16ms 恶化到 60ms。容量把每帧重排成本钉在常数级。
+ * 【约束与规则 (Rules)】窗口区间 [start, end) 的长度永不突破此值。
+ */
+const MESSAGE_WINDOW_CAPACITY = 120;
 let messageWindowSessionId = '';
 let messageWindowStart = 0;
+let messageWindowEnd = 0;
 let messageWindowUserExpanded = false;
 /**
  * 滚动扩窗锁必须是模块级：render() 每次都会重绑 onscroll，局部锁会被新闭包重置，
@@ -2361,8 +2376,9 @@ let olderLoadingStartedAt = 0;
 
 /**
  * 维护消息挂载窗口。
- * 【规则】切会话时重置为末尾窗口；用户主动向上翻阅后不再自动回末尾，
- *   仅在新消息导致窗口越界时兜底收敛，避免打断正在看历史的读者。
+ * 【规则】切会话回到末尾窗口；读者贴底且窗口未扩展时保持尾部窗口；
+ *   其余情况保持起点并按容量上限截断末端。窗口是 [start, end) 有界区间，
+ *   长度永不突破 MESSAGE_WINDOW_CAPACITY，因此每帧重排成本与历史总量解耦。
  */
 function ensureMessageWindow(total: number): void {
   const sessionChanged = messageWindowSessionId !== state.activeSessionId;
@@ -2371,35 +2387,143 @@ function ensureMessageWindow(total: number): void {
   const plan = planMessageWindow({
     total,
     start: messageWindowStart,
+    end: messageWindowEnd,
     userExpanded: messageWindowUserExpanded,
     sessionChanged,
     followBottom: stream ? isStreamNearBottom(stream) : true,
     initialWindow: INITIAL_RENDER_WINDOW,
+    capacity: MESSAGE_WINDOW_CAPACITY,
   });
   messageWindowStart = plan.start;
+  messageWindowEnd = plan.end;
   messageWindowUserExpanded = plan.userExpanded;
 }
 
-/** 向上扩展本地窗口；返回 true 表示本次滚动已由本地消息满足，无需请求服务端。 */
+/**
+ * 向上扩展本地窗口；返回 true 表示本次滚动已由本地消息满足，无需请求服务端。
+ *
+ * 【竞态守卫 (Rules)】扩展只移动起点，末端由容量推导，因此区间长度恒定；
+ *   读者向上翻时尾部自动滑出，挂载量不随回溯轮次增长。
+ * 【虚拟坐标 (Rules)】画布高度钉成全高后，搬迁窗口必须把 scrollTop 同步到新起点的虚拟位置，
+ *   否则读者会停在原处而内容已被换掉。
+ */
 function expandMessageWindow(): boolean {
-  const nextStart = expandMessageWindowStart(messageWindowStart, RENDER_WINDOW_STEP);
-  if (nextStart === messageWindowStart) return false;
-  const anchor = captureStreamAnchor();
+  const total = state.messages.length;
+  const nextStart = expandMessageWindowStart(messageWindowStart, RENDER_WINDOW_STEP, Math.max(0, total - MESSAGE_WINDOW_CAPACITY));
+  const nextEnd = windowEndFor(nextStart, total, MESSAGE_WINDOW_CAPACITY, INITIAL_RENDER_WINDOW);
+  if (nextStart === messageWindowStart && nextEnd === messageWindowEnd) return false;
   messageWindowStart = nextStart;
+  messageWindowEnd = nextEnd;
   messageWindowUserExpanded = true;
   canvasStructureDirty = true;
-  // 窗口扩展只允许“保持锚点”，绝不允许贴底跟随抢走本次滚动。
   suppressPinBottomOnce = true;
   render();
-  // 【滚动锚定 (Rules)】窗口向前扩展会把历史插到顶部。React 提交可能晚于 render 的同步锚点校正，
-  // 因此连续两帧重新对齐到扩展前可见的那条消息，读者视口不会被最老的历史顶走。
-  const reapplyAnchor = (): void => applyStreamAnchor(anchor, false);
-  requestAnimationFrame(() => {
-    reapplyAnchor();
-    requestAnimationFrame(reapplyAnchor);
-  });
+  // 占位块已按新起点补偿，内容在虚拟坐标中的位置不变；仅当视口已落在窗口外时才校正。
+  requestAnimationFrame(() => syncScrollTopToWindow('expand upward'));
   return true;
 }
+
+/**
+ * 向下滑动窗口：读者从历史区滚回挂载区间尾部时整体前移窗口。
+ *
+ * 【设计意图 (Why)】有界窗口意味着向下滚动必须回收顶部，否则滚到底会撞上“没有更多”的空洞。
+ * 【约束与规则 (Rules)】起点单调不减且不越过 total - capacity；只有已扩展过的窗口才滑动。
+ *   搬迁后必须把 scrollTop 校正到新窗口的虚拟坐标，否则读者会被固定在原处。
+ */
+function slideMessageWindowForward(): void {
+  if (!messageWindowUserExpanded) return;
+  const total = state.messages.length;
+  const capacity = MESSAGE_WINDOW_CAPACITY;
+  if (total <= capacity) return;
+  const nextStart = slideMessageWindowDown(
+    messageWindowStart,
+    total,
+    capacity,
+    RENDER_WINDOW_STEP,
+    INITIAL_RENDER_WINDOW,
+  );
+  if (nextStart === messageWindowStart) return;
+  messageWindowStart = nextStart;
+  messageWindowEnd = windowEndFor(nextStart, total, capacity, INITIAL_RENDER_WINDOW);
+  canvasStructureDirty = true;
+  render();
+  requestAnimationFrame(() => syncScrollTopToWindow('slide forward'));
+  logScroll.trace('window slid forward on downward scroll', {
+    start: messageWindowStart,
+    end: messageWindowEnd,
+    total,
+  });
+}
+
+/**
+ * 把窗口移动到指定消息索引周围（拖滚动条跳转时使用）。
+ *
+ * 【规则】前留少量上文行数，起点受容量约束；索引越界时不改窗口。
+ */
+function relocateMessageWindowToIndex(index: number): boolean {
+  const total = state.messages.length;
+  if (!Number.isFinite(index) || index < 0 || index >= total) return false;
+  const nextStart = windowStartAroundIndex(index, total, MESSAGE_WINDOW_CAPACITY, 4, INITIAL_RENDER_WINDOW);
+  const nextEnd = windowEndFor(nextStart, total, MESSAGE_WINDOW_CAPACITY, INITIAL_RENDER_WINDOW);
+  if (nextStart === messageWindowStart && nextEnd === messageWindowEnd) return false;
+  messageWindowStart = nextStart;
+  messageWindowEnd = nextEnd;
+  messageWindowUserExpanded = true;
+  canvasStructureDirty = true;
+  return true;
+}
+
+/**
+ * 把窗口搬迁后校正 scrollTop（仅在视口已完全脱离窗口时兜底）。
+ *
+ * 【设计意图 (Why)】占位块已按新起点补偿，窗口搬迁不改变内容在虚拟坐标中的位置，
+ *   因此正常滚动时绝不能改写 scrollTop —— 那会吞掉用户的滚动距离（实测滚 11050px 只推进 36 条）。
+ *   只有视口彻底脱离窗口覆盖范围（拖滚动条、跳转）时才需要兜底定位。
+ * 【约束与规则 (Rules)】视口落在窗口覆盖区间内时保持原样。
+ */
+function syncScrollTopToWindow(reason: string): void {
+  const stream = document.getElementById('conversation-stream');
+  if (!stream) return;
+  const virtualTop = Math.round(messageWindowStart * averageRowHeightPx);
+  const virtualBottom = Math.round(messageWindowEnd * averageRowHeightPx);
+  if (stream.scrollTop >= virtualTop - stream.clientHeight && stream.scrollTop <= virtualBottom) return;
+  const target = Math.max(0, Math.min(virtualTop, stream.scrollHeight - stream.clientHeight));
+  stream.scrollTop = target;
+  logScroll.debug('scrollTop synced to window', { reason, start: messageWindowStart, target });
+}
+
+/**
+ * 安排一次虚拟高度同步，未锁定行高时逐帧重试。
+ *
+ * 【设计意图 (Why)】`mountMessageList` 返回时 React 可能尚未提交，rAF 里读不到行，
+ *   一次性调用会永远错过锁定时机（实测 averageRowHeightPx 停在默认 96，
+ *   导致滚动 11050px 只推进 36 条消息）。
+ * 【约束与规则 (Rules)】最多重试 8 帧；锁定成功后不再重试。
+ */
+function scheduleVirtualHeightSync(attempt = 0): void {
+  requestAnimationFrame(() => {
+    const locked = lockAverageRowHeight();
+    syncCanvasVirtualHeight();
+    if (locked) {
+      // 行高锁定会改变占位高度与画布虚拟高度，必须重渲染让占位块用上新值。
+      canvasStructureDirty = true;
+      render();
+      /**
+       * 【首屏贴底 (Rules)】画布高度变成虚拟全高后，scrollTop 必须落到窗口在虚拟坐标中的
+       *   真实位置（≈ 窗口起点 × 行高），否则会停在 0 也就是会话最开头，
+       *   读者打开会话看到的是最早的记录而不是最新消息。
+       */
+      if (!messageWindowUserExpanded) {
+        requestAnimationFrame(() => scrollStreamToBottom('virtual height locked'));
+      }
+      return;
+    }
+    if (!averageRowHeightLocked && attempt < 8) {
+      scheduleVirtualHeightSync(attempt + 1);
+    }
+  });
+}
+
 const sessionMessagesCache = new Map<string, MessageViewModel[]>();
 const sessionServerOffset = new Map<string, number>();
 const sessionParentOffsetMap = new Map<string, number>();
@@ -2789,6 +2913,32 @@ async function loadOlderMessages(): Promise<void> {
     // 完整血缘链条 [D, C, B, A]，环形自动熔断
     const lineageChain = resolveLineageChain(sessionId, state.sessions);
     let batchAppended = false;
+
+    // 0. 本地持久化缓存优先（Cache-First）：若本地 IndexedDB 存有比当前更早的行，0ms 极速呈现，避免网络往返
+    const oldestRowId = state.messages.find((m) => typeof m.rowId === 'number' && m.rowId > 0)?.rowId;
+    if (typeof oldestRowId === 'number' && oldestRowId > 1) {
+      try {
+        const cacheRef: CacheChannelRef = { profile: resolvedProfile, channel: 'session', channelId: sessionId };
+        const localOlderRows = await cacheService.readOlderRows(cacheRef, oldestRowId, 100);
+        if (localOlderRows.length > 0) {
+          const cachedBatch = localOlderRows.map(toMessageViewModel).reverse();
+          const before = state.messages.length;
+          state.messages = planOlderBatchPrependMerge(cachedBatch, state.messages);
+          const added = state.messages.length - before;
+          if (added > 0) {
+            // 新批次插在列表头部，窗口对齐到本批末尾附近，末端由容量推导保持区间有界
+            messageWindowStart = Math.max(0, added - 8);
+            messageWindowEnd = windowEndFor(messageWindowStart, state.messages.length, MESSAGE_WINDOW_CAPACITY, INITIAL_RENDER_WINDOW);
+            messageWindowUserExpanded = true;
+            sessionMessagesCache.set(sessionId, state.messages);
+            state.hasOlderMessages = true;
+            batchAppended = true;
+          }
+        }
+      // gate-degrade: 本地缓存读取失败或未命中时平滑回退到远端 REST 拉取
+      } catch {}
+    }
+
     // 单次调用最多推进的页数：防止"整页都是已缓存重复"时无净增死循环
     let attempts = 0;
     const MAX_PAGE_ATTEMPTS = 8;
@@ -2861,6 +3011,7 @@ async function loadOlderMessages(): Promise<void> {
         // 曾经直接置 0 会让 4000 行历史全量挂载，每轮渲染都在重建整棵 React 树，
         // 单轮耗时从 200ms 涨到 4s，观感等同于"翻不动"。
         messageWindowStart = Math.max(0, added - 8);
+        messageWindowEnd = windowEndFor(messageWindowStart, state.messages.length, MESSAGE_WINDOW_CAPACITY, INITIAL_RENDER_WINDOW);
         messageWindowUserExpanded = true;
         sessionMessagesCache.set(sessionId, state.messages);
 
@@ -3081,9 +3232,9 @@ async function loadMessages(sessionId: string, targetBotName?: string): Promise<
       persistMessagesToCache(cacheRef, merged, cacheFenceMax);
       syncActiveSessionPreviewToRail(sessionId, merged, resolvedBotName);
       const serverKnownCount = outcome.pagination?.returned ?? outcome.messages.length;
-      // 【分页游标权威性 (Rules)】offset 必须严格等于服务端已返回的条数，
-      // 绝不能混入本地缓存长度：缓存可能含父会话穿透消息，混入会让游标跳条或反复拉同一页。
-      sessionServerOffset.set(sessionId, serverKnownCount);
+      // 【分页游标权威性 (Rules)】offset 保持单调递增，绝不能把本地已有持久化缓存的更大游标倒退覆盖成 100
+      const currentKnown = Math.max(sessionServerOffset.get(sessionId) || 0, serverKnownCount);
+      sessionServerOffset.set(sessionId, currentKnown);
       state.messages = merged;
       state.hasOlderMessages = merged.length > serverKnownCount
         ? true
@@ -5310,6 +5461,13 @@ function applyStreamAnchor(anchor: StreamAnchor, pinBottom: boolean): void {
       }
       return;
     }
+    /**
+     * 【锚点不得反推窗口 (Rules)】锚点落在挂载窗口外时只做退化处理，绝不据此移动窗口。
+     * 窗口定位由 expandMessageWindow / slideMessageWindowForward / loadOlderMessages 显式决策；
+     * 锚点反向搬窗口会与"加载更早批次跳到新内容"的意图打架，实测导致向上回溯时
+     * 首条可见 rowId 在 30486~35221 之间来回震荡而不是单调变早。
+     */
+    logScroll.trace('anchor outside mounted window', { id: anchor.id });
   }
   stream.scrollTop = anchor.rawScrollTop;
 }
@@ -5722,12 +5880,74 @@ function resolveSessionKnownFiles(): readonly string[] {
   return knownFilesValue;
 }
 
+/**
+ * 已挂载消息的平均渲染高度（px），用于把窗口外历史折算成等效高度。
+ *
+ * 【设计意图 (Why)】窗口有界后原生滚动条只反映挂载部分（实测 scrollHeight 在 14k~33k 之间乱跳），
+ *   必须让 scrollHeight 恒等于全量估算高度，thumb 长度与位置才稳定。
+ * 【防范的历史坑 (Pitfall)】若每帧都从当前挂载行重测平均行高，滚动过程中估值会持续漂移，
+ *   scrollHeight 随之从 1.0M 涨到 2.3M，滚动条照样乱飞。必须在同一会话内锁定。
+ * 【约束与规则 (Rules)】每个会话只在首次拿到足够样本时锁定一次，切会话才重置。
+ */
+let averageRowHeightPx = 96;
+let averageRowHeightSessionId = '';
+let averageRowHeightLocked = false;
+
+/** 锁定本会话的平均行高；返回 true 表示本次完成了锁定（需要重渲染以更新占位）。 */
+function lockAverageRowHeight(): boolean {
+  if (averageRowHeightLocked && averageRowHeightSessionId === state.activeSessionId) return false;
+  if (averageRowHeightSessionId !== state.activeSessionId) {
+    averageRowHeightSessionId = state.activeSessionId;
+    averageRowHeightLocked = false;
+    averageRowHeightPx = 96;
+  }
+  const canvas = document.querySelector<HTMLElement>('.conv-canvas');
+  if (!canvas) return false;
+  const windowCount = Math.max(1, messageWindowEnd - messageWindowStart);
+  const rows = canvas.querySelectorAll<HTMLElement>('[data-msg-id]');
+  if (rows.length < 5) return false;
+  let contentH = 0;
+  for (const row of rows) {
+    const h = row.getBoundingClientRect().height;
+    if (Number.isFinite(h) && h > 0) contentH += h;
+  }
+  // 【口径 (Rules)】必须用"窗口内消息条数"作分母，不是 DOM 行数：一条消息可能渲染成多个
+  // data-msg-id 节点，用行数会把平均行高算小一半，导致滚动 1px 只走半条消息。
+  if (contentH <= 0) return false;
+  averageRowHeightPx = Math.max(24, contentH / windowCount);
+  averageRowHeightLocked = true;
+  return true;
+}
+
+/**
+ * 虚拟高度由内层视口自撑（`.conv-virtual-viewport` 的 height），
+ * 不再需要给画布写 min-height，避免两套高度互相打架。
+ */
+function syncCanvasVirtualHeight(): void {
+  const canvas = document.querySelector<HTMLElement>('.conv-canvas');
+  if (!canvas) return;
+  if (canvas.style.minHeight) canvas.style.minHeight = '';
+}
+
+/** 计算窗口内容在虚拟坐标中的纵向偏移。 */
+function computeContentOffsetPx(): number {
+  if (messageWindowStart <= 0) return 0;
+  return Math.round(messageWindowStart * averageRowHeightPx);
+}
+
+/** 虚拟总高度；未超过容量时返回 0，表示不启用虚拟定位。 */
+function computeVirtualHeightPx(): number {
+  const total = state.messages.length;
+  if (total <= MESSAGE_WINDOW_CAPACITY) return 0;
+  return Math.round(total * averageRowHeightPx);
+}
+
 /** 把当前会话状态映射为对话区只读视图模型；不做任何排序或解析。 */
 function buildConversationSnapshot(): ConversationSnapshot {
   const focusType = state.activeFocus.type;
   const streaming = isStreamingActiveForCurrentSession();
   ensureMessageWindow(state.messages.length);
-  const windowedMessages = state.messages.slice(messageWindowStart);
+  const windowedMessages = state.messages.slice(messageWindowStart, messageWindowEnd);
   const lastMessageId = windowedMessages[windowedMessages.length - 1]?.id;
   return {
     mode: focusType === 'group' ? 'group' : focusType === 'bot' ? 'foreground' : 'scratchpad',
@@ -5737,6 +5957,8 @@ function buildConversationSnapshot(): ConversationSnapshot {
     hasOlderMessages: state.hasOlderMessages,
     isLoadingOlder: state.isLoadingOlder,
     profileName: state.profileName,
+    contentOffsetPx: computeContentOffsetPx(),
+    virtualHeightPx: computeVirtualHeightPx(),
     knownFiles: resolveSessionKnownFiles(),
     locale: state.lang,
     messages: windowedMessages.map((m) => {
@@ -5809,7 +6031,7 @@ function syncReactMessageList(force = false): void {
     return;
   }
   ensureMessageWindow(state.messages.length);
-  const currentIds = state.messages.slice(messageWindowStart).map((m) => m.id);
+  const currentIds = state.messages.slice(messageWindowStart, messageWindowEnd).map((m) => m.id);
   if (reactMessageListHost !== host) {
     reactMessageList?.unmount();
     reactMessageList = mountMessageList(host, buildConversationSnapshot);
@@ -5817,6 +6039,9 @@ function syncReactMessageList(force = false): void {
     renderedMessageIds = new Set(currentIds);
     lastSeenStreaming = isStreamingActiveForCurrentSession();
     lastSeenLoadingOlder = state.isLoadingOlder;
+    // 【首挂必须也锁定行高 (Rules)】首次挂载若跳过锁定，虚拟高度永不生效，
+    // 实测 scrollHeight 停在 751118（= 7625×96 的默认估值）、滚动 11050px 只推进 0 条。
+    scheduleVirtualHeightSync();
     return;
   }
   const streaming = isStreamingActiveForCurrentSession();
@@ -5836,6 +6061,8 @@ function syncReactMessageList(force = false): void {
   if (shouldPush && reactMessageList) {
     reactMessageList.update();
     renderedMessageIds = new Set(currentIds);
+    // React 提交后锁定本会话平均行高并钉住画布虚拟高度，供占位与滚动条映射使用。
+    scheduleVirtualHeightSync();
   }
 }
 
@@ -7768,7 +7995,59 @@ function bindEvents(): void {
 
       if (streamScrollCooldown || state.isLoadingOlder) return;
 
-      if (streamEl.scrollTop < 240) {
+      const prefetchThreshold = Math.max(800, streamEl.clientHeight * 1.0);
+
+      /**
+       * 【有界窗口下行回收 (Rules)】窗口是 [start, end) 有界区间，向下滚到区间尾部时
+       * 必须整体前移，否则读者滚到底会撞上"没有更多内容"的空洞。
+       * 判定用"距底部不足一屏"而不是精确触底，留出一屏余量做回收，避免读者看到空白。
+       * 【占位块换算 (Rules)】底部占位块也计入 scrollHeight，因此这里用的是含占位的真实距离，
+       * 与窗口前移后占位减少的量正好抵消，不会形成回收抖动。
+       */
+      if (messageWindowUserExpanded && messageWindowEnd < state.messages.length) {
+        const distanceToEnd = streamEl.scrollHeight - streamEl.scrollTop - streamEl.clientHeight;
+        if (distanceToEnd < prefetchThreshold) {
+          streamScrollCooldown = true;
+          slideMessageWindowForward();
+          requestAnimationFrame(() => { streamScrollCooldown = false; });
+          return;
+        }
+      }
+
+      /**
+       * 【拖滚动条跳转 (Rules)】画布高度钉成虚拟全高后，scrollTop 是"全量虚拟坐标"。
+       *   用户把 thumb 拖到远处时，按行高换算出目标索引并搬迁窗口，
+       *   再把 scrollTop 校正回该索引对应的虚拟位置，保证停靠点与看到的内容一致。
+       */
+      if (state.messages.length > MESSAGE_WINDOW_CAPACITY) {
+        const virtualTop = Math.round(messageWindowStart * averageRowHeightPx);
+        const virtualBottom = Math.round(messageWindowEnd * averageRowHeightPx);
+        const outside = streamEl.scrollTop < virtualTop - streamEl.clientHeight * 2
+          || streamEl.scrollTop > virtualBottom;
+        if (outside) {
+          const targetIndex = Math.floor(streamEl.scrollTop / Math.max(1, averageRowHeightPx));
+          if (relocateMessageWindowToIndex(targetIndex)) {
+            streamScrollCooldown = true;
+            render();
+            requestAnimationFrame(() => {
+              syncScrollTopToWindow('scrollbar jump');
+              streamScrollCooldown = false;
+            });
+            return;
+          }
+        }
+      }
+
+      /**
+       * 【虚拟坐标判定 (Rules)】画布高度钉成虚拟全高后，scrollTop 是"全量虚拟坐标"，
+       *   不能再用 scrollTop < 800 判断"接近顶部"。真实判据是：
+       *   视口顶端已经进入窗口上沿之上（或紧贴），说明读者正在向上回溯，需要扩窗。
+       */
+      const virtualWindowTop = Math.round(messageWindowStart * averageRowHeightPx);
+      const nearWindowTop = messageWindowStart > 0 && streamEl.scrollTop < virtualWindowTop + prefetchThreshold;
+      const atTrueTop = messageWindowStart === 0 && streamEl.scrollTop < prefetchThreshold;
+
+      if (nearWindowTop || atTrueTop) {
         // 【AGENTS.md 三态隔离】群聊研讨室严禁发起单会话翻页
         if (state.activeFocus.type === 'group') return;
 
@@ -7777,10 +8056,16 @@ function bindEvents(): void {
         // 若等 expand 返回后才上锁，同一次手势会连扩两批，把锚点补偿推到列表底部。
         streamScrollCooldown = true;
         const expanded = expandMessageWindow();
-        // 150ms 动量吸收窗，吸收触顶回弹波谷，防惯性滚动雪崩
-        setTimeout(() => { streamScrollCooldown = false; }, 150);
-        if (expanded) return;
-        if (!state.hasOlderMessages) return;
+        if (expanded) {
+          // 本地扩窗仅需吸收同帧 DOM 提交事件，下一帧立刻释放锁，杜绝手势对抗卡死感
+          requestAnimationFrame(() => { streamScrollCooldown = false; });
+          return;
+        }
+        // 窗口已顶到列表首部才需要向服务端要更早历史
+        if (messageWindowStart > 0 || !state.hasOlderMessages) {
+          streamScrollCooldown = false;
+          return;
+        }
         requestAnimationFrame(async () => {
           try {
             // 【持续触顶连拉 (Rules)】用户停在顶部不松手时连续补页，直到
@@ -7793,15 +8078,15 @@ function bindEvents(): void {
               await loadOlderMessages();
               chain += 1;
               const el = document.getElementById('conversation-stream');
-              const stillAtTop = Boolean(el && el.scrollTop < 60);
+              const stillNearTop = Boolean(el && el.scrollTop < prefetchThreshold * 0.4);
               if (state.messages.length === before) break;
-              if (!stillAtTop || !state.hasOlderMessages) break;
+              if (!stillNearTop || !state.hasOlderMessages) break;
             } while (chain < 40);
           } finally {
-            // Cool-down delay (150ms) to absorb momentum scroll bounce & prevent cascading re-entrancy
+            // Cool-down delay (60ms) to absorb momentum scroll bounce & prevent cascading re-entrancy
             setTimeout(() => {
               streamScrollCooldown = false;
-            }, 150);
+            }, 60);
           }
         });
       }
@@ -8179,13 +8464,29 @@ function beginLeftRailResize(event: React.PointerEvent<HTMLDivElement>): void {
 
   document.documentElement.setAttribute('data-rail-resizing', 'left');
   let currentW = startWidth;
+  let rafId = 0;
 
+  /**
+   * 【唯一写入口 (Rules)】宽度只能写 `--rail-w-left`，绝不能改边栏元素自身的内联几何。
+   * React 已经把 width / flex / min-width / max-width 四件套内联绑到该变量上，另写一份会与
+   * 残留的 `min-width: var(--rail-w-left)` 打架：变宽时旧值更小看不出问题，一旦收窄，
+   * 上次提交的宽度就成了下限，拖动停在旧宽度（实测收窄 96px 时 12 帧纹丝不动）。
+   */
   const onPointerMove = (moveEv: PointerEvent) => {
     currentW = clampLeftRailWidth(String(startWidth + (moveEv.clientX - startX)));
-    document.documentElement.style.setProperty(cssVar, `${currentW}px`);
+    if (!rafId) {
+      rafId = requestAnimationFrame(() => {
+        document.documentElement.style.setProperty(cssVar, `${currentW}px`);
+        rafId = 0;
+      });
+    }
   };
 
   const onPointerUp = () => {
+    if (rafId) {
+      cancelAnimationFrame(rafId);
+      rafId = 0;
+    }
     try {
       handle.releasePointerCapture(event.pointerId);
     // gate-degrade: 指针可能已被系统回收，释放失败不影响最终宽度写入
@@ -8193,10 +8494,11 @@ function beginLeftRailResize(event: React.PointerEvent<HTMLDivElement>): void {
     window.removeEventListener('pointermove', onPointerMove);
     window.removeEventListener('pointerup', onPointerUp);
     window.removeEventListener('pointercancel', onPointerUp);
-    document.documentElement.removeAttribute('data-rail-resizing');
     const settled = clampLeftRailWidth(String(currentW));
     document.documentElement.style.setProperty(cssVar, `${settled}px`);
     localStorage.setItem('hermes_flux_rail_w_left', String(settled));
+    // 【松手不回弹 (Rules)】先落定变量再撤 resizing 标记：反过来会让 0.12s 过渡从拖拽终点再播一次。
+    requestAnimationFrame(() => document.documentElement.removeAttribute('data-rail-resizing'));
   };
 
   window.addEventListener('pointermove', onPointerMove, { passive: true });
@@ -8245,14 +8547,29 @@ function bindRailResizeEvents(): void {
       document.documentElement.setAttribute('data-rail-resizing', 'right');
 
       let currentW = startWidth;
+      let rafId = 0;
 
+      /**
+       * 【唯一写入口 (Rules)】同左轨：只写 `--rail-w-right`。
+       * 边栏元素的内联几何由组件模板持有，另写一份会被残留的 `min-width` 反向钉死，
+       * 表现为「拖到 A 点、边框停在 B 点」的非线性滞后。
+       */
       const onPointerMove = (moveEv: PointerEvent) => {
         const delta = (moveEv.clientX - startX) * -1;
         currentW = Math.max(minW, Math.min(maxW, startWidth + delta));
-        document.documentElement.style.setProperty(cssVar, `${currentW}px`);
+        if (!rafId) {
+          rafId = requestAnimationFrame(() => {
+            document.documentElement.style.setProperty(cssVar, `${currentW}px`);
+            rafId = 0;
+          });
+        }
       };
 
       const onPointerUp = (upEv: PointerEvent) => {
+        if (rafId) {
+          cancelAnimationFrame(rafId);
+          rafId = 0;
+        }
         try {
           handle.releasePointerCapture(upEv.pointerId);
         // gate-degrade: releasePointerCapture 容错处理
@@ -8260,8 +8577,9 @@ function bindRailResizeEvents(): void {
         window.removeEventListener('pointermove', onPointerMove);
         window.removeEventListener('pointerup', onPointerUp);
         window.removeEventListener('pointercancel', onPointerUp);
-        document.documentElement.removeAttribute('data-rail-resizing');
+        document.documentElement.style.setProperty(cssVar, `${Math.round(currentW)}px`);
         localStorage.setItem(storageKey, String(Math.round(currentW)));
+        requestAnimationFrame(() => document.documentElement.removeAttribute('data-rail-resizing'));
       };
 
       window.addEventListener('pointermove', onPointerMove, { passive: true });

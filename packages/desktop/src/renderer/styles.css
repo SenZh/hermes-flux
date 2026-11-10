@@ -741,7 +741,9 @@ html[data-maximized="true"] #flux-app-root {
   pointer-events: none;
 }
 
-/* Dragging state: Disable transition & selections across entire window to maintain 120 FPS */
+/* 拖拽期只关过渡与文本选择。
+   禁止在这里给 #conversation-stream 加 contain：`contain: strict` 含 size containment，
+   会让滚动容器按"无内容"计算尺寸，history 翻页与流式追加会跳变。 */
 html[data-rail-resizing] #flux-left-rail,
 html[data-rail-resizing] .flux-left-rail,
 html[data-rail-resizing] #flux-inspector-pod,
@@ -749,10 +751,16 @@ html[data-rail-resizing] .flux-inspector-pod {
   transition: none !important;
   will-change: auto;
 }
-html[data-rail-resizing],
-html[data-rail-resizing] * {
+html[data-rail-resizing] .conv-canvas {
+  transition: none !important;
+}
+html[data-rail-resizing] {
   cursor: col-resize !important;
   user-select: none !important;
+}
+html[data-rail-resizing] iframe,
+html[data-rail-resizing] webview {
+  pointer-events: none !important;
 }
 
 /* Scrollbar Customization */

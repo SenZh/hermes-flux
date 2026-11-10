@@ -2,20 +2,30 @@
  * 消息挂载窗口纯逻辑。
  *
  * 【设计意图 (Why)】
- *   窗口起点决定“首屏挂多少条消息”。它同时受会话切换、新消息到达、读者是否贴底、
- *   是否主动向上翻阅、以及回滚截断影响。把状态迁移抽成纯函数，才能对边界做可证伪测试，
- *   避免再次出现“窗口起点等于总长 → 空白会话”或“读者回溯时顶部行被抽走”。
+ *   窗口决定“DOM 里同时挂多少条消息”。长会话（实测 7745 条）向上回溯时，
+ *   若窗口只扩不缩，挂载量随回溯轮次单调增长，每帧样式重算与布局成本线性上升，
+ *   边栏拖拽这类改宽度的操作会从 16ms 恶化到 60ms 以上。窗口必须是有界滑动区间。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   1. 旧实现窗口是 `[start, total)` 开放区间，`expandMessageWindowStart` 单向递减，
+ *      回溯 28 轮后 scrollHeight 从 2245px 涨到 198268px，滑回底部也不释放；
+ *   2. 收缩分支要求 `userExpanded === false`，而回溯一旦把它置真就再不回假，
+ *      滑回底部永远进不去收缩路径，挂载量永不回收；
+ *   3. 用“返回数 >= pageSize”判定见底，网关单页上限低于请求值时超长会话被误判到头。
  *
  * 【约束与规则 (Rules)】
- *   - 0 <= start <= total（total 为 0 时 start 必须为 0）；
+ *   - 0 <= start <= end <= total（total 为 0 时 start 与 end 必须同为 0）；
+ *   - end - start <= capacity，容量是硬上限，任何状态迁移都不得突破；
  *   - 切会话必须回到末尾窗口，绝不继承上一会话的阅读位置；
- *   - 读者离开底部回溯时冻结起点，新消息到达不得抽走顶部已挂载行；
- *   - 回滚/截断把总长压到与起点相等时，必须收敛回末尾窗口并解除“已扩展”状态。
+ *   - 贴底且窗口已覆盖末尾时回到尾部窗口，保证流式锚点永远有最后一条消息；
+ *   - 回滚/截断把总长压到窗口内时必须收敛回末尾窗口。
  */
 
 export interface MessageWindowPlanInput {
   total: number;
   start: number;
+  /** 上次的窗口末端（不含），仅用于诊断与单调性校验 */
+  end?: number;
   /** 用户是否已主动向上扩展过窗口 */
   userExpanded: boolean;
   /** 是否切换了会话（activeSessionId 变化） */
@@ -24,43 +34,115 @@ export interface MessageWindowPlanInput {
   followBottom: boolean;
   /** 首屏窗口大小 */
   initialWindow: number;
+  /** 挂载容量硬上限 */
+  capacity: number;
 }
 
 export interface MessageWindowPlan {
   start: number;
+  /** 窗口末端（不含），切片语义为 slice(start, end) */
+  end: number;
   userExpanded: boolean;
 }
 
+/** 默认挂载容量：约 3 屏（120 条），平衡回溯手感与每帧重排成本。 */
+export const DEFAULT_WINDOW_CAPACITY = 120;
+
 const clampTotal = (total: number): number => (Number.isFinite(total) && total > 0 ? Math.floor(total) : 0);
-const tailStart = (total: number, initialWindow: number): number => Math.max(0, total - Math.max(1, initialWindow));
 
-export function planMessageWindow(input: MessageWindowPlanInput): MessageWindowPlan {
-  const total = clampTotal(input.total);
-  const initialWindow = Math.max(1, Math.floor(input.initialWindow));
-  const tail = tailStart(total, initialWindow);
+const normalizeCapacity = (capacity: number, initialWindow: number): number => {
+  const cap = Number.isFinite(capacity) && capacity > 0 ? Math.floor(capacity) : DEFAULT_WINDOW_CAPACITY;
+  const floor = Number.isFinite(initialWindow) && initialWindow > 0 ? Math.floor(initialWindow) : 1;
+  return Math.max(floor, cap);
+};
 
-  if (input.sessionChanged) {
-    return { start: tail, userExpanded: false };
-  }
-  if (total === 0) {
-    return { start: 0, userExpanded: false };
-  }
-  if (!input.userExpanded) {
-    // 读者离开底部回溯：冻结起点，新消息到达只扩展尾部，不抽走顶部已挂载行。
-    return { start: input.followBottom ? tail : Math.max(0, Math.min(input.start, tail)), userExpanded: false };
-  }
-  // 已主动扩展：起点越界（含 start === total，slice 会得到空数组）时收敛回末尾窗口。
-  if (input.start >= total) {
-    return { start: tail, userExpanded: false };
-  }
-  return { start: Math.max(0, input.start), userExpanded: true };
+const clampStart = (start: number, maxStart: number): number => {
+  const s = Number.isFinite(start) && start > 0 ? Math.floor(start) : 0;
+  return Math.max(0, Math.min(s, maxStart));
+};
+
+/** 尾部窗口起点：末尾 capacity 条的首索引。 */
+const tailStart = (total: number, capacity: number): number => Math.max(0, total - capacity);
+
+/**
+ * 由起点推导窗口末端。这是 end 的唯一推导入口，禁止在别处另算一份。
+ */
+export function windowEndFor(start: number, total: number, capacity: number, initialWindow = 1): number {
+  const t = clampTotal(total);
+  const cap = normalizeCapacity(capacity, initialWindow);
+  const s = clampStart(start, Math.max(0, t - 1));
+  return Math.min(t, s + cap);
 }
 
-/** 向上扩展一批窗口；返回新的起点，绝不小于 0。 */
-export function expandMessageWindowStart(start: number, step: number): number {
+/**
+ * 规划窗口区间。
+ *
+ * 【规则】切会话与贴底一律回到尾部窗口；其余情况保持起点并强制容量上限，
+ *   超过容量时以起点为准截断末端（读者正在看的位置绝不因容量而被抽走）。
+ */
+export function planMessageWindow(input: MessageWindowPlanInput): MessageWindowPlan {
+  const total = clampTotal(input.total);
+  const capacity = normalizeCapacity(input.capacity, input.initialWindow);
+  const maxStart = Math.max(0, total - capacity);
+  const tail = tailStart(total, capacity);
+
+  if (total === 0) {
+    return { start: 0, end: 0, userExpanded: false };
+  }
+  if (input.sessionChanged) {
+    return { start: tail, end: total, userExpanded: false };
+  }
+  // 贴底时窗口必须覆盖末尾，否则流式直写锚点找不到最后一条消息。
+  if (input.followBottom && !input.userExpanded) {
+    return { start: tail, end: total, userExpanded: false };
+  }
+  const start = clampStart(input.start, maxStart);
+  const end = Math.min(total, start + capacity);
+  return { start, end, userExpanded: input.userExpanded };
+}
+
+/** 向上扩展一屏；返回新的起点，绝不小于 0，也不越过容量允许的最大起点。 */
+export function expandMessageWindowStart(start: number, step: number, total = Number.MAX_SAFE_INTEGER): number {
   const normalizedStart = Number.isFinite(start) && start > 0 ? Math.floor(start) : 0;
   const normalizedStep = Number.isFinite(step) && step > 0 ? Math.floor(step) : 0;
-  return Math.max(0, normalizedStart - normalizedStep);
+  const floor = Math.max(0, Math.min(normalizedStart - normalizedStep, total));
+  return Math.max(0, floor);
+}
+
+/**
+ * 向下滑动窗口：用户从历史里往回滚到挂载区间末端时，把窗口整体前移。
+ *
+ * 【规则】起点单调不减，且不超过 total - capacity，保证容量上限全程成立。
+ */
+export function slideMessageWindowDown(
+  start: number,
+  total: number,
+  capacity: number,
+  step: number,
+  initialWindow = 1
+): number {
+  const t = clampTotal(total);
+  const cap = normalizeCapacity(capacity, initialWindow);
+  const maxStart = Math.max(0, t - cap);
+  const normalizedStep = Number.isFinite(step) && step > 0 ? Math.floor(step) : 0;
+  const s = clampStart(start, maxStart);
+  return Math.min(maxStart, s + normalizedStep);
+}
+
+/** 把窗口落在某个消息索引周围，前留 leadRows 行上文；索引越界时退化为尾部窗口。 */
+export function windowStartAroundIndex(
+  index: number,
+  total: number,
+  capacity: number,
+  leadRows: number,
+  initialWindow = 1
+): number {
+  const t = clampTotal(total);
+  const cap = normalizeCapacity(capacity, initialWindow);
+  const maxStart = Math.max(0, t - cap);
+  const idx = Number.isFinite(index) && index > 0 ? Math.floor(index) : 0;
+  const lead = Number.isFinite(leadRows) && leadRows > 0 ? Math.floor(leadRows) : 0;
+  return clampStart(idx - lead, maxStart);
 }
 
 /**
@@ -103,4 +185,3 @@ export function computeHasOlderMessages(
   // 兜底：无持久化数字 rowId 时，按是否有消息保守返回 true
   return true;
 }
-

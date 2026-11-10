@@ -25,7 +25,7 @@ import { applyTruncation, evictToCap, maxOrderKey, mergeRemoteWindow, upsertMess
 
 /** 默认结构性上限。 */
 export const DEFAULT_SESSION_CAP = 200;
-export const DEFAULT_MESSAGE_CAP = 500;
+export const DEFAULT_MESSAGE_CAP = 5000;
 
 export interface CacheServiceOptions {
   /** 会话索引池上限（会话 + 群聊共享） */
@@ -130,6 +130,26 @@ export class CacheService {
   async openChannel(ref: CacheChannelRef, limit: number): Promise<OpenChannelResult> {
     const rows = await this.store.listMessages({ ...ref, limit });
     return { rows, fenceMax: maxOrderKey(rows) };
+  }
+
+  /**
+   * 向上翻页读取更早历史消息行。
+   *
+   * 【设计意图 (Why)】
+   *   支持向上滚动时优先命中本地缓存，避免每翻一页都必须发起网络请求。
+   * 【防范的历史坑 (Pitfall)】
+   *   必须走 withChannelLock 通道串行锁，防止读取与并发写入产生脏交错。
+   * 【约束与规则 (Rules)】
+   *   按通道加串行锁；按 orderKey 倒序返回满足 orderKey < beforeOrderKey 的行。
+   */
+  async readOlderRows(
+    ref: CacheChannelRef,
+    beforeOrderKey: number,
+    limit: number
+  ): Promise<CachedMessageRow[]> {
+    return this.withChannelLock(ref, async () => {
+      return this.store.listMessages({ ...ref, beforeOrderKey, limit });
+    });
   }
 
   /**

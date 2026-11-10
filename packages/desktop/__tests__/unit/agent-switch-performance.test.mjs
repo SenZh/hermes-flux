@@ -49,13 +49,31 @@ test('Agent 切换 - 主工位预取不得被头像提前 return 跳过', () => 
   assert.match(rendererSource, /if \(botForeverChatCache\.has\(p\.name\)\) continue;/, '已预取的主工位必须跳过重复探测');
 });
 
-test('Agent 切换 - 消息列表必须按窗口挂载，且向下滚动耗尽后才请求服务端', () => {
+test('Agent 切换 - 消息列表必须按有界窗口挂载，且向下滚动耗尽后才请求服务端', () => {
   assert.match(rendererSource, /const INITIAL_RENDER_WINDOW = 24;/, '初始挂载窗口必须存在且保持小窗口');
   assert.match(rendererSource, /const RENDER_WINDOW_STEP = 40;/, '窗口扩展步长必须存在');
-  assert.match(rendererSource, /state\.messages\.slice\(messageWindowStart\)/, '对话快照必须只取窗口内消息');
+  assert.match(
+    rendererSource,
+    /const MESSAGE_WINDOW_CAPACITY = \d+;/,
+    '必须有挂载容量硬上限，否则长会话回溯时挂载量随轮次增长'
+  );
+  assert.match(
+    rendererSource,
+    /state\.messages\.slice\(messageWindowStart, messageWindowEnd\)/,
+    '对话快照必须取有界区间 slice(start, end)，禁止 slice(start) 开放区间'
+  );
+  assert.doesNotMatch(
+    rendererSource,
+    /state\.messages\.slice\(messageWindowStart\)/,
+    '严禁保留开放区间切片：这正是挂载量只增不减的根因'
+  );
   assert.match(rendererSource, /messageWindowSessionId !== state\.activeSessionId/, '切会话必须重置窗口');
   assert.match(rendererSource, /const expanded = expandMessageWindow\(\);/, '顶部滚动必须先尝试扩展本地窗口');
-  assert.match(rendererSource, /messageWindowStart = 0;/, '加载更早批次后必须把批次纳入窗口');
+  assert.match(
+    rendererSource,
+    /slideMessageWindowForward\(\)/,
+    '向下滚到窗口尾部必须整体前移窗口，否则读者会撞上空白'
+  );
   assert.match(rendererSource, /applyStreamAnchor\(anchor, false\)/, '窗口扩展后必须重放滚动锚点');
 });
 

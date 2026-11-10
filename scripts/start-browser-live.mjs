@@ -24,6 +24,13 @@ const PORT = Number(process.env.PORT) || 9120;
 let sessionCookie = '';
 let lastKnownBaseUrl = '';
 
+process.on('uncaughtException', (err) => {
+  console.error('[Browser Live UncaughtException]', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[Browser Live UnhandledRejection]', reason);
+});
+
 /**
  * 【设计意图 (Why)】浏览器直跑模式下，凭据由用户在连接面板输入并经 PAL 桥透传到 /__gw/auth，
  *   服务端必须复刻桌面主进程 ipc.ts:167-216 的认证链路，而非依赖环境变量预登录。
@@ -123,11 +130,12 @@ async function authenticateWithCredentials(baseUrl, username, password) {
   return ticketData.ticket;
 }
 
-async function httpProxy(cookie, { baseUrl, path: p, method = 'GET', params, body, ticket }) {
+async function httpProxy(cookie, { baseUrl, path: p = '', method = 'GET', params, body, ticket } = {}) {
   const b = normalizeGatewayUrl(baseUrl);
   if (!b) throw new Error('未配置网关地址');
 
-  let fullUrl = `${b}${p.startsWith('/') ? '' : '/'}${p}`;
+  const safePath = (p || '').trim();
+  let fullUrl = safePath ? `${b}${safePath.startsWith('/') ? '' : '/'}${safePath}` : b;
   if (params && typeof params === 'object') {
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(params)) {

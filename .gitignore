@@ -45,3 +45,6 @@ bun.lock
 
 # CDP 测试现场打包产物（每次运行重建）
 packages/desktop/__tests__/cdp/.tmp/
+
+# OpenChamber 浏览器面板的截图与本地会话产物
+.openchamber/

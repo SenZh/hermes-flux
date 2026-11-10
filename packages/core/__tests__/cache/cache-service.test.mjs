@@ -241,3 +241,23 @@ test('消息：applyRemoteWindow 远端为空时清空围栏内全部本地行',
   assert.deepEqual(result.rows, []);
   assert.equal(result.evictedKeys.length, 2);
 });
+
+test('readOlderRows：按 beforeOrderKey 倒序读取更早历史消息，且遵循通道隔离', async () => {
+  const { service } = makeService();
+  await service.appendRows(REF, [row(1), row(2), row(3), row(4), row(5)]);
+  await service.appendRows(OTHER_REF, [row(10, { channelId: 's2' })]);
+
+  // 从 orderKey 4 往前读 2 条 -> 应该拿到 3, 2（倒序）
+  const older = await service.readOlderRows(REF, 4, 2);
+  assert.equal(older.length, 2);
+  assert.deepEqual(older.map((r) => r.orderKey), [3, 2]);
+
+  // 读到边界，没有更早历史时返回空数组
+  const none = await service.readOlderRows(REF, 1, 10);
+  assert.deepEqual(none, []);
+
+  // 跨通道查询互不干扰
+  const otherOlder = await service.readOlderRows(OTHER_REF, 20, 10);
+  assert.equal(otherOlder.length, 1);
+  assert.equal(otherOlder[0].orderKey, 10);
+});

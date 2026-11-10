@@ -49,7 +49,10 @@ export function ConversationMessageList({ snapshot }: { snapshot: ConversationSn
     return () => clearTimeout(timer);
   }, [snapshot.isLoadingOlder]);
 
-  return (
+  const virtualHeight = snapshot.virtualHeightPx && snapshot.virtualHeightPx > 0 ? snapshot.virtualHeightPx : 0;
+  const offset = snapshot.contentOffsetPx && snapshot.contentOffsetPx > 0 ? snapshot.contentOffsetPx : 0;
+
+  const content = (
     <>
       {showLoading ? (
         <div className="conv-history-indicator" data-loading="true">
@@ -70,4 +73,21 @@ export function ConversationMessageList({ snapshot }: { snapshot: ConversationSn
       ))}
     </>
   );
+
+  /**
+   * 【虚拟高度定位 (Rules)】长会话下窗口只挂载一段，必须把这段内容绝对定位到它在
+   *   全量历史中的真实纵向位置，同时把外层撑到"总条数 × 平均行高"。
+   *   这样 scrollHeight 恒定、滚动条比例稳定，且滚到任意位置都能看到对应内容而不是空白。
+   */
+  if (virtualHeight > 0) {
+    return (
+      <div className="conv-virtual-viewport" style={{ height: `${virtualHeight}px` }}>
+        <div className="conv-virtual-window" style={{ top: `${offset}px` }}>
+          {content}
+        </div>
+      </div>
+    );
+  }
+
+  return content;
 }

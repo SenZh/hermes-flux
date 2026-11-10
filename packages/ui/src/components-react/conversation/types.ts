@@ -52,6 +52,16 @@ export interface ConversationSnapshot {
   mode: ConversationMode;
   connection: ConnectionStatus;
   messages: ConversationMessageVM[];
+  /**
+   * 窗口内容在虚拟坐标中的纵向偏移（px）。
+   * 【设计意图 (Why)】窗口只挂载一部分消息时，原生滚动条只反映已挂载部分，
+   *   长会话滚动时 thumb 长度与位置会剧烈跳动。把内容绝对定位到"起点 × 平均行高"处，
+   *   容器高度固定为"总条数 × 平均行高"，scrollHeight 恒定，滚动条才稳定。
+   * 【约束与规则 (Rules)】由宿主按实测平均行高计算，组件不得自算。
+   */
+  contentOffsetPx?: number;
+  /** 虚拟总高度（px）= 总条数 × 平均行高；仅在消息数超过窗口容量时由宿主提供。 */
+  virtualHeightPx?: number;
   /** 整个会话真实读写过的文件；必须由宿主按完整消息集合计算，不能随窗口收缩。 */
   knownFiles?: readonly string[];
   /** 当前语言标识；纳入行组件比较，切换语言后已挂载消息也要重新渲染。 */

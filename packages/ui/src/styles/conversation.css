@@ -1524,6 +1524,24 @@ details[open] > summary > .tool-row__expand {
   animation: fadeIn 0.15s ease;
 }
 
+/* 未挂载消息的虚拟视口：外层撑出全量历史高度，内层按窗口起点绝对定位。
+   必须是纯高度、零绘制，否则会污染画布间距或吞掉点击。 */
+.conv-virtual-viewport {
+  position: relative;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.conv-virtual-window {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--conv-turn-gap);
+}
+
 .conv-history-indicator__spinner {
   width: 10px;
   height: 10px;
