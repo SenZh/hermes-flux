@@ -38,7 +38,7 @@ import {
 /** 面板可见行数：8 行 × 54px，与设计文档第 9 节一致。 */
 const PANEL_VISIBLE_ROWS = 8;
 /** 面板行高（px），滚轮一次正好滚一行。 */
-const PANEL_ROW_PX = 54;
+const PANEL_ROW_PX = 40;
 /** 面板滚动时额外挂载的上下文行数，避免滑行瞬间露出空白。 */
 const PANEL_OVERSCAN_ROWS = 2;
 /** 边缘轮播步进间隔。 */
@@ -438,18 +438,19 @@ export function PromptNavigatorRail({
 
   if (total < 2) return null;
 
-  const focusIndex = highlightedIndex === null ? activeIndex : highlightedIndex;
   const tickId = (index: number): string => `conv-prompt-tick-${index}`;
   const emptyPreview = t('conversation.promptNavigator.emptyPreview');
   const previewOf = (entry: PromptEntry | undefined): string =>
     entry && entry.preview ? entry.preview : emptyPreview;
 
   const ticks: React.ReactElement[] = [];
+  const hasHighlight = highlightedIndex !== null;
   for (let i = start; i < end; i += 1) {
     const entry = prompts[i];
     if (!entry) continue;
     const isActive = i === activeIndex;
     const isHighlighted = i === highlightedIndex;
+    const distance = hasHighlight ? Math.abs(i - (highlightedIndex ?? 0)) : 0;
     const label = isActive
       ? `${t('conversation.promptNavigator.currentPrompt')}: ${previewOf(entry)}`
       : previewOf(entry);
@@ -464,7 +465,7 @@ export function PromptNavigatorRail({
         aria-label={label}
         style={{
           top: `${i * RAIL_TICK_PITCH_PX}px`,
-          width: `${tickWidth(i - focusIndex, isActive, isHighlighted)}px`,
+          width: `${tickWidth(distance, isActive, isHighlighted, hasHighlight)}px`,
         }}
       >
         <span className="conv-prompt-rail__tick-bar" aria-hidden="true" />
@@ -498,6 +499,7 @@ export function PromptNavigatorRail({
             setPanelOpen(false);
           }}
         >
+          <span className="conv-prompt-rail__panel-index" aria-hidden="true">{i + 1}</span>
           <span className="conv-prompt-rail__panel-text">{previewOf(entry)}</span>
         </button>
       );

@@ -1643,12 +1643,12 @@ details[open] > summary > .tool-row__expand {
 
 .conv-prompt-rail {
   --conv-rail-pitch: 12px;
-  --conv-prompt-panel-row: 54px;
+  --conv-prompt-panel-row: 40px;
   --conv-prompt-panel-visible: 8;
 
   position: absolute;
   top: 50%;
-  right: 8px;
+  right: 14px;
   z-index: 20;
   display: flex;
   align-items: center;
@@ -1698,7 +1698,7 @@ details[open] > summary > .tool-row__expand {
   width: 100%;
   height: 2px;
   border-radius: 1px;
-  background: color-mix(in oklab, var(--foreground) 30%, transparent);
+  background: color-mix(in oklab, var(--foreground) 42%, transparent);
   transition: width 120ms ease, background-color 120ms ease;
 }
 
@@ -1718,12 +1718,13 @@ details[open] > summary > .tool-row__expand {
 .conv-prompt-rail__panel {
   position: absolute;
   top: 50%;
-  right: calc(100% + 8px);
+  right: calc(100% + 12px);
   z-index: 30;
-  width: min(20rem, calc(100vw - 6rem));
-  padding: 4px;
+  width: min(22rem, calc(100vw - 6rem));
+  padding: 6px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-inner, 6px);
+  border-top-color: var(--specular-line);
+  border-radius: var(--radius-panel, 8px);
   background: var(--popover);
   box-shadow: var(--shadow-card);
   transform: translateY(-50%);
@@ -1752,16 +1753,17 @@ details[open] > summary > .tool-row__expand {
   height: var(--conv-prompt-panel-row);
   display: flex;
   align-items: center;
+  gap: 10px;
   padding: 0 10px;
   border: none;
   border-radius: var(--radius-inner, 6px);
   background: transparent;
-  color: var(--muted-foreground);
+  color: var(--secondary-foreground);
   font-family: var(--conv-font-sans);
   font-size: var(--conv-meta-size);
   text-align: left;
   cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
 }
 
 .conv-prompt-rail__panel-row.is-active {
@@ -1769,7 +1771,23 @@ details[open] > summary > .tool-row__expand {
 }
 
 .conv-prompt-rail__panel-row.is-highlighted {
-  background: color-mix(in oklab, var(--foreground) 6%, transparent);
+  background: color-mix(in oklab, var(--foreground) 8%, transparent);
+  color: var(--foreground);
+  box-shadow: inset 2px 0 0 var(--foreground);
+}
+
+.conv-prompt-rail__panel-index {
+  flex: none;
+  min-width: 2.25rem;
+  font-family: var(--conv-font-mono);
+  font-size: var(--text-micro);
+  color: var(--muted-foreground);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.conv-prompt-rail__panel-row.is-active .conv-prompt-rail__panel-index,
+.conv-prompt-rail__panel-row.is-highlighted .conv-prompt-rail__panel-index {
   color: var(--foreground);
 }
 
