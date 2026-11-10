@@ -59,8 +59,8 @@
   --color-warning: var(--warning);
   --color-border: var(--border);
   --color-ring: var(--ring);
-  --font-ui: var(--font-sans);
-  --font-code: var(--font-mono);
+  /* 字体族映射不在这里：--font-* 需要先清空默认命名空间再重建，
+     若在清空之前定义，会被随后的 `--font-*: initial` 一并抹掉（已实测）。见下方独立块。 */
   /* 时长与缓动不在此定义：--duration-fast/--duration-normal 由 :root 节奏层（styles.css）单一来源持有，同名定义会造成隐式覆盖 */
 }
 
@@ -82,6 +82,29 @@
   --radius-*: initial;
   --shadow-*: initial;
   --text-*: initial;
+  /* 字体族同样清场。设计意图：全系统只承认两种字体角色——界面字体与代码字体，
+     二者都是皮肤槽位（--font-sans / --font-mono），由设置页在运行时写进 :root。
+     Tailwind 默认的 font-sans / font-serif / font-mono 各自携带一套写死的字体栈，
+     一旦可用，组件就会绕开用户偏好；清空后这三类不再生成任何 CSS。
+     防范的历史坑：font-sans 与皮肤变量同名，若写成 `@theme { --font-sans: var(--font-sans) }`
+     会自引用失效（同圆角段），因此只允许用 font-ui / font-code 两个新名字去引用槽位。 */
+  --font-*: initial;
+}
+
+/*
+ * 字体族只保留两个角色（必须写在清空块之后，否则会被 initial 抹掉）。
+ *
+ * 设计意图(Why)：界面字体与代码字体是仅有的两类字体语义，且都必须支持用户在设置里动态更换。
+ *   二者分别引用皮肤槽位 --font-sans / --font-mono（运行时由 applyFontPreferences 写到 :root），
+ *   组件只要写 font-ui / font-code 就自动跟随用户偏好，无法把字体写死。
+ * 防范的历史坑(Pitfall)：曾把这两条写在清空块之前，产物里 font-ui / font-code 根本不生成，
+ *   元素回落到 UA 的 monospace（已实测：<code> 计算字体为 monospace，与槽位无关）。
+ * 约束与规则(Rules)：槽位缺失时回落到系统栈，保证字体文件未加载也能正常阅读；
+ *   禁止在这里写死具体字体名以外的第二套真值，字体真值唯一面是 tokens/fonts.ts 的注册表。
+ */
+@theme inline {
+  --font-ui: var(--font-sans, system-ui, -apple-system, "Segoe UI", "PingFang SC", sans-serif);
+  --font-code: var(--font-mono, "JetBrains Mono", Consolas, monospace);
 }
 
 /*
