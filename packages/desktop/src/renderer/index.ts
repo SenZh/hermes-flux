@@ -1319,16 +1319,24 @@ function settleInitialBottom(attempt = 0): void {
       return;
     }
     const distance = stream.scrollHeight - stream.scrollTop - stream.clientHeight;
-    if (distance > 2) {
-      stream.scrollTop = stream.scrollHeight;
-      markProgrammaticScroll(stream);
-    } else {
+    /**
+     * 贴底走「窗口真实底边对齐」，不再依赖 scrollHeight：
+     * 虚拟高度是估算值，与窗口实际高度可差出上千像素。
+     */
+    const reserve = parseFloat(getComputedStyle(stream).paddingBottom) || 0;
+    scrollStreamToContentBottom(stream, reserve);
+    const after = Math.abs(stream.scrollHeight - stream.scrollTop - stream.clientHeight);
+    if (settleMinFrames > 0) {
+      settleMinFrames -= 1;
+    } else if (after <= 2 || Math.abs(distance - after) <= 2) {
       /**
-       * 【收敛条件 (Rules)】既贴住底部、虚拟全高也已生效时立即结束，
-       *   不必空转满 90 帧；全高未生效时继续跟随，等后续帧把它写进 scrollHeight。
+       * 【收敛条件 (Rules)】视口已贴在内容底（或本次已无法再推进）时结束，
+       *   不必空转满 90 帧。
        */
-      const expected = computeVirtualHeightPx();
-      if (expected <= 0 || stream.scrollHeight >= expected * 0.98) {
+      const virtualWindow = document.querySelector<HTMLElement>('.conv-virtual-window');
+      const windowBottom = virtualWindow?.getBoundingClientRect().bottom;
+      const safeBottom = stream.getBoundingClientRect().bottom - reserve;
+      if (windowBottom === undefined || Math.abs(windowBottom - safeBottom) <= 2) {
         initialBottomSettling = false;
         settledLayoutSignature = layoutSignature();
         return;
@@ -1423,6 +1431,37 @@ function syncStreamBottomInset(): void {
     dockInsetObserver.observe(dock);
     dockInsetTarget = dock;
   }
+}
+
+/**
+ * 贴底：窗口覆盖末尾时把窗口真实底边对齐到「输入舱上方安全线」，否则滚到 scrollHeight。
+ *
+ * 【设计意图 (Why)】虚拟高度是「总条数 × 平均行高」的估算，而单条消息行高差异极大。
+ *   实测 3538 条会话的末尾窗口真实高度 14451，估算份额却有 19068，两者差 4617。
+ *   此时按 scrollHeight 贴底，视口会落到最后一条真实消息之后——整屏空白。
+ *   直接测量窗口底边并对齐，与估算口径彻底解耦。
+ *
+ * 【约束与规则 (Rules)】只在窗口覆盖末尾时按测量值对齐；窗口在中间时仍以 scrollHeight 为准，
+ *   保证读者能看到尾部占位而不是被钉在窗口内部。
+ */
+function scrollStreamToContentBottom(stream: HTMLElement, reservePx: number): void {
+  const virtualWindow = document.querySelector<HTMLElement>('.conv-virtual-window');
+  if (virtualWindow && messageWindowEnd >= state.messages.length) {
+    const streamRect = stream.getBoundingClientRect();
+    const windowRect = virtualWindow.getBoundingClientRect();
+    /**
+     * 上限保护：窗口若因渲染缺失远高于安全线（例如内容尚未提交完），
+     * 一次性回拉过大反而会跳过内容，这里按一屏收敛。
+     */
+    const delta = Math.round(windowRect.bottom - (streamRect.bottom - reservePx));
+    if (Math.abs(delta) > 2) {
+      stream.scrollTop += delta;
+      markProgrammaticScroll(stream);
+    }
+    return;
+  }
+  stream.scrollTop = stream.scrollHeight;
+  markProgrammaticScroll(stream);
 }
 
 /**
@@ -2512,6 +2551,20 @@ let messageWindowStart = 0;
 let messageWindowEnd = 0;
 let messageWindowUserExpanded = false;
 /**
+ * 待处理的会话切换推送标记。
+ *
+ * 【设计意图 (Why)】切会话后窗口起点、平均行高与虚拟高度全部换了口径，
+ *   必须向 React 推一次快照。只靠「消息 id 有变化」判定不够稳：
+ *   一旦 `renderedMessageIds` 与新区间意外相同，列表就会停在旧窗口，
+ *   正文与虚拟坐标脱节，贴底直接落到空白区（实测 2738 条会话切回后整屏空白）。
+ *
+ * 【约束与规则 (Rules)】由 `ensureMessageWindow` 在会话切换时置位，
+ *   `syncReactMessageList` 推送后清空；不得跨会话残留。
+ */
+let sessionSwitchPending = false;
+/** 切会话后允许落定循环忽略收敛判据的剩余帧数，见 ensureMessageWindow 注释。 */
+let settleMinFrames = 0;
+/**
  * 滚动扩窗锁必须是模块级：render() 每次都会重绑 onscroll，局部锁会被新闭包重置，
  * 同一次手势就能连续扩窗，把锚点补偿推到列表底部。
  */
@@ -2581,7 +2634,21 @@ let olderLoadingStartedAt = 0;
  */
 function ensureMessageWindow(total: number): void {
   const sessionChanged = messageWindowSessionId !== state.activeSessionId;
-  if (sessionChanged) messageWindowSessionId = state.activeSessionId;
+  if (sessionChanged) {
+    messageWindowSessionId = state.activeSessionId;
+    /**
+     * 【切会话必须重锁行高 (Rules)】平均行高按窗口内容实测得出，换会话后窗口内容整体不同；
+     *   若沿用上一个会话的值，`总条数 × 平均行高` 与实际窗口高度就对不上，
+     *   贴底时视口会落到最后一条真实消息之后（实测 2738 条会话切回后整屏空白）。
+     *   这里只清锁定标记，真正的重量由 scheduleVirtualHeightSync 在 React 提交后执行。
+     */
+    averageRowHeightLocked = false;
+    averageRowHeightSessionId = '';
+    /** 切会话必须无条件推一次快照：窗口起点、行高、虚拟高度全部换了口径。 */
+    sessionSwitchPending = true;
+    /** 前 8 帧不判断收敛：此时 DOM 还是上一个会话的内容，容易误判"已经贴住"。 */
+    settleMinFrames = 8;
+  }
   const stream = document.getElementById('conversation-stream');
   const plan = planMessageWindow({
     total,
@@ -6203,7 +6270,22 @@ function lockAverageRowHeight(): boolean {
   const rows = canvas.querySelectorAll<HTMLElement>('[data-msg-id]');
   if (rows.length < 5) return false;
   let contentH = 0;
+  /**
+   * 【按消息去重累加 (Rules)】同一条消息会在行内渲染多个带 `data-msg-id` 的节点
+   *   （复制 / 重试 / 删除三个操作按钮都继承了该属性）。实测 120 条窗口里有 158 个节点、
+   *   只对应 68 条消息，逐节点累加会把平均行高抬高 32%，虚拟全高随之虚高，
+   *   贴底时视口落到最后一个真实内容之后（整屏空白）。
+   *   只累加「最外层同 id 节点」一次，才是这条消息真正占的高度。
+   */
+  const seenIds = new Set<string>();
   for (const row of rows) {
+    const id = row.getAttribute('data-msg-id');
+    if (id) {
+      if (seenIds.has(id)) continue;
+      const outerSame = row.parentElement?.closest('[data-msg-id]');
+      if (outerSame && outerSame.getAttribute('data-msg-id') === id) continue;
+      seenIds.add(id);
+    }
     const h = row.getBoundingClientRect().height;
     if (Number.isFinite(h) && h > 0) contentH += h;
   }
@@ -6234,10 +6316,28 @@ function computeContentOffsetPx(): number {
   return Math.round(messageWindowStart * averageRowHeightPx);
 }
 
-/** 虚拟总高度；未超过容量时返回 0，表示不启用虚拟定位。 */
+/**
+ * 虚拟总高度；未超过容量时返回 0，表示不启用虚拟定位。
+ *
+ * 【设计意图 (Why)】长会话里同一窗口内各行高度差异极大（实测 120 条窗口真实高度 14451，
+ *   而 `120 × 平均行高` 会算到 19000），单靠「总条数 × 平均行高」估算，
+ *   窗口底与虚拟底会差出上千像素。此时贴底就是把视口放到最后一条真实消息之后——整屏空白。
+ *   窗口覆盖末尾时改用「窗口偏移 + 窗口实测高度」，让虚拟底与内容底严格重合。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 只有窗口覆盖末尾才生效；窗口在中间时仍用估算，尾部还有占位补偿；
+ *   2. DOM 尚未提交时（拿不到窗口高度）回退到估算，绝不返回 0 以外的异常值。
+ */
 function computeVirtualHeightPx(): number {
   const total = state.messages.length;
   if (total <= MESSAGE_WINDOW_CAPACITY) return 0;
+  if (messageWindowEnd >= total) {
+    const virtualWindow = document.querySelector<HTMLElement>('.conv-virtual-window');
+    const realHeight = virtualWindow?.getBoundingClientRect().height ?? 0;
+    if (realHeight > 0) {
+      return Math.round(computeContentOffsetPx() + realHeight);
+    }
+  }
   return Math.round(total * averageRowHeightPx);
 }
 
@@ -6353,6 +6453,7 @@ function syncReactMessageList(force = false): void {
     renderedMessageIds = new Set(currentIds);
     lastSeenStreaming = isStreamingActiveForCurrentSession();
     lastSeenLoadingOlder = state.isLoadingOlder;
+    sessionSwitchPending = false;
     // 【首挂必须也锁定行高 (Rules)】首次挂载若跳过锁定，虚拟高度永不生效，
     // 实测 scrollHeight 停在 751118（= 7625×96 的默认估值）、滚动 11050px 只推进 0 条。
     scheduleVirtualHeightSync();
@@ -6369,10 +6470,11 @@ function syncReactMessageList(force = false): void {
     prevIds: renderedMessageIds,
     nextIds: currentIds,
     justStoppedStreaming,
-    force,
+    force: force || sessionSwitchPending,
     loadingOlderChanged,
   });
   if (shouldPush && reactMessageList) {
+    sessionSwitchPending = false;
     reactMessageList.update();
     renderedMessageIds = new Set(currentIds);
     // React 提交后锁定本会话平均行高并钉住画布虚拟高度，供占位与滚动条映射使用。
