@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   planOlderBatchPrependMerge,
+  planOlderBatchPrependMergeDetailed,
   planOlderPagination,
   countLocalCoveredRows,
 } from '../../dist/session/olderBatchMerge.js';
@@ -92,6 +93,59 @@ test('向早翻页合并 - 缓存恢复行（无 sessionId）按 fallback 归属
 
   const asParent = planOlderBatchPrependMerge(batch, [cached], { timelineSessionId: 'sess-C', fallbackSessionId: 'sess-D' });
   assert.deepEqual(asParent.map((m) => m.id), ['d-24000', 'cache-25000'], '父会话批次整体前置，缓存行不得被当成父行锚点');
+});
+
+test('向早翻页合并 - 首次翻父会话段且本地全是子会话行时，整批父行必须全部入列', () => {
+  // 复现审查实测：锚点被跨会话兜底抢走后，父段批次按「父 rowId < 子会话锚点」比较，
+  // 跨会话 rowId 空间无关，父行会被整批删光（实测 100 条父行 0 条入列），
+  // 而游标照常推进 → 父会话历史在本会话生命周期内永久不可达。
+  const current = [
+    { id: 'd-25000', rowId: 25000, sessionId: 'sess-D', rawTimestamp: 5000 },
+    { id: 'd-25001', rowId: 25001, sessionId: 'sess-D', rawTimestamp: 5001 },
+  ];
+  const batch = Array.from({ length: 100 }, (_, i) => ({
+    id: `c-${30000 + i}`,
+    rowId: 30000 + i,
+    sessionId: 'sess-C',
+    rawTimestamp: 4000 + i,
+  }));
+
+  const merged = planOlderBatchPrependMerge(batch, current, {
+    timelineSessionId: 'sess-C',
+    fallbackSessionId: 'sess-D',
+  });
+
+  assert.equal(merged.length, 102, '父会话段首批 100 行必须全部入列');
+  assert.equal(merged[0].sessionId, 'sess-C', '父行必须排在子会话行之前');
+  assert.equal(merged[100].id, 'd-25000', '子会话行紧随父段之后');
+});
+
+test('向早翻页合并 - 父段批次 rowId 全部小于叶会话锚点时仍按会话边界判定，不被跨会话比较误删', () => {
+  const current = [{ id: 'd-25000', rowId: 25000, sessionId: 'sess-D', rawTimestamp: 5000 }];
+  const batch = [
+    { id: 'c-10', rowId: 10, sessionId: 'sess-C', rawTimestamp: 1000 },
+    { id: 'c-11', rowId: 11, sessionId: 'sess-C', rawTimestamp: 1001 },
+  ];
+
+  const merged = planOlderBatchPrependMerge(batch, current, {
+    timelineSessionId: 'sess-C',
+    fallbackSessionId: 'sess-D',
+  });
+
+  assert.deepEqual(merged.map((m) => m.id), ['c-10', 'c-11', 'd-25000']);
+});
+
+test('向早翻页合并 - 详细版回传被丢弃行数，供上层区分「真重复」与「边界过滤」', () => {
+  const current = Array.from({ length: 130 }, (_, i) => row(1000 + i));
+  const laterBatch = Array.from({ length: 20 }, (_, i) => row(5000 + i));
+  const droppedAll = planOlderBatchPrependMergeDetailed(laterBatch, current, { timelineSessionId: 'sess' });
+  assert.equal(droppedAll.droppedCount, 20, '整批晚于锚点时丢弃行数必须如实回传');
+  assert.equal(droppedAll.merged.length, 130, '合并结果不变');
+
+  const duplicateBatch = current.slice(0, 10);
+  const duplicateOnly = planOlderBatchPrependMergeDetailed(duplicateBatch, current, { timelineSessionId: 'sess' });
+  assert.equal(duplicateOnly.droppedCount, 0, '纯重复批次不能被算作边界丢弃');
+  assert.equal(duplicateOnly.merged.length, 130, '纯重复批次不改变列表');
 });
 
 test('本地已覆盖行数下界 - 无 sessionId 的缓存恢复行计入，父会话行排除', () => {

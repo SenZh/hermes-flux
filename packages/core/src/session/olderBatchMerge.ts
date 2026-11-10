@@ -1,20 +1,20 @@
-/**
- * 历史消息批次向上拼接与安全合并纯函数 (packages/core/src/session/olderBatchMerge.ts)
+﻿/**
+ * 鍘嗗彶娑堟伅鎵规鍚戜笂鎷兼帴涓庡畨鍏ㄥ悎骞剁函鍑芥暟 (packages/core/src/session/olderBatchMerge.ts)
  *
- * 【设计意图 (Why)】
- *   向早翻页（Prepend）拉取回来的批次为更早的历史行，严禁使用正向追加的 planSessionLoadMerge，
- *   否则在批次较短且无重叠时会被判定为不同源而直接丢弃。
- *   必须专设纯函数处理头部拼接、重叠去重与时间线单调性。
+ * 銆愯璁℃剰鍥?(Why)銆?
+ *   鍚戞棭缈婚〉锛圥repend锛夋媺鍙栧洖鏉ョ殑鎵规涓烘洿鏃╃殑鍘嗗彶琛岋紝涓ョ浣跨敤姝ｅ悜杩藉姞鐨?planSessionLoadMerge锛?
+ *   鍚﹀垯鍦ㄦ壒娆¤緝鐭笖鏃犻噸鍙犳椂浼氳鍒ゅ畾涓轰笉鍚屾簮鑰岀洿鎺ヤ涪寮冦€?
+ *   蹇呴』涓撹绾嚱鏁板鐞嗗ご閮ㄦ嫾鎺ャ€侀噸鍙犲幓閲嶄笌鏃堕棿绾垮崟璋冩€с€?
  *
- * 【防范的历史坑 (Pitfall)】
- *   1. planSessionLoadMerge 短路分支将无重叠更早历史 100% 丢弃；
- *   2. 机械 [...batch, ...existing] 在分页重叠时导致同一条消息重复渲染两份；
- *   3. 临时无 rowId 消息被错误插到头部破坏列表顺序。
+ * 銆愰槻鑼冪殑鍘嗗彶鍧?(Pitfall)銆?
+ *   1. planSessionLoadMerge 鐭矾鍒嗘敮灏嗘棤閲嶅彔鏇存棭鍘嗗彶 100% 涓㈠純锛?
+ *   2. 鏈烘 [...batch, ...existing] 鍦ㄥ垎椤甸噸鍙犳椂瀵艰嚧鍚屼竴鏉℃秷鎭噸澶嶆覆鏌撲袱浠斤紱
+ *   3. 涓存椂鏃?rowId 娑堟伅琚敊璇彃鍒板ご閮ㄧ牬鍧忓垪琛ㄩ『搴忋€?
  *
- * 【约束与规则 (Rules)】
- *   - 纯函数，零 IO，输入不可变；
- *   - 以 rowId 或 id 作为唯一去重依据；
- *   - 保持持久行递增全序。
+ * 銆愮害鏉熶笌瑙勫垯 (Rules)銆?
+ *   - 绾嚱鏁帮紝闆?IO锛岃緭鍏ヤ笉鍙彉锛?
+ *   - 浠?rowId 鎴?id 浣滀负鍞竴鍘婚噸渚濇嵁锛?
+ *   - 淇濇寔鎸佷箙琛岄€掑鍏ㄥ簭銆?
  */
 
 export interface MinimalIdentifiedMessage {
@@ -26,15 +26,15 @@ export interface MinimalIdentifiedMessage {
 }
 
 /**
- * 本地已覆盖行数下界。
+ * 鏈湴宸茶鐩栬鏁颁笅鐣屻€?
  *
- * 【设计意图 (Why)】
- *   网关 `/messages` 的 offset 是「从最新端跳过的持久行数」，而本地列表是视图消息
- *   （工具行被吸收、隐藏行被过滤），条数只会少于行数。用视图条数作下界，
- *   保证翻页起点一定落在本地已覆盖区间内，绝不跳过未加载的真实历史。
- * 【约束与规则 (Rules)】只统计有持久 rowId 的行；带 sessionId 且不属于当前会话的行
- *   （父会话血缘）不计入。缺 sessionId 的缓存恢复行按计入处理——它可能高估，
- *   由翻页侧的一次性"高估回退"兜底，绝不因此把服务端仍有的一整段历史判成已到最早。
+ * 銆愯璁℃剰鍥?(Why)銆?
+ *   缃戝叧 `/messages` 鐨?offset 鏄€屼粠鏈€鏂扮璺宠繃鐨勬寔涔呰鏁般€嶏紝鑰屾湰鍦板垪琛ㄦ槸瑙嗗浘娑堟伅
+ *   锛堝伐鍏疯琚惛鏀躲€侀殣钘忚琚繃婊わ級锛屾潯鏁板彧浼氬皯浜庤鏁般€傜敤瑙嗗浘鏉℃暟浣滀笅鐣岋紝
+ *   淇濊瘉缈婚〉璧风偣涓€瀹氳惤鍦ㄦ湰鍦板凡瑕嗙洊鍖洪棿鍐咃紝缁濅笉璺宠繃鏈姞杞界殑鐪熷疄鍘嗗彶銆?
+ * 銆愮害鏉熶笌瑙勫垯 (Rules)銆戝彧缁熻鏈夋寔涔?rowId 鐨勮锛涘甫 sessionId 涓斾笉灞炰簬褰撳墠浼氳瘽鐨勮
+ *   锛堢埗浼氳瘽琛€缂橈級涓嶈鍏ャ€傜己 sessionId 鐨勭紦瀛樻仮澶嶈鎸夎鍏ュ鐞嗏€斺€斿畠鍙兘楂樹及锛?
+ *   鐢辩炕椤典晶鐨勪竴娆℃€?楂樹及鍥為€€"鍏滃簳锛岀粷涓嶅洜姝ゆ妸鏈嶅姟绔粛鏈夌殑涓€鏁存鍘嗗彶鍒ゆ垚宸插埌鏈€鏃┿€?
  */
 export function countLocalCoveredRows(
   messages: readonly MinimalIdentifiedMessage[] | null | undefined,
@@ -51,15 +51,15 @@ export function countLocalCoveredRows(
 }
 
 export interface OlderPaginationPlanInput {
-  /** 现有游标：已确认从最新端覆盖的行数 */
+  /** 鐜版湁娓告爣锛氬凡纭浠庢渶鏂扮瑕嗙洊鐨勮鏁?*/
   storedOffset: number;
-  /** 本地已覆盖行数下界（countLocalCoveredRows 的结果） */
+  /** 鏈湴宸茶鐩栬鏁颁笅鐣岋紙countLocalCoveredRows 鐨勭粨鏋滐級 */
   localCoveredRows: number;
-  /** 本批网关返回行数；为 0 表示只求请求起点 */
+  /** 鏈壒缃戝叧杩斿洖琛屾暟锛涗负 0 琛ㄧず鍙眰璇锋眰璧风偣 */
   returned: number;
-  /** 本批按网关升序的持久行 id */
+  /** 鏈壒鎸夌綉鍏冲崌搴忕殑鎸佷箙琛?id */
   batchRowIds: readonly number[];
-  /** 本地最早一条持久行 id */
+  /** 鏈湴鏈€鏃╀竴鏉℃寔涔呰 id */
   earliestLocalRowId: number | null;
 }
 
@@ -69,21 +69,21 @@ export interface OlderPaginationPlan {
 }
 
 /**
- * 向早翻页的游标规划。
+ * 鍚戞棭缈婚〉鐨勬父鏍囪鍒掋€?
  *
- * 【设计意图 (Why)】
- *   游标必须同时满足两条：① 请求起点不小于本地已覆盖行数，否则重复拉取且每次
- *   只推进一部分，缺口累积后直接跳过整段历史；② 批次命中本地最早行时按该行的
- *   精确位置收敛，避免每轮都从头重叠。
- * 【防范的历史坑 (Pitfall)】
- *   首屏 REST 只回 100 行而合并保留了本地 1130 条视图时，旧代码把游标记成 100，
- *   之后每轮 `offset += returned(500)`，游标很快越过本地真实覆盖边界，
- *   中途一整段历史永远不再加载，最终 `returned = 0` 被误判为「已到最早」。
- * 【约束与规则 (Rules)】
- *   1. 纯函数、零 IO；
- *   2. `nextOffset` 单调不减，且不超过 `queryOffset + returned`；
- *   3. 命中本地最早行时取「保守滞后」边界：宁可多拉一轮重叠，也不跳过该行之前尚未落地的行；
- *   4. 无法定位本地最早行时按 `returned` 推进，与网关分页语义一致。
+ * 銆愯璁℃剰鍥?(Why)銆?
+ *   娓告爣蹇呴』鍚屾椂婊¤冻涓ゆ潯锛氣憼 璇锋眰璧风偣涓嶅皬浜庢湰鍦板凡瑕嗙洊琛屾暟锛屽惁鍒欓噸澶嶆媺鍙栦笖姣忔
+ *   鍙帹杩涗竴閮ㄥ垎锛岀己鍙ｇ疮绉悗鐩存帴璺宠繃鏁存鍘嗗彶锛涒憽 鎵规鍛戒腑鏈湴鏈€鏃╄鏃舵寜璇ヨ鐨?
+ *   绮剧‘浣嶇疆鏀舵暃锛岄伩鍏嶆瘡杞兘浠庡ご閲嶅彔銆?
+ * 銆愰槻鑼冪殑鍘嗗彶鍧?(Pitfall)銆?
+ *   棣栧睆 REST 鍙洖 100 琛岃€屽悎骞朵繚鐣欎簡鏈湴 1130 鏉¤鍥炬椂锛屾棫浠ｇ爜鎶婃父鏍囪鎴?100锛?
+ *   涔嬪悗姣忚疆 `offset += returned(500)`锛屾父鏍囧緢蹇秺杩囨湰鍦扮湡瀹炶鐩栬竟鐣岋紝
+ *   涓€斾竴鏁存鍘嗗彶姘歌繙涓嶅啀鍔犺浇锛屾渶缁?`returned = 0` 琚鍒や负銆屽凡鍒版渶鏃┿€嶃€?
+ * 銆愮害鏉熶笌瑙勫垯 (Rules)銆?
+ *   1. 绾嚱鏁般€侀浂 IO锛?
+ *   2. `nextOffset` 鍗曡皟涓嶅噺锛屼笖涓嶈秴杩?`queryOffset + returned`锛?
+ *   3. 鍛戒腑鏈湴鏈€鏃╄鏃跺彇銆屼繚瀹堟粸鍚庛€嶈竟鐣岋細瀹佸彲澶氭媺涓€杞噸鍙狅紝涔熶笉璺宠繃璇ヨ涔嬪墠灏氭湭钀藉湴鐨勮锛?
+ *   4. 鏃犳硶瀹氫綅鏈湴鏈€鏃╄鏃舵寜 `returned` 鎺ㄨ繘锛屼笌缃戝叧鍒嗛〉璇箟涓€鑷淬€?
  */
 export function planOlderPagination(input: OlderPaginationPlanInput): OlderPaginationPlan {
   const storedOffset = Number.isFinite(input.storedOffset) && input.storedOffset > 0
@@ -101,27 +101,39 @@ export function planOlderPagination(input: OlderPaginationPlanInput): OlderPagin
     const indexInBatch = input.batchRowIds.findIndex((id) => id === earliest);
     if (indexInBatch >= 0) nextOffset = queryOffset + indexInBatch + 1;
   }
-  // 上界硬约束：无论批内下标如何，单轮推进都不得超过本批实际返回的行数。
+  // 涓婄晫纭害鏉燂細鏃犺鎵瑰唴涓嬫爣濡備綍锛屽崟杞帹杩涢兘涓嶅緱瓒呰繃鏈壒瀹為檯杩斿洖鐨勮鏁般€?
   return { queryOffset, nextOffset: Math.max(queryOffset, Math.min(nextOffset, queryOffset + returned)) };
 }
 
 export interface OlderBatchMergeOptions {
   /**
-   * 批次所属会话 id。
+   * 鎵规鎵€灞炰細璇?id銆?
    *
-   * 【设计意图 (Why)】列表头部可能已经是更早的父会话血缘行；若用「第一条有 rowId 的行」
-   *   当锚点，锚点会被父行夺走，本会话更晚的行就会被整批塞到父历史之前。
-   * 【约束与规则 (Rules)】提供该 id 时，锚点与插入点都只按该会话的行判定；
-   *   缺省保持旧行为，供既有调用方兼容。
+   * 銆愯璁℃剰鍥?(Why)銆戝垪琛ㄥご閮ㄥ彲鑳藉凡缁忔槸鏇存棭鐨勭埗浼氳瘽琛€缂樿锛涜嫢鐢ㄣ€岀涓€鏉℃湁 rowId 鐨勮銆?
+   *   褰撻敋鐐癸紝閿氱偣浼氳鐖惰澶鸿蛋锛屾湰浼氳瘽鏇存櫄鐨勮灏变細琚暣鎵瑰鍒扮埗鍘嗗彶涔嬪墠銆?
+   * 銆愮害鏉熶笌瑙勫垯 (Rules)銆戞彁渚涜 id 鏃讹紝閿氱偣涓庢彃鍏ョ偣閮藉彧鎸夎浼氳瘽鐨勮鍒ゅ畾锛?
+   *   缂虹渷淇濇寔鏃ц涓猴紝渚涙棦鏈夎皟鐢ㄦ柟鍏煎銆?
    */
   timelineSessionId?: string;
   /**
-   * 缺失 sessionId 的行的归属会话（通常是当前叶子会话）。
+   * 缂哄け sessionId 鐨勮鐨勫綊灞炰細璇濓紙閫氬父鏄綋鍓嶅彾瀛愪細璇濓級銆?
    *
-   * 【设计意图 (Why)】持久缓存恢复出来的行不带 sessionId；把它们当成「属于任何时间线」
-   *   会让父会话批次找到错误插入点，也会让本会话批次认错锚点。
+   * 銆愯璁℃剰鍥?(Why)銆戞寔涔呯紦瀛樻仮澶嶅嚭鏉ョ殑琛屼笉甯?sessionId锛涙妸瀹冧滑褰撴垚銆屽睘浜庝换浣曟椂闂寸嚎銆?
+   *   浼氳鐖朵細璇濇壒娆℃壘鍒伴敊璇彃鍏ョ偣锛屼篃浼氳鏈細璇濇壒娆¤閿欓敋鐐广€?
    */
   fallbackSessionId?: string;
+}
+
+export interface OlderBatchMergeResult<T> {
+  merged: T[];
+  /**
+   * 琚€屾洿鏃╄竟鐣屻€嶄涪寮冪殑琛屾暟銆?
+   *
+   * 銆愯璁℃剰鍥?(Why)銆戣皟鐢ㄦ柟蹇呴』鑳藉尯鍒嗕袱绉嶃€屽噣澧炰负 0銆嶏細鏁存壒閮芥槸宸叉寔鏈夌殑閲嶅琛?
+   *   锛堝彲浠ユ斁蹇冩帹杩涙父鏍囷級锛屼互鍙婃暣鎵硅杈圭晫杩囨护锛堣鏄庨敋鐐瑰彛寰勪笌鎵规浼氳瘽涓嶄竴鑷达紝
+   *   鎺ㄨ繘娓告爣灏辨槸姘镐箙涓㈡帀杩欐鍘嗗彶锛夈€傚彧鍥炰紶鍚堝苟缁撴灉鏃犳硶鍒嗚鲸銆?
+   */
+  droppedCount: number;
 }
 
 export function planOlderBatchPrependMerge<T extends MinimalIdentifiedMessage>(
@@ -129,11 +141,24 @@ export function planOlderBatchPrependMerge<T extends MinimalIdentifiedMessage>(
   currentMessages: readonly T[],
   options?: OlderBatchMergeOptions
 ): T[] {
+  return planOlderBatchPrependMergeDetailed(olderBatch, currentMessages, options).merged;
+}
+
+/**
+ * 涓?`planOlderBatchPrependMerge` 鍚屾簮锛岄澶栧洖浼犺涓㈠純琛屾暟銆?
+ *
+ * 銆愮害鏉熶笌瑙勫垯 (Rules)銆戠函鍑芥暟銆侀浂 IO锛屼袱澶勫鍑哄叡鐢ㄥ悓涓€浠藉疄鐜帮紝绂佹鍚勫啓涓€濂楄竟鐣屽垽瀹氥€?
+ */
+export function planOlderBatchPrependMergeDetailed<T extends MinimalIdentifiedMessage>(
+  olderBatch: readonly T[],
+  currentMessages: readonly T[],
+  options?: OlderBatchMergeOptions
+): OlderBatchMergeResult<T> {
   if (!olderBatch || olderBatch.length === 0) {
-    return currentMessages ? [...currentMessages] : [];
+    return { merged: currentMessages ? [...currentMessages] : [], droppedCount: 0 };
   }
   if (!currentMessages || currentMessages.length === 0) {
-    return [...olderBatch];
+    return { merged: [...olderBatch], droppedCount: 0 };
   }
 
   const timelineId = options?.timelineSessionId;
@@ -141,7 +166,7 @@ export function planOlderBatchPrependMerge<T extends MinimalIdentifiedMessage>(
   const belongsToTimeline = (m: T): boolean =>
     Boolean(timelineId) && (m.sessionId ?? fallbackId) === timelineId;
 
-  // 确保 olderBatch 自身是按时间/行号升序排列（防御网关 order=latest 返回从新到旧的 DESC 序列）
+  // 纭繚 olderBatch 鑷韩鏄寜鏃堕棿/琛屽彿鍗囧簭鎺掑垪锛堥槻寰＄綉鍏?order=latest 杩斿洖浠庢柊鍒版棫鐨?DESC 搴忓垪锛?
   const normalizedOlder = [...olderBatch].sort((a, b) => {
     const ta = typeof a.rawTimestamp === 'number' ? a.rawTimestamp : 0;
     const tb = typeof b.rawTimestamp === 'number' ? b.rawTimestamp : 0;
@@ -151,7 +176,7 @@ export function planOlderBatchPrependMerge<T extends MinimalIdentifiedMessage>(
     return ra - rb;
   });
 
-  // 构造复合唯一去重键：(sessionId, rowId) 复合键优先，彻底杜绝父子会话局部 rowId 碰撞
+  // 鏋勯€犲鍚堝敮涓€鍘婚噸閿細(sessionId, rowId) 澶嶅悎閿紭鍏堬紝褰诲簳鏉滅粷鐖跺瓙浼氳瘽灞€閮?rowId 纰版挒
   const compositeKey = (m: T): string => {
     const sess = m.sessionId || '';
     if (typeof m.rowId === 'number' && m.rowId > 0) {
@@ -165,22 +190,22 @@ export function planOlderBatchPrependMerge<T extends MinimalIdentifiedMessage>(
   };
 
   /**
-   * 只接受「严格早于本会话在本地的最早持久行」的行。
+   * 鍙帴鍙椼€屼弗鏍兼棭浜庢湰浼氳瘽鍦ㄦ湰鍦扮殑鏈€鏃╂寔涔呰銆嶇殑琛屻€?
    *
-   * 【防范的历史坑 (Pitfall)】
-   *   游标落后于本地已覆盖行数时，网关批次会同时包含更早行、已持有行和比本地最早行
-   *   更晚的行。旧实现把所有「不在当前集合」的行一律头插，等于把更晚的行搬到列表
-   *   最前面：首行 rowId 反而变大、时间线倒挂。宁可丢弃无法证明更早的行（下轮还能
-   *   重新拉到），也绝不允许列表失序。
-   * 【约束与规则 (Rules)】
-   *   1. 锚点只取 `timelineSessionId` 对应会话的行，父会话血缘行不参与比较；
-   *   2. 跨会话（父会话血缘）行不参与 rowId 边界比较，继续按时间线前置。
+   * 銆愰槻鑼冪殑鍘嗗彶鍧?(Pitfall)銆?
+   *   娓告爣钀藉悗浜庢湰鍦板凡瑕嗙洊琛屾暟鏃讹紝缃戝叧鎵规浼氬悓鏃跺寘鍚洿鏃╄銆佸凡鎸佹湁琛屽拰姣旀湰鍦版渶鏃╄
+   *   鏇存櫄鐨勮銆傛棫瀹炵幇鎶婃墍鏈夈€屼笉鍦ㄥ綋鍓嶉泦鍚堛€嶇殑琛屼竴寰嬪ご鎻掞紝绛変簬鎶婃洿鏅氱殑琛屾惉鍒板垪琛?
+   *   鏈€鍓嶉潰锛氶琛?rowId 鍙嶈€屽彉澶с€佹椂闂寸嚎鍊掓寕銆傚畞鍙涪寮冩棤娉曡瘉鏄庢洿鏃╃殑琛岋紙涓嬭疆杩樿兘
+   *   閲嶆柊鎷夊埌锛夛紝涔熺粷涓嶅厑璁稿垪琛ㄥけ搴忋€?
+   * 銆愮害鏉熶笌瑙勫垯 (Rules)銆?
+   *   1. 鎻愪緵 `timelineSessionId` 鏃讹紝閿氱偣涓ユ牸闄愬畾鍦ㄨ浼氳瘽鐨勮鍐咃紱鏈細璇濆湪鏈湴灏氭棤浠讳綍琛?
+   *      锛堥娆＄炕鐖朵細璇濇锛夋椂閿氱偣涓?undefined锛屾暣鎵规斁琛?鈥斺€?璺ㄤ細璇?rowId 绌洪棿鏃犲叧锛?
+   *      鎷垮埆鐨勪細璇濋琛屽綋閿氱偣浼氭妸鏁存壒鐖朵細璇濆巻鍙插垹鍏夛紱
+   *   2. 璺ㄤ細璇濓紙鐖朵細璇濊缂橈級琛屼笉鍙備笌 rowId 杈圭晫姣旇緝锛岀户缁寜鏃堕棿绾垮墠缃€?
    */
-  const anchor = (
-    timelineId
-      ? currentMessages.find((m) => belongsToTimeline(m) && typeof m.rowId === 'number' && m.rowId > 0)
-      : undefined
-  ) ?? currentMessages.find((m) => typeof m.rowId === 'number' && m.rowId > 0);
+  const anchor = timelineId
+    ? currentMessages.find((m) => belongsToTimeline(m) && typeof m.rowId === 'number' && m.rowId > 0)
+    : currentMessages.find((m) => typeof m.rowId === 'number' && m.rowId > 0);
   const strictlyEarlier = (m: T): boolean => {
     if (!anchor || typeof anchor.rowId !== 'number') return true;
     if (typeof m.rowId !== 'number' || !(m.rowId > 0)) return true;
@@ -191,12 +216,24 @@ export function planOlderBatchPrependMerge<T extends MinimalIdentifiedMessage>(
     return m.rowId < anchor.rowId;
   };
   const boundedOlder = normalizedOlder.filter(strictlyEarlier);
+  /**
+   * 琚€屾洿鏃╄竟鐣屻€嶄涪鎺夈€佷笖鏈湴纭疄娌℃湁鐨勮鐨勬暟閲忋€?
+   *
+   * 銆愯璁℃剰鍥?(Why)銆戜笂灞傝鐢ㄥ畠鍖哄垎涓ょ銆屽噣澧炰负 0銆嶏細鏁存壒閮芥槸鏈湴宸叉寔鏈夌殑閲嶅琛?
+   *   锛堝彲浠ユ斁蹇冩帹杩涙父鏍囷級锛岃繕鏄暣鎵硅杈圭晫杩囨护涓旀湰鍦颁粠鏈湁杩囷紙鎺ㄨ繘娓告爣灏辨槸姘镐箙涓㈠巻鍙诧級銆?
+   *   鐩存帴鎶婅繃婊ゆ潯鏁板綋涓㈠純鏁颁細鎶婇噸鍙犳壒娆¤鎶ユ垚鍗遍櫓锛屽鑷存湰璇ユ帹杩涚殑娓告爣琚崱浣忋€?
+   */
+  const heldKeys = new Set<string>();
+  for (const m of currentMessages) heldKeys.add(compositeKey(m));
+  const droppedUnseenCount = normalizedOlder.filter(
+    (m) => !strictlyEarlier(m) && !heldKeys.has(compositeKey(m))
+  ).length;
 
   /**
-   * 批次插入点：跳过列表头部更早的父会话血缘行，插到本会话第一行之前。
+   * 鎵规鎻掑叆鐐癸細璺宠繃鍒楄〃澶撮儴鏇存棭鐨勭埗浼氳瘽琛€缂樿锛屾彃鍒版湰浼氳瘽绗竴琛屼箣鍓嶃€?
    *
-   * 【防范的历史坑 (Pitfall)】无条件 `[...older, ...current]` 会把本会话更早的批次
-   *   塞到父会话历史之前，冷启动后 exhausted 标记清零时会真实发生。
+   * 銆愰槻鑼冪殑鍘嗗彶鍧?(Pitfall)銆戞棤鏉′欢 `[...older, ...current]` 浼氭妸鏈細璇濇洿鏃╃殑鎵规
+   *   濉炲埌鐖朵細璇濆巻鍙蹭箣鍓嶏紝鍐峰惎鍔ㄥ悗 exhausted 鏍囪娓呴浂鏃朵細鐪熷疄鍙戠敓銆?
    */
   const insertionIndex = (() => {
     if (!timelineId) return 0;
@@ -209,18 +246,18 @@ export function planOlderBatchPrependMerge<T extends MinimalIdentifiedMessage>(
     ...currentMessages.slice(insertionIndex),
   ];
 
-  // 1. 查找是否存在重叠消息
-  // 从 currentMessages 头部取第一条消息，看是否在 boundedOlder 中存在
+  // 1. 鏌ユ壘鏄惁瀛樺湪閲嶅彔娑堟伅
+  // 浠?currentMessages 澶撮儴鍙栫涓€鏉℃秷鎭紝鐪嬫槸鍚﹀湪 boundedOlder 涓瓨鍦?
   const firstCurrent = currentMessages[0];
   const overlapIdxInOlder = boundedOlder.findIndex((m) => matchKey(m, firstCurrent));
 
   if (overlapIdxInOlder >= 0) {
-    // boundedOlder 的 [0, overlapIdxInOlder) 是纯更早的消息
+    // boundedOlder 鐨?[0, overlapIdxInOlder) 鏄函鏇存棭鐨勬秷鎭?
     const pureOlderHead = boundedOlder.slice(0, overlapIdxInOlder);
-    return spliceOlder(pureOlderHead);
+    return { merged: spliceOlder(pureOlderHead), droppedCount: droppedUnseenCount };
   }
 
-  // 2. 如果第一条未匹配，全量扫描 boundedOlder 中是否包含任何已存在的消息
+  // 2. 濡傛灉绗竴鏉℃湭鍖归厤锛屽叏閲忔壂鎻?boundedOlder 涓槸鍚﹀寘鍚换浣曞凡瀛樺湪鐨勬秷鎭?
   const currentKeySet = new Set<string>();
   for (const m of currentMessages) {
     currentKeySet.add(compositeKey(m));
@@ -233,5 +270,5 @@ export function planOlderBatchPrependMerge<T extends MinimalIdentifiedMessage>(
     }
   }
 
-  return spliceOlder(deduplicatedOlder);
+  return { merged: spliceOlder(deduplicatedOlder), droppedCount: droppedUnseenCount };
 }

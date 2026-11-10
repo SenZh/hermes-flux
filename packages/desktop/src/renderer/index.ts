@@ -175,6 +175,7 @@ import {
   type CachedMessageRow,
   type CacheChannelRef,
   planOlderBatchPrependMerge,
+  planOlderBatchPrependMergeDetailed,
   planOlderPagination,
   countLocalCoveredRows,
   resolveLineageChain,
@@ -3491,6 +3492,9 @@ async function loadOlderMessages(): Promise<void> {
            */
           if (targetId === sessionId && !floorSuppressed && queryOffset > storedOffset) {
             sessionOvershootRetry.add(cursorKey);
+            // 回退必须同时清掉分页表里的旧值：读取顺序是 parentOffset ?? serverOffset，
+            // 只改后者会被前一轮写入的大游标完全遮蔽，回退永不生效。
+            sessionParentOffsetMap.delete(cursorKey);
             sessionServerOffset.set(sessionId, storedOffset);
             continue;
           }
@@ -3500,6 +3504,42 @@ async function loadOlderMessages(): Promise<void> {
         }
 
         const returned = outcome.pagination?.returned ?? outcome.messages.length;
+
+        // 压缩摘要节点是纯机器交接文本，原始消息已随 include_compacted 一并返回。
+        // 【行序守恒 (Rules)】这里绝不能删 hidden 行：本地数组必须与服务端数组逐行对应，
+        // 删行会让 fork 切点与分页 offset 漂移。hidden 行一律交给 visibility 层过滤。
+        // 只保留「kind 缺失的存量行」前缀兜底，避免整块 [CONTEXT COMPACTION 措手无策。
+        const payload = outcome.messages.filter((m) => {
+          if (typeof m.display_kind === 'string' && m.display_kind.length > 0) return true;
+          const text = typeof m.content === 'string' ? m.content : '';
+          return !text.startsWith('[CONTEXT COMPACTION');
+        });
+        const batch = parseRawMessages(payload);
+
+        const before = state.messages.length;
+        const mergeResult = planOlderBatchPrependMergeDetailed(batch, state.messages, {
+          timelineSessionId: targetId,
+          fallbackSessionId: sessionId,
+        });
+        const added = mergeResult.merged.length - before;
+
+        if (added <= 0 && mergeResult.droppedCount > 0) {
+          /**
+           * 【边界异常 (Rules)】整批被「更早边界」丢掉，说明锚点口径与批次会话不一致。
+           * 此时绝不能推进游标：行没拿到、游标又前移，等于把这段历史永久丢失。
+           * 停在本段并显式留痕，交由上层血缘继续。
+           */
+          logSession.warn('older batch fully dropped by earlier-boundary filter', {
+            sessionId,
+            targetId,
+            queryOffset,
+            returned,
+            dropped: mergeResult.droppedCount,
+          });
+          sessionServerOffset.set(`${cursorKey}:exhausted`, 1);
+          break;
+        }
+
         /**
          * 【保守收敛 (Rules)】批次若命中本地最早行，只推进到该行的批次位置，
          *   多拉一轮重叠也不跳过省下的行；推进上界严格不超过 `queryOffset + returned`。
@@ -3517,20 +3557,7 @@ async function loadOlderMessages(): Promise<void> {
         sessionParentOffsetMap.set(cursorKey, cursorPlan.nextOffset);
         if (targetId === sessionId) sessionServerOffset.set(sessionId, cursorPlan.nextOffset);
 
-        // 压缩摘要节点是纯机器交接文本，原始消息已随 include_compacted 一并返回。
-        // 【行序守恒 (Rules)】这里绝不能删 hidden 行：本地数组必须与服务端数组逐行对应，
-        // 删行会让 fork 切点与分页 offset 漂移。hidden 行一律交给 visibility 层过滤。
-        // 只保留「kind 缺失的存量行」前缀兜底，避免整块 [CONTEXT COMPACTION 措手无策。
-        const payload = outcome.messages.filter((m) => {
-          if (typeof m.display_kind === 'string' && m.display_kind.length > 0) return true;
-          const text = typeof m.content === 'string' ? m.content : '';
-          return !text.startsWith('[CONTEXT COMPACTION');
-        });
-        const batch = parseRawMessages(payload);
-
-        const before = state.messages.length;
-        state.messages = planOlderBatchPrependMerge(batch, state.messages, { timelineSessionId: targetId, fallbackSessionId: sessionId });
-        const added = state.messages.length - before;
+        state.messages = mergeResult.merged;
 
         if (added <= 0) {
           // 整页都是本地缓存已有的行：游标已前进，继续拉下一页
@@ -3590,6 +3617,8 @@ async function loadOlderMessages(): Promise<void> {
     }
   } catch (err) {
     console.warn('[Flux] loadOlderMessages failed:', err);
+    // 【失败不等于到底 (Rules)】未受控异常同样不是「已到最早」，保留入口等下次重试。
+    fetchFailed = true;
   }
 
   // 全部血缘节点耗尽或拉取不到更早消息：彻底收敛，停掉顶部加载动画。

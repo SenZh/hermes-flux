@@ -30,9 +30,15 @@ test('历史翻页与 Profile 透传接线守卫', async (t) => {
     assert.equal(hasProfileParam, true, 'loadOlderMessages 内部的 fetchSessionMessages 必须显式携带 profile: resolvedProfile');
   });
 
-  await t.test('2. loadOlderMessages 必须使用 planOlderBatchPrependMerge 纯函数合并历史，严禁暴力头插', () => {
-    const hasPrependMerge = /state\.messages = planOlderBatchPrependMerge\(\s*batch,\s*state\.messages(?:,\s*\{[^}]*\})?\s*\);/.test(rendererSource);
-    assert.equal(hasPrependMerge, true, '必须使用 planOlderBatchPrependMerge 处理历史批次，严禁裸 [...batch, ...state.messages]');
+  await t.test('2. loadOlderMessages 必须使用计划器合并历史，严禁暴力头插', () => {
+    const hasPrependMerge =
+      /const mergeResult = planOlderBatchPrependMergeDetailed\(batch, state\.messages, \{[\s\S]*?\}\);/.test(rendererSource)
+      || /state\.messages = planOlderBatchPrependMerge\(\s*batch,\s*state\.messages(?:,\s*\{[^}]*\})?\s*\);/.test(rendererSource);
+    assert.equal(hasPrependMerge, true, '必须使用 core 的向早合并计划器处理历史批次，严禁裸 [...batch, ...state.messages]');
+    assert.ok(
+      rendererSource.includes('state.messages = mergeResult.merged;'),
+      '详细版合并结果必须落到 state.messages，否则丢弃行数判定与列表内容会脱钩'
+    );
     const rawPrepend = rendererSource.includes('state.messages = [...batch, ...state.messages];');
     assert.equal(rawPrepend, false, '严禁保留裸 [...batch, ...state.messages] 暴力头插');
   });
@@ -93,8 +99,16 @@ test('历史翻页与 Profile 透传接线守卫', async (t) => {
       '实际请求必须使用 queryOffset，禁止算出后丢弃（变异 void queryOffset 必须变红）'
     );
     assert.ok(
-      tail.includes('sessionOvershootRetry'),
-      '必须有"本地下界高估"的一次性回退，否则越过服务端末尾会被误判为已到最早'
+      /sessionOvershootRetry\.add\(cursorKey\)[\s\S]{0,400}continue;/.test(tail),
+      '高估回退必须真的重拉（add 标记后 continue），写成 void 占位等于没有回退'
+    );
+    assert.ok(
+      /sessionOvershootRetry\.add\(cursorKey\)[\s\S]{0,200}sessionParentOffsetMap\.delete\(cursorKey\)/.test(tail),
+      '回退必须同时清分页表旧游标，否则 parentOffset 会完全遮蔽回退'
+    );
+    assert.ok(
+      tail.includes('planOlderBatchPrependMergeDetailed'),
+      '父段整批被边界过滤时必须拿到丢弃行数，禁止静默推进游标'
     );
   });
 
@@ -102,7 +116,10 @@ test('历史翻页与 Profile 透传接线守卫', async (t) => {
     const start = rendererSource.indexOf('const serverKnownCount');
     const fastRest = start >= 0 ? rendererSource.slice(start, start + 1200) : '';
     assert.ok(fastRest.includes('countLocalCoveredRows(merged, sessionId)'), '首屏必须把本地覆盖行数并入 sessionServerOffset 下界');
-    assert.ok(fastRest.includes('Math.max('), '游标只能取各来源最大值，绝不回退');
+    assert.ok(
+      /const currentKnown = Math\.max\(\s*sessionServerOffset\.get\(sessionId\)/.test(fastRest),
+      '游标只能取各来源最大值；改成 Math.min 会让首屏把已确认游标倒退回更小值'
+    );
   });
 
   await t.test('9. 持久缓存恢复与 cache-first 读取必须与本会话口径一致', () => {
