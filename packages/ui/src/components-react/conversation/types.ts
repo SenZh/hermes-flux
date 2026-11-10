@@ -10,7 +10,7 @@
  *   3. 缺失即降级：不得用正文相似度或时间戳补造身份。
  */
 
-import type { MessageDisplayKind } from '@hermes-flux/core';
+import type { MessageDisplayKind, MessageDisplayMetadata } from '@hermes-flux/core';
 
 export type ConversationMode = 'scratchpad' | 'foreground' | 'group';
 export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected';
@@ -52,7 +52,7 @@ export interface ConversationMessageVM {
    */
   displayKind?: MessageDisplayKind;
   /** 窄化后的展示元数据，仅时间线类事件使用。 */
-  displayMetadata?: { task_count?: number; display_text?: string };
+  displayMetadata?: MessageDisplayMetadata;
 }
 
 export interface ContextUsageVM {

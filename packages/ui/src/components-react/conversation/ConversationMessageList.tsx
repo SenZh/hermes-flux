@@ -59,6 +59,17 @@ export function ConversationMessageList({ snapshot }: { snapshot: ConversationSn
   const virtualHeight = snapshot.virtualHeightPx && snapshot.virtualHeightPx > 0 ? snapshot.virtualHeightPx : 0;
   const offset = snapshot.contentOffsetPx && snapshot.contentOffsetPx > 0 ? snapshot.contentOffsetPx : 0;
 
+  // 【空态 (Rules)】生产桌面端挂的是本组件（mountMessageList），不是 ConversationStage。
+  //   当整个会话只剩不可上屏的行时，若不给空态，画布就是一片纯空白。
+  if (turns.length === 0) {
+    return (
+      <div className="conv-state" data-conv-state="empty">
+        <div className="conv-state__title">{snapshot.emptyTitle ?? t('conversation.emptyTitle')}</div>
+        {snapshot.emptyHint ? <div className="conv-state__hint">{snapshot.emptyHint}</div> : null}
+      </div>
+    );
+  }
+
   const content = (
     <>
       {showLoading ? (

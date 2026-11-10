@@ -64,7 +64,8 @@ try {
     const events = Array.from(document.querySelectorAll('[data-event-kind]')).map((el) => el.getAttribute('data-event-kind'));
     const bubbles = document.querySelectorAll('.conv-message__bubble');
     const bubbleTexts = Array.from(bubbles).map((el) => el.textContent.trim());
-    return { ids, events, bubbleCount: bubbles.length, bubbleTexts };
+    const labels = Array.from(document.querySelectorAll('.conv-event__label')).map((el) => el.textContent.trim());
+    return { ids, events, labels, bubbleCount: bubbles.length, bubbleTexts };
   })()`);
 
   const checks = [
@@ -73,9 +74,11 @@ try {
     ['model_switch 画时间线标记', probe.events.includes('model_switch')],
     ['process_complete 画时间线标记', probe.events.includes('process_complete')],
     ['async_delegation_complete 画时间线标记', probe.events.includes('async_delegation_complete')],
+    ['时间线事件集合精确匹配', JSON.stringify(probe.events) === JSON.stringify(['model_switch', 'process_complete', 'async_delegation_complete'])],
     ['steer 显示用户原话', probe.bubbleTexts.some((t) => t.includes('先把文章写得更好一点'))],
     ['用户气泡数量正确（u1 + steer）', probe.bubbleCount === 2],
-    ['机器正文没有漏进气泡', !probe.bubbleTexts.some((t) => t.includes('Background Process Finished') || t.includes('[System:'))],
+    ['机器正文没有漏进气泡', !probe.bubbleTexts.some((t) => t.includes('Background Process') || t.includes('[System:') || t.includes('background agents'))],
+    ['时间线标签已本地化（无网关英文原文）', !probe.labels.some((t) => /Background Process Finished|Model Changed|Background Agents Finished/.test(t))],
   ];
 
   for (const [label, ok] of checks) {
@@ -86,6 +89,25 @@ try {
   console.log('probe =', JSON.stringify(probe));
   const shot = await session.screenshot(path.join(outDir, 'display-kind.png'));
   console.log(`screenshot: ${path.relative(rootDir, shot)}`);
+
+  fs.writeFileSync(
+    path.join(outDir, 'evidence.json'),
+    JSON.stringify(
+      {
+        feature: 'display-kind',
+        capturedAt: new Date().toISOString(),
+        surface: 'real Blink kernel + packages/*/dist build output',
+        input: MESSAGES.map((m) => ({ id: m.id, displayKind: m.displayKind ?? 'user' })),
+        dom: probe,
+        assertions: checks.map(([label, ok]) => ({ label, ok })),
+        screenshot: 'display-kind.png',
+      },
+      null,
+      2
+    ),
+    'utf8'
+  );
+  console.log('evidence: artifacts/verification/display-kind/evidence.json');
 } finally {
   await session.cleanup();
 }

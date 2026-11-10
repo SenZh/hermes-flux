@@ -29,7 +29,9 @@
 | `steer` | 当中插话 | 用户气泡，显示原话 |
 | `auto_continue` | 崩溃恢复续跑 | 时间线标记 |
 | `internal_notification` | 网关自注入通知 | 时间线通知 |
-| `skill_invocation` | 斜杠技能调用 | 显示 /skill args |
+| `skill_invocation` | 斜杠技能调用 | 用户气泡，显示 /skill args |
+
+`skill_invocation` 保持用户气泡。官方 `_history_to_messages` 把技能行的 `text` 投影成 `/skill args`，它本来就是一次人类发起的调用，画成气泡是对的，因此不进 `TIMELINE_KINDS`。
 
 官方明文约束两条。其一，`Both fields are absent for genuine user input; never infer origin from the prompt text`。其二，`[System:` 前缀的 role=user 行 `must never render as a user bubble`。
 
@@ -91,14 +93,13 @@ REST 与 RPC 返回形状不同，这是上一版最大的漏洞。
 
 窄化规则：先判 `typeof === 'string'` 则 `JSON.parse` 兜底，再判是否对象，然后只取两个字段。`task_count` 必须是有限数字，`display_text` 必须是字符串。
 
-### 决策 5：窗口与平均行高按可见行数计
+### 决策 5：窗口与平均行高保持下标口径
 
-保留不可见行会让第 5 条依赖失准。`messageWindow` 的下标语义不变，但两处口径要改。
+保留不可见行会让「窗口条数」与「DOM 行数」分离。这里不改分母口径，仍然用窗口下标条数。
 
-- `lockAverageRowHeight`（`index.ts:5897`）的分母从 `windowCount = messageWindowEnd - messageWindowStart` 改为窗口内可见行数。`windowCount` 若含隐藏行，分母虚高会让平均行高偏小，滚动 1px 只推进不足一条消息。
-- `computeVirtualHeightPx`（`index.ts:5939`）的分子改为全量可见行数。
+理由。虚拟坐标系本来就按**下标**推进：`computeContentOffsetPx = messageWindowStart × 平均行高`，`computeVirtualHeightPx = 总条数 × 平均行高`。若把分母改成可见行数，`contentH / 可见数` 得到的平均行高乘以下标起点会系统性地偏大，滚动条位置反而不准。保持 `平均行高 = contentH / 下标条数`，则 `窗口占位 = 下标跨度 × 平均行高 ≡ contentH`，自洽。
 
-不可见行数量级很小，通常是压缩交接行与换模型标记。这两处只是口径校正，不是重构。
+隐藏行是低频事件（压缩交接、换模型），偏差可忽略。`index.ts` 的 `lockAverageRowHeight` 与 `computeVirtualHeightPx` 因此只需加注释说明，不改逻辑。
 
 ### 决策 6：`findPreviousUserPrompt` 与左侧栏预览跳过非人类行
 
@@ -238,7 +239,8 @@ export function projectDisplay(input: RawDisplayInput): DisplayProjection;
 
 | 文件 | 改动 |
 |---|---|
-| `src/renderer/index.ts:2677` `parseRawMessages` | 调 `projectDisplay`，把 kind 与 metadata 搬进视图模型 |
+| `src/renderer/index.ts:2677` `parseRawMessages` | 改为薄包装，实现在 `transcriptRows.ts` |
+| `src/renderer/transcriptRows.ts` | 新建，网关行 → 视图模型的纯函数（唯一翻译点，可直接单测） |
 | `src/renderer/index.ts:258` `toMessageViewModel` | 缓存行还原时带回两个字段 |
 | `src/renderer/index.ts:283` `toCachedMessage` | 落缓存时写入两个字段 |
 | `src/renderer/index.ts:5977` `buildConversationSnapshot` | 快照映射带上两个字段；`lastMessageId` 改取窗口内最后一条可见行 |
@@ -249,6 +251,7 @@ export function projectDisplay(input: RawDisplayInput): DisplayProjection;
 | `src/renderer/index.ts:2991` 翻页压缩过滤 | 优先看 kind，kind 缺失才回落到 `[CONTEXT COMPACTION` 前缀 |
 | `src/renderer/messageActions.ts:59` `findPreviousUserPrompt` | 跳过非 `'user'` kind |
 | `src/renderer/rollbackTransaction.ts:236` `bindTurnRowIds` | 绑定 user_row_id 时跳过非 `'user'` kind，否则回滚锚点绑到机器行 |
+| `src/renderer/index.ts` `exportMarkdown` | 导出口径与视图一致：hidden 不导出，事件标 `### Event` |
 
 ### 保留但降级
 

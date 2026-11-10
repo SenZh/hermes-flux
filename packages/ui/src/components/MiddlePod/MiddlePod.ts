@@ -14,7 +14,7 @@ import { escapeHtml } from '../../utils/html.js';
 import { renderMarkdownCore, formatInlineCodeOrLink as formatInlineCodeOrLinkLib, highlightCodeSyntax as highlightCodeSyntaxLib, type RenderMarkdownOptions } from '../../lib/markdown.js';
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { MessageDisplayKind } from '@hermes-flux/core';
+import type { MessageDisplayKind, MessageDisplayMetadata } from '@hermes-flux/core';
 import { ToolBlocks } from '../../components-react/conversation/ToolCapsule.js';
 
 export interface MessageViewModel {
@@ -46,7 +46,7 @@ export interface MessageViewModel {
   /** 网关显示类型；缺失即 'user'。判别逻辑见 core/session/displayKind.ts。 */
   displayKind?: MessageDisplayKind;
   /** 窄化后的展示元数据，仅时间线类事件使用。 */
-  displayMetadata?: { task_count?: number; display_text?: string };
+  displayMetadata?: MessageDisplayMetadata;
 }
 
 export interface ContextGaugeUsage {
@@ -160,6 +160,17 @@ export function renderConversationCanvas(props: MiddlePodProps): string {
   }
 
   if (props.messages.length === 0) {
+    return `
+      <div class="content-fluid-canvas conv-canvas" data-conv-layer="canvas">
+        ${renderContextGauge(props.contextUsage)}
+        ${renderWelcomeEmptyState()}
+      </div>
+    `;
+  }
+
+  // 【空态 (Rules)】只剩不可上屏的行（display_kind='hidden'）时，消息列表渲染不出任何内容，
+  // 若不在这里回落空态，画布就是一片纯空白。
+  if (props.messages.every((m) => (m.displayKind ?? 'user') === 'hidden')) {
     return `
       <div class="content-fluid-canvas conv-canvas" data-conv-layer="canvas">
         ${renderContextGauge(props.contextUsage)}

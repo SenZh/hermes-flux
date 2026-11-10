@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-// 【反 AI 假测试门禁 (Gate 2)】真实导入生产构建模块，禁止在测试内自造假闭包。
+// 【反 AI 假测试门禁 (Gate 2)】真实导入生产构建产物。
 import { findPreviousUserPrompt } from '../../dist/renderer/messageActions.mjs';
 import { bindTurnRowIds } from '../../dist/renderer/rollbackTransaction.mjs';
 
@@ -12,108 +12,93 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rendererSource = readFileSync(path.resolve(__dirname, '../../src/renderer/index.ts'), 'utf8');
 
 /**
- * display_kind 接线守卫
+ * display_kind 接线守卫（宿主编排层）
  *
  * 【设计意图 (Why)】
- *   判别逻辑本身由 core 的 projectDisplay 单测覆盖；本文件守的是"接线"：
- *   字段有没有真的从网关行搬进视图模型、有没有真的落进缓存、回滚有没有被机器行污染。
- *   这些是单测最能防回归、又最容易被后续重构悄悄删掉的地方。
+ *   行翻译逻辑本身由 transcript-rows.test.mjs 做行为级覆盖（真实导入 dist，变异必红）。
+ *   本文件只守 renderer 入口里那几处无法单独导出的编排接线：快照缓存键、末条判定、
+ *   翻页过滤、左侧栏预览、导出。这些地方改错不会让任何纯函数测试变红。
  *
  * 【约束与规则 (Rules)】
- *   断言精确到调用语法特征，任何一处退化必须使测试变红。
+ *   断言必须是**精确到整行**的契约字符串，任何对语义的改写都要让它变红；
+ *   禁止使用宽松正则（历史上这类断言在 5 个真实业务变异下全部保持绿灯）。
  */
 
-test('display_kind 接线守卫', async (t) => {
-  await t.test('1. parseRawMessages 必须调用 projectDisplay，且把 kind 与 metadata 搬进视图模型', () => {
+test('display_kind 宿主编排接线（精确字符串契约）', async (t) => {
+  await t.test('1. 快照缓存键必须同时比对 displayKind 与 displayMetadata', () => {
+    const start = rendererSource.indexOf('const cached = conversationVmCache.get(m);');
+    const block = rendererSource.slice(start, start + 420);
     assert.ok(
-      /const projection = projectDisplay\(\{/.test(rendererSource),
-      'parseRawMessages 必须调用 projectDisplay 做唯一判别'
+      block.includes('&& cached.displayKind === displayKind') && block.includes('&& cached.displayMetadata === m.displayMetadata)'),
+      '缓存命中条件必须同时比对 kind 与 metadata，否则同文本不同元数据会命中旧对象'
     );
+    const writeStart = rendererSource.indexOf('conversationVmCache.set(m, {');
+    const writeBlock = rendererSource.slice(writeStart, writeStart + 400);
     assert.ok(
-      /displayKind: projection\.kind,/.test(rendererSource),
-      '投影结果必须写进 MessageViewModel.displayKind'
-    );
-    assert.ok(
-      /displayMetadata: projection\.metadata,/.test(rendererSource),
-      '投影结果必须写进 MessageViewModel.displayMetadata'
-    );
-  });
-
-  await t.test('2. 行序守恒：空正文守卫必须先判 kind，只有 user 行才允许丢弃', () => {
-    const guardStart = rendererSource.indexOf('const hasContent = Boolean(rawText && rawText.trim());');
-    const tail = rendererSource.slice(guardStart);
-    const guardBlock = tail.slice(0, tail.indexOf('const rawTs = m.timestamp ?? m.created_at;'));
-    assert.ok(guardBlock.length > 0, '必须能定位到 parseRawMessages 的空正文守卫区段');
-    assert.ok(
-      /projection\.kind === 'user' && rawRole !== 'assistant' && !hasContent/.test(guardBlock),
-      "空正文守卫必须写成「且 kind 为 user」，否则 hidden 行被删，fork 切点与分页 offset 漂移"
-    );
-    assert.ok(
-      !/if \(rawRole !== 'assistant' && !hasContent\) \{\s*continue;/.test(guardBlock),
-      '严禁保留不看 kind 的裸空正文守卫'
+      writeBlock.includes('displayKind,') && writeBlock.includes('displayMetadata: m.displayMetadata,'),
+      '缓存写入必须同时落 kind 与 metadata'
     );
   });
 
-  await t.test('3. 缓存往返：两个字段必须落盘并还原', () => {
+  await t.test('2. 末条判定必须跳过不上屏的行', () => {
     assert.ok(
-      /displayKind: view\.displayKind,/.test(rendererSource) && /displayMetadata: view\.displayMetadata,/.test(rendererSource),
-      'toCachedMessage 必须写入两个字段，否则冷启动机器行会重新画成用户气泡'
-    );
-    assert.ok(
-      /displayKind: \(row\.displayKind as MessageDisplayKind \| undefined\) \?\? 'user',/.test(rendererSource),
-      'toMessageViewModel 必须还原 displayKind 并回落到 user'
-    );
-    assert.ok(
-      /displayMetadata: row\.displayMetadata,/.test(rendererSource),
-      'toMessageViewModel 必须还原 displayMetadata'
-    );
-  });
-
-  await t.test('4. 快照缓存键必须包含 displayKind，否则同文本不同 kind 命中旧对象', () => {
-    assert.ok(
-      /&& cached\.displayKind === displayKind\)/.test(rendererSource),
-      'conversationVmCache 命中条件必须比较 displayKind'
-    );
-    assert.ok(
-      /displayKind,\s*\n\s*\}\);/.test(rendererSource),
-      'conversationVmCache 写入时必须带 displayKind'
-    );
-  });
-
-  await t.test('5. lastMessageId 必须跳过不上屏的行', () => {
-    assert.ok(
-      /if \(kind !== 'hidden'\) return windowedMessages\[i\]\.id;/.test(rendererSource),
+      rendererSource.includes("      if (kind !== 'hidden') return windowedMessages[i].id;"),
       '末条若是 hidden，真正可见的最后一条必须拿到 isLastInTurn 与流式态'
     );
     assert.ok(
-      !/const lastMessageId = windowedMessages\[windowedMessages\.length - 1\]\?\.id;/.test(rendererSource),
+      !rendererSource.includes('const lastMessageId = windowedMessages[windowedMessages.length - 1]?.id;'),
       '严禁保留直接取窗口末条的实现'
     );
   });
 
-  await t.test('6. 翻页压缩过滤必须优先看 kind', () => {
+  await t.test('3. 翻页过滤不得删 hidden 行（行序守恒）', () => {
+    const start = rendererSource.indexOf('const payload = outcome.messages.filter((m) => {');
+    const block = rendererSource.slice(start, start + 400);
+    assert.ok(block.length > 0, '必须能定位到翻页过滤区段');
     assert.ok(
-      /if \(m\.display_kind === 'hidden'\) return false;/.test(rendererSource),
-      'loadOlderMessages 必须优先用 display_kind 判定压缩交接行'
+      !block.includes("if (m.display_kind === 'hidden') return false;"),
+      '翻页时删掉 hidden 行会让本地数组与服务端数组失去逐行对应，fork 切点与 offset 漂移'
     );
     assert.ok(
-      /return !text\.startsWith\('\[CONTEXT COMPACTION'\);/.test(rendererSource),
-      'kind 缺失时必须保留 [CONTEXT COMPACTION 前缀兜底，兼容存量会话'
+      block.includes('if (typeof m.display_kind === \'string\' && m.display_kind.length > 0) return true;'),
+      '有 kind 的行必须无条件保留，只对 kind 缺失的存量行做前缀兜底'
     );
   });
 
-  await t.test('7. 左侧栏预览只取真实人类正文', () => {
-    const block = rendererSource.slice(
-      rendererSource.indexOf('function syncActiveSessionPreviewToRail'),
-      rendererSource.indexOf('function syncActiveSessionPreviewToRail') + 1600
+  await t.test('4. 左侧栏预览与 Bot 反哺只取真实人类正文', () => {
+    const start = rendererSource.indexOf('function syncActiveSessionPreviewToRail');
+    const block = rendererSource.slice(start, start + 1600);
+    assert.ok(
+      block.includes("const visibleMessages = messages.filter((m) => (m.displayKind ?? 'user') === 'user');"),
+      '预览必须只用可上屏的人类行，否则副标题会显示 [System:] 或后台回执'
     );
     assert.ok(
-      /const visibleMessages = messages\.filter\(\(m\) => \(m\.displayKind \?\? 'user'\) === 'user'\);/.test(block),
-      '预览与 Bot 反哺必须只用可上屏的人类行'
-    );
-    assert.ok(
-      /const lastMsg = visibleMessages\[visibleMessages\.length - 1\];/.test(block),
+      block.includes('const lastMsg = visibleMessages[visibleMessages.length - 1];'),
       '必须从过滤后的列表取末条'
+    );
+  });
+
+  await t.test('5. 导出口径与视图一致：hidden 不导出，事件单独标注', () => {
+    const start = rendererSource.indexOf('async function exportMarkdown');
+    const block = rendererSource.slice(start, start + 900);
+    assert.ok(
+      block.includes(".filter((m) => (m.displayKind ?? 'user') !== 'hidden')"),
+      'hidden 行不得导出成 ### User'
+    );
+    assert.ok(
+      block.includes('`### Event (${kind})`'),
+      '时间线事件必须标注为 Event，不能冒充用户发言'
+    );
+  });
+
+  await t.test('6. 持久层回读必须窄化，禁止裸 as 断言', () => {
+    assert.ok(
+      rendererSource.includes("displayKind: isKnownDisplayKind(row.displayKind) ? row.displayKind : 'user',"),
+      'IndexedDB 是不可信来源，非法 kind 必须回落 user'
+    );
+    assert.ok(
+      !rendererSource.includes("displayKind: (row.displayKind as MessageDisplayKind | undefined) ?? 'user',"),
+      '严禁用 as 断言把未知值带进下游分派'
     );
   });
 });
@@ -127,15 +112,14 @@ test('findPreviousUserPrompt 必须跳过机器行', async (t) => {
   ];
 
   await t.test('steer 行不得被当成上一轮用户提问回填进输入框', () => {
-    const got = findPreviousUserPrompt('a2', base);
-    assert.equal(got, '真正的第一问', '必须跳过 displayKind=steer 的机器行');
+    assert.equal(findPreviousUserPrompt('a2', base), '真正的第一问');
   });
 
   await t.test('普通会话行为不变', () => {
     assert.equal(findPreviousUserPrompt('a1', base), '真正的第一问');
   });
 
-  await t.test('无更早用户行时返回 null，不得回退到机器行', () => {
+  await t.test('无更早真实用户行时返回 null，不得回退到机器行', () => {
     const onlyMachine = [
       { id: 'u1', rowId: 1, role: 'user', content: '[System: model changed]', displayKind: 'model_switch' },
       { id: 'a1', role: 'assistant', content: '回答' },

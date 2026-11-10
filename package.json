@@ -48,6 +48,7 @@
     "probe:gateway": "node scripts/contract/probe.mjs",
     "probe:drift": "node scripts/contract/probe.mjs --check",
     "verify": "npm run gates && npm run contract:verify && npm run contract:coverage && npm run contract:doc:check && npm run typecheck && npm test && npm run verify:formal",
+    "verify:display-kind": "node scripts/verify/display-kind-check.mjs",
     "prepare": "node -e \"try { require('child_process').execSync('git config core.hooksPath .githooks'); } catch {}\""
   },
   "devDependencies": {

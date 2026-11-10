@@ -18,6 +18,8 @@
  *   - 时间戳统一毫秒整数。
  */
 
+import type { MessageDisplayKind, MessageDisplayMetadata } from '../session/displayKind.js';
+
 /** 缓存信封版本。结构变更时提升，读到不匹配的值直接丢弃重建。 */
 export const CACHE_SCHEMA_VERSION = 1 as const;
 
@@ -97,9 +99,9 @@ export interface CachedMessageRow {
    *
    * 【约束与规则 (Rules)】缺失即视作 'user'；旧缓存行无需迁移。
    */
-  displayKind?: string;
+  displayKind?: MessageDisplayKind;
   /** 窄化后的展示元数据（子代理完成数、后台进程标题等）。 */
-  displayMetadata?: { task_count?: number; display_text?: string };
+  displayMetadata?: MessageDisplayMetadata;
 }
 
 /** 通道引用：定位一个会话或一个房间的消息集合。 */

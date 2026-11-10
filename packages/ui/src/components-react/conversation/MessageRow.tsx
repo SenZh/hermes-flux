@@ -56,13 +56,14 @@ export const MessageRow = React.memo(function MessageRow({
   const [isEventDetailOpen, setIsEventDetailOpen] = React.useState(false);
 
   // 时间线事件：网关自注入的换模型 / 后台回执 / 续跑提示，只画单行标记，不画气泡。
+  // 【规则】标签一律走 i18n，网关的英文 display_text 只进可展开详情，避免中文界面出现英文句子。
   const timelineLabel = React.useMemo(() => {
     if (!isTimelineKind(displayKind)) return '';
     switch (displayKind) {
       case 'model_switch':
         return t('conversation.modelChanged');
       case 'process_complete':
-        return message.displayMetadata?.display_text || t('conversation.backgroundFinished');
+        return t('conversation.backgroundFinished');
       case 'async_delegation_complete': {
         const count = message.displayMetadata?.task_count;
         return typeof count === 'number' && count > 0
@@ -81,7 +82,8 @@ export const MessageRow = React.memo(function MessageRow({
   }
 
   if (isTimelineKind(displayKind)) {
-    const detail = message.content?.trim();
+    const displayText = message.displayMetadata?.display_text;
+    const detail = [displayText, message.content?.trim()].filter(Boolean).join('\n\n');
     return (
       <div className="conv-event" data-role="event" data-msg-id={message.id} data-event-kind={displayKind}>
         <span className="conv-event__dot" />
