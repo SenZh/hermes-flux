@@ -129,7 +129,8 @@ export async function createDriveSession(options = {}) {
   const cdpPort = probeServer.address().port;
   await new Promise((resolve) => probeServer.close(resolve));
 
-  const targetUrl = `http://127.0.0.1:${serverPort}/packages/desktop/__tests__/cdp/e2e-acceptance-harness.html`;
+  const targetPath = options.htmlPath || '/packages/desktop/__tests__/cdp/e2e-acceptance-harness.html';
+  const targetUrl = `http://127.0.0.1:${serverPort}${targetPath}`;
 
   const browserProc = spawn(
     browserPath,
@@ -288,10 +289,163 @@ export async function runFeature(featureId) {
   const featureArtifactsDir = path.join(ARTIFACTS_DIR, featureId);
   if (!fs.existsSync(featureArtifactsDir)) fs.mkdirSync(featureArtifactsDir, { recursive: true });
 
-  const session = await createDriveSession();
+  const session = await createDriveSession(
+    featureId === 'first-paint-skeleton'
+      ? { htmlPath: '/packages/desktop/dist/renderer/index.html' }
+      : {}
+  );
   const startTime = Date.now();
 
   try {
+    if (featureId === 'first-paint-skeleton') {
+      console.log('  1. 等待真实 renderer 首帧挂载...');
+      await session.waitFor('document.getElementById("flux-app-root")?.childElementCount > 0', 15000, 'renderer first paint');
+
+      console.log('  2. 注入"数据未到达"状态并重绘（真实渲染路径，非 mock 组件）...');
+      const injected = await session.evaluate(`(() => {
+        const app = window.__fluxState;
+        if (!app) return 'no-state';
+        app.gatewayConnected = true;
+        app.gatewayConnecting = false;
+        app.profiles = [];
+        app.sessions = [];
+        app.messages = [];
+        app.groupRooms = [];
+        app.projects = [];
+        app.profilesPhase = 'loading';
+        app.sessionsPhase = 'loading';
+        app.messagesPhase = 'loading';
+        app.activeSessionId = '';
+        app.activeFocus = { type: 'bot', botName: 'default' };
+        try {
+          window.__fluxRender();
+        } catch (error) {
+          return 'render-error: ' + (error && error.message ? error.message : String(error));
+        }
+        return 'ok:' + JSON.stringify({
+          leftRail: Boolean(document.getElementById('react-leftrail-host')),
+          leftRailChildren: document.getElementById('react-leftrail-host')?.childElementCount || 0,
+          stationHtml: (document.getElementById('flux-station-rail')?.innerHTML || '').slice(0, 160),
+        });
+      })()`);
+      console.log('     · 注入结果:', injected);
+      if (injected !== 'ok' && !String(injected).startsWith('ok:')) throw new Error(`骨架态注入失败: ${injected}`);
+
+      // React 岛提交是异步的：以用户视角轮询骨架真正出现在 DOM 上，而不是读一次就断言。
+      await session.waitFor('document.querySelectorAll(\'[data-skeleton="agent"]\').length === 3', 5000, 'agent skeletons');
+
+      const skeletonState = await session.evaluate(`(() => {
+        const q = (sel) => document.querySelectorAll(sel).length;
+        return {
+          agentBlocks: q('[data-skeleton="agent"]'),
+          sessionRows: q('[data-skeleton="session"]'),
+          agentCardSkeleton: q('[data-skeleton="agent-card"]'),
+          conversationSkeleton: q('[data-conv-skeleton="true"]'),
+          realStations: q('[data-station-profile]'),
+          primaryCard: q('[data-primary-bot]'),
+          conversationHost: Boolean(document.getElementById('react-message-list-host')),
+          conversationHtml: (document.getElementById('react-message-list-host')?.innerHTML || '').slice(0, 300),
+          bodyText: document.body.innerText,
+        };
+      })()`);
+      console.log('     · 骨架态 DOM 统计:', {
+        agentBlocks: skeletonState.agentBlocks,
+        sessionRows: skeletonState.sessionRows,
+        conversationSkeleton: skeletonState.conversationSkeleton,
+      });
+
+      if (skeletonState.agentBlocks !== 3) throw new Error(`微轨必须有 3 个 Agent 骨架，实际 ${skeletonState.agentBlocks}`);
+      if (skeletonState.sessionRows !== 4) throw new Error(`会话区必须有 4 行骨架，实际 ${skeletonState.sessionRows}`);
+      if (skeletonState.agentCardSkeleton < 1) throw new Error('主工位卡必须是骨架行');
+      if (skeletonState.conversationSkeleton !== 1) throw new Error(`对话区必须渲染骨架（host=${skeletonState.conversationHost}, html=${skeletonState.conversationHtml}）`);
+      if (skeletonState.realStations !== 0) throw new Error('加载中不得渲染真实 Agent 站点');
+      if (skeletonState.primaryCard !== 0) throw new Error('加载中不得渲染主工位身份行');
+      if (skeletonState.bodyText.includes('暂无历史会话')) throw new Error('加载中不得断言没有会话');
+      if (skeletonState.bodyText.includes('开始新的对话')) throw new Error('加载中不得断言会话为空');
+
+      const skeletonShot = path.join(featureArtifactsDir, 'skeleton.png');
+      await session.screenshot(skeletonShot);
+      // 规范要求固定名 screenshot.png：首屏骨架就是本用例的主图。
+      const primaryShot = path.join(featureArtifactsDir, 'screenshot.png');
+      await session.screenshot(primaryShot);
+
+      console.log('  2.5 浅色皮肤（warm-paper）下复核骨架可见性...');
+      const lightCheck = await session.evaluate(`(() => {
+        document.documentElement.setAttribute('data-theme', 'warm-paper');
+        const alphaOf = (color) => {
+          const rgba = color.match(/^rgba?\\([^)]*,\\s*([\\d.]+)\\)$/);
+          if (rgba) return parseFloat(rgba[1]);
+          const slash = color.match(/\\/\\s*([\\d.]+)\\s*\\)$/);
+          if (slash) return parseFloat(slash[1]);
+          return color === 'transparent' ? 0 : 1;
+        };
+        const block = document.querySelector('[data-skeleton="agent"]');
+        const background = document.querySelector('#flux-station-rail');
+        const blockColor = block ? getComputedStyle(block).backgroundColor : '';
+        const backgroundImage = background ? getComputedStyle(background).backgroundColor : '';
+        return { blockColor, backgroundImage, alpha: alphaOf(blockColor) };
+      })()`);
+      console.log('     · 浅色皮肤骨架色:', lightCheck);
+      if (!(lightCheck.alpha >= 0.08)) throw new Error(`暖白皮肤下骨架不可见（alpha=${lightCheck.alpha}, color=${lightCheck.blockColor}）`);
+      const lightShot = path.join(featureArtifactsDir, 'skeleton-warm-paper.png');
+      await session.screenshot(lightShot);
+      await session.evaluate('document.documentElement.setAttribute("data-theme", "obsidian-gold")');
+
+      console.log('  3. 注入"数据已到达"状态，验证骨架原位退场...');
+      await session.evaluate(`(() => {
+        const app = window.__fluxState;
+        if (!app) return false;
+        app.gatewayConnected = true;
+        app.gatewayConnecting = false;
+        app.profiles = [
+          { name: 'default', displayName: 'Default 助理', isDefault: true },
+          { name: 'arch-wang', displayName: '架构老王' },
+        ];
+        app.sessions = [{ id: 'verify-s1', title: '骨架验证会话', preview: '数据已到达', botName: 'default', timestamp: Date.now() }];
+        app.profilesPhase = 'ready';
+        app.sessionsPhase = 'ready';
+        app.messagesPhase = 'ready';
+        window.__fluxRender();
+        return true;
+      })()`);
+
+      await session.waitFor('document.querySelectorAll(\'[data-station-profile]\').length > 0', 5000, 'real stations after ready');
+
+      const readyState = await session.evaluate(`(() => {
+        const q = (sel) => document.querySelectorAll(sel).length;
+        return {
+          agentBlocks: q('[data-skeleton="agent"]'),
+          sessionRows: q('[data-skeleton="session"]'),
+          conversationSkeleton: q('[data-conv-skeleton="true"]'),
+          realStations: q('[data-station-profile]'),
+          sessionItems: q('.session-item'),
+        };
+      })()`);
+      console.log('     · 就绪态 DOM 统计:', readyState);
+
+      if (readyState.agentBlocks !== 0) throw new Error('数据到达后不得残留 Agent 骨架');
+      if (readyState.sessionRows !== 0) throw new Error('数据到达后不得残留会话骨架');
+      if (readyState.conversationSkeleton !== 0) throw new Error('数据到达后不得残留对话骨架');
+      if (readyState.realStations < 1) throw new Error('数据到达后必须渲染真实 Agent 站点');
+      if (readyState.sessionItems < 1) throw new Error('数据到达后必须渲染真实会话行');
+
+      const readyShot = path.join(featureArtifactsDir, 'ready.png');
+      await session.screenshot(readyShot);
+
+      const evidence = {
+        featureId,
+        timestamp: new Date().toISOString(),
+        durationMs: Date.now() - startTime,
+        status: 'PASSED',
+        skeletonState,
+        readyState,
+        screenshots: { skeleton: skeletonShot, ready: readyShot },
+      };
+      fs.writeFileSync(path.join(featureArtifactsDir, 'evidence.json'), JSON.stringify(evidence, null, 2));
+      console.log('  ✔ 骨架屏验证成功，证据已落盘:', featureArtifactsDir);
+      return true;
+    }
+
     if (featureId === 'bot-primary-chat') {
       console.log('  1. 验证左侧专职 Bot 卡片渲染与初始状态...');
       await session.waitFor('document.querySelector(".rail-primary-agent-card") !== null', 10000, 'primary card');

@@ -28,6 +28,7 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 ## Features
 
 - [Bot primary chat](./bot-primary-chat.md) covers dedicated agent forever chat, atomic activity reflection, titlebar sync, and session pool physical isolation.
+- [First paint skeleton](./first-paint-skeleton.md) covers the loading placeholders for the agent rail, session list and conversation canvas, and their in-place retirement once data lands.
 - [Left rail cockpit](./left-rail-cockpit.md) covers the React island left rail: micro rail, primary card, agent scoping, session row shape, group collage and width clamping.
 - [Session management](./session-management.md) covers creating sessions, switching between them, draft preservation, deleting sessions, and focus restoration.
 - [Group room collaboration](./group-room-collaboration.md) covers multi-agent group rooms, collage avatars, and collaborative discussion flows.
@@ -44,6 +45,7 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 | 特征说明文档 (`features/*.md`) | control-flux 注册 ID (`run <id>`) | 支持的别名 (Aliases) | 命名分叉说明 (Naming Debt Note) |
 |---|---|---|---|
 | `bot-primary-chat.md` | `bot-primary-chat` | — | 名称一致 |
+| `first-paint-skeleton.md` | `first-paint-skeleton` | — | 名称一致（驱动真实 renderer 而非 E2E harness） |
 | `session-management.md` | `session-management` | — | 名称一致 |
 | `group-room-collaboration.md` | `group-room` | — | **分叉**：文件名带 `-collaboration` 后缀，而 runner 注册 ID 仅为 `group-room` |
 | `interactive-input-dock.md` | `input-dock-controls` | — | **分叉**：文件名使用 `interactive-input-dock`，而 runner 注册 ID 为 `input-dock-controls` |
