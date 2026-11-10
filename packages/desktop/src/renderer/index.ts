@@ -166,6 +166,8 @@ import {
   type CacheChannelRef,
   planOlderBatchPrependMerge,
   resolveLineageChain,
+  projectDisplay,
+  type MessageDisplayKind,
 } from '@hermes-flux/core';
 
 import { DesktopCacheStore } from './cache/DesktopCacheStore.js';
@@ -271,6 +273,8 @@ function toMessageViewModel(row: CachedMessageRow): MessageViewModel {
     })),
     timestamp: formatSessionTime(row.timestamp),
     rawTimestamp: row.timestamp,
+    displayKind: (row.displayKind as MessageDisplayKind | undefined) ?? 'user',
+    displayMetadata: row.displayMetadata,
   };
 }
 
@@ -303,6 +307,8 @@ function toCachedMessage(view: MessageViewModel, ref: CacheChannelRef): CachedMe
     })),
     timestamp: view.rawTimestamp ?? Date.now(),
     status: 'complete',
+    displayKind: view.displayKind,
+    displayMetadata: view.displayMetadata,
   };
 }
 
@@ -2686,7 +2692,7 @@ function parseRawMessages(list: any[]): MessageViewModel[] {
     if (!m || typeof m !== 'object') continue;
 
     const rawRole = String(m.role || '').toLowerCase();
-    
+
     let rawText = '';
     if (typeof m.text === 'string') {
       rawText = m.text;
@@ -2707,6 +2713,17 @@ function parseRawMessages(list: any[]): MessageViewModel[] {
     } else if (m.delta && typeof m.delta.text === 'string') {
       rawText = m.delta.text;
     }
+
+    // 显示类型投影：唯一判别点。只贴标签、不改行序，正文取 display_content → text → content。
+    const projection = projectDisplay({
+      role: rawRole,
+      displayKind: m.display_kind,
+      displayContent: m.display_content,
+      text: rawText,
+      content: m.content,
+      metadata: m.display_metadata,
+    });
+    rawText = projection.text;
 
     const thought = typeof m.thinking === 'string'
       ? m.thinking
@@ -2850,7 +2867,9 @@ function parseRawMessages(list: any[]): MessageViewModel[] {
       continue;
     }
 
-    if (rawRole !== 'assistant' && !hasContent) {
+    // 【行序守恒 (Rules)】只有真实用户行才按"无正文即丢弃"处理；display_kind 已判定为
+    // 非 user 的行无条件保留，否则本地数组会少行，fork 切点与分页 offset 全部漂移。
+    if (projection.kind === 'user' && rawRole !== 'assistant' && !hasContent) {
       continue;
     }
 
@@ -2869,6 +2888,8 @@ function parseRawMessages(list: any[]): MessageViewModel[] {
       toolCalls,
       timestamp: formatTimestamp(numTs),
       rawTimestamp: numTs,
+      displayKind: projection.kind,
+      displayMetadata: projection.metadata,
     };
     if (messageScope.isGroupRoom) scopedMsg.isGroupRoom = true;
     if (messageScope.isBotRoom) scopedMsg.isBotRoom = true;
@@ -2987,8 +3008,12 @@ async function loadOlderMessages(): Promise<void> {
         sessionParentOffsetMap.set(cursorKey, queryOffset + returned);
         if (targetId === sessionId) sessionServerOffset.set(sessionId, queryOffset + returned);
 
-        // 压缩摘要节点是纯机器交接文本；原始消息已随 include_compacted 一并返回，跳过它避免中间夹一条机器块
+        // 压缩摘要节点是纯机器交接文本；原始消息已随 include_compacted 一并返回。
+        // 【规则】优先看 display_kind：判为 hidden 的行由投影统一处理，不再靠文本前缀猜。
+        // kind 缺失时才回落到 [CONTEXT COMPACTION 前缀，兼容未打标的存量行。
         const payload = outcome.messages.filter((m) => {
+          if (m.display_kind === 'hidden') return false;
+          if (typeof m.display_kind === 'string' && m.display_kind.length > 0) return true;
           const text = typeof m.content === 'string' ? m.content : '';
           return !text.startsWith('[CONTEXT COMPACTION');
         });
@@ -3085,10 +3110,15 @@ async function loadOlderMessages(): Promise<void> {
 function syncActiveSessionPreviewToRail(sessionId: string, messages: MessageViewModel[], botName?: string): void {
   if (!sessionId || messages.length === 0) return;
 
+  // 【口径 (Rules)】预览只取可上屏的行。display_kind='hidden' 与时间线事件都不是人类内容，
+  // 拿来当副标题会把 [System: ...] 或后台回执顶到左侧栏。
+  const visibleMessages = messages.filter((m) => (m.displayKind ?? 'user') === 'user');
+  if (visibleMessages.length === 0) return;
+
   // 1. 若当前会话为专职 Bot 的 Forever Chat，委托 core 领域逻辑更新
   const botRes = syncActiveSessionToBot({
     sessionId,
-    messages,
+    messages: visibleMessages,
     foreverChatCache: botForeverChatCache,
     activeFocusBotName: state.activeFocus.type === 'bot' ? state.activeFocus.botName : undefined,
     profiles: state.profiles,
@@ -3104,7 +3134,7 @@ function syncActiveSessionPreviewToRail(sessionId: string, messages: MessageView
   const sess = state.sessions.find((s) => s.id === sessionId && (!botName || s.botName === botName))
     || state.sessions.find((s) => s.id === sessionId);
   if (sess) {
-    const lastMsg = messages[messages.length - 1];
+    const lastMsg = visibleMessages[visibleMessages.length - 1];
     const lastText = (lastMsg.content || lastMsg.thought || '').slice(0, 100).replace(/\s+/g, ' ').trim();
     const rawTs = lastMsg.rawTimestamp ?? Date.now();
     if (lastText) {
@@ -5859,6 +5889,7 @@ const conversationVmCache = new WeakMap<MessageViewModel, {
   thought?: string;
   toolsRef?: MessageViewModel['toolCalls'];
   toolsSignature: string;
+  displayKind: MessageDisplayKind;
 }>();
 
 let knownFilesToolsRef: readonly (MessageViewModel['toolCalls'])[] = [];
@@ -5913,6 +5944,9 @@ function lockAverageRowHeight(): boolean {
   }
   // 【口径 (Rules)】必须用"窗口内消息条数"作分母，不是 DOM 行数：一条消息可能渲染成多个
   // data-msg-id 节点，用行数会把平均行高算小一半，导致滚动 1px 只走半条消息。
+  // display_kind='hidden' 的行不上屏、也不贡献高度，但仍占一个窗口下标；虚拟坐标系本就按
+  // 下标推进（见 computeContentOffsetPx / computeVirtualHeightPx），因此分母继续用下标条数，
+  // 让"下标 × 平均行高"自洽。隐藏行是低频事件，偏差可忽略。
   if (contentH <= 0) return false;
   averageRowHeightPx = Math.max(24, contentH / windowCount);
   averageRowHeightLocked = true;
@@ -5948,7 +5982,15 @@ function buildConversationSnapshot(): ConversationSnapshot {
   const streaming = isStreamingActiveForCurrentSession();
   ensureMessageWindow(state.messages.length);
   const windowedMessages = state.messages.slice(messageWindowStart, messageWindowEnd);
-  const lastMessageId = windowedMessages[windowedMessages.length - 1]?.id;
+  // 【末条判定 (Rules)】必须取窗口内最后一条可上屏的行：末条若被 display_kind 标成 hidden，
+  // 真正可见的最后一条就拿不到页脚与流式态。
+  const lastMessageId = (() => {
+    for (let i = windowedMessages.length - 1; i >= 0; i--) {
+      const kind = windowedMessages[i].displayKind ?? 'user';
+      if (kind !== 'hidden') return windowedMessages[i].id;
+    }
+    return undefined;
+  })();
   return {
     mode: focusType === 'group' ? 'group' : focusType === 'bot' ? 'foreground' : 'scratchpad',
     connection: state.gatewayConnected ? 'connected' : state.gatewayConnecting ? 'connecting' : 'disconnected',
@@ -5963,6 +6005,7 @@ function buildConversationSnapshot(): ConversationSnapshot {
     locale: state.lang,
     messages: windowedMessages.map((m) => {
       const isLast = m.id === lastMessageId;
+      const displayKind = m.displayKind ?? 'user';
       const toolsSignature = m.toolCalls?.map((tc) => `${tc.id}:${tc.status}:${tc.output?.length ?? 0}:${tc.args?.length ?? 0}`).join('|') ?? '';
       if (!isLast) {
         const cached = conversationVmCache.get(m);
@@ -5970,7 +6013,8 @@ function buildConversationSnapshot(): ConversationSnapshot {
           && cached.content === m.content
           && cached.thought === m.thought
           && cached.toolsRef === m.toolCalls
-          && cached.toolsSignature === toolsSignature) {
+          && cached.toolsSignature === toolsSignature
+          && cached.displayKind === displayKind) {
           return cached.vm;
         }
       }
@@ -5988,6 +6032,8 @@ function buildConversationSnapshot(): ConversationSnapshot {
         timestamp: m.timestamp,
         status: streaming && isLast ? 'streaming' : undefined,
         isStreaming: streaming && isLast,
+        displayKind,
+        displayMetadata: m.displayMetadata,
         toolCalls: m.toolCalls?.map((tc) => ({
           id: tc.id,
           name: tc.name,
@@ -6005,6 +6051,7 @@ function buildConversationSnapshot(): ConversationSnapshot {
           thought: m.thought,
           toolsRef: m.toolCalls,
           toolsSignature,
+          displayKind,
         });
       }
       return vm;
