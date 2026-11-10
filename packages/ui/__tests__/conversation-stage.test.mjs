@@ -159,7 +159,8 @@ test('display_kind：时间线文案按 displayMetadata 分派', async (t) => {
 
   await t.test('有正文时提供详情展开入口', () => {
     const html = renderEvent({ displayKind: 'process_complete' });
-    assert.ok(html.includes('conv-event__toggle'), '有原始内容时必须可展开');
+    assert.ok(html.includes('conv-annot-toggle'), '有原始内容时必须可展开');
+    assert.ok(html.includes('role="button"'), '展开入口必须是可聚焦按钮语义');
   });
 
   await t.test('无正文时不渲染空的展开入口', () => {
@@ -171,7 +172,7 @@ test('display_kind：时间线文案按 displayMetadata 分派', async (t) => {
         },
       })
     );
-    assert.ok(!html.includes('conv-event__toggle'), '没有详情就不该给空展开按钮');
+    assert.ok(!html.includes('conv-annot-toggle'), '没有详情就不该给空展开按钮');
   });
 });
 

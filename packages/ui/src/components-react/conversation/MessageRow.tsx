@@ -22,6 +22,17 @@ import { ConversationMessageFooter } from './MessageFooter.js';
 import type { ConversationMode, ConversationMessageVM } from './types.js';
 import { sanitizeCompactedMessage, isTimelineKind } from '@hermes-flux/core';
 
+/**
+ * 标注展开开关的键盘激活：role="button" 承诺 Enter 与 Space 可用。
+ * Space 必须 preventDefault，否则会连带滚动会话流。
+ */
+function handleToggleKey(event: React.KeyboardEvent<HTMLElement>, toggle: () => void): void {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    toggle();
+  }
+}
+
 export interface MessageRowProps {
   message: ConversationMessageVM;
   isFirstInTurn: boolean;
@@ -39,6 +50,7 @@ export const MessageRow = React.memo(function MessageRow({
   isFirstInTurn,
   isLastInTurn,
   mode,
+  locale,
   isStreaming,
   knownFiles,
 }: MessageRowProps): React.ReactElement | null {
@@ -75,7 +87,7 @@ export const MessageRow = React.memo(function MessageRow({
       default:
         return t('conversation.systemNotice');
     }
-  }, [displayKind, message.displayMetadata]);
+  }, [displayKind, message.displayMetadata, locale]);
 
   if (displayKind === 'hidden') {
     return null;
@@ -90,15 +102,16 @@ export const MessageRow = React.memo(function MessageRow({
         <span className="conv-event__label">{timelineLabel}</span>
         {detail ? (
           <span
-            className="conv-event__toggle"
+            className="conv-annot-toggle"
             role="button"
             tabIndex={0}
             onClick={() => setIsEventDetailOpen((prev) => !prev)}
+            onKeyDown={(event) => handleToggleKey(event, () => setIsEventDetailOpen((prev) => !prev))}
           >
             {isEventDetailOpen ? t('conversation.hideEventDetail') : t('conversation.viewEventDetail')}
           </span>
         ) : null}
-        {detail && isEventDetailOpen ? <div className="conv-event__detail">{detail}</div> : null}
+        {detail && isEventDetailOpen ? <div className="conv-raw-panel conv-event__detail">{detail}</div> : null}
       </div>
     );
   }
@@ -130,6 +143,7 @@ export const MessageRow = React.memo(function MessageRow({
               role="button"
               tabIndex={0}
               onClick={() => setIsCompactedOpen((prev) => !prev)}
+              onKeyDown={(event) => handleToggleKey(event, () => setIsCompactedOpen((prev) => !prev))}
             >
               <span className="conv-handoff-pill__dot" />
               <span>{t('conversation.contextCompacted')}</span>
@@ -138,7 +152,7 @@ export const MessageRow = React.memo(function MessageRow({
               </span>
             </div>
             {isCompactedOpen ? (
-              <div className="conv-handoff-panel">{compactedInfo.compactedSummary}</div>
+              <div className="conv-raw-panel conv-handoff-panel">{compactedInfo.compactedSummary}</div>
             ) : null}
           </div>
         ) : null}

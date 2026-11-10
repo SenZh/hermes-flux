@@ -196,6 +196,23 @@ test('TC-016 空 id 条目被剔除', () => {
   assert.equal(entries[0].index, 3);
 });
 
+test('TC-021 非人类正文的 role=user 行不占导航横杠', () => {
+  const entries = buildPromptEntries([
+    { id: 'u1', role: 'user', content: '真实提问', displayKind: 'user' },
+    { id: 'u2', role: 'user', content: '[System: model changed]', displayKind: 'model_switch' },
+    { id: 'u3', role: 'user', content: '[OUT-OF-BAND]插话', displayKind: 'steer' },
+    { id: 'u4', role: 'user', content: '', displayKind: 'hidden' },
+    { id: 'a1', role: 'assistant', content: '回答' },
+  ]);
+  assert.equal(entries.length, 1, '只有真实提问占横杠');
+  assert.equal(entries[0].id, 'u1');
+});
+
+test('TC-022 未带 displayKind 的旧消息仍按提问收录', () => {
+  const entries = buildPromptEntries([{ id: 'u1', role: 'user', content: '旧数据' }]);
+  assert.equal(entries.length, 1);
+});
+
 test('TC-020 38 条 prompt 时窗口长度不超过容量 30', () => {
   for (const activeIndex of [0, 1, 19, 36, 37]) {
     const plan = planTickWindow(38, activeIndex, RAIL_VISIBLE_TICKS);

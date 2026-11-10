@@ -60,8 +60,9 @@ export function ConversationMessageList({ snapshot }: { snapshot: ConversationSn
   const offset = snapshot.contentOffsetPx && snapshot.contentOffsetPx > 0 ? snapshot.contentOffsetPx : 0;
 
   // 【空态 (Rules)】生产桌面端挂的是本组件（mountMessageList），不是 ConversationStage。
-  //   当整个会话只剩不可上屏的行时，若不给空态，画布就是一片纯空白。
-  if (turns.length === 0) {
+  //   只在「本帧一条消息都没有」时出空态；窗口内恰好全是 hidden 行时不能插空态，
+  //   否则长会话滑到那一段会在列表中部弹出一张「开始新的对话」插页。
+  if (snapshot.messages.length === 0) {
     return (
       <div className="conv-state" data-conv-state="empty">
         <div className="conv-state__title">{snapshot.emptyTitle ?? t('conversation.emptyTitle')}</div>

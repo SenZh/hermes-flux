@@ -1513,7 +1513,7 @@ details[open] > summary > .tool-row__expand {
   width: fit-content;
   margin: 8px auto 12px;
   padding: 4px 12px;
-  border-radius: var(--radius-inner, 6px);
+  border-radius: var(--radius-inner, 4px);
   background: color-mix(in srgb, var(--foreground) 3%, transparent);
   color: var(--muted-foreground);
   font-family: var(--conv-font-sans);
@@ -1555,7 +1555,11 @@ details[open] > summary > .tool-row__expand {
    14. 时间线事件（换模型 / 后台回执 / 续跑提示）
    【设计意图 (Why)】网关把这些信令与人类正文存在同一列，用 display_kind 区分。
      它们不是用户说的，绝不能画成用户气泡；用一条低对比单行标记交代发生过什么。
-   【约束与规则 (Rules)】只用 Design Tokens；不占用户气泡的左右对齐与圆角。
+   【约束与规则 (Rules)】
+     1. 只用 Design Tokens（换肤）；间距严格走 4/8 网格；
+     2. 标签是整句中文，字号挂 --conv-meta-size（13px 档），不得用 --fs-micro（胶囊/快捷键专用 10px 档）；
+     3. 与压缩交接胶囊共用 .conv-annot-toggle 与 .conv-raw-panel 两个基类，
+        只在「带不带外框」这一处允许差异：事件行是通栏裸行，胶囊嵌在用户气泡内。
    ========================================================================== */
 
 .conv-event {
@@ -1563,19 +1567,20 @@ details[open] > summary > .tool-row__expand {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin: 10px 0;
+  margin: 8px 0;
   padding: 0;
   color: var(--muted-foreground);
   font-family: var(--conv-font-sans);
-  font-size: var(--conv-micro-size, 11px);
-  line-height: 16px;
+  font-size: var(--conv-meta-size);
+  line-height: 20px;
 }
 
 .conv-event__dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--border-medium);
+  background: var(--muted-foreground);
+  opacity: 0.55;
   flex-shrink: 0;
 }
 
@@ -1583,33 +1588,43 @@ details[open] > summary > .tool-row__expand {
   color: var(--muted-foreground);
 }
 
-.conv-event__toggle {
+/* 两类标注共用的展开开关：键盘可达（Enter / Space），hover 与 focus-visible 都有反馈。 */
+.conv-annot-toggle {
   cursor: pointer;
   user-select: none;
+  color: var(--muted-foreground);
   opacity: 0.7;
+  border-radius: var(--radius-inner, 4px);
+  transition: color 0.15s ease, opacity 0.15s ease;
 }
 
-.conv-event__toggle:hover {
+.conv-annot-toggle:hover,
+.conv-annot-toggle:focus-visible {
   opacity: 1;
   color: var(--foreground);
+  outline: none;
 }
 
-.conv-event__detail {
+/* 两类标共同用的原始内容面板：等宽、限高、独立滚动，防长文本撑排版。 */
+.conv-raw-panel {
   flex-basis: 100%;
-  max-height: 200px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  margin-top: 6px;
+  margin-top: 8px;
   padding: 8px 12px;
-  border-radius: var(--radius-inner, 6px);
+  border-radius: var(--radius-inner, 4px);
   border: 1px solid var(--border-subtle);
   background: var(--conv-code-block-bg);
   color: var(--muted-foreground);
   font-family: var(--conv-font-mono);
-  font-size: var(--conv-micro-size, 11px);
+  font-size: var(--conv-micro-size);
   line-height: 18px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.conv-event__detail {
+  max-height: 200px;
 }
 
 /* ==========================================================================
@@ -1624,7 +1639,7 @@ details[open] > summary > .tool-row__expand {
   gap: 6px;
   margin-bottom: 6px;
   padding: 2px 8px;
-  border-radius: var(--radius-inner, 6px);
+  border-radius: var(--radius-inner, 4px);
   border: 1px solid var(--border-subtle);
   background: color-mix(in srgb, var(--foreground) 3%, transparent);
   color: var(--muted-foreground);
@@ -1652,19 +1667,6 @@ details[open] > summary > .tool-row__expand {
 
 .conv-handoff-panel {
   max-height: 240px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  margin: 6px 0 10px;
-  padding: 8px 12px;
-  border-radius: var(--radius-inner, 6px);
-  border: 1px solid var(--border-subtle);
-  background: var(--conv-code-block-bg);
-  color: var(--muted-foreground);
-  font-family: var(--conv-font-mono);
-  font-size: var(--conv-micro-size, 11px);
-  line-height: 18px;
-  white-space: pre-wrap;
-  word-break: break-all;
 }
 
 @keyframes spin {
@@ -1724,7 +1726,7 @@ details[open] > summary > .tool-row__expand {
   pointer-events: auto;
   cursor: pointer;
   outline: none;
-  border-radius: var(--radius-inner, 6px);
+  border-radius: var(--radius-inner, 4px);
   transition: width 120ms ease, box-shadow 120ms ease;
 }
 
@@ -1784,7 +1786,7 @@ details[open] > summary > .tool-row__expand {
   width: min(20rem, calc(100vw - 6rem));
   padding: 4px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-inner, 6px);
+  border-radius: var(--radius-inner, 4px);
   background: var(--popover);
   box-shadow: var(--shadow-card);
   transform: translateY(-50%);
@@ -1795,7 +1797,7 @@ details[open] > summary > .tool-row__expand {
   position: relative;
   overflow: hidden;
   height: calc(var(--conv-prompt-panel-row) * var(--conv-prompt-panel-visible));
-  border-radius: var(--radius-inner, 6px);
+  border-radius: var(--radius-inner, 4px);
 }
 
 .conv-prompt-rail__panel-track {
@@ -1815,7 +1817,7 @@ details[open] > summary > .tool-row__expand {
   align-items: center;
   padding: 0 10px;
   border: none;
-  border-radius: var(--radius-inner, 6px);
+  border-radius: var(--radius-inner, 4px);
   background: transparent;
   color: var(--muted-foreground);
   font-family: var(--conv-font-sans);
