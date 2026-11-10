@@ -62,7 +62,9 @@ export function findPreviousUserPrompt(
 ): string | null {
   const msgIdx = msgId ? messages.findIndex((m) => m.id === msgId) : -1;
   const slice = msgIdx >= 0 ? messages.slice(0, msgIdx) : messages;
-  const prevUserMsg = slice.slice().reverse().find((m) => m.role === 'user');
+  // 【规则】只认真实人类正文。steer 行与 [System: 行的 role 也是 user，
+  // 取错会把机器文本回填进输入框，回滚后一提交就重放一遍信令。
+  const prevUserMsg = slice.slice().reverse().find((m) => m.role === 'user' && (m.displayKind ?? 'user') === 'user');
   return prevUserMsg?.content || null;
 }
 

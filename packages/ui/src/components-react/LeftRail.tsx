@@ -107,7 +107,7 @@ const AgentStationItem = React.memo(function AgentStationItem({
   return <Button
     variant="ghost"
     size="icon"
-    className={`station-agent-badge rail-pinned-bot-row relative size-[42px] shrink-0 rounded-lg border p-0 transition-all duration-150 ${active ? 'active border-primary bg-primary-subtle' : 'border-transparent bg-transparent hover:bg-card-hover/70'}`}
+    className={`station-agent-badge rail-pinned-bot-row relative size-[42px] shrink-0 rounded-panel border p-0 transition-all duration-150 ${active ? 'active border-primary bg-primary-subtle' : 'border-transparent bg-transparent hover:bg-card-hover/70'}`}
     data-profile={agent.name}
     data-station-profile={agent.name}
     title={t('rail.enterBotChat', { name: agent.displayName || agent.name })}
@@ -162,7 +162,7 @@ export function RailEntityRow({
 }: RailEntityRowProps): React.ReactElement {
   return <button
     type="button"
-    className={`${className} group relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors duration-150 ${compact ? 'min-h-8' : 'min-h-12'} ${active ? 'active bg-card-active text-foreground' : 'hover:bg-card-hover/80 text-secondary-foreground hover:text-foreground'}`}
+    className={`${className} group relative flex w-full items-center gap-2 rounded-card px-2 py-1.5 text-left transition-colors duration-150 ${compact ? 'min-h-8' : 'min-h-12'} ${active ? 'active bg-card-active text-foreground' : 'hover:bg-card-hover/80 text-secondary-foreground hover:text-foreground'}`}
     title={titleAttr}
     onClick={onClick}
     onContextMenu={onContextMenu}
@@ -231,7 +231,7 @@ const GroupRow = React.memo(function GroupRow({ group, profiles, active, editing
   onCancelRename: () => void;
 }): React.ReactElement {
   if (editing) {
-    return <div className="rail-group-item rail-group-inline-rename-wrap active min-h-12 rounded-md bg-card-active px-2" data-room-id={group.roomId}>
+    return <div className="rail-group-item rail-group-inline-rename-wrap active min-h-12 rounded-card bg-card-active px-2" data-room-id={group.roomId}>
       <RenameGroup initialName={group.name} roomId={group.roomId} onConfirm={onConfirmRename} onCancel={onCancelRename} />
     </div>;
   }
@@ -262,15 +262,15 @@ function RenameGroup({ initialName, roomId, onConfirm, onCancel }: {
   return <form className="flex min-w-0 flex-1 items-center gap-1" onSubmit={(event) => { event.preventDefault(); onConfirm(value.trim()); }}>
     <Input
       id={`rail-group-rename-input-${roomId}`}
-      className="rail-group-rename-input h-7 min-w-0 flex-1 rounded-sm border-primary bg-panel px-1.5 text-aux"
+      className="rail-group-rename-input h-7 min-w-0 flex-1 rounded-inner border-primary bg-panel px-1.5 text-aux"
       value={value}
       onChange={(event) => setValue(event.currentTarget.value)}
       onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); onCancel(); } }}
       autoFocus
     />
-    <Button type="submit" size="sm" className="btn-confirm-group-rename h-6 rounded-sm px-2 text-micro" title={t('common.confirm')}>{t('common.confirm')}</Button>
-    <Button type="button" variant="ghost" size="sm" className="btn-cancel-group-rename h-6 rounded-sm px-1 text-micro text-muted-foreground" title={t('common.cancel')} onClick={onCancel}>{t('common.cancel')}</Button>
+    <Button type="submit" size="sm" className="btn-confirm-group-rename h-6 rounded-inner px-2 text-micro" title={t('common.confirm')}>{t('common.confirm')}</Button>
+    <Button type="button" variant="ghost" size="sm" className="btn-cancel-group-rename h-6 rounded-inner px-1 text-micro text-muted-foreground" title={t('common.cancel')} onClick={onCancel}>{t('common.cancel')}</Button>
   </form>;
 }
 
@@ -281,7 +281,7 @@ function ProjectCard({ project, focus, onSelectSession, onSessionMenu }: {
   onSessionMenu: (session: LeftRailSession, x: number, y: number) => void;
 }): React.ReactElement {
   const sessions = project.sessions || [];
-  return <details id={`rail-proj-${project.id}`} className="project-accordion-unit overflow-hidden rounded-lg border border-border-subtle bg-card" data-project-id={project.id}>
+  return <details id={`rail-proj-${project.id}`} className="project-accordion-unit overflow-hidden rounded-panel border border-border-subtle bg-card" data-project-id={project.id}>
     <summary className="project-accordion-trigger flex cursor-pointer items-center gap-2 p-2 text-body font-semibold text-foreground">
       <Folder size={14} className="shrink-0 text-muted-foreground" />
       <span className="truncate">{project.name}</span>
@@ -352,12 +352,12 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
         />)}
       </div>
       <div className="flex w-full flex-col items-center gap-1.5 border-t border-border-subtle pt-2">
-        <Button id="rail-station-groups-btn" variant="ghost" size="icon" className="relative size-[38px] rounded-lg text-secondary-foreground hover:bg-card-hover hover:text-foreground transition-colors" title={t('rail.groups')} onClick={() => props.onSetTab('groups')}>
+        <Button id="rail-station-groups-btn" variant="ghost" size="icon" className="relative size-[38px] rounded-panel text-secondary-foreground hover:bg-card-hover hover:text-foreground transition-colors" title={t('rail.groups')} onClick={() => props.onSetTab('groups')}>
           <Users size={16} />
           {model.hasRunningGroup && <span className="activity-pulse-indicator absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-primary" data-status="running" />}
           {!model.hasRunningGroup && model.hasUnreadGroup && <span className="activity-unread-badge absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-success" data-status="unread" />}
         </Button>
-        <Button id="rail-station-projects-btn" variant="ghost" size="icon" className="size-[38px] rounded-lg text-secondary-foreground hover:bg-card-hover hover:text-foreground transition-colors" title={t('rail.projects')} onClick={() => props.onSetTab('projects')}>
+        <Button id="rail-station-projects-btn" variant="ghost" size="icon" className="size-[38px] rounded-panel text-secondary-foreground hover:bg-card-hover hover:text-foreground transition-colors" title={t('rail.projects')} onClick={() => props.onSetTab('projects')}>
           <Folder size={16} />
         </Button>
         {/* PR-3d 用户定案：微轨底部"新建会话 +"与"‹ 折叠"两按钮删除。
@@ -375,7 +375,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
           <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/70" size={13} />
           <Input
             id="session-search-input"
-            className="h-8 rounded-md border border-border-subtle bg-panel/70 pl-8 pr-2.5 text-aux transition-colors placeholder:text-muted-foreground/50 hover:border-border focus:border-primary/40 focus:bg-panel"
+            className="h-8 rounded-card border border-border-subtle bg-panel/70 pl-8 pr-2.5 text-aux transition-colors placeholder:text-muted-foreground/50 hover:border-border focus:border-primary/40 focus:bg-panel"
             placeholder={t('rail.searchPlaceholder')}
             value={props.searchQuery}
             onChange={(event) => props.onSearchChange(event.currentTarget.value)}
@@ -401,7 +401,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
       </div>
 
       {model.showChatDeck && <div className="session-scroll-area min-h-0 flex-1 overflow-y-auto px-1.5 pb-3 mr-[var(--geo-resize-handle)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" id="session-list-container">
-        {model.error && <div id="session-list-error" role="alert" className="m-1 rounded-md border border-border-strong bg-panel p-2 text-aux text-foreground">{model.error}</div>}
+        {model.error && <div id="session-list-error" role="alert" className="m-1 rounded-card border border-border-strong bg-panel p-2 text-aux text-foreground">{model.error}</div>}
 
         {model.visibleGroups.length > 0 && <section className="mb-2">
           {/* PR-3d 用户定案：header 字号行高放大一档，删 ⌄/› 文本箭头（折叠态由列表显隐与点击整行表达），

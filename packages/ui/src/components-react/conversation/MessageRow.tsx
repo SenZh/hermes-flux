@@ -20,7 +20,18 @@ import { StreamRow } from './StreamRow.js';
 import { ToolSection } from './ToolCapsule.js';
 import { ConversationMessageFooter } from './MessageFooter.js';
 import type { ConversationMode, ConversationMessageVM } from './types.js';
-import { sanitizeCompactedMessage } from '@hermes-flux/core';
+import { sanitizeCompactedMessage, isTimelineKind } from '@hermes-flux/core';
+
+/**
+ * 标注展开开关的键盘激活：role="button" 承诺 Enter 与 Space 可用。
+ * Space 必须 preventDefault，否则会连带滚动会话流。
+ */
+function handleToggleKey(event: React.KeyboardEvent<HTMLElement>, toggle: () => void): void {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    toggle();
+  }
+}
 
 export interface MessageRowProps {
   message: ConversationMessageVM;
@@ -39,18 +50,71 @@ export const MessageRow = React.memo(function MessageRow({
   isFirstInTurn,
   isLastInTurn,
   mode,
+  locale,
   isStreaming,
   knownFiles,
 }: MessageRowProps): React.ReactElement | null {
   const isUser = message.role === 'user';
+  const displayKind = message.displayKind ?? 'user';
   const thoughtSummary = message.thought ? message.thought.replace(/\s+/g, ' ').trim().slice(0, 60) : '';
 
-  // 动态投影：剥离 [CONTEXT COMPACTION] 机器技术总结，气泡只展示人类提问
+  // 动态投影：剥离 [CONTEXT COMPACTION] 机器技术总结，气泡只展示人类提问。
+  // 【规则】display_kind 已判定的行不再走文本兜底，避免两套判别互相覆盖。
   const compactedInfo = React.useMemo(() => {
-    return isUser ? sanitizeCompactedMessage(message.content || '') : null;
-  }, [isUser, message.content]);
+    return isUser && displayKind === 'user' ? sanitizeCompactedMessage(message.content || '') : null;
+  }, [isUser, displayKind, message.content]);
 
   const [isCompactedOpen, setIsCompactedOpen] = React.useState(false);
+  const [isEventDetailOpen, setIsEventDetailOpen] = React.useState(false);
+
+  // 时间线事件：网关自注入的换模型 / 后台回执 / 续跑提示，只画单行标记，不画气泡。
+  // 【规则】标签一律走 i18n，网关的英文 display_text 只进可展开详情，避免中文界面出现英文句子。
+  const timelineLabel = React.useMemo(() => {
+    if (!isTimelineKind(displayKind)) return '';
+    switch (displayKind) {
+      case 'model_switch':
+        return t('conversation.modelChanged');
+      case 'process_complete':
+        return t('conversation.backgroundFinished');
+      case 'async_delegation_complete': {
+        const count = message.displayMetadata?.task_count;
+        return typeof count === 'number' && count > 0
+          ? t('conversation.delegationFinishedCount', { count })
+          : t('conversation.delegationFinished');
+      }
+      case 'auto_continue':
+        return t('conversation.autoContinued');
+      default:
+        return t('conversation.systemNotice');
+    }
+  }, [displayKind, message.displayMetadata, locale]);
+
+  if (displayKind === 'hidden') {
+    return null;
+  }
+
+  if (isTimelineKind(displayKind)) {
+    const displayText = message.displayMetadata?.display_text;
+    const detail = [displayText, message.content?.trim()].filter(Boolean).join('\n\n');
+    return (
+      <div className="conv-event" data-role="event" data-msg-id={message.id} data-event-kind={displayKind}>
+        <span className="conv-event__dot" />
+        <span className="conv-event__label">{timelineLabel}</span>
+        {detail ? (
+          <span
+            className="conv-annot-toggle"
+            role="button"
+            tabIndex={0}
+            onClick={() => setIsEventDetailOpen((prev) => !prev)}
+            onKeyDown={(event) => handleToggleKey(event, () => setIsEventDetailOpen((prev) => !prev))}
+          >
+            {isEventDetailOpen ? t('conversation.hideEventDetail') : t('conversation.viewEventDetail')}
+          </span>
+        ) : null}
+        {detail && isEventDetailOpen ? <div className="conv-raw-panel conv-event__detail">{detail}</div> : null}
+      </div>
+    );
+  }
 
   // 【消除空白占位 Bug 2 根因】：如果助手行既无正文、又无思考、且无工具调用，直接返回 null，严禁渲染空占位 DOM
   const hasContent = Boolean(message.content && message.content.trim());
@@ -79,6 +143,7 @@ export const MessageRow = React.memo(function MessageRow({
               role="button"
               tabIndex={0}
               onClick={() => setIsCompactedOpen((prev) => !prev)}
+              onKeyDown={(event) => handleToggleKey(event, () => setIsCompactedOpen((prev) => !prev))}
             >
               <span className="conv-handoff-pill__dot" />
               <span>{t('conversation.contextCompacted')}</span>
@@ -87,7 +152,7 @@ export const MessageRow = React.memo(function MessageRow({
               </span>
             </div>
             {isCompactedOpen ? (
-              <div className="conv-handoff-panel">{compactedInfo.compactedSummary}</div>
+              <div className="conv-raw-panel conv-handoff-panel">{compactedInfo.compactedSummary}</div>
             ) : null}
           </div>
         ) : null}

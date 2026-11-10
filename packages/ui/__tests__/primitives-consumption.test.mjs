@@ -22,12 +22,28 @@ const PRIMITIVES_DIR = path.join(UI_SRC, 'components-react/primitives');
  * 【约束】consumed 至少一项；pending 的每项必须写清消费它的后续 PR，禁止"以后再说"。
  */
 const CONSUMPTION = {
-  Button: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx'] },
+  Button: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/gallery/Gallery.tsx'] },
   Input: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx'] },
-  Badge: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx'] },
+  Badge: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/gallery/Gallery.tsx'] },
   Dialog: { state: 'pending', target: 'SettingsModal / Modal 族迁移 PR（波③）' },
   Menu: { state: 'pending', target: 'ContextMenu 舱迁移 PR（波③，右键菜单三态收编）' },
   Switch: { state: 'pending', target: 'SettingsModal 布尔开关迁移 PR（波③）' },
+  /**
+   * 业务原子（Surface / ListRow / Toolbar / Stat）。
+   *
+   * 设计意图 (Why)：
+   *   这 4 个原子是"设计系统唯一拼装入口"的落地物，消费者的正确形态是业务视图，
+   *   而当前唯一真实渲染面是 Gallery 审查页（等同 Storybook 的角色）。
+   *   把它们登记为 consumed 而不是 pending，是因为 pending 的语义是"尚未有任何渲染面"，
+   *   而它们已经有可运行、可截图、可断言计算样式的真实渲染面。
+   *
+   * 约束与规则 (Rules)：
+   *   后续业务视图接入时，必须把新消费者补进本清单（测试会强制枚举，禁止隐式消费）。
+   */
+  Surface: { state: 'consumed', consumers: ['components-react/gallery/Gallery.tsx'] },
+  ListRow: { state: 'consumed', consumers: ['components-react/gallery/Gallery.tsx'] },
+  Toolbar: { state: 'consumed', consumers: ['components-react/gallery/Gallery.tsx'] },
+  Stat: { state: 'consumed', consumers: ['components-react/gallery/Gallery.tsx'] },
 };
 
 /** 收集 ui 包内所有未被排除的生产源文件（排除 primitives 自身与 barrel）。 */
@@ -76,7 +92,7 @@ test('primitives 消费守卫：登记表结构完整且状态合法', async (t)
     const consumed = Object.entries(CONSUMPTION).filter(([, entry]) => entry.state === 'consumed').map(([name]) => name).sort();
     assert.ok(consumed.length >= 3, `已消费 primitives 不得少于 3 个，当前 ${consumed.length}`);
     // 冻结当前消费集合：删除任何一项都必须先解释清楚，不能悄悄发生
-    assert.deepEqual(consumed, ['Badge', 'Button', 'Input'], '已消费集合只增不减；若确有迁移请同步更新本断言并在 PR 里说明');
+    assert.deepEqual(consumed, ['Badge', 'Button', 'Input', 'ListRow', 'Stat', 'Surface', 'Toolbar'], '已消费集合只增不减；若确有迁移请同步更新本断言并在 PR 里说明');
   });
 });
 

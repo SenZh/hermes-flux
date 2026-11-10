@@ -233,9 +233,11 @@ export function bindTurnRowIds(params: BindTurnRowIdsParams): boolean {
   }
 
   // 2. 绑定前序最近 user 消息行号
+  // 【规则】必须只匹配真实人类正文：steer 与 [System: 行的 role 同样是 user，
+  // 绑到它们会让下一次回滚截断在错误的行上。
   if (asstIdx > 0 && resolvedUserRowId !== null) {
     for (let i = asstIdx - 1; i >= 0; i--) {
-      if (messages[i].role === 'user') {
+      if (messages[i].role === 'user' && (messages[i].displayKind ?? 'user') === 'user') {
         if (messages[i].rowId !== resolvedUserRowId) {
           messages[i].rowId = resolvedUserRowId;
           changed = true;

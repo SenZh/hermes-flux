@@ -42,4 +42,5 @@ export * from './session/conversationContext.js';
 export * from './session/olderBatchMerge.js';
 export * from './session/lineage.js';
 export * from './session/compactionFilter.js';
+export * from './session/displayKind.js';
 export type { AttachedImageResult, PromptSubmitResult, CommandDispatchResult, SlashExecResult, CompleteSlashResult, CompletePathParams, CompletionItemsResult, SessionHistoryResult, GroupsSendResult } from './rpc/contracts/gateway-contract.generated.js';

@@ -13,7 +13,6 @@ import {
   renderSlashPopper,
   renderMentionPopper,
   renderToolCapsuleSlot,
-  extractToolTarget,
   renderInspectionPod,
   mountTitlebar,
   mountLeftRail,
@@ -175,8 +174,11 @@ import {
   type CacheChannelRef,
   planOlderBatchPrependMerge,
   resolveLineageChain,
+  isKnownDisplayKind,
+  type MessageDisplayKind,
 } from '@hermes-flux/core';
 
+import { parseTranscriptRows } from './transcriptRows.js';
 import { DesktopCacheStore } from './cache/DesktopCacheStore.js';
 
 /**
@@ -280,6 +282,8 @@ function toMessageViewModel(row: CachedMessageRow): MessageViewModel {
     })),
     timestamp: formatSessionTime(row.timestamp),
     rawTimestamp: row.timestamp,
+    displayKind: isKnownDisplayKind(row.displayKind) ? row.displayKind : 'user',
+    displayMetadata: row.displayMetadata,
   };
 }
 
@@ -312,6 +316,8 @@ function toCachedMessage(view: MessageViewModel, ref: CacheChannelRef): CachedMe
     })),
     timestamp: view.rawTimestamp ?? Date.now(),
     status: 'complete',
+    displayKind: view.displayKind,
+    displayMetadata: view.displayMetadata,
   };
 }
 
@@ -3051,209 +3057,16 @@ function requestPathCompletion(word: string): void {
  * 【防范的历史坑 (Pitfall)】必须提取 row_id 为持久 rowId，回滚截断才有可信锚点；
  * 历史上此函数丢弃 row_id 导致回滚被迫用临时 id 触发 4018。
  * 作用域（是否 Bot/群聊）从当前焦点内联派生，避免跨调用残留过期标记。
+ * 具体翻译逻辑在 transcriptRows.ts 的纯函数里，本函数只负责注入宿主作用域与时区格式化。
  */
 function parseRawMessages(list: any[]): MessageViewModel[] {
-  const messageScope = {
-    isGroupRoom: state.activeFocus.type === 'group',
-    isBotRoom: state.activeFocus.type === 'bot',
-  };
-  const parsedMessages: MessageViewModel[] = [];
-
-  for (let idx = 0; idx < list.length; idx++) {
-    const m = list[idx];
-    if (!m || typeof m !== 'object') continue;
-
-    const rawRole = String(m.role || '').toLowerCase();
-    
-    let rawText = '';
-    if (typeof m.text === 'string') {
-      rawText = m.text;
-    } else if (typeof m.content === 'string') {
-      rawText = m.content;
-    } else if (Array.isArray(m.content)) {
-      rawText = m.content
-        .map((part: any) => {
-          if (typeof part === 'string') return part;
-          if (part && typeof part.text === 'string') return part.text;
-          if (part && part.type === 'tool_use') return `[调用工具: ${part.name || 'tool'}]`;
-          return '';
-        })
-        .filter(Boolean)
-        .join('\n');
-    } else if (typeof m.message === 'string') {
-      rawText = m.message;
-    } else if (m.delta && typeof m.delta.text === 'string') {
-      rawText = m.delta.text;
-    }
-
-    const thought = typeof m.thinking === 'string'
-      ? m.thinking
-      : typeof m.thought === 'string'
-      ? m.thought
-      : typeof m.reasoning === 'string'
-      ? m.reasoning
-      : '';
-
-    const rawToolCalls = Array.isArray(m.tool_calls)
-      ? m.tool_calls
-      : Array.isArray(m.tools)
-      ? m.tools
-      : Array.isArray(m.tool_use)
-      ? m.tool_use
-      : [];
-
-    const toolCalls = rawToolCalls.map((tc: any, tIdx: number) => {
-      const toolName = tc.name || tc.function?.name || tc.tool || 'tool';
-      const rawArgs = tc.args ?? tc.arguments ?? tc.function?.arguments ?? tc.input ?? tc.parameters ?? {};
-      // 【防范的历史坑 (Pitfall)】历史 args 形状不统一（顶层 command / 信封 args.command / JSON 字符串），
-      // 旧实现取不到 key 就把整段 JSON 当目标显示。统一走深度提取，取不到留空。
-      const cleanArg = extractToolTarget(rawArgs);
-
-      const formatRawOutput = (val: unknown): string | undefined => {
-        if (val === null || val === undefined) return undefined;
-        if (typeof val === 'string') return val;
-        try {
-          return JSON.stringify(val, null, 2);
-        } catch {
-          return String(val);
-        }
-      };
-
-      return {
-        id: tc.id || tc.tool_call_id || `tc-${idx}-${tIdx}`,
-        name: toolName,
-        status: (tc.status || 'completed') as any,
-        args: cleanArg,
-        output: formatRawOutput(tc.output ?? tc.result ?? tc.stdout),
-      };
-    });
-
-    let isToolPayload = rawRole === 'tool' || rawRole === 'function';
-    let synthesizedToolCall: any = null;
-
-    if (!isToolPayload && rawText.trim().startsWith('{') && rawText.trim().endsWith('}')) {
-      try {
-        const parsed = JSON.parse(rawText.trim());
-        if (
-          parsed &&
-          typeof parsed === 'object' &&
-          ('output' in parsed || 'stdout' in parsed || 'exit_code' in parsed || 'exitCode' in parsed || 'diff' in parsed || 'files_modified' in parsed || 'total_count' in parsed || 'matches_text' in parsed || 'content' in parsed)
-        ) {
-          isToolPayload = true;
-          let toolName = 'tool';
-          let targetArg = '';
-
-          if ('matches_text' in parsed || 'total_count' in parsed) {
-            toolName = 'grep';
-          } else if ('diff' in parsed || 'files_modified' in parsed) {
-            toolName = 'edit';
-            targetArg = parsed.resolved_path || (parsed.files_modified ? parsed.files_modified[0] : '') || '';
-          } else if ('output' in parsed || 'stdout' in parsed) {
-            toolName = 'shell';
-          }
-
-          let formattedOutput = parsed.output ?? parsed.stdout ?? parsed.diff ?? parsed.matches_text ?? rawText;
-          if (typeof formattedOutput !== 'string') {
-            formattedOutput = JSON.stringify(formattedOutput, null, 2);
-          }
-
-          synthesizedToolCall = {
-            id: m.tool_call_id || `tc-synth-${idx}`,
-            name: toolName,
-            status: 'completed',
-            args: targetArg,
-            output: formattedOutput,
-          };
-        }
-      // gate-degrade: 跨库删除的容错分支，某个 profile 未持有该会话属正常
-      } catch {
-        // not json
-      }
-    }
-
-    if (isToolPayload) {
-      if (parsedMessages.length > 0 && parsedMessages[parsedMessages.length - 1].role === 'assistant') {
-        const prev = parsedMessages[parsedMessages.length - 1];
-        if (!prev.toolCalls) prev.toolCalls = [];
-
-        if (synthesizedToolCall) {
-          prev.toolCalls.push(synthesizedToolCall);
-          continue;
-        }
-
-        const validToolOutput = rawText || m.output || (m.result && Object.keys(m.result).length > 0 ? JSON.stringify(m.result) : undefined);
-
-        if (prev.toolCalls.length > 0) {
-          const lastTool = prev.toolCalls[prev.toolCalls.length - 1];
-          lastTool.output = validToolOutput;
-          // If the last tool was missing arguments or targetArg, try extracting from the result
-          if (!lastTool.args && synthesizedToolCall?.args) {
-            lastTool.args = synthesizedToolCall.args;
-          }
-          continue;
-        } else {
-          prev.toolCalls.push({
-            id: m.tool_call_id || `tc-${idx}`,
-            name: synthesizedToolCall?.name || m.name || 'tool',
-            status: 'completed',
-            args: synthesizedToolCall?.args || '',
-            output: validToolOutput,
-          });
-          continue;
-        }
-      } else if (synthesizedToolCall) {
-        const rawTs = m.timestamp ?? m.created_at;
-        const numTs = typeof rawTs === 'number' ? (rawTs > 1e11 ? rawTs : rawTs * 1000) : Date.parse(rawTs) || Date.now();
-        parsedMessages.push({
-          id: String(m.row_id ?? m.id ?? `msg-${idx}`),
-          rowId: extractDurableRowId(m),
-          role: 'assistant',
-          content: '',
-          thought: '',
-          toolCalls: [synthesizedToolCall],
-          timestamp: formatTimestamp(numTs),
-          rawTimestamp: numTs,
-        });
-        continue;
-      } else {
-        continue;
-      }
-    }
-
-    const hasContent = Boolean(rawText && rawText.trim());
-    const hasThought = Boolean(thought && thought.trim());
-    const hasTools = toolCalls.length > 0;
-
-    if (rawRole === 'assistant' && !hasContent && !hasThought && !hasTools) {
-      continue;
-    }
-
-    if (rawRole !== 'assistant' && !hasContent) {
-      continue;
-    }
-
-    const rawTs = m.timestamp ?? m.created_at;
-    const numTs = typeof rawTs === 'number' ? (rawTs > 1e11 ? rawTs : rawTs * 1000) : Date.parse(rawTs) || Date.now();
-
-    const rowIdNum = extractDurableRowId(m);
-    const scopedMsg: MessageViewModel = {
-      id: String(m.row_id ?? m.id ?? `msg-${idx}`),
-      sessionId: typeof m.session_id === 'string' ? m.session_id : undefined,
-      rowId: rowIdNum,
-      role: (rawRole === 'user' || rawRole === 'system' ? rawRole : 'assistant') as MessageViewModel['role'],
-      content: rawText,
-      thought,
-      thoughtDurationMs: m.thought_duration_ms,
-      toolCalls,
-      timestamp: formatTimestamp(numTs),
-      rawTimestamp: numTs,
-    };
-    if (messageScope.isGroupRoom) scopedMsg.isGroupRoom = true;
-    if (messageScope.isBotRoom) scopedMsg.isBotRoom = true;
-    parsedMessages.push(scopedMsg);
-  }
-
-  return parsedMessages;
+  return parseTranscriptRows(list, {
+    scope: {
+      isGroupRoom: state.activeFocus.type === 'group',
+      isBotRoom: state.activeFocus.type === 'bot',
+    },
+    formatTimestamp,
+  });
 }
 
 async function loadOlderMessages(): Promise<void> {
@@ -3365,12 +3178,16 @@ async function loadOlderMessages(): Promise<void> {
         sessionParentOffsetMap.set(cursorKey, queryOffset + returned);
         if (targetId === sessionId) sessionServerOffset.set(sessionId, queryOffset + returned);
 
-        // 压缩摘要节点是纯机器交接文本；原始消息已随 include_compacted 一并返回，跳过它避免中间夹一条机器块
+        // 压缩摘要节点是纯机器交接文本，原始消息已随 include_compacted 一并返回。
+        // 【行序守恒 (Rules)】这里绝不能删 hidden 行：本地数组必须与服务端数组逐行对应，
+        // 删行会让 fork 切点与分页 offset 漂移。hidden 行一律交给 visibility 层过滤。
+        // 只保留「kind 缺失的存量行」前缀兜底，避免整块 [CONTEXT COMPACTION 措手无策。
         const payload = outcome.messages.filter((m) => {
+          if (typeof m.display_kind === 'string' && m.display_kind.length > 0) return true;
           const text = typeof m.content === 'string' ? m.content : '';
           return !text.startsWith('[CONTEXT COMPACTION');
         });
-        const batch = parseRawMessages(payload.length > 0 ? payload : outcome.messages);
+        const batch = parseRawMessages(payload);
 
         const before = state.messages.length;
         state.messages = planOlderBatchPrependMerge(batch, state.messages);
@@ -3463,10 +3280,15 @@ async function loadOlderMessages(): Promise<void> {
 function syncActiveSessionPreviewToRail(sessionId: string, messages: MessageViewModel[], botName?: string): void {
   if (!sessionId || messages.length === 0) return;
 
+  // 【口径 (Rules)】预览只取可上屏的行。display_kind='hidden' 与时间线事件都不是人类内容，
+  // 拿来当副标题会把 [System: ...] 或后台回执顶到左侧栏。
+  const visibleMessages = messages.filter((m) => (m.displayKind ?? 'user') === 'user');
+  if (visibleMessages.length === 0) return;
+
   // 1. 若当前会话为专职 Bot 的 Forever Chat，委托 core 领域逻辑更新
   const botRes = syncActiveSessionToBot({
     sessionId,
-    messages,
+    messages: visibleMessages,
     foreverChatCache: botForeverChatCache,
     activeFocusBotName: state.activeFocus.type === 'bot' ? state.activeFocus.botName : undefined,
     profiles: state.profiles,
@@ -3482,7 +3304,7 @@ function syncActiveSessionPreviewToRail(sessionId: string, messages: MessageView
   const sess = state.sessions.find((s) => s.id === sessionId && (!botName || s.botName === botName))
     || state.sessions.find((s) => s.id === sessionId);
   if (sess) {
-    const lastMsg = messages[messages.length - 1];
+    const lastMsg = visibleMessages[visibleMessages.length - 1];
     const lastText = (lastMsg.content || lastMsg.thought || '').slice(0, 100).replace(/\s+/g, ' ').trim();
     const rawTs = lastMsg.rawTimestamp ?? Date.now();
     if (lastText) {
@@ -4114,8 +3936,14 @@ async function pinSession(id: string): Promise<void> {
 async function exportMarkdown(id: string): Promise<void> {
   const activeTitle = state.sessions.find((s) => s.id === id)?.title || 'session';
   const mdContent = state.messages
+    // 【规则】导出口径与视图一致：hidden 行不导出，时间线事件单独标注，
+    // 否则 [System: ...] 与后台回执会被导出成「### User」冒充用户发言。
+    .filter((m) => (m.displayKind ?? 'user') !== 'hidden')
     .map((m) => {
-      const header = m.role === 'user' ? '### User' : `### Assistant (${state.profileName || 'Agent'})`;
+      const kind = m.displayKind ?? 'user';
+      const header = kind !== 'user'
+        ? `### Event (${kind})`
+        : m.role === 'user' ? '### User' : `### Assistant (${state.profileName || 'Agent'})`;
       return `${header} - ${m.timestamp}\n\n${m.thought ? `> 思考链：\n> ${m.thought.replace(/\n/g, '\n> ')}\n\n` : ''}${m.content}\n`;
     })
     .join('\n---\n\n');
@@ -6249,6 +6077,8 @@ const conversationVmCache = new WeakMap<MessageViewModel, {
   thought?: string;
   toolsRef?: MessageViewModel['toolCalls'];
   toolsSignature: string;
+  displayKind: MessageDisplayKind;
+  displayMetadata?: MessageViewModel['displayMetadata'];
 }>();
 
 let knownFilesToolsRef: readonly (MessageViewModel['toolCalls'])[] = [];
@@ -6303,6 +6133,9 @@ function lockAverageRowHeight(): boolean {
   }
   // 【口径 (Rules)】必须用"窗口内消息条数"作分母，不是 DOM 行数：一条消息可能渲染成多个
   // data-msg-id 节点，用行数会把平均行高算小一半，导致滚动 1px 只走半条消息。
+  // display_kind='hidden' 的行不上屏、也不贡献高度，但仍占一个窗口下标；虚拟坐标系本就按
+  // 下标推进（见 computeContentOffsetPx / computeVirtualHeightPx），因此分母继续用下标条数，
+  // 让"下标 × 平均行高"自洽。隐藏行是低频事件，偏差可忽略。
   if (contentH <= 0) return false;
   averageRowHeightPx = Math.max(24, contentH / windowCount);
   averageRowHeightLocked = true;
@@ -6338,7 +6171,15 @@ function buildConversationSnapshot(): ConversationSnapshot {
   const streaming = isStreamingActiveForCurrentSession();
   ensureMessageWindow(state.messages.length);
   const windowedMessages = state.messages.slice(messageWindowStart, messageWindowEnd);
-  const lastMessageId = windowedMessages[windowedMessages.length - 1]?.id;
+  // 【末条判定 (Rules)】必须取窗口内最后一条可上屏的行：末条若被 display_kind 标成 hidden，
+  // 真正可见的最后一条就拿不到页脚与流式态。
+  const lastMessageId = (() => {
+    for (let i = windowedMessages.length - 1; i >= 0; i--) {
+      const kind = windowedMessages[i].displayKind ?? 'user';
+      if (kind !== 'hidden') return windowedMessages[i].id;
+    }
+    return undefined;
+  })();
   return {
     mode: focusType === 'group' ? 'group' : focusType === 'bot' ? 'foreground' : 'scratchpad',
     connection: state.gatewayConnected ? 'connected' : state.gatewayConnecting ? 'connecting' : 'disconnected',
@@ -6353,6 +6194,7 @@ function buildConversationSnapshot(): ConversationSnapshot {
     locale: state.lang,
     messages: windowedMessages.map((m) => {
       const isLast = m.id === lastMessageId;
+      const displayKind = m.displayKind ?? 'user';
       const toolsSignature = m.toolCalls?.map((tc) => `${tc.id}:${tc.status}:${tc.output?.length ?? 0}:${tc.args?.length ?? 0}`).join('|') ?? '';
       if (!isLast) {
         const cached = conversationVmCache.get(m);
@@ -6360,7 +6202,9 @@ function buildConversationSnapshot(): ConversationSnapshot {
           && cached.content === m.content
           && cached.thought === m.thought
           && cached.toolsRef === m.toolCalls
-          && cached.toolsSignature === toolsSignature) {
+          && cached.toolsSignature === toolsSignature
+          && cached.displayKind === displayKind
+          && cached.displayMetadata === m.displayMetadata) {
           return cached.vm;
         }
       }
@@ -6378,6 +6222,8 @@ function buildConversationSnapshot(): ConversationSnapshot {
         timestamp: m.timestamp,
         status: streaming && isLast ? 'streaming' : undefined,
         isStreaming: streaming && isLast,
+        displayKind,
+        displayMetadata: m.displayMetadata,
         toolCalls: m.toolCalls?.map((tc) => ({
           id: tc.id,
           name: tc.name,
@@ -6395,6 +6241,8 @@ function buildConversationSnapshot(): ConversationSnapshot {
           thought: m.thought,
           toolsRef: m.toolCalls,
           toolsSignature,
+          displayKind,
+          displayMetadata: m.displayMetadata,
         });
       }
       return vm;

@@ -85,6 +85,22 @@ function resolveTargets() {
   return SCAN_ROOTS.flatMap((root) => listSourceFiles(root));
 }
 
+/**
+ * 样式表专项目标（显式清单，禁止宽 glob）。
+ * 只服务声明了 cssAware 的规则，避免换肤/i18n 规则对遗留样式表全面报红。
+ */
+const CSS_SCAN_TARGETS = [
+  'packages/ui/src/styles/conversation.css',
+  'packages/desktop/src/renderer/styles.css',
+];
+
+function resolveCssTargets() {
+  const existing = CSS_SCAN_TARGETS.filter((rel) => fs.existsSync(path.join(REPO_ROOT, rel)));
+  if (!flags.changed && !flags.staged) return existing;
+  const changed = new Set(changedFiles({ stagedOnly: flags.staged }));
+  return existing.filter((rel) => changed.has(rel));
+}
+
 /* ---------------- 债务基线 ---------------- */
 function loadBaseline() {
   if (!fs.existsSync(BASELINE_PATH)) return { version: 1, frozenAt: null, entries: {} };
@@ -152,6 +168,42 @@ function run() {
     for (const rule of RULES) {
       // 引擎自身对 UI 类规则豁免（它不渲染像素），但架构规则照常约束
       if (ENGINE_SELF_EXEMPT[rule.id]?.(file)) continue;
+      const found = rule.check(file, ctx);
+      layoutWarnings.push(...ctx.warnings);
+      ctx.warnings.length = 0;
+      if (found.length === 0) continue;
+      allViolations.push(...found);
+      results.push({ rule, found });
+    }
+  }
+
+  /* ---------------- 样式表专项扫描 ---------------- */
+  /**
+   * Gate 4e 的样式表面。
+   *
+   * 设计意图 (Why)：
+   *   token-fallback-drift 的真值面与违规面都在 .css 里，但默认扫描域只收 ts/tsx/js/mjs。
+   *   历史口径下这条规则在全量门禁里恒为空跑（实测 167 个目标文件中 .css = 0），
+   *   而单测却能通过 —— 典型的「探针活着、门禁死了」。
+   *
+   * 防范的历史坑 (Pitfall)：
+   *   若把所有规则都对整个 styles.css 开放，换肤规则会把遗留样式表里的每个色值都报成违规，
+   *   门禁当天变红即被绕过。因此只放行显式声明 cssAware 的规则。
+   *
+   * 约束与规则 (Rules)：
+   *   样式表目标必须显式列出，禁止宽 glob；--changed/--staged 模式下同样按改动集过滤。
+   */
+  const cssTargets = resolveCssTargets();
+  for (const file of cssTargets) {
+    let ctx;
+    try {
+      ctx = makeScanCtx(file, { fromIndex: flags.staged });
+    } catch (err) {
+      console.error(warnLine(`无法读取 ${file}: ${err.message}`));
+      continue;
+    }
+    for (const rule of RULES) {
+      if (!rule.cssAware) continue;
       const found = rule.check(file, ctx);
       layoutWarnings.push(...ctx.warnings);
       ctx.warnings.length = 0;

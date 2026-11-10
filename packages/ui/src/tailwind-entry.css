@@ -13,7 +13,7 @@
 
 /* 只扫 React 组件目录。
    设计意图(Why)：Tailwind v4 默认自动检测会扫全仓，把 docs/prototypes 里的任意值 class
-     （w-[220px]、text-[22px] 等）一并编进生产产物，违反"基座只服务 React 岛"的边界。
+      （w-[220px]、text-[22px] 等）一并编进生产产物，违反"基座只服务 React 岛"的边界。
    约束与规则(Rules)：路径相对本文件；新增扫描面必须显式列出具体目录，禁止用 `**` 宽 glob 扫全仓。 */
 @source "./components-react/**/*.tsx";
 
@@ -49,6 +49,7 @@
   --color-primary: var(--primary);
   --color-primary-hover: var(--primary-hover);
   --color-primary-subtle: var(--primary-subtle);
+  --color-primary-border: var(--primary-border);
   --color-card-active: var(--card-active);
   --color-border-subtle: var(--border-subtle);
   --color-border-strong: var(--border-strong);
@@ -58,27 +59,164 @@
   --color-warning: var(--warning);
   --color-border: var(--border);
   --color-ring: var(--ring);
-  --radius-sm: var(--radius-inner, 4px);
-  --radius-md: var(--radius-card, 6px);
-  --radius-lg: var(--radius-panel, 8px);
-  --radius-xl: var(--radius-window, 12px);
-  --radius-full: 9999px;
-  --font-ui: var(--font-sans);
-  --font-code: var(--font-mono);
-  /* 字号档位引用节奏层 --fs-*，使 Tailwind 的 text-* 与 styles.css 同源。
-     设计意图(Why)：若在这里再写一遍 20/16/14/13/12/11/10px，就等于第二套字号真值；
-     引用变量后改 --fs-* 一处，组件 utility 与状态栏等直接消费者同时生效。
-     约束与规则(Rules)：禁止在此写死 px；--fs-* 的唯一真值面在 styles.css :root 节奏层。
-     当前 7 档：20 / 16 / 14 / 13 / 12 / 11 / 10px（micro 必须是最小档）。 */
-  --text-hero: var(--fs-hero, 20px);
-  --text-title: var(--fs-title, 16px);
-  --text-section: var(--fs-section, 14px);
-  --text-body: var(--fs-body, 13px);
-  --text-aux: var(--fs-aux, 12px);
-  --text-caption: var(--fs-caption, 11px);
-  --text-overline: var(--fs-caption, 11px);
-  --text-micro: var(--fs-micro, 10px);
+  /* 字体族映射不在这里：--font-* 需要先清空默认命名空间再重建，
+     若在清空之前定义，会被随后的 `--font-*: initial` 一并抹掉（已实测）。见下方独立块。 */
   /* 时长与缓动不在此定义：--duration-fast/--duration-normal 由 :root 节奏层（styles.css）单一来源持有，同名定义会造成隐式覆盖 */
+}
+
+/*
+ * 默认命名空间清场：物理封死非法语素。
+ *
+ * 设计意图(Why)：Tailwind 自带 shadow-sm/md/lg/xl、rounded-sm/md/lg/xl、text-sm/base/lg…
+ *   这些刻度与设计系统没有任何对应关系。只要有这套刻度在手，写组件的人就会本能地
+ *   按"我要大一点"去挑 lg，而不是按"这是卡片还是浮层"去挑语义档位——规范靠人自觉守不住，
+ *   必须让非法写法在编译期就产不出任何 CSS（写错了 = 没有样式 = 立刻被发现）。
+ * 防范的历史坑(Pitfall)：
+ *   1. 只写文档、只做 code review 是无效的，历史上有大量 rounded-md 就是这么进来的；
+ *   2. 清空 --radius-* 后 rounded-full 依然可用（Tailwind 生成 calc(infinity * 1px)），无需特殊处理；
+ *   3. 清空 --text-* 后必须把 7 档语义字号重新映射，否则所有 text-* 一起消失，排版整体塌陷。
+ * 约束与规则(Rules)：本块只能出现 `initial`，禁止在这里重新定义任何刻度值；
+ *   语义档位一律写在后面的 @theme inline 或 @utility 里，且禁止自引用（见下方圆角段注释）。
+ */
+@theme {
+  --radius-*: initial;
+  --shadow-*: initial;
+  --text-*: initial;
+  /* 字体族同样清场。设计意图：全系统只承认两种字体角色——界面字体与代码字体，
+     二者都是皮肤槽位（--font-sans / --font-mono），由设置页在运行时写进 :root。
+     Tailwind 默认的 font-sans / font-serif / font-mono 各自携带一套写死的字体栈，
+     一旦可用，组件就会绕开用户偏好；清空后这三类不再生成任何 CSS。
+     防范的历史坑：font-sans 与皮肤变量同名，若写成 `@theme { --font-sans: var(--font-sans) }`
+     会自引用失效（同圆角段），因此只允许用 font-ui / font-code 两个新名字去引用槽位。 */
+  --font-*: initial;
+}
+
+/*
+ * 字体族只保留两个角色（必须写在清空块之后，否则会被 initial 抹掉）。
+ *
+ * 设计意图(Why)：界面字体与代码字体是仅有的两类字体语义，且都必须支持用户在设置里动态更换。
+ *   二者分别引用皮肤槽位 --font-sans / --font-mono（运行时由 applyFontPreferences 写到 :root），
+ *   组件只要写 font-ui / font-code 就自动跟随用户偏好，无法把字体写死。
+ * 防范的历史坑(Pitfall)：曾把这两条写在清空块之前，产物里 font-ui / font-code 根本不生成，
+ *   元素回落到 UA 的 monospace（已实测：<code> 计算字体为 monospace，与槽位无关）。
+ * 约束与规则(Rules)：槽位缺失时回落到系统栈，保证字体文件未加载也能正常阅读；
+ *   禁止在这里写死具体字体名以外的第二套真值，字体真值唯一面是 tokens/fonts.ts 的注册表。
+ */
+@theme inline {
+  --font-ui: var(--font-sans, system-ui, -apple-system, "Segoe UI", "PingFang SC", sans-serif);
+  --font-code: var(--font-mono, "JetBrains Mono", Consolas, monospace);
+}
+
+/*
+ * 语义字号 7 档（清空默认 --text-* 后重建）。
+ *
+ * 设计意图(Why)：字号档位引用节奏层 --fs-*，使 Tailwind 的 text-* 与 styles.css 同源。
+ *   若在这里再写一遍 20/16/14/13/12/11/10px，就等于第二套字号真值；
+ *   引用变量后改 --fs-* 一处，组件 utility 与状态栏等直接消费者同时生效。
+ * 防范的历史坑(Pitfall)：行高必须与字号成对给。只给 font-size 不给 line-height 时，
+ *   浏览器回退到 normal（≈1.2 倍），13px 正文行高只有 15.6px，中文密排会挤成一坨。
+ * 约束与规则(Rules)：7 档固定为 hero/title/section/body/aux/caption/micro，各档行高
+ *   28/22/20/19/16/14/12px；--text-overline 是 caption 的语义别名（同一字号，收敛为大写小标题用法），
+ *   不构成第 8 档；禁止在此写死新的字号。回退值只在皮肤未注入时兜底，真值唯一面在 styles.css :root。
+ */
+@theme inline {
+  --text-hero: var(--fs-hero, 20px);
+  --text-hero--line-height: 28px;
+  --text-title: var(--fs-title, 16px);
+  --text-title--line-height: 22px;
+  --text-section: var(--fs-section, 14px);
+  --text-section--line-height: 20px;
+  --text-body: var(--fs-body, 13px);
+  --text-body--line-height: 19px;
+  --text-aux: var(--fs-aux, 12px);
+  --text-aux--line-height: 16px;
+  --text-caption: var(--fs-caption, 11px);
+  --text-caption--line-height: 14px;
+  --text-overline: var(--fs-caption, 11px);
+  --text-overline--line-height: 14px;
+  --text-micro: var(--fs-micro, 10px);
+  --text-micro--line-height: 12px;
+}
+
+/*
+ * 语义圆角四档（@utility）。
+ *
+ * 设计意图(Why)：设计系统的圆角只有"这是什么表面"的语义划分——
+ *   inner（行内元素/控件内角 4px）、card（卡片 6px）、panel（面板 8px）、window（浮层/窗口 12px）。
+ *   直接写成 rounded-card，写的人无法再问"这里要不要更圆一点"，只能问"这是卡片还是浮层"。
+ * 防范的历史坑(Pitfall)：绝不能写成 `@theme { --radius-card: var(--radius-card) }`。
+ *   皮肤槽位名与 theme 命名空间同名时，Tailwind 会把原文照抄成
+ *   `:root { --radius-card: var(--radius-card) }`；自引用在计算值阶段直接失效，
+ *   border-radius 静默塌成 0，而且产物里看着"有这个类"，排查极难（已实测）。
+ *   因此这里一律用 @utility 让 CSS 属性去引用皮肤槽位，禁止让 theme 变量引用自己。
+ * 约束与规则(Rules)：槽位名必须与 skins.ts SLOT_IDS 同源；回退值仅供皮肤未注入时兜底，
+ *   真值唯一面在 packages/desktop/src/renderer/styles.css :root 节奏层；禁止新增 sm/md/lg/xl 式刻度。
+ */
+@utility rounded-inner {
+  border-radius: var(--radius-inner, 4px);
+}
+
+@utility rounded-card {
+  border-radius: var(--radius-card, 6px);
+}
+
+@utility rounded-panel {
+  border-radius: var(--radius-panel, 8px);
+}
+
+@utility rounded-window {
+  border-radius: var(--radius-window, 12px);
+}
+
+/*
+ * 语义阴影三档（@utility）。
+ *
+ * 设计意图(Why)：阴影表达的是"这个表面离底图有多远"，因此只有 card（贴地卡片）、
+ *   panel 之上的浮层 window、以及贴边悬挂的 dock 三种物理位置，没有"第 5 档阴影"这种东西。
+ * 防范的历史坑(Pitfall)：同圆角段——禁止 `@theme { --shadow-card: var(--shadow-card) }` 自引用；
+ *   另外 --shadow-* 的真值是完整 box-shadow 列表（可能含多个逗号分隔的分量），
+ *   只能整体赋给 box-shadow 属性，不能拆开当颜色/半径使用。
+ * 约束与规则(Rules)：三个类名与皮肤槽位同名，但引用方向是 CSS 属性 → 槽位变量，单向，安全。
+ */
+@utility shadow-card {
+  box-shadow: var(--shadow-card);
+}
+
+@utility shadow-window {
+  box-shadow: var(--shadow-window);
+}
+
+@utility shadow-dock {
+  box-shadow: var(--shadow-dock);
+}
+
+/*
+ * 顶部 1px 受光线（specular-top）。
+ *
+ * 设计意图(Why)：深色皮肤下卡片与面板的边界几乎不可见，顶部一条 1px 受光线是区分层级的关键
+ *   （设计系统 README 的「受光高光线」）。做成独立工具类后，任何容器加一个类就有受光线，
+ *   不必每次手抄 ::before。
+ * 防范的历史坑(Pitfall)：--specular-line 在 skins.ts 里的真值是 **box-shadow 片段**
+ *   （`inset 0 1px 0 0 rgba(...)`），不是颜色。把它写进 `background:` 会被 CSS 解析器
+ *   整条丢弃（background 语法里没有 inset 关键字），结果是"类存在、产物存在、屏幕上什么都没有"，
+ *   属于最难发现的假交付。这里改由 1px 高的 ::before 自身承载该 box-shadow：
+ *   元素高 1px + inset 上偏移 1px ⇒ 未被偏移框覆盖的整条 1px 带被着色，视觉等价于顶部受光线。
+ *   必须用 ::before 独立承载：若直接写在本体上，会与 shadow-card/shadow-window 抢同一个
+ *   box-shadow 属性，谁后生效取决于样式表顺序，出现"加了受光线就没阴影"的随机缺陷。
+ * 约束与规则(Rules)：不改变宿主布局（position: relative + 绝对定位伪元素 + pointer-events: none）；
+ *   禁止改成本体的 border-top（会撑高盒子 1px，破坏 42px/48px 整数几何）。
+ */
+@utility specular-top {
+  position: relative;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 1px;
+    box-shadow: var(--specular-line);
+    pointer-events: none;
+  }
 }
 
 /*
@@ -90,10 +228,16 @@
  * 防范的历史坑(Pitfall)：只在个别组件上覆盖背景，会让"新写一个按钮又变白"反复发生；
  *   把基线写在 layer 之外又会压过 utilities（实测搜索框丢失面板底色与边框）。
  * 约束与规则(Rules)：必须落在 base 层，让组件自身的 utility 永远赢；
- *   作用域严格限定在 React 岛宿主（.flux-left-rail 左轨 / .flux-settings 设置中心）内，
- *   绝不声明到全局元素选择器。
+ *   作用域必须由"岛宿主"显式声明，绝不声明到全局元素选择器。
+ *   岛宿主有两种识别方式：既有的具体类（.flux-left-rail / .flux-settings），
+ *   以及新增的 `[data-flux-island]` 属性——后者是给新岛用的唯一入口，
+ *   避免"又写了一个新岛、忘了把自己加进这份选择器名单"导致控件变回白方块（Gallery 曾实测复现）。
  */
 @layer base {
+  [data-flux-island] button,
+  [data-flux-island] input,
+  [data-flux-island] textarea,
+  [data-flux-island] select,
   .flux-left-rail button,
   .flux-left-rail input,
   .flux-left-rail textarea,
@@ -111,6 +255,7 @@
     margin: 0;
   }
 
+  [data-flux-island] button,
   .flux-left-rail button,
   .flux-settings button {
     cursor: pointer;
@@ -118,12 +263,16 @@
     appearance: none;
   }
 
+  [data-flux-island] :focus-visible,
   .flux-left-rail :focus-visible,
   .flux-settings :focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
   }
 
+  [data-flux-island] *,
+  [data-flux-island] *::before,
+  [data-flux-island] *::after,
   .flux-left-rail *,
   .flux-left-rail *::before,
   .flux-left-rail *::after,

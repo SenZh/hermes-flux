@@ -4,3 +4,7 @@ export * from './Dialog.js';
 export * from './Menu.js';
 export * from './Badge.js';
 export * from './Switch.js';
+export * from './Surface.js';
+export * from './ListRow.js';
+export * from './Toolbar.js';
+export * from './Stat.js';

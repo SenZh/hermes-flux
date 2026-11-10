@@ -103,16 +103,19 @@ export function normalizePromptPreview(content: string): string {
  * 【约束与规则 (Rules)】
  *   1. 只保留 `role === 'user'`；
  *   2. id 非字符串或空白一律剔除，不做补造；
- *   3. 按入参顺序编号，不排序、不去重；输出天然按 index 严格升序。
+ *   3. 按入参顺序编号，不排序、不去重；输出天然按 index 严格升序；
+ *   4. `displayKind` 非 'user' 的行（换模型提示、后台回执、steer 包装）不是人类提问，
+ *      不得占一根横杠，否则导航轨数量与会话真实提问数不符。
  */
 export function buildPromptEntries(
-  messages: readonly { id: string; role: string; content: string }[]
+  messages: readonly { id: string; role: string; content: string; displayKind?: string }[]
 ): PromptEntry[] {
   if (!Array.isArray(messages) || messages.length === 0) return [];
   const entries: PromptEntry[] = [];
   for (let i = 0; i < messages.length; i += 1) {
     const message = messages[i];
     if (!message || message.role !== 'user') continue;
+    if (message.displayKind !== undefined && message.displayKind !== 'user') continue;
     const id = message.id;
     if (typeof id !== 'string' || id.trim().length === 0) continue;
     entries.push({ id, index: i, preview: normalizePromptPreview(message.content) });

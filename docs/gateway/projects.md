@@ -9,7 +9,7 @@
 | `projects.create` | `profile` `name` `folders` `slug` `primary_path` `description` `icon` `color` `board_slug` `use` | `project` | `packages/core/src/project/projectService.ts:160` | ✅ 0.22.5 |
 | `projects.delete` | `profile` `id` | `projects` `active_id` | `packages/core/src/project/projectService.ts:202` | ✅ 0.22.5 |
 | `projects.get` | `profile` `id` | `project` | `packages/core/src/project/projectService.ts:110` | ✅ 0.22.5 |
-| `projects.list` | `profile` | `projects` `active_id` | `packages/core/src/project/projectService.ts:66`<br>`packages/desktop/src/renderer/index.ts:1887` | ✅ 0.22.5 |
+| `projects.list` | `profile` | `projects` `active_id` | `packages/core/src/project/projectService.ts:66`<br>`packages/desktop/src/renderer/index.ts:1893` | ✅ 0.22.5 |
 | `projects.remove_folder` | `profile` `id` `path` | `project` | `packages/core/src/project/projectService.ts:268` | ✅ 0.22.5 |
 | `projects.set_active` | `profile` `id` | `active_id` | `packages/core/src/project/projectService.ts:222` | ✅ 0.22.5 |
 | `projects.tree` | `profile` `preview_limit` `session_limit` | `projects` `active_id` `scoped_session_ids` | `packages/core/src/project/projectService.ts:285` | ✅ 0.22.5 |
@@ -56,7 +56,7 @@
 - 真实探针：已通过（网关 0.22.5，录制于 2026-11-01T01:59:35.303Z）
 - 调用点：
   - `packages/core/src/project/projectService.ts:66`
-  - `packages/desktop/src/renderer/index.ts:1887`
+  - `packages/desktop/src/renderer/index.ts:1893`
 
 ### `projects.remove_folder`
 

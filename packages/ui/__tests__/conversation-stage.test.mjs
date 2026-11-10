@@ -61,3 +61,118 @@ test('连接中与未连接：不渲染消息，但保留舞台结构', () => {
     assert.ok(!html.includes('conv-message'), `${connection} 不得渲染消息`);
   }
 });
+
+test('display_kind：hidden 行不上屏，也不产出空回合容器', () => {
+  const snapshot = {
+    ...base,
+    messages: [
+      { id: 'u1', role: 'user', content: '真实提问' },
+      { id: 'h1', role: 'user', content: '[System: model changed]', displayKind: 'hidden' },
+      { id: 'a1', role: 'assistant', content: '回答' },
+    ],
+  };
+  const html = renderToStaticMarkup(React.createElement(ConversationStage, { snapshot }));
+  assert.ok(!html.includes('data-msg-id="h1"'), 'hidden 行不得产出消息节点');
+  assert.equal((html.match(/class="conv-turn"/g) || []).length, 2, 'hidden 行不得制造空回合 div');
+  assert.ok(html.includes('data-msg-id="u1"') && html.includes('data-msg-id="a1"'), '可见行必须保留');
+});
+
+test('display_kind：全 hidden 输入回落到空态，不产出任何回合', () => {
+  const snapshot = {
+    ...base,
+    messages: [{ id: 'h1', role: 'user', content: '[System: x]', displayKind: 'hidden' }],
+  };
+  const html = renderToStaticMarkup(React.createElement(ConversationStage, { snapshot }));
+  assert.equal((html.match(/class="conv-turn"/g) || []).length, 0, '全 hidden 不得渲染空回合');
+  assert.ok(html.includes('conv-state'), '可见行为空时必须回落到空态提示，而不是一片空白');
+});
+
+test('display_kind：model_switch 画时间线标记，不画用户气泡', () => {
+  const snapshot = {
+    ...base,
+    messages: [
+      { id: 'u1', role: 'user', content: '提问' },
+      { id: 'e1', role: 'user', content: '[System: model changed]', displayKind: 'model_switch' },
+    ],
+  };
+  const html = renderToStaticMarkup(React.createElement(ConversationStage, { snapshot }));
+  assert.ok(html.includes('data-event-kind="model_switch"'), '必须标记事件类型');
+  assert.ok(html.includes('conv-event'), '必须使用时间线标记样式');
+  assert.equal((html.match(/conv-message__bubble/g) || []).length, 1, '整个快照只该有 u1 一个用户气泡，事件行不得再产一个');
+  assert.ok(!html.includes('id="msg-content-e1"'), '事件行不得使用助手正文锚点');
+});
+
+test('display_kind：steer 仍画用户气泡且展示原话', () => {
+  const snapshot = {
+    ...base,
+    messages: [{ id: 's1', role: 'user', content: '用户自己的话', displayKind: 'steer' }],
+  };
+  const html = renderToStaticMarkup(React.createElement(ConversationStage, { snapshot }));
+  assert.ok(html.includes('用户自己的话'), 'steer 必须展示用户原话');
+  assert.ok(html.includes('conv-message--user'), 'steer 仍是用户气泡');
+});
+
+test('display_kind：时间线文案按 displayMetadata 分派', async (t) => {
+  const renderEvent = (message) =>
+    renderToStaticMarkup(
+      React.createElement(ConversationStage, {
+        snapshot: { ...base, messages: [{ id: 'e1', role: 'user', content: 'raw detail', ...message }] },
+      })
+    );
+
+  await t.test('async_delegation_complete 带 task_count 显示计数', () => {
+    const html = renderEvent({ displayKind: 'async_delegation_complete', displayMetadata: { task_count: 3 } });
+    assert.ok(/3/.test(html), 'task_count 必须进入文案');
+    assert.ok(!html.includes('{count}'), '占位符必须被插值替换');
+  });
+
+  await t.test('async_delegation_complete 无 task_count 退化为不带计数', () => {
+    const html = renderEvent({ displayKind: 'async_delegation_complete' });
+    const label = html.match(/conv-event__label">([^<]*)</)?.[1] ?? '';
+    assert.ok(!/\d/.test(label), `缺计数时文案不得出现数字，实际是「${label}」`);
+    assert.ok(html.includes('conv-event'), '仍应渲染时间线标记');
+  });
+
+  await t.test('task_count 非数字时不得渲染成 NaN', () => {
+    const html = renderEvent({ displayKind: 'async_delegation_complete', displayMetadata: { task_count: 'many' } });
+    assert.ok(!html.includes('NaN'), '非数字计数必须按缺失处理');
+  });
+
+  await t.test('process_complete 标签走 i18n，英文 display_text 只进详情', () => {
+    const html = renderEvent({
+      displayKind: 'process_complete',
+      displayMetadata: { display_text: 'Background Process Finished: python3 x.py' },
+    });
+    assert.ok(html.includes('conv-event__label'), '必须有标签节点');
+    assert.ok(!html.includes('Background Process Finished'), '中文界面不得直接显示网关英文标签');
+  });
+
+  await t.test('auto_continue 与 internal_notification 各有专属文案', () => {
+    const auto = renderEvent({ displayKind: 'auto_continue' });
+    const notice = renderEvent({ displayKind: 'internal_notification' });
+    assert.ok(auto.includes('conv-event'), 'auto_continue 必须渲染时间线标记');
+    assert.ok(notice.includes('conv-event'), 'internal_notification 必须渲染时间线标记');
+    const autoLabel = auto.match(/conv-event__label">([^<]*)</)?.[1] ?? '';
+    const noticeLabel = notice.match(/conv-event__label">([^<]*)</)?.[1] ?? '';
+    assert.notEqual(autoLabel, noticeLabel, '两种事件不得共用同一文案');
+  });
+
+  await t.test('有正文时提供详情展开入口', () => {
+    const html = renderEvent({ displayKind: 'process_complete' });
+    assert.ok(html.includes('conv-annot-toggle'), '有原始内容时必须可展开');
+    assert.ok(html.includes('role="button"'), '展开入口必须是可聚焦按钮语义');
+  });
+
+  await t.test('无正文时不渲染空的展开入口', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(ConversationStage, {
+        snapshot: {
+          ...base,
+          messages: [{ id: 'e1', role: 'user', content: '', displayKind: 'model_switch' }],
+        },
+      })
+    );
+    assert.ok(!html.includes('conv-annot-toggle'), '没有详情就不该给空展开按钮');
+  });
+});
+
