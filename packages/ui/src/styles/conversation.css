@@ -1703,17 +1703,21 @@ details[open] > summary > .tool-row__expand {
      1. 颜色/圆角/阴影/字号一律语义 Token，禁止裸色值与字面量字号；
      2. 轨道 z-index 20，面板 30，均高于底部遮罩 10、低于输入舱交互层；
      3. 滚动容器自身不得声明 transform，滑行动画只作用在轨道内部两层；
-     4. 命中带 28px，消息列贴近时收窄到 12px，绝不侵入正文右缘。
+     4. 命中带 28px，消息列贴近时收窄到 12px，绝不侵入正文右缘；
+     5. 面板按 L4 浮层处理：popover 实面 + 1px 发丝线 + 顶部受光线，内缩走 8px 网格；
+     6. --specular-line 是 box-shadow 片段而不是颜色，只能进 box-shadow，
+        写成 border-color 会被浏览器整条丢弃（历史缺陷：面板失去了受光线）。
    ========================================================================== */
 
 .conv-prompt-rail {
   --conv-rail-pitch: 12px;
   --conv-prompt-panel-row: 40px;
   --conv-prompt-panel-visible: 8;
+  --conv-prompt-panel-pad: 8px;
 
   position: absolute;
   top: 50%;
-  right: 14px;
+  right: 16px;
   z-index: 20;
   display: flex;
   align-items: center;
@@ -1733,7 +1737,8 @@ details[open] > summary > .tool-row__expand {
 }
 
 .conv-prompt-rail__gutter:focus-visible {
-  box-shadow: 0 0 0 1px color-mix(in oklab, var(--foreground) 22%, transparent);
+  /* 用前景混色而不是 --ring：--ring 在浅色皮肤是低对比品牌色，2px 轮廓会看不清 */
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--foreground) 60%, transparent);
 }
 
 /* 滑行轨道：高度等于可见 tick 数 × 间距，超出部分的横杠由自身裁掉 */
@@ -1758,12 +1763,16 @@ details[open] > summary > .tool-row__expand {
   transition: width 120ms ease;
 }
 
+/* 三档亮度全部走语义前景 Token，而不是前景的百分比混色：
+   混色会让常规档在浅色皮肤上掉到 1.8:1，2px 的图形指示器直接看不见。
+   --muted-foreground ≈5:1、--secondary-foreground ≈7:1、--foreground 最高，
+   两极性皮肤都过 WCAG 1.4.11 的 3:1 非文本下限。 */
 .conv-prompt-rail__tick-bar {
   display: block;
   width: 100%;
   height: 2px;
   border-radius: 1px;
-  background: color-mix(in oklab, var(--foreground) 42%, transparent);
+  background: var(--muted-foreground);
   transition: width 120ms ease, background-color 120ms ease;
 }
 
@@ -1771,29 +1780,44 @@ details[open] > summary > .tool-row__expand {
   background: var(--foreground);
 }
 
+/* 悬停项介于常规与当前之间：三档让「我正在看」和「我在哪」不混淆 */
 .conv-prompt-rail__tick.is-highlighted .conv-prompt-rail__tick-bar {
-  background: color-mix(in oklab, var(--foreground) 60%, transparent);
+  background: var(--secondary-foreground);
 }
 
 .conv-prompt-rail__tick.is-highlighted.is-active .conv-prompt-rail__tick-bar {
   background: var(--foreground);
 }
 
-/* 悬浮面板：全部提问的可滚列表，8 行可见，行高 54px */
+/* 悬浮面板：全部提问的可滚列表，8 行可见，行高 40px（8pt 网格整数倍） */
+@keyframes convPromptPanelEnter {
+  from {
+    opacity: 0;
+    transform: translateY(-50%) translateX(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
+  }
+}
+
 .conv-prompt-rail__panel {
   position: absolute;
   top: 50%;
-  right: calc(100% + 12px);
+  right: calc(100% + 16px);
   z-index: 30;
-  width: min(22rem, calc(100vw - 6rem));
-  padding: 6px;
+  width: min(20rem, calc(100vw - 7rem));
+  padding: var(--conv-prompt-panel-pad, 8px);
   border: 1px solid var(--border);
-  border-top-color: var(--specular-line);
   border-radius: var(--radius-panel, 8px);
   background: var(--popover);
-  box-shadow: var(--shadow-card);
+  /* 浮层遮蔽用 --shadow-window：语义就是「模态弹窗与主浮层」，且五个皮肤都不带描边。
+     --shadow-card 在 warm-paper / ayu-light 的真值里带 `0 0 0 1px` 描边，
+     与 border 并存会叠成两像素双线；受光线同理只能是 box-shadow 片段。 */
+  box-shadow: var(--shadow-window), var(--specular-line);
   transform: translateY(-50%);
   overflow: hidden;
+  animation: convPromptPanelEnter 120ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 .conv-prompt-rail__panel-viewport {
@@ -1818,8 +1842,7 @@ details[open] > summary > .tool-row__expand {
   height: var(--conv-prompt-panel-row);
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 10px;
+  padding: 0 8px;
   border: none;
   border-radius: var(--radius-inner, 4px);
   background: transparent;
@@ -1833,26 +1856,12 @@ details[open] > summary > .tool-row__expand {
 
 .conv-prompt-rail__panel-row.is-active {
   color: var(--foreground);
+  box-shadow: inset 2px 0 0 color-mix(in oklab, var(--foreground) 55%, transparent);
 }
 
 .conv-prompt-rail__panel-row.is-highlighted {
-  background: color-mix(in oklab, var(--foreground) 8%, transparent);
-  color: var(--foreground);
-  box-shadow: inset 2px 0 0 var(--foreground);
-}
-
-.conv-prompt-rail__panel-index {
-  flex: none;
-  min-width: 2.25rem;
-  font-family: var(--conv-font-mono);
-  font-size: var(--chat-text-micro);
-  color: var(--muted-foreground);
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-.conv-prompt-rail__panel-row.is-active .conv-prompt-rail__panel-index,
-.conv-prompt-rail__panel-row.is-highlighted .conv-prompt-rail__panel-index {
+  /* 浮层底色比列表更暗，card-hover 的 7/255 差值在这里几乎看不见，用前景混色保证跨皮肤可辨 */
+  background: color-mix(in oklab, var(--foreground) 7%, transparent);
   color: var(--foreground);
 }
 
@@ -1862,15 +1871,15 @@ details[open] > summary > .tool-row__expand {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  line-height: 1.4;
+  line-height: 18px;
 }
 
-/* 面板上下渐变遮罩：还有更多项时给出可滚动暗示 */
+/* 面板上下渐隐遮罩：还有更多项时给出可滚动暗示 */
 .conv-prompt-rail__panel-mask {
   position: absolute;
   left: 0;
   right: 0;
-  height: 14%;
+  height: 24px;
   pointer-events: none;
   z-index: 1;
 }
@@ -1893,6 +1902,10 @@ details[open] > summary > .tool-row__expand {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .conv-prompt-rail__panel {
+    animation: none;
+  }
+
   .conv-prompt-rail__gutter,
   .conv-prompt-rail__tape,
   .conv-prompt-rail__tick,
