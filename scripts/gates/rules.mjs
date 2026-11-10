@@ -1138,6 +1138,90 @@ const noShadowScale = makeClassTokenRule({
     `禁止 ${token}（无语义投影档位）：改用 ${LEGACY_SHADOW_FIX[groups[1]] ?? 'shadow-card'}；合法档仅 shadow-card|window|dock（shadow-none 合法）`,
 });
 
+/* ------------------------------------------------------------------ *
+ * Gate 4e · 字体族契约
+ * ------------------------------------------------------------------ */
+
+/**
+ * ui/no-raw-font-family（类名侧）
+ *
+ * 设计意图 (Why)：
+ *   全系统只有两种字体角色：界面字体与代码字体，二者都是皮肤槽位（--font-sans / --font-mono），
+ *   由设置页在运行时写进 :root，用户换字体后所有组件必须一起变。
+ *   Tailwind 默认的 font-sans / font-serif / font-mono 各自携带一套写死的字体栈，
+ *   一旦被使用，该组件就永久脱离用户偏好，且状态栏、代码块、输入框会各自不一致。
+ *
+ * 防范的历史坑 (Pitfall)：
+ *   tailwind-entry.css 已用 `--font-*: initial` 把这些类物理清空，
+ *   因此本规则属于第二道防线——防止有人为了"让它有样式"又在 @theme 里把默认栈加回来。
+ *
+ * 约束与规则 (Rules)：
+ *   合法写法只有 font-ui（界面字体）与 font-code（代码字体）；
+ *   确需一次性特例时写行内豁免 `// gate-theme-allow: 理由`。
+ */
+const noRawFontFamily = makeClassTokenRule({
+  id: 'visual/no-raw-font-family',
+  title: '视觉契约 · 字体族只允许 font-ui / font-code（禁止写死字体栈）',
+  pattern: /\bfont-(sans|serif|mono)\b/,
+  buildMessage: ({ token }) =>
+    `禁止 ${token}（Tailwind 默认字体栈，绕开用户字体设置）：界面文字用 font-ui，代码/终端/等宽读数用 font-code；两者分别消费皮肤槽位 --font-sans / --font-mono`,
+});
+
+/**
+ * ui/no-raw-font-family-decl（样式表侧）
+ *
+ * 设计意图 (Why)：
+ *   类名侧只能管 React 岛，遗留样式表里的 `font-family: "JetBrains Mono", ...`
+ *   同样会让组件脱离用户偏好。这条规则覆盖 .css 面，要求一律写成 var(--font-*)。
+ *
+ * 豁免：
+ *   1. `@font-face` 块内的 font-family 是字体注册本身，不是消费点；
+ *   2. CSS 全局关键字 inherit / initial / unset / revert 属于继承语义，不携带字体真值。
+ */
+const noRawFontFamilyDecl = {
+  id: 'visual/no-raw-font-family-decl',
+  gate: 'Gate 4',
+  title: '视觉契约 · 样式表不得裸写字体栈（必须 var(--font-*)）',
+  cssAware: true,
+  check(file, ctx) {
+    if (!isVisualSurface(file)) return [];
+    if (!/\.css$/.test(file)) return [];
+
+    const CSS_WIDE = /^(?:inherit|initial|unset|revert|revert-layer)$/i;
+    const out = [];
+    const src = ctx.stripped;
+    const re = /font-family\s*:\s*([^;}\n]+)/g;
+    let m;
+
+    while ((m = re.exec(src)) !== null) {
+      const value = m[1].trim();
+      if (value.length === 0) continue;
+      if (/\bvar\(\s*--(?:font|conv-font|chat-text)/.test(value)) continue;
+      if (CSS_WIDE.test(value)) continue;
+
+      // @font-face 块内是字体注册，不是消费点
+      const braceIdx = src.lastIndexOf('{', m.index);
+      const header = braceIdx >= 0 ? src.slice(Math.max(0, braceIdx - 60), braceIdx).trimEnd() : '';
+      if (/@font-face$/i.test(header)) continue;
+
+      const lineNo = lineAt(src, m.index);
+      const lineIdx = lineNo - 1;
+      if (hasInlineAllowance(ctx.rawLines, lineIdx, 'theme')) continue;
+
+      out.push({
+        file,
+        line: lineNo,
+        lineIdx,
+        ruleId: 'visual/no-raw-font-family-decl',
+        message: `裸写字体栈「${value.slice(0, 48)}」不会跟随用户字体设置：改用 var(--font-sans)（界面字体）或 var(--font-mono)（代码字体）`,
+        snippet: (ctx.rawLines[lineIdx] ?? '').trim().slice(0, 110),
+      });
+    }
+
+    return out;
+  },
+};
+
 /** 原生字阶 → 7 档语义字阶（像素值以 styles.css :root 的 --fs-* 为准） */
 const RAW_FONT_FIX = {
   xs: 'text-aux（12px 辅助文字）',
@@ -1347,6 +1431,8 @@ export const visualRules = [
   noLegacyRadius,
   noShadowScale,
   noRawFontScale,
+  noRawFontFamily,
+  noRawFontFamilyDecl,
   tokenFallbackDrift,
   arbitraryValue,
   fractionalSpacing,
