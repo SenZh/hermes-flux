@@ -99,6 +99,8 @@ import {
   windowEndFor,
   windowStartAroundIndex,
   computeHasOlderMessages,
+  shouldExpandWindow,
+  shouldSettleInitialBottom,
 } from './messageWindow.js';
 import { profilesDiffer } from './profileRefresh.js';
 import { promptMessageIndexAtScrollTop, topmostRectTop, shouldRebuildPromptIndex } from './promptNavigator.js';
@@ -1269,6 +1271,7 @@ function scrollStreamToBottom(reason: string): void {
   const stream = document.getElementById('conversation-stream');
   if (!stream) return;
   stream.scrollTop = stream.scrollHeight;
+  markProgrammaticScroll(stream);
 
   requestAnimationFrame(() => {
     const settled = document.getElementById('conversation-stream');
@@ -1276,12 +1279,66 @@ function scrollStreamToBottom(reason: string): void {
     const drift = settled.scrollHeight - settled.scrollTop - settled.clientHeight;
     if (drift > 1) {
       settled.scrollTop = settled.scrollHeight;
+      markProgrammaticScroll(settled);
     }
     logScroll.debug('pinned to bottom', {
       reason,
       scrollHeight: settled.scrollHeight,
       clientHeight: settled.clientHeight,
       residualDrift: Math.round(drift),
+    });
+  });
+}
+
+/**
+ * 首屏落定：在落定期内每帧把视口贴到最新消息。
+ *
+ * 【设计意图 (Why)】虚拟全高是分几帧才写进 scrollHeight 的（实测先 111711、后 137621），
+ *   若只在"全高已生效"时贴一次，等待期间 90 帧会被耗尽，之后读者永远停在旧口径的中部。
+ *   每帧跟随贴底，任何一次高度增长都能被跟上。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 只在 `initialBottomSettling` 期间工作，最多 90 帧；
+ *   2. 每帧写 scrollTop 都登记为程序写入，避免被滚动处理器误判成读者手势；
+ *   3. 读者一旦产生真实滚动（任意方向），滚动处理器立即解除落定，把控制权交还读者。
+ */
+function settleInitialBottom(attempt = 0): void {
+  if (!initialBottomSettling) return;
+  requestAnimationFrame(() => {
+    if (!initialBottomSettling) return;
+    const stream = document.getElementById('conversation-stream');
+    if (!stream) {
+      initialBottomSettling = false;
+      settledLayoutSignature = layoutSignature();
+      return;
+    }
+    const distance = stream.scrollHeight - stream.scrollTop - stream.clientHeight;
+    if (distance > 2) {
+      stream.scrollTop = stream.scrollHeight;
+      markProgrammaticScroll(stream);
+    } else {
+      /**
+       * 【收敛条件 (Rules)】既贴住底部、虚拟全高也已生效时立即结束，
+       *   不必空转满 90 帧；全高未生效时继续跟随，等后续帧把它写进 scrollHeight。
+       */
+      const expected = computeVirtualHeightPx();
+      if (expected <= 0 || stream.scrollHeight >= expected * 0.98) {
+        initialBottomSettling = false;
+        settledLayoutSignature = layoutSignature();
+        return;
+      }
+    }
+    if (attempt < 90) {
+      settleInitialBottom(attempt + 1);
+      return;
+    }
+    initialBottomSettling = false;
+    settledLayoutSignature = layoutSignature();
+    logScroll.debug('initial bottom settled', {
+      attempt,
+      start: messageWindowStart,
+      scrollHeight: stream.scrollHeight,
+      averageRowHeight: Math.round(averageRowHeightPx * 100) / 100,
     });
   });
 }
@@ -2378,6 +2435,59 @@ let messageWindowUserExpanded = false;
  */
 let streamScrollCooldown = false;
 let lastStreamScrollTop = 0;
+/**
+ * 首屏落定标志：切会话或冷启动恢复会话后，视口必须先落到最新消息。
+ *
+ * 【设计意图 (Why)】冷启动会直接渲染缓存的活跃会话，此时 `scrollTop` 初值为 0，
+ *   而窗口已按末尾规划。滚动处理器把「视口在窗口上沿之上」判成读者向上回溯，
+ *   连续扩窗把窗口搬离末尾并置真 `messageWindowUserExpanded`，
+ *   行高锁定后那次贴底又因该标志被跳过，读者最终停在会话中部。
+ *   实测 1128 条会话：窗口从 [1008,1128] 落到 [907,1027]，距底 25756px。
+ *
+ * 【约束与规则 (Rules)】只在首屏落定期间工作，贴底完成或超时即解除；
+ *   期间滚动处理器只更新导航轨，不做扩窗、回收与跳转。
+ */
+let initialBottomSettling = false;
+/**
+ * 已完成首屏落定时的布局指纹（`消息条数:平均行高锁定状态`）。
+ *
+ * 【设计意图 (Why)】只用消息条数判定会漏掉行高锁定：条数不变，但 scrollHeight 会从
+ *   96 的估算口径（1128×96≈108k）跳到实测口径（1128×122≈138k），
+ *   残留的 scrollTop 就停在新旧口径之间的会话中部。
+ *   冷启动的缓存恢复与分页补齐又是分批的，所以两个维度都要追踪。
+ *
+ * 【约束与规则 (Rules)】与 `readerScrolledSessionId` 配合：读者一旦主动向上回溯，
+ *   本会话的自动贴底立即永久让位，绝不把正在回看的读者拽回底部。
+ */
+let settledLayoutSignature = '';
+/** 布局指纹：条数 + 平均行高，任一变化都要求重新落定首屏。 */
+function layoutSignature(): string {
+  return `${state.messages.length}:${averageRowHeightLocked ? averageRowHeightPx.toFixed(2) : 'pending'}`;
+}
+/**
+ * 读者主动向上回溯过的会话 id。
+ *
+ * 【设计意图 (Why)】只有读者的手势能证明「我不想在底部」。
+ *   程序贴底时 scrollTop 单调增大，读者向上翻时单调减小，用方向即可区分，
+ *   不必猜测是滚轮、触摸还是拖动滚动条。
+ */
+let readerScrolledSessionId = '';
+/**
+ * 最近一次程序写入 scrollTop 后实际落地的值（浏览器会夹到最大值）。
+ *
+ * 【设计意图 (Why)】锚点校正会把 scrollTop 改小几十到几百像素，
+ *   在滚动处理器眼里与「读者向上回溯」完全同形。若不加区分，
+ *   一次锚点校正就会把本会话永久标记成"读者已回溯"，首屏补齐后再也不贴底。
+ *
+ * 【约束与规则 (Rules)】只在程序写入后登记；滚动处理器消费一次即清空，
+ *   读者真正滚动时 scrollTop 不会等于登记值，判定自然放行。
+ */
+let programmaticScrollTarget: number | null = null;
+
+/** 程序写下 scrollTop 后登记落地值，供滚动处理器区分程序滚动与读者手势。 */
+function markProgrammaticScroll(stream: HTMLElement): void {
+  programmaticScrollTarget = Math.round(stream.scrollTop);
+}
 /** 上一轮"正在加载更早历史"的起始时刻，用于熔断被节流打断的陈旧加载锁 */
 let olderLoadingStartedAt = 0;
 
@@ -2496,6 +2606,7 @@ function syncScrollTopToWindow(reason: string): void {
   if (stream.scrollTop >= virtualTop - stream.clientHeight && stream.scrollTop <= virtualBottom) return;
   const target = Math.max(0, Math.min(virtualTop, stream.scrollHeight - stream.clientHeight));
   stream.scrollTop = target;
+  markProgrammaticScroll(stream);
   logScroll.debug('scrollTop synced to window', { reason, start: messageWindowStart, target });
 }
 
@@ -2528,11 +2639,16 @@ function scheduleVirtualHeightSync(attempt = 0): void {
       if (!messageWindowUserExpanded) {
         requestAnimationFrame(() => scrollStreamToBottom('virtual height locked'));
       }
+      // 行高锁定后 scrollHeight 才等于虚拟全高，首屏落定必须按新口径重跑一次。
+      settleInitialBottom();
       return;
     }
     if (!averageRowHeightLocked && attempt < 8) {
       scheduleVirtualHeightSync(attempt + 1);
+      return;
     }
+    // 行高迟迟锁不上时也要落定首屏，否则读者会停在旧口径的中部。
+    settleInitialBottom();
   });
 }
 
@@ -5694,6 +5810,9 @@ function captureStreamAnchor(): StreamAnchor {
 function applyStreamAnchor(anchor: StreamAnchor, pinBottom: boolean): void {
   // 跳转落定期间禁止按跳转前捕获的锚点反推位移，否则刚写入的落点会被按反数抵消。
   if (promptJumpSettling) return;
+  // 首屏落定期间 scrollTop 由 settleInitialBottom 统一驱动：此时锚点来自旧视口（缓存恢复时是 0），
+  // 按它写回会把刚贴好的底部又拉回会话中部。
+  if (initialBottomSettling) return;
   const stream = document.getElementById('conversation-stream');
   if (!stream) return;
 
@@ -5703,6 +5822,7 @@ function applyStreamAnchor(anchor: StreamAnchor, pinBottom: boolean): void {
   // next token flush snaps back down — the "bouncing" conversation.
   if (pinBottom) {
     stream.scrollTop = stream.scrollHeight;
+    markProgrammaticScroll(stream);
     logScroll.trace('pinned after render', { session: state.activeSessionId });
     return;
   }
@@ -5710,6 +5830,7 @@ function applyStreamAnchor(anchor: StreamAnchor, pinBottom: boolean): void {
   // If we switched to a different session, don't inherit old session scroll offset!
   if (anchor.sessionId !== state.activeSessionId) {
     stream.scrollTop = stream.scrollHeight;
+    markProgrammaticScroll(stream);
     return;
   }
 
@@ -5721,6 +5842,7 @@ function applyStreamAnchor(anchor: StreamAnchor, pinBottom: boolean): void {
       const delta = currentOffset - anchor.offset;
       if (Math.abs(delta) >= 1) {
         stream.scrollTop += delta;
+        markProgrammaticScroll(stream);
         logScroll.trace('anchor corrected', { id: anchor.id, delta: Math.round(delta) });
       }
       return;
@@ -5734,6 +5856,7 @@ function applyStreamAnchor(anchor: StreamAnchor, pinBottom: boolean): void {
     logScroll.trace('anchor outside mounted window', { id: anchor.id });
   }
   stream.scrollTop = anchor.rawScrollTop;
+  markProgrammaticScroll(stream);
 }
 
 /**
@@ -5744,6 +5867,7 @@ function applyStreamAnchor(anchor: StreamAnchor, pinBottom: boolean): void {
 function stabilizeStreamAnchor(anchor: StreamAnchor): void {
   // 跳转落定期间锚点来自跳转前，尾随校正会把 settle 写入的位移按反数抵消。
   if (promptJumpSettling) return;
+  if (initialBottomSettling) return;
   if (!anchor.id) return;
   const stream = document.getElementById('conversation-stream');
   if (!stream) return;
@@ -6629,6 +6753,31 @@ function mountReactShellComponents(): void {
   // 缓存命中时是两次引用比较；未命中才整表重建并按 scrollTop 重算当前项。
   rebuildPromptEntries();
   syncPromptNavigator();
+  /**
+   * 首屏贴底不变式：窗口覆盖末尾 + 读者未回溯 ⇒ 视口应在底部。
+   * 【触发点 (Rules)】按布局指纹判定，而不是会话切换那一刻：
+   *   冷启动的缓存恢复、分页补齐与行高锁定都是分批到达的，首次规划发生在消息到位之前，
+   *   那一刻触发会落空，之后口径变化时再也不会落定。
+   * 【意图 (Why)】没有这一步，scrollTop 初值 0 会被滚动处理器判成读者向上回溯，
+   *   窗口被连续扩离末尾，读者最终停在会话中部（实测 1128 条会话距底 25756px）。
+   * 【兜底 (Rules)】脱离一屏以上说明旧口径残留，即便指纹已记录也重新落定一轮。
+   */
+  const streamForSettle = document.getElementById('conversation-stream');
+  const atTail = messageWindowEnd >= state.messages.length && state.messages.length > MESSAGE_WINDOW_CAPACITY;
+  const drifted = streamForSettle
+    ? streamForSettle.scrollHeight - streamForSettle.scrollTop - streamForSettle.clientHeight > streamForSettle.clientHeight
+    : false;
+  if (shouldSettleInitialBottom({
+    sessionId: state.activeSessionId,
+    readerScrolledSessionId,
+    atTail,
+    settledSignature: settledLayoutSignature,
+    currentSignature: layoutSignature(),
+    drifted,
+  })) {
+    initialBottomSettling = true;
+  }
+  settleInitialBottom();
 }
 
 function render(): void {
@@ -7071,7 +7220,12 @@ function render(): void {
       const reactHost = document.getElementById('react-message-list-host');
       const canUseReactList = state.gatewayConnected && state.messages.length > 0;
       if (reactHost && canUseReactList) {
-        syncReactMessageList();
+        /**
+         * 【结构变化必须强制推送 (Rules)】行高锁定会改写 `virtualHeightPx` 与 `contentOffsetPx`，
+         *   但挂载窗口的消息 id 可能一个都没变（首屏 120 条原地不动）。
+         *   若不强制推送，视口会一直停在旧口径的 scrollHeight 上，读者看到的是会话中部。
+         */
+        syncReactMessageList(structureDirty);
         canvasStructureDirty = false;
         applyStreamAnchor(streamAnchor, pinBottom);
         lastMessagesSnapshot = currentMessagesSnapshot;
@@ -8274,11 +8428,32 @@ function bindEvents(): void {
     streamEl.onscroll = () => {
       // 导航轨位置必须第一个算：下面的 handler 有 6 处 return，写在中段会被冷却期与加载期吃掉。
       syncPromptNavigatorFromScroll();
+      /**
+       * 【程序滚动识别 (Rules)】贴底、锚点校正都会写 scrollTop 并派发 scroll 事件。
+       *   按落地值识别，避免把程序写入误判成读者手势。
+       */
+      const isProgrammatic = programmaticScrollTarget !== null
+        && Math.abs(streamEl.scrollTop - programmaticScrollTarget) <= 2;
+      programmaticScrollTarget = null;
+      const previousTop = lastStreamScrollTop;
+      /**
+       * 【控制权移交 (Rules)】读者的任意真实滚动都意味着"我要自己控制视口"：
+       *   立即解除首屏落定；其中向上回溯额外记录该会话，此后同类补齐不再把读者拽回底部。
+       */
+      if (!isProgrammatic && Math.abs(streamEl.scrollTop - previousTop) > 4) {
+        initialBottomSettling = false;
+        if (streamEl.scrollTop < previousTop - 4) {
+          readerScrolledSessionId = state.activeSessionId;
+          settledLayoutSignature = layoutSignature();
+        }
+      }
       // 下滑方向手势：即刻释放冷却锁，彻底消除手势对抗感（对标 OpenChamber 动量释放）
       if (streamEl.scrollTop > lastStreamScrollTop + 4) {
         streamScrollCooldown = false;
       }
       lastStreamScrollTop = streamEl.scrollTop;
+      // 首屏落定期间 scrollTop 由 settleInitialBottom 驱动，不得当作读者回溯去扩窗。
+      if (initialBottomSettling) return;
 
       if (streamScrollCooldown || state.isLoadingOlder) return;
 
@@ -8312,6 +8487,21 @@ function bindEvents(): void {
         const outside = streamEl.scrollTop < virtualTop - streamEl.clientHeight * 2
           || streamEl.scrollTop > virtualBottom;
         if (outside) {
+          /**
+           * 【同一授权规则 (Rules)】读者没向上回溯过时，视口脱离窗口只可能是首屏未定位；
+           *   此时搬迁窗口会把起点搬到会话顶部，必须改为贴底。
+           */
+          if (!shouldExpandWindow({
+            sessionId: state.activeSessionId,
+            readerScrolledSessionId,
+            total: state.messages.length,
+            capacity: MESSAGE_WINDOW_CAPACITY,
+          })) {
+            initialBottomSettling = true;
+            settleInitialBottom();
+            scrollStreamToBottom('initial scroll position offscreen');
+            return;
+          }
           const targetIndex = Math.floor(streamEl.scrollTop / Math.max(1, averageRowHeightPx));
           if (relocateMessageWindowToIndex(targetIndex)) {
             streamScrollCooldown = true;
@@ -8337,6 +8527,29 @@ function bindEvents(): void {
       if (nearWindowTop || atTrueTop) {
         // 【AGENTS.md 三态隔离】群聊研讨室严禁发起单会话翻页
         if (state.activeFocus.type === 'group') return;
+
+        /**
+         * 【扩窗必须由读者授权 (Rules)】只有读者真实向上回溯过，才允许把窗口起点往前搬。
+         * 【设计意图 (Why)】冷启动先渲染缓存会话时 scrollTop 初值为 0，视口天然"落在窗口上沿之上"，
+         *   这与"读者正在向上翻"在 scroll 事件里无法区分。实测 1128 条会话因此在首屏连扩三次，
+         *   窗口从 [1008,1128] 落到 [907,1027]，读者看到的不是最新消息。
+         * 【判据】`readerScrolledSessionId` 记录的反向滚动只可能来自读者手势：
+         *   程序贴底只会让 scrollTop 增大。
+         */
+        if (!shouldExpandWindow({
+          sessionId: state.activeSessionId,
+          readerScrolledSessionId,
+          total: state.messages.length,
+          capacity: MESSAGE_WINDOW_CAPACITY,
+        })) {
+          // 视口尚未落到底部：这是首屏没定位，直接贴底，绝不扩窗。
+          if (state.messages.length > MESSAGE_WINDOW_CAPACITY) {
+            initialBottomSettling = true;
+            settleInitialBottom();
+            scrollStreamToBottom('initial window offscreen');
+          }
+          return;
+        }
 
         // 先扩展本地挂载窗口：已加载但未挂载的更早消息无需请求服务端。
         // 【竞态守卫 (Rules)】必须先上锁再扩展：render 插入历史会同步触发新的 scroll 事件，
