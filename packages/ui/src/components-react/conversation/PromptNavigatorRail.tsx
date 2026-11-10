@@ -464,7 +464,14 @@ export function PromptNavigatorRail({
         aria-current={isActive ? 'true' : undefined}
         aria-label={label}
         style={{
-          top: `${i * RAIL_TICK_PITCH_PX}px`,
+          /**
+           * 【窗口内相对定位 (Rules)】tick 的纵向位置必须是「窗口内第几根」，
+           *   不能再用全局下标再靠 tape 整体上移：`start` 一旦大于 0，位移量就会超过
+           *   可视窗高度，30 根 tick 全部被 `overflow: hidden` 裁掉（实测 88 次提问时
+           *   tape 跑到 y=-452，整条轨道一个像素都画不出来）。
+           *   本式与 `pointerIndexAt` 的 `start + floor(offsetY / pitch)` 严格互逆。
+           */
+          top: `${(i - start) * RAIL_TICK_PITCH_PX}px`,
           width: `${tickWidth(distance, isActive, isHighlighted, hasHighlight)}px`,
         }}
       >
@@ -530,7 +537,6 @@ export function PromptNavigatorRail({
         <div
           key={prompts[0]?.id ?? ''}
           className="conv-prompt-rail__tape"
-          style={{ transform: `translateY(-${start * RAIL_TICK_PITCH_PX}px)` }}
         >
           {ticks}
         </div>

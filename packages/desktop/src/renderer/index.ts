@@ -1350,6 +1350,82 @@ function settleInitialBottom(attempt = 0): void {
 }
 
 /**
+ * 会话流底部内边距跟随输入舱实测高度。
+ *
+ * 【设计意图 (Why)】输入舱是绝对定位的浮层，会话流必须用 padding 为它让出空间。
+ *   原先写死 160px，而输入舱会随附件行、通知条、队列托盘、多行输入长高（实测 110px 起，
+ *   加通知栈可到 200px 以上）。一旦超出，最后一行文字就被压在输入舱底下，拖到底也看不全。
+ *
+ * 【防范的历史坑 (Pitfall)】按输入框高度估算会漏掉它上方的队列托盘与通知栈，
+ *   必须量「pod 底边到 dock 顶边」这一整段，而不是量输入卡片本身。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 变量必须写在 `#conversation-stream` 上：该元素自己声明过同名 scoped token，
+ *      写在 pod 上会被它自己的声明覆盖；
+ *   2. 每次量完追加 16px 呼吸位，保证末行与输入舱之间有视觉间距；
+ *   3. 输入舱尺寸变化（多行输入、通知出现）由 ResizeObserver 触发重算。
+ */
+let dockInsetObserver: ResizeObserver | null = null;
+let dockInsetTarget: HTMLElement | null = null;
+/**
+ * 把「内容底超出输入舱上方安全线」的剩余溢出累加到当前底部留白。
+ *
+ * 【设计意图 (Why)】虚拟高度按 `总条数 × 平均行高` 估算，末尾这批消息的实测行高高于均值
+ *   （实测 122 条窗口比估算份额高 288px），窗口底部会溢出画布，溢出部分不受 padding 保护，
+ *   最后一条消息就被压在输入舱底下，拖到底也看不全。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 增量按「当前 padding 下还剩多少溢出」计算并累加，这样无论内容多长都能一次补足；
+ *   2. 只增不减，且切换会话时重置为基准值——减小会让内容重新被压住并来回震荡；
+ *   3. 只在贴底时测量，读者回溯时不动他的阅读位置。
+ */
+function syncStreamBottomInset(): void {
+  const pod = document.querySelector<HTMLElement>('.flux-middle-pod');
+  const dock = document.querySelector<HTMLElement>('.input-dock-container');
+  const stream = document.getElementById('conversation-stream');
+  if (!pod || !dock || !stream) return;
+  const baseInset = Math.round(pod.getBoundingClientRect().bottom - dock.getBoundingClientRect().top) + 16;
+  const distance = stream.scrollHeight - stream.scrollTop - stream.clientHeight;
+  if (distance <= STICK_TO_BOTTOM_THRESHOLD_PX) {
+    const virtualWindow = document.querySelector<HTMLElement>('.conv-virtual-window');
+    const contentBottom = virtualWindow
+      ? virtualWindow.getBoundingClientRect().bottom
+      : document.querySelector<HTMLElement>('.conv-canvas')?.getBoundingClientRect().bottom;
+    if (contentBottom !== undefined) {
+      const visibleBottom = stream.getBoundingClientRect().bottom - baseInset;
+      const need = Math.ceil(contentBottom - visibleBottom);
+      const currentPx = Math.round(parseFloat(stream.style.getPropertyValue('--conv-gutter-bottom')) || baseInset);
+      /**
+       * 贴底时内容底 = 视口底 − 留白 + 溢出量，因此「当前留白 + 剩余溢出」就是不动点，
+       * 一次即可到位；内容变短时同样成立，所以允许回缩。
+       * 4px 死区吸收测量取整与亚像素抖动，避免每帧来回追。
+       */
+      const targetPx = Math.abs(need) > 4 ? Math.max(baseInset, currentPx + need) : currentPx;
+      const next = `${targetPx}px`;
+      const prev = stream.style.getPropertyValue('--conv-gutter-bottom');
+      if (next !== prev) {
+        /**
+         * 底部留白变化的瞬间会把内容顶离视口底；原本贴底的读者必须继续贴底。
+         * 交给首屏落定的同一套循环：它连续跟踪几帧，吸收 padding 重排与锚点回写造成的漂移。
+         */
+        stream.style.setProperty('--conv-gutter-bottom', next);
+        initialBottomSettling = true;
+        settleInitialBottom();
+      }
+    }
+  }
+  if (typeof ResizeObserver === 'undefined') return;
+  if (!dockInsetObserver) {
+    dockInsetObserver = new ResizeObserver(() => syncStreamBottomInset());
+  }
+  if (dockInsetTarget !== dock) {
+    dockInsetObserver.disconnect();
+    dockInsetObserver.observe(dock);
+    dockInsetTarget = dock;
+  }
+}
+
+/**
  * Chromium reports every unexplained layout shift; a viewport that "jumps" is
  * exactly a run of these. Logged so a jump can be traced to the frame that
  * caused it instead of guessed at.
@@ -6626,6 +6702,8 @@ function mountReactShellComponents(): void {
     initialBottomSettling = true;
   }
   settleInitialBottom();
+  // 输入舱高度决定会话流底部留白，必须在消息列表挂载后同步一次。
+  syncStreamBottomInset();
 }
 
 function render(): void {
