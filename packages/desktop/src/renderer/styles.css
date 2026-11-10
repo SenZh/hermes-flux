@@ -508,10 +508,14 @@
 
 
 /* Consolidated Minimal Desktop Layout: Status consolidated in Titlebar */
+/* 设计意图(Why)：状态栏已拔除，读数收敛进顶栏；:root 真值 --geo-statusbar: 0px 即"不存在这条栏"。
+   防范的历史坑(Pitfall)：兜底值曾写 22px，与 :root 真值相反。一旦 Token 缺失，这条死选择器
+   会凭空复活 22px 高度并吃掉一像素边框，视觉上表现为顶栏下方多出一条空带。
+   约束与规则(Rules)：兜底值必须等于 :root 真值，禁止为已退役的几何保留旧尺寸。 */
 .flux-status-bar,
 #app-status-bar {
-  height: var(--geo-statusbar, 22px);
-  min-height: var(--geo-statusbar, 22px);
+  height: var(--geo-statusbar, 0px);
+  min-height: var(--geo-statusbar, 0px);
   padding: 0 var(--space-4, 16px);
   display: flex;
   align-items: center;
