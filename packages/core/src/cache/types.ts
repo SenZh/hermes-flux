@@ -89,6 +89,17 @@ export interface CachedMessageRow {
   status: 'complete' | 'error' | 'interrupted';
   /** 正文因超长被截断 */
   truncated?: boolean;
+  /**
+   * 网关显示类型（见 session/displayKind.ts）。
+   *
+   * 【设计意图 (Why)】冷启动从 IndexedDB 还原时，机器信令行必须仍按原类型渲染，
+   *   否则离线重开会把 `[System: ...]` 之类重新画成用户气泡。
+   *
+   * 【约束与规则 (Rules)】缺失即视作 'user'；旧缓存行无需迁移。
+   */
+  displayKind?: string;
+  /** 窄化后的展示元数据（子代理完成数、后台进程标题等）。 */
+  displayMetadata?: { task_count?: number; display_text?: string };
 }
 
 /** 通道引用：定位一个会话或一个房间的消息集合。 */
