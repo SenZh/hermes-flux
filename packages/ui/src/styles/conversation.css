@@ -1907,28 +1907,35 @@ details[open] > summary > .tool-row__expand {
    16. 首屏骨架（Skeleton）
    【设计意图 (Why)】
      数据尚未到达时只表达"这里将出现内容"，不伪造默认助理、假头像、默认会话与空态文案。
-     骨架以真实元素几何占位（微轨 42px、卡片行 48px、头像 36px），数据到达时原位替换、不跳动。
+     骨架以真实元素几何占位（微轨 42px、卡片行与真实行同构、头像 36px），数据到达时原位替换、不跳动。
    【约束与规则 (Rules)】
-     1. 颜色只取语义 Token（--card-active），禁止裸色值；
+     1. 色彩 = 前景 Token 的 12% 混色：深色提亮、浅色压暗，两极性都可辨，且不依赖"选中底色"语义；
      2. 呼吸动效仅作用于骨架块，规模受首屏骨架数量约束；reduced-motion 下静止；
      3. 骨架块一律 aria-hidden，不进入无障碍树。
+     历史的坑：曾用 var(--card-active)，暖白皮肤的它是纯白，首屏骨架完全不可见。
    ========================================================================== */
 
 /* gate-perf-allow: 骨架屏呼吸仅覆盖首屏十余个占位块，数据到达即全部卸载，规模受限 */
 .flux-skeleton {
   display: block;
   /*
-   * 色彩只用前景 Token 的低比例混色，而不是任何"选中底色"：
+   * 只用前景 Token 的低比例混色，而不是任何"选中底色"：
    * 深色皮肤得到提亮、浅色皮肤得到压暗，两极性对比度都在可辨认区间。
-   * 历史的坑：曾用 var(--card-active)，暖白皮肤的它是纯白，骨架在首屏完全不可见。
    */
   background: color-mix(in oklab, var(--foreground) 12%, transparent);
   animation: fluxSkeletonBreathe 2.4s ease-in-out infinite;
 }
 
+/* 老 WebView 不支持 color-mix 时不能让骨架整体透明：退回卡片底色至少仍可见。 */
+@supports not (background: color-mix(in oklab, Canvas 12%, transparent)) {
+  .flux-skeleton {
+    background: var(--card-active);
+  }
+}
+
 @keyframes fluxSkeletonBreathe {
   0%, 100% {
-    opacity: 0.55;
+    opacity: 0.72;
   }
   50% {
     opacity: 1;
@@ -1938,7 +1945,7 @@ details[open] > summary > .tool-row__expand {
 @media (prefers-reduced-motion: reduce) {
   .flux-skeleton {
     animation: none;
-    opacity: 0.8;
+    opacity: 0.85;
   }
 }
 

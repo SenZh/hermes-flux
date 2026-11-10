@@ -18,7 +18,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -369,27 +369,94 @@ export async function runFeature(featureId) {
       const primaryShot = path.join(featureArtifactsDir, 'screenshot.png');
       await session.screenshot(primaryShot);
 
-      console.log('  2.5 浅色皮肤（warm-paper）下复核骨架可见性...');
-      const lightCheck = await session.evaluate(`(() => {
+      console.log('  2.5 浅色皮肤（warm-paper）下复核骨架可见性（合成对比度）...');
+      await session.evaluate(`(() => {
         document.documentElement.setAttribute('data-theme', 'warm-paper');
-        const alphaOf = (color) => {
-          const rgba = color.match(/^rgba?\\([^)]*,\\s*([\\d.]+)\\)$/);
-          if (rgba) return parseFloat(rgba[1]);
-          const slash = color.match(/\\/\\s*([\\d.]+)\\s*\\)$/);
-          if (slash) return parseFloat(slash[1]);
-          return color === 'transparent' ? 0 : 1;
-        };
-        const block = document.querySelector('[data-skeleton="agent"]');
-        const background = document.querySelector('#flux-station-rail');
-        const blockColor = block ? getComputedStyle(block).backgroundColor : '';
-        const backgroundImage = background ? getComputedStyle(background).backgroundColor : '';
-        return { blockColor, backgroundImage, alpha: alphaOf(blockColor) };
+        // 主题切换带 150ms 过渡：立即截图会抓到旧皮肤的中间态（上一轮浅色图里的深灰块即此）。
+        const settle = document.createElement('style');
+        settle.id = 'skeleton-transition-settle';
+        settle.textContent = '*{transition:none!important}';
+        document.head.appendChild(settle);
+        return true;
       })()`);
-      console.log('     · 浅色皮肤骨架色:', lightCheck);
-      if (!(lightCheck.alpha >= 0.08)) throw new Error(`暖白皮肤下骨架不可见（alpha=${lightCheck.alpha}, color=${lightCheck.blockColor}）`);
+      await session.evaluate('new Promise((resolve) => setTimeout(() => resolve(true), 450))');
+
+      const lightCheck = await session.evaluate(`(() => {
+        // 量峰值（opacity=1）而不是动画中间值，才能对"骨架是否可辨"给出稳定结论。
+        const measure = document.createElement('style');
+        measure.id = 'skeleton-measure';
+        measure.textContent = '.flux-skeleton{animation:none!important;opacity:1!important}';
+        document.head.appendChild(measure);
+
+        const toRgba = (color) => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 1;
+          canvas.height = 1;
+          const ctx = canvas.getContext('2d');
+          ctx.clearRect(0, 0, 1, 1);
+          ctx.fillStyle = color;
+          ctx.fillRect(0, 0, 1, 1);
+          const d = ctx.getImageData(0, 0, 1, 1).data;
+          return { r: d[0], g: d[1], b: d[2], a: d[3] / 255 };
+        };
+        const luminance = ({ r, g, b }) => {
+          const channel = (value) => {
+            const c = value / 255;
+            return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+          };
+          return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+        };
+        const composite = (fg, bg) => ({
+          r: fg.r * fg.a + bg.r * (1 - fg.a),
+          g: fg.g * fg.a + bg.g * (1 - fg.a),
+          b: fg.b * fg.a + bg.b * (1 - fg.a),
+          a: 1,
+        });
+        const backdropOf = (el) => {
+          let node = el.parentElement;
+          while (node) {
+            const color = toRgba(getComputedStyle(node).backgroundColor);
+            if (color.a > 0.9) return color;
+            node = node.parentElement;
+          }
+          return { r: 255, g: 255, b: 255, a: 1 };
+        };
+        const sample = (selector) => {
+          const el = document.querySelector(selector);
+          if (!el) return null;
+          const colorText = getComputedStyle(el).backgroundColor;
+          const color = toRgba(colorText);
+          const backdrop = backdropOf(el);
+          const composed = composite(color, backdrop);
+          const l1 = luminance(composed);
+          const l2 = luminance(backdrop);
+          const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+          return { colorText, alpha: Math.round(color.a * 1000) / 1000, ratio: Math.round(ratio * 100) / 100 };
+        };
+        const result = {
+          theme: document.documentElement.getAttribute('data-theme'),
+          agent: sample('[data-skeleton="agent"]'),
+          session: sample('[data-skeleton="session"] .flux-skeleton'),
+          conversation: sample('[data-conv-skeleton="true"] .flux-skeleton'),
+        };
+        measure.remove();
+        return result;
+      })()`);
+      console.log('     · 浅色皮肤合成对比度:', lightCheck);
+      for (const [slot, entry] of Object.entries({ agent: lightCheck.agent, session: lightCheck.session, conversation: lightCheck.conversation })) {
+        if (!entry) throw new Error(`暖白皮肤下找不到 ${slot} 骨架，无法取证`);
+        if (!(entry.alpha >= 0.08)) throw new Error(`暖白皮肤下 ${slot} 骨架近透明（alpha=${entry.alpha}, color=${entry.colorText}）`);
+        if (!(entry.ratio >= 1.12)) throw new Error(`暖白皮肤下 ${slot} 骨架不可辨（对比度 ${entry.ratio}:1，需 ≥1.12:1）`);
+        if (entry.ratio > 2.2) throw new Error(`暖白皮肤下 ${slot} 骨架过于抢眼（对比度 ${entry.ratio}:1，需 ≤2.2:1）`);
+      }
       const lightShot = path.join(featureArtifactsDir, 'skeleton-warm-paper.png');
       await session.screenshot(lightShot);
-      await session.evaluate('document.documentElement.setAttribute("data-theme", "obsidian-gold")');
+      await session.evaluate(`(() => {
+        document.getElementById('skeleton-transition-settle')?.remove();
+        document.documentElement.setAttribute('data-theme', 'obsidian-gold');
+        return true;
+      })()`);
+      await session.evaluate('new Promise((resolve) => setTimeout(() => resolve(true), 450))');
 
       console.log('  3. 注入"数据已到达"状态，验证骨架原位退场...');
       await session.evaluate(`(() => {
@@ -434,12 +501,14 @@ export async function runFeature(featureId) {
 
       const evidence = {
         featureId,
+        commit: execSync('git rev-parse HEAD', { cwd: rootDir }).toString().trim(),
         timestamp: new Date().toISOString(),
         durationMs: Date.now() - startTime,
         status: 'PASSED',
         skeletonState,
         readyState,
-        screenshots: { skeleton: skeletonShot, ready: readyShot },
+        warmPaper: lightCheck,
+        screenshots: { skeleton: skeletonShot, ready: readyShot, warmPaper: lightShot, primary: primaryShot },
       };
       fs.writeFileSync(path.join(featureArtifactsDir, 'evidence.json'), JSON.stringify(evidence, null, 2));
       console.log('  ✔ 骨架屏验证成功，证据已落盘:', featureArtifactsDir);

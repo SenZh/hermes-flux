@@ -184,7 +184,7 @@ export function RailEntityRow({
     type="button"
     disabled={loading}
     aria-busy={loading}
-    className={`${className} group relative flex w-full items-center gap-2 rounded-card px-2 py-1.5 text-left transition-colors duration-150 ${compact ? 'min-h-8' : 'min-h-12'} ${active ? 'active bg-card-active text-foreground' : 'hover:bg-card-hover/80 text-secondary-foreground hover:text-foreground'}`}
+    className={`${className} group relative flex w-full items-center gap-2 rounded-card px-2 py-1.5 text-left transition-colors duration-150 ${compact ? 'min-h-8' : 'min-h-12'} ${loading ? '' : active ? 'active bg-card-active text-foreground' : 'hover:bg-card-hover/80 text-secondary-foreground hover:text-foreground'}`}
     title={titleAttr}
     onClick={loading ? undefined : onClick}
     onContextMenu={loading ? undefined : onContextMenu}

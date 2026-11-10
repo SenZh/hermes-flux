@@ -2384,8 +2384,8 @@ async function applyColdStartFocus(): Promise<void> {
   if (state.profilesPhase !== 'ready') return;
   // 【防范的历史坑 (Pitfall)】曾经先封存再调用：本地有 Profile 缓存时，本函数在连接探测返回前就执行，
   //   openBotChat 因 gatewayClient 为空直接返回，而封存标记已置位，二次启动永远拿不到默认焦点。
-  //   可执行性必须先于封存判断。
-  if (!gatewayClient || !getEffectiveUrl(state.gatewayUrl)) return;
+  //   可执行性必须先于封存判断；客户端对象存在但传输尚未 OPEN 时 call 会立即 reject，同样不能封存。
+  if (!gatewayClient || !getEffectiveUrl(state.gatewayUrl) || !state.gatewayConnected) return;
   // 只采用"用户真正保存过"的落点：state.profileName 的兜底字面量 'default' 不是用户选择。
   const storedProfileName = localStorage.getItem('hermes_flux_profile')
     || localStorage.getItem('hermes_aura_profile')
@@ -5886,6 +5886,8 @@ function disconnect(): void {
   state.gatewayConnected = false;
   state.gatewayConnecting = false;
   state.gatewayLatencyMs = 0;
+  // 断线后不会再有历史到达：立刻离开 loading，避免骨架把断线表现成"一直在加载"。
+  state.messagesPhase = 'ready';
   state.sessions = [];
   state.messages = [];
   // 断线即丢弃挂起回滚：会话通道已断，乐观裁撤快照不再有意义，残留会让重连后横幅跨会话泄漏
