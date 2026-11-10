@@ -1276,16 +1276,14 @@ function isStreamNearBottom(stream: HTMLElement | null): boolean {
 function scrollStreamToBottom(reason: string): void {
   const stream = document.getElementById('conversation-stream');
   if (!stream) return;
-  stream.scrollTop = stream.scrollHeight;
-  markProgrammaticScroll(stream);
+  scrollStreamToContentBottom(stream, parseFloat(getComputedStyle(stream).paddingBottom) || 0);
 
   requestAnimationFrame(() => {
     const settled = document.getElementById('conversation-stream');
     if (!settled) return;
     const drift = settled.scrollHeight - settled.scrollTop - settled.clientHeight;
     if (drift > 1) {
-      settled.scrollTop = settled.scrollHeight;
-      markProgrammaticScroll(settled);
+      scrollStreamToContentBottom(settled, parseFloat(getComputedStyle(settled).paddingBottom) || 0);
     }
     logScroll.debug('pinned to bottom', {
       reason,
@@ -1392,7 +1390,11 @@ function syncStreamBottomInset(): void {
   const dock = document.querySelector<HTMLElement>('.input-dock-container');
   const stream = document.getElementById('conversation-stream');
   if (!pod || !dock || !stream) return;
-  const baseInset = Math.round(pod.getBoundingClientRect().bottom - dock.getBoundingClientRect().top) + 16;
+  /**
+   * 安全线 = 输入舱顶边到 pod 底边的整段 + 32px 呼吸位。
+   * 16px 在字体放大或输入舱带通知栈时余量不足，末行会贴到输入舱边上。
+   */
+  const baseInset = Math.round(pod.getBoundingClientRect().bottom - dock.getBoundingClientRect().top) + 32;
   const distance = stream.scrollHeight - stream.scrollTop - stream.clientHeight;
   if (distance <= STICK_TO_BOTTOM_THRESHOLD_PX) {
     const virtualWindow = document.querySelector<HTMLElement>('.conv-virtual-window');
@@ -1431,6 +1433,24 @@ function syncStreamBottomInset(): void {
     dockInsetObserver.observe(dock);
     dockInsetTarget = dock;
   }
+}
+
+/**
+ * 把底部留白的重算压进一帧。
+ *
+ * 【设计意图 (Why)】滚动处理器是高频路径，每次都量两次 rect 会掉帧。
+ *   但「读者滚到底」这一下必须重算：输入舱可能在聚焦后变高，而 padding 只在 render 时才更新，
+ *   不补这一步，读者滚到底看到的仍是按旧舱高留出的空白，末行照样被压住。
+ */
+let insetSyncScheduled = false;
+
+function scheduleStreamBottomInset(): void {
+  if (insetSyncScheduled) return;
+  insetSyncScheduled = true;
+  requestAnimationFrame(() => {
+    insetSyncScheduled = false;
+    syncStreamBottomInset();
+  });
 }
 
 /**
@@ -5792,8 +5812,12 @@ function applyStreamAnchor(anchor: StreamAnchor, pinBottom: boolean): void {
   // streaming restores the old scrollTop while the rows keep growing, and the
   // next token flush snaps back down — the "bouncing" conversation.
   if (pinBottom) {
-    stream.scrollTop = stream.scrollHeight;
-    markProgrammaticScroll(stream);
+    /**
+     * 【贴底按测量对齐 (Rules)】流式输出期间也要经 `scrollStreamToContentBottom`：
+     *   直接写 scrollHeight 用的是「总条数 × 平均行高」的估算值，与窗口真实高度可差上千像素，
+     *   读者会看到最后一行被压在输入舱底下或停在空白处。
+     */
+    scrollStreamToContentBottom(stream, parseFloat(getComputedStyle(stream).paddingBottom) || 0);
     logScroll.trace('pinned after render', { session: state.activeSessionId });
     return;
   }
@@ -8482,6 +8506,13 @@ function bindEvents(): void {
       lastStreamScrollTop = streamEl.scrollTop;
       // 首屏落定期间 scrollTop 由 settleInitialBottom 驱动，不得当作读者回溯去扩窗。
       if (initialBottomSettling) return;
+      /**
+       * 读者贴到底部时补算一次底部留白：输入舱会在聚焦/多行输入后变高，
+       * 而 padding 只在 render 时更新，不在这里补，滚到底看到的仍是按旧舱高留出的空白。
+       */
+      if (streamEl.scrollHeight - streamEl.scrollTop - streamEl.clientHeight <= STICK_TO_BOTTOM_THRESHOLD_PX) {
+        scheduleStreamBottomInset();
+      }
 
       if (streamScrollCooldown || state.isLoadingOlder) return;
 
