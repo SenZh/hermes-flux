@@ -10,6 +10,8 @@
  *   3. 缺失即降级：不得用正文相似度或时间戳补造身份。
  */
 
+import type { MessageDisplayKind } from '@hermes-flux/core';
+
 export type ConversationMode = 'scratchpad' | 'foreground' | 'group';
 export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected';
 export type MessageStatus = 'pending' | 'streaming' | 'complete' | 'error' | 'interrupted';
@@ -40,6 +42,17 @@ export interface ConversationMessageVM {
   status?: MessageStatus;
   isStreaming?: boolean;
   toolCalls?: ConversationToolVM[];
+  /**
+   * 网关显示类型。缺失即 'user'（真实人类正文）。
+   *
+   * 【设计意图 (Why)】网关把换模型、后台进程回执、当中插话等信令与人类正文存在同一列，
+   *   靠 display_kind 区分。表现层据此决定画气泡、画时间线标记，还是整行跳过。
+   *
+   * 【约束与规则 (Rules)】未知值必须按 'user' 显示，严禁静默隐藏用户消息。
+   */
+  displayKind?: MessageDisplayKind;
+  /** 窄化后的展示元数据，仅时间线类事件使用。 */
+  displayMetadata?: { task_count?: number; display_text?: string };
 }
 
 export interface ContextUsageVM {

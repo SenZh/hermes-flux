@@ -39,6 +39,7 @@ const areEqual = (prev: TurnGroupProps, next: TurnGroupProps): boolean => {
     const b = next.messages[i];
     if (a === b) continue;
     if (a.id !== b.id || a.content !== b.content || a.thought !== b.thought || a.status !== b.status) return false;
+    if (a.displayKind !== b.displayKind || a.displayMetadata !== b.displayMetadata) return false;
     if (
       a.rowId !== b.rowId ||
       a.sender !== b.sender ||

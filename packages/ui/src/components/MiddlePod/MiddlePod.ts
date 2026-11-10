@@ -14,6 +14,7 @@ import { escapeHtml } from '../../utils/html.js';
 import { renderMarkdownCore, formatInlineCodeOrLink as formatInlineCodeOrLinkLib, highlightCodeSyntax as highlightCodeSyntaxLib, type RenderMarkdownOptions } from '../../lib/markdown.js';
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import type { MessageDisplayKind } from '@hermes-flux/core';
 import { ToolBlocks } from '../../components-react/conversation/ToolCapsule.js';
 
 export interface MessageViewModel {
@@ -42,6 +43,10 @@ export interface MessageViewModel {
   rawTimestamp?: number;
   isGroupRoom?: boolean;
   isBotRoom?: boolean;
+  /** 网关显示类型；缺失即 'user'。判别逻辑见 core/session/displayKind.ts。 */
+  displayKind?: MessageDisplayKind;
+  /** 窄化后的展示元数据，仅时间线类事件使用。 */
+  displayMetadata?: { task_count?: number; display_text?: string };
 }
 
 export interface ContextGaugeUsage {

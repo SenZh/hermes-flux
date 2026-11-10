@@ -1552,7 +1552,68 @@ details[open] > summary > .tool-row__expand {
 }
 
 /* ==========================================================================
-   14. 上下文压缩交接微胶囊与抽屉展开面板 (Compacted Handoff Pill & Panel)
+   14. 时间线事件（换模型 / 后台回执 / 续跑提示）
+   【设计意图 (Why)】网关把这些信令与人类正文存在同一列，用 display_kind 区分。
+     它们不是用户说的，绝不能画成用户气泡；用一条低对比单行标记交代发生过什么。
+   【约束与规则 (Rules)】只用 Design Tokens；不占用户气泡的左右对齐与圆角。
+   ========================================================================== */
+
+.conv-event {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+  padding: 0;
+  color: var(--muted-foreground);
+  font-family: var(--conv-font-sans);
+  font-size: var(--conv-micro-size, 11px);
+  line-height: 16px;
+}
+
+.conv-event__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border-medium);
+  flex-shrink: 0;
+}
+
+.conv-event__label {
+  color: var(--muted-foreground);
+}
+
+.conv-event__toggle {
+  cursor: pointer;
+  user-select: none;
+  opacity: 0.7;
+}
+
+.conv-event__toggle:hover {
+  opacity: 1;
+  color: var(--foreground);
+}
+
+.conv-event__detail {
+  flex-basis: 100%;
+  max-height: 200px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin-top: 6px;
+  padding: 8px 12px;
+  border-radius: var(--radius-inner, 6px);
+  border: 1px solid var(--border-subtle);
+  background: var(--conv-code-block-bg);
+  color: var(--muted-foreground);
+  font-family: var(--conv-font-mono);
+  font-size: var(--conv-micro-size, 11px);
+  line-height: 18px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ==========================================================================
+   15. 上下文压缩交接微胶囊与抽屉展开面板 (Compacted Handoff Pill & Panel)
    【设计意图 (Why)】大段技术性机器背景默认收折隐藏，正文回归人类意图；
      仅在气泡顶部提供极简微胶囊，展开面板设 max-height 严格防排版抖动。
    ========================================================================== */

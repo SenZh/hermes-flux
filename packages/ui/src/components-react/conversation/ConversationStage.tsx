@@ -15,6 +15,7 @@ import { t } from '../../i18n/index.js';
 import type { ConversationActions, ConversationSnapshot } from './types.js';
 import { ConversationStream } from './ConversationStream.js';
 import { TurnGroup, groupTurns } from './TurnGroup.js';
+import { selectVisibleMessages } from './visibility.js';
 
 export interface ConversationStageProps {
   snapshot: ConversationSnapshot;
@@ -39,7 +40,9 @@ export function ConversationStage({
   onboarding,
   dock,
 }: ConversationStageProps): React.ReactElement {
-  const turns = React.useMemo(() => groupTurns(snapshot.messages), [snapshot.messages]);
+  // 分组前剔除不上屏的行（display_kind='hidden'）：宿主保留它们只为维持与服务端逐行对应。
+  const visibleMessages = React.useMemo(() => selectVisibleMessages(snapshot.messages), [snapshot.messages]);
+  const turns = React.useMemo(() => groupTurns(visibleMessages), [visibleMessages]);
 
   return (
     <main className="flux-middle-pod conversation-pod" data-conv-layer="stage" data-conv-mode={snapshot.mode}>

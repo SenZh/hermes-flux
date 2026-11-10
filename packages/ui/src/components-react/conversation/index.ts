@@ -7,5 +7,6 @@ export { ConversationMessageFooter } from './MessageFooter.js';
 export { MarkdownBlock } from './MarkdownBlock.js';
 export { ToolCapsule, ToolSection, ToolBlocks, classifyTool } from './ToolCapsule.js';
 export { TurnGroup, groupTurns } from './TurnGroup.js';
+export { selectVisibleMessages } from './visibility.js';
 export { useStreamFollow, STREAM_FOLLOW_THRESHOLD_PX } from './useStreamFollow.js';
 export { mountConversation, mountMessageList, type ConversationMount } from './mount.js';

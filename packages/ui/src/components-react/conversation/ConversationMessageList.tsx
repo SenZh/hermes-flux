@@ -13,10 +13,17 @@ import * as React from 'react';
 import { t } from '../../i18n/index.js';
 import type { ConversationSnapshot } from './types.js';
 import { TurnGroup, groupTurns } from './TurnGroup.js';
+import { selectVisibleMessages } from './visibility.js';
 import { collectTouchedFiles } from '../../lib/fileRefs.js';
 
 export function ConversationMessageList({ snapshot }: { snapshot: ConversationSnapshot }): React.ReactElement {
-  const turns = React.useMemo(() => groupTurns(snapshot.messages), [snapshot.messages]);
+  // 【规则】分组前剔除不上屏的行（display_kind='hidden'）。宿主保留它们在 state.messages 里
+  // 以维持与服务端逐行对应，但视图层若也保留，会产出空的 data-conv-turn 容器，制造无意义间距。
+  const visibleMessages = React.useMemo(
+    () => selectVisibleMessages(snapshot.messages),
+    [snapshot.messages]
+  );
+  const turns = React.useMemo(() => groupTurns(visibleMessages), [visibleMessages]);
   // 文件引用只在 Agent 真实读写过该文件时才可点击；按工具数组引用缓存，避免每次渲染重扫。
   // 【设计意图 (Why)】knownFiles 保持稳定引用，让 TurnGroup / MessageRow 的 memo 在消息与工具都未变时
   //   真正跳过 Markdown 重算；否则每次快照都返回新数组，已挂载消息会整屏重算。

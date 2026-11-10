@@ -61,3 +61,54 @@ test('连接中与未连接：不渲染消息，但保留舞台结构', () => {
     assert.ok(!html.includes('conv-message'), `${connection} 不得渲染消息`);
   }
 });
+
+test('display_kind：hidden 行不上屏，也不产出空回合容器', () => {
+  const snapshot = {
+    ...base,
+    messages: [
+      { id: 'u1', role: 'user', content: '真实提问' },
+      { id: 'h1', role: 'user', content: '[System: model changed]', displayKind: 'hidden' },
+      { id: 'a1', role: 'assistant', content: '回答' },
+    ],
+  };
+  const html = renderToStaticMarkup(React.createElement(ConversationStage, { snapshot }));
+  assert.ok(!html.includes('data-msg-id="h1"'), 'hidden 行不得产出消息节点');
+  assert.equal((html.match(/class="conv-turn"/g) || []).length, 2, 'hidden 行不得制造空回合 div');
+  assert.ok(html.includes('data-msg-id="u1"') && html.includes('data-msg-id="a1"'), '可见行必须保留');
+});
+
+test('display_kind：全 hidden 输入回落到空态，不产出任何回合', () => {
+  const snapshot = {
+    ...base,
+    messages: [{ id: 'h1', role: 'user', content: '[System: x]', displayKind: 'hidden' }],
+  };
+  const html = renderToStaticMarkup(React.createElement(ConversationStage, { snapshot }));
+  assert.equal((html.match(/class="conv-turn"/g) || []).length, 0, '全 hidden 不得渲染空回合');
+  assert.ok(html.includes('conv-state'), '可见行为空时必须回落到空态提示，而不是一片空白');
+});
+
+test('display_kind：model_switch 画时间线标记，不画用户气泡', () => {
+  const snapshot = {
+    ...base,
+    messages: [
+      { id: 'u1', role: 'user', content: '提问' },
+      { id: 'e1', role: 'user', content: '[System: model changed]', displayKind: 'model_switch' },
+    ],
+  };
+  const html = renderToStaticMarkup(React.createElement(ConversationStage, { snapshot }));
+  assert.ok(html.includes('data-event-kind="model_switch"'), '必须标记事件类型');
+  assert.ok(html.includes('conv-event'), '必须使用时间线标记样式');
+  assert.equal((html.match(/conv-message__bubble/g) || []).length, 1, '整个快照只该有 u1 一个用户气泡，事件行不得再产一个');
+  assert.ok(!html.includes('id="msg-content-e1"'), '事件行不得使用助手正文锚点');
+});
+
+test('display_kind：steer 仍画用户气泡且展示原话', () => {
+  const snapshot = {
+    ...base,
+    messages: [{ id: 's1', role: 'user', content: '用户自己的话', displayKind: 'steer' }],
+  };
+  const html = renderToStaticMarkup(React.createElement(ConversationStage, { snapshot }));
+  assert.ok(html.includes('用户自己的话'), 'steer 必须展示用户原话');
+  assert.ok(html.includes('conv-message--user'), 'steer 仍是用户气泡');
+});
+
