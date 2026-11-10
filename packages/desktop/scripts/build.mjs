@@ -134,7 +134,8 @@ async function buildAll() {
     sourcemap: true,
   });
   // 消息窗口与 Profile 刷新是热路径纯逻辑，独立产物供行为级单测直接导入（不依赖 DOM）。
-  for (const moduleName of ['messageWindow', 'profileRefresh']) {
+  // 提示词导航轨的滚动换算与缓存判定同为纯逻辑，一并独立产物，供 host 侧单测覆盖。
+  for (const moduleName of ['messageWindow', 'profileRefresh', 'promptNavigator']) {
     await esbuild.build({
       entryPoints: [path.join(rootDir, `src/renderer/${moduleName}.ts`)],
       outfile: path.join(rootDir, `dist/renderer/${moduleName}.mjs`),
@@ -145,7 +146,7 @@ async function buildAll() {
       sourcemap: true,
     });
   }
-  console.log('  ✔ Interactive-stage pure modules compiled (rollbackTransaction, toolPatchQueue, conversationPush, settingsController, messageWindow, profileRefresh)');
+  console.log('  ✔ Interactive-stage pure modules compiled (rollbackTransaction, toolPatchQueue, conversationPush, settingsController, messageWindow, profileRefresh, promptNavigator)');
 
   // 4. Copy static assets
   fs.copyFileSync(

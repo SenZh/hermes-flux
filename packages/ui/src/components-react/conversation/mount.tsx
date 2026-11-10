@@ -17,7 +17,9 @@ import type { ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { ConversationStage } from './ConversationStage.js';
 import { ConversationMessageList } from './ConversationMessageList.js';
+import { PromptNavigatorRail } from './PromptNavigatorRail.js';
 import type { ConversationActions, ConversationSnapshot } from './types.js';
+import type { PromptNavigatorActions, PromptNavigatorSnapshot } from '../../lib/promptNavigator.js';
 
 export interface ConversationMount {
   update: () => void;
@@ -41,6 +43,38 @@ export function mountConversation(
         dock={options.dock?.()}
       />
     );
+  };
+
+  update();
+  return {
+    update,
+    unmount: () => root.unmount(),
+  };
+}
+
+/**
+ * 提示词导航轨挂载：只接管轨道，pod / 滚动容器 / 输入舱仍由宿主模板提供。
+ *
+ * 【设计意图 (Why)】
+ *   轨道必须挂在 `.flux-middle-pod` 的常驻 host 上，与标题栏、左轨、消息列表同构：
+ *   宿主只推快照，组件内部状态（高亮、面板、轮播）不会因为一次 render 被重建。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   挂进 `#conversation-stream` 会在 `activeStream.innerHTML = renderConversationCanvas(...)`
+ *   时连宿主一起销毁，轨道从此不再出现。
+ *
+ * 【约束与规则 (Rules)】同一 host 只允许一个 root；宿主要求已连接。
+ */
+export function mountPromptNavigator(
+  host: HTMLElement,
+  getSnapshot: () => PromptNavigatorSnapshot,
+  actions: PromptNavigatorActions
+): ConversationMount {
+  if (!host.isConnected) throw new Error('Prompt navigator host must be connected before mounting');
+  const root: Root = createRoot(host);
+
+  const update = (): void => {
+    root.render(<PromptNavigatorRail snapshot={getSnapshot()} actions={actions} />);
   };
 
   update();

@@ -63,6 +63,12 @@ import {
   type TitlebarSnapshot,
   attachMotionController,
   mountMessageList,
+  mountPromptNavigator,
+  buildPromptEntries,
+  resolveActivePromptIndex,
+  type PromptEntry,
+  type PromptNavigatorActions,
+  type PromptNavigatorSnapshot,
   type ConversationMount,
   type ConversationSnapshot,
   type ConversationMessageVM,
@@ -95,6 +101,7 @@ import {
   computeHasOlderMessages,
 } from './messageWindow.js';
 import { profilesDiffer } from './profileRefresh.js';
+import { promptMessageIndexAtScrollTop, topmostRectTop, shouldRebuildPromptIndex } from './promptNavigator.js';
 
 import {
   HermesGatewayClient,
@@ -2509,6 +2516,11 @@ function scheduleVirtualHeightSync(attempt = 0): void {
       canvasStructureDirty = true;
       render();
       /**
+       * 【位置重算 (Rules)】行高从默认 96 变成实测值后，同一个 scrollTop 对应的消息下标完全变了；
+       *   若 scrollTop 恰好停在底部，此后不会再产生 scroll 事件，导航会永久停在 96 的口径。
+       */
+      syncPromptNavigatorFromScroll();
+      /**
        * 【首屏贴底 (Rules)】画布高度变成虚拟全高后，scrollTop 必须落到窗口在虚拟坐标中的
        *   真实位置（≈ 窗口起点 × 行高），否则会停在 0 也就是会话最开头，
        *   读者打开会话看到的是最早的记录而不是最新消息。
@@ -2521,6 +2533,256 @@ function scheduleVirtualHeightSync(attempt = 0): void {
     if (!averageRowHeightLocked && attempt < 8) {
       scheduleVirtualHeightSync(attempt + 1);
     }
+  });
+}
+
+/* --------------------------------------------------------------------------
+ * 提示词导航轨：模块级状态、快照推送、当前位置与跳转
+ * -------------------------------------------------------------------------- */
+
+/**
+ * 阅读基准线（px）。
+ *
+ * 【设计意图 (Why)】读者视线并非贴在视口顶端，而是落在顶端往下约 100px 处；
+ *   用这条基准线换算「当前读到第几条消息」，轨道高亮才与阅读感受一致。
+ * 【约束与规则 (Rules)】与 48px 贴底跟随阈值语义、量纲都不同，禁止合并成一个常量：
+ *   后者判定「是否自动贴底」，前者判定「读到哪一条」。
+ */
+const PROMPT_READ_LINE_PX = 100;
+
+/**
+ * 空快照必须是一个冻结常量。
+ *
+ * 【防范的历史坑 (Pitfall)】若在 getPromptNavigatorSnapshot 里现造空对象，
+ *   每次 render 都会得到新引用，去重失效，React 岛被每个 render 推一次。
+ */
+const EMPTY_PROMPT_NAVIGATOR_SNAPSHOT: PromptNavigatorSnapshot = Object.freeze({
+  prompts: Object.freeze([]) as readonly PromptEntry[],
+  activeIndex: -1,
+});
+
+let promptNavigatorSnapshot: PromptNavigatorSnapshot | null = null;
+let promptNavigatorEntries: PromptEntry[] = [];
+let promptNavigatorCache: { sessionId: string; messagesRef: readonly unknown[] } | null = null;
+let lastPromptNavigatorSnapshot: PromptNavigatorSnapshot | null = null;
+let updateReactPromptNavigator: (() => void) | null = null;
+/** 跳转序列号：丢弃迟到 rAF，连点两根 tick 时先到的回调不得覆盖后一次跳转。 */
+let promptJumpSeq = 0;
+/** 跳转落定期间屏蔽 render 自带的两处锚点写入者。 */
+let promptJumpSettling = false;
+/** `.conv-stream` 的 padding-top 实测值，首帧读取一次后缓存（切皮肤无需重读）。 */
+let streamPaddingTopPx = 24;
+let streamPaddingTopRead = false;
+/** 重建重入标记：syncPromptNavigatorFromScroll 内部触发的重建不得递归调用自身。 */
+let promptNavigatorRebuildDepth = 0;
+
+/** 读取一次 `.conv-stream` 的 padding-top，用于滚动位置换算。 */
+function ensureStreamPaddingTop(stream: HTMLElement): void {
+  if (streamPaddingTopRead) return;
+  streamPaddingTopRead = true;
+  const raw = Number.parseFloat(getComputedStyle(stream).paddingTop);
+  if (Number.isFinite(raw) && raw >= 0) streamPaddingTopPx = raw;
+}
+
+/**
+ * 快照唯一出口：只返回模块级引用。
+ *
+ * 【约束与规则 (Rules)】禁止在此函数内构造新对象，否则引用去重失效。
+ */
+function getPromptNavigatorSnapshot(): PromptNavigatorSnapshot {
+  return promptNavigatorSnapshot ?? EMPTY_PROMPT_NAVIGATOR_SNAPSHOT;
+}
+
+/**
+ * 快照推送唯一入口。
+ *
+ * 【约束与规则 (Rules)】位置变化、重建、跳转落定全部走这里，禁止在别处直接调 update。
+ */
+function syncPromptNavigator(): void {
+  if (!updateReactPromptNavigator) return;
+  const snapshot = getPromptNavigatorSnapshot();
+  if (snapshot === lastPromptNavigatorSnapshot) return;
+  lastPromptNavigatorSnapshot = snapshot;
+  updateReactPromptNavigator();
+}
+
+/**
+ * 整表重建提示词条目。
+ *
+ * 【设计意图 (Why)】缓存 key 用「会话 id + 消息数组引用」，O(1) 判定；
+ *   切会话必须把当前项落到末条（读者位置未知），其余重建按当前 scrollTop 重算。
+ * 【防范的历史坑 (Pitfall)】前置翻页每次都返回新数组，若一律取末条，
+ *   读者停在顶部时轨道会整体跳到末尾，且该路径不产生 scroll 事件，永不自我修复。
+ * 【约束与规则 (Rules)】
+ *   1. 本函数只写 `promptNavigatorEntries` 与 `promptNavigatorCache`；
+ *   2. 切会话分支额外写一次「末条」快照并推送，其余分支交给滚动位置重算；
+ *   3. 返回 true 表示已完成「切会话重置」，调用方不得再按 scrollTop 覆盖。
+ */
+function rebuildPromptEntries(): boolean {
+  const shouldRebuild = shouldRebuildPromptIndex({
+    sessionId: promptNavigatorCache?.sessionId ?? '',
+    currentSessionId: state.activeSessionId,
+    cachedMessagesRef: promptNavigatorCache?.messagesRef ?? null,
+    messagesRef: state.messages,
+  });
+  if (!shouldRebuild) return false;
+  const sessionChanged = promptNavigatorCache?.sessionId !== state.activeSessionId;
+  promptNavigatorEntries = buildPromptEntries(state.messages);
+  promptNavigatorCache = { sessionId: state.activeSessionId, messagesRef: state.messages };
+  if (sessionChanged) {
+    promptNavigatorSnapshot = promptNavigatorEntries.length === 0
+      ? { prompts: promptNavigatorEntries, activeIndex: -1, locale: state.lang }
+      : { prompts: promptNavigatorEntries, activeIndex: promptNavigatorEntries.length - 1, locale: state.lang };
+    syncPromptNavigator();
+    return true;
+  }
+  if (promptNavigatorRebuildDepth > 0) return false;
+  // 等长替换 / 回滚：按当前滚动位置重算，避免高亮停在已裁掉的下标上。
+  syncPromptNavigatorFromScroll();
+  return false;
+}
+
+/**
+ * 按滚动位置刷新当前项。
+ *
+ * 【设计意图 (Why)】滚动热路径只做整数算术与一次二分；只有跨过一条提问才换快照引用，
+ *   滚动过程本身不触发 React 更新。
+ * 【约束与规则 (Rules)】
+ *   1. 重建与位置计算必须同一会话，否则会话切换瞬间会拿新会话的 total 算旧会话的 entries；
+ *   2. entries 为空时快照也要清空，否则轨道仍指向上一会话的旧表；
+ *   3. 同一 activeIndex 不换引用。
+ */
+function syncPromptNavigatorFromScroll(): void {
+  const stream = document.getElementById('conversation-stream');
+  if (stream) ensureStreamPaddingTop(stream);
+  promptNavigatorRebuildDepth += 1;
+  let sessionReset = false;
+  try {
+    sessionReset = rebuildPromptEntries();
+  } finally {
+    promptNavigatorRebuildDepth -= 1;
+  }
+  if (sessionReset) return;
+  if (promptNavigatorEntries.length === 0) {
+    if (promptNavigatorSnapshot && promptNavigatorSnapshot.prompts.length > 0) {
+      promptNavigatorSnapshot = { prompts: promptNavigatorEntries, activeIndex: -1, locale: state.lang };
+      syncPromptNavigator();
+    }
+    return;
+  }
+  if (promptNavigatorCache?.sessionId !== state.activeSessionId) return;
+  const total = state.messages.length;
+  if (total <= 0 || !stream) return;
+  const messageIndex = promptMessageIndexAtScrollTop({
+    scrollTop: stream.scrollTop,
+    rowHeight: averageRowHeightPx,
+    paddingTop: streamPaddingTopPx,
+    readLinePx: PROMPT_READ_LINE_PX,
+    total,
+  });
+  const next = resolveActivePromptIndex(promptNavigatorEntries, messageIndex);
+  if (next === (promptNavigatorSnapshot?.activeIndex ?? -1)) return;
+  promptNavigatorSnapshot = { prompts: promptNavigatorEntries, activeIndex: next, locale: state.lang };
+  syncPromptNavigator();
+}
+
+/** 导航轨动作表：只传消息 id，宿主用 id 反查（下标会被前置翻页整体平移）。 */
+function createPromptNavigatorActions(): PromptNavigatorActions {
+  return {
+    onSelect: (messageId: string) => {
+      jumpToPrompt(messageId);
+    },
+  };
+}
+
+/**
+ * 跳到指定用户消息。
+ *
+ * 【设计意图 (Why)】把消息窗口搬到目标索引附近，再用 DOM 实测校正 scrollTop，
+ *   使目标行顶部与视口顶部相差不超过 12px。
+ * 【防范的历史坑 (Pitfall)】见 settlePromptJump 的九条要点。
+ * 【约束与规则 (Rules)】全程不改消息窗口容量、虚拟高度与缓存逻辑，只借用既有原语。
+ */
+function jumpToPrompt(messageId: string): void {
+  const index = state.messages.findIndex((m) => m.id === messageId);
+  if (index < 0) return;
+
+  promptJumpSeq += 1;
+  const seq = promptJumpSeq;
+  promptJumpSettling = true;
+  suppressPinBottomOnce = true;
+  streamScrollCooldown = true;
+  // 语义上读者已离开尾部，掐掉 scheduleVirtualHeightSync 里的 scrollStreamToBottom。
+  messageWindowUserExpanded = true;
+  relocateMessageWindowToIndex(index);
+  canvasStructureDirty = true;
+  render();
+  settlePromptJump(messageId, seq, 0, 0);
+}
+
+/**
+ * 跳转落定：逐帧等目标行挂载后按 DOM 实测校正。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   1. 用入场下标会失效：前置翻页把历史插到数组头，闭包里的 index 已过期，因此每帧按 id 重查；
+ *   2. 行高锁定帧会嵌套一次 render 并安排 stabilizeStreamAnchor，必须先等它落定；
+ *   3. 单次 rAF 会错过 React 提交，最多重试 8 帧，超限显式告警不静默放弃；
+ *   4. 一条消息有多个 `data-msg-id` 节点（行本体 + 页脚按钮），取最上矩形才是行本体。
+ */
+function settlePromptJump(messageId: string, seq: number, attempt: number, wait: number): void {
+  requestAnimationFrame(() => {
+    if (seq !== promptJumpSeq) return;
+    // 跳转途中切会话或回滚时目标可能已不存在，每帧按 id 重查，不用入场时的下标。
+    const index = state.messages.findIndex((m) => m.id === messageId);
+    if (index < 0) {
+      releasePromptJump(seq);
+      return;
+    }
+    // 行高锁定帧会嵌套一次 render 并安排 stabilizeStreamAnchor，等它落定再定位。
+    if (!averageRowHeightLocked && wait < 8) {
+      settlePromptJump(messageId, seq, attempt, wait + 1);
+      return;
+    }
+    const stream = document.getElementById('conversation-stream');
+    if (!stream) {
+      releasePromptJump(seq);
+      return;
+    }
+    ensureStreamPaddingTop(stream);
+    if (attempt === 0) {
+      const rough = index * averageRowHeightPx;
+      stream.scrollTop = Math.max(0, Math.min(rough, stream.scrollHeight - stream.clientHeight));
+    }
+    const nodes = stream.querySelectorAll<HTMLElement>(`[data-msg-id="${CSS.escape(messageId)}"]`);
+    const top = topmostRectTop(Array.from(nodes, (node) => node.getBoundingClientRect()));
+    if (top !== null) {
+      const delta = top - stream.getBoundingClientRect().top;
+      stream.scrollTop += delta - 12;
+      syncPromptNavigatorFromScroll();
+      releasePromptJump(seq);
+      return;
+    }
+    if (attempt < 8) {
+      settlePromptJump(messageId, seq, attempt + 1, wait);
+      return;
+    }
+    logScroll.warn('prompt jump target not mounted', { messageId, attempt });
+    releasePromptJump(seq);
+  });
+}
+
+/**
+ * 延迟一帧释放两个标志。
+ *
+ * 【防范的历史坑 (Pitfall)】锁定行高那一帧会再注册一次尾随锚点校正，它在下一帧运行；
+ *   提前释放会让 stabilizeStreamAnchor 把刚写入的位移按反数抵消。
+ *   自身写出的 scroll 事件也在下一帧派发，冷却锁必须活到那时，否则会触发一次多余扩窗。
+ */
+function releasePromptJump(seq: number): void {
+  requestAnimationFrame(() => {
+    if (seq !== promptJumpSeq) return;
+    promptJumpSettling = false;
+    streamScrollCooldown = false;
   });
 }
 
@@ -5430,6 +5692,8 @@ function captureStreamAnchor(): StreamAnchor {
 }
 
 function applyStreamAnchor(anchor: StreamAnchor, pinBottom: boolean): void {
+  // 跳转落定期间禁止按跳转前捕获的锚点反推位移，否则刚写入的落点会被按反数抵消。
+  if (promptJumpSettling) return;
   const stream = document.getElementById('conversation-stream');
   if (!stream) return;
 
@@ -5478,6 +5742,8 @@ function applyStreamAnchor(anchor: StreamAnchor, pinBottom: boolean): void {
  * later. Re-measure once and absorb the residual drift.
  */
 function stabilizeStreamAnchor(anchor: StreamAnchor): void {
+  // 跳转落定期间锚点来自跳转前，尾随校正会把 settle 写入的位移按反数抵消。
+  if (promptJumpSettling) return;
   if (!anchor.id) return;
   const stream = document.getElementById('conversation-stream');
   if (!stream) return;
@@ -6344,6 +6610,25 @@ function mountReactShellComponents(): void {
   }
   syncReactSettings();
   syncReactMessageList();
+
+  /**
+   * 提示词导航轨挂载与推送。
+   * 【设计意图 (Why)】必须放在 syncReactMessageList 之后：首帧 host 已存在但消息列表还没建，
+   *   提前挂载读到的是旧窗口信息。
+   * 【约束与规则 (Rules)】host 常驻 pod 层，只挂一次；推送统一走 syncPromptNavigator。
+   */
+  const navHost = document.getElementById('react-prompt-navigator-host');
+  if (navHost && !updateReactPromptNavigator) {
+    const promptNavigatorMount = mountPromptNavigator(
+      navHost,
+      getPromptNavigatorSnapshot,
+      createPromptNavigatorActions()
+    );
+    updateReactPromptNavigator = promptNavigatorMount.update;
+  }
+  // 缓存命中时是两次引用比较；未命中才整表重建并按 scrollTop 重算当前项。
+  rebuildPromptEntries();
+  syncPromptNavigator();
 }
 
 function render(): void {
@@ -7987,6 +8272,8 @@ function bindEvents(): void {
   const streamEl = document.getElementById('conversation-stream');
   if (streamEl) {
     streamEl.onscroll = () => {
+      // 导航轨位置必须第一个算：下面的 handler 有 6 处 return，写在中段会被冷却期与加载期吃掉。
+      syncPromptNavigatorFromScroll();
       // 下滑方向手势：即刻释放冷却锁，彻底消除手势对抗感（对标 OpenChamber 动量释放）
       if (streamEl.scrollTop > lastStreamScrollTop + 4) {
         streamScrollCooldown = false;

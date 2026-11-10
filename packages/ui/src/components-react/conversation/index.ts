@@ -8,4 +8,5 @@ export { MarkdownBlock } from './MarkdownBlock.js';
 export { ToolCapsule, ToolSection, ToolBlocks, classifyTool } from './ToolCapsule.js';
 export { TurnGroup, groupTurns } from './TurnGroup.js';
 export { useStreamFollow, STREAM_FOLLOW_THRESHOLD_PX } from './useStreamFollow.js';
-export { mountConversation, mountMessageList, type ConversationMount } from './mount.js';
+export { PromptNavigatorRail, type PromptNavigatorRailProps } from './PromptNavigatorRail.js';
+export { mountConversation, mountMessageList, mountPromptNavigator, type ConversationMount } from './mount.js';

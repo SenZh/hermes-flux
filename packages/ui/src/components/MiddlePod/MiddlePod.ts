@@ -213,6 +213,21 @@ export function renderSideAgentCapsule(capsule: SideAgentCapsuleView): string {
   `;
 }
 
+/**
+ * 中间舱骨架。
+ *
+ * 【设计意图 (Why)】
+ *   `#react-prompt-navigator-host` 是提示词导航轨的常驻宿主，必须挂在 pod 层，
+ *   位于 `#conversation-stream` 之后、输入舱 dock 之前：放流内会被整块画布替换销毁，
+ *   放 dock 之后会被 dock 盖住。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   早期轨道模板每帧重建，宿主节点被 `outerHTML` 覆写，滚动位置与悬停态全部丢失。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 禁止把 host 移进 `#conversation-stream`；
+ *   2. 禁止把 host 作为任何 `innerHTML` / `outerHTML` 的目标。
+ */
 export function renderMiddlePod(props: MiddlePodProps): string {
   return `
     <main class="flux-middle-pod conversation-pod" data-conv-layer="stage">
@@ -220,6 +235,9 @@ export function renderMiddlePod(props: MiddlePodProps): string {
       <div id="conversation-stream" class="messages-stream-area conv-stream" data-conv-layer="stream">
         ${renderConversationCanvas(props)}
       </div>
+
+      <!-- Prompt Navigator Rail Host (React 岛，常驻，绝不进滚动流) -->
+      <div id="react-prompt-navigator-host"></div>
 
       <!-- Dock Scrim Fade (Bottom gradient to prevent card collision) -->
       <div class="dock-scrim-fade conv-dock-scrim" data-conv-layer="scrim"></div>
