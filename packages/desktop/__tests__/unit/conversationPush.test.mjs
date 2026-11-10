@@ -64,3 +64,29 @@ test('集合清空：清空会话必须推送', () => {
     true
   );
 });
+
+test('首屏相位翻转：消息 id 完全不变也必须推送（骨架 ⇄ 历史）', () => {
+  assert.equal(
+    decideConversationPush({
+      prevIds: new Set(),
+      nextIds: [],
+      justStoppedStreaming: false,
+      force: false,
+      messagesPhaseChanged: true,
+    }),
+    true
+  );
+});
+
+test('相位未变化时仍是原判定：不得因新字段存在而放大推送', () => {
+  assert.equal(
+    decideConversationPush({
+      prevIds: ids('a', 'b'),
+      nextIds: ['a', 'b'],
+      justStoppedStreaming: false,
+      force: false,
+      messagesPhaseChanged: false,
+    }),
+    false
+  );
+});

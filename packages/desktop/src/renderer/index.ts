@@ -71,6 +71,7 @@ import {
   type ConversationMount,
   type ConversationSnapshot,
   type ConversationMessageVM,
+  type DataPhase,
   mountFileTypeSprite,
   warmUpHighlighting,
   loadFontPreferences,
@@ -90,6 +91,7 @@ import {
 import { applyOptimisticCut, planSessionLoadMerge, planRollbackLeaveRestore, takeServerPriority, extractDurableRowId, bindTurnRowIds, resolveRollbackTarget } from './rollbackTransaction.js';
 import { createToolPatchQueue } from './toolPatchQueue.js';
 import { decideConversationPush } from './conversationPush.js';
+import { resolveColdStartFocus } from './coldStartFocus.js';
 import { createSettingsController, resolveGatewayPassword } from './settingsController.js';
 import {
   planMessageWindow,
@@ -434,19 +436,19 @@ async function restoreCacheToState(): Promise<void> {
         profiles: state.profiles.length,
         avatars: Object.keys(avatars || {}).length,
       });
-      // 若当前未激活会话且缓存中存在会话，预载首个会话消息以瞬间完成首屏渲染
-      if (!state.activeSessionId && state.sessions.length > 0) {
-        const firstSession = state.sessions[0];
-        if (firstSession?.id) {
-          state.activeSessionId = firstSession.id;
-          state.activeLiveSessionId = '';
-          void loadMessages(firstSession.id, firstSession.botName);
-        }
-      }
+      // 缓存命中即代表该域已有真实数据：骨架必须让位，否则秒开的卡片会被占位块盖住。
+      if (state.profiles.length > 0) state.profilesPhase = 'ready';
+      if (state.sessions.length > 0) state.sessionsPhase = 'ready';
+      // 【冷启动落点单一裁决 (Rules)】这里不再抢先打开"最新会话"：
+      //   落点统一交给 applyColdStartFocus（Profile 非空则第一个 Agent），避免首屏两次焦点跳变。
       render();
     }
   // gate-degrade: 本地缓存读取失败属于可选加速失效，回落到网络拉取即可
-  } catch {}
+  } catch {
+  } finally {
+    // 缓存为空或失败时也可能由后续网络数据裁决；applyColdStartFocus 内部幂等且相位未就绪时直接返回。
+    void applyColdStartFocus();
+  }
 }
 
 /**
@@ -586,6 +588,16 @@ interface AppState {
   dockNotice: string;
   /** Rail-level failure line, distinct from a legitimately empty session list. */
   sessionListError: string;
+  /**
+   * 首屏三域的首次到达相位（与 settingsModel 的 SettingsLoadable 同源思路：加载 ≠ 空）。
+   *
+   * 【设计意图 (Why)】骨架屏只在数据尚未到达时出现；三域各自独立，因为 Profile 与会话
+   *   是两批 RPC，用单一 boolean 会让先到的一方永远等后到的一方。
+   * 【约束与规则 (Rules)】数据到达（含空结果或失败）必须切 ready，否则骨架永久假加载。
+   */
+  profilesPhase: DataPhase;
+  sessionsPhase: DataPhase;
+  messagesPhase: DataPhase;
   /** Conversations optimistically inserted while the gateway persists them. */
   pendingSessionIds: string[];
   reasoningLevel: 'default' | 'none' | 'low' | 'high' | 'max' | 'off' | 'medium';
@@ -894,6 +906,9 @@ const state: AppState = {
   modelMenuOpen: false,
   dockNotice: '',
   sessionListError: '',
+  profilesPhase: 'loading',
+  sessionsPhase: 'loading',
+  messagesPhase: 'loading',
   pendingSessionIds: [],
   favoriteModels: safeParseJson<string[]>(localStorage.getItem('hermes_flux_fav_models') || localStorage.getItem('hermes_aura_fav_models'), [], isStringArray),
   recentModels: safeParseJson<string[]>(localStorage.getItem('hermes_flux_recent_models') || localStorage.getItem('hermes_aura_recent_models'), [], isStringArray),
@@ -1847,6 +1862,8 @@ async function fetchSessions(): Promise<void> {
   if (state.profiles.length === 0) {
     try {
       state.profiles = await client.listProfiles();
+      // 这里拿到了 Agent 域的真值：必须同步离开骨架相位，否则冷启动落点会一直等一个不会到来的 fetchProfiles。
+      state.profilesPhase = 'ready';
     // gate-degrade: 读取本地会话缓存失败时回落到网络拉取，缓存本就是可选加速
     } catch {}
   }
@@ -1918,6 +1935,8 @@ async function fetchSessions(): Promise<void> {
   });
   state.sessions = reconciled.sessions;
   state.pendingSessionIds = reconciled.pendingIds;
+  // 会话域已到达（含权威空列表）：离开骨架相位，空态才允许下"暂无历史会话"的结论。
+  state.sessionsPhase = 'ready';
   // 权威结果落缓存：只在完整成功时覆盖，部分失败保留上一代快照（规则 1）
   if (authoritative) persistSessionsToCache(reconciled.sessions);
 
@@ -1965,11 +1984,11 @@ async function fetchSessions(): Promise<void> {
   syncProfileLastMessages();
   void enrichVisibleSessionPreviews();
 
-  if (!state.activeSessionId && state.sessions.length > 0) {
-    await selectSession(state.sessions[0].id);
-    return;
+  // 冷启动落点统一在此裁决：Profile 非空则落第一个 Agent 的终身主工位，否则退回第一个会话。
+  // 【防范的历史坑 (Pitfall)】这里曾直接打开"最新会话"，与 Profile 到达后的工位切换叠加成首屏两次焦点跳变。
+  if (state.profilesPhase === 'ready') {
+    await applyColdStartFocus();
   }
-
   render();
 }
 
@@ -2148,6 +2167,8 @@ async function openGroupRoom(roomId: string): Promise<void> {
   state.activeLiveSessionId = roomId;
   state.isLoadingOlder = false;
   state.hasOlderMessages = false;
+  // 研讨记录尚未到达：与普通会话同口径声明 loading，避免把"切换房间的空窗"读成空会话。
+  state.messagesPhase = 'loading';
   const generation = ++activeLoadMessagesGeneration;
   const guard = { sessionId: roomId, generation };
 
@@ -2205,6 +2226,8 @@ async function openGroupRoom(roomId: string): Promise<void> {
   }
 
   pendingScrollToBottom = true;
+  // 无论拿到日志还是回落种子通知，研讨记录都已落地：离开骨架相位。
+  state.messagesPhase = 'ready';
   render();
 
   // 若为托管房间，进入时自动启动持续同步
@@ -2220,6 +2243,8 @@ const botForeverChatCache = new Map<string, string>();
 async function openBotChat(botProfile: string): Promise<void> {
   const client = gatewayClient;
   if (!botProfile || !client) return;
+  // 任何一次显式进入 Agent 都视为用户已表达意图，冷启动落点不得再抢焦点。
+  cancelColdStartFocus();
 
   // 【失败回退 (Rules)】记录进入前的焦点与 Profile：冷路径失败时完整恢复，
   // 绝不把用户困在空白工位，也不让左侧选中 Agent 与实际 Profile 上下文错配。
@@ -2271,6 +2296,8 @@ async function openBotChat(botProfile: string): Promise<void> {
   state.isLoadingOlder = false;
   state.activeSessionId = '';
   state.activeLiveSessionId = '';
+  // 冷路径要等 session.list：这段空窗必须声明 loading，否则会先闪一张"开始新的对话"。
+  state.messagesPhase = 'loading';
   pendingScrollToBottom = true;
   render();
 
@@ -2315,15 +2342,66 @@ async function openBotChat(botProfile: string): Promise<void> {
         render();
       } else {
         // 上一个 Bot 也没有缓存：保持空态但不要递归触发第二次冷路径，避免失败风暴。
+        // 【规则】失败必须离开 loading：否则界面把"进入主工位失败"伪装成"一直在加载"。
+        state.messagesPhase = 'ready';
         render();
       }
     } else {
+      state.messagesPhase = 'ready';
       render();
     }
     return;
   }
 
   void fetchModelOptions({ clearNotice: true });
+}
+
+/**
+ * 冷启动默认落点是否仍待裁决。
+ *
+ * 【设计意图 (Why)】只有"用户尚未表达选择意图"时才允许自动落点；用户一旦点了任何会话、
+ *   Agent 或群聊，迟到到达的 Profile 列表绝不允许把视口抢回第一个 Agent。
+ */
+let coldStartFocusPending = true;
+let coldStartFocusApplied = false;
+
+/** 用户主动选择任一会话 / Agent / 群聊：彻底关闭冷启动自动落点。 */
+function cancelColdStartFocus(): void {
+  coldStartFocusPending = false;
+}
+
+/**
+ * 冷启动默认焦点：默认选中第一个 Agent（第一个 profile），对话区直接显示该 Agent 的对话。
+ *
+ * 【设计意图 (Why)】首屏要有确定落点，且落点必须来自真实 Profile 列表，不能是界面上的默认助理占位。
+ * 【防范的历史坑 (Pitfall)】Profile 域尚未就绪就急着打开会话，会让首屏先落会话、Profile 到达后再切工位，
+ *   用户看到两次焦点跳变；网关不存在名为 default 的 Profile 时，旧实现还会把焦点停在一个不存在的实体上。
+ * 【约束与规则 (Rules)】只在 profilesPhase 已 ready 后裁决；裁决一次即封存（幂等），失败不回滚该标记，
+ *   避免每次 Profile 刷新都重新抢焦点。
+ */
+async function applyColdStartFocus(): Promise<void> {
+  if (!coldStartFocusPending || coldStartFocusApplied) return;
+  if (state.profilesPhase !== 'ready') return;
+  // 【防范的历史坑 (Pitfall)】曾经先封存再调用：本地有 Profile 缓存时，本函数在连接探测返回前就执行，
+  //   openBotChat 因 gatewayClient 为空直接返回，而封存标记已置位，二次启动永远拿不到默认焦点。
+  //   可执行性必须先于封存判断。
+  if (!gatewayClient || !getEffectiveUrl(state.gatewayUrl)) return;
+  // 只采用"用户真正保存过"的落点：state.profileName 的兜底字面量 'default' 不是用户选择。
+  const storedProfileName = localStorage.getItem('hermes_flux_profile')
+    || localStorage.getItem('hermes_aura_profile')
+    || (state.profileName !== 'default' ? state.profileName : undefined);
+  const target = resolveColdStartFocus({
+    profiles: state.profiles,
+    sessions: state.sessions,
+    savedProfileName: storedProfileName,
+  });
+  if (target.kind === 'none') return;
+  coldStartFocusApplied = true;
+  if (target.kind === 'session') {
+    await selectSession(target.sessionId);
+    return;
+  }
+  await openBotChat(target.botName);
 }
 
 async function fetchModelOptions(options: { clearNotice?: boolean } = {}): Promise<void> {
@@ -2402,10 +2480,13 @@ async function fetchProfiles(options: { refresh?: boolean } = {}): Promise<void>
       || list.some((p) => !state.profiles.some((old) => old.name === p.name))
     );
     state.profiles = list;
+    // 数据已到达（含空列表）：无论内容如何都必须离开骨架相位，否则永久假加载。
+    state.profilesPhase = 'ready';
     persistAgentsToCache(list);
     syncSessionBotDisplayNames(list);
     syncProfileLastMessages();
     render();
+    void applyColdStartFocus();
 
     // 2. 已有头像只回填内存缓存；缺失的才向网关拉取 (profiles.get_asset)。
     for (const p of list) {
@@ -2451,6 +2532,10 @@ async function fetchProfiles(options: { refresh?: boolean } = {}): Promise<void>
     if (profileTopologyChanged) void fetchSessions();
   } catch (e) {
     console.warn('[Flux] fetchProfiles failed:', e);
+    // 失败同样结束骨架相位：错误由错误行与日志表达，绝不能让骨架把故障伪装成慢。
+    state.profilesPhase = 'ready';
+    void applyColdStartFocus();
+    render();
   }
 }
 
@@ -3487,7 +3572,33 @@ function syncActiveSessionPreviewToRail(sessionId: string, messages: MessageView
 /** 消息拉取代际计数器：彻底阻断切会话时迟滞慢响应串染当前视口与缓存的致命竞态 */
 let activeLoadMessagesGeneration = 0;
 
+/**
+ * 会话历史加载入口：唯一负责 messagesPhase 进出的地方。
+ *
+ * 【设计意图 (Why)】宿主在"清空视口 → 历史落地"之间必须声明 loading，视图才用骨架占位；
+ *   否则这段空窗会被渲染成"开始新的对话"，等于向用户断言会话是空的。
+ * 【约束与规则 (Rules)】
+ *   1. 命中内存缓存时直接视为 ready：没有空窗就不该闪一次骨架；
+ *   2. finally 无条件收敛 ready（旧代际已被新会话接管时除外），任何分支都不得留下永久骨架。
+ */
 async function loadMessages(sessionId: string, targetBotName?: string): Promise<void> {
+  const cached = sessionId ? sessionMessagesCache.get(sessionId) : undefined;
+  state.messagesPhase = cached && cached.length > 0 ? 'ready' : 'loading';
+  // loadMessagesInner 第一条语句就是 ++activeLoadMessagesGeneration，因此本次加载的代际可预知。
+  // 【防范的坑】用 activeSessionId 判定会漏掉"同一会话被第二次加载"：旧代际的 finally 会把
+  //   新代际的 loading 提前置 ready，骨架消失而视口仍空，闪一张"开始新的对话"。
+  const expectedGeneration = activeLoadMessagesGeneration + 1;
+  try {
+    await loadMessagesInner(sessionId, targetBotName);
+  } finally {
+    if (!sessionId || expectedGeneration === activeLoadMessagesGeneration) {
+      state.messagesPhase = 'ready';
+      render();
+    }
+  }
+}
+
+async function loadMessagesInner(sessionId: string, targetBotName?: string): Promise<void> {
   // 离线也允许打开会话：历史由持久化缓存提供，没有网关不该直接清空
   if (!sessionId) {
     state.messages = [];
@@ -5586,7 +5697,12 @@ async function connect(targetUrl?: string): Promise<void> {
   if (!getEffectiveUrl(state.gatewayUrl)) {
     state.gatewayConnected = false;
     state.gatewayConnecting = false;
+    // 不会发起任何拉取，就绝不能停在骨架相位：否则永久假加载。
+    state.profilesPhase = 'ready';
+    state.sessionsPhase = 'ready';
+    state.messagesPhase = 'ready';
     state.testStatus = undefined;
+    void applyColdStartFocus();
     render();
     return;
   }
@@ -5621,6 +5737,11 @@ async function connect(targetUrl?: string): Promise<void> {
     if (!test.ok) {
       state.gatewayConnecting = false;
       state.gatewayConnected = false;
+      // 连接失败：没有数据会到达，骨架必须让位于错误提示与缓存快照。
+      state.profilesPhase = 'ready';
+      state.sessionsPhase = 'ready';
+      state.messagesPhase = 'ready';
+      void applyColdStartFocus();
       render();
       return;
     }
@@ -5724,6 +5845,10 @@ async function connect(targetUrl?: string): Promise<void> {
     console.error('[Flux Connect] Connection failed:', err);
     state.gatewayConnected = false;
     state.gatewayConnecting = false;
+    // 握手中断：不再有任何数据会到达，离开骨架相位，避免把网络故障伪装成加载中。
+    state.profilesPhase = 'ready';
+    state.sessionsPhase = 'ready';
+    state.messagesPhase = 'ready';
     state.testStatus = {
       ok: false,
       message: `WebSocket 连接握手失败: ${err.message || '网络异常'}`,
@@ -5888,6 +6013,7 @@ interface RenderMessagesSnapshot {
   hasOlder: boolean;
   isLoadingOlder: boolean;
   profileName: string;
+  messagesPhase: DataPhase;
   rollbackActive: boolean;
   capsuleCount: number;
 }
@@ -5946,9 +6072,9 @@ function bindInspectorController(el: HTMLElement): NonNullable<typeof inspectorM
  */
 function createLeftRailActions(): LeftRailActions {
   return {
-    onSelectSession: (sessionId: string, botName?: string) => { void selectSession(sessionId, { botName }); },
-    onSelectBot: (profileName: string) => { void openBotChat(profileName); },
-    onSelectGroup: (roomId: string) => { void openGroupRoom(roomId); },
+    onSelectSession: (sessionId: string, botName?: string) => { cancelColdStartFocus(); void selectSession(sessionId, { botName }); },
+    onSelectBot: (profileName: string) => { cancelColdStartFocus(); void openBotChat(profileName); },
+    onSelectGroup: (roomId: string) => { cancelColdStartFocus(); void openGroupRoom(roomId); },
     onOpenSessionMenu: (sessionId: string, title: string, x: number, y: number) => {
       state.sessionContextMenu = { x, y, targetType: 'session', targetId: sessionId, targetName: title, sessionId, sessionTitle: title };
       render();
@@ -5962,7 +6088,7 @@ function createLeftRailActions(): LeftRailActions {
       render();
     },
     onSearchChange: (value: string) => { state.sessionSearchQuery = value; render(); },
-    onNewChat: (kind: 'session' | 'group') => { void fetchProjects(); state.newTaskModalTab = kind === 'group' ? 'group' : 'solo'; state.isNewTaskModalOpen = true; render(); },
+    onNewChat: (kind: 'session' | 'group') => { cancelColdStartFocus(); void fetchProjects(); state.newTaskModalTab = kind === 'group' ? 'group' : 'solo'; state.isNewTaskModalOpen = true; render(); },
     onSetTab: (tab: LeftRailTab) => {
       state.activeRailTab = state.activeRailTab === tab ? 'chats' : tab;
       if (state.activeRailTab === 'projects') void fetchProjects();
@@ -6051,6 +6177,8 @@ interface LeftRailSnapshotInputs {
   error: string;
   collapsed: boolean;
   editingGroupRoomId?: string;
+  profilesPhase: DataPhase;
+  sessionsPhase: DataPhase;
 }
 let lastLeftRailSnapshot: LeftRailSnapshot | null = null;
 let lastLeftRailInputs: LeftRailSnapshotInputs | null = null;
@@ -6070,6 +6198,8 @@ function sameLeftRailInputs(prev: LeftRailSnapshotInputs, next: LeftRailSnapshot
     && prev.isGroupsGroupExpanded === next.isGroupsGroupExpanded
     && prev.error === next.error
     && prev.collapsed === next.collapsed
+    && prev.profilesPhase === next.profilesPhase
+    && prev.sessionsPhase === next.sessionsPhase
     && prev.editingGroupRoomId === next.editingGroupRoomId;
 }
 
@@ -6198,6 +6328,8 @@ function getLeftRailSnapshot(): LeftRailSnapshot {
     error: state.sessionListError,
     collapsed: state.leftRailCollapsed,
     editingGroupRoomId: state.editingGroupRoomId,
+    profilesPhase: state.profilesPhase,
+    sessionsPhase: state.sessionsPhase,
   };
   if (lastLeftRailSnapshot && lastLeftRailInputs && sameLeftRailInputs(lastLeftRailInputs, inputs)) {
     return lastLeftRailSnapshot;
@@ -6216,6 +6348,8 @@ function getLeftRailSnapshot(): LeftRailSnapshot {
       searchQuery: state.sessionSearchQuery,
       isSessionsGroupExpanded: state.isSessionsGroupExpanded,
       isGroupsGroupExpanded: state.isGroupsGroupExpanded,
+      profilesPhase: state.profilesPhase,
+      sessionsPhase: state.sessionsPhase,
       error: state.sessionListError,
     }),
     collapsed: state.leftRailCollapsed,
@@ -6387,6 +6521,7 @@ function buildConversationSnapshot(): ConversationSnapshot {
     // 本地未挂载行由滚动事件中的 expandMessageWindow() 平滑物理延展，仅当服务端真有更早历史时才展示拉取提示
     hasOlderMessages: state.hasOlderMessages,
     isLoadingOlder: state.isLoadingOlder,
+    messagesPhase: state.messagesPhase,
     profileName: state.profileName,
     contentOffsetPx: computeContentOffsetPx(),
     virtualHeightPx: computeVirtualHeightPx(),
@@ -6451,6 +6586,7 @@ function buildConversationSnapshot(): ConversationSnapshot {
 }
 
 let lastSeenLoadingOlder = false;
+let lastSeenMessagesPhase: DataPhase = 'ready';
 
 /**
  * 同步 React 消息列表。
@@ -6466,6 +6602,7 @@ function syncReactMessageList(force = false): void {
     renderedMessageIds = new Set();
     lastSeenStreaming = false;
     lastSeenLoadingOlder = false;
+    lastSeenMessagesPhase = state.messagesPhase;
     return;
   }
   ensureMessageWindow(state.messages.length);
@@ -6478,6 +6615,7 @@ function syncReactMessageList(force = false): void {
     lastSeenStreaming = isStreamingActiveForCurrentSession();
     lastSeenLoadingOlder = state.isLoadingOlder;
     sessionSwitchPending = false;
+    lastSeenMessagesPhase = state.messagesPhase;
     // 【首挂必须也锁定行高 (Rules)】首次挂载若跳过锁定，虚拟高度永不生效，
     // 实测 scrollHeight 停在 751118（= 7625×96 的默认估值）、滚动 11050px 只推进 0 条。
     scheduleVirtualHeightSync();
@@ -6490,12 +6628,17 @@ function syncReactMessageList(force = false): void {
   const loadingOlderChanged = lastSeenLoadingOlder !== state.isLoadingOlder;
   lastSeenLoadingOlder = state.isLoadingOlder;
 
+  // 首屏相位翻转必须推送：骨架 ⇄ 真实空态/历史在不换 id 的情况下也要换脸。
+  const messagesPhaseChanged = lastSeenMessagesPhase !== state.messagesPhase;
+  lastSeenMessagesPhase = state.messagesPhase;
+
   const shouldPush = decideConversationPush({
     prevIds: renderedMessageIds,
     nextIds: currentIds,
     justStoppedStreaming,
     force: force || sessionSwitchPending,
     loadingOlderChanged,
+    messagesPhaseChanged,
   });
   if (shouldPush && reactMessageList) {
     sessionSwitchPending = false;
@@ -6909,6 +7052,7 @@ function render(): void {
     hasOlder: state.hasOlderMessages,
     isLoadingOlder: state.isLoadingOlder,
     profileName: state.profileName,
+    messagesPhase: state.messagesPhase,
     rollbackActive: Boolean(state.rollbackArmed),
     capsuleCount: state.sideAgentCapsules.length,
   };
@@ -6956,6 +7100,7 @@ function render(): void {
       lastMessagesSnapshot.hasOlder !== currentMessagesSnapshot.hasOlder ||
       lastMessagesSnapshot.isLoadingOlder !== currentMessagesSnapshot.isLoadingOlder ||
       lastMessagesSnapshot.profileName !== currentMessagesSnapshot.profileName ||
+      lastMessagesSnapshot.messagesPhase !== currentMessagesSnapshot.messagesPhase ||
       lastMessagesSnapshot.rollbackActive !== currentMessagesSnapshot.rollbackActive ||
       lastMessagesSnapshot.capsuleCount !== currentMessagesSnapshot.capsuleCount);
 
@@ -6978,6 +7123,7 @@ function render(): void {
           password: state.password,
           profileName: state.profileName,
           messages: state.messages,
+          messagesPhase: state.messagesPhase,
           testStatus: state.testStatus,
           hasOlderMessages: state.hasOlderMessages,
           isLoadingOlder: state.isLoadingOlder,
@@ -7270,7 +7416,9 @@ function render(): void {
     const activeStream = document.getElementById('conversation-stream');
     if (activeStream && messagesChanged) {
       const reactHost = document.getElementById('react-message-list-host');
-      const canUseReactList = state.gatewayConnected && state.messages.length > 0;
+      // 【骨架也走 React 宿主 (Rules)】历史未到达时同样由宿主渲染骨架，
+      // 否则 loading 相位会被模板的欢迎空态抢走，界面又对用户断言"没有对话"。
+      const canUseReactList = state.gatewayConnected && (state.messages.length > 0 || state.messagesPhase === 'loading');
       if (reactHost && canUseReactList) {
         /**
          * 【结构变化必须强制推送 (Rules)】行高锁定会改写 `virtualHeightPx` 与 `contentOffsetPx`，
@@ -7290,6 +7438,7 @@ function render(): void {
           password: state.password,
           profileName: state.profileName,
           messages: state.messages,
+          messagesPhase: state.messagesPhase,
           testStatus: state.testStatus,
           hasOlderMessages: state.hasOlderMessages,
           isLoadingOlder: state.isLoadingOlder,

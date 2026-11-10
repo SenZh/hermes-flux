@@ -138,7 +138,7 @@ async function buildAll() {
   // transcriptRows 是网关行 → 视图模型的唯一翻译点，同理由行为测试直接导入。
   // 【规则】它依赖 @hermes-flux/ui 与 core，必须以 external 保留裸包说明符：
   //   打进产物会把 React 的 CJS 依赖塞进 ESM，Node 直接 import 就炸 "Dynamic require of util"。
-  for (const moduleName of ['messageWindow', 'profileRefresh', 'promptNavigator']) {
+  for (const moduleName of ['messageWindow', 'profileRefresh', 'promptNavigator', 'coldStartFocus']) {
     await esbuild.build({
       entryPoints: [path.join(rootDir, `src/renderer/${moduleName}.ts`)],
       outfile: path.join(rootDir, `dist/renderer/${moduleName}.mjs`),
@@ -149,7 +149,7 @@ async function buildAll() {
       sourcemap: true,
     });
   }
-  console.log('  ✔ Interactive-stage pure modules compiled (rollbackTransaction, toolPatchQueue, conversationPush, settingsController, messageWindow, profileRefresh, promptNavigator)');
+  console.log('  ✔ Interactive-stage pure modules compiled (rollbackTransaction, toolPatchQueue, conversationPush, settingsController, messageWindow, profileRefresh, promptNavigator, coldStartFocus)');
 
   // transcriptRows 单独编译：它以 external 保留 @hermes-flux/ui 与 core 的裸说明符，
   // 否则 React 的 CJS 依赖会被塞进 ESM 产物，Node 直接 import 时炸 "Dynamic require of util"。
