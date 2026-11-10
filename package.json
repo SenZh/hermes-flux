@@ -25,6 +25,7 @@
     "test:mobile:cdp": "node packages/mobile/scripts/prepare-assets.mjs && node --test packages/mobile/__tests__/cdp-mobile-bridge.test.mjs",
     "test:mobile:emulator": "node packages/mobile/__tests__/adb-mobile-runner.mjs",
     "test:isolated": "node scripts/gates/run-isolated-tests.mjs",
+    "verify:gallery": "node scripts/verify/gallery.mjs",
     "test:gateway": "node --test packages/core/__tests__/rpc/gateway-e2e.test.mjs",
     "test:live-gateway": "node --test packages/core/__tests__/rpc/live-gateway-real.test.mjs",
     "test:cdp": "node --test --test-concurrency=1 packages/desktop/__tests__/cdp/advanced-systems-cdp.test.mjs packages/desktop/__tests__/cdp/e2e-acceptance-cdp.test.mjs packages/desktop/__tests__/cdp/interactive-stage-cdp.test.mjs packages/desktop/__tests__/cdp/conversation-perf-cdp.test.mjs packages/desktop/__tests__/cdp/rail-handle-symmetry-cdp.test.mjs packages/desktop/__tests__/cdp/rail-cockpit-form-cdp.test.mjs packages/desktop/__tests__/cdp/settings-center-cdp.test.mjs",

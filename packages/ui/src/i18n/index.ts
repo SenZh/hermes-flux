@@ -483,6 +483,27 @@ export const zhDict = {
   'gateway.urlRequired': '请先填写网关地址',
   'gateway.urlHint': '填写你部署的网关地址',
   'gateway.urlPlaceholder': 'http://主机:端口 或 https://你的域名',
+
+  // Gallery 样例页（设计系统原子的真实形态拼装，仅供人工截图审查，不进入生产挂载点）
+  'gallery.title': '模型供应商',
+  'gallery.subtitle': '{count} 个提供商在线',
+  'gallery.sync': '同步模型',
+  'gallery.addProvider': '添加提供商',
+  'gallery.providerAnthropic': 'Anthropic',
+  'gallery.providerOpenAI': 'OpenAI',
+  'gallery.providerLocal': '本地推理节点',
+  'gallery.providerModels': '{count} 个模型',
+  'gallery.providerCurrent': '使用中',
+  'gallery.providerRecent': '最近使用',
+  'gallery.providerDisabled': '已停用',
+  'gallery.statProviders': '提供商',
+  'gallery.statModels': '可用模型',
+  'gallery.statLatency': '平均首字延迟',
+  'gallery.statProvidersDelta': '较上周 +1',
+  'gallery.statModelsDelta': '本周新增 6 个',
+  'gallery.statLatencyDelta': '超过阈值 200ms',
+  'gallery.noticeTitle': '关于本样例页',
+  'gallery.noticeBody': '本页由 Surface / ListRow / Toolbar / Stat 四个原子组合而成，用于截图审查真实形态下的几何与字阶。它不进入生产挂载点，也不发起任何网关调用。',
 } as const;
 
 export type I18nKey = keyof typeof zhDict;
@@ -959,6 +980,27 @@ export const enDict: Record<I18nKey, string> = {
   'gateway.urlRequired': 'Please enter the gateway URL first',
   'gateway.urlHint': 'Enter your deployed gateway address',
   'gateway.urlPlaceholder': 'http://host:port or https://your-domain',
+
+  // Gallery sample page (design-system atoms assembled; screenshot review only, never mounted in production)
+  'gallery.title': 'Model Providers',
+  'gallery.subtitle': '{count} providers online',
+  'gallery.sync': 'Sync models',
+  'gallery.addProvider': 'Add provider',
+  'gallery.providerAnthropic': 'Anthropic',
+  'gallery.providerOpenAI': 'OpenAI',
+  'gallery.providerLocal': 'Local inference node',
+  'gallery.providerModels': '{count} models',
+  'gallery.providerCurrent': 'Active',
+  'gallery.providerRecent': 'Recently used',
+  'gallery.providerDisabled': 'Disabled',
+  'gallery.statProviders': 'Providers',
+  'gallery.statModels': 'Models',
+  'gallery.statLatency': 'Avg first token',
+  'gallery.statProvidersDelta': '+1 vs last week',
+  'gallery.statModelsDelta': '6 added this week',
+  'gallery.statLatencyDelta': 'Above 200ms threshold',
+  'gallery.noticeTitle': 'About this sample',
+  'gallery.noticeBody': 'This page is assembled from the Surface / ListRow / Toolbar / Stat atoms to review real-shape geometry and type scale in screenshots. It is never mounted in production and makes no gateway calls.',
 };
 
 export type Locale = 'zh-CN' | 'en-US';
