@@ -97,7 +97,7 @@ function LoadBoundary<T>({
   }
   if (state.status === 'error') {
     return (
-      <div className="flex flex-col items-start gap-2 rounded-lg border border-border-subtle bg-panel px-4 py-3">
+      <div className="flex flex-col items-start gap-2 rounded-panel border border-border-subtle bg-panel px-4 py-3">
         <span className="text-body text-destructive">{t('settings.loadFailed')}</span>
         <span className="text-caption text-muted-foreground">{state.message}</span>
         <Button variant="outline" size="sm" type="button" onClick={onRetry}>
@@ -125,7 +125,7 @@ function SegmentedControl<T extends string>({
   ariaLabel: string;
 }): React.ReactElement {
   return (
-    <div role="group" aria-label={ariaLabel} className="inline-flex items-center gap-1 rounded-md border border-border bg-input p-0.5">
+    <div role="group" aria-label={ariaLabel} className="inline-flex items-center gap-1 rounded-card border border-border bg-input p-0.5">
       {options.map((option) => {
         const active = option.value === value;
         return (
@@ -135,7 +135,7 @@ function SegmentedControl<T extends string>({
             aria-pressed={active}
             data-segmented-value={option.value}
             onClick={() => onChange(option.value)}
-            className={`h-7 rounded-sm px-2.5 text-caption transition-colors ${
+            className={`h-7 rounded-inner px-2.5 text-caption transition-colors ${
               active ? 'bg-card-active text-foreground' : 'text-secondary-foreground hover:text-foreground'
             }`}
           >
@@ -173,14 +173,14 @@ function AppearancePanel({
                 aria-checked={active}
                 data-theme-option={id}
                 onClick={() => actions.onThemeChange(id)}
-                className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors ${
+                className={`flex items-center gap-3 rounded-panel border px-3 py-2.5 text-left transition-colors ${
                   active ? 'border-primary bg-primary-subtle' : 'border-border-subtle bg-transparent hover:bg-card-hover'
                 }`}
               >
                 <span className="flex shrink-0 items-center gap-1" aria-hidden="true">
-                  <span className="size-4 rounded-sm border border-border" style={{ background: skin.slots['--background'] }} />
-                  <span className="size-4 rounded-sm border border-border" style={{ background: skin.slots['--foreground'] }} />
-                  <span className="size-4 rounded-sm border border-border" style={{ background: skin.slots['--primary'] }} />
+                  <span className="size-4 rounded-inner border border-border" style={{ background: skin.slots['--background'] }} />
+                  <span className="size-4 rounded-inner border border-border" style={{ background: skin.slots['--foreground'] }} />
+                  <span className="size-4 rounded-inner border border-border" style={{ background: skin.slots['--primary'] }} />
                 </span>
                 <span className="flex min-w-0 flex-col">
                   <span className="truncate text-body text-foreground">{t(THEME_LABEL_KEY[id])}</span>
@@ -202,7 +202,7 @@ function AppearancePanel({
             id="settings-ui-font"
             value={snapshot.fontPrefs.uiFont}
             onChange={(event) => actions.onFontPrefsChange({ ...snapshot.fontPrefs, uiFont: event.target.value as typeof snapshot.fontPrefs.uiFont })}
-            className="h-8 min-w-40 rounded-sm border border-border bg-input px-2 text-body text-foreground"
+            className="h-8 min-w-40 rounded-inner border border-border bg-input px-2 text-body text-foreground"
           >
             {getUiFontSelectOptions().map((option) => (
               <option key={option.id} value={option.id}>
@@ -216,7 +216,7 @@ function AppearancePanel({
             id="settings-mono-font"
             value={snapshot.fontPrefs.monoFont}
             onChange={(event) => actions.onFontPrefsChange({ ...snapshot.fontPrefs, monoFont: event.target.value as typeof snapshot.fontPrefs.monoFont })}
-            className="h-8 min-w-40 rounded-sm border border-border bg-input px-2 text-body text-foreground"
+            className="h-8 min-w-40 rounded-inner border border-border bg-input px-2 text-body text-foreground"
           >
             {MONO_FONT_OPTIONS.map((option) => (
               <option key={option.id} value={option.id}>
@@ -562,7 +562,7 @@ function ConnectionPanel({
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex items-center justify-between gap-3 rounded-lg border border-border-subtle bg-panel px-4 py-3">
+      <div className="flex items-center justify-between gap-3 rounded-panel border border-border-subtle bg-panel px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
           <StatusDot tone={status === 'connected' ? 'success' : status === 'connecting' ? 'warning' : 'destructive'} />
           <span className="text-body text-foreground">{statusLabel}</span>
@@ -759,7 +759,7 @@ export function SettingsModal({
         data-testid="settings-dialog"
         ref={dialogRef}
         tabIndex={-1}
-        className="flex h-[min(680px,calc(100vh-96px))] w-[900px] max-w-[94vw] overflow-hidden rounded-xl border border-border bg-popover text-foreground shadow-[var(--shadow-window)]"
+        className="flex h-[min(680px,calc(100vh-96px))] w-[900px] max-w-[94vw] overflow-hidden rounded-window border border-border bg-popover text-foreground shadow-[var(--shadow-window)]"
       >
         <aside className="flex w-[212px] shrink-0 flex-col border-r border-border-subtle bg-sidebar">
           <div className="flex items-center justify-between px-4 pb-2 pt-4">
@@ -771,7 +771,7 @@ export function SettingsModal({
               aria-label={t('settings.close')}
               title={t('settings.close')}
               onClick={actions.onClose}
-              className="flex size-7 items-center justify-center rounded-sm text-muted-foreground hover:bg-card-hover hover:text-foreground"
+              className="flex size-7 items-center justify-center rounded-inner text-muted-foreground hover:bg-card-hover hover:text-foreground"
             >
               <X size={14} />
             </button>
@@ -801,7 +801,7 @@ export function SettingsModal({
                   data-settings-section={section.id}
                   aria-current={selected ? 'page' : undefined}
                   onClick={() => actions.onSelectSection(section.id)}
-                  className={`flex h-8 items-center gap-2 rounded-md px-2 text-left text-body transition-colors ${
+                  className={`flex h-8 items-center gap-2 rounded-card px-2 text-left text-body transition-colors ${
                     selected ? 'bg-card-active text-foreground' : 'text-secondary-foreground hover:bg-card-hover hover:text-foreground'
                   }`}
                 >

@@ -43,12 +43,12 @@ export function Titlebar({ platform, title, isMaximized, gatewayConnected, laten
     </div>
     <div className="titlebar-center">
       {activeAvatar?.kind === 'bot' && <span
-        className="titlebar-bot-avatar mr-1.5 inline-flex shrink-0 items-center justify-center overflow-hidden rounded-sm"
+        className="titlebar-bot-avatar mr-1.5 inline-flex shrink-0 items-center justify-center overflow-hidden rounded-inner"
         aria-hidden="true"
         dangerouslySetInnerHTML={{ __html: renderBotAvatar(activeAvatar.name, activeAvatar.name, activeAvatar.avatar, 16) }}
       />}
       {activeAvatar?.kind === 'group' && <span
-        className="titlebar-group-avatar mr-1.5 inline-flex shrink-0 items-center justify-center overflow-hidden rounded-sm"
+        className="titlebar-group-avatar mr-1.5 inline-flex shrink-0 items-center justify-center overflow-hidden rounded-inner"
         aria-hidden="true"
         dangerouslySetInnerHTML={{ __html: renderGroupCollageAvatar(activeAvatar.members, activeAvatar.profiles, 16) }}
       />}
