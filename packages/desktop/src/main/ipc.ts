@@ -317,7 +317,20 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
 
     const res = await fetch(fullUrl, fetchOptions);
     if (!res.ok) {
-      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      // 网关的错误语义全在 JSON 的 detail 里（"base_url must include scheme and host"、
+      // "The endpoint rejected the API key."）。只抛状态码会让用户看到 400 却不知道为什么。
+      const raw = await res.text().catch(() => '');
+      let detail = '';
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && typeof (parsed as { detail?: unknown }).detail === 'string') {
+          detail = (parsed as { detail: string }).detail;
+        }
+      // gate-degrade: 非 JSON 的错误页（反向代理 502 等）没有 detail，保留状态码即可
+      } catch {
+        // 非 JSON 的错误页没有 detail，保留状态码即可。
+      }
+      throw new Error(`HTTP ${res.status}: ${detail || res.statusText}`);
     }
     const contentType = (res.headers.get('content-type') || '').toLowerCase();
     if (contentType.includes('application/json')) {

@@ -66,14 +66,11 @@ export type SettingsI18nKey =
 export interface SettingsControllerDeps {
   isConnected(): boolean;
   profileName(): string;
-  currentProvider(): string;
   call<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T>;
   render(): void;
   translate(key: SettingsI18nKey): string;
   describeError(error: unknown): string;
 
-  getProviders(): SettingsLoadable<ProviderDirectoryRow[]>;
-  setProviders(value: SettingsLoadable<ProviderDirectoryRow[]>): void;
   getProfiles(): SettingsLoadable<SettingsProfileRow[]>;
   setProfiles(value: SettingsLoadable<SettingsProfileRow[]>): void;
   getMcp(): SettingsLoadable<McpServerRow[]>;
@@ -96,13 +93,10 @@ export function resolveGatewayPassword(draftPassword: string, previousPassword: 
   return draftPassword.trim() ? draftPassword : previousPassword;
 }
 
-export interface SettingsController {
-  loadProviders(): Promise<void>;
+export interface SettingsController {
   loadProfiles(): Promise<void>;
   loadExtensions(): Promise<void>;
   ensureSection(section: SettingsSectionId, force?: boolean): void;
-  saveProviderKey(slug: string, apiKey: string): Promise<SettingsOperationResult>;
-  disconnectProvider(slug: string): Promise<SettingsOperationResult>;
   reloadSkills(): Promise<SettingsOperationResult>;
   /** 让设置页内其它异步操作（如连通性测试）共享同一份忙态计数。 */
   runBusy<T>(task: () => Promise<T>): Promise<T>;
@@ -147,32 +141,6 @@ export function createSettingsController(deps: SettingsControllerDeps): Settings
   }
 
   const disconnectedMessage = (): string => deps.translate('settings.notConnected');
-
-  async function loadProviders(): Promise<void> {
-    const token = ++providerLoad.token;
-    if (!deps.isConnected()) {
-      deps.setProviders({ status: 'error', message: disconnectedMessage() });
-      deps.render();
-      return;
-    }
-    deps.setProviders({ status: 'loading' });
-    deps.render();
-    try {
-      const payload = await deps.call('model.options', {
-        profile: deps.profileName() || 'default',
-        include_unconfigured: true,
-      });
-      if (token !== providerLoad.token) return;
-      // 协议成功但形状不符 ≠ 没有提供商：必须显式失败，不得伪装成空列表。
-      const providers = payload && typeof payload === 'object' ? (payload as { providers?: unknown }).providers : undefined;
-      if (!Array.isArray(providers)) throw new Error(deps.translate('settings.malformedResponse'));
-      deps.setProviders({ status: 'ready', data: buildProviderDirectory(payload, deps.currentProvider()) });
-    } catch (error) {
-      if (token !== providerLoad.token) return;
-      deps.setProviders({ status: 'error', message: deps.describeError(error) });
-    }
-    deps.render();
-  }
 
   async function loadProfiles(): Promise<void> {
     const token = ++profileLoad.token;
@@ -259,7 +227,7 @@ export function createSettingsController(deps: SettingsControllerDeps): Settings
   }
 
   function ensureSection(section: SettingsSectionId, force = false): void {
-    if (section === 'providers' && (force || deps.getProviders().status === 'idle')) void loadProviders();
+    // 提供商域由 renderer 的统一装载接管（跨 Agent 归并），不在此处重复拉取。
     if (section === 'agents' && (force || deps.getProfiles().status === 'idle')) void loadProfiles();
     // 扩展域有两个独立数据源；只要有一个不是 ready（含单边 error），就允许重试。
     if (
@@ -268,40 +236,6 @@ export function createSettingsController(deps: SettingsControllerDeps): Settings
     ) {
       void loadExtensions();
     }
-  }
-
-  async function saveProviderKey(slug: string, apiKey: string): Promise<SettingsOperationResult> {
-    if (!deps.isConnected()) return { ok: false, message: disconnectedMessage() };
-    return runBusy(async () => {
-      try {
-        await deps.call('model.save_key', { slug, api_key: apiKey });
-        try {
-          await deps.call('reload.env', {});
-        // gate-degrade: 环境热重载失败不影响已落盘的密钥，下一轮刷新会读到新凭据
-        } catch (error) {
-          deps.warn('reload.env failed after model.save_key', { error: deps.describeError(error) });
-        }
-        await loadProviders();
-        deps.onCatalogChanged();
-        return { ok: true };
-      } catch (error) {
-        return { ok: false, message: deps.describeError(error) };
-      }
-    });
-  }
-
-  async function disconnectProvider(slug: string): Promise<SettingsOperationResult> {
-    if (!deps.isConnected()) return { ok: false, message: disconnectedMessage() };
-    return runBusy(async () => {
-      try {
-        await deps.call('model.disconnect', { slug });
-        await loadProviders();
-        deps.onCatalogChanged();
-        return { ok: true };
-      } catch (error) {
-        return { ok: false, message: deps.describeError(error) };
-      }
-    });
   }
 
   async function reloadSkills(): Promise<SettingsOperationResult> {
@@ -318,5 +252,5 @@ export function createSettingsController(deps: SettingsControllerDeps): Settings
     });
   }
 
-  return { loadProviders, loadProfiles, loadExtensions, ensureSection, saveProviderKey, disconnectProvider, reloadSkills, runBusy };
+  return { loadProfiles, loadExtensions, ensureSection, reloadSkills, runBusy };
 }

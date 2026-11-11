@@ -21,6 +21,12 @@ function snapshot(overrides = {}) {
     fontPrefs: { uiFont: 'geist-sans', monoFont: 'jetbrains-mono', sizeScale: 'medium' },
     providers: { status: 'idle' },
     profiles: { status: 'idle' },
+    bots: [],
+    scopedProfile: 'default',
+    providerAdminView: 'bot',
+    customEndpoints: { status: 'idle' },
+    oauthProviders: { status: 'idle' },
+    providerAdminBusy: false,
     mcp: { status: 'idle' },
     skills: { status: 'idle' },
     gateway: {
@@ -99,66 +105,6 @@ test('外观页渲染真实皮肤真值表：五张皮肤卡，激活态互斥',
   assert.ok(html.includes('id="settings-mono-font"'));
 });
 
-test('提供商页只渲染网关快照，未配置的提供商同样可见且带密钥入口', () => {
-  setLocale('zh-CN');
-  const html = render({
-    section: 'providers',
-    providers: {
-      status: 'ready',
-      data: [
-        { slug: 'anthropic', name: 'Anthropic', authenticated: true, availableModelCount: 12, accounts: [], freeTier: false, isCurrent: true },
-        {
-          slug: 'deepseek',
-          name: 'DeepSeek',
-          authenticated: false,
-          availableModelCount: 3,
-          keyEnv: 'DEEPSEEK_API_KEY',
-          warning: 'quota exhausted',
-          accounts: [{ id: 'k1', state: 'limited' }],
-          freeTier: false,
-          isCurrent: false,
-        },
-      ],
-    },
-  });
-  assert.ok(html.includes('data-provider-slug="anthropic"'));
-  assert.ok(html.includes('data-provider-slug="deepseek"'));
-  assert.ok(html.includes('DEEPSEEK_API_KEY'), '必须告诉用户密钥落到哪个环境变量');
-  assert.ok(html.includes('quota exhausted'), '网关告警必须原样透出');
-  assert.ok(html.includes(t('settings.providerAddKey')), '未认证的提供商必须给出配置密钥入口');
-  assert.ok(html.includes(t('settings.providerCurrent')));
-  for (const fake of ['jev', 'agnes-ai', 'magpie', 'ipraft', 'vpi']) {
-    assert.equal(html.includes(fake), false, `不得出现硬编码的假提供商 ${fake}`);
-  }
-});
-
-test('提供商列表排序：当前使用优先，其次已配置，未配置排在最后', () => {
-  setLocale('zh-CN');
-  const html = render({
-    section: 'providers',
-    providers: {
-      status: 'ready',
-      data: [
-        { slug: 'zeta', name: 'Zeta', authenticated: false, availableModelCount: 0, accounts: [], freeTier: false, isCurrent: false },
-        { slug: 'beta', name: 'Beta', authenticated: true, availableModelCount: 4, accounts: [], freeTier: false, isCurrent: false },
-        { slug: 'alpha', name: 'Alpha', authenticated: true, availableModelCount: 9, accounts: [], freeTier: false, isCurrent: true },
-      ],
-    },
-  });
-  const order = [...html.matchAll(/data-provider-slug="([^"]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(order, ['alpha', 'beta', 'zeta']);
-});
-
-test('提供商页三态显式：空态与失败态不能长成同一张脸', () => {  setLocale('zh-CN');
-  const empty = render({ section: 'providers', providers: { status: 'ready', data: [] } });
-  assert.ok(empty.includes(t('settings.providersEmpty')));
-
-  const failed = render({ section: 'providers', providers: { status: 'error', message: 'socket closed' } });
-  assert.ok(failed.includes(t('settings.loadFailed')));
-  assert.ok(failed.includes('socket closed'), '失败必须带原始原因（Failure Is Not Empty）');
-  assert.ok(failed.includes(t('settings.retry')));
-  assert.equal(failed.includes(t('settings.providersEmpty')), false);
-});
 
 test('连接页表单值来自快照，且给出真实连接状态', () => {
   setLocale('zh-CN');
@@ -226,68 +172,230 @@ test('设置域注册表：未知 section 回落到第一个域，检索按当�
   setLocale('zh-CN');
 });
 
-
-test('行级操作结局：成功清空草稿、失败保留、取消不打扰', async () => {
-  const { resolveProviderRowOutcome } = await import('../dist/components-react/settings/settingsModel.js');
-  assert.equal(resolveProviderRowOutcome({ ok: true }), 'clear');
-  assert.equal(resolveProviderRowOutcome({ ok: false, message: 'bad key' }), 'keep');
-  assert.equal(resolveProviderRowOutcome({ ok: false, cancelled: true }), 'ignore');
-  assert.equal(resolveProviderRowOutcome({ ok: false, cancelled: true, message: 'x' }), 'ignore', '取消优先于错误文案');
+const providerSnapshot = (overrides = {}) => ({
+  section: 'providers',
+  ...overrides,
 });
 
-test('提供商行状态机：保存成功清空、失败保留草稿、取消不报错', async () => {
-  const { providerRowReducer, PROVIDER_ROW_INITIAL } = await import('../dist/components-react/settings/settingsModel.js');
-  const typing = providerRowReducer(PROVIDER_ROW_INITIAL, { type: 'toggleEditing' });
-  const withDraft = providerRowReducer(typing, { type: 'draftChange', value: 'sk-live' });
-  assert.equal(withDraft.editing, true);
-  assert.equal(withDraft.keyDraft, 'sk-live');
+/** 造一行统一提供商视图：默认三个 Agent，可按状态覆盖。 */
+function providerView(overrides = {}) {
+  const agents = overrides.agents ?? [
+    { profile: 'default', displayName: 'default', state: 'active' },
+    { profile: 'aura', displayName: 'aura', state: 'ready' },
+    { profile: 'codeboy', displayName: 'codeboy', state: 'ready' },
+  ];
+  return {
+    key: overrides.key ?? 'custom:fn',
+    kind: overrides.kind ?? 'custom',
+    id: overrides.id ?? 'fn',
+    name: overrides.name ?? 'fn',
+    models: overrides.models ?? ['m1', 'm2'],
+    detail: overrides.detail ?? 'http://gw.example/v1',
+    availability: overrides.availability ?? 'active',
+    agents,
+    manualHint: overrides.manualHint,
+    expiresAt: overrides.expiresAt,
+  };
+}
 
-  const pending = providerRowReducer(withDraft, { type: 'submitStart' });
-  assert.equal(pending.pending, true);
-  assert.equal(pending.keyDraft, 'sk-live', '提交中不得清空草稿');
-
-  const success = providerRowReducer(pending, { type: 'submitResult', result: { ok: true }, fallback: 'x' });
-  assert.deepEqual(success, { editing: false, keyDraft: '', pending: false, error: '' });
-
-  const failed = providerRowReducer(pending, {
-    type: 'submitResult',
-    result: { ok: false, message: '401 invalid key' },
-    fallback: 'x',
-  });
-  assert.equal(failed.editing, true, '失败必须保留输入框');
-  assert.equal(failed.keyDraft, 'sk-live', '失败必须保留用户已输入的密钥');
-  assert.equal(failed.error, '401 invalid key');
-
-  const failedNoMessage = providerRowReducer(pending, { type: 'submitResult', result: { ok: false }, fallback: '保存失败' });
-  assert.equal(failedNoMessage.error, '保存失败', '网关没给原因时必须用兜底文案，不能静默');
-
-  const cancelled = providerRowReducer(pending, {
-    type: 'submitResult',
-    result: { ok: false, cancelled: true, message: '不应显示' },
-    fallback: 'x',
-  });
-  assert.equal(cancelled.editing, true);
-  assert.equal(cancelled.keyDraft, 'sk-live');
-  assert.equal(cancelled.error, '', '用户主动取消不是错误');
+test('提供商页：订阅与自定义混排成一张表，同一行同时给出类型与生效范围', () => {
+  setLocale('zh-CN');
+  const html = render(providerSnapshot({
+    providerViews: {
+      status: 'ready',
+      data: [
+        providerView({}),
+        providerView({
+          key: 'subscription:xai-oauth',
+          kind: 'subscription',
+          id: 'xai-oauth',
+          name: 'xAI Grok OAuth',
+          detail: 'SuperGrok',
+          models: [],
+          availability: 'ready',
+          agents: [
+            { profile: 'default', displayName: 'default', state: 'ready' },
+            { profile: 'aura', displayName: 'aura', state: 'ready' },
+            { profile: 'codeboy', displayName: 'codeboy', state: 'ready' },
+          ],
+        }),
+      ],
+    },
+  }));
+  assert.ok(html.includes('data-provider-key="custom:fn"'));
+  assert.ok(html.includes('data-provider-key="subscription:xai-oauth"'), '订阅与自定义必须在同一张表里');
+  assert.ok(html.includes(t('settings.providerKindCustom')));
+  assert.ok(html.includes(t('settings.providerKindSubscription')));
 });
 
-test('提供商行状态机：断开的失败与取消分支', async () => {
-  const { providerRowReducer, PROVIDER_ROW_INITIAL } = await import('../dist/components-react/settings/settingsModel.js');
-  const start = providerRowReducer(PROVIDER_ROW_INITIAL, { type: 'disconnectStart' });
-  assert.equal(start.pending, true);
+/** 取出某个 Agent 格子的 label 片段，用于断言勾选与禁用状态。 */
+function agentCell(html, profile) {
+  const at = html.indexOf(`data-agent-profile="${profile}"`);
+  if (at < 0) return '';
+  const open = html.lastIndexOf('<label', at);
+  const end = html.indexOf('</label>', at);
+  return html.slice(open, end);
+}
 
-  const failed = providerRowReducer(start, {
-    type: 'disconnectResult',
-    result: { ok: false, message: '403 forbidden' },
-    fallback: 'x',
-  });
-  assert.equal(failed.pending, false);
-  assert.equal(failed.error, '403 forbidden');
+test('生效范围是每个 Agent 一个格子：头像 + 名称 + 勾选框，不再用计数代替', () => {
+  setLocale('zh-CN');
+  const html = render(providerSnapshot({
+    providerViews: {
+      status: 'ready',
+      data: [
+        providerView({
+          agents: [
+            { profile: 'default', displayName: 'default', state: 'active' },
+            { profile: 'aura', displayName: 'aura', state: 'ready' },
+            { profile: 'codeboy', displayName: 'codeboy', state: 'absent' },
+          ],
+        }),
+      ],
+    },
+  }));
+  assert.ok(html.includes('data-agent-profile="default"'), '每个 Agent 必须是一个可勾选的格子');
+  assert.ok(html.includes('data-agent-profile="aura"'));
+  assert.ok(html.includes('data-agent-profile="codeboy"'));
+  assert.ok(html.includes(t('settings.providerBindingTitle')), '勾选区要有标题，说明它是什么');
+  assert.equal(html.includes(t('settings.providerScopeAll')), false, '不得再用"N 个 Agent 在用"这类计数代替');
 
-  const cancelled = providerRowReducer(start, {
-    type: 'disconnectResult',
-    result: { ok: false, cancelled: true },
-    fallback: 'x',
+  const active = agentCell(html, 'default');
+  assert.ok(active.includes('checked'), '当前模型必须勾选');
+  assert.ok(active.includes('disabled'), '当前模型的格子必须锁定：取消会让主模型指向不存在的 provider');
+  assert.ok(active.includes(t('settings.providerBindingActive')));
+
+  const ready = agentCell(html, 'aura');
+  assert.ok(ready.includes('checked'), '已配置必须勾选');
+  assert.equal(ready.includes('disabled'), false, '已配置但非当前模型：可以取消勾选');
+
+  const absent = agentCell(html, 'codeboy');
+  assert.equal(absent.includes('checked'), false, '未配置不得勾选');
+  assert.equal(/data-profile-slot=/.test(html), false, '不得再出现首字母头像槽位');
+});
+
+test('提供商页三态显式：空态与失败态不能长成同一张脸', () => {
+  setLocale('zh-CN');
+  const empty = render({ section: 'providers', providerViews: { status: 'ready', data: [] } });
+  assert.ok(empty.includes(t('settings.providersEmpty')));
+
+  const failed = render({ section: 'providers', providerViews: { status: 'error', message: 'socket closed' } });
+  assert.ok(failed.includes(t('settings.loadFailed')));
+  assert.ok(failed.includes('socket closed'), '失败必须带原始原因（Failure Is Not Empty）');
+  assert.ok(failed.includes(t('settings.retry')));
+  assert.equal(failed.includes(t('settings.providersEmpty')), false);
+});
+
+test('某个 Agent 读取失败：格子锁定并带原始原因，不得折进"未配置"', () => {
+  setLocale('zh-CN');
+  const html = render({
+    section: 'providers',
+    providerViews: {
+      status: 'ready',
+      data: [providerView({
+        availability: 'error',
+        agents: [
+          { profile: 'default', displayName: 'default', state: 'active' },
+          { profile: 'aura', displayName: 'aura', state: 'error', detail: 'HTTP 500' },
+          { profile: 'codeboy', displayName: 'codeboy', state: 'ready' },
+        ],
+      })],
+    },
+    providerFailures: [{ profile: 'aura', displayName: 'aura', message: 'HTTP 500: boom' }],
   });
-  assert.equal(cancelled.error, '', '取消断开不得显示错误');
+  assert.ok(html.includes('HTTP 500: boom'), '失败原因必须透出');
+  assert.ok(html.includes('data-agent-state="error"'), '读取失败必须是独立状态');
+
+  const broken = agentCell(html, 'aura');
+  assert.ok(broken.includes('disabled'), '读不到的 Agent 不能让人去勾选或取消');
+  assert.ok(broken.includes('HTTP 500'), '格子自身要带原因，不能只靠列表上方的汇总');
+});
+
+test('添加提供商是按钮 + 弹框：默认不渲染表单，点开才出现', () => {
+  setLocale('zh-CN');
+  const closed = render(providerSnapshot({
+    providerViews: { status: 'ready', data: [providerView()] },
+    subscriptionCatalog: { status: 'ready', data: [] },
+  }));
+  assert.ok(closed.includes(t('settings.providerAdd')), '必须有添加入口按钮');
+  assert.equal(closed.includes(t('settings.customEndpointUrl')), false, '未点开时不得常驻表单占位，表单只在弹框里出现');
+});
+
+test('行内不再有笼统的「使用」：模型列表按需展开，动作全部可自解释', () => {
+  setLocale('zh-CN');
+  const html = render(providerSnapshot({
+    providerViews: { status: 'ready', data: [providerView()] },
+  }));
+  assert.equal(html.includes(`>${t('settings.providerUse')}<`), false, '不得再有不说作用于哪个 Agent 的「使用」');
+  assert.equal(html.includes('设为默认'), false, '用户明确问过"设为默认什么意思"，这个词不能再出现');
+  assert.ok(html.includes(t('settings.providerModelsExpand')), '模型列表要有明确入口');
+  assert.equal(html.includes('data-model-id='), false, '模型列表默认折叠，不能把所有模型铺在行里');
+  assert.ok(html.includes(t('settings.providerEdit')), '编辑入口必须存在');
+  assert.ok(html.includes(t('settings.providerDelete')), '删除入口必须存在');
+  assert.equal(html.includes(t('settings.refresh')), false, '常驻刷新按钮已删除：动作后自动重拉，失败态有重试');
+});
+
+test('没有模型的提供商：模型区说明为空，且不存在可点的空列表', () => {
+  setLocale('zh-CN');
+  const html = render(providerSnapshot({
+    providerViews: {
+      status: 'ready',
+      data: [providerView({ models: [], availability: 'ready' })],
+    },
+  }));
+  assert.ok(html.includes(t('settings.providerNoModels')), '必须说明没有可用模型');
+  assert.equal(html.includes('data-model-id='), false, '没有模型时不能渲染出可点条目');
+});
+
+test('B 策略在界面上先挡一道：有 Agent 正在用，删除按钮必须禁用', () => {
+  setLocale('zh-CN');
+  const deleteTag = (html) => {
+    const at = html.indexOf(`>${t('settings.providerDelete')}</button>`);
+    assert.ok(at > 0, '必须存在删除按钮');
+    return html.slice(html.lastIndexOf('<button', at), at);
+  };
+
+  const isDisabled = (tag) => /\sdisabled(=|>|\s)/.test(tag);
+
+  const busy = render(providerSnapshot({
+    providerViews: { status: 'ready', data: [providerView()] },
+  }));
+  assert.ok(isDisabled(deleteTag(busy)), '有 active 的 Agent 时删除必须禁用，不能等壳层拒绝才告诉用户');
+
+  const idle = render(providerSnapshot({
+    providerViews: {
+      status: 'ready',
+      data: [providerView({
+        agents: [
+          { profile: 'default', displayName: 'default', state: 'ready' },
+          { profile: 'aura', displayName: 'aura', state: 'ready' },
+          { profile: 'codeboy', displayName: 'codeboy', state: 'absent' },
+        ],
+      })],
+    },
+  }));
+  assert.equal(isDisabled(deleteTag(idle)), false, '没有任何 Agent 在用时，删除必须可点');
+});
+
+test('订阅的未配置 Agent 不允许勾选：登录态只能在目标 Agent 上单独建立', () => {
+  setLocale('zh-CN');
+  const html = render(providerSnapshot({
+    providerViews: {
+      status: 'ready',
+      data: [providerView({
+        key: 'subscription:xai-oauth',
+        kind: 'subscription',
+        id: 'xai-oauth',
+        name: 'xAI Grok OAuth',
+        detail: 'SuperGrok',
+        agents: [
+          { profile: 'default', displayName: 'default', state: 'ready' },
+          { profile: 'aura', displayName: 'aura', state: 'absent' },
+          { profile: 'codeboy', displayName: 'codeboy', state: 'absent' },
+        ],
+      })],
+    },
+  }));
+  const absent = agentCell(html, 'aura');
+  assert.ok(absent.includes('disabled'), '订阅写不进别人的登录态，勾选框必须禁用');
+  assert.equal(absent.includes('checked'), false);
 });

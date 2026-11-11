@@ -22,9 +22,18 @@
 import type { I18nKey } from '../../i18n/index.js';
 import type { FontPreferences } from '../../tokens/fontPreferences.js';
 import type { SkinId } from '../../tokens/skins.js';
-import type { ProviderDirectoryRow, McpServerRow, SkillRow } from '@hermes-flux/core';
+import type {
+  McpServerRow,
+  SkillRow,
+  CustomEndpointRow,
+  OauthProviderRow,
+  EndpointProbe,
+  CustomEndpointDraft,
+  ProviderView,
+} from '@hermes-flux/core';
 
-export type { ProviderDirectoryRow, McpServerRow, SkillRow };
+export type { McpServerRow, SkillRow };
+export type { CustomEndpointRow, OauthProviderRow, ProviderView };
 
 /** 设置中心的一级域。只允许真实存在的能力。 */
 export type SettingsSectionId = 'appearance' | 'providers' | 'agents' | 'extensions' | 'connection' | 'about';
@@ -88,17 +97,57 @@ export interface SettingsProfileRow {
   isDefault?: boolean;
 }
 
-/** 设置弹窗的完整渲染输入（由壳层构造，组件不做任何取数）。 */
+/** Bot 头像条的一行。`profile` 是网关的 profile 名，`avatar` 缺省时走确定性图腾。 */
+export interface SettingsBotRow {
+  profile: string;
+  displayName: string;
+  avatar?: string;
+}
+
+/**
+ * 设置弹窗的完整渲染输入（由壳层构造，组件不做任何取数）。
+ *
+ * 【设计意图】提供商只保留一个视角：一张跨 Agent 的归并表。
+ *   上一版有"按 Bot / 按 Provider"两个视角 + 顶部头像条，用户要在两处对齐同一个概念，
+ *   且"对哪些 Agent 生效"得自己点进去现算。现在 Agent 是行的字段，不需要切换。
+ */
 export interface SettingsSnapshot {
   isOpen: boolean;
   section: SettingsSectionId;
   theme: SkinId;
   locale: 'zh' | 'en';
   fontPrefs: FontPreferences;
-  providers: SettingsLoadable<ProviderDirectoryRow[]>;
   profiles: SettingsLoadable<SettingsProfileRow[]>;
   mcp: SettingsLoadable<McpServerRow[]>;
   skills: SettingsLoadable<SkillRow[]>;
+  /** Bot 花名册（提供商行的 Agent 槽位来源），由 profiles 列表实时派生。 */
+  bots: SettingsBotRow[];
+  /** 提供商配置当前作用到的 Bot（删除/设为默认/登录都作用于它）；空串表示跟随连接 profile。 */
+  scopedProfile: string;
+  /** 统一提供商表：订阅与自定义混排，包含每个 Agent 的生效状态。 */
+  providerViews: SettingsLoadable<ProviderView[]>;
+  /** 读取失败的 Agent；必须显式提示，不能折进"未配置"。 */
+  providerFailures: Array<{ profile: string; displayName: string; message: string }>;
+  /** 添加面板需要但主列表不需要的富信息：订阅目录（含未登录项）。 */
+  subscriptionCatalog: SettingsLoadable<OauthProviderRow[]>;
+  /** 端点表单编辑用的原始端点行（含 base_url / has_api_key）。 */
+  customEndpoints: SettingsLoadable<CustomEndpointRow[]>;
+  /**
+   * 每个 provider 的**配置集合**：归一化 id → 配置了它的 profile 列表。
+   *
+   * 【为什么必须单独给】`providerViews[].agents` 是 `model.options` 的在用集合，
+   *   端点存在于某 profile 的配置里却没进 options 时会漏掉它。删除必须按配置集合收敛，
+   *   否则会误报"没有任何 Agent 在用"而拒绝删除。
+   */
+  endpointProfiles: Record<string, string[]>;
+  /**
+   * 端点清单读取失败的 Agent。
+   * 【为什么必须显式】端点清单是删除的作用域来源；某个 Agent 读失败时，
+   *   它的端点不在清单里，删除会漏删并报成功。读不到就不许猜着删。
+   */
+  endpointFailures: Array<{ profile: string; displayName: string; message: string }>;
+  /** 提供商域的独立忙态，不锁整页。 */
+  providerAdminBusy: boolean;
   gateway: {
     url: string;
     username: string;
@@ -129,62 +178,6 @@ export interface SettingsActionResult {
   cancelled?: boolean;
 }
 
-/**
- * 行级操作结束后草稿的去留。
- * 【规则】只有成功才清空；失败必须保留用户输入；取消不改变任何状态。
- */
-export type ProviderRowOutcome = 'clear' | 'keep' | 'ignore';
-
-export function resolveProviderRowOutcome(result: SettingsActionResult): ProviderRowOutcome {
-  if (result.ok) return 'clear';
-  if (result.cancelled) return 'ignore';
-  return 'keep';
-}
-
-/** 提供商行内的交互状态机（纯数据，组件用 useReducer 消费）。 */
-export interface ProviderRowState {
-  editing: boolean;
-  keyDraft: string;
-  pending: boolean;
-  error: string;
-}
-
-export type ProviderRowAction =
-  | { type: 'toggleEditing' }
-  | { type: 'draftChange'; value: string }
-  | { type: 'submitStart' }
-  | { type: 'submitResult'; result: SettingsActionResult; fallback: string }
-  | { type: 'disconnectStart' }
-  | { type: 'disconnectResult'; result: SettingsActionResult; fallback: string };
-
-export const PROVIDER_ROW_INITIAL: ProviderRowState = { editing: false, keyDraft: '', pending: false, error: '' };
-
-export function providerRowReducer(state: ProviderRowState, action: ProviderRowAction): ProviderRowState {
-  switch (action.type) {
-    case 'toggleEditing':
-      return { ...state, editing: !state.editing, error: '' };
-    case 'draftChange':
-      return { ...state, keyDraft: action.value };
-    case 'submitStart':
-    case 'disconnectStart':
-      return { ...state, pending: true, error: '' };
-    case 'submitResult': {
-      const outcome = resolveProviderRowOutcome(action.result);
-      if (outcome === 'clear') return { editing: false, keyDraft: '', pending: false, error: '' };
-      if (outcome === 'ignore') return { ...state, pending: false };
-      // 失败：保留草稿与输入框，只显示行级错误。
-      return { ...state, pending: false, error: action.result.message || action.fallback };
-    }
-    case 'disconnectResult': {
-      const outcome = resolveProviderRowOutcome(action.result);
-      if (outcome === 'keep') return { ...state, pending: false, error: action.result.message || action.fallback };
-      return { ...state, pending: false };
-    }
-    default:
-      return state;
-  }
-}
-
 /** 设置弹窗的全部副作用出口。壳层实现，组件只调用。 */
 export interface SettingsActions {
   onClose: () => void;
@@ -192,9 +185,6 @@ export interface SettingsActions {
   onThemeChange: (id: SkinId) => void;
   onLocaleChange: (locale: 'zh' | 'en') => void;
   onFontPrefsChange: (prefs: FontPreferences) => void;
-  onRefreshProviders: () => void;
-  onSaveProviderKey: (slug: string, apiKey: string) => Promise<SettingsActionResult>;
-  onDisconnectProvider: (slug: string) => Promise<SettingsActionResult>;
   onRefreshProfiles: () => void;
   onOpenAgent: (name: string) => void;
   onRefreshExtensions: () => void;
@@ -202,4 +192,56 @@ export interface SettingsActions {
   onTestGateway: (draft: GatewayDraft) => void;
   onConnectGateway: (draft: GatewayDraft) => void;
   onDisconnectGateway: () => void;
+
+  /** 切换操作作用的 Agent（删除 / 设为默认 / 登录都作用于它）。 */
+  onScopeProfileChange: (profile: string) => void;
+  /** 重新装载统一提供商表。 */
+  onReloadProviders: () => void;
+
+  /** 探测端点，不落盘。 */
+  onProbeEndpoint: (draft: CustomEndpointDraft) => Promise<EndpointProbe>;
+  /** 保存端点；`fanOutTo` 非空时逐个写到目标 Agent。 */
+  onSaveEndpoint: (
+    draft: CustomEndpointDraft,
+    options: { fanOutTo: readonly string[]; makeDefault: boolean },
+  ) => Promise<SettingsActionResult & { fanOut?: Array<{ profile: string; displayName: string; ok: boolean; message?: string }> }>;
+  /** 删除端点。用户看到一行，删除就是整体删除：壳层会跨所有配过它的 Agent 一起删。 */
+  onDeleteEndpoint: (id: string) => Promise<SettingsActionResult>;
+  /**
+   * 勾选 / 取消勾选某一个 Agent 对某提供商的绑定。
+   *
+   * 【规则】`apiKey` 只在「把自定义端点配置到一个未配置的 Agent」时需要：
+   *   网关不回明文密钥，客户端无法复制，只能让用户重输。
+   * 【规则】正在被当作当前主模型的 Agent 不允许取消，壳层会拒绝并给出原因。
+   */
+  onToggleProviderAgent: (
+    providerId: string,
+    profile: string,
+    nextChecked: boolean,
+    apiKey?: string,
+  ) => Promise<SettingsActionResult>;
+  /**
+   * 把某个 Agent 的主模型切到这个提供商。
+   * 【规则】必须带具体模型：一个提供商下有多个模型，主模型槽位只能放一个。
+   * 【规则】高价模型网关会要求二次确认；`confirmExpensive` 为真时才真正落盘。
+   */
+  onActivateProvider: (
+    providerId: string,
+    model: string,
+    confirmExpensive?: boolean,
+  ) => Promise<SettingsActionResult & { confirmRequired?: boolean }>;
+
+  /** 发起订阅登录，返回设备码会话。 */
+  onStartLogin: (providerId: string) => Promise<{ ok: boolean; sessionId?: string; userCode?: string; verificationUrl?: string; message?: string }>;
+  /** 轮询一次登录会话。 */
+  onPollLogin: (providerId: string, sessionId: string) => Promise<{ status: 'pending' | 'approved' | 'failed' | 'cancelled'; message?: string }>;
+  /** 取消登录会话。 */
+  onCancelLogin: (sessionId: string) => Promise<void>;
+  /** 退出订阅登录（仅作用于当前选中的 Agent）。 */
+  onLogoutProvider: (providerId: string) => Promise<SettingsActionResult>;
+
+  /** 轻量用户提示（复制成功等），不改变任何业务状态。 */
+  onNotify: (message: string) => void;
+  /** 复制文本，由壳层决定用哪种剪贴板实现。 */
+  onCopy: (text: string) => Promise<boolean>;
 }

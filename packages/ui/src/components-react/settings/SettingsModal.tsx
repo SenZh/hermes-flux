@@ -7,11 +7,12 @@ import { getUiFontSelectOptions, MONO_FONT_OPTIONS } from '../../tokens/fonts.js
 import { Button } from '../primitives/Button.js';
 import { Input } from '../primitives/Input.js';
 import { Badge } from '../primitives/Badge.js';
+import { SegmentedControl } from './SegmentedControl.js';
+import { LoadBoundary } from './LoadBoundary.js';
+import { ProvidersAdminPanel } from './ProvidersAdminPanel.js';
 import {
-  PROVIDER_ROW_INITIAL,
   SETTINGS_SECTIONS,
   filterSettingsSections,
-  providerRowReducer,
   type GatewayDraft,
   type SettingsActions,
   type SettingsActionResult,
@@ -75,76 +76,6 @@ function StatusDot({ tone }: { tone: 'success' | 'warning' | 'destructive' | 'mu
   const color =
     tone === 'success' ? 'bg-success' : tone === 'warning' ? 'bg-warning' : tone === 'destructive' ? 'bg-destructive' : 'bg-muted-foreground';
   return <span className={`size-1.5 shrink-0 rounded-full ${color}`} aria-hidden="true" />;
-}
-
-/**
- * 网关数据边界：加载中 / 失败 / 空 三种状态各自可见。
- * 【防范的历史坑】旧设置页在网关未连接时渲染一屏硬编码卡片，用户无法分辨"没有提供商"与"没连上网关"。
- */
-function LoadBoundary<T>({
-  state,
-  onRetry,
-  emptyLabel,
-  children,
-}: {
-  state: SettingsLoadable<T>;
-  onRetry: () => void;
-  emptyLabel: string;
-  children: (data: T) => React.ReactNode;
-}): React.ReactElement {
-  if (state.status === 'loading' || state.status === 'idle') {
-    return <p className="py-6 text-body text-muted-foreground">{t('settings.loading')}</p>;
-  }
-  if (state.status === 'error') {
-    return (
-      <div className="flex flex-col items-start gap-2 rounded-panel border border-border-subtle bg-panel px-4 py-3">
-        <span className="text-body text-destructive">{t('settings.loadFailed')}</span>
-        <span className="text-caption text-muted-foreground">{state.message}</span>
-        <Button variant="outline" size="sm" type="button" onClick={onRetry}>
-          {t('settings.retry')}
-        </Button>
-      </div>
-    );
-  }
-  const isEmpty = Array.isArray(state.data) ? state.data.length === 0 : false;
-  if (isEmpty) {
-    return <p className="py-6 text-body text-muted-foreground">{emptyLabel}</p>;
-  }
-  return <>{children(state.data)}</>;
-}
-
-function SegmentedControl<T extends string>({
-  value,
-  options,
-  onChange,
-  ariaLabel,
-}: {
-  value: T;
-  options: Array<{ value: T; label: string }>;
-  onChange: (value: T) => void;
-  ariaLabel: string;
-}): React.ReactElement {
-  return (
-    <div role="group" aria-label={ariaLabel} className="inline-flex items-center gap-1 rounded-card border border-border bg-input p-0.5">
-      {options.map((option) => {
-        const active = option.value === value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            aria-pressed={active}
-            data-segmented-value={option.value}
-            onClick={() => onChange(option.value)}
-            className={`h-7 rounded-inner px-2.5 text-caption transition-colors ${
-              active ? 'bg-card-active text-foreground' : 'text-secondary-foreground hover:text-foreground'
-            }`}
-          >
-            {option.label}
-          </button>
-        );
-      })}
-    </div>
-  );
 }
 
 function AppearancePanel({
@@ -258,107 +189,12 @@ function AppearancePanel({
   );
 }
 
-function ProviderRow({
-  row,
-  busy,
-  onSaveKey,
-  onDisconnect,
-}: {
-  row: SettingsSnapshot['providers'] extends SettingsLoadable<infer T> ? (T extends Array<infer U> ? U : never) : never;
-  busy: boolean;
-  onSaveKey: (slug: string, apiKey: string) => Promise<SettingsActionResult>;
-  onDisconnect: (slug: string) => Promise<SettingsActionResult>;
-}): React.ReactElement {
-  const [state, dispatch] = React.useReducer(providerRowReducer, PROVIDER_ROW_INITIAL);
-  const { editing, keyDraft, pending, error: rowError } = state;
-
-  const commit = async (): Promise<void> => {
-    const draft = keyDraft.trim();
-    if (!draft) return;
-    dispatch({ type: 'submitStart' });
-    const result = await onSaveKey(row.slug, draft);
-    // 成功才清空草稿并收起输入框；失败保留用户已输入的内容（由 reducer 保证）。
-    dispatch({ type: 'submitResult', result, fallback: t('settings.saveFailed') });
-  };
-
-  const disconnect = async (): Promise<void> => {
-    dispatch({ type: 'disconnectStart' });
-    const result = await onDisconnect(row.slug);
-    dispatch({ type: 'disconnectResult', result, fallback: t('settings.disconnectFailed') });
-  };
-
-  const disabled = busy || pending;
-
-  return (
-    <div className="flex flex-col gap-2 border-b border-border-subtle py-3 last:border-b-0" data-provider-slug={row.slug}>
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex min-w-0 items-center gap-2">
-          <StatusDot tone={row.authenticated ? 'success' : 'warning'} />
-          <span className="truncate text-body text-foreground">{row.name}</span>
-          {row.name !== row.slug ? (
-            <span className="truncate font-code text-caption text-muted-foreground">{row.slug}</span>
-          ) : null}
-          {row.isCurrent ? <Badge variant="outline">{t('settings.providerCurrent')}</Badge> : null}
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <span className="font-code text-caption text-muted-foreground">
-            {t('settings.providerModelCount', { count: row.availableModelCount })}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            type="button"
-            disabled={disabled}
-            onClick={() => dispatch({ type: 'toggleEditing' })}
-          >
-            {row.authenticated ? t('settings.providerUpdateKey') : t('settings.providerAddKey')}
-          </Button>
-          {row.authenticated ? (
-            <Button variant="ghost" size="sm" type="button" disabled={disabled} onClick={() => { void disconnect(); }}>
-              {t('settings.providerDisconnect')}
-            </Button>
-          ) : null}
-        </div>
-      </div>
-
-      {row.warning ? <p className="text-caption text-warning">{row.warning}</p> : null}
-      {row.keyEnv ? (
-        <p className="font-code text-caption text-muted-foreground">
-          {t('settings.providerKeyEnv', { env: row.keyEnv })}
-        </p>
-      ) : null}
-      {row.accounts.length > 0 ? (
-        <p className="text-caption text-muted-foreground">
-          {t('settings.providerAccounts', { count: row.accounts.length })}
-        </p>
-      ) : null}
-      {rowError ? <p className="text-caption text-destructive" role="alert">{rowError}</p> : null}
-
-      {editing ? (
-        <div className="flex items-center gap-2">
-          <Input
-            type="password"
-            value={keyDraft}
-            autoComplete="off"
-            placeholder={t('settings.providerKeyPlaceholder')}
-            aria-label={t('settings.providerKeyLabel')}
-            onChange={(event) => dispatch({ type: 'draftChange', value: event.target.value })}
-            className="h-8 font-code"
-          />
-          <Button
-            size="sm"
-            type="button"
-            disabled={disabled || keyDraft.trim().length === 0}
-            onClick={() => { void commit(); }}
-          >
-            {t('settings.save')}
-          </Button>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
+/**
+ * 提供商域（唯一入口）。
+ * 【设计意图】这个面板只做一件事：把统一提供商表画出来。
+ *   历史上这里叠了两块同源列表（一块来自 model.options 的原始 54 行，一块来自端点 REST），
+ *   同一件事说两遍、口径还不一致。现在只有 ProvidersAdminPanel 一处。
+ */
 function ProvidersPanel({
   snapshot,
   actions,
@@ -366,60 +202,7 @@ function ProvidersPanel({
   snapshot: SettingsSnapshot;
   actions: SettingsActions;
 }): React.ReactElement {
-  const [query, setQuery] = React.useState('');
-  const needle = query.trim().toLowerCase();
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-caption text-muted-foreground">{t('settings.providersHint')}</p>
-        <Button variant="outline" size="sm" type="button" disabled={snapshot.busy} onClick={actions.onRefreshProviders}>
-          <RefreshCw size={12} />
-          {t('settings.refresh')}
-        </Button>
-      </div>
-      <Input
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        placeholder={t('settings.providersSearch')}
-        aria-label={t('settings.providersSearch')}
-        className="h-8 text-caption"
-      />
-      <LoadBoundary
-        state={snapshot.providers}
-        onRetry={actions.onRefreshProviders}
-        emptyLabel={t('settings.providersEmpty')}
-      >
-        {(rows) => {
-          // 真实网关会返回 50+ 个 provider（含未配置），必须由检索与排序收敛噪声：
-          // 当前使用 > 已配置 > 待配置，同组内保持网关原始顺序。
-          const visible = (needle
-            ? rows.filter((row) => `${row.name} ${row.slug}`.toLowerCase().includes(needle))
-            : rows
-          ).slice().sort((a, b) => {
-            const rank = (row: (typeof rows)[number]): number => (row.isCurrent ? 0 : row.authenticated ? 1 : 2);
-            return rank(a) - rank(b);
-          });
-          if (visible.length === 0) {
-            return <p className="py-6 text-body text-muted-foreground">{t('settings.providersNoMatch')}</p>;
-          }
-          return (
-            <div className="flex flex-col">
-              {visible.map((row) => (
-                <ProviderRow
-                  key={row.slug}
-                  row={row}
-                  busy={snapshot.busy}
-                  onSaveKey={actions.onSaveProviderKey}
-                  onDisconnect={actions.onDisconnectProvider}
-                />
-              ))}
-            </div>
-          );
-        }}
-      </LoadBoundary>
-    </div>
-  );
+  return <ProvidersAdminPanel snapshot={snapshot} actions={actions} />;
 }
 
 function AgentsPanel({
