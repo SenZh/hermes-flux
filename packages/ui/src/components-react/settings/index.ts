@@ -1,15 +1,10 @@
 export { SettingsModal } from './SettingsModal.js';
 export { mountSettingsModal } from './mount.js';
+export { ProvidersAdminPanel } from './ProvidersAdminPanel.js';
 export {
   SETTINGS_SECTIONS,
   filterSettingsSections,
-  providerRowReducer,
-  resolveProviderRowOutcome,
   resolveSettingsSection,
-  PROVIDER_ROW_INITIAL,
-  type ProviderRowAction,
-  type ProviderRowState,
-  type ProviderRowOutcome,
   type SettingsActions,
   type SettingsActionResult,
   type SettingsIconName,
@@ -18,8 +13,11 @@ export {
   type SettingsSectionId,
   type SettingsSnapshot,
   type SettingsProfileRow,
+  type SettingsBotRow,
+  type CustomEndpointRow,
+  type OauthProviderRow,
+  type ProviderView,
   type GatewayDraft,
-  type ProviderDirectoryRow,
   type McpServerRow,
   type SkillRow,
 } from './settingsModel.js';

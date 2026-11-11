@@ -157,4 +157,14 @@ export function applyFontPreferences(prefs: FontPreferences, root: HTMLElement =
   root.style.setProperty('--chat-text-ui-label', scalePx(TYPOGRAPHY_TOKENS.uiLabel, factor));
   root.style.setProperty('--chat-text-meta', scalePx(TYPOGRAPHY_TOKENS.meta, factor));
   root.style.setProperty('--chat-text-micro', scalePx(TYPOGRAPHY_TOKENS.micro, factor));
+  /**
+   * 局部界面字号：只给需要跟随用户字号档位的紧凑控件使用（如 Agent 选择卡）。
+   * 【为什么不改 --fs-caption】设计系统的 7 档界面字阶是全局布局真值，
+   *   全量缩放会让导航、表格与固定几何一起漂移；这里提供一个消费同一倍率的局部变量，
+   *   基准仍取 caption 档的 11px，只在声明了它的组件里生效。
+   * 【为什么 clamp 到 10px 且取整】small 档 11 × 0.9 = 9.9px，会跌破 micro 档并产生小数；
+   *   界面字号只允许整数档，下限取 micro 的 10px，三档稳定为 10 / 11 / 12px。
+   */
+  const captionPx = Math.max(10, Math.round(Number.parseFloat(scalePx(TYPOGRAPHY_TOKENS.caption, factor))));
+  root.style.setProperty('--ui-text-caption', `${captionPx}px`);
 }

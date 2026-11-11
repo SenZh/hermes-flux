@@ -52,42 +52,110 @@ test('设置页的网关调用必须是真实契约方法，且参数在契约�
     path.resolve(import.meta.dirname, '../../../core/src/rpc/contracts/contractTable.generated.ts'),
     'utf8',
   );
-  const required = [
-    'model.options',
-    'model.save_key',
-    'model.disconnect',
-    'profiles.list',
-    'mcp.servers.status',
-    'skills.manage',
-    'skills.reload',
-    'reload.env',
-  ];
+  // 提供商统一表把每个 Agent 的 model.options 交给 providerCatalog 并发拉取，
+  // 因此契约校验必须同时覆盖 controller 与 providerCatalog 两个真实调用点。
+  const catalog = fs.readFileSync(
+    path.resolve(import.meta.dirname, '../../src/renderer/providerCatalog.ts'),
+    'utf8',
+  );
+  const required = ['model.options', 'profiles.list', 'mcp.servers.status', 'skills.manage', 'skills.reload'];
   for (const method of required) {
-    assert.ok(controller.includes(`'${method}'`), `设置编排必须调用真实契约方法 ${method}`);
+    assert.ok(controller.includes(`'${method}'`) || catalog.includes(`'${method}'`), `设置编排必须调用真实契约方法 ${method}`);
     assert.ok(contract.includes(`'${method}':`), `契约表里必须存在 ${method}`);
   }
-  assert.ok(controller.includes('include_unconfigured: true'), '设置页必须能看到未配置的提供商');
+  assert.ok(catalog.includes('explicit_only: true'), '提供商统一表必须用 explicit_only 口径，掺进未配置的骨架行就判不出谁真的配了');
   assert.ok(controller.includes("action: 'list'"), 'skills.manage 必须显式声明 action= list');
 });
 
 test('设置快照不得包含明文密码（指纹缓存与 DevTools 都会把它带出去）', () => {
   const snapshotBlock = source.slice(
     source.indexOf('function getSettingsSnapshot'),
-    source.indexOf('/** 按当前 section 懒加载对应数据'),
+    source.indexOf('function ensureSettingsSectionData'),
   );
   assert.ok(snapshotBlock.length > 0);
   assert.equal(/password:\s*state\.password/.test(snapshotBlock), false, '快照禁止直出明文密码');
   assert.ok(snapshotBlock.includes('hasStoredPassword: Boolean(state.password)'), '只允许暴露"是否已保存"');
 });
 
-test('断开提供商必须经过二次确认，不得直接调用 model.disconnect', () => {
-  const actionBlock = source.slice(
-    source.indexOf('onDisconnectProvider:'),
-    source.indexOf('onRefreshProfiles:'),
+test('破坏性写操作必须经过二次确认，且删除范围在点击瞬间就确定', () => {
+  const start = source.indexOf('onDeleteEndpoint:');
+  assert.ok(start !== -1, '必须存在 onDeleteEndpoint 动作');
+  // 按下一个动作名切分，不用固定字符数：窗口随代码增长会静默失焦。
+  const next = source.indexOf('onToggleProviderAgent:', start);
+  assert.ok(next > start, 'onToggleProviderAgent 必须紧跟其后，切片边界才可信');
+  const block = source.slice(start, next);
+
+  assert.ok(block.includes('confirmModal'), '删除端点前必须弹二次确认');
+  assert.ok(block.includes('cancelled: true'), '取消时必须显式返回 cancelled，而不是伪装成功');
+  assert.ok(
+    block.includes('planProviderRemoval('),
+    '删除范围必须由 planProviderRemoval 判定：作用域是配置集合，不是在用集合',
   );
-  assert.ok(actionBlock.includes('confirmModal'), '断开前必须弹二次确认');
-  assert.ok(actionBlock.includes('cancelled: true'), '取消时必须显式返回 cancelled，而不是伪装成功');
-  assert.ok(actionBlock.includes('controller.disconnectProvider(slug)'), '确认后才允许调用控制器');
+  assert.ok(
+    block.includes('settingsEndpointProfiles['),
+    '删除必须按配置集合收敛：只删在用集合会漏掉未生效的端点，出现"能看见却删不掉"',
+  );
+  assert.equal(
+    block.includes('profilesWithProvider('),
+    false,
+    '不得再用在用集合决定删除范围（上一版的 bug 形态）',
+  );
+  assert.ok(
+    block.includes('settingsEndpointFailures.length > 0'),
+    '端点清单读取失败时必须拒删：作用域不完整会漏删却报成功',
+  );
+  assert.ok(
+    block.includes('providerDeletePartial'),
+    '部分失败必须把失败名单回显给用户，不能只 toast「已删除」',
+  );
+  assert.ok(
+    block.includes('result.failed'),
+    '控制器返回的 failed 必须被消费，不能丢弃',
+  );
+
+  const logoutStart = source.indexOf('onLogoutProvider:');
+  assert.ok(logoutStart !== -1, '必须存在 onLogoutProvider 动作');
+  const logoutBlock = source.slice(logoutStart, logoutStart + 2400);
+  assert.ok(logoutBlock.includes('confirmModal'), '退出订阅前必须弹二次确认');
+  assert.ok(
+    logoutBlock.includes('planDeleteTarget'),
+    '退出订阅只作用于当前 Agent，必须在点击瞬间锁定它',
+  );
+});
+
+test('订阅取消勾选必须走断开登录，不能去删端点', () => {
+  const start = source.indexOf('onToggleProviderAgent:');
+  assert.ok(start !== -1, '必须存在 onToggleProviderAgent 动作');
+  const block = source.slice(start, source.indexOf('onNotify:', start));
+  assert.ok(
+    block.includes("case 'logout-subscription'"),
+    '订阅没有端点记录，取消绑定只能走 OAuth 登出',
+  );
+  const logoutCase = block.slice(block.indexOf("case 'logout-subscription'"));
+  assert.ok(
+    logoutCase.slice(0, 400).includes('controller.logoutOauth('),
+    '该分支必须调用 logoutOauth',
+  );
+  assert.equal(
+    logoutCase.slice(0, 400).includes('controller.remove('),
+    false,
+    '绝不能退回去删 custom-endpoints：订阅不在端点清单里，必然 404',
+  );
+});
+
+test('勾选未配置的自定义端点：先从其它成员复制密钥，复制失败才要求手填', () => {
+  const start = source.indexOf("case 'attach':");
+  assert.ok(start !== -1, '必须存在 attach 分支');
+  const block = source.slice(start, source.indexOf("case 'logout-subscription':", start));
+  const copyAt = block.indexOf('controller.resolveEndpointKey(');
+  const needsKeyAt = block.indexOf('needsKey: true');
+  assert.ok(copyAt !== -1, '勾回已取消的成员时必须先尝试复用其它成员的密钥');
+  assert.ok(needsKeyAt > copyAt, '只有复制失败才返回 needsKey，不能让首次勾选无条件弹密钥输入');
+  assert.ok(
+    block.includes('settingsEndpointProfiles[targetId]'),
+    '复制来源必须是配置集合：按 model.options 的在用集合会漏掉未生效成员',
+  );
+  assert.ok(block.includes('draftFromEndpoint(row)'), '端点定义仍从原始行还原，不能只复制密钥');
 });
 
 test('Esc 关闭必须让位给输入法组合态', () => {

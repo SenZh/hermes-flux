@@ -22,10 +22,12 @@ import {
   type SettingsActions,
   type GatewayDraft,
   type SettingsLoadable,
-  type ProviderDirectoryRow as SettingsProviderRow,
   type McpServerRow as SettingsMcpRow,
   type SkillRow as SettingsSkillRow,
   type SettingsProfileRow,
+  type ProviderView as SettingsProviderView,
+  type CustomEndpointRow as SettingsCustomEndpointRow,
+  type OauthProviderRow as SettingsOauthProviderRow,
   buildLeftRailModel,
   formatLeftRailTime,
   renderModelPickerMenu,
@@ -93,6 +95,8 @@ import { createToolPatchQueue } from './toolPatchQueue.js';
 import { decideConversationPush } from './conversationPush.js';
 import { resolveColdStartFocus } from './coldStartFocus.js';
 import { createSettingsController, resolveGatewayPassword } from './settingsController.js';
+import { createProviderAdminRest } from './providerAdminRest.js';
+import { createProviderAdminController, planDeleteTarget } from './providerAdminController.js';
 import {
   planMessageWindow,
   expandMessageWindowStart,
@@ -192,10 +196,15 @@ import {
   resolveLineageChain,
   isKnownDisplayKind,
   type MessageDisplayKind,
+  planBindingToggle,
+  planProviderRemoval,
+  normalizeEndpointId,
+  draftFromEndpoint,
 } from '@hermes-flux/core';
 
 import { parseTranscriptRows } from './transcriptRows.js';
 import { DesktopCacheStore } from './cache/DesktopCacheStore.js';
+import { loadProviderCatalog } from './providerCatalog.js';
 
 /**
  * 客户端缓存服务（冷启动快照 + 消息正文）。
@@ -642,8 +651,25 @@ interface AppState {
   isSettingsOpen: boolean;
   settingsSection: SettingsSectionId;
   /** 设置中心的网关数据快照：每个域各自持有加载态，禁止用一个 boolean 混住"没数据"与"加载失败"。 */
-  settingsProviders: SettingsLoadable<SettingsProviderRow[]>;
   settingsProfiles: SettingsLoadable<SettingsProfileRow[]>;
+  /** 提供商配置当前作用到的 Bot；空串表示跟随连接 profile。 */
+  settingsScopedProfile: string;
+  /** 统一提供商表（订阅 + 自定义，含每个 Agent 的生效状态）。 */
+  settingsProviderViews: SettingsLoadable<SettingsProviderView[]>;
+  /** 读取失败的 Agent，必须显式提示。 */
+  settingsProviderFailures: Array<{ profile: string; displayName: string; message: string }>;
+  /** 添加面板用的订阅目录（含未登录项）。 */
+  settingsSubscriptionCatalog: SettingsLoadable<SettingsOauthProviderRow[]>;
+  /** 端点表单编辑用的原始端点行（含 base_url / has_api_key）。 */
+  settingsCustomEndpoints: SettingsLoadable<SettingsCustomEndpointRow[]>;
+  /**
+   * provider 的**配置集合**：归一化 id → 配置了它的 profile。
+   * 删除必须按这个集合收敛；`providerViews[].agents` 是在用集合，会漏掉未生效的端点。
+   */
+  settingsEndpointProfiles: Record<string, string[]>;
+  /** 端点清单读取失败的 Agent：删除作用域不完整时不能猜着删。 */
+  settingsEndpointFailures: Array<{ profile: string; displayName: string; message: string }>;
+  settingsProviderAdminBusy: boolean;
   settingsMcp: SettingsLoadable<SettingsMcpRow[]>;
   settingsSkills: SettingsLoadable<SettingsSkillRow[]>;
   settingsBusy: boolean;
@@ -956,8 +982,15 @@ const state: AppState = {
   password: localStorage.getItem('hermes_flux_password') || localStorage.getItem('hermes_aura_password') || '',
   isSettingsOpen: false,
   settingsSection: 'appearance',
-  settingsProviders: { status: 'idle' },
   settingsProfiles: { status: 'idle' },
+  settingsScopedProfile: '',
+  settingsProviderViews: { status: 'idle' },
+  settingsProviderFailures: [],
+  settingsSubscriptionCatalog: { status: 'idle' },
+  settingsCustomEndpoints: { status: 'idle' },
+  settingsEndpointProfiles: {},
+  settingsEndpointFailures: [],
+  settingsProviderAdminBusy: false,
   settingsMcp: { status: 'idle' },
   settingsSkills: { status: 'idle' },
   settingsBusy: false,
@@ -4278,7 +4311,7 @@ async function deleteSession(id: string): Promise<void> {
         });
       },
       baseUrl: () => getEffectiveUrl(state.gatewayUrl),
-      ticket: () => currentTicket,
+      ticket: () => currentTicket ?? '',
     });
     const outcome = await lifecycle.deleteSession(id, [...targetProfiles]);
     for (const failedProfile of outcome.failedProfiles) {
@@ -6923,6 +6956,124 @@ function syncReactMessageList(force = false): void {
 let updateReactSettings: (() => void) | null = null;
 let lastSettingsSnapshotJson = '';
 let settingsController: ReturnType<typeof createSettingsController> | null = null;
+let providerAdminController: ReturnType<typeof createProviderAdminController> | null = null;
+
+/** 提供商配置的作用域 Bot：显式选中优先，否则跟随连接 profile。 */
+function scopedProfileName(): string {
+  return state.settingsScopedProfile || state.profileName || 'default';
+}
+
+/**
+ * 订阅的共享 auth profile。
+ * 【为什么不是 scopedProfile】订阅是账号级来源，登录态落在共享 auth，
+ *   由 `share_auth` 回落到首个 profile；登录、轮询、退出都必须作用于它，
+ *   否则会把令牌签进一个不参与共享的 profile，其他 Agent 仍然用不了。
+ */
+function subscriptionProfileName(): string {
+  return botRoster()[0]?.profile || state.profileName || 'default';
+}
+
+/**
+ * 提供商管理控制器（自定义端点 / 订阅账号）。
+ * 【约束】REST 一律带 `profile`，禁止依赖网关进程的默认 profile，
+ *   否则用户以为在配这个 Bot，实际写到了别的 Bot 上。
+ */
+function getProviderAdminController(): ReturnType<typeof createProviderAdminController> {
+  if (providerAdminController) return providerAdminController;
+  const rest = createProviderAdminRest({
+    baseUrl: () => getEffectiveUrl(state.gatewayUrl),
+    ticket: () => currentTicket ?? '',
+    proxy: (options) => {
+      if (!desktopApi?.httpProxy) throw new Error('Desktop REST proxy is unavailable');
+      return desktopApi.httpProxy(options);
+    },
+  });
+  providerAdminController = createProviderAdminController({
+    rest,
+    render: () => render(),
+    describeError: (error) => describeRpcError(error),
+    getEndpoints: () => state.settingsCustomEndpoints,
+    setEndpoints: (value) => { state.settingsCustomEndpoints = value; },
+    getOauth: () => state.settingsSubscriptionCatalog,
+    setOauth: (value) => { state.settingsSubscriptionCatalog = value; },
+    setBusy: (busy) => { state.settingsProviderAdminBusy = busy; },
+    notify: (message) => showToast(message),
+    warn: (message, meta) => bootLog.warn(message, meta),
+    onCatalogChanged: () => { void fetchModelOptions({ clearNotice: false }); },
+  });
+  return providerAdminController;
+}
+
+/**
+ * 装载统一提供商表。
+ * 【设计意图】首屏要回答"我接了哪些模型来源、哪些 Agent 在用"，这需要每个 Agent 的
+ *   `model.options` 加一份订阅目录加各 profile 的端点列表，全部并发拉取后归并。
+ * 【规则】任一 Agent 失败都进 `settingsProviderFailures` 显式提示，
+ *   不允许把"读取失败"渲染成"未配置"。
+ */
+async function reloadProviderCatalog(): Promise<void> {
+  const agents = botRoster();
+  state.settingsProviderViews = { status: 'loading' };
+  render();
+  try {
+    const rest = createProviderAdminRest({
+      baseUrl: () => getEffectiveUrl(state.gatewayUrl),
+      ticket: () => currentTicket ?? '',
+      proxy: (options) => {
+        if (!desktopApi?.httpProxy) throw new Error('Desktop REST proxy is unavailable');
+        return desktopApi.httpProxy(options);
+      },
+    });
+    const result = await loadProviderCatalog({
+      agents,
+      rest,
+      rpc: {
+        call: <T,>(method: string, params?: Record<string, unknown>) => {
+          if (!gatewayClient) return Promise.reject(new Error(t('settings.notConnected'))) as Promise<T>;
+          return gatewayClient.call<T>(method, params);
+        },
+      },
+      describeError: (error) => describeRpcError(error),
+    });
+    state.settingsProviderViews = { status: 'ready', data: result.views };
+    state.settingsProviderFailures = result.failed;
+    // 端点与订阅的**原始行**必须落进快照：编辑表单要 base_url / has_api_key，
+    // 添加弹框要包含未登录项。用归并后的视图反推这两个域，正是"编辑打不开""弹框没得选"的根因。
+    state.settingsCustomEndpoints = { status: 'ready', data: result.endpoints.map((entry) => entry.row) };
+    state.settingsEndpointProfiles = Object.fromEntries(
+      result.endpoints.map((entry) => [normalizeEndpointId(entry.row.id), [...entry.profiles]]),
+    );
+    state.settingsEndpointFailures = result.endpointFailures;
+    state.settingsSubscriptionCatalog = result.subscriptionsOk
+      ? { status: 'ready', data: result.subscriptions }
+      : { status: 'error', message: result.subscriptionsError || t('settings.loadFailed') };
+  } catch (error) {
+    state.settingsProviderViews = { status: 'error', message: describeRpcError(error) };
+    state.settingsProviderFailures = [];
+    state.settingsCustomEndpoints = { status: 'error', message: describeRpcError(error) };
+    state.settingsEndpointProfiles = {};
+    state.settingsEndpointFailures = [];
+    state.settingsSubscriptionCatalog = { status: 'error', message: describeRpcError(error) };
+  }
+  render();
+}
+
+/**
+ * Bot 花名册的唯一投影：从 `state.profiles`（网关真实档案）派生。
+ * 【规则】不另存一份 `settingsBots`：双真值必然漂移，头像条与扇出回显会各说一套。
+ */
+function botRoster(): Array<{ profile: string; displayName: string; avatar?: string }> {
+  if (state.profiles.length === 0) {
+    const name = state.profileName || 'default';
+    return [{ profile: name, displayName: name }];
+  }
+  return state.profiles.map((profile) => ({
+    profile: profile.name,
+    displayName: profile.displayName || profile.name,
+    avatar: profile.avatar,
+  }));
+}
+
 
 /** 当前生效的语言：state.lang 是唯一真值，i18n 模块只做消费者。 */
 function syncLocale(): void {
@@ -6938,7 +7089,6 @@ function getSettingsController(): ReturnType<typeof createSettingsController> {
   settingsController = createSettingsController({
     isConnected: () => Boolean(gatewayClient) && state.gatewayConnected,
     profileName: () => state.profileName || 'default',
-    currentProvider: () => state.currentProvider,
     call: <T,>(method: string, params?: Record<string, unknown>) => {
       if (!gatewayClient) return Promise.reject(new Error(t('settings.loadFailed'))) as Promise<T>;
       return gatewayClient.call<T>(method, params);
@@ -6946,8 +7096,6 @@ function getSettingsController(): ReturnType<typeof createSettingsController> {
     render: () => render(),
     translate: (key) => t(key),
     describeError: (error) => describeRpcError(error),
-    getProviders: () => state.settingsProviders,
-    setProviders: (value) => { state.settingsProviders = value; },
     getProfiles: () => state.settingsProfiles,
     setProfiles: (value) => { state.settingsProfiles = value; },
     getMcp: () => state.settingsMcp,
@@ -6972,25 +7120,6 @@ function toSettingsProfileRows(profiles: AgentProfile[]): SettingsProfileRow[] {
   }));
 }
 
-/**
- * 提供商行的"使用中"标记必须跟随**当前** provider，而不是装载那一刻的快照：
- * 目录可能在 `model.options` 回包前就加载完成，那时 currentProvider 仍为空，
- * 若不在此重算，界面会一直把错误的行标成使用中（真实网关 CDP 已复现）。
- */
-function withCurrentProvider(
-  value: SettingsSnapshot['providers'],
-): SettingsSnapshot['providers'] {
-  if (value.status !== 'ready' || !state.currentProvider) return value;
-  const current = state.currentProvider.toLowerCase();
-  let changed = false;
-  const data = value.data.map((row) => {
-    const isCurrent = row.slug.toLowerCase() === current;
-    if (isCurrent === row.isCurrent) return row;
-    changed = true;
-    return { ...row, isCurrent };
-  });
-  return changed ? { ...value, data } : value;
-}
 
 function getSettingsSnapshot(): SettingsSnapshot {
   return {
@@ -6999,8 +7128,17 @@ function getSettingsSnapshot(): SettingsSnapshot {
     theme: state.theme,
     locale: state.lang === 'en' ? 'en' : 'zh',
     fontPrefs: fontPreferences,
-    providers: withCurrentProvider(state.settingsProviders),
+    // 提供商的旧 providers 域已并入统一表 providerViews，快照不再单列 providers。
     profiles: state.settingsProfiles,
+    bots: botRoster(),
+    scopedProfile: scopedProfileName(),
+    providerViews: state.settingsProviderViews,
+    providerFailures: state.settingsProviderFailures,
+    subscriptionCatalog: state.settingsSubscriptionCatalog,
+    customEndpoints: state.settingsCustomEndpoints,
+    endpointProfiles: state.settingsEndpointProfiles,
+    endpointFailures: state.settingsEndpointFailures,
+    providerAdminBusy: state.settingsProviderAdminBusy,
     mcp: state.settingsMcp,
     skills: state.settingsSkills,
     gateway: {
@@ -7020,16 +7158,19 @@ function getSettingsSnapshot(): SettingsSnapshot {
 }
 
 /**
- * 提供商目录装载。
- * 【设计意图】`include_unconfigured: true` 是设置页与模型选择器的唯一差别：
- *   选择器只列能用的，设置页必须把未配置的也列出来，否则用户没有入口填密钥。
- * 【约束与规则】失败必须落成 error 态并带原始信息，禁止降级成空数组。
+ * 按当前 section 懒加载对应数据；幂等、并发收敛由控制器统一保证。
+ * 【规则】提供商域只需一次统一装载：每个 Agent 的 model.options + 订阅目录 + 端点列表
+ *   都在 loadProviderCatalog 内并发完成，不需要再单独跑端点/订阅的两次装载。
  */
-/** 按当前 section 懒加载对应数据；幂等、并发收敛由控制器统一保证。 */
 function ensureSettingsSectionData(section: SettingsSectionId, force = false): void {
   getSettingsController().ensureSection(section, force);
+  if (section !== 'providers') return;
+  // 花名册是 Agent 槽位的来源；空列表时补拉一次，已有数据不重复请求。
+  if (state.profiles.length === 0) void getSettingsController().loadProfiles();
+  if (force || state.settingsProviderViews.status === 'idle') {
+    void reloadProviderCatalog();
+  }
 }
-
 /** 连接表单提交：先落 state + localStorage，再走真实 connect()。 */
 function applyGatewayDraft(draft: GatewayDraft): void {
   state.gatewayUrl = draft.url.trim();
@@ -7076,24 +7217,287 @@ function createSettingsActions(): SettingsActions {
       applyFontPreferences(prefs);
       render();
     },
-    onRefreshProviders: () => { void getSettingsController().loadProviders(); },
-    onSaveProviderKey: (slug, apiKey) => getSettingsController().saveProviderKey(slug, apiKey),
-    onDisconnectProvider: (slug) =>
+    onRefreshProfiles: () => { void getSettingsController().loadProfiles(); },
+    onScopeProfileChange: (profile) => {
+      state.settingsScopedProfile = profile;
+      render();
+    },
+    onReloadProviders: () => {
+      void reloadProviderCatalog();
+    },
+    onProbeEndpoint: (draft) => getProviderAdminController().probe(draft),
+    onSaveEndpoint: async (draft, options) => {
+      const outcome = await getProviderAdminController().save(scopedProfileName(), draft, {
+        fanOutTo: options.fanOutTo,
+        makeDefault: options.makeDefault,
+        profileDisplayNames: Object.fromEntries(botRoster().map((bot) => [bot.profile, bot.displayName])),
+      });
+      if (outcome.currentOk === false) return { ok: false, message: outcome.current.message || t('settings.saveFailed') };
+      void reloadProviderCatalog();
+      return { ok: true, fanOut: [outcome.current, ...outcome.fanOut] };
+    },
+    /**
+     * 使用：把选中 Agent 的主模型切到这个提供商。
+     * 【规则】必须带具体模型。网关的 `custom-endpoints/{id}/activate` 只认自定义端点，
+     *   订阅走它必然 404；统一走 `/api/model/set` 后才能覆盖订阅。
+     * 【约束】只影响当前作用域那一个 Agent，不做跨 Agent 批量。
+     * 【为什么不弹二次确认】模型选择弹窗已经把"让哪个 Agent 用哪个模型"写在标题上，
+     *   再弹一次确认等于让用户点两遍同一个决定。
+     */
+    onActivateProvider: async (providerId, model, confirmExpensive) => {
+      const controller = getProviderAdminController();
+      const profile = scopedProfileName();
+      const view = state.settingsProviderViews.status === 'ready'
+        ? state.settingsProviderViews.data.find((item) => item.id === providerId)
+        : undefined;
+      const result = await controller.useMainModel(profile, {
+        provider: providerId,
+        model,
+        baseUrl: view?.kind === 'custom' ? view.detail : undefined,
+        confirmExpensive,
+      });
+      if (result.ok) {
+        showToast(t('settings.providerUsed', { name: view?.name || providerId }));
+        void reloadProviderCatalog();
+      }
+      return result;
+    },
+    /** 退出订阅：订阅是账号级来源，退出共享 auth 后所有 Agent 一起失去它。 */
+    onLogoutProvider: (providerId) =>
       new Promise((resolve) => {
-        const controller = getSettingsController();
-        // 断开提供商会删除已保存的密钥且网关无还原接口，必须先二次确认。
+        const controller = getProviderAdminController();
+        const profileAtOpen = subscriptionProfileName();
+        const target = planDeleteTarget(
+          profileAtOpen,
+          botRoster().find((bot) => bot.profile === profileAtOpen)?.displayName ?? profileAtOpen,
+        );
+        const view = state.settingsProviderViews.status === 'ready'
+          ? state.settingsProviderViews.data.find((item) => item.id === providerId)
+          : undefined;
+        if (view?.manualHint) {
+          // 网关明确说这个订阅不能自动断开：显示它自己的做法，不假装能一键退出。
+          state.confirmModal = {
+            title: t('settings.logoutConfirmTitle'),
+            message: t('settings.logoutManual', { command: view.manualHint }),
+            confirmLabel: t('settings.close'),
+            cancelLabel: t('settings.cancel'),
+            isDanger: false,
+            onConfirm: async () => resolve({ ok: false, cancelled: true }),
+            onCancel: () => resolve({ ok: false, cancelled: true }),
+          };
+          render();
+          return;
+        }
         state.confirmModal = {
-          title: t('settings.disconnectConfirmTitle'),
-          message: t('settings.disconnectConfirmMessage', { slug }),
-          confirmLabel: t('settings.disconnect'),
+          title: t('settings.logoutConfirmTitle'),
+          message: t('settings.logoutConfirmMessage', { bot: target.displayName, name: view?.name || providerId }),
+          confirmLabel: t('settings.providerLogout'),
           cancelLabel: t('settings.cancel'),
           isDanger: true,
-          onConfirm: async () => { resolve(await controller.disconnectProvider(slug)); },
+          onConfirm: async () => {
+            const result = await controller.logoutOauth(target.profile, providerId);
+            if (result.ok) {
+              showToast(t('settings.logoutDone', { name: view?.name || providerId }));
+              void reloadProviderCatalog();
+            }
+            resolve(result);
+          },
           onCancel: () => resolve({ ok: false, cancelled: true }),
         };
         render();
       }),
-    onRefreshProfiles: () => { void getSettingsController().loadProfiles(); },
+    onStartLogin: (providerId) => getProviderAdminController().startLogin(subscriptionProfileName(), providerId),
+    onPollLogin: (providerId, sessionId) =>
+      getProviderAdminController().pollLogin(subscriptionProfileName(), providerId, sessionId),
+    onCancelLogin: (sessionId) => getProviderAdminController().cancelLogin(subscriptionProfileName(), sessionId),
+    onCopy: async (text) => {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch (error) {
+        bootLog.warn('clipboard write failed', { error: describeRpcError(error) });
+        return false;
+      }
+    },
+    /**
+     * 删除端点：用户看到的是一行，删除就必须是整体删除。
+     * 【规则】作用范围取 `view.agents` 里 active/ready 的 Agent（真正配了它的），
+     *   不取"当前作用域"那一个——只删一个的话这行还在，用户会认为按钮没生效。
+     * 【约束】读取失败的 Agent 不在删除范围内：读不到就不能猜着删。
+     */
+    onDeleteEndpoint: (id) =>
+      new Promise((resolve) => {
+        const controller = getProviderAdminController();
+        const targetId = normalizeEndpointId(id);
+        const view = state.settingsProviderViews.status === 'ready'
+          ? state.settingsProviderViews.data.find((item) => normalizeEndpointId(item.id) === targetId)
+          : undefined;
+        if (!view) {
+          // 视图里找不到这一行：说明快照已经过期，不能拿一个猜出来的 id 去删。
+          showToast(t('settings.providerDeleteUnknown'));
+          resolve({ ok: false, message: t('settings.providerDeleteUnknown') });
+          return;
+        }
+
+        /**
+         * 删除的作用域是**配置集合**，不是在用集合。
+         * 【为什么】端点可以存在于某 profile 的配置里、却没进 model.options（未生效、未带模型）。
+         *   用 profilesWithProvider 会得到空集，于是"能看见却删不掉"。
+         */
+        // 配置集合不完整时不许删：某个 Agent 的端点清单读失败，它的端点不在集合里，
+        // 删除会漏掉它却报成功。读不到就不能猜着删。
+        if (state.settingsEndpointFailures.length > 0) {
+          const names = state.settingsEndpointFailures.map((item) => item.displayName).join('、');
+          showToast(t('settings.providerDeleteScopeIncomplete', { agents: names }));
+          resolve({ ok: false, message: t('settings.providerDeleteScopeIncomplete', { agents: names }) });
+          return;
+        }
+
+        const plan = planProviderRemoval(view, state.settingsEndpointProfiles[targetId] ?? []);
+
+        if (plan.kind === 'blocked-in-use') {
+          const names = plan.agents
+            .map((agent) => (agent.model ? `${agent.displayName}（${agent.model}）` : agent.displayName))
+            .join('、');
+          state.confirmModal = {
+            title: t('settings.providerDeleteBlockedTitle'),
+            message: t('settings.providerDeleteBlocked', { name: view.name, agents: names }),
+            confirmLabel: t('settings.close'),
+            cancelLabel: t('settings.cancel'),
+            isDanger: false,
+            onConfirm: async () => resolve({ ok: false, message: t('settings.providerDeleteBlockedShort') }),
+            onCancel: () => resolve({ ok: false, cancelled: true }),
+          };
+          render();
+          return;
+        }
+
+        if (plan.kind === 'empty') {
+          // 数据不一致：行还在，但没有任何 profile 承认配置过它。既不能删，也不能说"没人在用"。
+          showToast(t('settings.providerDeleteInconsistent'));
+          resolve({ ok: false, message: t('settings.providerDeleteInconsistent') });
+          return;
+        }
+
+        const names = plan.profiles.map(
+          (profile) => botRoster().find((bot) => bot.profile === profile)?.displayName || profile,
+        );
+        state.confirmModal = {
+          title: t('settings.providerDelete'),
+          message: t('settings.providerDeleteConfirm', { name: view.name, agents: names.join('、') }),
+          confirmLabel: t('settings.providerDelete'),
+          cancelLabel: t('settings.cancel'),
+          isDanger: true,
+          onConfirm: async () => {
+            const result = await controller.remove(plan.profiles, view.id);
+            // 只有全部成功才算删掉。部分失败必须如实回显失败名单，不能先报"已删除"。
+            if (result.ok) {
+              showToast(t('settings.providerDeleted', { name: view.name }));
+              void reloadProviderCatalog();
+              resolve(result);
+              return;
+            }
+            const detail = result.failed
+              .map((item) => `${item.displayName}：${item.message || ''}`)
+              .join('；');
+            const message = result.failed.length > 0
+              ? t('settings.providerDeletePartial', { detail })
+              : result.message || t('settings.providerToggleFailed');
+            void reloadProviderCatalog();
+            resolve({ ok: false, message });
+          },
+          onCancel: () => resolve({ ok: false, cancelled: true }),
+        };
+        render();
+      }),
+
+    /**
+     * 勾选 / 取消勾选某一个 Agent 的绑定。
+     *
+     * 【规则】判定全部交给 core 的 planBindingToggle，壳层只执行与回显：
+     *   正在使用的 Agent 不允许取消（用户已确认的策略：先改模型再移除）；
+     *   自定义端点新增必须补密钥（网关不回明文）；订阅只能引导去登录。
+     * 【规则】写入时 `makeDefault` 恒为 false：勾选是建立配置关系，不是改主模型。
+     */
+    onToggleProviderAgent: async (providerId, profile, nextChecked, apiKey) => {
+      const controller = getProviderAdminController();
+      const targetId = normalizeEndpointId(providerId);
+      const view = state.settingsProviderViews.status === 'ready'
+        ? state.settingsProviderViews.data.find((item) => normalizeEndpointId(item.id) === targetId)
+        : undefined;
+      if (!view) return { ok: false, message: t('settings.providerDeleteUnknown') };
+
+      const plan = planBindingToggle(view, profile, nextChecked);
+      switch (plan.kind) {
+        case 'noop':
+          return { ok: true };
+        case 'unknown-profile':
+          return { ok: false, message: t('settings.providerToggleUnknownProfile', { profile }) };
+        case 'blocked-active':
+          return { ok: false, message: t('settings.providerToggleBlockedActive', { profile }) };
+        case 'blocked-error':
+          return { ok: false, message: plan.message || t('settings.providerToggleBlockedError', { profile }) };
+        case 'login-required':
+          return { ok: false, message: t('settings.providerToggleLoginRequired', { profile }) };
+        case 'detach': {
+          const result = await controller.remove([profile], view.id);
+          if (result.ok) {
+            // 等回读完成再清 pending：否则用户会看到"点了没反应"的旧勾选态。
+            await reloadProviderCatalog();
+            return { ok: true };
+          }
+          return { ok: false, message: result.message || t('settings.providerToggleFailed') };
+        }
+        case 'logout-subscription': {
+          // 订阅的绑定就是该 Agent 的 OAuth 登录态，只能走断开登录，不能删端点。
+          const result = await controller.logoutOauth(profile, view.id);
+          if (result.ok) {
+            await reloadProviderCatalog();
+            return { ok: true };
+          }
+          return { ok: false, message: result.message || t('settings.providerToggleFailed') };
+        }
+        case 'attach': {
+          const row = state.settingsCustomEndpoints.status === 'ready'
+            ? state.settingsCustomEndpoints.data.find(
+                (item) => normalizeEndpointId(item.id) === targetId,
+              )
+            : undefined;
+          if (!row) return { ok: false, message: t('settings.providerEditUnavailable') };
+          let key = (apiKey ?? '').trim();
+          if (!key) {
+            // 先尝试从其它成员复制：取消绑定会连密钥一起删，用户刚勾回来不该被要求重输。
+            const sources = (state.settingsEndpointProfiles[targetId] ?? [])
+              .filter((source) => source !== profile);
+            const copied = await controller.resolveEndpointKey(view.id, sources);
+            if (!copied.ok) {
+              if (copied.reason === 'no-readable-key') {
+                // 确实没有可读来源（所有成员都缺密钥）：这时才让用户就地补一次。
+                return {
+                  ok: false,
+                  needsKey: true,
+                  message: t('settings.providerToggleNeedsKey', { profile }),
+                };
+              }
+              // 读取故障必须原样透出，不能伪装成"请重输密钥"（Failure Is Not Empty）。
+              return { ok: false, message: copied.message || t('settings.providerToggleFailed') };
+            }
+            key = copied.key;
+          }
+          const draft = { ...draftFromEndpoint(row), apiKey: { kind: 'set' as const, value: key } };
+          const outcome = await controller.save(profile, draft, { fanOutTo: [], makeDefault: false });
+          if (!outcome.currentOk) {
+            return { ok: false, message: outcome.current.message || t('settings.providerToggleFailed') };
+          }
+          // 等回读完成再清 pending：否则用户会看到"点了没反应"的旧勾选态。
+          await reloadProviderCatalog();
+          return { ok: true };
+        }
+        default:
+          return { ok: false, message: t('settings.providerToggleFailed') };
+      }
+    },
+    onNotify: (message) => showToast(message),
     onOpenAgent: (name) => {
       state.isSettingsOpen = false;
       state.editingAgentProfileName = name;

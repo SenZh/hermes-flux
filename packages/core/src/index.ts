@@ -13,6 +13,8 @@ export * from './models/types.js';
 export * from './models/modelNaming.js';
 export * from './models/modelCatalog.js';
 export * from './models/providerDirectory.js';
+export * from './models/providerAdmin.js';
+export * from './models/providerViews.js';
 export * from './rpc/profileNormalize.js';
 export * from './session/eventReducer.js';
 export * from './session/sessionRegistry.js';

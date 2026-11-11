@@ -9,7 +9,7 @@
 | 契约来源 | `apps/shared/src/gateway-contract.generated.ts`（网关 Pydantic 模型自动生成） |
 | 契约指纹 | `4364a2dd0064fbaf…` |
 | 同步时间 | 2026-11-01T01:48:16.956Z |
-| 契约内方法总数 | 258（本仓库实际使用 60 个，本文档只覆盖用到的） |
+| 契约内方法总数 | 258（本仓库实际使用 57 个，本文档只覆盖用到的） |
 | 契约内事件总数 | 72 |
 | 探针网关版本 | 0.22.5 |
 | 探针录制时间 | 2026-11-01T01:59:35.303Z |
@@ -26,7 +26,7 @@
 | 代码时光机 | 3 | 3 | [rollback.md](./rollback.md) |
 | 子代理委派 | 4 | 4 | [subagent.md](./subagent.md) |
 | 对话提交与旁路 | 7 | 2 | [prompt.md](./prompt.md) |
-| 扩展（MCP / 技能 / 提供商凭据） | 6 | 3 | [extensions.md](./extensions.md) |
+| 扩展（MCP / 技能 / 提供商凭据） | 3 | 3 | [extensions.md](./extensions.md) |
 | 下行事件流 | 72 个事件 | — | [events.md](./events.md) |
 
 ## 使用规则
