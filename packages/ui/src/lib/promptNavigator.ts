@@ -206,6 +206,153 @@ export function planTickWindow(
 }
 
 /**
+ * 面板可见行数与行高。
+ *
+ * 【设计意图 (Why)】
+ *   面板高度 = 行高 × 可见行数，滚轮步进与 translateY 都按行高计算。
+ *   这三个数值此前散落在组件 TS 常量、CSS 变量与文档三处，改任一处都会让滑行错位。
+ *   统一收敛到纯模型导出，组件与 CSS 侧守卫用例都从这里取真值。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 行高必须是 8pt 网格整数倍，落在 4px 网格上（40 = 8 × 5）；
+ *   2. `PANEL_ROW_PX` 与 CSS `--conv-prompt-panel-row` 必须严格相等；
+ *   3. `PANEL_VISIBLE_ROWS` 与 CSS `--conv-prompt-panel-visible` 必须严格相等。
+ */
+export const PANEL_VISIBLE_ROWS = 8;
+export const PANEL_ROW_PX = 40;
+/** 面板滚动时额外挂载的上下文行数，避免滑行瞬间露出空白。 */
+export const PANEL_OVERSCAN_ROWS = 2;
+
+/** 面板一行的渲染数据；只有预览正文，不含任何序号或行号字段。 */
+export interface PromptPanelRow {
+  id: string;
+  /** 该行在 prompts 中的绝对下标，用于高亮判定与点击 */
+  index: number;
+  /** 纵向位置（px），等于绝对下标 × 行高 */
+  top: number;
+  /** 压成单行的预览正文，是这一行唯一的可见内容 */
+  text: string;
+  isActive: boolean;
+  isHighlighted: boolean;
+}
+
+/**
+ * 面板滚动偏移：高亮行保留上下 2 行上下文，只有贴近边缘才滑动。
+ *
+ * 【防范的历史坑 (Pitfall)】面板若跟随高亮逐行滚动，读者永远只能看到当前行与下方 7 行，
+ *   无法形成"上下文感"；只有贴边才滑动才与参考实现一致。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 结果恒夹在 `[0, total - PANEL_VISIBLE_ROWS]`；
+ *   2. `total <= PANEL_VISIBLE_ROWS` 时恒为 0。
+ */
+export function ensurePanelOffset(target: number, offset: number, total: number): number {
+  const maxOffset = Math.max(0, total - PANEL_VISIBLE_ROWS);
+  const base = clamp(offset, 0, maxOffset);
+  if (target - base < 2) return clamp(target - 2, 0, maxOffset);
+  if (target - base > PANEL_VISIBLE_ROWS - 3) {
+    return clamp(target - PANEL_VISIBLE_ROWS + 3, 0, maxOffset);
+  }
+  return base;
+}
+
+/**
+ * 规划面板行：只产出可见行 ± overscan，且每行只带预览正文。
+ *
+ * 【设计意图 (Why)】
+ *   3870 次提问不能全部进 DOM；同时面板行曾是「序号 + 正文」两段结构，
+ *   序号在长列表里既无导航价值又挤掉 46px 正文宽度，本轮收敛为单段预览。
+ *   把行的数据形状收敛成纯函数，是为了让「行里只有预览」这个决策可被单测证伪，
+ *   而不是靠读产物字符串里的类名。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   曾为「可见行数 / overscan」开了可选入参，但没有任何调用方使用，
+ *   等于给两个永不执行的分支写了归一逻辑；行数只该由模块常量决定。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 起点夹在 `[0, total - 1]`，终点不超过 `total`；
+ *   2. 挂载行数上限恒为 `PANEL_VISIBLE_ROWS + PANEL_OVERSCAN_ROWS`，不接受外部覆盖；
+ *   3. 每行 `top` 由绝对下标 × 行高决定；面板整体的纵向位移由 `panel-track` 的
+ *      `translateY(-offset × 行高)` 反向抵消，两者不在这里合并；
+ *   4. `text` 与 `id` 必须非空；空 id 条目视为数据缺陷直接跳过，不补造；
+ *   5. 小数 `offset` 向下取整，保证起点落在真实行上而不是行间。
+ */
+export function planPanelRows(
+  prompts: readonly PromptEntry[],
+  options: {
+    offset: number;
+    activeIndex: number;
+    highlightedIndex: number | null;
+    previewOf: (entry: PromptEntry) => string;
+  }
+): PromptPanelRow[] {
+  const total = prompts.length;
+  if (total === 0) return [];
+  const start = clamp(Math.floor(options.offset), 0, Math.max(0, total - 1));
+  // `Math.min` 与下文的 `!entry` 守卫语义等价（越界读只会得到 undefined 并被跳过）；
+  // 保留它是为了让循环边界显式可读，而不是依赖「数组越界返回 undefined」这条隐式事实。
+  const end = Math.min(total, start + PANEL_VISIBLE_ROWS + PANEL_OVERSCAN_ROWS);
+  const highlighted = options.highlightedIndex;
+  const rows: PromptPanelRow[] = [];
+  for (let i = start; i < end; i += 1) {
+    const entry = prompts[i];
+    if (!entry || typeof entry.id !== 'string' || entry.id.length === 0) continue;
+    rows.push({
+      id: entry.id,
+      index: i,
+      top: i * PANEL_ROW_PX,
+      text: options.previewOf(entry),
+      isActive: i === options.activeIndex,
+      isHighlighted: i === highlighted,
+    });
+  }
+  return rows;
+}
+
+/**
+ * 一行的渲染属性包：把行数据映射成 DOM 属性。
+ *
+ * 【设计意图 (Why)】
+ *   面板只在 hover 时挂载，服务端静态渲染进不到该分支，渲染层契约此前零覆盖。
+ *   把「行 → 属性」收敛成纯函数后，「不含序号、点击传 id、不进 Tab 序列、几何按行高算」
+ *   这组契约可以被单测直接证伪，而不是靠读产物字符串里的类名。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   序号曾在渲染层以独立 span 回流，纯模型侧断言拦不住：模型产出不含序号，渲染时另加。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. `className` 只能由 `isActive` / `isHighlighted` 两个判别位算出；
+ *   2. `selectId` 只携带消息 id，绝不携带易失下标（前置翻页会让下标整体平移）；
+ *   3. 行不进 Tab 序列（`tabIndex = -1`），键盘通路统一走 gutter 的 listbox；
+ *   4. `top` 必须由 `PANEL_ROW_PX` 推算，禁止出现第二份行高真值；
+ *   5. 本函数的返回对象是行内按钮的**全部**可变量，组件不得在其外另加子节点。
+ */
+export function buildPanelRowProps(row: PromptPanelRow): PanelRowProps {
+  return {
+    className: `conv-prompt-rail__panel-row${row.isActive ? ' is-active' : ''}${row.isHighlighted ? ' is-highlighted' : ''}`,
+    top: `${row.index * PANEL_ROW_PX}px`,
+    tabIndex: -1,
+    ariaCurrent: row.isActive ? 'true' : undefined,
+    text: row.text,
+    selectId: row.id,
+  };
+}
+
+/** 面板行的 DOM 属性包；字段集是渲染层的完整可变面。 */
+export interface PanelRowProps {
+  className: string;
+  /** 纵向位置，等于绝对下标 × 行高 */
+  top: string;
+  /** 恒为 -1：行不进 Tab 序列 */
+  tabIndex: number;
+  ariaCurrent: 'true' | undefined;
+  /** 这一行唯一的可见内容 */
+  text: string;
+  /** 点击时回调的消息 id */
+  selectId: string;
+}
+
+/**
  * 计算一根横杠的视觉宽度。
  *
  * 【设计意图 (Why)】

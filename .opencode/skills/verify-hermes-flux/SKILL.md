@@ -77,3 +77,4 @@ Hermes Flux 是面向 Hermes Agent 全生态构建的全平台端到端极客美
 - `node scripts/verify/control-flux.mjs run session-management`：会话生命周期与草稿保全验证；
 - `node scripts/verify/control-flux.mjs run group-room`：多智能体研讨室协同验证；
 - `node scripts/verify/control-flux.mjs run input-dock-controls`：输入舱黄金限宽与模型控制验证。
+- `node scripts/verify/control-flux.mjs run prompt-navigator-rail`：提示词导航轨命中带宽度、面板 8 行 40px 节奏、无序号槽位与浮层遮蔽验证。

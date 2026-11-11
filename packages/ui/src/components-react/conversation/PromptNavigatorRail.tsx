@@ -26,8 +26,13 @@
 import * as React from 'react';
 import { t } from '../../i18n/index.js';
 import {
+  PANEL_ROW_PX,
+  PANEL_VISIBLE_ROWS,
   RAIL_TICK_PITCH_PX,
   RAIL_VISIBLE_TICKS,
+  buildPanelRowProps,
+  ensurePanelOffset,
+  planPanelRows,
   planTickWindow,
   tickWidth,
   type PromptEntry,
@@ -35,12 +40,6 @@ import {
   type PromptNavigatorSnapshot,
 } from '../../lib/promptNavigator.js';
 
-/** 面板可见行数：8 行 × 54px，与设计文档第 9 节一致。 */
-const PANEL_VISIBLE_ROWS = 8;
-/** 面板行高（px），滚轮一次正好滚一行。 */
-const PANEL_ROW_PX = 40;
-/** 面板滚动时额外挂载的上下文行数，避免滑行瞬间露出空白。 */
-const PANEL_OVERSCAN_ROWS = 2;
 /** 边缘轮播步进间隔。 */
 const CAROUSEL_INTERVAL_MS = 80;
 /** 上下热区高度。 */
@@ -90,22 +89,6 @@ function ensureWindowStartFor(
   const base = clamp(baseStart, 0, maxStart);
   if (target < base) return clamp(target, 0, maxStart);
   if (target >= base + capacity) return clamp(target - capacity + 1, 0, maxStart);
-  return base;
-}
-
-/**
- * 面板高亮行保留上下 2 行上下文，只有贴近边缘才滑动。
- *
- * 【防范的历史坑 (Pitfall)】面板若跟随高亮逐行滚动，读者永远只能看到当前行与下方 7 行，
- *   无法形成"上下文感"；只有贴边才滑动才与参考实现一致。
- */
-function ensurePanelOffset(target: number, offset: number, total: number): number {
-  const maxOffset = Math.max(0, total - PANEL_VISIBLE_ROWS);
-  const base = clamp(offset, 0, maxOffset);
-  if (target - base < 2) return clamp(target - 2, 0, maxOffset);
-  if (target - base > PANEL_VISIBLE_ROWS - 3) {
-    return clamp(target - PANEL_VISIBLE_ROWS + 3, 0, maxOffset);
-  }
   return base;
 }
 
@@ -480,34 +463,36 @@ export function PromptNavigatorRail({
     );
   }
 
-  // 面板只挂可见行 ± overscan，避免 3870 个按钮同时进 DOM。
+  // 面板只挂可见行 ± overscan，避免 3870 个按钮同时进 DOM；行的数据形状由纯模型决定。
   const panelRows: React.ReactElement[] = [];
   if (panelOpen) {
-    const visibleEnd = Math.min(total, panelOffset + PANEL_VISIBLE_ROWS + PANEL_OVERSCAN_ROWS);
-    for (let i = panelOffset; i < visibleEnd; i += 1) {
-      const entry = prompts[i];
-      if (!entry) continue;
-      const isActive = i === activeIndex;
-      const isHighlighted = i === highlightedIndex;
+    const rows = planPanelRows(prompts, {
+      offset: panelOffset,
+      activeIndex,
+      highlightedIndex,
+      previewOf,
+    });
+    for (const row of rows) {
+      const props = buildPanelRowProps(row);
       panelRows.push(
         <button
-          key={entry.id}
+          key={props.selectId}
           type="button"
-          className={`conv-prompt-rail__panel-row${isActive ? ' is-active' : ''}${isHighlighted ? ' is-highlighted' : ''}`}
-          style={{ top: `${i * PANEL_ROW_PX}px` }}
-          aria-current={isActive ? 'true' : undefined}
+          tabIndex={props.tabIndex}
+          className={props.className}
+          style={{ top: props.top }}
+          aria-current={props.ariaCurrent}
           onMouseEnter={() => {
             stopCarousel();
-            setHighlightedIndex(i);
+            setHighlightedIndex(row.index);
           }}
           onClick={(event) => {
             event.stopPropagation();
-            actions.onSelect(entry.id);
+            actions.onSelect(props.selectId);
             setPanelOpen(false);
           }}
         >
-          <span className="conv-prompt-rail__panel-index" aria-hidden="true">{i + 1}</span>
-          <span className="conv-prompt-rail__panel-text">{previewOf(entry)}</span>
+          <span className="conv-prompt-rail__panel-text">{props.text}</span>
         </button>
       );
     }

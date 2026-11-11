@@ -290,7 +290,7 @@ export async function runFeature(featureId) {
   if (!fs.existsSync(featureArtifactsDir)) fs.mkdirSync(featureArtifactsDir, { recursive: true });
 
   const session = await createDriveSession(
-    featureId === 'first-paint-skeleton'
+    featureId === 'first-paint-skeleton' || featureId === 'prompt-navigator-rail'
       ? { htmlPath: '/packages/desktop/dist/renderer/index.html' }
       : {}
   );
@@ -884,8 +884,199 @@ export async function runFeature(featureId) {
       fs.writeFileSync(path.join(featureArtifactsDir, 'evidence.json'), JSON.stringify(evidence, null, 2));
       console.log(`  ✔ Ayu 晨曦皮肤验证成功！证据已落盘: ${screenshotPath}`);
       return true;
+    } else if (featureId === 'prompt-navigator-rail') {
+      console.log('  1. 等待真实 renderer 挂载并注入多条用户提问（走真实渲染路径）...');
+      await session.waitFor('document.getElementById("flux-app-root")?.childElementCount > 0', 15000, 'renderer first paint');
+
+      const injected = await session.evaluate(`(() => {
+        const app = window.cdpApp || window.__fluxState;
+        if (!app) return 'no-state';
+        const messages = [];
+        for (let i = 0; i < 24; i += 1) {
+          messages.push({ id: 'pn-user-' + i, role: 'user', content: '第 ' + (i + 1) + ' 次提问：把构建脚本改成增量编译', timestamp: '18:0' + (i % 10) });
+          messages.push({ id: 'pn-assist-' + i, role: 'assistant', content: '收到，第 ' + (i + 1) + ' 轮答复。', timestamp: '18:1' + (i % 10) });
+        }
+        app.gatewayConnected = true;
+        app.gatewayConnecting = false;
+        app.messages = messages;
+        try {
+          if (typeof app.render === 'function') app.render();
+          else if (typeof window.__fluxRender === 'function') window.__fluxRender();
+        } catch (error) {
+          return 'render-error: ' + (error && error.message ? error.message : String(error));
+        }
+        return 'ok';
+      })()`);
+      if (String(injected) !== 'ok') throw new Error(`提问注入失败: ${injected}`);
+
+      console.log('  2. 等待导航轨挂载并读命中带宽度...');
+      await session.waitFor('document.querySelector(".conv-prompt-rail__gutter") !== null', 8000, 'prompt rail gutter');
+      const railMetrics = await session.evaluate(`(() => {
+        const gutter = document.querySelector('.conv-prompt-rail__gutter');
+        const gr = gutter.getBoundingClientRect();
+        const ticks = Array.from(document.querySelectorAll('.conv-prompt-rail__tick'));
+        const stage = document.querySelector('.flux-middle-pod');
+        const stageBg = stage ? getComputedStyle(stage).backgroundColor : '';
+        const normal = ticks.find((t) => !t.classList.contains('is-active') && !t.classList.contains('is-highlighted'));
+        return {
+          gutterWidth: +gr.width.toFixed(2),
+          tickCount: ticks.length,
+          tickHeight: ticks[0] ? getComputedStyle(ticks[0].firstElementChild).height : null,
+          tickColor: normal ? getComputedStyle(normal.firstElementChild).backgroundColor : null,
+          stageBg,
+        };
+      })()`);
+      console.log('     · 轨道指标:', railMetrics);
+      if (railMetrics.tickCount === 0 || railMetrics.tickCount > 30) {
+        throw new Error(`轨道 tick 数量必须落在 1~30，实测 ${railMetrics.tickCount}`);
+      }
+      if (railMetrics.gutterWidth !== 28 && railMetrics.gutterWidth !== 12) {
+        throw new Error(`命中带宽度必须是 28 或 12，实测 ${railMetrics.gutterWidth}`);
+      }
+
+      console.log('  3. 真实指针事件驱动面板挂载，读行几何与序号槽位...');
+      const panelMetrics = await session.evaluate(`(async () => {
+        const gutter = document.querySelector('.conv-prompt-rail__gutter');
+        const gr = gutter.getBoundingClientRect();
+        gutter.dispatchEvent(new PointerEvent('pointermove', {
+          clientX: gr.left + gr.width / 2,
+          clientY: gr.top + gr.height / 2,
+          bubbles: true,
+        }));
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const panel = document.querySelector('.conv-prompt-rail__panel');
+        if (!panel) return { mounted: false };
+        const cs = getComputedStyle(panel);
+        const rows = Array.from(panel.querySelectorAll('.conv-prompt-rail__panel-row'));
+        const viewport = panel.querySelector('.conv-prompt-rail__panel-viewport');
+        const rowCs = rows[0] ? getComputedStyle(rows[0]) : null;
+        return {
+          mounted: true,
+          padding: cs.padding,
+          radius: cs.borderTopLeftRadius,
+          borderWidth: cs.borderTopWidth,
+          boxShadow: cs.boxShadow,
+          rowCount: rows.length,
+          rowHeight: rowCs ? rowCs.height : null,
+          rowChildren: rows[0] ? rows[0].children.length : null,
+          rowTabIndex: rows[0] ? rows[0].tabIndex : null,
+          visibleRows: viewport ? Math.round(viewport.getBoundingClientRect().height / parseFloat(rowCs.height)) : null,
+          indexNodes: panel.querySelectorAll('.conv-prompt-rail__panel-index').length,
+          topsAscendBy: rows.length > 1 ? rows[1].offsetTop - rows[0].offsetTop : null,
+        };
+      })()`);
+      console.log('     · 面板指标:', panelMetrics);
+      if (panelMetrics.mounted !== true) throw new Error('指针事件后面板必须挂载');
+      if (panelMetrics.indexNodes !== 0) throw new Error(`面板行不得含序号节点，实测 ${panelMetrics.indexNodes}`);
+      if (panelMetrics.rowChildren !== 1) throw new Error(`面板行必须只有一个文本子节点，实测 ${panelMetrics.rowChildren}`);
+      if (panelMetrics.rowTabIndex !== -1) throw new Error(`面板行必须不进 Tab 序列，实测 tabIndex=${panelMetrics.rowTabIndex}`);
+      if (panelMetrics.rowHeight !== '40px') throw new Error(`面板行高必须 40px，实测 ${panelMetrics.rowHeight}`);
+      if (panelMetrics.visibleRows !== 8) throw new Error(`面板必须可见 8 行，实测 ${panelMetrics.visibleRows}`);
+      if (panelMetrics.rowCount !== 10) throw new Error(`面板挂载行数必须是 8 可见 + 2 overscan = 10，实测 ${panelMetrics.rowCount}`);
+      if (panelMetrics.padding !== '8px') throw new Error(`面板内缩必须 8px，实测 ${panelMetrics.padding}`);
+      if (panelMetrics.borderWidth !== '1px') throw new Error(`面板边框必须 1px 发丝线，实测 ${panelMetrics.borderWidth}`);
+      if (panelMetrics.radius !== '8px') throw new Error(`面板圆角必须 8px，实测 ${panelMetrics.radius}`);
+      if (Math.abs(panelMetrics.topsAscendBy - 40) > 0.5) throw new Error(`行间距必须等于行高 40px，实测 ${panelMetrics.topsAscendBy}`);
+      // --shadow-card 在两个浅色皮肤自带 0 0 0 1px 描边，与 border 并存会叠成双线
+      if (/0px 0px 0px 1px/.test(panelMetrics.boxShadow)) {
+        throw new Error(`浮层遮蔽不得再叠加 1px 描边层：${panelMetrics.boxShadow}`);
+      }
+
+      console.log('  4. 点击一根非当前 tick，验证跳转落点与当前项同步...');
+      const jumpMetrics = await session.evaluate(`(async () => {
+        const ticks = Array.from(document.querySelectorAll('.conv-prompt-rail__tick'));
+        // 必须选一个「离当前位置足够远」的目标：窗口内相邻 tick 跳转不改变 scrollTop，等于没验证。
+        const target = ticks[0];
+        if (!target || target.classList.contains('is-active')) return { skipped: 'no-far-tick' };
+        const stream = document.getElementById('conversation-stream');
+        const beforeTop = stream.scrollTop;
+        const gutter = document.querySelector('.conv-prompt-rail__gutter');
+        const gr = gutter.getBoundingClientRect();
+        const tr = target.getBoundingClientRect();
+        gutter.dispatchEvent(new PointerEvent('pointermove', {
+          clientX: gr.left + gr.width / 2,
+          clientY: tr.top + tr.height / 2,
+          bubbles: true,
+        }));
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        // 用带坐标的真实 MouseEvent：gutter 靠 clientY 反算 tick 下标，裸 click() 的 clientY 为 0，落不到任何 tick。
+        gutter.dispatchEvent(new MouseEvent('click', {
+          clientX: gr.left + gr.width / 2,
+          clientY: tr.top + tr.height / 2,
+          bubbles: true,
+        }));
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        const activeTickIndex = Array.from(document.querySelectorAll('.conv-prompt-rail__tick')).findIndex((t) => t.classList.contains('is-active'));
+        return {
+          moved: stream.scrollTop !== beforeTop,
+          beforeTop: +beforeTop.toFixed(1),
+          afterTop: +stream.scrollTop.toFixed(1),
+          activeTickIndex,
+          activeTickCount: document.querySelectorAll('.conv-prompt-rail__tick.is-active').length,
+        };
+      })()`);
+      console.log('     · 跳转指标:', jumpMetrics);
+      if (jumpMetrics.skipped === undefined) {
+        if (jumpMetrics.activeTickCount !== 1) {
+          throw new Error(`跳转后当前项必须唯一，实测 ${jumpMetrics.activeTickCount}`);
+        }
+        if (jumpMetrics.activeTickIndex < 0) {
+          throw new Error('跳转后必须有处于当前态的 tick');
+        }
+        if (!jumpMetrics.moved) {
+          throw new Error(`点击远端 tick 后滚动位置必须改变，实测仍停在 scrollTop=${jumpMetrics.afterTop}`);
+        }
+      }
+
+      console.log('  5. 键盘通路：gutter 聚焦后 End 与 ArrowUp 必须移动高亮且指向已挂载 tick...');
+      const keyboardMetrics = await session.evaluate(`(async () => {
+        const gutter = document.querySelector('.conv-prompt-rail__gutter');
+        gutter.focus();
+        const dispatch = (key) => gutter.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+        dispatch('End');
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        const afterEnd = gutter.getAttribute('aria-activedescendant');
+        const endTargetMounted = afterEnd ? Boolean(document.getElementById(afterEnd)) : false;
+        dispatch('ArrowUp');
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        const afterUp = gutter.getAttribute('aria-activedescendant');
+        const upTargetMounted = afterUp ? Boolean(document.getElementById(afterUp)) : false;
+        return {
+          afterEnd,
+          endTargetMounted,
+          afterUp,
+          upTargetMounted,
+          moved: afterEnd !== afterUp,
+          isGutterFocused: document.activeElement === gutter,
+        };
+      })()`);
+      console.log('     · 键盘指标:', keyboardMetrics);
+      if (!keyboardMetrics.isGutterFocused) throw new Error('gutter 必须可获得焦点（Tab 序列入口）');
+      if (!keyboardMetrics.afterEnd) throw new Error('End 键后 aria-activedescendant 必须指向某项');
+      if (!keyboardMetrics.endTargetMounted) throw new Error('End 指示的目标 tick 必须已挂载，不得指向不存在节点');
+      if (!keyboardMetrics.upTargetMounted) throw new Error('ArrowUp 后目标 tick 必须仍已挂载');
+      if (!keyboardMetrics.moved) throw new Error('ArrowUp 必须让高亮相对 End 位置发生移动');
+
+      console.log('  6. 捕获真实渲染截图与证据快照...');
+      const railScreenshot = path.join(featureArtifactsDir, 'screenshot.png');
+      await session.screenshot(railScreenshot);
+
+      const railEvidence = {
+        featureId,
+        timestamp: new Date().toISOString(),
+        durationMs: Date.now() - startTime,
+        status: 'PASSED',
+        railMetrics,
+        panelMetrics,
+        jumpMetrics,
+        keyboardMetrics,
+        screenshot: railScreenshot,
+      };
+      fs.writeFileSync(path.join(featureArtifactsDir, 'evidence.json'), JSON.stringify(railEvidence, null, 2));
+      console.log(`  ✔ 提示词导航轨验证成功！证据已落盘: ${railScreenshot}`);
+      return true;
     } else {
-      throw new Error(`Unknown feature ID: ${featureId}. Supported features: bot-primary-chat, session-management, group-room, input-dock-controls, interactive-chat-stage, clean-light-theme`);
+      throw new Error(`Unknown feature ID: ${featureId}. Supported features: bot-primary-chat, session-management, group-room, input-dock-controls, interactive-chat-stage, clean-light-theme, prompt-navigator-rail`);
     }
   } finally {
     await session.cleanup();
