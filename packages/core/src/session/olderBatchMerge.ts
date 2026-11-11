@@ -206,6 +206,22 @@ export function planOlderBatchPrependMergeDetailed<T extends MinimalIdentifiedMe
   const anchor = timelineId
     ? currentMessages.find((m) => belongsToTimeline(m) && typeof m.rowId === 'number' && m.rowId > 0)
     : currentMessages.find((m) => typeof m.rowId === 'number' && m.rowId > 0);
+  /**
+   * 无共享行时的方向判定。
+   *
+   * 【设计意图 (Why)】
+   *   网关的物理 id 不单调于显示序（官方 session_stored_reads.py:179 明文承认），
+   *   所以「id 更小」既不是「更早」的必要条件也不是充分条件。
+   *   无共享行时唯一可用的方向证据是时间戳：本行时间严格早于本地最早行即为更早。
+   *   时间戳只用于方向判定，绝不用于列表排序（排序始终是服务端返回顺序）。
+   *
+   * 【防范的历史坑 (Pitfall)】
+   *   1. 只用 id 比较：会话 20261020_150348_4fe41e 实测丢首问 18541（id 更大但时间更早）；
+   *   2. 完全不做方向判定就前插：older-batch-regression 记录的真实事故会把更晚的行搬到列表最前。
+   *   两条都必须挡住，故用「id 更小 OR 时间更早」双证据，都不成立才按更晚处理。
+   *
+   * 【约束与规则 (Rules)】跨会话（父会话血缘）行不参与本会话边界比较，继续按时间线前置。
+   */
   const strictlyEarlier = (m: T): boolean => {
     if (!anchor || typeof anchor.rowId !== 'number') return true;
     if (typeof m.rowId !== 'number' || !(m.rowId > 0)) return true;
@@ -213,15 +229,19 @@ export function planOlderBatchPrependMergeDetailed<T extends MinimalIdentifiedMe
       ? belongsToTimeline(m)
       : !m.sessionId || !anchor.sessionId || m.sessionId === anchor.sessionId;
     if (!sameTimeline) return true;
-    return m.rowId < anchor.rowId;
+    if (m.rowId < anchor.rowId) return true;
+    const rowTs = typeof m.rawTimestamp === 'number' ? m.rawTimestamp : undefined;
+    const anchorTs = typeof anchor.rawTimestamp === 'number' ? anchor.rawTimestamp : undefined;
+    if (typeof rowTs === 'number' && typeof anchorTs === 'number') return rowTs < anchorTs;
+    return false;
   };
   const boundedOlder = normalizedOlder.filter(strictlyEarlier);
   /**
-   * 琚€屾洿鏃╄竟鐣屻€嶄涪鎺夈€佷笖鏈湴纭疄娌℃湁鐨勮鐨勬暟閲忋€?
+   * 被「更早边界」丢掉、且本地确实没有的行数。
    *
-   * 銆愯璁℃剰鍥?(Why)銆戜笂灞傝鐢ㄥ畠鍖哄垎涓ょ銆屽噣澧炰负 0銆嶏細鏁存壒閮芥槸鏈湴宸叉寔鏈夌殑閲嶅琛?
-   *   锛堝彲浠ユ斁蹇冩帹杩涙父鏍囷級锛岃繕鏄暣鎵硅杈圭晫杩囨护涓旀湰鍦颁粠鏈湁杩囷紙鎺ㄨ繘娓告爣灏辨槸姘镐箙涓㈠巻鍙诧級銆?
-   *   鐩存帴鎶婅繃婊ゆ潯鏁板綋涓㈠純鏁颁細鎶婇噸鍙犳壒娆¤鎶ユ垚鍗遍櫓锛屽鑷存湰璇ユ帹杩涚殑娓告爣琚崱浣忋€?
+   * 【设计意图 (Why)】上层要区分两种「净增为 0」：整批都是本地已持有的重复行
+   *   （游标可以放心推进），与整批被方向过滤掉且本地从未有过（推进游标就是永久丢历史）。
+   *   直接把过滤条数当丢弃数会把重叠批次误报成危险，导致本该推进的游标被卡住。
    */
   const heldKeys = new Set<string>();
   for (const m of currentMessages) heldKeys.add(compositeKey(m));
@@ -258,11 +278,11 @@ export function planOlderBatchPrependMergeDetailed<T extends MinimalIdentifiedMe
   }
 
   // 2. 濡傛灉绗竴鏉℃湭鍖归厤锛屽叏閲忔壂鎻?boundedOlder 涓槸鍚﹀寘鍚换浣曞凡瀛樺湪鐨勬秷鎭?
+
   const currentKeySet = new Set<string>();
   for (const m of currentMessages) {
     currentKeySet.add(compositeKey(m));
   }
-
   const deduplicatedOlder: T[] = [];
   for (const m of boundedOlder) {
     if (!currentKeySet.has(compositeKey(m))) {
