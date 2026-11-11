@@ -143,6 +143,21 @@ test('订阅取消勾选必须走断开登录，不能去删端点', () => {
   );
 });
 
+test('勾选未配置的自定义端点：先从其它成员复制密钥，复制失败才要求手填', () => {
+  const start = source.indexOf("case 'attach':");
+  assert.ok(start !== -1, '必须存在 attach 分支');
+  const block = source.slice(start, source.indexOf("case 'logout-subscription':", start));
+  const copyAt = block.indexOf('controller.resolveEndpointKey(');
+  const needsKeyAt = block.indexOf('needsKey: true');
+  assert.ok(copyAt !== -1, '勾回已取消的成员时必须先尝试复用其它成员的密钥');
+  assert.ok(needsKeyAt > copyAt, '只有复制失败才返回 needsKey，不能让首次勾选无条件弹密钥输入');
+  assert.ok(
+    block.includes('settingsEndpointProfiles[targetId]'),
+    '复制来源必须是配置集合：按 model.options 的在用集合会漏掉未生效成员',
+  );
+  assert.ok(block.includes('draftFromEndpoint(row)'), '端点定义仍从原始行还原，不能只复制密钥');
+});
+
 test('Esc 关闭必须让位给输入法组合态', () => {
   assert.ok(settingsUi.includes('event.isComposing'), '中文输入法取消候选词时不得关闭设置弹窗');
 });

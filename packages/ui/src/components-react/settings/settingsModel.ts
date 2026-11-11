@@ -176,6 +176,11 @@ export interface SettingsActionResult {
   ok: boolean;
   message?: string;
   cancelled?: boolean;
+  /**
+   * 勾选未配置的自定义端点时，其它成员没有可复用的密钥，界面需要就地补一次。
+   * 【规则】只有 `true` 才允许打开密钥输入框；普通失败不得被误当成"缺密钥"。
+   */
+  needsKey?: boolean;
 }
 
 /** 设置弹窗的全部副作用出口。壳层实现，组件只调用。 */
@@ -210,8 +215,8 @@ export interface SettingsActions {
   /**
    * 勾选 / 取消勾选某一个 Agent 对某提供商的绑定。
    *
-   * 【规则】`apiKey` 只在「把自定义端点配置到一个未配置的 Agent」时需要：
-   *   网关不回明文密钥，客户端无法复制，只能让用户重输。
+   * 【规则】`apiKey` 只在「把自定义端点配置到一个未配置的 Agent」且确实无法复用时才需要：
+   *   壳层会先尝试从其它成员复制密钥；没有可读来源时返回 `needsKey`，界面再就地补一次。
    * 【规则】正在被当作当前主模型的 Agent 不允许取消，壳层会拒绝并给出原因。
    */
   onToggleProviderAgent: (
@@ -231,13 +236,13 @@ export interface SettingsActions {
     confirmExpensive?: boolean,
   ) => Promise<SettingsActionResult & { confirmRequired?: boolean }>;
 
-  /** 发起订阅登录，返回设备码会话。 */
+  /** 发起订阅登录，作用于共享 auth；登录成功后所有 Agent 默认可用。 */
   onStartLogin: (providerId: string) => Promise<{ ok: boolean; sessionId?: string; userCode?: string; verificationUrl?: string; message?: string }>;
   /** 轮询一次登录会话。 */
   onPollLogin: (providerId: string, sessionId: string) => Promise<{ status: 'pending' | 'approved' | 'failed' | 'cancelled'; message?: string }>;
   /** 取消登录会话。 */
   onCancelLogin: (sessionId: string) => Promise<void>;
-  /** 退出订阅登录（仅作用于当前选中的 Agent）。 */
+  /** 退出订阅登录：作用于共享 auth，退出后所有 Agent 一起失去该订阅。 */
   onLogoutProvider: (providerId: string) => Promise<SettingsActionResult>;
 
   /** 轻量用户提示（复制成功等），不改变任何业务状态。 */

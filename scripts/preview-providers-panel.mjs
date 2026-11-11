@@ -14,7 +14,7 @@ import { setLocale } from '../packages/ui/dist/i18n/index.js';
 
 setLocale('zh-CN');
 
-const agent = (profile, displayName, state) => ({ profile, displayName, state });
+const agent = (profile, displayName, state, detail) => ({ profile, displayName, state, ...(detail ? { detail } : {}) });
 
 const fnView = {
   key: 'custom:fn',
@@ -25,11 +25,13 @@ const fnView = {
   detail: 'https://llm.internal/v1',
   availability: 'active',
   agents: [
-    agent('default', 'default', 'active'),
-    agent('aura', 'aura', 'active'),
-    agent('codeboy', 'codeboy', 'active'),
-    agent('xiaofawang', 'xiaofawang', 'active'),
-    agent('mobile', 'mobile', 'active'),
+    agent('default', 'default', 'active', 'gpt-5.4'),
+    agent('aura', 'aura', 'active', 'gpt-5.4'),
+    agent('codeboy', 'codeboy', 'active', 'gpt-5.4'),
+    agent('xiaofawang', 'xiaofawang', 'active', 'gpt-5.4'),
+    agent('mobile', 'mobile', 'active', 'gpt-5.4'),
+    agent('ops', 'ops', 'ready'),
+    agent('writer', 'writer', 'absent'),
   ],
 };
 
@@ -47,6 +49,8 @@ const cpaView = {
     agent('codeboy', 'codeboy', 'ready'),
     agent('xiaofawang', 'xiaofawang', 'absent'),
     agent('mobile', 'mobile', 'absent'),
+    agent('ops', 'ops', 'ready'),
+    agent('writer', 'writer', 'absent'),
   ],
 };
 
@@ -64,8 +68,14 @@ const xaiView = {
     agent('codeboy', 'codeboy', 'ready'),
     agent('xiaofawang', 'xiaofawang', 'ready'),
     agent('mobile', 'mobile', 'ready'),
+    agent('ops', 'ops', 'ready'),
+    agent('writer', 'writer', 'ready'),
   ],
 };
+
+const avatar = (bg, accent) => `data:image/svg+xml;utf8,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="${bg}"/><circle cx="32" cy="25" r="11" fill="${accent}"/><path d="M11 61c3-13 11-19 21-19s18 6 21 19" fill="${accent}"/></svg>`,
+)}`;
 
 const snapshot = {
   isOpen: true,
@@ -77,11 +87,13 @@ const snapshot = {
   mcp: { status: 'ready', data: [] },
   skills: { status: 'ready', data: [] },
   bots: [
-    { profile: 'default', displayName: 'default' },
-    { profile: 'aura', displayName: 'aura' },
-    { profile: 'codeboy', displayName: 'codeboy' },
-    { profile: 'xiaofawang', displayName: 'xiaofawang' },
-    { profile: 'mobile', displayName: 'mobile' },
+    { profile: 'default', displayName: 'default', avatar: avatar('#4B5A6B', '#D7E0EA') },
+    { profile: 'aura', displayName: 'aura', avatar: avatar('#6B5A4B', '#EADFD2') },
+    { profile: 'codeboy', displayName: 'codeboy', avatar: avatar('#4B6B5A', '#D2EADF') },
+    { profile: 'xiaofawang', displayName: 'xiaofawang', avatar: avatar('#5A4B6B', '#DFD2EA') },
+    { profile: 'mobile', displayName: 'mobile', avatar: avatar('#6B4B5A', '#EAD2DF') },
+    { profile: 'ops', displayName: 'ops', avatar: avatar('#4B6B6B', '#D2EAEA') },
+    { profile: 'writer', displayName: 'writer', avatar: avatar('#6B6B4B', '#EAEAD2') },
   ],
   scopedProfile: 'default',
   providerViews: { status: 'ready', data: [fnView, cpaView, xaiView] },
@@ -154,6 +166,8 @@ const actions = new Proxy(
 );
 
 window.__previewLog = log;
+// 交互验证需要临时改写动作结果（例如模拟"没有可复用密钥"的分支）。
+window.__previewActions = actions;
 
 // 把运行时错误直接暴露到标题上：验证页面没有 DevTools，否则"点了没反应"只能靠猜。
 window.addEventListener('error', (event) => {

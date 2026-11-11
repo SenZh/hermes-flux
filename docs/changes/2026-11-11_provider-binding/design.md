@@ -1,5 +1,9 @@
 # 提供商面板：绑定关系与按钮契约 (2026-11-11)
 
+> **状态：部分条款已被 [`requirements.md`](./requirements.md) 裁决取代。**
+> 目标 Agent 作用域、强制写一致、测试连接回填、`make_default` 开关、删除读取完整性等以裁决版为准；
+> 本文保留事实取证与历史推导，冲突处以裁决版为唯一真值。
+
 本文定义"提供商 × Agent"到底是什么关系、每个按钮对用户意味着什么、点了之后改的是哪一层、失败怎么表现、如何证伪。
 
 前置事实全部来自源码与网关行为取证，证据行号随文标注。
@@ -65,7 +69,15 @@
 
 ### 3.3 勾选"未配置"的 Agent：必须补密钥
 
-硬约束：`GET /api/providers/custom-endpoints` 只回 `has_api_key` 与 `${ENV_VAR}` 预览，**不回明文密钥**。所以把一条自定义端点复制到新 Agent 时，定义（`base_url` / `model` / `models`）可以复制，密钥不能。
+硬约束：`GET /api/providers/custom-endpoints` 只回 `has_api_key` 与 `${ENV_VAR}` 预览，**不回明文密钥**。所以把一条自定义端点复制到新 Agent 时，定义（`base_url` / `model` / `models`）可以复制，密钥不能直接读。
+
+> **2026-11-11 修正**：密钥仍然不能直接从 GET 拿到明文，但网关的自定义端点把密钥存在 `key_env` 指向的环境变量里，GET 会给出 `${HERMES_CUSTOM_<ID>_API_KEY}` 预览。只要另一个成员还持有这条端点，客户端就可以按这个变量名调用 `POST /api/env/reveal` 读出明文，再随保存写进目标成员。因此交互不再无条件要求重输：先复制，复制不到才补密钥。
+>
+> **网关取证（0.22.5 源码）**：
+> - `hermes_cli/web_routers/config_env.py` 的 `_api_key_display`：`key_env` 存在时返回 `api_key_preview = f"${{{key_env}}}"`；明文 `api_key` 走脱敏预览。
+> - 同文件 `POST /api/env/reveal`：请求体 `EnvVarReveal { key, profile? }`，按 `body.profile or profile` 读取该 profile 的 `.env`，返回 `{ key, value }`；限流 5 次 / 30 秒，受 `_require_token` 保护，Desktop 的原生 HTTP principal 可通过。
+> - 同文件 `_write_custom_endpoint` 明确拒绝把 `${VAR}` 形态当 `api_key` 写回（会 400），所以复制路径必须是"reveal 明文 → 再保存"，不能直接透传预览串。
+> - 本仓库不 vendored 网关源码；以上取证来自 `NousResearch/hermes-agent` tag `v0.22.5` 的 `config_env.py`。若目标网关没有该路由，调用会返回 404/405，客户端降级为 `transport` 错误并允许手填，不会静默假装复制成功。
 
 交互因此分两步，不做静默成功：
 
@@ -225,7 +237,8 @@ THEN 该格显示失败原因并禁用，绝不可渲染成"未配置"。
 
 | 不做 | 理由 |
 |---|---|
-| 事后把已有 provider 追加到新 Agent 而不输入密钥 | 网关不回明文密钥，物理不可能；只能复制定义 + 重输密钥 |
+| 事后把已有 provider 追加到新 Agent 且**其它成员也没有可读密钥** | 没有来源可复制；客户端不能凭空恢复明文，只能让用户手填一次 |
+| 把脱敏预览（`sk-…9f2c`）当密钥写回 | 掩码不是密钥，写进去只会得到一条永远 401 的端点 |
 | 一次性跨 provider 批量操作 | 每个写入都可能触发多 profile 托管切换，副作用叠加不可控 |
 | 为订阅勾选新 Agent 时重新走 OAuth | 登录态在 share_auth 下由新 profile 只读回落 default；失败时引导去登录，不伪造授权 |
 | 在行内展示"N/M 生效"这类带分母的计数 | 用户读不懂分母；勾选区本身就是全集 |

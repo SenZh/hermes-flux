@@ -25,6 +25,7 @@ import {
   draftFromEndpoint,
   emptyEndpointDraft,
   normalizeBaseUrl,
+  normalizeEndpointId,
   toEndpointPayload,
   validateDraft,
   type CustomEndpointDraft,
@@ -66,6 +67,18 @@ export interface SaveEndpointOutcome {
   message?: string;
 }
 
+/**
+ * 从其它成员复制密钥的结果。
+ *
+ * 【为什么要判别式】"没有可读密钥"与"读取故障"必须分开：
+ *   前者应该让用户就地补一次，后者必须把网关原文透出来。
+ *   把两者都折成 `needsKey` 会让 500/超时伪装成"请重输密钥"，用户永远看不到真实故障。
+ */
+export type EndpointKeyResolution =
+  | { ok: true; key: string; source: string }
+  | { ok: false; reason: 'no-readable-key'; message?: string }
+  | { ok: false; reason: 'transport'; message: string };
+
 export interface ProviderAdminControllerDeps {
   rest: ProviderAdminRest;
   render(): void;
@@ -85,6 +98,15 @@ export interface ProviderAdminController {
   load(profile: string): Promise<void>;
   probe(draft: CustomEndpointDraft): Promise<EndpointProbe>;
   save(profile: string, draft: CustomEndpointDraft, options: SaveEndpointOptions): Promise<SaveEndpointOutcome>;
+  /**
+   * 从其它成员复制一条端点的 API Key。
+   * 【规则】只在源成员存在、GET 给出 `${ENV_VAR}` 预览且 reveal 返回非空值时成功；
+   *   否则返回失败原因，由界面降级为"就地补密钥"。
+   */
+  resolveEndpointKey(
+    id: string,
+    sourceProfiles: readonly string[],
+  ): Promise<EndpointKeyResolution>;
   /**
    * 把某个 Agent 的主模型切到指定提供商。
    * 【规则】必须点名模型：订阅与自定义端点都走 `/api/model/set`，
@@ -188,6 +210,9 @@ export function createProviderAdminController(deps: ProviderAdminControllerDeps)
    */
   async function save(profile: string, draft: CustomEndpointDraft, options: SaveEndpointOptions): Promise<SaveEndpointOutcome> {
     const errors = validateDraft(draft);
+    // 新建端点必须有明文密钥：GET 不回密钥，先建一个空密钥条目等于制造一条发不出请求的配置。
+    // 编辑时留空（keep）合法，表示保留各成员原密钥。
+    if (!draft.id.trim() && draft.apiKey.kind !== 'set') errors.push('apiKey');
     if (errors.length > 0) {
       return {
         currentOk: false,
@@ -253,6 +278,64 @@ export function createProviderAdminController(deps: ProviderAdminControllerDeps)
         fanOut: results,
       };
     });
+  }
+
+  /**
+   * 从其它成员复制一条端点的 API Key。
+   *
+   * 【设计意图 (Why)】
+   *   用户取消某个 Agent 的绑定后再勾回来，不该被要求重新输入同一把密钥。
+   *   同一条端点通常还留在别的成员上，网关的 GET 会给出 `key_env` 的 `${VAR}` 预览，
+   *   `/api/env/reveal` 可以按这个变量名把明文读出来，再随保存写进目标成员。
+   *   这比"客户端自己保存明文"安全，也比"让用户重输"省事。
+   *
+   * 【防范的历史坑 (Pitfall)】
+   *   1. 旧版把所有非明文预览（脱敏串）都当成可复制的密钥，结果把一串掩码写进 `.env`，
+   *      端点看起来配好了，实际每次请求都 401。只接受严格的 `${ENV_VAR}` 形态。
+   *   2. reveal 会让明文短暂进入内存；这里绝不打日志、绝不回显、绝不写本地存储。
+   *   3. 源 profile 的顺序就是成员的配置顺序；第一个可读的胜出，失败继续找下一个，
+   *      不能因为某个成员缺密钥就整体放弃。
+   */
+  async function resolveEndpointKey(
+    id: string,
+    sourceProfiles: readonly string[],
+  ): Promise<EndpointKeyResolution> {
+    const targetId = normalizeEndpointId(id);
+    const sources = [...new Set(sourceProfiles.map((profile) => profile.trim()).filter(Boolean))];
+    let lastMessage = 'noSource';
+    for (const source of sources) {
+      let rows: CustomEndpointRow[];
+      try {
+        rows = await deps.rest.listEndpoints(source);
+      } catch (error) {
+        // 成员清单都读不到，不能继续猜；这是读取故障，不是"没有可读密钥"。
+        return { ok: false, reason: 'transport', message: deps.describeError(error) };
+      }
+      const row = rows.find((item) => normalizeEndpointId(item.id) === targetId);
+      if (!row || !row.hasApiKey) {
+        lastMessage = 'keyMissing';
+        continue;
+      }
+      // GET 对 `key_env` 返回 `${VAR}`；脱敏预览（`sk-…abcd`）无法反推，不能当密钥。
+      const match = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/.exec(row.apiKeyPreview || '');
+      if (!match) {
+        lastMessage = 'unreadable';
+        continue;
+      }
+      try {
+        const value = (await deps.rest.revealEnv(source, match[1])).trim();
+        if (value) return { ok: true, key: value, source };
+        lastMessage = 'empty';
+      } catch (error) {
+        const { status, message } = describeProviderAdminError(error);
+        // 404 = 变量不在该 profile 的 .env 里。这不是故障，用户手填即可解决。
+        if (status !== 404) {
+          return { ok: false, reason: 'transport', message: message || deps.describeError(error) };
+        }
+        lastMessage = 'keyMissing';
+      }
+    }
+    return { ok: false, reason: 'no-readable-key', message: lastMessage };
   }
 
   async function useMainModel(
@@ -383,6 +466,7 @@ export function createProviderAdminController(deps: ProviderAdminControllerDeps)
     load,
     probe,
     save,
+    resolveEndpointKey,
     useMainModel,
     remove,
     loadOauth,

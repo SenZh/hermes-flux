@@ -49,6 +49,14 @@ function makeDeps(overrides = {}) {
       if (shouldFail) throw new Error('HTTP 500: delete failed');
       return [];
     },
+    async revealEnv(profile, key) {
+      calls.push(['revealEnv', profile, key]);
+      if (overrides.failRevealHard === true) throw new Error('HTTP 500: reveal down');
+      if (overrides.failReveal === true || (Array.isArray(overrides.failReveal) && overrides.failReveal.includes(profile))) {
+        throw new Error(`HTTP 404: ${key} not found`);
+      }
+      return overrides.revealed?.[`${profile}:${key}`] ?? '';
+    },
     async listOauthProviders(profile) {
       calls.push(['listOauthProviders', profile]);
       if (overrides.failOauth?.includes(profile)) throw new Error(`HTTP 500: ${profile} oauth failed`);
@@ -113,6 +121,19 @@ test('save：扇出中途失败要停下、报 partial，并如实报告是哪�
   assert.equal(warns.length, 1, '部分失败必须留下可观测记录');
 });
 
+test('save：新建端点必须带明文密钥，keep 不得发出请求', async () => {
+  const { controller, calls } = makeDeps();
+  const outcome = await controller.save(
+    'default',
+    { ...draft, apiKey: { kind: 'keep' } },
+    { fanOutTo: [], makeDefault: false },
+  );
+  assert.equal(outcome.currentOk, false);
+  assert.equal(outcome.overall, 'failed');
+  assert.ok(outcome.current.message.includes('apiKey'), '必须明确指出缺密钥');
+  assert.equal(calls.length, 0, '禁止创建一条发不出请求的空密钥端点');
+});
+
 test('save：草稿不合法时一个请求都不发', async () => {
   const { controller, calls } = makeDeps();
   const outcome = await controller.save('default', { ...draft, baseUrl: 'llm.internal/v1' }, { fanOutTo: ['aura'], makeDefault: false });
@@ -157,6 +178,85 @@ test('loadOauth：失败必须落 error 态', async () => {
   await controller.load('aura');
   assert.equal(state.oauth.status, 'error');
   assert.match(state.oauth.message, /500/);
+});
+
+test('resolveEndpointKey：从第一个持有 `${VAR}` 的成员复制明文，不让用户重输', async () => {
+  const { controller, calls } = makeDeps({
+    endpoints: {
+      aura: [{ id: 'fn', name: 'fn', baseUrl: 'https://llm/v1', models: ['m1'], hasApiKey: true, apiKeyPreview: '${HERMES_CUSTOM_FN_API_KEY}' }],
+    },
+    revealed: { 'aura:HERMES_CUSTOM_FN_API_KEY': 'sk-copied' },
+  });
+  const result = await controller.resolveEndpointKey('custom:fn', ['aura']);
+  assert.deepEqual(result, { ok: true, key: 'sk-copied', source: 'aura' });
+  assert.deepEqual(
+    calls.map((call) => call.slice(0, 2)),
+    [['listEndpoints', 'aura'], ['revealEnv', 'aura']],
+    '必须先读源成员的端点清单，再按 key_env 变量名 reveal',
+  );
+  assert.equal(calls[1][2], 'HERMES_CUSTOM_FN_API_KEY', '只接受 `${VAR}` 变量名，不能把预览串当密钥');
+});
+
+test('resolveEndpointKey：跳过缺密钥与脱敏预览的成员，继续找下一个可读来源', async () => {
+  const { controller, calls } = makeDeps({
+    endpoints: {
+      default: [{ id: 'fn', name: 'fn', baseUrl: 'https://llm/v1', models: ['m1'], hasApiKey: true, apiKeyPreview: 'sk-…9f2c' }],
+      aura: [{ id: 'fn', name: 'fn', baseUrl: 'https://llm/v1', models: ['m1'], hasApiKey: true, apiKeyPreview: '${HERMES_CUSTOM_FN_API_KEY}' }],
+    },
+    revealed: { 'aura:HERMES_CUSTOM_FN_API_KEY': 'sk-real' },
+  });
+  const result = await controller.resolveEndpointKey('fn', ['default', 'aura']);
+  assert.equal(result.ok, true);
+  assert.equal(result.source, 'aura');
+  assert.equal(calls.filter((call) => call[0] === 'revealEnv').length, 1, '脱敏预览不得触发 reveal，更不得被当成密钥写回');
+});
+
+test('resolveEndpointKey：所有成员都不可读时失败，并把原因交回界面降级为手填', async () => {
+  const { controller, calls } = makeDeps({
+    endpoints: {
+      aura: [{ id: 'fn', name: 'fn', baseUrl: 'https://llm/v1', models: ['m1'], hasApiKey: false }],
+    },
+  });
+  const result = await controller.resolveEndpointKey('fn', ['aura', 'codeboy']);
+  assert.deepEqual(result, { ok: false, reason: 'no-readable-key', message: 'keyMissing' });
+  assert.equal(calls.filter((call) => call[0] === 'revealEnv').length, 0);
+  assert.equal(JSON.stringify(result).includes('sk-'), false, '失败结果不得夹带任何密钥形态');
+});
+
+test('resolveEndpointKey：读取成员清单失败必须报 transport，不能降级成 needsKey', async () => {
+  const { controller } = makeDeps({ failList: ['aura'] });
+  const result = await controller.resolveEndpointKey('fn', ['aura']);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'transport', '网关 500/超时不能被伪装成"没有可读密钥"');
+  assert.match(result.message, /500/, '真实故障原文必须透出（Failure Is Not Empty）');
+});
+
+test('resolveEndpointKey：reveal 非 404 故障报 transport，404 才允许用户手填', async () => {
+  const endpoint = { id: 'fn', name: 'fn', baseUrl: 'https://llm/v1', models: ['m1'], hasApiKey: true, apiKeyPreview: '${HERMES_CUSTOM_FN_API_KEY}' };
+
+  const hard = makeDeps({ endpoints: { aura: [endpoint] }, failRevealHard: true });
+  const hardResult = await hard.controller.resolveEndpointKey('fn', ['aura']);
+  assert.equal(hardResult.ok, false);
+  assert.equal(hardResult.reason, 'transport', 'reveal 500 是故障，不是缺密钥');
+  assert.match(hardResult.message, /reveal down/);
+
+  const missing = makeDeps({ endpoints: { aura: [endpoint] }, failReveal: ['aura'] });
+  const missingResult = await missing.controller.resolveEndpointKey('fn', ['aura']);
+  assert.deepEqual(missingResult, { ok: false, reason: 'no-readable-key', message: 'keyMissing' }, '变量不在 .env 里时用户手填即可');
+});
+
+test('resolveEndpointKey：reveal 失败不影响下一个成员，最终失败原因可见', async () => {
+  const { controller } = makeDeps({
+    endpoints: {
+      aura: [{ id: 'fn', name: 'fn', baseUrl: 'https://llm/v1', models: ['m1'], hasApiKey: true, apiKeyPreview: '${HERMES_CUSTOM_FN_API_KEY}' }],
+      codeboy: [{ id: 'fn', name: 'fn', baseUrl: 'https://llm/v1', models: ['m1'], hasApiKey: true, apiKeyPreview: '${HERMES_CUSTOM_FN_API_KEY}' }],
+    },
+    failReveal: ['aura'],
+    revealed: { 'codeboy:HERMES_CUSTOM_FN_API_KEY': 'sk-from-codeboy' },
+  });
+  const result = await controller.resolveEndpointKey('fn', ['aura', 'codeboy']);
+  assert.equal(result.ok, true, '一个成员读取失败不能让整次复制失败');
+  assert.equal(result.source, 'codeboy');
 });
 
 test('useMainModel：走通用 /api/model/set，订阅与端点共用一条路径', async () => {

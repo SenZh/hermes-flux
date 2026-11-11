@@ -25,6 +25,7 @@ function row(slug, models, isCurrent, userDefined = true) {
     models,
     modelCount: models.length,
     isCurrent,
+    currentModel: isCurrent ? models[0] : undefined,
     userDefined,
   };
 }
@@ -84,7 +85,7 @@ test('mergeProviderViews：未登录订阅不进主列表', () => {
   assert.equal(views.some((view) => view.agents.some((agent) => agent.detail === 'loggedOut')), false);
 });
 
-test('mergeProviderViews：已登录订阅即使没被任何 Agent 选中也要显示', () => {
+test('mergeProviderViews：已登录订阅默认对所有 Agent 生效', () => {
   const views = mergeProviderViews({
     roster,
     options: [
@@ -97,8 +98,31 @@ test('mergeProviderViews：已登录订阅即使没被任何 Agent 选中也要�
   });
   const xai = views.find((view) => view.id === 'xai-oauth');
   assert.ok(xai, '登录过就是可用的模型来源，不在任何 Agent 的 options 里也要列出来');
-  assert.equal(xai.availability, 'not_configured', '没被任何 Agent 选中，就是没在用');
+  assert.equal(xai.availability, 'ready', '订阅登录一次默认对所有 Agent 生效');
+  assert.deepEqual(
+    xai.agents.map((agent) => agent.state),
+    ['ready', 'ready', 'ready'],
+    '订阅没有按 Agent 可写的绑定，所有槽位默认可用',
+  );
   assert.deepEqual(xai.models, [], '种子缺失时没有模型可选，界面必须禁用"使用"');
+});
+
+test('mergeProviderViews：custom:fn 与 fn 同指一个端点，槽位不得误判为未配置', () => {
+  const views = mergeProviderViews({
+    roster,
+    options: [
+      options('default', [row('custom:fn', ['m1', 'm2'], true)]),
+      options('aura', []),
+      options('codeboy', []),
+    ],
+    subscriptions,
+    endpoints,
+  });
+  const fn = views.find((view) => view.id === 'fn');
+  assert.ok(fn, '端点行必须进入主列表');
+  assert.equal(fn.agents[0].state, 'active', 'custom:fn 必须被识别为同一个端点的当前模型');
+  assert.equal(fn.agents[0].detail, 'm1', '当前模型必须能从 custom:fn 行里取到');
+  assert.equal(fn.agents[1].state, 'absent', '没配这个端点的 Agent 仍然是未配置');
 });
 
 test('mergeProviderViews：每个 Agent 槽位必须存在，长度恒等于花名册', () => {
@@ -111,10 +135,16 @@ test('mergeProviderViews：每个 Agent 槽位必须存在，长度恒等于花�
 test('mergeProviderViews：主模型指向即 active，配了但没选是 ready', () => {
   const fn = build().find((view) => view.id === 'fn');
   assert.deepEqual(fn.agents.map((agent) => agent.state), ['active', 'active', 'active']);
+  assert.deepEqual(
+    fn.agents.map((agent) => agent.detail),
+    ['m1', 'm1', 'm1'],
+    'active 的 detail 必须是当前模型，模型弹框靠它标「当前模型」',
+  );
   assert.equal(fn.availability, 'active');
 
   const cpa = build().find((view) => view.id === 'cpa');
   assert.deepEqual(cpa.agents.map((agent) => agent.state), ['ready', 'ready', 'ready']);
+  assert.deepEqual(cpa.agents.map((agent) => agent.detail), [undefined, undefined, undefined], '非 active 不携带当前模型');
   assert.equal(cpa.availability, 'ready');
 });
 

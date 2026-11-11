@@ -168,6 +168,26 @@
   border-radius: var(--radius-window, 12px);
 }
 
+/**
+ * Agent 成员网格。
+ *
+ * 设计意图(Why)：设置页的「生效于」是一张成员名单。轨道宽度必须固定，
+ *   Agent 增多时只增加行数，不能把名字压成两行或让成员忽宽忽窄。
+ *   网格本身必须横跨整行：早期把它放在标题与动作按钮之间，动作按钮宽度不同
+ *   会让同一份名单在自定义端点行排出 4 列、订阅行排出 5 列。
+ * 几何依据：轨道 64px、头像 44px、列间距 8px、行间距 12px，全部落在 4px 网格上；
+ *   设置弹窗内约 5-6 列，窄屏自动降列。不承诺固定列数，避免文档与真实 DOM 脱节。
+ * 约束与规则(Rules)：64px 与成员自身的 `w-16` 同值，改这里必须同步宽度；
+ *   禁止改成 auto-fit 或 1fr，否则头像间距会被拉伸得不均匀；
+ *   禁止横向滚动：成员多时必须换行，让所有成员始终可见。
+ */
+@utility agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 64px);
+  justify-content: start;
+  gap: 12px 8px;
+}
+
 /*
  * 语义阴影三档（@utility）。
  *

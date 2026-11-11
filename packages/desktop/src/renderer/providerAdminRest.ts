@@ -73,6 +73,8 @@ export interface ProviderAdminRest {
   activateEndpoint(profile: string, id: string): Promise<{ provider: string; model: string }>;
   /** 通用主模型切换：订阅与自定义端点共用，必须点名一个具体模型。 */
   setMainModel(profile: string, assignment: MainModelAssignment): Promise<MainModelResult>;
+  /** 读取某一 profile 的单个环境变量明文，仅用于把已有密钥复制到另一个成员。 */
+  revealEnv(profile: string, key: string): Promise<string>;
   deleteEndpoint(profile: string, id: string): Promise<CustomEndpointRow[]>;
   listOauthProviders(profile: string): Promise<OauthProviderRow[]>;
   startOauthLogin(profile: string, id: string): Promise<OauthLoginSession>;
@@ -190,6 +192,28 @@ export function createProviderAdminRest(deps: ProviderAdminRestDeps): ProviderAd
         params: { profile },
       });
       return normalizeCustomEndpoints(response);
+    },
+
+    /**
+     * 读取某个 profile 的单个环境变量明文。
+     *
+     * 【设计意图 (Why)】
+     *   取消一个 Agent 的绑定会连同它的 `.env` 密钥一起删掉；再勾回来时定义还能从
+     *   端点行还原，密钥却已不在该 profile 上。逐个成员重新输入纯属重复劳动。
+     *   网关给自定义端点写入的是 `key_env`（GET 以 `${VAR}` 预览），只要另一个成员
+     *   还持有同一条端点，就能按同一个变量名把明文读出来再写回目标成员。
+     *
+     * 【约束与规则 (Rules)】
+     *   1. 明文只在内存里中转，绝不落盘、绝不进日志、绝不回显；
+     *   2. 调用方必须显式给出源 profile，禁止把"当前 profile"当默认值猜；
+     *   3. 网关对不存在或不可读的变量回 404，由上层降级为"让用户手填"。
+     */
+    async revealEnv(profile: string, key: string): Promise<string> {
+      const response = await call('/api/env/reveal', {
+        method: 'POST',
+        body: { key, profile },
+      });
+      return readStringField(response, 'value');
     },
 
     async listOauthProviders(profile: string): Promise<OauthProviderRow[]> {

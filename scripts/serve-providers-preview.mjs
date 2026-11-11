@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const root = path.resolve('artifacts/verification/providers-admin');
-const port = 9141;
+const port = Number(process.env.PORT) || 9141;
 
 const types = {
   '.html': 'text/html; charset=utf-8',

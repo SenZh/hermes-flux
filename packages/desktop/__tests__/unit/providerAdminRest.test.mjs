@@ -77,6 +77,16 @@ test('deleteEndpoint：带空格的 id 必须 URL 编码，否则网关 404', as
   assert.deepEqual(calls[0].params, { profile: 'default' });
 });
 
+test('revealEnv：POST 到 /api/env/reveal，源 profile 放在请求体，密钥不进 URL', async () => {
+  const { rest, calls } = makeRest(() => ({ key: 'HERMES_CUSTOM_GW_API_KEY', value: 'sk-real' }));
+  const value = await rest.revealEnv('aura', 'HERMES_CUSTOM_GW_API_KEY');
+  assert.equal(calls[0].path, '/api/env/reveal');
+  assert.equal(calls[0].method, 'POST');
+  assert.equal(calls[0].params, undefined, '密钥变量名不得出现在 URL 查询串里');
+  assert.deepEqual(calls[0].body, { key: 'HERMES_CUSTOM_GW_API_KEY', profile: 'aura' });
+  assert.equal(value, 'sk-real');
+});
+
 test('activateEndpoint：POST 到 activate 路径并解析 provider/model', async () => {
   const { rest, calls } = makeRest(() => ({ ok: true, provider: 'gw', model: 'm1' }));
   const result = await rest.activateEndpoint('default', 'gw');

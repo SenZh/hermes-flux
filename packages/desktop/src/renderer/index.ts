@@ -6228,6 +6228,16 @@ function scopedProfileName(): string {
 }
 
 /**
+ * 订阅的共享 auth profile。
+ * 【为什么不是 scopedProfile】订阅是账号级来源，登录态落在共享 auth，
+ *   由 `share_auth` 回落到首个 profile；登录、轮询、退出都必须作用于它，
+ *   否则会把令牌签进一个不参与共享的 profile，其他 Agent 仍然用不了。
+ */
+function subscriptionProfileName(): string {
+  return botRoster()[0]?.profile || state.profileName || 'default';
+}
+
+/**
  * 提供商管理控制器（自定义端点 / 订阅账号）。
  * 【约束】REST 一律带 `profile`，禁止依赖网关进程的默认 profile，
  *   否则用户以为在配这个 Bot，实际写到了别的 Bot 上。
@@ -6516,11 +6526,11 @@ function createSettingsActions(): SettingsActions {
       }
       return result;
     },
-    /** 退出订阅：只退出当前选中 Agent，其余 Agent 的登录态各自独立。 */
+    /** 退出订阅：订阅是账号级来源，退出共享 auth 后所有 Agent 一起失去它。 */
     onLogoutProvider: (providerId) =>
       new Promise((resolve) => {
         const controller = getProviderAdminController();
-        const profileAtOpen = scopedProfileName();
+        const profileAtOpen = subscriptionProfileName();
         const target = planDeleteTarget(
           profileAtOpen,
           botRoster().find((bot) => bot.profile === profileAtOpen)?.displayName ?? profileAtOpen,
@@ -6560,10 +6570,10 @@ function createSettingsActions(): SettingsActions {
         };
         render();
       }),
-    onStartLogin: (providerId) => getProviderAdminController().startLogin(scopedProfileName(), providerId),
+    onStartLogin: (providerId) => getProviderAdminController().startLogin(subscriptionProfileName(), providerId),
     onPollLogin: (providerId, sessionId) =>
-      getProviderAdminController().pollLogin(scopedProfileName(), providerId, sessionId),
-    onCancelLogin: (sessionId) => getProviderAdminController().cancelLogin(scopedProfileName(), sessionId),
+      getProviderAdminController().pollLogin(subscriptionProfileName(), providerId, sessionId),
+    onCancelLogin: (sessionId) => getProviderAdminController().cancelLogin(subscriptionProfileName(), sessionId),
     onCopy: async (text) => {
       try {
         await navigator.clipboard.writeText(text);
@@ -6696,7 +6706,8 @@ function createSettingsActions(): SettingsActions {
         case 'detach': {
           const result = await controller.remove([profile], view.id);
           if (result.ok) {
-            void reloadProviderCatalog();
+            // 等回读完成再清 pending：否则用户会看到"点了没反应"的旧勾选态。
+            await reloadProviderCatalog();
             return { ok: true };
           }
           return { ok: false, message: result.message || t('settings.providerToggleFailed') };
@@ -6705,7 +6716,7 @@ function createSettingsActions(): SettingsActions {
           // 订阅的绑定就是该 Agent 的 OAuth 登录态，只能走断开登录，不能删端点。
           const result = await controller.logoutOauth(profile, view.id);
           if (result.ok) {
-            void reloadProviderCatalog();
+            await reloadProviderCatalog();
             return { ok: true };
           }
           return { ok: false, message: result.message || t('settings.providerToggleFailed') };
@@ -6717,14 +6728,33 @@ function createSettingsActions(): SettingsActions {
               )
             : undefined;
           if (!row) return { ok: false, message: t('settings.providerEditUnavailable') };
-          const key = (apiKey ?? '').trim();
-          if (!key) return { ok: false, message: t('settings.providerToggleNeedsKey', { profile }) };
+          let key = (apiKey ?? '').trim();
+          if (!key) {
+            // 先尝试从其它成员复制：取消绑定会连密钥一起删，用户刚勾回来不该被要求重输。
+            const sources = (state.settingsEndpointProfiles[targetId] ?? [])
+              .filter((source) => source !== profile);
+            const copied = await controller.resolveEndpointKey(view.id, sources);
+            if (!copied.ok) {
+              if (copied.reason === 'no-readable-key') {
+                // 确实没有可读来源（所有成员都缺密钥）：这时才让用户就地补一次。
+                return {
+                  ok: false,
+                  needsKey: true,
+                  message: t('settings.providerToggleNeedsKey', { profile }),
+                };
+              }
+              // 读取故障必须原样透出，不能伪装成"请重输密钥"（Failure Is Not Empty）。
+              return { ok: false, message: copied.message || t('settings.providerToggleFailed') };
+            }
+            key = copied.key;
+          }
           const draft = { ...draftFromEndpoint(row), apiKey: { kind: 'set' as const, value: key } };
           const outcome = await controller.save(profile, draft, { fanOutTo: [], makeDefault: false });
           if (!outcome.currentOk) {
             return { ok: false, message: outcome.current.message || t('settings.providerToggleFailed') };
           }
-          void reloadProviderCatalog();
+          // 等回读完成再清 pending：否则用户会看到"点了没反应"的旧勾选态。
+          await reloadProviderCatalog();
           return { ok: true };
         }
         default:

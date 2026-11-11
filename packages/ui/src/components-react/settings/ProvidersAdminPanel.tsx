@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Bot as BotIcon } from 'lucide-react';
+import { Bot as BotIcon, Check } from 'lucide-react';
 import {
   deriveEndpointId,
   draftFromEndpoint,
@@ -16,6 +16,7 @@ import { t } from '../../i18n/index.js';
 import { Button } from '../primitives/Button.js';
 import { Input } from '../primitives/Input.js';
 import { LoadBoundary } from './LoadBoundary.js';
+import { ModelPickerDialog, ModelPickerField } from './ModelPicker.js';
 import { SegmentedControl } from './SegmentedControl.js';
 import { SettingField } from './SettingRow.js';
 import { SettingsSectionHeading } from './SettingsSectionHeading.js';
@@ -61,35 +62,31 @@ function AvailabilityDot({ availability }: { availability: ProviderView['availab
 }
 
 /**
- * Agent 头像。
- * 【规则】有头像用头像；没有就用通用 Bot 图腾，**不得退回首字母**——
- *   上一版用首字母冒充头像，用户在截图上直接提问"这是什么"。
- */
-function AgentAvatar({ avatar }: { avatar?: string }): React.ReactElement {
-  if (avatar) {
-    return <img src={avatar} alt="" className="size-4 shrink-0 rounded-full object-cover" />;
-  }
-  return <BotIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />;
-}
-
-/**
- * 生效范围：每个 Agent 一个「头像 + 名称 + 勾选框」的格子。
+ * Agent 成员网格：44px 头像 + 名称，固定 64px 轨道，列数由容器可用宽度自动决定。
  *
  * 【设计意图 (Why)】
- *   用户要的不是"3 个 Agent 在用"这种计数，而是"哪几个、能不能改"。
- *   勾选框同时表达三件事：Binding 是否存在、能否改动、改了会写哪一层。
- *   所以这里既不是只读展示，也不是独立的"分配"对话框——它本身就是操作面。
+ *   provider 的一行就是“一个 id + 一组 Agent 成员”。成员选择必须像一张名单：
+ *   头像和名称先被认出来，选中与当前模型都长在头像上。
+ *   不再给每个成员套一层正方形卡片：卡片边框会吃掉宽度，头像只能做到 24px，
+ *   用户还得先辨认"这是勾选框还是卡片"。现在头像直接放大到 44px，勾选压在其右下角，
+ *   当前模型用 success 环表达，视觉信息密度更高。
  *
  * 【防范的历史坑 (Pitfall)】
- *   1. 上一版用首字母头像 + "N/5 生效"，分母是什么从没交代过。
- *   2. 「使用」按钮不指明作用于哪个 Agent，用户以为是整行生效。
- *   3. 正在使用的 Agent 被取消勾选，会让它的主模型指向不存在的 provider。
+ *   1. 上一版用首字母头像 + “N/5 生效”，分母是什么从没交代过。
+ *   2. 正方形卡片边框 + 24px 头像，用户反馈"头像太小、外面那圈方框多余"。
+ *   3. 网格曾经放在标题与动作按钮之间，动作按钮占用宽度不同，同一份名单会在
+ *      自定义端点行排出 4 列、订阅行排出 5 列；网格现在必须横跨整行，列数才稳定。
+ *   4. 正在使用的 Agent 被取消勾选，会让它的主模型指向不存在的 provider。
  *
  * 【约束与规则 (Rules)】
  *   1. `active` 的格子锁定：取消必须先切模型（用户已确认的策略）；
- *   2. `error` 的格子锁定并显示原始原因，绝不渲染成"未配置"；
- *   3. 自定义端点勾选未配置的 Agent 时，先就地补密钥，确认后才写入；
- *   4. 订阅没有可写的绑定记录，勾选只会得到"去登录"的提示。
+ *   2. `error` 的格子锁定并显示原始原因，绝不渲染成“未配置”；
+ *   3. 自定义端点勾选未配置的 Agent 时，先尝试复用其它成员的密钥，失败才就地补密钥；
+ *   4. 订阅没有可写的绑定记录，格子只读；
+ *   5. 名称最多 8 个显示单位（中文 4 字 / 半角 8 字符），完整名称留在 title 与 aria-label；
+ *   6. 名称字号消费 `--ui-text-caption`（11px × 用户字号档位），不写死 px；
+ *   7. 无头像一律 `BotIcon` 兜底，严禁退回首字母；
+ *   8. 成员增多时只换行，不横向滚动、不压缩头像。
  */
 function AgentBindingGrid({
   view,
@@ -100,7 +97,7 @@ function AgentBindingGrid({
   view: ProviderView;
   bots: readonly SettingsBotRow[];
   busy: boolean;
-  onToggle: (profile: string, nextChecked: boolean, apiKey?: string) => Promise<{ ok: boolean; message?: string }>;
+  onToggle: (profile: string, nextChecked: boolean, apiKey?: string) => Promise<{ ok: boolean; message?: string; needsKey?: boolean }>;
 }): React.ReactElement {
   const [keyFor, setKeyFor] = React.useState('');
   const [keyValue, setKeyValue] = React.useState('');
@@ -120,70 +117,150 @@ function AgentBindingGrid({
     setKeyValue('');
   };
 
+  /**
+   * 勾选未配置的自定义端点。
+   *
+   * 【设计意图 (Why)】壳层会先尝试从其它成员复制密钥；只有确实没有可复用来源时
+   *   （`needsKey`）才把输入框打开。过去一勾选就要求重输密钥，用户刚取消再勾回来
+   *   也要重打一遍，属明显多余。
+   */
+  const attach = async (profile: string): Promise<void> => {
+    setPendingProfile(profile);
+    setError('');
+    const result = await onToggle(profile, true);
+    setPendingProfile('');
+    if (result.ok) {
+      setKeyFor('');
+      setKeyValue('');
+      return;
+    }
+    if (result.needsKey) {
+      setKeyFor(profile);
+      setKeyValue('');
+      return;
+    }
+    setError(result.message || '');
+  };
+
   const change = (agent: ProviderView['agents'][number], nextChecked: boolean): void => {
     if (!nextChecked) {
       void run(agent.profile, false);
       return;
     }
     if (view.kind === 'custom') {
-      // 网关不回明文密钥，客户端无法复制，只能让用户就地补一次。
-      setKeyFor(agent.profile);
-      setKeyValue('');
-      setError('');
+      void attach(agent.profile);
       return;
     }
     void run(agent.profile, true);
   };
 
   return (
-    <div className="mt-2 flex flex-col gap-1">
-      <span className="text-aux text-muted-foreground" title={t('settings.providerBindingHint')}>
-        {t('settings.providerBindingTitle')}
+    <div className="mt-2 flex flex-col gap-2">
+      <span
+        className="text-aux text-muted-foreground"
+        title={
+          view.kind === 'subscription'
+            ? t('settings.providerBindingHintAll')
+            : t('settings.providerBindingHint')
+        }
+      >
+        {view.kind === 'subscription'
+          ? t('settings.providerBindingTitleAll')
+          : t('settings.providerBindingTitleEditable')}
       </span>
-      <div className="flex flex-wrap gap-1">
+      <div className="agent-grid">
         {view.agents.map((agent) => {
           const bot = bots.find((item) => item.profile === agent.profile);
           const checked = agent.state === 'active' || agent.state === 'ready';
           const locked = agent.state === 'active' || agent.state === 'error';
-          // 订阅的绑定只能由该 Agent 自己走一次 OAuth 得到，客户端写不进去，所以不给勾。
-          const subscriptionAbsent = view.kind === 'subscription' && agent.state === 'absent';
-          const disabled = busy || locked || subscriptionAbsent || pendingProfile === agent.profile;
-          const title =
+          // 订阅是账号级来源：登录一次默认对所有 Agent 生效，没有按 Agent 可写的绑定，因此只读。
+          const subscription = view.kind === 'subscription';
+          const disabled = busy || locked || subscription || pendingProfile === agent.profile;
+          const statusText =
             agent.state === 'active'
-              ? t('settings.providerToggleBlockedActive', { profile: agent.displayName })
+              ? t('settings.providerBindingActive')
               : agent.state === 'error'
                 ? agent.detail || t('settings.providerToggleBlockedError', { profile: agent.displayName })
-                : subscriptionAbsent
-                  ? t('settings.providerToggleLoginRequired', { profile: agent.displayName })
-                  : undefined;
+                : subscription
+                  ? t('settings.providerBindingSubscriptionAll')
+                  : '';
+          const dimmed = busy || pendingProfile === agent.profile;
+          const label = statusText
+            ? `${agent.displayName} · ${view.name} · ${statusText}`
+            : `${agent.displayName} · ${view.name}`;
           return (
             <label
               key={agent.profile}
-              title={title}
+              title={label}
               data-agent-profile={agent.profile}
               data-agent-state={agent.state}
-              className={
-                'flex min-w-0 items-center gap-1 rounded-inner border px-2 py-1 text-caption '
-                + (checked ? 'border-primary-border bg-primary-subtle text-foreground' : 'border-border-subtle text-muted-foreground')
-                + (locked ? ' opacity-70' : '')
-              }
+              className={[
+                'group flex w-16 flex-col items-center gap-1 rounded-card py-1',
+                'has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-foreground/70',
+                disabled ? 'cursor-not-allowed' : 'cursor-pointer',
+                dimmed ? 'opacity-60' : '',
+              ].join(' ')}
             >
               <input
                 type="checkbox"
-                className="size-3 shrink-0 accent-primary"
+                className="sr-only"
                 checked={checked}
                 disabled={disabled}
+                aria-label={label}
                 onChange={(event) => change(agent, event.target.checked)}
               />
-              <AgentAvatar avatar={bot?.avatar} />
-              <span className="truncate">{truncateProfileLabel(agent.displayName)}</span>
-              {agent.state === 'active' ? (
-                <span className="shrink-0 text-micro text-muted-foreground">{t('settings.providerBindingActive')}</span>
-              ) : null}
+              {/* 头像本身就是勾选面：不再外包一层正方形卡片，把有限宽度让给头像和名字。
+                  当前模型用 success 环表达，勾选用压在头像右下角的对号表达。 */}
+              <span className="relative">
+                <span
+                  className={[
+                    'flex size-11 items-center justify-center overflow-hidden rounded-full bg-card-active',
+                    agent.state === 'active' ? 'ring-2 ring-success ring-offset-2 ring-offset-popover' : '',
+                    agent.state === 'error' ? 'border-2 border-dashed border-destructive/60' : '',
+                    checked || agent.state === 'error' ? '' : 'opacity-55',
+                  ].join(' ')}
+                >
+                  {bot?.avatar ? (
+                    <img src={bot.avatar} alt="" className="size-11 object-cover" />
+                  ) : (
+                    <BotIcon aria-hidden="true" className="size-6 text-muted-foreground" />
+                  )}
+                </span>
+                {checked ? (
+                  <span
+                    aria-hidden="true"
+                    className="absolute -bottom-1 -right-1 flex size-4 items-center justify-center rounded-full bg-primary text-primary-foreground ring-2 ring-popover"
+                  >
+                    <Check aria-hidden="true" className="size-3" strokeWidth={2.5} />
+                  </span>
+                ) : null}
+                {agent.state === 'error' ? (
+                  <span
+                    aria-hidden="true"
+                    className="absolute -right-1 -top-1 size-2 rounded-full bg-destructive ring-2 ring-popover"
+                  />
+                ) : null}
+              </span>
+              <span
+                className={`w-full truncate text-center font-ui leading-tight ${
+                  agent.state === 'active' ? 'font-semibold text-foreground' : 'font-medium text-secondary-foreground'
+                }`}
+                style={{ fontSize: 'var(--ui-text-caption, var(--fs-caption))' }}
+              >
+                {truncateProfileLabel(agent.displayName)}
+              </span>
             </label>
           );
         })}
       </div>
+
+      {view.agents
+        .filter((agent) => agent.state === 'error')
+        .map((agent) => (
+          <p key={agent.profile} className="text-caption text-destructive" role="alert">
+            {agent.displayName} · {agent.detail || t('settings.providerToggleBlockedError', { profile: agent.displayName })}
+          </p>
+        ))}
 
       {keyFor ? (
         <div className="flex flex-wrap items-center gap-2 rounded-panel border border-border-subtle bg-panel px-2 py-2">
@@ -238,7 +315,7 @@ function ProviderRow({
   scopedProfile,
   currentAgentName,
   onToggleAgent,
-  onSetCurrentModel,
+  onActivateModel,
   onEdit,
   onDelete,
   onLogout,
@@ -252,8 +329,17 @@ function ProviderRow({
   scopedProfile: string;
   /** 「设为当前模型」作用到哪一个 Agent——必须写在按钮上，不能靠隐式作用域。 */
   currentAgentName: string;
-  onToggleAgent: (profile: string, nextChecked: boolean, apiKey?: string) => Promise<{ ok: boolean; message?: string }>;
-  onSetCurrentModel: (model: string) => void;
+  onToggleAgent: (profile: string, nextChecked: boolean, apiKey?: string) => Promise<{ ok: boolean; message?: string; needsKey?: boolean }>;
+  /**
+   * 在弹框里点一个模型后落到网关。
+   * 【规则】高价模型第一次调用只返回 `confirmRequired`，弹框不关；
+   *   用户点「仍然设置」后带 `confirmExpensive` 重发。
+   */
+  onActivateModel: (model: string, confirmExpensive: boolean) => Promise<{
+    ok: boolean;
+    confirmRequired?: boolean;
+    message?: string;
+  }>;
   onEdit: () => void;
   onDelete: () => void;
   onLogout: () => void;
@@ -274,88 +360,44 @@ function ProviderRow({
 
   return (
     <div
-      className="flex items-start justify-between gap-4 border-b border-border-subtle py-3 last:border-b-0"
+      className="border-b border-border-subtle py-3 last:border-b-0"
       data-provider-key={view.key}
     >
-      <div className="flex min-w-0 flex-1 items-start gap-2">
-        <AvailabilityDot availability={view.availability} />
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="truncate text-body text-foreground">{view.name}</span>
-            <span className="shrink-0 rounded-inner border border-border px-1 text-micro text-muted-foreground">
-              {isSubscription ? t('settings.providerKindSubscription') : t('settings.providerKindCustom')}
-            </span>
-          </div>
-          {detail || modelLabel ? (
-            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-              {detail ? (
-                <span className="truncate font-code text-caption text-muted-foreground">{detail}</span>
-              ) : null}
-              {detail && modelLabel ? <span className="text-caption text-faint">·</span> : null}
-              {modelLabel ? <span className="text-caption text-muted-foreground">{modelLabel}</span> : null}
+      {/* 标题与动作单独占一条；成员网格必须横跨整行，否则动作按钮越多，网格越窄，
+          同一份名单会在两行里排出不同的列数（用户实测 4 列 / 5 列不一致）。 */}
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+        <div className="flex min-w-0 flex-1 items-start gap-2">
+          <AvailabilityDot availability={view.availability} />
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <span className="truncate text-body text-foreground">{view.name}</span>
+              <span className="shrink-0 rounded-inner border border-border px-1 text-micro text-muted-foreground">
+                {isSubscription ? t('settings.providerKindSubscription') : t('settings.providerKindCustom')}
+              </span>
             </div>
-          ) : null}
-
-          <AgentBindingGrid
-            view={view}
-            bots={bots}
-            busy={busy || pending}
-            onToggle={onToggleAgent}
-          />
-
-          {view.manualHint ? (
-            <p className="mt-1 text-caption text-muted-foreground">{view.manualHint}</p>
-          ) : null}
-          {error ? (
-            <p className="mt-1 text-caption text-destructive" role="alert">
-              {error}
-            </p>
-          ) : null}
-
-          {modelsOpen ? (
-            <div className="mt-2 overflow-hidden rounded-panel border border-border-subtle">
-              <div className="flex items-center justify-between gap-2 border-b border-border-subtle bg-panel px-2 py-1">
-                <span className="text-aux text-muted-foreground">
-                  {t('settings.providerModelsTitle')} · {view.models.length}
-                </span>
-                <span className="truncate text-micro text-muted-foreground">
-                  {t('settings.providerSetCurrentModelFor', { bot: currentAgentName })}
-                </span>
+            {detail || modelLabel ? (
+              <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                {detail ? (
+                  <span className="truncate font-code text-caption text-muted-foreground">{detail}</span>
+                ) : null}
+                {detail && modelLabel ? <span className="text-caption text-faint">·</span> : null}
+                {modelLabel ? <span className="text-caption text-muted-foreground">{modelLabel}</span> : null}
               </div>
-              {view.models.length === 0 ? (
-                <p className="px-2 py-2 text-caption text-muted-foreground">{t('settings.providerNoModels')}</p>
-              ) : (
-                view.models.map((model) => (
-                  <button
-                    key={model}
-                    type="button"
-                    disabled={busy || pending}
-                    data-model-id={model}
-                    onClick={() => onSetCurrentModel(model)}
-                    className="flex w-full items-center justify-between gap-2 px-2 py-2 text-left hover:bg-panel disabled:opacity-60"
-                  >
-                    <span className="min-w-0 flex-1 truncate font-code text-caption text-foreground">{model}</span>
-                    {activeAgent?.detail === model ? (
-                      <span className="shrink-0 text-micro text-muted-foreground">{t('settings.providerCurrent')}</span>
-                    ) : null}
-                  </button>
-                ))
-              )}
-            </div>
-          ) : null}
+            ) : null}
+          </div>
         </div>
-      </div>
 
-      <div className="flex shrink-0 flex-col items-end gap-1">
-        <div className="flex items-center gap-1">
+        <div className="ml-auto flex shrink-0 items-center gap-1">
           <Button
             variant="ghost"
             size="sm"
             type="button"
-            aria-expanded={modelsOpen}
-            onClick={() => setModelsOpen((open) => !open)}
+            aria-haspopup="dialog"
+            disabled={busy || pending || view.models.length === 0}
+            title={view.models.length === 0 ? t('settings.providerNoModels') : undefined}
+            onClick={() => setModelsOpen(true)}
           >
-            {modelsOpen ? t('settings.providerModelsCollapse') : t('settings.providerModelsExpand')}
+            {t('settings.providerModelsExpand')}
           </Button>
           {isSubscription ? (
             <Button variant="ghost" size="sm" type="button" disabled={busy || pending} onClick={onLogout}>
@@ -380,6 +422,34 @@ function ProviderRow({
           )}
         </div>
       </div>
+
+      <AgentBindingGrid
+        view={view}
+        bots={bots}
+        busy={busy || pending}
+        onToggle={onToggleAgent}
+      />
+
+      {view.manualHint ? (
+        <p className="mt-1 text-caption text-muted-foreground">{view.manualHint}</p>
+      ) : null}
+      {error ? (
+        <p className="mt-1 text-caption text-destructive" role="alert">
+          {error}
+        </p>
+      ) : null}
+
+      <ModelPickerDialog
+        open={modelsOpen}
+        onClose={() => setModelsOpen(false)}
+        title={t('settings.providerModelsDialogTitle')}
+        subtitle={t('settings.providerSetCurrentModelFor', { bot: currentAgentName })}
+        providerName={view.name}
+        models={view.models}
+        currentModel={activeAgent?.detail}
+        busy={busy || pending}
+        onPick={onActivateModel}
+      />
     </div>
   );
 }
@@ -512,6 +582,7 @@ function EndpointForm({
   busy,
   actions,
   onSaved,
+  showFanOut,
 }: {
   state: FormState;
   dispatch: React.Dispatch<FormAction>;
@@ -521,11 +592,19 @@ function EndpointForm({
   actions: SettingsActions;
   /** 全部写入成功后的收尾：提示由壳层弹出，弹窗负责关闭。 */
   onSaved: () => void;
+  /**
+   * 是否渲染「保存时配置到」。
+   * 【规则】只在新建时渲染：成员关系是外层「生效于」网格的职责，
+   *   编辑弹窗只改定义，避免两个入口各自保存、状态不同步。
+   */
+  showFanOut: boolean;
 }): React.ReactElement {
   const { draft } = state;
   const derivedId = draft.id || deriveEndpointId(draft.name);
   const otherBots = bots.filter((bot) => bot.profile !== scopedProfile);
   const hasStoredKey = draft.id.length > 0;
+  // 新建必须带明文密钥；编辑留空表示保留原密钥。
+  const keyMissing = showFanOut && draft.apiKey.kind !== 'set';
 
   const probe = async (): Promise<void> => {
     dispatch({ type: 'probeStart' });
@@ -590,11 +669,13 @@ function EndpointForm({
             autoComplete="off"
             value={draft.apiKey.kind === 'set' ? draft.apiKey.value : ''}
             placeholder={
-              draft.apiKey.kind === 'clear'
-                ? t('settings.customEndpointKeyClearPending')
-                : hasStoredKey
-                  ? t('settings.customEndpointKeyKeep')
-                  : ''
+              keyMissing
+                ? t('settings.customEndpointKeyRequired')
+                : draft.apiKey.kind === 'clear'
+                  ? t('settings.customEndpointKeyClearPending')
+                  : hasStoredKey
+                    ? t('settings.customEndpointKeyKeep')
+                    : ''
             }
             onChange={(event) =>
               dispatch({
@@ -620,29 +701,34 @@ function EndpointForm({
       <SettingField label={t('settings.customEndpointId')}>
         <Input
           value={draft.id}
+          readOnly={!showFanOut}
+          aria-readonly={!showFanOut}
+          title={!showFanOut ? t('settings.customEndpointIdLocked') : undefined}
           placeholder={derivedId || 'internal-gateway'}
           onChange={(event) => dispatch({ type: 'field', patch: { id: event.target.value } })}
-          className="h-8 font-code text-caption"
+          className={`h-8 font-code text-caption ${!showFanOut ? 'cursor-not-allowed text-muted-foreground' : ''}`}
         />
+        {!showFanOut ? (
+          <p className="text-micro text-muted-foreground">{t('settings.customEndpointIdLocked')}</p>
+        ) : null}
       </SettingField>
       <SettingField label={t('settings.customEndpointModel')}>
-        <Input
+        <ModelPickerField
           value={draft.model}
+          models={draft.models ?? []}
+          providerName={draft.name || draft.id}
           placeholder="gpt-5.4"
-          onChange={(event) => dispatch({ type: 'field', patch: { model: event.target.value } })}
-          className="h-8 font-code text-caption"
+          ariaLabel={t('settings.customEndpointModel')}
+          onChange={(model) => dispatch({ type: 'field', patch: { model } })}
         />
       </SettingField>
       {draft.models && draft.models.length > 0 ? (
-        <div className="flex flex-col gap-1">
-          <span className="text-aux text-muted-foreground">{t('settings.providerModelsTitle')}</span>
-          <p className="text-caption text-muted-foreground">
-            {t('settings.providerModels', { count: draft.models.length })}
-          </p>
-        </div>
+        <p className="text-micro text-muted-foreground">
+          {t('settings.providerModels', { count: draft.models.length })}
+        </p>
       ) : null}
 
-      {otherBots.length > 0 ? (
+      {showFanOut && otherBots.length > 0 ? (
         <div className="flex flex-col gap-1">
           <span className="text-aux text-muted-foreground">{t('settings.customEndpointApplyTo')}</span>
           <div className="flex flex-wrap gap-x-3 gap-y-2">
@@ -663,6 +749,10 @@ function EndpointForm({
           </div>
           <p className="text-micro text-muted-foreground">{t('settings.customEndpointApplyToHint')}</p>
         </div>
+      ) : null}
+
+      {!showFanOut ? (
+        <p className="text-micro text-muted-foreground">{t('settings.customEndpointMembersHint')}</p>
       ) : null}
 
       {state.probe ? <ProbeLine probe={state.probe} /> : null}
@@ -689,7 +779,7 @@ function EndpointForm({
         <Button
           size="sm"
           type="button"
-          disabled={disabled || !draft.name.trim() || !draft.baseUrl.trim() || !draft.model.trim()}
+          disabled={disabled || keyMissing || !draft.name.trim() || !draft.baseUrl.trim() || !draft.model.trim()}
           onClick={() => { void save(); }}
         >
           {t('settings.customEndpointSave')}
@@ -994,6 +1084,7 @@ function AddProviderDialog({
                 busy={snapshot.providerAdminBusy}
                 actions={actions}
                 onSaved={closeWithCleanup}
+                showFanOut={!editing}
               />
             </div>
           )}
@@ -1032,133 +1123,13 @@ function useRowAction(): [RowActionState, (id: string, task: () => Promise<RowAc
 }
 
 /**
- * 高价模型的确认弹窗。
+ * 高价模型的确认。
  *
  * 【设计意图 (Why)】
  *   主模型槽位只能放一个模型，所以"设为当前模型"必须点名具体模型。
- *   网关对高价模型会要求二次确认且**不落盘**，这里负责把那一步显示出来。
- *
- * 【约束与规则 (Rules)】
- *   1. 从模型列表点进来时预选中那个模型，不让用户再选一遍；
- *   2. 当前正在用的模型预选中并标注；
- *   3. 确认前不关闭弹窗。
+ *   网关对高价模型会要求二次确认且**不落盘**；这一步现在由 `ModelPickerDialog`
+ *   在同一个弹框内完成，不再叠第二层弹窗。
  */
-function UseProviderDialog({
-  view,
-  agentProfile,
-  agentName,
-  initialModel,
-  onClose,
-  onConfirm,
-  busy,
-}: {
-  view: ProviderView;
-  /** 当前作用域的 profile：用来定位"当前模型"，不能取任意一个 active。 */
-  agentProfile: string;
-  agentName: string;
-  /** 从模型列表点进来的那个模型：预选中，避免让用户再选一遍。 */
-  initialModel?: string;
-  onClose: () => void;
-  /** 返回 `confirmRequired` 时弹窗保留，并显示网关给出的价格警告。 */
-  onConfirm: (model: string, confirmExpensive: boolean) => Promise<{ confirmRequired?: boolean; message?: string }>;
-  busy: boolean;
-}): React.ReactElement {
-  const current = view.agents.find(
-    (agent) => agent.profile === agentProfile && agent.state === 'active',
-  );
-  const [model, setModel] = React.useState<string>(
-    initialModel && view.models.includes(initialModel)
-      ? initialModel
-      : current?.detail && view.models.includes(current.detail)
-        ? current.detail
-        : view.models[0] ?? '',
-  );
-  const [warning, setWarning] = React.useState('');
-  const [pending, setPending] = React.useState(false);
-
-  const submit = async (confirmExpensive: boolean): Promise<void> => {
-    setPending(true);
-    const result = await onConfirm(model, confirmExpensive);
-    setPending(false);
-    if (result.confirmRequired) {
-      // 网关没有落盘，只是要求确认高价模型：保留弹窗，把警告原文给用户看。
-      setWarning(result.message || t('settings.providerExpensiveWarning'));
-    }
-  };
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-backdrop/40 p-4"
-      role="dialog"
-      aria-modal="true"
-      tabIndex={-1}
-      onKeyDown={(event) => {
-        // 同上：Esc 只关这一层，不冒泡到宿主的设置中心。
-        if (event.key === 'Escape') {
-          event.stopPropagation();
-          onClose();
-        }
-      }}
-      aria-label={t('settings.providerUseTitle')}
-    >
-      {/* gate-theme-allow: 与新增弹窗一致，模型多时必须有界可滚动 */}
-      <div className="flex max-h-[min(480px,calc(100vh-96px))] w-full max-w-lg flex-col overflow-hidden rounded-window border border-border bg-popover shadow-window">
-        <div className="flex items-center justify-between gap-3 border-b border-border-subtle px-4 py-3">
-          <div className="min-w-0">
-            <h3 className="truncate text-section font-medium text-foreground">{t('settings.providerUseTitle')}</h3>
-            <p className="mt-1 truncate text-caption text-muted-foreground">
-              {t('settings.providerUseSubtitle', { bot: agentName, name: view.name })}
-            </p>
-          </div>
-          <Button variant="ghost" size="sm" type="button" onClick={onClose}>
-            {t('settings.close')}
-          </Button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-2 py-2">
-          {view.models.map((item) => (
-            <button
-              key={item}
-              type="button"
-              className="flex w-full items-center gap-2 rounded-inner px-2 py-2 text-left hover:bg-panel"
-              aria-pressed={model === item}
-              onClick={() => setModel(item)}
-            >
-              <span
-                className={`size-2 shrink-0 rounded-full ${model === item ? 'bg-primary' : 'bg-faint'}`}
-                aria-hidden="true"
-              />
-              <span className="min-w-0 flex-1 truncate font-code text-caption text-foreground">{item}</span>
-              {current?.detail === item ? (
-                <span className="shrink-0 text-micro text-muted-foreground">{t('settings.providerCurrent')}</span>
-              ) : null}
-            </button>
-          ))}
-        </div>
-
-        {warning ? (
-          <p className="border-t border-border-subtle px-4 py-2 text-caption text-warning" role="alert">
-            {warning}
-          </p>
-        ) : null}
-
-        <div className="flex items-center justify-end gap-2 border-t border-border-subtle px-4 py-3">
-          <Button variant="ghost" size="sm" type="button" onClick={onClose}>
-            {t('settings.cancel')}
-          </Button>
-          <Button
-            size="sm"
-            type="button"
-            disabled={busy || pending || !model}
-            onClick={() => { void submit(Boolean(warning)); }}
-          >
-            {warning ? t('settings.providerUseAnyway') : t('settings.providerUse')}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export function ProvidersAdminPanel({
   snapshot,
@@ -1170,53 +1141,24 @@ export function ProvidersAdminPanel({
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<CustomEndpointRow | null>(null);
   const [query, setQuery] = React.useState('');
-  const [useTarget, setUseTarget] = React.useState<ProviderView | null>(null);
-  const [useInitialModel, setUseInitialModel] = React.useState('');
-  const [useTargetState, setUseTargetState] = React.useState<{ id: string; pending: boolean; error: string }>({
-    id: '',
-    pending: false,
-    error: '',
-  });
+  const [modelPendingId, setModelPendingId] = React.useState('');
   const [deleteState, runDelete] = useRowAction();
   const [logoutState, runLogout] = useRowAction();
 
   /**
-   * 从模型列表里直接点一个模型。
-   * 【规则】先尝试直接落盘；网关要求确认高价模型时（`confirmRequired`）才打开弹窗，
-   *   并把用户点的那个模型预选上——不让他再选一遍。
+   * 在弹框里点一个模型。
+   * 【规则】网关回 `confirmRequired` 时**不落盘**，原样把结果交给弹框，
+   *   由用户点「仍然设置」后带 `confirmExpensive` 重发；成功后弹框自行关闭。
    */
-  const setCurrentModel = (view: ProviderView, model: string): void => {
-    setUseTargetState({ id: view.id, pending: true, error: '' });
-    void actions.onActivateProvider(view.id, model, false).then((result) => {
-      if (result.confirmRequired) {
-        setUseInitialModel(model);
-        setUseTarget(view);
-        setUseTargetState({ id: view.id, pending: false, error: '' });
-        return;
-      }
-      setUseTarget(null);
-      setUseTargetState({ id: view.id, pending: false, error: result.ok ? '' : result.message || '' });
-    });
-  };
-
-  /**
-   * 弹窗确认后带着选中的模型执行切换。
-   * 【规则】网关回 `confirmRequired` 时**不关弹窗**：它还没落盘，只是要用户确认高价模型。
-   */
-  const confirmUse = async (
+  const activateModel = async (
     view: ProviderView,
     model: string,
     confirmExpensive: boolean,
-  ): Promise<{ confirmRequired?: boolean; message?: string }> => {
-    setUseTargetState({ id: view.id, pending: true, error: '' });
+  ): Promise<{ ok: boolean; confirmRequired?: boolean; message?: string }> => {
+    setModelPendingId(view.id);
     const result = await actions.onActivateProvider(view.id, model, confirmExpensive);
-    if (result.confirmRequired) {
-      setUseTargetState({ id: view.id, pending: false, error: '' });
-      return { confirmRequired: true, message: result.message };
-    }
-    setUseTarget(null);
-    setUseTargetState({ id: view.id, pending: false, error: result.ok ? '' : result.message || '' });
-    return { message: result.message };
+    setModelPendingId('');
+    return result;
   };
 
   // 宿主漏字段时不能让整棵设置树崩掉：设置页是全屏对话框，崩了等于什么都点不了。
@@ -1266,6 +1208,8 @@ export function ProvidersAdminPanel({
           className="mb-2 h-8 text-caption"
         />
 
+        <p className="mb-2 text-caption text-secondary-foreground">{t('settings.providerBindingLegend')}</p>
+
         {failures.length > 0 ? (
           <div className="mb-2 flex flex-col gap-1 rounded-panel border border-border-subtle bg-panel px-3 py-2">
             {failures.map((failure) => (
@@ -1292,17 +1236,15 @@ export function ProvidersAdminPanel({
               <div className="flex flex-col">
                 {visible.map((view) => {
                   const pending =
-                    (useTargetState.pending && useTargetState.id === view.id) ||
+                    modelPendingId === view.id ||
                     (deleteState.pending && deleteState.id === view.id) ||
                     (logoutState.pending && logoutState.id === view.id);
                   const error =
-                    useTargetState.id === view.id
-                      ? useTargetState.error
-                      : deleteState.id === view.id
-                        ? deleteState.error
-                        : logoutState.id === view.id
-                          ? logoutState.error
-                          : '';
+                    deleteState.id === view.id
+                      ? deleteState.error
+                      : logoutState.id === view.id
+                        ? logoutState.error
+                        : '';
                   return (
                     <ProviderRow
                       key={view.key}
@@ -1315,7 +1257,8 @@ export function ProvidersAdminPanel({
                       currentAgentName={scopedDisplayName}
                       onToggleAgent={(profile, nextChecked, apiKey) =>
                         actions.onToggleProviderAgent(view.id, profile, nextChecked, apiKey)}
-                      onSetCurrentModel={(model) => setCurrentModel(view, model)}
+                      onActivateModel={(model, confirmExpensive) =>
+                        activateModel(view, model, confirmExpensive)}
                       onEdit={() => openEdit(view)}
                       onDelete={() => runDelete(view.id, () => actions.onDeleteEndpoint(view.id))}
                       onLogout={() => runLogout(view.id, () => actions.onLogoutProvider(view.id))}
@@ -1328,18 +1271,6 @@ export function ProvidersAdminPanel({
           }}
         </LoadBoundary>
       </section>
-
-      {useTarget ? (
-        <UseProviderDialog
-          view={useTarget}
-          agentProfile={scoped}
-          agentName={scopedDisplayName}
-          initialModel={useInitialModel}
-          busy={snapshot.providerAdminBusy || useTargetState.pending}
-          onClose={() => { setUseTarget(null); setUseInitialModel(''); }}
-          onConfirm={(model, confirmExpensive) => confirmUse(useTarget, model, confirmExpensive)}
-        />
-      ) : null}
 
       <AddProviderDialog
         open={dialogOpen}

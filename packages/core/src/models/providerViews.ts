@@ -204,13 +204,31 @@ function bindingFor(
 /**
  * 判断某个 provider 在某个 profile 上的状态。
  * 【规则】profile 读取失败时是 `error`，不是 `absent`。
+ * 【规则】`custom:fn` 与 `fn` 是同一个端点，槽位匹配必须走同一套归一化，
+ *   否则端点以 `custom:` 形态出现在 `model.options` 时会被误判成未配置。
  */
 function stateForProfile(option: ProfileModelOption | undefined, slug: string): AgentBindingState {
   if (!option) return 'error';
   if (option.error) return 'error';
-  const hit = option.rows.find((row) => row.slug === slug);
+  const hit = option.rows.find((row) => normalizeEndpointId(row.slug) === normalizeEndpointId(slug));
   if (!hit) return 'absent';
   return hit.isCurrent ? 'active' : 'ready';
+}
+
+/**
+ * 订阅槽位：登录一次默认对所有 Agent 生效。
+ *
+ * 【为什么与自定义端点不同】订阅是账号级来源，登录态落在共享 auth（`share_auth` 回落），
+ *   其他 profile 只读共享，不各自持有一份可写的端点记录。因此“未登录该订阅”不等于
+ *   “该 Agent 没有这个来源”：只要订阅已登录，所有 Agent 默认可用。
+ *   这里只在 `model.options` 读取失败时标 error；主模型指向它时标 active；其余 ready。
+ *
+ * 【规则】读取失败绝不能被渲染成“未配置”（Failure Is Not Empty）。
+ */
+function subscriptionStateForProfile(option: ProfileModelOption | undefined, slug: string): AgentBindingState {
+  if (!option || option.error) return 'error';
+  const hit = option.rows.find((row) => normalizeEndpointId(row.slug) === normalizeEndpointId(slug));
+  return hit?.isCurrent ? 'active' : 'ready';
 }
 
 function apiUrlFor(options: readonly ProfileModelOption[], slug: string): string {
@@ -312,7 +330,19 @@ export function mergeProviderViews(input: ProviderSourceInput): ProviderView[] {
     const seeded = seed.get(id);
     const kind: ProviderKind = sub ? 'subscription' : 'custom';
 
-    const agents = roster.map((ref) => bindingFor(ref, stateForProfile(byProfile.get(ref.profile), id)));
+    // 订阅默认对所有 Agent 生效；自定义端点只对配置过它的 Agent 存在。
+    const agents = roster.map((ref) => {
+      const option = byProfile.get(ref.profile);
+      const state = kind === 'subscription'
+        ? subscriptionStateForProfile(option, id)
+        : stateForProfile(option, id);
+      // `active` 的 detail 必须是正在使用的模型：模型选择器靠它标「当前模型」。
+      // 缺失时用户只能看到"使用中"却不知道是哪个模型，等于把主模型信息丢了。
+      const currentModel = state === 'active'
+        ? option?.rows.find((row) => normalizeEndpointId(row.slug) === id)?.currentModel
+        : undefined;
+      return bindingFor(ref, state, currentModel);
+    });
 
     if (kind === 'subscription') {
       views.push({

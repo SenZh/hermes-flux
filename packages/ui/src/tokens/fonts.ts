@@ -201,6 +201,7 @@ export const TYPOGRAPHY_TOKENS = {
   uiLabel: '14px',
   meta: '13px',
   micro: '12px',
+  caption: '11px',
 } as const;
 
 export const FONT_SIZE_SCALE_OPTIONS = {
