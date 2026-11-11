@@ -50,6 +50,11 @@ export interface ModelCatalogEntry {
   date: string;
   /** 厂商展示名，如 `Anthropic` / `DeepSeek`；判不出时回退 provider 名 */
   vendor: string;
+  /**
+   * 厂商图标 slug（`anthropic` / `zhipu` / `xai` …），与 `packages/ui/src/icons/lobe/`
+   * 的文件名一一对应。空串表示判不出厂商或上游无官方图标，UI 必须降级而非留白。
+   */
+  vendorId: string;
   /** 单行显示名；与 `name` 完全一致（后缀已在名字里，不再重复拼接） */
   displayName: string;
   /** 价格（$/Mtok 格式化字符串，网关原样给出），缺失则为 undefined */
@@ -297,6 +302,7 @@ export function normalizeModelCatalog(payload: unknown): ModelCatalogEntry[] {
         route: parts.route,
         date: parts.date,
         vendor: parts.vendor,
+        vendorId: parts.vendorId,
         displayName: parts.name,
         pricing: pricing?.[id],
         capabilities: capabilities?.[id],
@@ -498,6 +504,7 @@ export function modelCatalogFingerprint(entries: readonly ModelCatalogEntry[]): 
         e.id,
         e.displayName,
         e.vendor,
+        e.vendorId,
         e.variant,
         e.quant,
         e.context,

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { LeftRail } from '../../dist/components-react/LeftRail.js';
@@ -219,7 +220,13 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
     });
 
     assert.ok(dockHtml.includes('dock-input-collapse-toggle'), '必须包含折叠收起切换按键');
-    assert.ok(dockHtml.includes('max-height: 240px'), '输入框必须具备自适应伸展最大高度约束 (240px)');
+    // 【规则】自适应高度约束在共享样式表里（`.composer-dock__textarea`），不在模板字符串中。
+    // 旧断言在 dockHtml 里搜 `max-height: 240px`，实际命中的是思考下拉——思考已下沉到模型行，
+    // 这条断言才暴露出它一直在测错对象。
+    const dockCss = fs.readFileSync(new URL('../../src/styles/conversation.css', import.meta.url), 'utf8');
+    const textareaRule = /\.composer-dock__textarea\s*\{([\s\S]*?)\}/.exec(dockCss);
+    assert.ok(textareaRule, '必须定义 .composer-dock__textarea');
+    assert.match(textareaRule[1], /max-height:\s*240px/, '输入框必须具备自适应伸展最大高度约束 (240px)');
   });
 
   await t.test('5. 新建任务弹窗: 单选与多选 Agent 真实头像渲染、Workspace 下拉选择与标题自动生成', () => {

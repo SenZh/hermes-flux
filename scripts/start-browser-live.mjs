@@ -311,7 +311,23 @@ async function start() {
 
     // 5. 静态资源伺服
     const reqPath = url.pathname.replace(/^\//, '');
-    const fullPath = path.join(ROOT, reqPath);
+    // 【规则】浏览器直跑模式的入口页面在 `/`，但真实桌面产物在 `packages/desktop/dist/renderer/`。
+    // 组件里 `<img src="icons/lobe/...">` 按文档基准解析时会请求 `/icons/lobe/...`，
+    // 必须映射到渲染产物目录，否则全部彩色厂商图标在浏览器直跑下 404 破图。
+    let fullPath = path.resolve(ROOT, reqPath);
+    const rootWithSep = ROOT.endsWith(path.sep) ? ROOT : ROOT + path.sep;
+    if (fullPath !== ROOT && !fullPath.startsWith(rootWithSep)) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('Forbidden');
+      return;
+    }
+    if ((!fs.existsSync(fullPath) || fs.statSync(fullPath).isDirectory()) && reqPath.startsWith('icons/lobe/')) {
+      const iconsBase = path.resolve(ROOT, 'packages', 'desktop', 'dist', 'renderer', 'icons', 'lobe');
+      const fallback = path.resolve(ROOT, 'packages', 'desktop', 'dist', 'renderer', reqPath);
+      if (fallback.startsWith(iconsBase + path.sep)) {
+        fullPath = fallback;
+      }
+    }
     if (!fs.existsSync(fullPath) || fs.statSync(fullPath).isDirectory()) {
       res.writeHead(404, { 'Content-Type': 'text/plain' });
       res.end('Not Found');
@@ -326,6 +342,9 @@ async function start() {
       '.png': 'image/png',
       '.ico': 'image/x-icon',
       '.json': 'application/json; charset=utf-8',
+      // 【规则】厂商图标是 SVG，必须给出正确 MIME：Chromium 对 `application/octet-stream`
+      // 的 <img>/mask 一律拒绝解码，表现为「图标全丢但不报错」，极难定位。
+      '.svg': 'image/svg+xml',
     };
     res.writeHead(200, {
       'Content-Type': mimeMap[ext] || 'application/octet-stream',

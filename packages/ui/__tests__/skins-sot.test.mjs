@@ -95,7 +95,9 @@ test('改名锚点：幽灵旧名在组件文件清零，新槽名计数稳定�
   for (const [name, src] of [['--bg-hover', dock], ['--bg-surface-1', dock], ['--bg-surface-1', mid], ['--bg-main', railReact], ['--bg-main', railModel]]) {
     assert.equal((src.match(new RegExp('var\\(' + name, 'g')) ?? []).length, 0, `幽灵旧名 ${name} 复活`);
   }
-  assert.equal((dock.match(/var\(--card-hover\)/g) ?? []).length, 3);
+  // 【计数修正】模型行悬停底色已从 onmouseenter 内联脚本迁到 conversation.css 的
+  // `.model-option:hover`，InputDock.ts 里少一处 --card-hover 消费点（3 → 2）。
+  assert.equal((dock.match(/var\(--card-hover\)/g) ?? []).length, 2);
   assert.equal((dock.match(/var\(--popover\)/g) ?? []).length, 4);
   // 工具胶囊模板链路已整体删除（流式补丁通道改用 ToolBlocks 组件静态渲染），
   // 因此 MiddlePod 不再有任何 --popover 消费点。

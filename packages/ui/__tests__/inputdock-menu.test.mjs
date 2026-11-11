@@ -103,7 +103,9 @@ test('InputDock - model menu visibility is driven by application state', async (
     const html = dockHtml({ modelMenuOpen: true });
 
     // 2. Act
-    const optionCount = (html.match(/class="model-option/g) || []).length;
+    // 【规则】按「class 值恰好以 model-option 开头且后接空格/引号」计数：
+    // 行内二级级联的元素类名是 `model-option__cascade`，不加边界会把它也算成一行。
+    const optionCount = (html.match(/class="model-option(?=[" ])/g) || []).length;
 
     // 3. Assert
     assert.equal(optionCount, 2, 'Both models must be rendered as options');
