@@ -196,3 +196,47 @@ test('【真实缺陷】IDB 恢复的部分缓存继续向早翻页时，有交�
   );
   assert.equal(res.droppedCount, 0);
 });
+
+test('【真实事故】早期大 id 行作锚点时，晚 17 天但物理 id 更小的行绝不能插到前面', () => {
+  // 真实复现会话 20261011_145658_fd12d2：早期行 rowId=41432 (ts=1791988474) 在头部，
+  // 后续批次包含晚 17 天的 rowId=40695 (ts=1793452967)，因 40695 < 41432 不得放行。
+  const current = [
+    row(41432, 'sess', 1791988474),
+    row(41795, 'sess', 1793618317),
+  ];
+  const batch = [
+    row(10955, 'sess', 1791988474),
+    row(40695, 'sess', 1793452967),
+  ];
+
+  const res = planOlderBatchPrependMergeDetailed(batch, current, {
+    timelineSessionId: 'sess',
+    fallbackSessionId: 'sess',
+  });
+
+  const idx10955 = res.merged.findIndex((m) => m.rowId === 10955);
+  const idx40695 = res.merged.findIndex((m) => m.rowId === 40695);
+  const idx41432 = res.merged.findIndex((m) => m.rowId === 41432);
+  assert.ok(idx10955 >= 0 && idx10955 < idx41432, '同秒更早的 10955 必须进入并排在 41432 之前');
+  assert.equal(idx40695, -1, '晚 17 天的 40695 绝不能被当成更早历史插到 41432 前面');
+});
+
+test('同秒且服务端已排好序的批次，不得被二次按 rowId 升序重排破坏', () => {
+  const current = [row(17436, 'sess', TS_150840)];
+  const batch = [
+    row(18542, 'sess', TS_150506),
+    row(17400, 'sess', TS_150506),
+    row(17405, 'sess', TS_150525),
+  ];
+
+  const res = planOlderBatchPrependMergeDetailed(batch, current, {
+    timelineSessionId: 'sess',
+    fallbackSessionId: 'sess',
+  });
+
+  assert.deepEqual(
+    res.merged.map((m) => m.rowId),
+    [18542, 17400, 17405, 17436],
+    '同秒批次必须忠实保留服务端返回序列 [18542, 17400]'
+  );
+});

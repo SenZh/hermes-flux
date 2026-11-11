@@ -178,3 +178,67 @@ test('parseTranscriptRows - 未知 kind 一律回落 user（fail-open）', async
     assert.equal(row.content, '真实提问');
   });
 });
+
+test('parseTranscriptRows - 时间戳解析绝不伪造 Date.now()（常规行与 synthesizedToolCall 双分支）', () => {
+  let formatCalls = 0;
+  const parseTrack = (list) =>
+    parseTranscriptRows(list, {
+      scope,
+      formatTimestamp: (ts) => {
+        formatCalls += 1;
+        return `t${ts}`;
+      },
+    });
+
+  // 1. 常规消息分支：缺省、0、负数、NaN、非法字符串一律返回 undefined 且不调 formatTimestamp
+  const invalidCases = [
+    { role: 'user', row_id: 101, content: 'no-ts' },
+    { role: 'user', row_id: 102, content: 'zero-ts', timestamp: 0 },
+    { role: 'user', row_id: 103, content: 'neg-ts', timestamp: -100 },
+    { role: 'user', row_id: 104, content: 'nan-ts', timestamp: Number.NaN },
+    { role: 'user', row_id: 105, content: 'bad-str', timestamp: 'not-a-date' },
+  ];
+  const parsedInvalid = parseTrack(invalidCases);
+  assert.equal(parsedInvalid.length, 5);
+  for (const m of parsedInvalid) {
+    assert.equal(m.rawTimestamp, undefined, `常规行 ${m.rowId} 非法/缺失时间戳不得伪造成 Date.now() 或 1`);
+    assert.equal(m.timestamp, '', `常规行 ${m.rowId} 无有效时间戳时展示串必须为空`);
+  }
+  assert.equal(formatCalls, 0, '无有效时间戳时不得调用 formatTimestamp');
+
+  // 2. synthesizedToolCall 独立工具载荷分支（前面没有 assistant 可合并时独立成行，必须逐条独立解析）
+  const synthCases = [
+    { role: 'user', row_id: 201, content: '{"output":"ok-no-ts"}' },
+    { role: 'user', row_id: 202, content: '{"output":"ok-zero"}', timestamp: 0 },
+    { role: 'user', row_id: 203, content: '{"output":"ok-bad"}', created_at: 'invalid-date' },
+  ];
+  const parsedSynth = synthCases.map((row) => {
+    const res = parseTrack([row]);
+    assert.equal(res.length, 1, `独立工具载荷行 ${row.row_id} 应生成 1 条独立消息`);
+    return res[0];
+  });
+  for (const m of parsedSynth) {
+    assert.equal(m.rawTimestamp, undefined, `synthesizedToolCall 行 ${m.rowId} 绝不可伪造 Date.now()`);
+    assert.equal(m.timestamp, '', `synthesizedToolCall 行 ${m.rowId} 展示串必须为空`);
+    assert.equal(m.toolCalls?.length, 1, `行 ${m.rowId} 必须命中 synthesizedToolCall 分支`);
+  }
+  assert.equal(formatCalls, 0);
+
+  // 3. 10 位秒级归一为 13 位毫秒、13 位毫秒原样保留（常规行与独立 synthesizedToolCall 双分支验证）
+  const validRows = [
+    { role: 'user', row_id: 301, content: 'sec', timestamp: 1700000000 },
+    { role: 'assistant', row_id: 302, content: 'ms', created_at: 1700000005123 },
+  ];
+  const parsedValid = parseTrack(validRows);
+  assert.equal(parsedValid[0].rawTimestamp, 1700000000000);
+  assert.equal(parsedValid[0].timestamp, 't1700000000000');
+  assert.equal(parsedValid[1].rawTimestamp, 1700000005123);
+
+  const [parsedSynthValid] = parseTrack([
+    { role: 'user', row_id: 303, content: '{"output":"synth-sec"}', timestamp: 1700000009 },
+  ]);
+  assert.equal(parsedSynthValid.rawTimestamp, 1700000009000);
+  assert.equal(parsedSynthValid.timestamp, 't1700000009000');
+  assert.equal(parsedSynthValid.toolCalls?.length, 1);
+  assert.equal(formatCalls, 3);
+});

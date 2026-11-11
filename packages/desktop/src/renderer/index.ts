@@ -104,6 +104,11 @@ import {
   shouldTreatOlderDropAsExhausted,
   computeOlderBatchWindowStart,
   planAverageRowHeightLock,
+  computeExpandPrefetchPx,
+  computeStillNearTop,
+  planUpwardScrollAction,
+  planOlderZeroMessagesAction,
+  shouldKeepOlderMessagesAfterLoop,
   shouldExpandWindow,
   shouldSettleInitialBottom,
 } from './messageWindow.js';
@@ -1654,6 +1659,7 @@ const tokenCoalescer = new TokenCoalescer((flushedMap) => {
   const stream = document.getElementById('conversation-stream');
   if (stream && followBottom) {
     stream.scrollTop = stream.scrollHeight;
+    markProgrammaticScroll(stream);
   }
 
   logStream.trace('flush', {
@@ -2750,10 +2756,12 @@ let readerScrolledSessionId = '';
  *   读者真正滚动时 scrollTop 不会等于登记值，判定自然放行。
  */
 let programmaticScrollTarget: number | null = null;
+let programmaticScrollIgnoreUntil = 0;
 
-/** 程序写下 scrollTop 后登记落地值，供滚动处理器区分程序滚动与读者手势。 */
+/** 程序写下 scrollTop 后登记落地值与瞬时时间窗，供滚动处理器区分程序滚动与读者手势。 */
 function markProgrammaticScroll(stream: HTMLElement): void {
   programmaticScrollTarget = Math.round(stream.scrollTop);
+  programmaticScrollIgnoreUntil = performance.now() + 80;
 }
 /** 上一轮"正在加载更早历史"的起始时刻，用于熔断被节流打断的陈旧加载锁 */
 let olderLoadingStartedAt = 0;
@@ -2776,6 +2784,14 @@ function ensureMessageWindow(total: number): void {
      */
     averageRowHeightLocked = false;
     averageRowHeightSessionId = '';
+    /** 切会话清零滚动状态，防止上个会话的落定/冷却/坐标污染新会话 */
+    lastStreamScrollTop = 0;
+    programmaticScrollTarget = null;
+    programmaticScrollIgnoreUntil = 0;
+    readerScrolledSessionId = '';
+    settledLayoutSignature = '';
+    initialBottomSettling = false;
+    streamScrollCooldown = false;
     /** 切会话必须无条件推一次快照：窗口起点、行高、虚拟高度全部换了口径。 */
     sessionSwitchPending = true;
     /** 前 8 帧不判断收敛：此时 DOM 还是上一个会话的内容，容易误判"已经贴住"。 */
@@ -3185,6 +3201,8 @@ function releasePromptJump(seq: number): void {
 
 const sessionMessagesCache = new Map<string, MessageViewModel[]>();
 const sessionServerOffset = new Map<string, number>();
+/** 记录服务端实际确认过的原始行游标（不含本地覆盖行数抬升），用于高估回退基准。 */
+const sessionAuthoritativeOffset = new Map<string, number>();
 const sessionParentOffsetMap = new Map<string, number>();
 /**
  * 本地覆盖下界回退标记（每个 cursorKey 一次）。
@@ -3198,6 +3216,7 @@ const sessionOvershootRetry = new Set<string>();
 /** 会话游标失效时一并清理"高估回退"标记，避免下次打开会话永久失去本地下界。 */
 function forgetOlderCursorState(sessionId: string): void {
   sessionServerOffset.delete(sessionId);
+  sessionAuthoritativeOffset.delete(sessionId);
   const prefix = `${sessionId}:`;
   for (const key of [...sessionOvershootRetry]) {
     if (key.startsWith(prefix)) sessionOvershootRetry.delete(key);
@@ -3219,6 +3238,13 @@ function syncUntrustedCacheOrderFlag(sessionId: string, rows: readonly CachedMes
   } else {
     untrustedOrderCacheSessions.delete(sessionId);
   }
+}
+
+/** 判定当前会话是否仍存在尚未耗尽的父会话血缘段。 */
+function hasRemainingParentLineage(sessionId: string): boolean {
+  if (!sessionId) return false;
+  const parents = resolveLineageChain(sessionId, state.sessions).slice(1);
+  return parents.some((id) => sessionServerOffset.get(`${sessionId}:${id}:exhausted`) !== 1);
 }
 /** core 交互区领域服务单例（截断/分支/目录的唯一 wire 载荷构造入口） */
 const interactiveService = new InteractiveService();
@@ -3425,9 +3451,10 @@ async function loadOlderMessages(): Promise<void> {
     return null;
   };
 
+  // 完整血缘链条 [D, C, B, A]，环形自动熔断
+  const lineageChain = resolveLineageChain(sessionId, state.sessions);
+
   try {
-    // 完整血缘链条 [D, C, B, A]，环形自动熔断
-    const lineageChain = resolveLineageChain(sessionId, state.sessions);
     let batchAppended = false;
 
     // 0. 本地持久化缓存优先（Cache-First）：若本地 IndexedDB 存有比当前更早的行，0ms 极速呈现，避免网络往返
@@ -3520,15 +3547,21 @@ async function loadOlderMessages(): Promise<void> {
         if (outcome.messages.length === 0) {
           /**
            * 【高估兜底 (Rules)】若本次起点是被本地覆盖下界抬起来的，且一页都拿不到，
-           * 说明下界可能高估（旧缓存混入过父会话行）。先退回保守游标重拉一次，
+           * 说明下界可能高估（旧缓存混入过父会话行）。先退回服务端已知安全游标重拉一次，
            * 宁可重叠也不把服务端仍有的一整段历史判成"已到最早"。
            */
-          if (targetId === sessionId && !floorSuppressed && queryOffset > storedOffset) {
+          const zeroPlan = planOlderZeroMessagesAction({
+            isTargetSelf: targetId === sessionId,
+            floorSuppressed,
+            queryOffset,
+            safeFallbackOffset: sessionAuthoritativeOffset.get(sessionId) ?? 0,
+          });
+          if (zeroPlan.action === 'retry-fallback') {
             sessionOvershootRetry.add(cursorKey);
             // 回退必须同时清掉分页表里的旧值：读取顺序是 parentOffset ?? serverOffset，
             // 只改后者会被前一轮写入的大游标完全遮蔽，回退永不生效。
             sessionParentOffsetMap.delete(cursorKey);
-            sessionServerOffset.set(sessionId, storedOffset);
+            sessionServerOffset.set(sessionId, zeroPlan.fallbackOffset);
             continue;
           }
           // 该节点已见底，转向上一级血缘
@@ -3588,7 +3621,14 @@ async function loadOlderMessages(): Promise<void> {
           earliestLocalRowId: targetId === sessionId ? earliestLocalRowId : null,
         });
         sessionParentOffsetMap.set(cursorKey, cursorPlan.nextOffset);
-        if (targetId === sessionId) sessionServerOffset.set(sessionId, cursorPlan.nextOffset);
+        if (targetId === sessionId) {
+          sessionServerOffset.set(sessionId, cursorPlan.nextOffset);
+          // 正常翻页推进后同步抬升服务端已确认游标，避免末尾整除时冗余回退重扫
+          sessionAuthoritativeOffset.set(
+            sessionId,
+            Math.max(sessionAuthoritativeOffset.get(sessionId) || 0, cursorPlan.nextOffset)
+          );
+        }
 
         state.messages = mergeResult.merged;
 
@@ -3612,11 +3652,13 @@ async function loadOlderMessages(): Promise<void> {
         messageWindowUserExpanded = true;
         sessionMessagesCache.set(sessionId, state.messages);
 
-        // 缓存分桶纯洁性：只把当前会话自身的消息落盘，父会话历史只在内存合成
+        // 缓存分桶纯洁性：只把当前会话自身的消息落盘，父会话历史只在内存合成；
+        // 超出本地缓存上限时只保留最新窗口，防止 evictToCap 按物理 orderKey 误删新消息。
         if (targetId === sessionId) {
+          const ownMessages = state.messages.filter((m) => !m.sessionId || m.sessionId === sessionId);
           persistMessagesToCache(
             { profile: resolvedProfile, channel: 'session', channelId: sessionId },
-            state.messages,
+            ownMessages.slice(-MESSAGE_CACHE_LIMIT),
             0,
           );
         }
@@ -3657,9 +3699,14 @@ async function loadOlderMessages(): Promise<void> {
     fetchFailed = true;
   }
 
-  // 全部血缘节点耗尽或拉取不到更早消息：彻底收敛，停掉顶部加载动画。
-  // 【失败不等于到底 (Rules)】本轮有网络/协议失败时保留"还有更早历史"的入口，等下次重试。
-  if (!fetchFailed) state.hasOlderMessages = false;
+  // 仅当本轮未发生网络/协议失败且所有血缘节点均明确耗尽（非 MAX_PAGE_ATTEMPTS 追赶上限退出）时，
+  // 才可收敛关闭更早历史入口，绝不因 8 轮全命中本地缓存重叠而永久断尾。
+  const anyLineageRemaining = lineageChain.some(
+    (id) => sessionServerOffset.get(`${sessionId}:${id}:exhausted`) !== 1,
+  );
+  if (!shouldKeepOlderMessagesAfterLoop({ fetchFailed, anyLineageRemaining })) {
+    state.hasOlderMessages = false;
+  }
   state.isLoadingOlder = false;
   render();
 }
@@ -3779,7 +3826,12 @@ async function loadMessagesInner(sessionId: string, targetBotName?: string): Pro
   if (cached && cached.length > 0) {
     state.messages = [...cached];
     syncActiveSessionPreviewToRail(sessionId, state.messages, resolvedBotName);
-    state.hasOlderMessages = computeHasOlderMessages(state.messages, sessionServerOffset.get(sessionId) || 0, INITIAL_WINDOW_PAGE_SIZE);
+    state.hasOlderMessages = computeHasOlderMessages(
+      state.messages,
+      sessionServerOffset.get(sessionId),
+      INITIAL_WINDOW_PAGE_SIZE,
+      hasRemainingParentLineage(sessionId)
+    );
     pendingScrollToBottom = true;
     render();
     scrollStreamToBottom('cache hit');
@@ -3818,7 +3870,12 @@ async function loadMessagesInner(sessionId: string, targetBotName?: string): Pro
           sessionServerOffset.get(sessionId) || 0,
           countLocalCoveredRows(state.messages, sessionId),
         ));
-        state.hasOlderMessages = computeHasOlderMessages(state.messages, opened.rows.length, INITIAL_WINDOW_PAGE_SIZE);
+        state.hasOlderMessages = computeHasOlderMessages(
+          state.messages,
+          opened.rows.length,
+          INITIAL_WINDOW_PAGE_SIZE,
+          hasRemainingParentLineage(sessionId)
+        );
         pendingScrollToBottom = true;
         render();
         scrollStreamToBottom('persistent cache hit');
@@ -3865,6 +3922,7 @@ async function loadMessagesInner(sessionId: string, targetBotName?: string): Pro
       const replaceUntrustedCache = untrustedOrderCacheSessions.delete(sessionId);
       if (replaceUntrustedCache) {
         await cacheService.dropChannel(cacheRef);
+        if (currentGen !== activeLoadMessagesGeneration || state.activeSessionId !== sessionId) return;
         cacheFenceMax = 0;
         sessionServerOffset.delete(sessionId);
       }
@@ -3873,6 +3931,10 @@ async function loadMessagesInner(sessionId: string, targetBotName?: string): Pro
       persistMessagesToCache(cacheRef, merged, cacheFenceMax);
       syncActiveSessionPreviewToRail(sessionId, merged, resolvedBotName);
       const serverKnownCount = outcome.pagination?.returned ?? outcome.messages.length;
+      sessionAuthoritativeOffset.set(
+        sessionId,
+        Math.max(sessionAuthoritativeOffset.get(sessionId) || 0, serverKnownCount)
+      );
       // 【分页游标权威性 (Rules)】offset 保持单调递增，绝不能把本地已有持久化缓存的更大游标倒退覆盖成 100；
       // 【游标下界 (Rules)】本地合并保留的历史可能比本次 REST 返回更长，游标必须一并抬到本地覆盖行数，
       // 否则下一轮向早翻页会从落差点起步，跳过一整段从未加载的真实历史。
@@ -3882,7 +3944,7 @@ async function loadMessagesInner(sessionId: string, targetBotName?: string): Pro
       state.messages = merged;
       state.hasOlderMessages = merged.length > serverKnownCount
         ? true
-        : computeHasOlderMessages(merged, serverKnownCount, INITIAL_WINDOW_PAGE_SIZE);
+        : computeHasOlderMessages(merged, serverKnownCount, INITIAL_WINDOW_PAGE_SIZE, hasRemainingParentLineage(sessionId));
       state.dockNotice = '';
       pendingScrollToBottom = true;
       render();
@@ -3987,6 +4049,7 @@ async function loadMessagesInner(sessionId: string, targetBotName?: string): Pro
           const replaceUntrustedCache = untrustedOrderCacheSessions.delete(sessionId);
           if (replaceUntrustedCache) {
             await cacheService.dropChannel(cacheRef);
+            if (currentGen !== activeLoadMessagesGeneration || state.activeSessionId !== sessionId) return;
             cacheFenceMax = 0;
             sessionServerOffset.delete(sessionId);
           }
@@ -3995,12 +4058,21 @@ async function loadMessagesInner(sessionId: string, targetBotName?: string): Pro
           persistMessagesToCache(cacheRef, merged, cacheFenceMax);
           syncActiveSessionPreviewToRail(sessionId, merged, resolvedBotName);
           state.messages = merged;
+          sessionAuthoritativeOffset.set(
+            sessionId,
+            Math.max(sessionAuthoritativeOffset.get(sessionId) || 0, parsed.length)
+          );
           sessionServerOffset.set(sessionId, Math.max(
             sessionServerOffset.get(sessionId) || 0,
             merged.length,
             countLocalCoveredRows(merged, sessionId),
           ));
-          state.hasOlderMessages = computeHasOlderMessages(merged, merged.length, INITIAL_WINDOW_PAGE_SIZE);
+          state.hasOlderMessages = computeHasOlderMessages(
+            merged,
+            merged.length,
+            INITIAL_WINDOW_PAGE_SIZE,
+            hasRemainingParentLineage(sessionId)
+          );
           pendingScrollToBottom = true;
           render();
           scrollStreamToBottom('ws fallback loaded');
@@ -6180,6 +6252,7 @@ function stabilizeStreamAnchor(anchor: StreamAnchor): void {
   const drift = (target.getBoundingClientRect().top - streamTop) - anchor.offset;
   if (Math.abs(drift) >= 1) {
     stream.scrollTop += drift;
+    markProgrammaticScroll(stream);
     logScroll.debug('post-layout anchor drift absorbed', { id: anchor.id, drift: Math.round(drift) });
   }
 }
@@ -7690,7 +7763,10 @@ function render(): void {
     requestAnimationFrame(() => {
       if (pinBottom) {
         const stream = document.getElementById('conversation-stream');
-        if (stream) stream.scrollTop = stream.scrollHeight;
+        if (stream) {
+          stream.scrollTop = stream.scrollHeight;
+          markProgrammaticScroll(stream);
+        }
       } else {
         stabilizeStreamAnchor(streamAnchor);
       }
@@ -8834,9 +8910,12 @@ function bindEvents(): void {
        * 【程序滚动识别 (Rules)】贴底、锚点校正都会写 scrollTop 并派发 scroll 事件。
        *   按落地值识别，避免把程序写入误判成读者手势。
        */
-      const isProgrammatic = programmaticScrollTarget !== null
-        && Math.abs(streamEl.scrollTop - programmaticScrollTarget) <= 2;
-      programmaticScrollTarget = null;
+      const isProgrammatic =
+        (programmaticScrollTarget !== null && Math.abs(streamEl.scrollTop - programmaticScrollTarget) <= 2)
+        || (performance.now() <= programmaticScrollIgnoreUntil && streamEl.scrollTop >= lastStreamScrollTop);
+      if (programmaticScrollTarget !== null && Math.abs(streamEl.scrollTop - programmaticScrollTarget) <= 2) {
+        programmaticScrollTarget = null;
+      }
       const previousTop = lastStreamScrollTop;
       /**
        * 【控制权移交 (Rules)】读者的任意真实滚动都意味着"我要自己控制视口"：
@@ -8867,14 +8946,11 @@ function bindEvents(): void {
       if (streamScrollCooldown || state.isLoadingOlder) return;
 
       const viewportPrefetch = Math.max(800, streamEl.clientHeight * 1.0);
-      /**
-       * 【按窗口比例预取 (Rules)】挂载窗口的内容高度可能远超一屏：会话 20261020_150348_4fe41e
-       *   实测 166 条撑出 51130px，若向上扩窗仍用一屏 800px 作阈值，读者要滑完 98% 的窗口
-       *   高度才触发，体感等同于「滑不动」。
-       * 【约束与规则 (Rules)】向上扩窗与连拉判定按窗口高度的一半触发；向下回收保持一屏，
-       *   否则反向滚动时会在距底部半个窗口处就开始回收，窗口反复前移造成抖动。
-       */
-      const expandPrefetch = Math.max(viewportPrefetch, Math.round(streamEl.scrollHeight / 2));
+      const virtualWindowEl = document.querySelector<HTMLElement>('.conv-virtual-window');
+      const expandPrefetch = computeExpandPrefetchPx(
+        streamEl.clientHeight,
+        virtualWindowEl?.getBoundingClientRect().height
+      );
 
       /**
        * 【有界窗口下行回收 (Rules)】窗口是 [start, end) 有界区间，向下滚到区间尾部时
@@ -8923,51 +8999,50 @@ function bindEvents(): void {
           if (relocateMessageWindowToIndex(targetIndex)) {
             streamScrollCooldown = true;
             render();
+            const handoffToFetch =
+              messageWindowStart === 0
+              && streamEl.scrollTop < expandPrefetch
+              && state.hasOlderMessages
+              && readerScrolledSessionId === state.activeSessionId;
+            if (!handoffToFetch) {
+              requestAnimationFrame(() => {
+                syncScrollTopToWindow('scrollbar jump');
+                streamScrollCooldown = false;
+              });
+              return;
+            }
             requestAnimationFrame(() => {
               syncScrollTopToWindow('scrollbar jump');
-              streamScrollCooldown = false;
             });
-            return;
           }
         }
       }
 
-      /**
-       * 【虚拟坐标判定 (Rules)】画布高度钉成虚拟全高后，scrollTop 是"全量虚拟坐标"，
-       *   不能再用 scrollTop < 800 判断"接近顶部"。真实判据是：
-       *   视口顶端已经进入窗口上沿之上（或紧贴），说明读者正在向上回溯，需要扩窗。
-       */
       const virtualWindowTop = Math.round(messageWindowStart * averageRowHeightPx);
-      const nearWindowTop = messageWindowStart > 0 && streamEl.scrollTop < virtualWindowTop + expandPrefetch;
-      const atTrueTop = messageWindowStart === 0 && streamEl.scrollTop < expandPrefetch;
+      const upwardAction = planUpwardScrollAction({
+        sessionId: state.activeSessionId,
+        readerScrolledSessionId,
+        total: state.messages.length,
+        capacity: MESSAGE_WINDOW_CAPACITY,
+        windowStart: messageWindowStart,
+        hasOlderMessages: state.hasOlderMessages,
+        scrollTop: streamEl.scrollTop,
+        virtualWindowTopPx: virtualWindowTop,
+        expandPrefetchPx: expandPrefetch,
+      });
 
-      if (nearWindowTop || atTrueTop) {
-        // 【AGENTS.md 三态隔离】群聊研讨室严禁发起单会话翻页
-        if (state.activeFocus.type === 'group') return;
+      if (upwardAction === 'none') return;
+      // 【AGENTS.md 三态隔离】群聊研讨室严禁发起单会话翻页
+      if (state.activeFocus.type === 'group') return;
 
-        /**
-         * 【扩窗必须由读者授权 (Rules)】只有读者真实向上回溯过，才允许把窗口起点往前搬。
-         * 【设计意图 (Why)】冷启动先渲染缓存会话时 scrollTop 初值为 0，视口天然"落在窗口上沿之上"，
-         *   这与"读者正在向上翻"在 scroll 事件里无法区分。实测 1128 条会话因此在首屏连扩三次，
-         *   窗口从 [1008,1128] 落到 [907,1027]，读者看到的不是最新消息。
-         * 【判据】`readerScrolledSessionId` 记录的反向滚动只可能来自读者手势：
-         *   程序贴底只会让 scrollTop 增大。
-         */
-        if (!shouldExpandWindow({
-          sessionId: state.activeSessionId,
-          readerScrolledSessionId,
-          total: state.messages.length,
-          capacity: MESSAGE_WINDOW_CAPACITY,
-        })) {
-          // 视口尚未落到底部：这是首屏没定位，直接贴底，绝不扩窗。
-          if (state.messages.length > MESSAGE_WINDOW_CAPACITY) {
-            initialBottomSettling = true;
-            settleInitialBottom();
-            scrollStreamToBottom('initial window offscreen');
-          }
-          return;
-        }
+      if (upwardAction === 'settle-bottom') {
+        initialBottomSettling = true;
+        settleInitialBottom();
+        scrollStreamToBottom('initial window offscreen');
+        return;
+      }
 
+      if (upwardAction === 'expand-local-window') {
         // 先扩展本地挂载窗口：已加载但未挂载的更早消息无需请求服务端。
         // 【竞态守卫 (Rules)】必须先上锁再扩展：render 插入历史会同步触发新的 scroll 事件，
         // 若等 expand 返回后才上锁，同一次手势会连扩两批，把锚点补偿推到列表底部。
@@ -8978,34 +9053,47 @@ function bindEvents(): void {
           requestAnimationFrame(() => { streamScrollCooldown = false; });
           return;
         }
-        // 窗口已顶到列表首部才需要向服务端要更早历史
-        if (messageWindowStart > 0 || !state.hasOlderMessages) {
-          streamScrollCooldown = false;
-          return;
+        streamScrollCooldown = false;
+        return;
+      }
+
+      streamScrollCooldown = true;
+      requestAnimationFrame(async () => {
+        try {
+          // 【持续触顶连拉 (Rules)】用户停在顶部不松手时连续补页，直到
+          //   ① 视口被新增内容顶离顶部 ② 历史真正耗尽 ③ 达到单手势上限。
+          let chain = 0;
+          do {
+            const before = state.messages.length;
+            await loadOlderMessages();
+            chain += 1;
+            const el = document.getElementById('conversation-stream');
+            const stillNearTop = Boolean(el && computeStillNearTop(el.scrollTop, el.clientHeight));
+            if (state.messages.length === before) break;
+            if (!stillNearTop || !state.hasOlderMessages) break;
+          } while (chain < 40);
+        } finally {
+          // Cool-down delay (60ms) to absorb momentum scroll bounce & prevent cascading re-entrancy
+          setTimeout(() => {
+            streamScrollCooldown = false;
+          }, 60);
         }
-        requestAnimationFrame(async () => {
-          try {
-            // 【持续触顶连拉 (Rules)】用户停在顶部不松手时连续补页，直到
-            //   ① 视口被新增内容顶离顶部 ② 历史真正耗尽 ③ 达到单手势上限。
-            //   压缩归档场景下一次手势最多跨越 40 页，否则 4000+ 行历史要滑几十次才到更早日期，
-            //   用户看到的就是"一直转圈却翻不动"。
-            let chain = 0;
-            do {
-              const before = state.messages.length;
-              await loadOlderMessages();
-              chain += 1;
-              const el = document.getElementById('conversation-stream');
-              const stillNearTop = Boolean(el && el.scrollTop < expandPrefetch * 0.4);
-              if (state.messages.length === before) break;
-              if (!stillNearTop || !state.hasOlderMessages) break;
-            } while (chain < 40);
-          } finally {
-            // Cool-down delay (60ms) to absorb momentum scroll bounce & prevent cascading re-entrancy
-            setTimeout(() => {
-              streamScrollCooldown = false;
-            }, 60);
-          }
-        });
+      });
+    };
+
+    // 短列表（不足一屏无滚动条）或已停在 scrollTop=0 时，向上滚轮仍应触发历史拉取
+    streamEl.onwheel = (e: WheelEvent) => {
+      if (e.deltaY >= 0 || streamScrollCooldown || state.isLoadingOlder) return;
+      if (state.activeFocus.type === 'group' || !state.activeSessionId || !state.hasOlderMessages) return;
+      const isShortNoOverflow = streamEl.scrollHeight <= streamEl.clientHeight + 4;
+      if (isShortNoOverflow) {
+        initialBottomSettling = false;
+      }
+      if (initialBottomSettling) return;
+      if (streamEl.scrollTop <= 4 || isShortNoOverflow) {
+        readerScrolledSessionId = state.activeSessionId;
+        settledLayoutSignature = layoutSignature();
+        streamEl.onscroll?.(new Event('scroll'));
       }
     };
   }

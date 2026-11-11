@@ -1,20 +1,22 @@
 ﻿/**
- * 鍘嗗彶娑堟伅鎵规鍚戜笂鎷兼帴涓庡畨鍏ㄥ悎骞剁函鍑芥暟 (packages/core/src/session/olderBatchMerge.ts)
+ * 历史消息批次向上拼接与安全合并纯函数 (packages/core/src/session/olderBatchMerge.ts)
  *
- * 銆愯璁℃剰鍥?(Why)銆?
- *   鍚戞棭缈婚〉锛圥repend锛夋媺鍙栧洖鏉ョ殑鎵规涓烘洿鏃╃殑鍘嗗彶琛岋紝涓ョ浣跨敤姝ｅ悜杩藉姞鐨?planSessionLoadMerge锛?
- *   鍚﹀垯鍦ㄦ壒娆¤緝鐭笖鏃犻噸鍙犳椂浼氳鍒ゅ畾涓轰笉鍚屾簮鑰岀洿鎺ヤ涪寮冦€?
- *   蹇呴』涓撹绾嚱鏁板鐞嗗ご閮ㄦ嫾鎺ャ€侀噸鍙犲幓閲嶄笌鏃堕棿绾垮崟璋冩€с€?
+ * 【设计意图 (Why)】
+ *   向早翻页（Prepend）拉取回来的批次为更早的历史行，严禁使用正向追加的 planSessionLoadMerge，
+ *   否则在批次较短且无重叠时会被判定为不同源而直接丢弃。
+ *   必须专设纯函数处理头部拼接、重叠去重、分页游标推进与跨会话时间线隔离。
  *
- * 銆愰槻鑼冪殑鍘嗗彶鍧?(Pitfall)銆?
- *   1. planSessionLoadMerge 鐭矾鍒嗘敮灏嗘棤閲嶅彔鏇存棭鍘嗗彶 100% 涓㈠純锛?
- *   2. 鏈烘 [...batch, ...existing] 鍦ㄥ垎椤甸噸鍙犳椂瀵艰嚧鍚屼竴鏉℃秷鎭噸澶嶆覆鏌撲袱浠斤紱
- *   3. 涓存椂鏃?rowId 娑堟伅琚敊璇彃鍒板ご閮ㄧ牬鍧忓垪琛ㄩ『搴忋€?
+ * 【防范的历史坑 (Pitfall)】
+ *   1. planSessionLoadMerge 短路分支将无重叠更早历史 100% 丢弃；
+ *   2. 机械 [...batch, ...existing] 在分页重叠时导致同一条消息重复渲染两份；
+ *   3. 网关物理 rowId 不单调于 display order：用 rowId 大小猜测早晚会丢失首问或放行晚数天的消息；
+ *   4. planOlderPagination 命中批内下标时方向算反（queryOffset + indexInBatch + 1），
+ *      导致每次翻页只往前蠕动 1 到几条甚至 8 次重试耗尽提前断尾。
  *
- * 銆愮害鏉熶笌瑙勫垯 (Rules)銆?
- *   - 绾嚱鏁帮紝闆?IO锛岃緭鍏ヤ笉鍙彉锛?
- *   - 浠?rowId 鎴?id 浣滀负鍞竴鍘婚噸渚濇嵁锛?
- *   - 淇濇寔鎸佷箙琛岄€掑鍏ㄥ簭銆?
+ * 【约束与规则 (Rules)】
+ *   - 纯函数，零 IO，输入不可变；
+ *   - 忠实保留服务端返回展示序（仅在相邻时间戳多数递减时整体反转），严禁按 rowId 重排同秒消息；
+ *   - 以 (sessionId, rowId) 复合键作唯一去重依据，杜绝父子会话局部 rowId 碰撞。
  */
 
 export interface MinimalIdentifiedMessage {
@@ -23,18 +25,25 @@ export interface MinimalIdentifiedMessage {
   rowId?: number;
   rawTimestamp?: number;
   timestamp?: string | number;
+  displayKind?: string;
+}
+
+/** 将秒级与毫秒级时间戳统一归一化到毫秒，仅用于边界方向对比。 */
+function normalizeEpochMs(raw: unknown): number | undefined {
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) return undefined;
+  return raw < 1e11 ? raw * 1000 : raw;
 }
 
 /**
- * 鏈湴宸茶鐩栬鏁颁笅鐣屻€?
+ * 本地已覆盖行数下界。
  *
- * 銆愯璁℃剰鍥?(Why)銆?
- *   缃戝叧 `/messages` 鐨?offset 鏄€屼粠鏈€鏂扮璺宠繃鐨勬寔涔呰鏁般€嶏紝鑰屾湰鍦板垪琛ㄦ槸瑙嗗浘娑堟伅
- *   锛堝伐鍏疯琚惛鏀躲€侀殣钘忚琚繃婊わ級锛屾潯鏁板彧浼氬皯浜庤鏁般€傜敤瑙嗗浘鏉℃暟浣滀笅鐣岋紝
- *   淇濊瘉缈婚〉璧风偣涓€瀹氳惤鍦ㄦ湰鍦板凡瑕嗙洊鍖洪棿鍐咃紝缁濅笉璺宠繃鏈姞杞界殑鐪熷疄鍘嗗彶銆?
- * 銆愮害鏉熶笌瑙勫垯 (Rules)銆戝彧缁熻鏈夋寔涔?rowId 鐨勮锛涘甫 sessionId 涓斾笉灞炰簬褰撳墠浼氳瘽鐨勮
- *   锛堢埗浼氳瘽琛€缂橈級涓嶈鍏ャ€傜己 sessionId 鐨勭紦瀛樻仮澶嶈鎸夎鍏ュ鐞嗏€斺€斿畠鍙兘楂樹及锛?
- *   鐢辩炕椤典晶鐨勪竴娆℃€?楂樹及鍥為€€"鍏滃簳锛岀粷涓嶅洜姝ゆ妸鏈嶅姟绔粛鏈夌殑涓€鏁存鍘嗗彶鍒ゆ垚宸插埌鏈€鏃┿€?
+ * 【设计意图 (Why)】
+ *   网关 `/messages` 的 offset 是「从最新端跳过的持久行数」，而本地列表是视图消息
+ *   （工具行被吸收、隐藏行被过滤），条数只会少于行数。用视图条数作下界，
+ *   保证翻页起点一定落在本地已覆盖区间内，绝不跳过未加载的真实历史。
+ * 【约束与规则 (Rules)】只统计有持久 rowId 的行；带 sessionId 且不属于当前会话的行
+ *   （父会话血缘）不计入。缺 sessionId 的缓存恢复行按计入处理，
+ *   由翻页侧的一次性「高估回退」兜底，绝不因此把服务端仍有的一整段历史判成已到最早。
  */
 export function countLocalCoveredRows(
   messages: readonly MinimalIdentifiedMessage[] | null | undefined,
@@ -51,15 +60,15 @@ export function countLocalCoveredRows(
 }
 
 export interface OlderPaginationPlanInput {
-  /** 鐜版湁娓告爣锛氬凡纭浠庢渶鏂扮瑕嗙洊鐨勮鏁?*/
+  /** 现有游标：已确认从最新端覆盖的原始行数 */
   storedOffset: number;
-  /** 鏈湴宸茶鐩栬鏁颁笅鐣岋紙countLocalCoveredRows 鐨勭粨鏋滐級 */
+  /** 本地已覆盖行数下界（countLocalCoveredRows 的结果） */
   localCoveredRows: number;
-  /** 鏈壒缃戝叧杩斿洖琛屾暟锛涗负 0 琛ㄧず鍙眰璇锋眰璧风偣 */
+  /** 本批网关返回原始行数；为 0 表示只求请求起点 */
   returned: number;
-  /** 鏈壒鎸夌綉鍏冲崌搴忕殑鎸佷箙琛?id */
+  /** 本批按展示序升序的持久行 id（保留参数兼容既有签名） */
   batchRowIds: readonly number[];
-  /** 鏈湴鏈€鏃╀竴鏉℃寔涔呰 id */
+  /** 本地最早一条持久行 id（保留参数兼容既有签名） */
   earliestLocalRowId: number | null;
 }
 
@@ -69,21 +78,19 @@ export interface OlderPaginationPlan {
 }
 
 /**
- * 鍚戞棭缈婚〉鐨勬父鏍囪鍒掋€?
+ * 向早翻页的游标规划。
  *
- * 銆愯璁℃剰鍥?(Why)銆?
- *   娓告爣蹇呴』鍚屾椂婊¤冻涓ゆ潯锛氣憼 璇锋眰璧风偣涓嶅皬浜庢湰鍦板凡瑕嗙洊琛屾暟锛屽惁鍒欓噸澶嶆媺鍙栦笖姣忔
- *   鍙帹杩涗竴閮ㄥ垎锛岀己鍙ｇ疮绉悗鐩存帴璺宠繃鏁存鍘嗗彶锛涒憽 鎵规鍛戒腑鏈湴鏈€鏃╄鏃舵寜璇ヨ鐨?
- *   绮剧‘浣嶇疆鏀舵暃锛岄伩鍏嶆瘡杞兘浠庡ご閲嶅彔銆?
- * 銆愰槻鑼冪殑鍘嗗彶鍧?(Pitfall)銆?
- *   棣栧睆 REST 鍙洖 100 琛岃€屽悎骞朵繚鐣欎簡鏈湴 1130 鏉¤鍥炬椂锛屾棫浠ｇ爜鎶婃父鏍囪鎴?100锛?
- *   涔嬪悗姣忚疆 `offset += returned(500)`锛屾父鏍囧緢蹇秺杩囨湰鍦扮湡瀹炶鐩栬竟鐣岋紝
- *   涓€斾竴鏁存鍘嗗彶姘歌繙涓嶅啀鍔犺浇锛屾渶缁?`returned = 0` 琚鍒や负銆屽凡鍒版渶鏃┿€嶃€?
- * 銆愮害鏉熶笌瑙勫垯 (Rules)銆?
- *   1. 绾嚱鏁般€侀浂 IO锛?
- *   2. `nextOffset` 鍗曡皟涓嶅噺锛屼笖涓嶈秴杩?`queryOffset + returned`锛?
- *   3. 鍛戒腑鏈湴鏈€鏃╄鏃跺彇銆屼繚瀹堟粸鍚庛€嶈竟鐣岋細瀹佸彲澶氭媺涓€杞噸鍙狅紝涔熶笉璺宠繃璇ヨ涔嬪墠灏氭湭钀藉湴鐨勮锛?
- *   4. 鏃犳硶瀹氫綅鏈湴鏈€鏃╄鏃舵寜 `returned` 鎺ㄨ繘锛屼笌缃戝叧鍒嗛〉璇箟涓€鑷淬€?
+ * 【设计意图 (Why)】
+ *   网关 `/messages?order=latest` 按服务端展示序从最新端跳过 `offset` 行，再返回 `returned` 行
+ *   （数组从旧到新排列）。只要本批 `returned` 行已完整交付合并，游标必须单调跳过这 `returned` 行。
+ * 【防范的历史坑 (Pitfall)】
+ *   旧实现误以为 `batchRowIds` 是按最新到最旧排列，命中本地最早行时写成 `queryOffset + indexInBatch + 1`：
+ *   当本地早已覆盖到批首（`indexInBatch = 0`）时游标仅推进 1 行，导致每次只多拉 1~3 条消息蠕动，
+ *   甚至消耗完 `MAX_PAGE_ATTEMPTS = 8` 后直接被判为已到最早历史而永久断尾。
+ * 【约束与规则 (Rules)】
+ *   1. 纯函数、零 IO；
+ *   2. `queryOffset = Math.max(storedOffset, localCoveredRows)`；
+ *   3. `nextOffset = queryOffset + returned`，严格满足单调不减且不越界上界。
  */
 export function planOlderPagination(input: OlderPaginationPlanInput): OlderPaginationPlan {
   const storedOffset = Number.isFinite(input.storedOffset) && input.storedOffset > 0
@@ -95,31 +102,24 @@ export function planOlderPagination(input: OlderPaginationPlanInput): OlderPagin
   const queryOffset = Math.max(storedOffset, localCoveredRows);
   const returned = Number.isFinite(input.returned) && input.returned > 0 ? Math.floor(input.returned) : 0;
 
-  let nextOffset = queryOffset + returned;
-  const earliest = input.earliestLocalRowId;
-  if (typeof earliest === 'number' && earliest > 0) {
-    const indexInBatch = input.batchRowIds.findIndex((id) => id === earliest);
-    if (indexInBatch >= 0) nextOffset = queryOffset + indexInBatch + 1;
-  }
-  // 涓婄晫纭害鏉燂細鏃犺鎵瑰唴涓嬫爣濡備綍锛屽崟杞帹杩涢兘涓嶅緱瓒呰繃鏈壒瀹為檯杩斿洖鐨勮鏁般€?
-  return { queryOffset, nextOffset: Math.max(queryOffset, Math.min(nextOffset, queryOffset + returned)) };
+  return { queryOffset, nextOffset: queryOffset + returned };
 }
 
 export interface OlderBatchMergeOptions {
   /**
-   * 鎵规鎵€灞炰細璇?id銆?
+   * 批次所属会话 id。
    *
-   * 銆愯璁℃剰鍥?(Why)銆戝垪琛ㄥご閮ㄥ彲鑳藉凡缁忔槸鏇存棭鐨勭埗浼氳瘽琛€缂樿锛涜嫢鐢ㄣ€岀涓€鏉℃湁 rowId 鐨勮銆?
-   *   褰撻敋鐐癸紝閿氱偣浼氳鐖惰澶鸿蛋锛屾湰浼氳瘽鏇存櫄鐨勮灏变細琚暣鎵瑰鍒扮埗鍘嗗彶涔嬪墠銆?
-   * 銆愮害鏉熶笌瑙勫垯 (Rules)銆戞彁渚涜 id 鏃讹紝閿氱偣涓庢彃鍏ョ偣閮藉彧鎸夎浼氳瘽鐨勮鍒ゅ畾锛?
-   *   缂虹渷淇濇寔鏃ц涓猴紝渚涙棦鏈夎皟鐢ㄦ柟鍏煎銆?
+   * 【设计意图 (Why)】列表头部可能已经是更早的父会话血缘行；若用「第一条有 rowId 的行」
+   *   当锚点，锚点会被父行夺走，本会话更晚的行就会被整批塞到父历史之前。
+   * 【约束与规则 (Rules)】提供该 id 时，锚点与插入点都只按该会话的行判定；
+   *   缺省保持旧行为，供既有调用方兼容。
    */
   timelineSessionId?: string;
   /**
-   * 缂哄け sessionId 鐨勮鐨勫綊灞炰細璇濓紙閫氬父鏄綋鍓嶅彾瀛愪細璇濓級銆?
+   * 缺失 sessionId 的行的归属会话（通常是当前叶子会话）。
    *
-   * 銆愯璁℃剰鍥?(Why)銆戞寔涔呯紦瀛樻仮澶嶅嚭鏉ョ殑琛屼笉甯?sessionId锛涙妸瀹冧滑褰撴垚銆屽睘浜庝换浣曟椂闂寸嚎銆?
-   *   浼氳鐖朵細璇濇壒娆℃壘鍒伴敊璇彃鍏ョ偣锛屼篃浼氳鏈細璇濇壒娆¤閿欓敋鐐广€?
+   * 【设计意图 (Why)】持久缓存恢复出来的行不带 sessionId；把它们当成「属于任何时间线」
+   *   会让父会话批次找到错误插入点，也会让本会话批次认错锚点。
    */
   fallbackSessionId?: string;
 }
@@ -127,11 +127,10 @@ export interface OlderBatchMergeOptions {
 export interface OlderBatchMergeResult<T> {
   merged: T[];
   /**
-   * 琚€屾洿鏃╄竟鐣屻€嶄涪寮冪殑琛屾暟銆?
+   * 被「更早边界」丢弃且本地确实没有的行数。
    *
-   * 銆愯璁℃剰鍥?(Why)銆戣皟鐢ㄦ柟蹇呴』鑳藉尯鍒嗕袱绉嶃€屽噣澧炰负 0銆嶏細鏁存壒閮芥槸宸叉寔鏈夌殑閲嶅琛?
-   *   锛堝彲浠ユ斁蹇冩帹杩涙父鏍囷級锛屼互鍙婃暣鎵硅杈圭晫杩囨护锛堣鏄庨敋鐐瑰彛寰勪笌鎵规浼氳瘽涓嶄竴鑷达紝
-   *   鎺ㄨ繘娓告爣灏辨槸姘镐箙涓㈡帀杩欐鍘嗗彶锛夈€傚彧鍥炰紶鍚堝苟缁撴灉鏃犳硶鍒嗚鲸銆?
+   * 【设计意图 (Why)】调用方必须能够区分两种「净增为 0」：整批都是已持有的重复行
+   *   （游标可推进），与整批被边界过滤（推进游标就是永久丢掉这段历史）。
    */
   droppedCount: number;
 }
@@ -145,38 +144,71 @@ export function planOlderBatchPrependMerge<T extends MinimalIdentifiedMessage>(
 }
 
 /**
- * 涓?`planOlderBatchPrependMerge` 鍚屾簮锛岄澶栧洖浼犺涓㈠純琛屾暟銆?
+ * 保持服务端返回的展示序，仅当多数非 hidden 相邻行明确为降序（DESC）时整体反转。
  *
- * 銆愮害鏉熶笌瑙勫垯 (Rules)銆戠函鍑芥暟銆侀浂 IO锛屼袱澶勫鍑哄叡鐢ㄥ悓涓€浠藉疄鐜帮紝绂佹鍚勫啓涓€濂楄竟鐣屽垽瀹氥€?
+ * 【防范的历史坑 (Pitfall)】
+ *   1. 使用 `sort((a, b) => ta - tb || ra - rb)` 会把同秒且物理 id 逆序的服务端批次
+ *      （如 `[18542, 17400]`）强行重排颠倒；
+ *   2. 仅比较首尾两条时间戳，若批首恰好缺时间戳（回退成 `Date.now()`）会把整批升序历史倒置。
+ */
+function preserveAscendingOrder<T extends MinimalIdentifiedMessage>(
+  batch: readonly T[],
+  timelineId?: string,
+  fallbackId?: string
+): T[] {
+  if (batch.length < 2) return [...batch];
+  const inScope = timelineId
+    ? batch.filter((m) => (m.sessionId ?? fallbackId) === timelineId)
+    : batch;
+  const target = inScope.length >= 2 ? inScope : batch;
+
+  const visibleOrAll = target.filter((m) => m.displayKind !== 'hidden');
+  const sample = visibleOrAll.length >= 2 ? visibleOrAll : target;
+
+  let ascPairs = 0;
+  let descPairs = 0;
+  let prevTs: number | undefined;
+  for (const row of sample) {
+    const ts = normalizeEpochMs(row.rawTimestamp);
+    if (ts === undefined) continue;
+    if (prevTs !== undefined) {
+      if (ts > prevTs) ascPairs += 1;
+      else if (ts < prevTs) descPairs += 1;
+    }
+    prevTs = ts;
+  }
+
+  if (descPairs > ascPairs) {
+    return [...batch].reverse();
+  }
+  return [...batch];
+}
+
+/**
+ * 与 `planOlderBatchPrependMerge` 同源，额外回传被丢弃行数。
+ *
+ * 【约束与规则 (Rules)】纯函数、零 IO，两处导出共用同一份实现，禁止各写一套边界判定。
  */
 export function planOlderBatchPrependMergeDetailed<T extends MinimalIdentifiedMessage>(
   olderBatch: readonly T[],
   currentMessages: readonly T[],
   options?: OlderBatchMergeOptions
 ): OlderBatchMergeResult<T> {
-  if (!olderBatch || olderBatch.length === 0) {
-    return { merged: currentMessages ? [...currentMessages] : [], droppedCount: 0 };
-  }
-  if (!currentMessages || currentMessages.length === 0) {
-    return { merged: [...olderBatch], droppedCount: 0 };
-  }
-
   const timelineId = options?.timelineSessionId;
   const fallbackId = options?.fallbackSessionId;
   const belongsToTimeline = (m: T): boolean =>
     Boolean(timelineId) && (m.sessionId ?? fallbackId) === timelineId;
 
-  // 纭繚 olderBatch 鑷韩鏄寜鏃堕棿/琛屽彿鍗囧簭鎺掑垪锛堥槻寰＄綉鍏?order=latest 杩斿洖浠庢柊鍒版棫鐨?DESC 搴忓垪锛?
-  const normalizedOlder = [...olderBatch].sort((a, b) => {
-    const ta = typeof a.rawTimestamp === 'number' ? a.rawTimestamp : 0;
-    const tb = typeof b.rawTimestamp === 'number' ? b.rawTimestamp : 0;
-    if (ta && tb && ta !== tb) return ta - tb;
-    const ra = typeof a.rowId === 'number' && a.rowId > 0 ? a.rowId : 0;
-    const rb = typeof b.rowId === 'number' && b.rowId > 0 ? b.rowId : 0;
-    return ra - rb;
-  });
+  if (!olderBatch || olderBatch.length === 0) {
+    return { merged: currentMessages ? [...currentMessages] : [], droppedCount: 0 };
+  }
+  if (!currentMessages || currentMessages.length === 0) {
+    return { merged: preserveAscendingOrder(olderBatch, timelineId, fallbackId), droppedCount: 0 };
+  }
 
-  // 鏋勯€犲鍚堝敮涓€鍘婚噸閿細(sessionId, rowId) 澶嶅悎閿紭鍏堬紝褰诲簳鏉滅粷鐖跺瓙浼氳瘽灞€閮?rowId 纰版挒
+  const normalizedOlder = preserveAscendingOrder(olderBatch, timelineId, fallbackId);
+
+  // 构造复合唯一去重键：(sessionId, rowId) 复合键优先，彻底杜绝父子会话局部 rowId 碰撞
   const compositeKey = (m: T): string => {
     const sess = m.sessionId || fallbackId || '';
     if (typeof m.rowId === 'number' && m.rowId > 0) {
@@ -185,107 +217,139 @@ export function planOlderBatchPrependMergeDetailed<T extends MinimalIdentifiedMe
     return sess ? `${sess}::id::${m.id}` : `id::${m.id}`;
   };
 
-  const matchKey = (a: T, b: T): boolean => {
-    return compositeKey(a) === compositeKey(b);
-  };
-
-  /**
-   * 鍙帴鍙椼€屼弗鏍兼棭浜庢湰浼氳瘽鍦ㄦ湰鍦扮殑鏈€鏃╂寔涔呰銆嶇殑琛屻€?
-   *
-   * 銆愰槻鑼冪殑鍘嗗彶鍧?(Pitfall)銆?
-   *   娓告爣钀藉悗浜庢湰鍦板凡瑕嗙洊琛屾暟鏃讹紝缃戝叧鎵规浼氬悓鏃跺寘鍚洿鏃╄銆佸凡鎸佹湁琛屽拰姣旀湰鍦版渶鏃╄
-   *   鏇存櫄鐨勮銆傛棫瀹炵幇鎶婃墍鏈夈€屼笉鍦ㄥ綋鍓嶉泦鍚堛€嶇殑琛屼竴寰嬪ご鎻掞紝绛変簬鎶婃洿鏅氱殑琛屾惉鍒板垪琛?
-   *   鏈€鍓嶉潰锛氶琛?rowId 鍙嶈€屽彉澶с€佹椂闂寸嚎鍊掓寕銆傚畞鍙涪寮冩棤娉曡瘉鏄庢洿鏃╃殑琛岋紙涓嬭疆杩樿兘
-   *   閲嶆柊鎷夊埌锛夛紝涔熺粷涓嶅厑璁稿垪琛ㄥけ搴忋€?
-   * 銆愮害鏉熶笌瑙勫垯 (Rules)銆?
-   *   1. 鎻愪緵 `timelineSessionId` 鏃讹紝閿氱偣涓ユ牸闄愬畾鍦ㄨ浼氳瘽鐨勮鍐咃紱鏈細璇濆湪鏈湴灏氭棤浠讳綍琛?
-   *      锛堥娆＄炕鐖朵細璇濇锛夋椂閿氱偣涓?undefined锛屾暣鎵规斁琛?鈥斺€?璺ㄤ細璇?rowId 绌洪棿鏃犲叧锛?
-   *      鎷垮埆鐨勪細璇濋琛屽綋閿氱偣浼氭妸鏁存壒鐖朵細璇濆巻鍙插垹鍏夛紱
-   *   2. 璺ㄤ細璇濓紙鐖朵細璇濊缂橈級琛屼笉鍙備笌 rowId 杈圭晫姣旇緝锛岀户缁寜鏃堕棿绾垮墠缃€?
-   */
-  const anchor = timelineId
-    ? currentMessages.find((m) => belongsToTimeline(m) && typeof m.rowId === 'number' && m.rowId > 0)
-    : currentMessages.find((m) => typeof m.rowId === 'number' && m.rowId > 0);
-  /**
-   * 无共享行时的方向判定。
-   *
-   * 【设计意图 (Why)】
-   *   网关的物理 id 不单调于显示序（官方 session_stored_reads.py:179 明文承认），
-   *   所以「id 更小」既不是「更早」的必要条件也不是充分条件。
-   *   无共享行时唯一可用的方向证据是时间戳：本行时间严格早于本地最早行即为更早。
-   *   时间戳只用于方向判定，绝不用于列表排序（排序始终是服务端返回顺序）。
-   *
-   * 【防范的历史坑 (Pitfall)】
-   *   1. 只用 id 比较：会话 20261020_150348_4fe41e 实测丢首问 18541（id 更大但时间更早）；
-   *   2. 完全不做方向判定就前插：older-batch-regression 记录的真实事故会把更晚的行搬到列表最前。
-   *   两条都必须挡住，故用「id 更小 OR 时间更早」双证据，都不成立才按更晚处理。
-   *
-   * 【约束与规则 (Rules)】跨会话（父会话血缘）行不参与本会话边界比较，继续按时间线前置。
-   */
-  const strictlyEarlier = (m: T): boolean => {
-    if (!anchor || typeof anchor.rowId !== 'number') return true;
-    if (typeof m.rowId !== 'number' || !(m.rowId > 0)) return true;
-    const sameTimeline = timelineId
-      ? belongsToTimeline(m)
-      : !m.sessionId || !anchor.sessionId || m.sessionId === anchor.sessionId;
-    if (!sameTimeline) return true;
-    if (m.rowId < anchor.rowId) return true;
-    const rowTs = typeof m.rawTimestamp === 'number' ? m.rawTimestamp : undefined;
-    const anchorTs = typeof anchor.rawTimestamp === 'number' ? anchor.rawTimestamp : undefined;
-    if (typeof rowTs === 'number' && typeof anchorTs === 'number') return rowTs < anchorTs;
-    return false;
-  };
-  const boundedOlder = normalizedOlder.filter(strictlyEarlier);
-  /**
-   * 被「更早边界」丢掉、且本地确实没有的行数。
-   *
-   * 【设计意图 (Why)】上层要区分两种「净增为 0」：整批都是本地已持有的重复行
-   *   （游标可以放心推进），与整批被方向过滤掉且本地从未有过（推进游标就是永久丢历史）。
-   *   直接把过滤条数当丢弃数会把重叠批次误报成危险，导致本该推进的游标被卡住。
-   */
-  const heldKeys = new Set<string>();
-  for (const m of currentMessages) heldKeys.add(compositeKey(m));
-  const droppedUnseenCount = normalizedOlder.filter(
-    (m) => !strictlyEarlier(m) && !heldKeys.has(compositeKey(m))
-  ).length;
-
-  /**
-   * 鎵规鎻掑叆鐐癸細璺宠繃鍒楄〃澶撮儴鏇存棭鐨勭埗浼氳瘽琛€缂樿锛屾彃鍒版湰浼氳瘽绗竴琛屼箣鍓嶃€?
-   *
-   * 銆愰槻鑼冪殑鍘嗗彶鍧?(Pitfall)銆戞棤鏉′欢 `[...older, ...current]` 浼氭妸鏈細璇濇洿鏃╃殑鎵规
-   *   濉炲埌鐖朵細璇濆巻鍙蹭箣鍓嶏紝鍐峰惎鍔ㄥ悗 exhausted 鏍囪娓呴浂鏃朵細鐪熷疄鍙戠敓銆?
-   */
   const insertionIndex = (() => {
     if (!timelineId) return 0;
     const index = currentMessages.findIndex((m) => belongsToTimeline(m));
     return index >= 0 ? index : 0;
   })();
+
+  const isDurableTimelineAnchor = (m: T): boolean =>
+    typeof m.rowId === 'number' && m.rowId > 0 && (!timelineId || belongsToTimeline(m));
+
+  /**
+   * 选定无共享行时的时间线参考锚点。
+   * 【约束】若首条持久行是 `hidden` 机器行且其时间戳反而比同时间线紧邻可见行更晚（压缩摘要常带
+   *   压缩发生时刻），跳过该畸变机器行；若首条 `hidden` 确实更早则保留它作为上界。
+   */
+  const firstDurable = currentMessages.find(isDurableTimelineAnchor);
+  const firstVisibleDurable = currentMessages.find((m) => isDurableTimelineAnchor(m) && m.displayKind !== 'hidden');
+  const anchor = (() => {
+    if (!firstDurable) return undefined;
+    if (firstDurable.displayKind !== 'hidden' || !firstVisibleDurable) return firstDurable;
+    const hiddenTs = normalizeEpochMs(firstDurable.rawTimestamp);
+    const visibleTs = normalizeEpochMs(firstVisibleDurable.rawTimestamp);
+    if (hiddenTs !== undefined && visibleTs !== undefined && hiddenTs > visibleTs) {
+      return firstVisibleDurable;
+    }
+    return firstDurable;
+  })();
+
+  const isSameTimelineRow = (m: T): boolean => {
+    if (!anchor) return false;
+    return timelineId
+      ? belongsToTimeline(m)
+      : !m.sessionId || !anchor.sessionId || m.sessionId === anchor.sessionId;
+  };
+
+  const timelineHeldKeys = new Set<string>();
+  const allHeldKeys = new Set<string>();
+  for (const m of currentMessages) {
+    const k = compositeKey(m);
+    allHeldKeys.add(k);
+    if (!timelineId || belongsToTimeline(m)) {
+      timelineHeldKeys.add(k);
+    }
+  }
+
+  /**
+   * 方向与边界判定（两段式权威规则）：
+   *
+   * 【设计意图 (Why)】
+   *   1. 存在共享行时：以服务端返回序列中首个命中的本地同时间线行作为精确边界，
+   *      只放行该共享边界之前的行，绝不用物理 rowId 大小比较破坏乱序首问或同秒序；
+   *   2. 无共享行时：禁止用 `m.rowId < anchor.rowId` 放行更晚行（实测在 41432 锚点前放行
+   *      晚 17 天的 40695 制造时间倒挂），改用统一毫秒时间戳 `rowTs <= anchorTs` 判定，
+   *      仅在任一方缺失数字时间戳时保守回退 `m.rowId < anchor.rowId`。
+   *
+   * 【约束与规则 (Rules)】跨时间线（父会话血缘）行不参与本会话边界过滤，直接保留并去重。
+   */
+  const firstTimelineOverlapIdx = normalizedOlder.findIndex(
+    (m) => isSameTimelineRow(m) && timelineHeldKeys.has(compositeKey(m))
+  );
+
+  let boundedOlder: T[];
+  let droppedUnseenCount = 0;
+
+  if (firstTimelineOverlapIdx >= 0) {
+    boundedOlder = normalizedOlder.filter((m, idx) => {
+      if (!isSameTimelineRow(m)) return true;
+      return idx < firstTimelineOverlapIdx;
+    });
+    droppedUnseenCount = normalizedOlder.filter((m, idx) => {
+      if (!isSameTimelineRow(m)) return false;
+      return idx >= firstTimelineOverlapIdx && !allHeldKeys.has(compositeKey(m));
+    }).length;
+  } else {
+    const anchorTs = anchor ? normalizeEpochMs(anchor.rawTimestamp) : undefined;
+    const isRowEarlier = (m: T): boolean => {
+      if (!anchor || typeof anchor.rowId !== 'number') return true;
+      if (typeof m.rowId !== 'number' || !(m.rowId > 0)) return true;
+      if (!isSameTimelineRow(m)) return true;
+      const rowTs = normalizeEpochMs(m.rawTimestamp);
+      if (rowTs !== undefined && anchorTs !== undefined) {
+        return rowTs <= anchorTs;
+      }
+      // 本行缺时间戳但同批后续同时间线可见行有有效更早时间戳时，沿用批方向放行，不被错序 rowId 误杀
+      if (rowTs === undefined && anchorTs !== undefined) {
+        const idx = normalizedOlder.indexOf(m);
+        for (let j = idx + 1; j < normalizedOlder.length; j += 1) {
+          const next = normalizedOlder[j];
+          if (!isSameTimelineRow(next) || next.displayKind === 'hidden') continue;
+          const nextTs = normalizeEpochMs(next.rawTimestamp);
+          if (nextTs !== undefined) return nextTs <= anchorTs;
+        }
+      }
+      return m.rowId < anchor.rowId;
+    };
+
+    // 无共享行时只取连续前缀：一旦本时间线遇到严格晚于锚点的非 hidden 行即截断其后本时间线行，
+    // 既杜绝批尾混入更晚片段，又保证「首次无共享 -> 二次有共享」合并严格幂等。
+    let cutoffIdx = normalizedOlder.length;
+    for (let i = 0; i < normalizedOlder.length; i += 1) {
+      const m = normalizedOlder[i];
+      if (!isSameTimelineRow(m)) continue;
+      if (m.displayKind === 'hidden') continue;
+      if (!isRowEarlier(m)) {
+        cutoffIdx = i;
+        break;
+      }
+    }
+
+    const hasAcceptedInPrefix = normalizedOlder.some((m, idx) =>
+      idx < cutoffIdx && isSameTimelineRow(m) && isRowEarlier(m)
+    );
+
+    boundedOlder = normalizedOlder.filter((m, idx) => {
+      if (!isSameTimelineRow(m)) return true;
+      if (idx >= cutoffIdx) return false;
+      if (m.displayKind === 'hidden' && hasAcceptedInPrefix) return true;
+      return isRowEarlier(m);
+    });
+    const acceptedSet = new Set(boundedOlder);
+    droppedUnseenCount = normalizedOlder.filter(
+      (m) => !acceptedSet.has(m) && !allHeldKeys.has(compositeKey(m))
+    ).length;
+  }
+
   const spliceOlder = (older: readonly T[]): T[] => [
     ...currentMessages.slice(0, insertionIndex),
     ...older,
     ...currentMessages.slice(insertionIndex),
   ];
 
-  // 1. 鏌ユ壘鏄惁瀛樺湪閲嶅彔娑堟伅
-  // 浠?currentMessages 澶撮儴鍙栫涓€鏉℃秷鎭紝鐪嬫槸鍚﹀湪 boundedOlder 涓瓨鍦?
-  const firstCurrent = currentMessages[0];
-  const overlapIdxInOlder = boundedOlder.findIndex((m) => matchKey(m, firstCurrent));
-
-  if (overlapIdxInOlder >= 0) {
-    // boundedOlder 鐨?[0, overlapIdxInOlder) 鏄函鏇存棭鐨勬秷鎭?
-    const pureOlderHead = boundedOlder.slice(0, overlapIdxInOlder);
-    return { merged: spliceOlder(pureOlderHead), droppedCount: droppedUnseenCount };
-  }
-
-  // 2. 濡傛灉绗竴鏉℃湭鍖归厤锛屽叏閲忔壂鎻?boundedOlder 涓槸鍚﹀寘鍚换浣曞凡瀛樺湪鐨勬秷鎭?
-
-  const currentKeySet = new Set<string>();
-  for (const m of currentMessages) {
-    currentKeySet.add(compositeKey(m));
-  }
   const deduplicatedOlder: T[] = [];
   for (const m of boundedOlder) {
-    if (!currentKeySet.has(compositeKey(m))) {
+    if (!allHeldKeys.has(compositeKey(m))) {
       deduplicatedOlder.push(m);
     }
   }

@@ -283,3 +283,45 @@ test('定理 26 [pending 不可删]: pending 集合中的行，在窗口合并�
     { numRuns: 200 }
   );
 });
+
+test('定理 29 [readOlderRows 展示序精确切片]: 随机非单调 orderKey 下只取 displaySeq 严格更小的相邻前缀', async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      fc.uniqueArray(fc.integer({ min: 1, max: 100000 }), { minLength: 2, maxLength: 30 }),
+      fc.integer({ min: 1, max: 30 }),
+      fc.integer({ min: 0, max: 29 }),
+      async (orderKeys, limit, rawAnchorIdx) => {
+        const { service } = makeService();
+        const rows = orderKeys.map((k, idx) => ({
+          profile: REF.profile,
+          channel: REF.channel,
+          channelId: REF.channelId,
+          orderKey: k,
+          displaySeq: idx + 1,
+          role: 'assistant',
+          text: `msg-${k}`,
+          timestamp: 1_700_000_000_000 + idx,
+          status: 'complete',
+        }));
+        await service.applyRemoteWindow(REF, rows, 0);
+
+        const anchorIdx = rawAnchorIdx % orderKeys.length;
+        const anchorKey = orderKeys[anchorIdx];
+        const older = await service.readOlderRows(REF, anchorKey, limit);
+
+        const expected = rows
+          .slice(Math.max(0, anchorIdx - limit), anchorIdx)
+          .reverse();
+        assert.deepEqual(
+          older.map((r) => r.orderKey),
+          expected.map((r) => r.orderKey),
+          '非单调 orderKey 通道下 readOlderRows 必须严格按 displaySeq 切片并返回倒序'
+        );
+        for (const r of older) {
+          assert.ok(r.displaySeq < anchorIdx + 1, '绝不可返回展示序在锚点之后的行');
+        }
+      }
+    ),
+    { numRuns: 1000 }
+  );
+});

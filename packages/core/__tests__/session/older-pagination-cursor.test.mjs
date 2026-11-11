@@ -171,7 +171,12 @@ test('翻页游标 - 请求起点必须抬到本地已覆盖行数，绝不从�
   assert.equal(plan.queryOffset, 1130, '本地已覆盖 1130 行时，offset=100 会重拉一整段并让游标越走越偏');
 });
 
-test('翻页游标 - 批次命中本地最早行时取保守滞后边界，绝不跳过该行之前尚未落地的行', () => {
+test('翻页游标 - 批次命中本地最早行时，本批已覆盖全部区间并交付合并，游标必须完整跳过 returned', () => {
+  // 网关 order=latest 返回按展示序升序排列的 500 行（下标 0 最旧，下标 499 最新），
+  // offset 是从最新端往最旧端跳过的行数。
+  // 命中 20370（下标 370）意味着 20370..20499（最新端 130 行）已与本地重合，
+  // 而 20000..20369（更早 370 行）刚随本批一起拿到，下一轮必须跳过整批 500 行到 2000，
+  // 绝不能算成 1500+370+1=1871 造成反复重拉与单轮仅增几条的蠕动。
   const batchRowIds = Array.from({ length: 500 }, (_, i) => 20000 + i);
   const plan = planOlderPagination({
     storedOffset: 1500,
@@ -180,9 +185,8 @@ test('翻页游标 - 批次命中本地最早行时取保守滞后边界，绝�
     batchRowIds,
     earliestLocalRowId: 20370,
   });
-  assert.equal(plan.nextOffset, 1871, '本地最早行落在批次第 370 位，边界即 1500+370+1');
-  assert.ok(plan.nextOffset <= plan.queryOffset + 500, '游离行 370 行仍会在下一轮重叠拉取，不能宣称零重复');
-  assert.equal(plan.nextOffset, plan.queryOffset + 371, '滞后 129 行是有意为之：宁可重叠，不跳行');
+  assert.equal(plan.nextOffset, 2000);
+  assert.ok(plan.nextOffset > 1501, '绝不能退化为 queryOffset + 1 蠕动推进');
 });
 
 test('翻页游标 - 批次不含本地最早行时按 returned 推进，且永不回退', () => {

@@ -226,7 +226,9 @@ export function parseTranscriptRows(list: readonly unknown[], options: ParseTran
       }
       if (synthesizedToolCall) {
         const rawTs = row.timestamp ?? row.created_at;
-        const numTs = typeof rawTs === 'number' ? (rawTs > 1e11 ? rawTs : rawTs * 1000) : Date.parse(String(rawTs)) || Date.now();
+        const parsedTs = typeof rawTs === 'number'
+          ? (Number.isFinite(rawTs) && rawTs > 0 ? (rawTs > 1e11 ? rawTs : rawTs * 1000) : undefined)
+          : (rawTs !== undefined && rawTs !== null ? (Date.parse(String(rawTs)) || undefined) : undefined);
         parsedMessages.push({
           id: String(row.row_id ?? row.id ?? `msg-${idx}`),
           rowId: extractDurableRowId(row),
@@ -234,8 +236,8 @@ export function parseTranscriptRows(list: readonly unknown[], options: ParseTran
           content: '',
           thought: '',
           toolCalls: [synthesizedToolCall],
-          timestamp: formatTimestamp(numTs),
-          rawTimestamp: numTs,
+          timestamp: parsedTs !== undefined ? formatTimestamp(parsedTs) : '',
+          rawTimestamp: parsedTs,
           displayKind: 'user',
         });
         continue;
@@ -255,7 +257,9 @@ export function parseTranscriptRows(list: readonly unknown[], options: ParseTran
     }
 
     const rawTs = row.timestamp ?? row.created_at;
-    const numTs = typeof rawTs === 'number' ? (rawTs > 1e11 ? rawTs : rawTs * 1000) : Date.parse(String(rawTs)) || Date.now();
+    const parsedTs = typeof rawTs === 'number'
+      ? (Number.isFinite(rawTs) && rawTs > 0 ? (rawTs > 1e11 ? rawTs : rawTs * 1000) : undefined)
+      : (rawTs !== undefined && rawTs !== null ? (Date.parse(String(rawTs)) || undefined) : undefined);
 
     const scopedMsg: MessageViewModel = {
       id: String(row.row_id ?? row.id ?? `msg-${idx}`),
@@ -266,8 +270,8 @@ export function parseTranscriptRows(list: readonly unknown[], options: ParseTran
       thought,
       thoughtDurationMs: typeof row.thought_duration_ms === 'number' ? row.thought_duration_ms : undefined,
       toolCalls,
-      timestamp: formatTimestamp(numTs),
-      rawTimestamp: numTs,
+      timestamp: parsedTs !== undefined ? formatTimestamp(parsedTs) : '',
+      rawTimestamp: parsedTs,
       // assistant 行也记 'user'（意为「非机器行」），时间线分派只对 role=user 生效。
       displayKind: projection.kind as MessageDisplayKind,
       displayMetadata: projection.metadata,

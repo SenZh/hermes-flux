@@ -79,9 +79,25 @@ test('历史存在判定 - rowId 缺失（临时发送或非持久化行）但�
   );
 });
 
+test('历史存在判定 - 未传入 offsetOrCount（如内存缓存命中尚未记录服务端游标）时，只要未达 rowId=1 不得误判见底', () => {
+  assert.equal(
+    computeHasOlderMessages([{ rowId: 50 }, { rowId: 100 }], undefined, 100),
+    true,
+    '未传 offsetOrCount 时不得当成服务端返回 0 条而误判已到头'
+  );
+});
+
+test('历史存在判定 - 存在未耗尽父会话血缘时，即使本段首条 rowId===1 也仍有更早历史', () => {
+  assert.equal(
+    computeHasOlderMessages([{ rowId: 1 }], 1, 100, true),
+    true,
+    '短子会话首条 rowId===1 但仍有父会话血缘时，必须允许向上拉取父会话历史'
+  );
+});
+
 test('历史存在判定 - 变异检验：防范 earliestRow <= 1 退化为 < 1', () => {
   // 如果代码被篡改为 earliestRow < 1，则 rowId === 1 会逃逸被误判为 true
   const boundaryRow1 = [{ rowId: 1 }];
   const result = computeHasOlderMessages(boundaryRow1, 100, 100);
-  assert.equal(result, false, '当最老一条 rowId===1 时必须坚决返回 false，若变异为 < 1 则此测试必红');
+  assert.equal(result, false, '当最老一条 rowId===1 且无父血缘时必须坚决返回 false，若变异为 < 1 则此测试必红');
 });

@@ -199,6 +199,158 @@ export function shouldSettleInitialBottom(input: {
 }
 
 /**
+ * 向上扩窗与翻页时的预取触发阈值（px）。
+ *
+ * 【设计意图 (Why)】
+ *   挂载窗口高度（约 120 条）可能超过一屏 800px，本地扩窗按挂载窗口高度的一半预取
+ *   可提前平滑滑动；但绝不能把全量虚拟总高 `streamEl.scrollHeight / 2` 当作阈值，
+ *   否则 5000 条会话会撑出 25 万 px 的触发区，使中段滚动与顶部连拉全部失控。
+ */
+export function computeExpandPrefetchPx(
+  clientHeightPx: number,
+  mountedWindowHeightPx?: number
+): number {
+  const viewportPrefetch = Math.max(
+    800,
+    Number.isFinite(clientHeightPx) && clientHeightPx > 0 ? Math.round(clientHeightPx) : 0
+  );
+  const mountedHalf =
+    typeof mountedWindowHeightPx === 'number' &&
+    Number.isFinite(mountedWindowHeightPx) &&
+    mountedWindowHeightPx > 0
+      ? Math.round(mountedWindowHeightPx / 2)
+      : 0;
+  return Math.min(16000, Math.max(viewportPrefetch, mountedHalf));
+}
+
+/**
+ * 判定触顶连拉循环后视口是否仍停留在物理列表顶部。
+ *
+ * 【约束与规则 (Rules)】必须基于视口尺寸判断（约 0.4 屏），严禁使用扩窗预取阈值，
+ *   否则新插入历史把 scrollTop 顶到数万像素后仍会错误触发 40 页连拉。
+ */
+export function computeStillNearTop(scrollTopPx: number, clientHeightPx: number): boolean {
+  if (!Number.isFinite(scrollTopPx)) return false;
+  const viewportPrefetch = Math.max(
+    800,
+    Number.isFinite(clientHeightPx) && clientHeightPx > 0 ? Math.round(clientHeightPx) : 0
+  );
+  return scrollTopPx < viewportPrefetch * 0.4;
+}
+
+export interface UpwardScrollActionInput {
+  sessionId: string;
+  readerScrolledSessionId: string;
+  total: number;
+  capacity: number;
+  windowStart: number;
+  hasOlderMessages: boolean;
+  scrollTop: number;
+  virtualWindowTopPx: number;
+  expandPrefetchPx: number;
+}
+
+export type UpwardScrollAction =
+  | 'none'
+  | 'settle-bottom'
+  | 'expand-local-window'
+  | 'fetch-older-remote';
+
+/**
+ * 规划向上滚动接近上沿时的动作：解耦「本地窗口扩展」与「远端分页拉取」。
+ *
+ * 【设计意图 (Why)】
+ *   旧实现将 `shouldExpandWindow`（要求 `total > capacity`）直接拦在 `loadOlderMessages()` 之前，
+ *   导致所有首屏 <= 120 条的新会话或清洗重建后的老会话在触顶时被直接 `return`，永久拉不到历史。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. `total > capacity` 且未记录读者向上手势：首屏尚未贴底，返回 `settle-bottom`；
+ *   2. `total > capacity` 且已授权、且 `windowStart > 0`：返回 `expand-local-window`；
+ *   3. `total <= capacity` 或 `windowStart === 0` 时，只要读者在当前会话主动向上滚动且
+ *      `hasOlderMessages` 为真，一律返回 `fetch-older-remote`，绝不被容量阈值封死。
+ */
+export function planUpwardScrollAction(input: UpwardScrollActionInput): UpwardScrollAction {
+  if (!input.sessionId) return 'none';
+  const total = clampTotal(input.total);
+  const capacity = normalizeCapacity(input.capacity, 1);
+  const windowStart = Math.max(0, Math.floor(Number.isFinite(input.windowStart) ? input.windowStart : 0));
+  const prefetch = Number.isFinite(input.expandPrefetchPx) && input.expandPrefetchPx > 0
+    ? input.expandPrefetchPx
+    : 800;
+  const triggerBoundary = windowStart > 0
+    ? Math.max(0, Math.round(input.virtualWindowTopPx)) + prefetch
+    : prefetch;
+
+  if (!Number.isFinite(input.scrollTop) || input.scrollTop >= triggerBoundary) {
+    return 'none';
+  }
+
+  const exceedsCapacity = total > capacity;
+  if (exceedsCapacity && input.readerScrolledSessionId !== input.sessionId) {
+    return 'settle-bottom';
+  }
+
+  if (exceedsCapacity && windowStart > 0) {
+    return 'expand-local-window';
+  }
+
+  if (input.readerScrolledSessionId !== input.sessionId) {
+    return 'none';
+  }
+
+  if (windowStart === 0 && input.hasOlderMessages) {
+    return 'fetch-older-remote';
+  }
+
+  return 'none';
+}
+
+export interface OlderZeroMessagesInput {
+  isTargetSelf: boolean;
+  floorSuppressed: boolean;
+  queryOffset: number;
+  safeFallbackOffset: number;
+}
+
+export type OlderZeroMessagesPlan =
+  | { action: 'retry-fallback'; fallbackOffset: number }
+  | { action: 'exhausted' };
+
+/**
+ * 规划翻页返回 0 条消息时的动作：区分「缓存高估重拉」与「本段真正见底」。
+ *
+ * 【约束与规则 (Rules)】纯函数；仅当当前是本会话、未经历过回退、且请求起点高于
+ *   服务端已确认安全基准时才回退重拉，防止死循环与永久跳段。
+ */
+export function planOlderZeroMessagesAction(input: OlderZeroMessagesInput): OlderZeroMessagesPlan {
+  const safeOffset = Number.isFinite(input.safeFallbackOffset) && input.safeFallbackOffset > 0
+    ? Math.floor(input.safeFallbackOffset)
+    : 0;
+  if (
+    input.isTargetSelf
+    && !input.floorSuppressed
+    && Number.isFinite(input.queryOffset)
+    && input.queryOffset > safeOffset
+  ) {
+    return { action: 'retry-fallback', fallbackOffset: safeOffset };
+  }
+  return { action: 'exhausted' };
+}
+
+/**
+ * 判定单轮 `loadOlderMessages` 循环结束且未增行时，是否仍应保留 `hasOlderMessages = true`。
+ *
+ * 【防范的历史坑 (Pitfall)】重度折叠缓存超过 4000 持久行时，单轮最多 `MAX_PAGE_ATTEMPTS = 8`
+ *   全命中本地重复区间退出，未出错也未耗尽血缘；旧代码只看 `!fetchFailed` 就置 false 永久断尾。
+ */
+export function shouldKeepOlderMessagesAfterLoop(input: {
+  fetchFailed: boolean;
+  anyLineageRemaining: boolean;
+}): boolean {
+  return Boolean(input.fetchFailed || input.anyLineageRemaining);
+}
+
+/**
  * 判定会话是否可能包含更早的远端服务端历史。
  *
  * 【设计意图 (Why)】
@@ -209,22 +361,24 @@ export function shouldSettleInitialBottom(input: {
  *   1. 曾用 "返回数 >= pageSize" 判定见底：网关单页上限低于请求值时，超长会话被永久误判为已到头；
  *   2. 内存秒开时仅看 offset，忽略了 earliestRow <= 1，切回会话瞬间误弹更早历史提示；
  *   3. 将前端虚拟渲染窗口起点（messageWindowStart > 0）与远端历史混流，导致本地已缓存但首屏未挂载时误报；
- *   4. 弱网或空消息时因 rowId 缺失误报或抛错。
+ *   4. 短子会话首条 rowId === 1 时忽略了仍有未耗尽父会话血缘，导致父段历史无法触达。
  *
  * 【约束与规则 (Rules)】
- *   - 唯一物理权威依据是最老一条有效 rowId 是否已达物理首行：<= 1 即见底，> 1 即仍有更早历史；
+ *   - 空列表一律返回 false；
  *   - 若本次请求服务端显式返回 0 条（已到头），返回 false；
- *   - 严禁将本地虚拟窗口起点（messageWindowStart）混入此判定；
- *   - 必须为纯函数，具备可证伪测试能力。
+ *   - 存在未耗尽父会话血缘时，即使本段首条 rowId <= 1 仍返回 true；
+ *   - 否则最老持久行 rowId <= 1 判定见底，> 1 或缺失 rowId 判定仍有更早历史。
  */
 export function computeHasOlderMessages(
   messages: readonly { rowId?: number }[],
   offsetOrCount?: number,
-  pageSize?: number
+  _pageSize?: number,
+  hasParentLineage = false
 ): boolean {
   if (!Array.isArray(messages) || messages.length === 0) return false;
   // 若本次拉取明确返回 0 条，证明服务端已无更早历史
   if (typeof offsetOrCount === 'number' && offsetOrCount === 0) return false;
+  if (hasParentLineage) return true;
   let earliestRow: number | undefined;
   for (const m of messages) {
     if (typeof m.rowId === 'number' && Number.isInteger(m.rowId) && m.rowId > 0) {

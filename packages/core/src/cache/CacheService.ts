@@ -21,7 +21,7 @@ import type { CacheChannelRef, CachedAgentSummary, CachedMessageRow, CachedSessi
 import { CACHE_SCHEMA_VERSION, createEnvelope, isReadableEnvelope } from './types.js';
 import type { ICacheStore } from './ICacheStore.js';
 import { channelKey, messageKey } from './ICacheStore.js';
-import { applyTruncation, evictToCap, maxOrderKey, mergeRemoteWindow, upsertMessageRows } from './cacheMerge.js';
+import { applyTruncation, evictToCap, maxOrderKey, mergeRemoteWindow, sortByDisplayAsc, upsertMessageRows } from './cacheMerge.js';
 
 /** 默认结构性上限。 */
 export const DEFAULT_SESSION_CAP = 200;
@@ -138,17 +138,45 @@ export class CacheService {
    * 【设计意图 (Why)】
    *   支持向上滚动时优先命中本地缓存，避免每翻一页都必须发起网络请求。
    * 【防范的历史坑 (Pitfall)】
-   *   必须走 withChannelLock 通道串行锁，防止读取与并发写入产生脏交错。
+   *   网关物理 orderKey 与展示序不单调时，直接按 `orderKey < beforeOrderKey` 游标读取
+   *   会漏掉高 orderKey 的早期首问（如 18541），并误捞出低 orderKey 的更晚消息（如 17400）。
+   *   必须基于 displaySeq 展示全序定位锚点并向早切片；缺失 displaySeq 的旧缓存直接返回空降级远端。
    * 【约束与规则 (Rules)】
-   *   按通道加串行锁；按 orderKey 倒序返回满足 orderKey < beforeOrderKey 的行。
+   *   按通道加串行锁；返回切片按展示序倒序排列，与原有读取接口契约兼容。
    */
   async readOlderRows(
     ref: CacheChannelRef,
     beforeOrderKey: number,
     limit: number
   ): Promise<CachedMessageRow[]> {
+    const safeLimit = Math.max(0, Math.floor(limit));
+    if (safeLimit === 0) return [];
     return this.withChannelLock(ref, async () => {
-      return this.store.listMessages({ ...ref, beforeOrderKey, limit });
+      const allRows = await this.store.listMessages({ ...ref, limit: this.messageCap });
+      if (allRows.length === 0) return [];
+      if (allRows.some((r) => typeof r.displaySeq !== 'number' || !Number.isFinite(r.displaySeq))) {
+        return [];
+      }
+      const ordered = sortByDisplayAsc(allRows);
+      const anchorIndex = ordered.findIndex((r) => r.orderKey === beforeOrderKey);
+      if (anchorIndex >= 0) {
+        if (anchorIndex === 0) return [];
+        const start = Math.max(0, anchorIndex - safeLimit);
+        return ordered.slice(start, anchorIndex).reverse();
+      }
+      // 未命中锚点时，仅当整条通道 orderKey 自身严格递增（非乱序库）才允许按 orderKey < beforeOrderKey 回退，
+      // 否则绝不能拿物理 orderKey 猜测展示序，一律返回空数组交由远端权威分页拉取。
+      let strictlyMonotonicKeys = true;
+      for (let i = 1; i < ordered.length; i += 1) {
+        if (ordered[i].orderKey <= ordered[i - 1].orderKey) {
+          strictlyMonotonicKeys = false;
+          break;
+        }
+      }
+      if (strictlyMonotonicKeys && ordered.every((r) => r.orderKey < beforeOrderKey)) {
+        return ordered.slice(Math.max(0, ordered.length - safeLimit)).reverse();
+      }
+      return [];
     });
   }
 

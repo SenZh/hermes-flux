@@ -179,3 +179,63 @@ test('upsertMessageRows: 新行更丰富但缺 displaySeq 时，必须保留既�
   assert.equal(merged[0].toolCalls?.length, 1);
   assert.equal(merged[0].displaySeq, 7, '新行未携带 displaySeq 时不得把既有 displaySeq 抹成 undefined');
 });
+
+test('CacheService.readOlderRows: 非单调 orderKey 下必须按 displaySeq 切片，绝不漏首问或捞出晚行', async () => {
+  const store = new MemoryCacheStore();
+  const service = new CacheService(store, { messageCap: 100 });
+
+  await service.applyRemoteWindow(
+    REF,
+    [
+      row(18541, { displaySeq: 1, timestamp: 1000 }),
+      row(17405, { displaySeq: 2, timestamp: 2000 }),
+      row(17436, { displaySeq: 3, timestamp: 3000 }),
+      row(17400, { displaySeq: 4, timestamp: 4000 }),
+      row(17450, { displaySeq: 5, timestamp: 5000 }),
+    ],
+    0
+  );
+
+  const older = await service.readOlderRows(REF, 17436, 100);
+  const olderDisplay = sortByDisplayAsc(older);
+  assert.deepEqual(
+    olderDisplay.map((r) => r.orderKey),
+    [18541, 17405],
+    '必须精确返回 displaySeq < 3 的 [18541, 17405]，绝不能漏掉 18541 或捞出更晚的 17400'
+  );
+});
+
+test('CacheService.readOlderRows: 通道存在缺少 displaySeq 的旧版缓存时返回空以安全降级远端', async () => {
+  const store = new MemoryCacheStore();
+  const service = new CacheService(store, { messageCap: 100 });
+
+  await store.putMessages([
+    row(18541),
+    row(17405),
+    row(17436),
+    row(17400),
+  ]);
+
+  const older = await service.readOlderRows(REF, 17436, 100);
+  assert.deepEqual(older, [], '缺少 displaySeq 的旧版乱序缓存禁止作为本地翻页来源');
+});
+
+test('CacheService.readOlderRows: 非单调通道缺失锚点时绝不用物理 orderKey 猜早晚，且 limit<=0 返回空', async () => {
+  const store = new MemoryCacheStore();
+  const service = new CacheService(store, { messageCap: 100 });
+
+  await service.applyRemoteWindow(
+    REF,
+    [
+      row(18541, { displaySeq: 1, timestamp: 1000 }),
+      row(17405, { displaySeq: 2, timestamp: 2000 }),
+      row(17436, { displaySeq: 3, timestamp: 3000 }),
+    ],
+    0
+  );
+
+  // 非单调通道下，即使传入大于全通道最大 orderKey 的未命中锚点，也不得把最新窗口误当作更早历史返回
+  const missingAnchorRes = await service.readOlderRows(REF, 99999, 10);
+  assert.deepEqual(missingAnchorRes, [], '非单调通道未命中锚点时必须返回空，安全降级远端');
+  assert.deepEqual(await service.readOlderRows(REF, 17436, 0), []);
+});
