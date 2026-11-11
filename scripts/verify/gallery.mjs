@@ -95,6 +95,16 @@ function writeHostPage() {
     path.join(REPO_ROOT, 'packages/desktop/src/renderer/styles.css'),
     path.join(OUT_DIR, 'app.css'),
   );
+  // 字体文件从构建产物拷过来，保证截图里看到的就是用户选中的那套字，而不是回落的系统字体。
+  const fontSrc = path.join(REPO_ROOT, 'packages/desktop/dist/renderer/fonts');
+  const fontDst = path.join(OUT_DIR, 'fonts');
+  if (fs.existsSync(fontSrc)) {
+    fs.mkdirSync(fontDst, { recursive: true });
+    for (const name of fs.readdirSync(fontSrc)) {
+      if (!name.endsWith('.woff2')) continue;
+      fs.copyFileSync(path.join(fontSrc, name), path.join(fontDst, name));
+    }
+  }
   const html = `<!doctype html>
 <html lang="zh-CN" data-theme="obsidian-gold">
 <head>
@@ -220,6 +230,61 @@ const CENSUS = String.raw`(() => {
     }
   }
 
+  // 8. 字体族必须只来自两个皮肤槽位，并且设置切换后要真实跟随
+  const norm = (v) => v.replace(/["']/g, '').replace(/\s+/g, ' ').trim();
+  const rootStyle = getComputedStyle(document.documentElement);
+  const sansStack = norm(rootStyle.getPropertyValue('--font-sans'));
+  const monoStack = norm(rootStyle.getPropertyValue('--font-mono'));
+
+  if (!sansStack || !monoStack) {
+    issues.push({ dimension: 'font-token', element: 'root', text: '', detail: '--font-sans / --font-mono 未解析到值，字体契约无法判定' });
+  } else {
+    const allowedFamilies = new Set([sansStack, monoStack]);
+    for (const el of all) {
+      const family = norm(getComputedStyle(el).fontFamily);
+      if (!allowedFamilies.has(family)) push(el, 'font-family', family);
+    }
+
+    const uiEl = root.querySelector('[data-font="ui"]');
+    const codeEl = root.querySelector('[data-font="code"]');
+    if (!uiEl || !codeEl) {
+      issues.push({ dimension: 'font-sample', element: 'gallery', text: '', detail: '缺少 data-font="ui" / data-font="code" 字体样例' });
+    } else {
+      if (norm(getComputedStyle(uiEl).fontFamily) !== sansStack) {
+        issues.push({ dimension: 'font-role', element: 'ui', text: '', detail: '界面字体样例未落在 --font-sans 上' });
+      }
+      if (norm(getComputedStyle(codeEl).fontFamily) !== monoStack) {
+        issues.push({ dimension: 'font-role', element: 'code', text: '', detail: '代码字体样例未落在 --font-mono 上' });
+      }
+
+      // 动态切换：模拟用户在设置里把界面字体换成等宽字体，验证组件跟随而非各自写死
+      if (typeof window.__fluxApplyFont === 'function') {
+        const beforeSans = norm(getComputedStyle(uiEl).fontFamily);
+        const beforeMono = norm(getComputedStyle(codeEl).fontFamily);
+        window.__fluxApplyFont({ uiFont: 'jetbrains-mono', monoFont: 'fira-code', sizeScale: 'medium' });
+        const afterSansVar = norm(getComputedStyle(document.documentElement).getPropertyValue('--font-sans'));
+        const afterMonoVar = norm(getComputedStyle(document.documentElement).getPropertyValue('--font-mono'));
+        const afterUi = norm(getComputedStyle(uiEl).fontFamily);
+        const afterCode = norm(getComputedStyle(codeEl).fontFamily);
+
+        if (afterSansVar === beforeSans) {
+          issues.push({ dimension: 'font-dynamic', element: 'root', text: '', detail: '改设置后 --font-sans 没变化，偏好未写入 :root' });
+        }
+        if (afterUi !== afterSansVar) {
+          issues.push({ dimension: 'font-dynamic', element: 'ui', text: '', detail: '改设置后界面字体=' + afterUi + '，与 --font-sans=' + afterSansVar + ' 不一致' });
+        }
+        if (afterCode !== afterMonoVar || afterCode === beforeMono) {
+          issues.push({ dimension: 'font-dynamic', element: 'code', text: '', detail: '改设置后代码字体=' + afterCode + '，与 --font-mono=' + afterMonoVar + ' 不一致' });
+        }
+
+        // 恢复基线字体，保证多次运行结果一致
+        window.__fluxApplyFont({ uiFont: 'inter', monoFont: 'jetbrains-mono', sizeScale: 'medium' });
+      } else {
+        issues.push({ dimension: 'font-dynamic', element: 'window', text: '', detail: '__fluxApplyFont 不可用，无法验证设置联动' });
+      }
+    }
+  }
+
   return {
     issues,
     stats: {
@@ -228,6 +293,7 @@ const CENSUS = String.raw`(() => {
       toolbarHeight: toolbar ? Math.round(toolbar.getBoundingClientRect().height) : null,
       surfaces: root.querySelectorAll('[data-atom="surface"]').length,
       stats: root.querySelectorAll('[data-atom="stat"]').length,
+      fonts: { sans: sansStack.slice(0, 60), mono: monoStack.slice(0, 60) },
       // 记录关键槽位的真实解析结果：全为 undefined 说明宿主样式表没加载，
       // 此时"零违规"是假绿（所有 var() 都没有值，元素根本没有任何样式可违规）
       tokens: Object.fromEntries(

@@ -292,8 +292,10 @@ export function resolveTitlebarTitle(params: {
         p.name.toLowerCase() === activeFocus.botName.toLowerCase() ||
         (p.displayName && p.displayName.toLowerCase() === activeFocus.botName.toLowerCase())
     );
-    const botDisplay = focusBot?.displayName || activeFocus.botName;
-    return botDisplay;
+    // 【规则】Profile 尚在加载或不在列表里时，绝不把内部 name 当身份展示（会露出 "default" 这类占位名）；
+    // 回落应用标题，等真实 Profile 到达后再显示其身份。
+    if (!focusBot) return defaultTitle;
+    return focusBot.displayName || focusBot.name;
   }
 
   if (activeFocus?.type === 'group') {
@@ -364,9 +366,13 @@ export function resolveTitlebarAvatar(params: {
       (p.displayName && p.displayName.toLowerCase() === targetName!.toLowerCase())
   );
 
+  // 【规则】Profile 尚未到达时不出头像，也不把内部 name 当身份：加载期顶栏保持空白，
+  // 数据到达后由真实 displayName/avatar 接管，避免出现 "default" 这类占位身份。
+  if (!found) return undefined;
+
   return {
     kind: 'bot',
-    avatar: found?.avatar,
-    name: found?.displayName || targetName,
+    avatar: found.avatar,
+    name: found.displayName || found.name,
   };
 }

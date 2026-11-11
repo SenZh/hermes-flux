@@ -23,12 +23,19 @@ export interface ConversationPushInput {
   force: boolean;
   /** 是否正在拉取更早历史状态发生变化（避免小菊花挂死） */
   loadingOlderChanged?: boolean;
+  /**
+   * 首屏历史相位发生变化（loading ⇄ ready）。
+   * 【设计意图 (Why)】相位翻转时消息 id 集合可能完全相同（都为空），
+   *   不推送就会把骨架永久钉在屏幕上，或者让已经落地的历史继续被骨架盖住。
+   */
+  messagesPhaseChanged?: boolean;
 }
 
 export function decideConversationPush(input: ConversationPushInput): boolean {
   if (input.force) return true;
   if (input.justStoppedStreaming) return true;
   if (input.loadingOlderChanged) return true;
+  if (input.messagesPhaseChanged) return true;
   // 集合收缩：回滚截断、取消回滚、快照恢复都会让消息变少或整体替换，
   // 没有新 id 也必须推送，否则 React 继续显示已被删除的消息。
   if (input.nextIds.length !== input.prevIds.size) return true;

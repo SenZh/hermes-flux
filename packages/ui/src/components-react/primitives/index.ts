@@ -8,3 +8,4 @@ export * from './Surface.js';
 export * from './ListRow.js';
 export * from './Toolbar.js';
 export * from './Stat.js';
+export * from './Skeleton.js';

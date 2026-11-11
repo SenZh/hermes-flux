@@ -68,7 +68,7 @@ function assertWarnings(id, src, n, file = TSX) {
  * ================================================================== */
 
 test('visualRules 已全部装配进 RULES，且统一归属 Gate 4', () => {
-  assert.equal(visualRules.length, 7);
+  assert.equal(visualRules.length, 9);
   for (const rule of visualRules) {
     assert.ok(RULES.includes(rule), `${rule.id} 未进入 RULES 导出`);
     assert.equal(rule.gate, 'Gate 4', `${rule.id} 必须归属 Gate 4`);
@@ -80,6 +80,8 @@ test('visualRules 已全部装配进 RULES，且统一归属 Gate 4', () => {
     'visual/no-legacy-radius',
     'visual/no-shadow-scale',
     'visual/no-raw-font-scale',
+    'visual/no-raw-font-family',
+    'visual/no-raw-font-family-decl',
     'visual/token-fallback-drift',
     'visual/no-arbitrary-value',
     'visual/fractional-spacing',

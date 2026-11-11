@@ -30,9 +30,15 @@ test('历史翻页与 Profile 透传接线守卫', async (t) => {
     assert.equal(hasProfileParam, true, 'loadOlderMessages 内部的 fetchSessionMessages 必须显式携带 profile: resolvedProfile');
   });
 
-  await t.test('2. loadOlderMessages 必须使用 planOlderBatchPrependMerge 纯函数合并历史，严禁暴力头插', () => {
-    const hasPrependMerge = rendererSource.includes('state.messages = planOlderBatchPrependMerge(batch, state.messages);');
-    assert.equal(hasPrependMerge, true, '必须使用 planOlderBatchPrependMerge 处理历史批次，严禁裸 [...batch, ...state.messages]');
+  await t.test('2. loadOlderMessages 必须使用计划器合并历史，严禁暴力头插', () => {
+    const hasPrependMerge =
+      /const mergeResult = planOlderBatchPrependMergeDetailed\(batch, state\.messages, \{[\s\S]*?\}\);/.test(rendererSource)
+      || /state\.messages = planOlderBatchPrependMerge\(\s*batch,\s*state\.messages(?:,\s*\{[^}]*\})?\s*\);/.test(rendererSource);
+    assert.equal(hasPrependMerge, true, '必须使用 core 的向早合并计划器处理历史批次，严禁裸 [...batch, ...state.messages]');
+    assert.ok(
+      rendererSource.includes('state.messages = mergeResult.merged;'),
+      '详细版合并结果必须落到 state.messages，否则丢弃行数判定与列表内容会脱钩'
+    );
     const rawPrepend = rendererSource.includes('state.messages = [...batch, ...state.messages];');
     assert.equal(rawPrepend, false, '严禁保留裸 [...batch, ...state.messages] 暴力头插');
   });
@@ -72,5 +78,60 @@ test('历史翻页与 Profile 透传接线守卫', async (t) => {
     const syncReset = /state\.isLoadingOlder = false;\s*\r?\n\s*render\(\);/.test(tail);
     assert.ok(syncReset, '成功路径必须先同步置 false 再 render，不能把收敛放进 requestAnimationFrame');
     assert.ok(tail.includes('olderLoadingStartedAt'), '必须有陈旧加载锁熔断时间戳');
+  });
+
+  await t.test('7. 翻页起点必须经 planOlderPagination 对齐本地覆盖行数，严禁裸用 storedOffset', () => {
+    const tail = rendererSource.slice(rendererSource.indexOf('async function loadOlderMessages'));
+    assert.ok(
+      tail.includes('planOlderPagination({'),
+      '翻页请求起点必须由 planOlderPagination 计算，裸 offset 会在本地缓存更长时跳过整段历史'
+    );
+    assert.ok(
+      tail.includes('countLocalCoveredRows(state.messages, sessionId)'),
+      '本地覆盖行数下界必须来自 countLocalCoveredRows，禁止用视图条数以外的猜测'
+    );
+    assert.ok(
+      tail.includes('cursorPlan.nextOffset'),
+      '游标推进必须写入 planOlderPagination 的 nextOffset，保证批次命中本地最早行时精确收敛'
+    );
+    assert.ok(
+      /fetchSessionMessages\(\s*targetId,\s*\{[^}]*offset:\s*queryOffset[^}]*\}/s.test(tail),
+      '实际请求必须使用 queryOffset，禁止算出后丢弃（变异 void queryOffset 必须变红）'
+    );
+    assert.ok(
+      /sessionOvershootRetry\.add\(cursorKey\)[\s\S]{0,400}continue;/.test(tail),
+      '高估回退必须真的重拉（add 标记后 continue），写成 void 占位等于没有回退'
+    );
+    assert.ok(
+      /sessionOvershootRetry\.add\(cursorKey\)[\s\S]{0,200}sessionParentOffsetMap\.delete\(cursorKey\)/.test(tail),
+      '回退必须同时清分页表旧游标，否则 parentOffset 会完全遮蔽回退'
+    );
+    assert.ok(
+      tail.includes('planOlderBatchPrependMergeDetailed'),
+      '父段整批被边界过滤时必须拿到丢弃行数，禁止静默推进游标'
+    );
+  });
+
+  await t.test('8. 首屏 REST 游标必须同时抬到本地合并后的覆盖行数', () => {
+    const start = rendererSource.indexOf('const serverKnownCount');
+    const fastRest = start >= 0 ? rendererSource.slice(start, start + 1200) : '';
+    assert.ok(fastRest.includes('countLocalCoveredRows(merged, sessionId)'), '首屏必须把本地覆盖行数并入 sessionServerOffset 下界');
+    assert.ok(
+      /const currentKnown = Math\.max\(\s*sessionServerOffset\.get\(sessionId\)/.test(fastRest),
+      '游标只能取各来源最大值；改成 Math.min 会让首屏把已确认游标倒退回更小值'
+    );
+  });
+
+  await t.test('9. 持久缓存恢复与 cache-first 读取必须与本会话口径一致', () => {
+    const tail = rendererSource.slice(rendererSource.indexOf('async function loadOlderMessages'));
+    assert.ok(
+      tail.includes('const oldestRowId = sessionEarliestRowId();'),
+      'cache-first 的上界必须取本会话最早行，头部父会话行会把读取区间带偏'
+    );
+    const openChannel = rendererSource.slice(rendererSource.indexOf('cacheService.openChannel(cacheRef'));
+    assert.ok(
+      openChannel.slice(0, 900).includes('countLocalCoveredRows(state.messages, sessionId)'),
+      '持久缓存恢复的游标必须与首屏 REST 同源，禁止两条路径各算一套'
+    );
   });
 });

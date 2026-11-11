@@ -64,6 +64,7 @@ export * from './components-react/primitives/index.js';
 export { StatusBar, type StatusBarProps } from './components-react/StatusBar.js';
 export { Titlebar, type TitlebarProps as ReactTitlebarProps } from './components-react/Titlebar.js';
 export { LeftRail as ReactLeftRail, type LeftRailProps as ReactLeftRailProps } from './components-react/LeftRail.js';
+export * from './components-react/loadPhase.js';
 export * from './components-react/conversation/index.js';
 export { renderLeftRailHtml, type LeftRailHtmlSnapshot } from './components-react/leftRailStaticRender.js';
 export { renderBotAvatar, escapeHtml } from './utils/botAvatar.js';

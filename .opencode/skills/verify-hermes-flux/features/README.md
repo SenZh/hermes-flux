@@ -28,12 +28,14 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 ## Features
 
 - [Bot primary chat](./bot-primary-chat.md) covers dedicated agent forever chat, atomic activity reflection, titlebar sync, and session pool physical isolation.
+- [First paint skeleton](./first-paint-skeleton.md) covers the loading placeholders for the agent rail, session list and conversation canvas, and their in-place retirement once data lands.
 - [Left rail cockpit](./left-rail-cockpit.md) covers the React island left rail: micro rail, primary card, agent scoping, session row shape, group collage and width clamping.
 - [Session management](./session-management.md) covers creating sessions, switching between them, draft preservation, deleting sessions, and focus restoration.
 - [Group room collaboration](./group-room-collaboration.md) covers multi-agent group rooms, collage avatars, and collaborative discussion flows.
 - [Interactive input dock](./interactive-input-dock.md) covers the 740px golden width container, model tree accordion picker, and thinking depth controls.
 - [Interactive chat stage](./interactive-chat-stage.md) covers action bars (copy/fork/rollback), attachment trays, and slash command poppers.
 - [Clean light theme](./clean-light-theme.md) covers Ayu Light / Warm Paper / Jade White publication typography, tone tokens, and sunken surfaces.
+- [Prompt navigator rail](./prompt-navigator-rail.md) covers the right-edge tick rail, hit-band width adaptation, and the floating 8-row prompt panel without an ordinal column.
 
 ## Feature File vs. Registered Runner ID Mapping (Naming Debt)
 
@@ -44,9 +46,11 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 | 特征说明文档 (`features/*.md`) | control-flux 注册 ID (`run <id>`) | 支持的别名 (Aliases) | 命名分叉说明 (Naming Debt Note) |
 |---|---|---|---|
 | `bot-primary-chat.md` | `bot-primary-chat` | — | 名称一致 |
+| `first-paint-skeleton.md` | `first-paint-skeleton` | — | 名称一致（驱动真实 renderer 而非 E2E harness） |
 | `session-management.md` | `session-management` | — | 名称一致 |
 | `group-room-collaboration.md` | `group-room` | — | **分叉**：文件名带 `-collaboration` 后缀，而 runner 注册 ID 仅为 `group-room` |
 | `interactive-input-dock.md` | `input-dock-controls` | — | **分叉**：文件名使用 `interactive-input-dock`，而 runner 注册 ID 为 `input-dock-controls` |
 | `interactive-chat-stage.md` | `interactive-chat-stage` | — | 名称一致 |
 | `clean-light-theme.md` | `clean-light-theme` | `warm-paper-theme`, `ayu-light-theme` | runner 内部针对同一用例支持浅色皮肤别名多路映射 |
+| `prompt-navigator-rail.md` | `prompt-navigator-rail` | 无 | 名称一致（驱动真实 renderer，非 E2E harness） |
 

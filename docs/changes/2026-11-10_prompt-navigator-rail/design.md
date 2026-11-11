@@ -195,7 +195,7 @@ export interface PromptNavigatorRailProps {
 2. `gutter`，可交互命中面，`role="listbox"`，`tabIndex={0}`，`aria-activedescendant` 指向当前高亮 tick。高度严格等于 `visibleCount * 12`。
 3. `tape`，在 gutter 内，用 `translateY(-start * 12)` 滑动窗口。`key` 取 `prompts[0]?.id`，避免插入新消息时播放一次假滑行。
 4. `tick`，绝对定位在 tape 上，`role="option"`，`aria-current` 标记当前项，`aria-label` 是预览文本，自身 `pointer-events: none`。
-5. `panel`，悬停时出现在轨道左侧，是全部 prompt 的可滚列表。面板是 gutter 的子节点，和参考实现一致。四条事件边界必须写死：面板的 `mousemove` 与 `click` 一律 `stopPropagation`，避免冒泡到 gutter 的指针换算；`wheel` 不能用 React 的 `onWheel`，React 17 起在根容器上以 passive 方式注册，`preventDefault` 无效。必须在 `useEffect` 里用 `panel.addEventListener('wheel', handler, { passive: false })`，handler 内先 `preventDefault` 再 `stopPropagation`；面板 `mouseenter` 取消收起定时器并调 `stopCarousel()`，`mouseleave` 重新计时；面板本身不是原生滚动容器，用 `overflow: hidden` 加绝对定位加遮罩，滚轮按 54px 步进改写 `translateY`。
+5. `panel`，悬停时出现在轨道左侧，是全部 prompt 的可滚列表。面板是 gutter 的子节点，和参考实现一致。四条事件边界必须写死：面板的 `mousemove` 与 `click` 一律 `stopPropagation`，避免冒泡到 gutter 的指针换算；`wheel` 不能用 React 的 `onWheel`，React 17 起在根容器上以 passive 方式注册，`preventDefault` 无效。必须在 `useEffect` 里用 `panel.addEventListener('wheel', handler, { passive: false })`，handler 内先 `preventDefault` 再 `stopPropagation`；面板 `mouseenter` 取消收起定时器并调 `stopCarousel()`，`mouseleave` 重新计时；面板本身不是原生滚动容器，用 `overflow: hidden` 加绝对定位加遮罩，滚轮按 40px 步进改写 `translateY`。
 
 第一版不用 overscan。30 条 tick 就是渲染上限，`planTickWindow` 的 `end - start` 不得超过 `capacity`。
 
@@ -205,7 +205,7 @@ export interface PromptNavigatorRailProps {
 
 **边缘轮播（carousel）。** 指针进入 gutter 上下 18px 热区后，每 80ms 步进一条，`hasMoreAbove` 与 `hasMoreBelow` 为假时停。离开热区或卸载时清除定时器。步进时同步把 `highlightedIndex` 平移到指针所在的相对位置，避免高亮与 tick 脱节。
 
-**面板全量列表。** 面板不是单条预览，而是最多 8 行可见的滚动列表，行高 54px。滚轮以非被动监听接管，一步滚一行，不滚正文。高亮行始终保留上下 2 行上下文，只有贴近边缘才滑动。这样窗口外的提问也能被悬停、预览、点击。
+**面板全量列表。** 面板不是单条预览，而是最多 8 行可见的滚动列表，行高 40px。滚轮以非被动监听接管，一步滚一行，不滚正文。高亮行始终保留上下 2 行上下文，只有贴近边缘才滑动。这样窗口外的提问也能被悬停、预览、点击。
 
 `planTickWindow` 返回的两个 `hasMore` 布尔值同时喂给遮罩渐变与 carousel，和参考实现一致。
 
@@ -470,17 +470,17 @@ function releasePromptJump(seq: number): void {
 | tick 高 2px | `2px` | 视觉一致 |
 | tick 宽 10 / 14 / 20 | `10px` / `14px` / `20px` | 三档 |
 | 间距 12px | `var(--conv-rail-pitch, 12px)` | TS 常量与 CSS 变量同源 |
-| 常规横杠 | `color-mix(in oklab, var(--foreground) 30%, transparent)` | Token 化 |
+| 常规横杠 | `var(--muted-foreground)` | 语义 Token；禁止用前景百分比混色，浅色皮肤会掉到 2:1 以下 |
+| 悬停横杠 | `var(--secondary-foreground)` | 三档中最中间的一档 |
 | 当前横杠 | `var(--foreground)` | 实心 |
-| 面板表面 | `var(--popover)` | L4 实面，不是提示气泡反色胶囊 |
-| 面板边框 | `1px solid var(--border)` | 发丝线 |
-| 面板阴影 | `var(--shadow-card)` | 轻遮蔽 |
-| 面板宽 | `min(20rem, calc(100vw - 6rem))` | 夹住视口 |
-| 面板行高 | `54px`，可见 8 行 | 与参考一致 |
-| 面板内缩 | `4px` | 与参考一致 |
+| 面板表面 | `var(--popover)` + `1px var(--border)` + `var(--shadow-window)` + `var(--specular-line)` | L4 浮层；`--shadow-card` 在两个浅色皮肤自带 `0 0 0 1px` 描边，与 border 并存会叠成双线，故用 `--shadow-window`；受光线只能进 box-shadow，写 border-color 会被整条丢弃 |
+| 面板宽 | `min(20rem, calc(100vw - 7rem))` | 夹住视口 |
+| 面板行高 | `40px`（8pt 网格整数倍），可见 8 行 | 行内只留预览正文，不加序号 |
+| 面板内缩 | `8px` | `--conv-prompt-panel-pad`，走 8pt 网格；行内再让 8px，文字左缘合计 16px |
+| 列表行 | 常规 `var(--secondary-foreground)`，悬停/当前 `var(--foreground)` | 悬停 7% 前景混色底，当前 2px 左侧条 |
 | 面板文字 | `var(--conv-meta-size)` | 禁止内联字号，见 `rules.mjs:708-719` |
-| 遮罩 | `linear-gradient` 上下 14% | 有更多项时显示 |
-| 过渡 | `120ms` 宽度，`200ms` 滑行 | 设计系统 120 进 200 出 |
+| 遮罩 | `linear-gradient` 上下 24px | 有更多项时显示 |
+| 过渡 | `120ms` 变宽与面板进场，`200ms` 滑行 | 设计系统 120 进 200 出 |
 
 z-index：轨道 `20`，面板 `30`。底部遮罩是 `10`，见 `conversation.css:123`。dock 由宿主 `insertAdjacentHTML` 追加在 pod 末尾，见 `index.ts:6709-6710`。轨道必须在 dock 之前插入，否则会被 dock 盖住。
 

@@ -508,6 +508,10 @@ export const zhDict = {
   'gallery.statLatencyDelta': '超过阈值 200ms',
   'gallery.noticeTitle': '关于本样例页',
   'gallery.noticeBody': '本页由 Surface / ListRow / Toolbar / Stat 四个原子组合而成，用于截图审查真实形态下的几何与字阶。它不进入生产挂载点，也不发起任何网关调用。',
+  'gallery.fontUiLabel': '界面字体（皮肤槽位 --font-sans）',
+  'gallery.fontUiSample': '界面文字使用界面字体。在设置里更换后，所有表面同时跟随，不需要改任何组件。',
+  'gallery.fontCodeLabel': '代码字体（皮肤槽位 --font-mono）',
+  'gallery.fontCodeSample': 'hermes gateway --profile default --transport ws',
 } as const;
 
 export type I18nKey = keyof typeof zhDict;
@@ -1009,6 +1013,10 @@ export const enDict: Record<I18nKey, string> = {
   'gallery.statLatencyDelta': 'Above 200ms threshold',
   'gallery.noticeTitle': 'About this sample',
   'gallery.noticeBody': 'This page is assembled from the Surface / ListRow / Toolbar / Stat atoms to review real-shape geometry and type scale in screenshots. It is never mounted in production and makes no gateway calls.',
+  'gallery.fontUiLabel': 'UI font (follows the skin slot --font-sans)',
+  'gallery.fontUiSample': 'Interface text uses the UI font. Switching it in settings changes every surface at once.',
+  'gallery.fontCodeLabel': 'Code font (follows the skin slot --font-mono)',
+  'gallery.fontCodeSample': 'hermes gateway --profile default --transport ws',
 };
 
 export type Locale = 'zh-CN' | 'en-US';

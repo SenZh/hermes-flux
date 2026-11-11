@@ -131,7 +131,15 @@ function scalePx(base: string, factor: number): string {
   return `${Math.round(value * 10) / 10}px`;
 }
 
-/** 把偏好写入 :root。字号档位以乘数形式作用于 TYPOGRAPHY_TOKENS 的基准值。 */
+/**
+ * 把偏好写入 :root。字号档位以乘数形式作用于 TYPOGRAPHY_TOKENS 的基准值。
+ *
+ * 【命名约束 (Rules)】聊天阅读尺度必须写成 `--chat-text-*`，不能叫 `--text-*`。
+ *   `--text-*` 已被 Tailwind 占据为字号命名空间（--text-body / --text-micro 等），
+ *   而本函数写的是 <html> 行内样式，优先级高于样式表里的 :root。
+ *   两者同名时，用户一调字号缩放，组件侧的 text-micro 会被静默改成 12px×倍率，
+ *   与设计系统的 10px 档冲突，且排查时看起来"设置是对的"。
+ */
 export function applyFontPreferences(prefs: FontPreferences, root: HTMLElement = document.documentElement): void {
   const factor = FONT_SIZE_SCALE_OPTIONS[prefs.sizeScale];
   const uiOptions = getUiFontSelectOptions();
@@ -144,9 +152,9 @@ export function applyFontPreferences(prefs: FontPreferences, root: HTMLElement =
 
   root.style.setProperty('--font-sans', uiStack);
   root.style.setProperty('--font-mono', monoStack);
-  root.style.setProperty('--text-markdown', scalePx(TYPOGRAPHY_TOKENS.markdown, factor));
-  root.style.setProperty('--text-code', scalePx(TYPOGRAPHY_TOKENS.code, factor));
-  root.style.setProperty('--text-ui-label', scalePx(TYPOGRAPHY_TOKENS.uiLabel, factor));
-  root.style.setProperty('--text-meta', scalePx(TYPOGRAPHY_TOKENS.meta, factor));
-  root.style.setProperty('--text-micro', scalePx(TYPOGRAPHY_TOKENS.micro, factor));
+  root.style.setProperty('--chat-text-markdown', scalePx(TYPOGRAPHY_TOKENS.markdown, factor));
+  root.style.setProperty('--chat-text-code', scalePx(TYPOGRAPHY_TOKENS.code, factor));
+  root.style.setProperty('--chat-text-ui-label', scalePx(TYPOGRAPHY_TOKENS.uiLabel, factor));
+  root.style.setProperty('--chat-text-meta', scalePx(TYPOGRAPHY_TOKENS.meta, factor));
+  root.style.setProperty('--chat-text-micro', scalePx(TYPOGRAPHY_TOKENS.micro, factor));
 }

@@ -62,7 +62,7 @@ test('Composer dock - 输入舱视觉 100% 对标 OpenChamber', async (t) => {
 
   await t.test('4. 编辑器字号跟随设置档位，且不再硬编码 13.5px', () => {
     const editor = blockOf('.composer-dock__textarea');
-    assert.ok(editor.includes('font-size: var(--text-markdown)'), '输入文字必须与正文同源缩放');
+    assert.ok(editor.includes('font-size: var(--chat-text-markdown)'), '输入文字必须与正文同源缩放');
     assert.ok(!editor.includes('13.5px'), '禁止写死字号');
     assert.ok(editor.includes('resize: none'), '禁止出现浏览器原生拖拽手柄');
   });

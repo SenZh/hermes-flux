@@ -104,6 +104,19 @@ export function Gallery(): React.ReactElement {
         </div>
 
         <Surface level="card" padding="loose">
+          <div className="flex flex-col gap-2">
+            <span className="text-caption text-muted-foreground">{t('gallery.fontUiLabel')}</span>
+            <span data-font="ui" className="block font-ui text-body text-foreground">
+              {t('gallery.fontUiSample')}
+            </span>
+            <span className="text-caption text-muted-foreground">{t('gallery.fontCodeLabel')}</span>
+            <code data-font="code" className="block font-code text-body text-foreground">
+              {t('gallery.fontCodeSample')}
+            </code>
+          </div>
+        </Surface>
+
+        <Surface level="card" padding="loose">
           <div className="flex flex-col gap-1">
             <span className="text-section font-semibold text-foreground">{t('gallery.noticeTitle')}</span>
             <span className="text-body text-muted-foreground">{t('gallery.noticeBody')}</span>

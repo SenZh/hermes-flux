@@ -44,6 +44,13 @@ const CONSUMPTION = {
   ListRow: { state: 'consumed', consumers: ['components-react/gallery/Gallery.tsx'] },
   Toolbar: { state: 'consumed', consumers: ['components-react/gallery/Gallery.tsx'] },
   Stat: { state: 'consumed', consumers: ['components-react/gallery/Gallery.tsx'] },
+  /**
+   * 骨架块。
+   *
+   * 设计意图 (Why)：首屏加载骨架是"加载 ≠ 空"的唯一视觉出口，消费者是左轨与会话区的首屏占位，
+   *   不是演示页，因此登记为 consumed。
+   */
+  Skeleton: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/conversation/ConversationSkeleton.tsx'] },
 };
 
 /** 收集 ui 包内所有未被排除的生产源文件（排除 primitives 自身与 barrel）。 */
@@ -92,7 +99,7 @@ test('primitives 消费守卫：登记表结构完整且状态合法', async (t)
     const consumed = Object.entries(CONSUMPTION).filter(([, entry]) => entry.state === 'consumed').map(([name]) => name).sort();
     assert.ok(consumed.length >= 3, `已消费 primitives 不得少于 3 个，当前 ${consumed.length}`);
     // 冻结当前消费集合：删除任何一项都必须先解释清楚，不能悄悄发生
-    assert.deepEqual(consumed, ['Badge', 'Button', 'Input', 'ListRow', 'Stat', 'Surface', 'Toolbar'], '已消费集合只增不减；若确有迁移请同步更新本断言并在 PR 里说明');
+    assert.deepEqual(consumed, ['Badge', 'Button', 'Input', 'ListRow', 'Skeleton', 'Stat', 'Surface', 'Toolbar'], '已消费集合只增不减；若确有迁移请同步更新本断言并在 PR 里说明');
   });
 });
 

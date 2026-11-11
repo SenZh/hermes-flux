@@ -146,6 +146,59 @@ export function windowStartAroundIndex(
 }
 
 /**
+ * 窗口是否允许把起点向前搬（读者向上回溯）。
+ *
+ * 【设计意图 (Why)】
+ *   冷启动先渲染缓存会话时 `scrollTop` 初值为 0，视口天然"落在窗口上沿之上"，
+ *   在 scroll 事件里与"读者正在向上翻"完全同形。若不加授权，
+ *   首屏会连续扩窗并把窗口搬离末尾（实测 1128 条会话从 [1008,1128] 落到 [907,1027]），
+ *   读者看到的不是最新消息。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   曾用 `scrollTop === 0` 判断"刚打开"：读者自己滚到顶同样是 0，会把真实回溯也挡住。
+ *   现改为由读者手势产生的反向滚动记录来授权，与视口位置解耦。
+ *
+ * 【约束与规则 (Rules)】
+ *   - 只有同一会话内记录过读者反向滚动，才允许扩窗；
+ *   - 总数不超过容量时不存在"更早的未挂载内容"，一律不扩窗。
+ */
+export function shouldExpandWindow(input: {
+  sessionId: string;
+  readerScrolledSessionId: string;
+  total: number;
+  capacity: number;
+}): boolean {
+  if (!input.sessionId) return false;
+  if (clampTotal(input.total) <= normalizeCapacity(input.capacity, 1)) return false;
+  return input.readerScrolledSessionId === input.sessionId;
+}
+
+/**
+ * 首屏是否还需要落定（把视口贴到最新消息）。
+ *
+ * 【设计意图 (Why)】
+ *   缓存恢复、分页补齐与行高锁定都是分批到达的：条数变了、平均行高变了、
+ *   或者视口已脱离一屏以上，都说明视口还停在旧口径上，必须重新落定。
+ *
+ * 【约束与规则 (Rules)】
+ *   - 读者主动回溯过的会话永不自动落定，绝不把正在回看的人拽回底部；
+ *   - 窗口必须覆盖末尾才有"最新消息"可贴。
+ */
+export function shouldSettleInitialBottom(input: {
+  sessionId: string;
+  readerScrolledSessionId: string;
+  atTail: boolean;
+  settledSignature: string;
+  currentSignature: string;
+  drifted: boolean;
+}): boolean {
+  if (!input.sessionId) return false;
+  if (input.readerScrolledSessionId === input.sessionId) return false;
+  if (!input.atTail) return false;
+  return input.settledSignature !== input.currentSignature || input.drifted;
+}
+
+/**
  * 判定会话是否可能包含更早的远端服务端历史。
  *
  * 【设计意图 (Why)】

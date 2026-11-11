@@ -18,7 +18,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -94,7 +94,7 @@ export async function createDriveSession(options = {}) {
   // 1. 动态分配空闲静态伺服端口
   // 【规则】入口页可被调用方指定（默认验收 harness）：厂商图标预览等「纯渲染产物验证」
   // 需要一个能挂载 renderXxx 输出的空白宿主页，否则只能去改动 harness 的 mock 数据。
-  const entry = options.entry || '/packages/desktop/__tests__/cdp/e2e-acceptance-harness.html';
+  const entry = options.entry || options.htmlPath || '/packages/desktop/__tests__/cdp/e2e-acceptance-harness.html';
   // 【规则】入口页必须是以 `/` 开头的仓库相对路径：它既被静态服务的默认路由消费，
   // 又被直接拼进 targetUrl。少了前导斜杠会拼出 `http://host:portpackages/...`，
   // 页面直接 404 而报错信息完全指不到根因。
@@ -314,10 +314,232 @@ export async function runFeature(featureId) {
   const featureArtifactsDir = path.join(ARTIFACTS_DIR, featureId);
   if (!fs.existsSync(featureArtifactsDir)) fs.mkdirSync(featureArtifactsDir, { recursive: true });
 
-  const session = await createDriveSession();
+  const session = await createDriveSession(
+    featureId === 'first-paint-skeleton' || featureId === 'prompt-navigator-rail'
+      ? { htmlPath: '/packages/desktop/dist/renderer/index.html' }
+      : {}
+  );
   const startTime = Date.now();
 
   try {
+    if (featureId === 'first-paint-skeleton') {
+      console.log('  1. 等待真实 renderer 首帧挂载...');
+      await session.waitFor('document.getElementById("flux-app-root")?.childElementCount > 0', 15000, 'renderer first paint');
+
+      console.log('  2. 注入"数据未到达"状态并重绘（真实渲染路径，非 mock 组件）...');
+      const injected = await session.evaluate(`(() => {
+        const app = window.__fluxState;
+        if (!app) return 'no-state';
+        app.gatewayConnected = true;
+        app.gatewayConnecting = false;
+        app.profiles = [];
+        app.sessions = [];
+        app.messages = [];
+        app.groupRooms = [];
+        app.projects = [];
+        app.profilesPhase = 'loading';
+        app.sessionsPhase = 'loading';
+        app.messagesPhase = 'loading';
+        app.activeSessionId = '';
+        app.activeFocus = { type: 'bot', botName: 'default' };
+        try {
+          window.__fluxRender();
+        } catch (error) {
+          return 'render-error: ' + (error && error.message ? error.message : String(error));
+        }
+        return 'ok:' + JSON.stringify({
+          leftRail: Boolean(document.getElementById('react-leftrail-host')),
+          leftRailChildren: document.getElementById('react-leftrail-host')?.childElementCount || 0,
+          stationHtml: (document.getElementById('flux-station-rail')?.innerHTML || '').slice(0, 160),
+        });
+      })()`);
+      console.log('     · 注入结果:', injected);
+      if (injected !== 'ok' && !String(injected).startsWith('ok:')) throw new Error(`骨架态注入失败: ${injected}`);
+
+      // React 岛提交是异步的：以用户视角轮询骨架真正出现在 DOM 上，而不是读一次就断言。
+      await session.waitFor('document.querySelectorAll(\'[data-skeleton="agent"]\').length === 3', 5000, 'agent skeletons');
+
+      const skeletonState = await session.evaluate(`(() => {
+        const q = (sel) => document.querySelectorAll(sel).length;
+        return {
+          agentBlocks: q('[data-skeleton="agent"]'),
+          sessionRows: q('[data-skeleton="session"]'),
+          agentCardSkeleton: q('[data-skeleton="agent-card"]'),
+          conversationSkeleton: q('[data-conv-skeleton="true"]'),
+          realStations: q('[data-station-profile]'),
+          primaryCard: q('[data-primary-bot]'),
+          conversationHost: Boolean(document.getElementById('react-message-list-host')),
+          conversationHtml: (document.getElementById('react-message-list-host')?.innerHTML || '').slice(0, 300),
+          bodyText: document.body.innerText,
+        };
+      })()`);
+      console.log('     · 骨架态 DOM 统计:', {
+        agentBlocks: skeletonState.agentBlocks,
+        sessionRows: skeletonState.sessionRows,
+        conversationSkeleton: skeletonState.conversationSkeleton,
+      });
+
+      if (skeletonState.agentBlocks !== 3) throw new Error(`微轨必须有 3 个 Agent 骨架，实际 ${skeletonState.agentBlocks}`);
+      if (skeletonState.sessionRows !== 4) throw new Error(`会话区必须有 4 行骨架，实际 ${skeletonState.sessionRows}`);
+      if (skeletonState.agentCardSkeleton < 1) throw new Error('主工位卡必须是骨架行');
+      if (skeletonState.conversationSkeleton !== 1) throw new Error(`对话区必须渲染骨架（host=${skeletonState.conversationHost}, html=${skeletonState.conversationHtml}）`);
+      if (skeletonState.realStations !== 0) throw new Error('加载中不得渲染真实 Agent 站点');
+      if (skeletonState.primaryCard !== 0) throw new Error('加载中不得渲染主工位身份行');
+      if (skeletonState.bodyText.includes('暂无历史会话')) throw new Error('加载中不得断言没有会话');
+      if (skeletonState.bodyText.includes('开始新的对话')) throw new Error('加载中不得断言会话为空');
+
+      const skeletonShot = path.join(featureArtifactsDir, 'skeleton.png');
+      await session.screenshot(skeletonShot);
+      // 规范要求固定名 screenshot.png：首屏骨架就是本用例的主图。
+      const primaryShot = path.join(featureArtifactsDir, 'screenshot.png');
+      await session.screenshot(primaryShot);
+
+      console.log('  2.5 浅色皮肤（warm-paper）下复核骨架可见性（合成对比度）...');
+      await session.evaluate(`(() => {
+        document.documentElement.setAttribute('data-theme', 'warm-paper');
+        // 主题切换带 150ms 过渡：立即截图会抓到旧皮肤的中间态（上一轮浅色图里的深灰块即此）。
+        const settle = document.createElement('style');
+        settle.id = 'skeleton-transition-settle';
+        settle.textContent = '*{transition:none!important}';
+        document.head.appendChild(settle);
+        return true;
+      })()`);
+      await session.evaluate('new Promise((resolve) => setTimeout(() => resolve(true), 450))');
+
+      const lightCheck = await session.evaluate(`(() => {
+        // 量峰值（opacity=1）而不是动画中间值，才能对"骨架是否可辨"给出稳定结论。
+        const measure = document.createElement('style');
+        measure.id = 'skeleton-measure';
+        measure.textContent = '.flux-skeleton{animation:none!important;opacity:1!important}';
+        document.head.appendChild(measure);
+
+        const toRgba = (color) => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 1;
+          canvas.height = 1;
+          const ctx = canvas.getContext('2d');
+          ctx.clearRect(0, 0, 1, 1);
+          ctx.fillStyle = color;
+          ctx.fillRect(0, 0, 1, 1);
+          const d = ctx.getImageData(0, 0, 1, 1).data;
+          return { r: d[0], g: d[1], b: d[2], a: d[3] / 255 };
+        };
+        const luminance = ({ r, g, b }) => {
+          const channel = (value) => {
+            const c = value / 255;
+            return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+          };
+          return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+        };
+        const composite = (fg, bg) => ({
+          r: fg.r * fg.a + bg.r * (1 - fg.a),
+          g: fg.g * fg.a + bg.g * (1 - fg.a),
+          b: fg.b * fg.a + bg.b * (1 - fg.a),
+          a: 1,
+        });
+        const backdropOf = (el) => {
+          let node = el.parentElement;
+          while (node) {
+            const color = toRgba(getComputedStyle(node).backgroundColor);
+            if (color.a > 0.9) return color;
+            node = node.parentElement;
+          }
+          return { r: 255, g: 255, b: 255, a: 1 };
+        };
+        const sample = (selector) => {
+          const el = document.querySelector(selector);
+          if (!el) return null;
+          const colorText = getComputedStyle(el).backgroundColor;
+          const color = toRgba(colorText);
+          const backdrop = backdropOf(el);
+          const composed = composite(color, backdrop);
+          const l1 = luminance(composed);
+          const l2 = luminance(backdrop);
+          const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+          return { colorText, alpha: Math.round(color.a * 1000) / 1000, ratio: Math.round(ratio * 100) / 100 };
+        };
+        const result = {
+          theme: document.documentElement.getAttribute('data-theme'),
+          agent: sample('[data-skeleton="agent"]'),
+          session: sample('[data-skeleton="session"] .flux-skeleton'),
+          conversation: sample('[data-conv-skeleton="true"] .flux-skeleton'),
+        };
+        measure.remove();
+        return result;
+      })()`);
+      console.log('     · 浅色皮肤合成对比度:', lightCheck);
+      for (const [slot, entry] of Object.entries({ agent: lightCheck.agent, session: lightCheck.session, conversation: lightCheck.conversation })) {
+        if (!entry) throw new Error(`暖白皮肤下找不到 ${slot} 骨架，无法取证`);
+        if (!(entry.alpha >= 0.08)) throw new Error(`暖白皮肤下 ${slot} 骨架近透明（alpha=${entry.alpha}, color=${entry.colorText}）`);
+        if (!(entry.ratio >= 1.12)) throw new Error(`暖白皮肤下 ${slot} 骨架不可辨（对比度 ${entry.ratio}:1，需 ≥1.12:1）`);
+        if (entry.ratio > 2.2) throw new Error(`暖白皮肤下 ${slot} 骨架过于抢眼（对比度 ${entry.ratio}:1，需 ≤2.2:1）`);
+      }
+      const lightShot = path.join(featureArtifactsDir, 'skeleton-warm-paper.png');
+      await session.screenshot(lightShot);
+      await session.evaluate(`(() => {
+        document.getElementById('skeleton-transition-settle')?.remove();
+        document.documentElement.setAttribute('data-theme', 'obsidian-gold');
+        return true;
+      })()`);
+      await session.evaluate('new Promise((resolve) => setTimeout(() => resolve(true), 450))');
+
+      console.log('  3. 注入"数据已到达"状态，验证骨架原位退场...');
+      await session.evaluate(`(() => {
+        const app = window.__fluxState;
+        if (!app) return false;
+        app.gatewayConnected = true;
+        app.gatewayConnecting = false;
+        app.profiles = [
+          { name: 'default', displayName: 'Default 助理', isDefault: true },
+          { name: 'arch-wang', displayName: '架构老王' },
+        ];
+        app.sessions = [{ id: 'verify-s1', title: '骨架验证会话', preview: '数据已到达', botName: 'default', timestamp: Date.now() }];
+        app.profilesPhase = 'ready';
+        app.sessionsPhase = 'ready';
+        app.messagesPhase = 'ready';
+        window.__fluxRender();
+        return true;
+      })()`);
+
+      await session.waitFor('document.querySelectorAll(\'[data-station-profile]\').length > 0', 5000, 'real stations after ready');
+
+      const readyState = await session.evaluate(`(() => {
+        const q = (sel) => document.querySelectorAll(sel).length;
+        return {
+          agentBlocks: q('[data-skeleton="agent"]'),
+          sessionRows: q('[data-skeleton="session"]'),
+          conversationSkeleton: q('[data-conv-skeleton="true"]'),
+          realStations: q('[data-station-profile]'),
+          sessionItems: q('.session-item'),
+        };
+      })()`);
+      console.log('     · 就绪态 DOM 统计:', readyState);
+
+      if (readyState.agentBlocks !== 0) throw new Error('数据到达后不得残留 Agent 骨架');
+      if (readyState.sessionRows !== 0) throw new Error('数据到达后不得残留会话骨架');
+      if (readyState.conversationSkeleton !== 0) throw new Error('数据到达后不得残留对话骨架');
+      if (readyState.realStations < 1) throw new Error('数据到达后必须渲染真实 Agent 站点');
+      if (readyState.sessionItems < 1) throw new Error('数据到达后必须渲染真实会话行');
+
+      const readyShot = path.join(featureArtifactsDir, 'ready.png');
+      await session.screenshot(readyShot);
+
+      const evidence = {
+        featureId,
+        commit: execSync('git rev-parse HEAD', { cwd: rootDir }).toString().trim(),
+        timestamp: new Date().toISOString(),
+        durationMs: Date.now() - startTime,
+        status: 'PASSED',
+        skeletonState,
+        readyState,
+        warmPaper: lightCheck,
+        screenshots: { skeleton: skeletonShot, ready: readyShot, warmPaper: lightShot, primary: primaryShot },
+      };
+      fs.writeFileSync(path.join(featureArtifactsDir, 'evidence.json'), JSON.stringify(evidence, null, 2));
+      console.log('  ✔ 骨架屏验证成功，证据已落盘:', featureArtifactsDir);
+      return true;
+    }
+
     if (featureId === 'bot-primary-chat') {
       console.log('  1. 验证左侧专职 Bot 卡片渲染与初始状态...');
       await session.waitFor('document.querySelector(".rail-primary-agent-card") !== null', 10000, 'primary card');
@@ -687,8 +909,199 @@ export async function runFeature(featureId) {
       fs.writeFileSync(path.join(featureArtifactsDir, 'evidence.json'), JSON.stringify(evidence, null, 2));
       console.log(`  ✔ Ayu 晨曦皮肤验证成功！证据已落盘: ${screenshotPath}`);
       return true;
+    } else if (featureId === 'prompt-navigator-rail') {
+      console.log('  1. 等待真实 renderer 挂载并注入多条用户提问（走真实渲染路径）...');
+      await session.waitFor('document.getElementById("flux-app-root")?.childElementCount > 0', 15000, 'renderer first paint');
+
+      const injected = await session.evaluate(`(() => {
+        const app = window.cdpApp || window.__fluxState;
+        if (!app) return 'no-state';
+        const messages = [];
+        for (let i = 0; i < 24; i += 1) {
+          messages.push({ id: 'pn-user-' + i, role: 'user', content: '第 ' + (i + 1) + ' 次提问：把构建脚本改成增量编译', timestamp: '18:0' + (i % 10) });
+          messages.push({ id: 'pn-assist-' + i, role: 'assistant', content: '收到，第 ' + (i + 1) + ' 轮答复。', timestamp: '18:1' + (i % 10) });
+        }
+        app.gatewayConnected = true;
+        app.gatewayConnecting = false;
+        app.messages = messages;
+        try {
+          if (typeof app.render === 'function') app.render();
+          else if (typeof window.__fluxRender === 'function') window.__fluxRender();
+        } catch (error) {
+          return 'render-error: ' + (error && error.message ? error.message : String(error));
+        }
+        return 'ok';
+      })()`);
+      if (String(injected) !== 'ok') throw new Error(`提问注入失败: ${injected}`);
+
+      console.log('  2. 等待导航轨挂载并读命中带宽度...');
+      await session.waitFor('document.querySelector(".conv-prompt-rail__gutter") !== null', 8000, 'prompt rail gutter');
+      const railMetrics = await session.evaluate(`(() => {
+        const gutter = document.querySelector('.conv-prompt-rail__gutter');
+        const gr = gutter.getBoundingClientRect();
+        const ticks = Array.from(document.querySelectorAll('.conv-prompt-rail__tick'));
+        const stage = document.querySelector('.flux-middle-pod');
+        const stageBg = stage ? getComputedStyle(stage).backgroundColor : '';
+        const normal = ticks.find((t) => !t.classList.contains('is-active') && !t.classList.contains('is-highlighted'));
+        return {
+          gutterWidth: +gr.width.toFixed(2),
+          tickCount: ticks.length,
+          tickHeight: ticks[0] ? getComputedStyle(ticks[0].firstElementChild).height : null,
+          tickColor: normal ? getComputedStyle(normal.firstElementChild).backgroundColor : null,
+          stageBg,
+        };
+      })()`);
+      console.log('     · 轨道指标:', railMetrics);
+      if (railMetrics.tickCount === 0 || railMetrics.tickCount > 30) {
+        throw new Error(`轨道 tick 数量必须落在 1~30，实测 ${railMetrics.tickCount}`);
+      }
+      if (railMetrics.gutterWidth !== 28 && railMetrics.gutterWidth !== 12) {
+        throw new Error(`命中带宽度必须是 28 或 12，实测 ${railMetrics.gutterWidth}`);
+      }
+
+      console.log('  3. 真实指针事件驱动面板挂载，读行几何与序号槽位...');
+      const panelMetrics = await session.evaluate(`(async () => {
+        const gutter = document.querySelector('.conv-prompt-rail__gutter');
+        const gr = gutter.getBoundingClientRect();
+        gutter.dispatchEvent(new PointerEvent('pointermove', {
+          clientX: gr.left + gr.width / 2,
+          clientY: gr.top + gr.height / 2,
+          bubbles: true,
+        }));
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const panel = document.querySelector('.conv-prompt-rail__panel');
+        if (!panel) return { mounted: false };
+        const cs = getComputedStyle(panel);
+        const rows = Array.from(panel.querySelectorAll('.conv-prompt-rail__panel-row'));
+        const viewport = panel.querySelector('.conv-prompt-rail__panel-viewport');
+        const rowCs = rows[0] ? getComputedStyle(rows[0]) : null;
+        return {
+          mounted: true,
+          padding: cs.padding,
+          radius: cs.borderTopLeftRadius,
+          borderWidth: cs.borderTopWidth,
+          boxShadow: cs.boxShadow,
+          rowCount: rows.length,
+          rowHeight: rowCs ? rowCs.height : null,
+          rowChildren: rows[0] ? rows[0].children.length : null,
+          rowTabIndex: rows[0] ? rows[0].tabIndex : null,
+          visibleRows: viewport ? Math.round(viewport.getBoundingClientRect().height / parseFloat(rowCs.height)) : null,
+          indexNodes: panel.querySelectorAll('.conv-prompt-rail__panel-index').length,
+          topsAscendBy: rows.length > 1 ? rows[1].offsetTop - rows[0].offsetTop : null,
+        };
+      })()`);
+      console.log('     · 面板指标:', panelMetrics);
+      if (panelMetrics.mounted !== true) throw new Error('指针事件后面板必须挂载');
+      if (panelMetrics.indexNodes !== 0) throw new Error(`面板行不得含序号节点，实测 ${panelMetrics.indexNodes}`);
+      if (panelMetrics.rowChildren !== 1) throw new Error(`面板行必须只有一个文本子节点，实测 ${panelMetrics.rowChildren}`);
+      if (panelMetrics.rowTabIndex !== -1) throw new Error(`面板行必须不进 Tab 序列，实测 tabIndex=${panelMetrics.rowTabIndex}`);
+      if (panelMetrics.rowHeight !== '40px') throw new Error(`面板行高必须 40px，实测 ${panelMetrics.rowHeight}`);
+      if (panelMetrics.visibleRows !== 8) throw new Error(`面板必须可见 8 行，实测 ${panelMetrics.visibleRows}`);
+      if (panelMetrics.rowCount !== 10) throw new Error(`面板挂载行数必须是 8 可见 + 2 overscan = 10，实测 ${panelMetrics.rowCount}`);
+      if (panelMetrics.padding !== '8px') throw new Error(`面板内缩必须 8px，实测 ${panelMetrics.padding}`);
+      if (panelMetrics.borderWidth !== '1px') throw new Error(`面板边框必须 1px 发丝线，实测 ${panelMetrics.borderWidth}`);
+      if (panelMetrics.radius !== '8px') throw new Error(`面板圆角必须 8px，实测 ${panelMetrics.radius}`);
+      if (Math.abs(panelMetrics.topsAscendBy - 40) > 0.5) throw new Error(`行间距必须等于行高 40px，实测 ${panelMetrics.topsAscendBy}`);
+      // --shadow-card 在两个浅色皮肤自带 0 0 0 1px 描边，与 border 并存会叠成双线
+      if (/0px 0px 0px 1px/.test(panelMetrics.boxShadow)) {
+        throw new Error(`浮层遮蔽不得再叠加 1px 描边层：${panelMetrics.boxShadow}`);
+      }
+
+      console.log('  4. 点击一根非当前 tick，验证跳转落点与当前项同步...');
+      const jumpMetrics = await session.evaluate(`(async () => {
+        const ticks = Array.from(document.querySelectorAll('.conv-prompt-rail__tick'));
+        // 必须选一个「离当前位置足够远」的目标：窗口内相邻 tick 跳转不改变 scrollTop，等于没验证。
+        const target = ticks[0];
+        if (!target || target.classList.contains('is-active')) return { skipped: 'no-far-tick' };
+        const stream = document.getElementById('conversation-stream');
+        const beforeTop = stream.scrollTop;
+        const gutter = document.querySelector('.conv-prompt-rail__gutter');
+        const gr = gutter.getBoundingClientRect();
+        const tr = target.getBoundingClientRect();
+        gutter.dispatchEvent(new PointerEvent('pointermove', {
+          clientX: gr.left + gr.width / 2,
+          clientY: tr.top + tr.height / 2,
+          bubbles: true,
+        }));
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        // 用带坐标的真实 MouseEvent：gutter 靠 clientY 反算 tick 下标，裸 click() 的 clientY 为 0，落不到任何 tick。
+        gutter.dispatchEvent(new MouseEvent('click', {
+          clientX: gr.left + gr.width / 2,
+          clientY: tr.top + tr.height / 2,
+          bubbles: true,
+        }));
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        const activeTickIndex = Array.from(document.querySelectorAll('.conv-prompt-rail__tick')).findIndex((t) => t.classList.contains('is-active'));
+        return {
+          moved: stream.scrollTop !== beforeTop,
+          beforeTop: +beforeTop.toFixed(1),
+          afterTop: +stream.scrollTop.toFixed(1),
+          activeTickIndex,
+          activeTickCount: document.querySelectorAll('.conv-prompt-rail__tick.is-active').length,
+        };
+      })()`);
+      console.log('     · 跳转指标:', jumpMetrics);
+      if (jumpMetrics.skipped === undefined) {
+        if (jumpMetrics.activeTickCount !== 1) {
+          throw new Error(`跳转后当前项必须唯一，实测 ${jumpMetrics.activeTickCount}`);
+        }
+        if (jumpMetrics.activeTickIndex < 0) {
+          throw new Error('跳转后必须有处于当前态的 tick');
+        }
+        if (!jumpMetrics.moved) {
+          throw new Error(`点击远端 tick 后滚动位置必须改变，实测仍停在 scrollTop=${jumpMetrics.afterTop}`);
+        }
+      }
+
+      console.log('  5. 键盘通路：gutter 聚焦后 End 与 ArrowUp 必须移动高亮且指向已挂载 tick...');
+      const keyboardMetrics = await session.evaluate(`(async () => {
+        const gutter = document.querySelector('.conv-prompt-rail__gutter');
+        gutter.focus();
+        const dispatch = (key) => gutter.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+        dispatch('End');
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        const afterEnd = gutter.getAttribute('aria-activedescendant');
+        const endTargetMounted = afterEnd ? Boolean(document.getElementById(afterEnd)) : false;
+        dispatch('ArrowUp');
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        const afterUp = gutter.getAttribute('aria-activedescendant');
+        const upTargetMounted = afterUp ? Boolean(document.getElementById(afterUp)) : false;
+        return {
+          afterEnd,
+          endTargetMounted,
+          afterUp,
+          upTargetMounted,
+          moved: afterEnd !== afterUp,
+          isGutterFocused: document.activeElement === gutter,
+        };
+      })()`);
+      console.log('     · 键盘指标:', keyboardMetrics);
+      if (!keyboardMetrics.isGutterFocused) throw new Error('gutter 必须可获得焦点（Tab 序列入口）');
+      if (!keyboardMetrics.afterEnd) throw new Error('End 键后 aria-activedescendant 必须指向某项');
+      if (!keyboardMetrics.endTargetMounted) throw new Error('End 指示的目标 tick 必须已挂载，不得指向不存在节点');
+      if (!keyboardMetrics.upTargetMounted) throw new Error('ArrowUp 后目标 tick 必须仍已挂载');
+      if (!keyboardMetrics.moved) throw new Error('ArrowUp 必须让高亮相对 End 位置发生移动');
+
+      console.log('  6. 捕获真实渲染截图与证据快照...');
+      const railScreenshot = path.join(featureArtifactsDir, 'screenshot.png');
+      await session.screenshot(railScreenshot);
+
+      const railEvidence = {
+        featureId,
+        timestamp: new Date().toISOString(),
+        durationMs: Date.now() - startTime,
+        status: 'PASSED',
+        railMetrics,
+        panelMetrics,
+        jumpMetrics,
+        keyboardMetrics,
+        screenshot: railScreenshot,
+      };
+      fs.writeFileSync(path.join(featureArtifactsDir, 'evidence.json'), JSON.stringify(railEvidence, null, 2));
+      console.log(`  ✔ 提示词导航轨验证成功！证据已落盘: ${railScreenshot}`);
+      return true;
     } else {
-      throw new Error(`Unknown feature ID: ${featureId}. Supported features: bot-primary-chat, session-management, group-room, input-dock-controls, interactive-chat-stage, clean-light-theme`);
+      throw new Error(`Unknown feature ID: ${featureId}. Supported features: bot-primary-chat, session-management, group-room, input-dock-controls, interactive-chat-stage, clean-light-theme, prompt-navigator-rail`);
     }
   } finally {
     await session.cleanup();
