@@ -112,7 +112,11 @@
       "pixso": {
         "type": "remote",
         "url": "https://pixso.cn/mcp",
-        "timeout": { "startup": 45000, "catalog": 45000 },
+        "timeout": {
+          "startup": 45000,
+          "catalog": 45000
+        },
+        "disabled": true,
       },
     },
   },

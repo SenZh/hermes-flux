@@ -1,0 +1,119 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  // 规则正文与工程铁律必须作为指令源加载，避免 Agent 只读 AGENTS.md 漏掉门禁细则
+  "instructions": ["AGENTS.md", "ENGINEERING_DISCIPLINE.md"],
+
+  // 交付物目录不参与文件监听，避免构建产物反复触发刷新
+  "watcher": {
+    "ignore": ["packages/*/dist/**", "packages/*/release/**", "node_modules/**"],
+  },
+
+  // 保存即格式化，减少样式门禁因缩进噪声产生的误报
+  "formatter": true,
+
+  // 多步任务需要 todo 跟踪，避免长链任务丢步
+  "experimental": {
+    "todo": true,
+  },
+
+  /*
+   * 默认权限：以「不可逆操作必须人类确认」为唯一原则。
+   * 判定顺序为「最后匹配者生效」，因此宽泛规则在前、精确例外在后。
+   */
+  "permissions": [
+    { "action": "shell", "resource": "git push *", "effect": "ask" },
+    { "action": "shell", "resource": "git reset --hard *", "effect": "ask" },
+    { "action": "shell", "resource": "rm -rf *", "effect": "ask" },
+    { "action": "shell", "resource": "git clean *", "effect": "deny" },
+    { "action": "shell", "resource": "npm publish *", "effect": "deny" },
+
+    // 门禁与只读检查必须免确认，否则自动化流程每次都被打断，最终被人为绕过
+    { "action": "shell", "resource": "node scripts/gates/run.mjs*", "effect": "allow" },
+    { "action": "shell", "resource": "npm run typecheck*", "effect": "allow" },
+    { "action": "shell", "resource": "npm test*", "effect": "allow" },
+    { "action": "shell", "resource": "npm run build*", "effect": "allow" },
+    { "action": "shell", "resource": "git diff *", "effect": "allow" },
+    { "action": "shell", "resource": "git status *", "effect": "allow" },
+    { "action": "shell", "resource": "git log *", "effect": "allow" },
+  ],
+
+  /*
+   * Agent 编排。
+   * 分工原则：write 类只负责产出，review 类只读且结论 Binding，
+   * 主线程负责最终裁决与落盘，任何一环都不得自我认证。
+   */
+  "agents": {
+    "flux-build": {
+      "description": "Hermes Flux 主开发 Agent：按架构规范实现、跑通全部门禁后再交付",
+      "mode": "primary",
+      "steps": 60,
+    },
+
+    "flux-style-reviewer": {
+      "description": "样式与体验审查：换肤 Token、i18n、渲染性能与 iOS 级简约纯粹美学。只读，结论 Binding",
+      "mode": "subagent",
+      "steps": 30,
+      "permissions": [
+        { "action": "edit", "resource": "*", "effect": "deny" },
+        { "action": "shell", "resource": "git push *", "effect": "deny" },
+        { "action": "shell", "resource": "git reset --hard *", "effect": "deny" },
+        { "action": "subagent", "resource": "*", "effect": "deny" },
+      ],
+    },
+
+    "flux-code-reviewer": {
+      "description": "代码改动强制审查：架构分层、类型真实性、业务逻辑落盘测试与无遗漏、门禁不变量。只读，结论 Binding",
+      "mode": "subagent",
+      "steps": 40,
+      "permissions": [
+        { "action": "edit", "resource": "*", "effect": "deny" },
+        { "action": "shell", "resource": "git push *", "effect": "deny" },
+        { "action": "shell", "resource": "git reset --hard *", "effect": "deny" },
+        { "action": "subagent", "resource": "*", "effect": "deny" },
+      ],
+    },
+
+    "flux-gate-fixer": {
+      "description": "仅修复门禁阻断项的最小改动执行者，禁止顺手重构",
+      "mode": "subagent",
+      "steps": 20,
+    },
+
+    "flux-simplifier": {
+      "description": "极简主义专员：在严格保持行为不变的前提下，消除过度抽象、多层嵌套与冗余胶水代码",
+      "mode": "subagent",
+      "steps": 25,
+      "permissions": [
+        { "action": "shell", "resource": "git push *", "effect": "deny" },
+        { "action": "shell", "resource": "git reset --hard *", "effect": "deny" },
+        { "action": "subagent", "resource": "*", "effect": "deny" },
+      ],
+    },
+
+    // 禁止内置子 Agent 再派生孙 Agent，避免审查链自我循环与责任下推
+    "explore": {
+      "permissions": [{ "action": "subagent", "resource": "*", "effect": "deny" }],
+    },
+    "general": {
+      "permissions": [{ "action": "subagent", "resource": "*", "effect": "deny" }],
+    },
+  },
+
+  /*
+   * Pixso 远程 MCP（Streamable HTTP）。
+   * 设计意图：让 Agent 直接读取/回写 Pixso 设计稿图层，避免人工抄写设计参数。
+   * 认证：走 OAuth 2.1 自动流程，首次使用前需执行 `opencode mcp auth pixso` 完成浏览器授权；
+   * token 由 OpenCode 存于用户数据目录，严禁写入本配置文件，防止密钥入库。
+   * 约束：账号需全功能/研发席位，且图层链接必须带 item-id 才能定位；只读需查看权限，改画布需编辑权限。
+   */
+  "mcp": {
+    "servers": {
+      "pixso": {
+        "type": "remote",
+        "url": "https://pixso.cn/mcp",
+        "timeout": { "startup": 45000, "catalog": 45000 },
+      },
+    },
+  },
+}
