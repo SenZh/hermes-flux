@@ -48,6 +48,11 @@ export interface ModelDisplayParts {
   date: string;
   /** 厂商展示名，如 `Anthropic` / `DeepSeek`；无法判定时回退为原始前缀或空串 */
   vendor: string;
+  /**
+   * 厂商图标 slug，如 `anthropic` / `zhipu` / `xiaomimimo`，与图标资产文件名一一对应。
+   * 判不出厂商、或该厂商没有官方图标时为空串（由 UI 降级为首字母 badge）。
+   */
+  vendorId: string;
 }
 
 /**
@@ -106,72 +111,108 @@ const VENDOR_CASING: ReadonlyArray<readonly [RegExp, string]> = [
 /** 参数量写法修正：厂商写 `8B` / `120B` / `A12B`，绝不写 `8b`。 */
 const PARAMETER_COUNT = /\b(a?)(\d+(?:\.\d+)?)b\b/gi;
 
-/** 已知厂商前缀 → 展示名。键为小写，命中即用。 */
-const VENDOR_LABELS: Readonly<Record<string, string>> = {
-  anthropic: 'Anthropic',
-  openai: 'OpenAI',
-  google: 'Google',
-  deepseek: 'DeepSeek',
-  qwen: 'Qwen',
-  moonshot: 'Moonshot',
-  moonshotai: 'Moonshot',
-  minimax: 'MiniMax',
-  'z-ai': 'Z.AI',
-  zai: 'Z.AI',
-  xiaomi: 'Xiaomi',
-  tencent: 'Tencent',
-  stepfun: 'StepFun',
-  nvidia: 'NVIDIA',
-  meta: 'Meta',
-  sakana: 'Sakana AI',
-  upstage: 'Upstage',
-  inclusionai: 'InclusionAI',
-  'x-ai': 'xAI',
-  xai: 'xAI',
-  mistral: 'Mistral',
-  mistralai: 'Mistral AI',
-  cohere: 'Cohere',
-  perplexity: 'Perplexity',
-  inception: 'Inception',
-  poolside: 'Poolside',
-  reflection: 'Reflection',
-  ornith: 'Ornith',
-  openrouter: 'OpenRouter',
-  microsoft: 'Microsoft',
-  deepinfra: 'DeepInfra',
-  ollama: 'Ollama',
-  llamacpp: 'Local',
-  lmstudio: 'LM Studio',
+/**
+ * 厂商身份：展示名 + 稳定标识。
+ *
+ * 【设计意图 (Why)】
+ *   `label` 是给人看的（`Mistral AI` / `Z.AI`），`id` 是给图标查表用的稳定 slug
+ *   （`mistral` / `zhipu`），必须与 `packages/ui/src/icons/lobe/` 里的文件名一一对应。
+ *   两者放在同一条记录里，杜绝「展示名一张表、图标映射又一张表」的双份真值漂移。
+ *
+ * 【约束与规则 (Rules)】
+ *   - `id` 一律小写、无空格，且必须能在 lobe 图标清单里查到；查不到就留空串，
+ *     由 UI 降级为首字母 badge，绝不臆造一个不存在的 slug。
+ */
+interface VendorIdentity {
+  /** 人类可读厂商名 */
+  label: string;
+  /** 图标清单 slug；空串表示该厂商暂无官方图标 */
+  id: string;
+}
+
+/** 已知厂商前缀 → 厂商身份。键为小写，命中即用。 */
+const VENDOR_PREFIXES: Readonly<Record<string, VendorIdentity>> = {
+  anthropic: { label: 'Anthropic', id: 'anthropic' },
+  openai: { label: 'OpenAI', id: 'openai' },
+  google: { label: 'Google', id: 'google' },
+  deepseek: { label: 'DeepSeek', id: 'deepseek' },
+  qwen: { label: 'Qwen', id: 'qwen' },
+  moonshot: { label: 'Moonshot', id: 'moonshot' },
+  moonshotai: { label: 'Moonshot', id: 'moonshot' },
+  minimax: { label: 'MiniMax', id: 'minimax' },
+  'z-ai': { label: 'Z.AI', id: 'zhipu' },
+  zai: { label: 'Z.AI', id: 'zhipu' },
+  zhipu: { label: 'Z.AI', id: 'zhipu' },
+  xiaomi: { label: 'Xiaomi', id: 'xiaomimimo' },
+  tencent: { label: 'Tencent', id: 'tencent' },
+  stepfun: { label: 'StepFun', id: 'stepfun' },
+  nvidia: { label: 'NVIDIA', id: 'nvidia' },
+  meta: { label: 'Meta', id: 'meta' },
+  sakana: { label: 'Sakana AI', id: 'sakana' },
+  upstage: { label: 'Upstage', id: 'upstage' },
+  inclusionai: { label: 'InclusionAI', id: '' },
+  'x-ai': { label: 'xAI', id: 'xai' },
+  xai: { label: 'xAI', id: 'xai' },
+  mistral: { label: 'Mistral', id: 'mistral' },
+  mistralai: { label: 'Mistral AI', id: 'mistral' },
+  cohere: { label: 'Cohere', id: 'cohere' },
+  perplexity: { label: 'Perplexity', id: 'perplexity' },
+  inception: { label: 'Inception', id: 'inception' },
+  poolside: { label: 'Poolside', id: 'poolside' },
+  reflection: { label: 'Reflection', id: 'reflection' },
+  ornith: { label: 'Ornith', id: '' },
+  openrouter: { label: 'OpenRouter', id: 'openrouter' },
+  microsoft: { label: 'Microsoft', id: 'microsoft' },
+  deepinfra: { label: 'DeepInfra', id: 'deepinfra' },
+  ollama: { label: 'Ollama', id: 'ollama' },
+  llamacpp: { label: 'Local', id: '' },
+  lmstudio: { label: 'LM Studio', id: 'lmstudio' },
 };
 
 /**
- * 模型主体前缀 → 厂商展示名。
+ * 模型主体前缀 → 厂商身份。
  *
  * 【为什么需要】自定义 provider（当前 `cpa`）给出的 ID **没有厂商前缀**（如 `gemini-3.8-flash`），
  * 而有些代理的"前缀"是路由分组名（如 `group/deepseek-v4.1-flash` 的 `group`），不是厂商。
  * 两种情况都必须回落到主体名推断，否则用户会看到"group"这种内部标识当厂商。
  */
-const MODEL_PREFIX_VENDORS: ReadonlyArray<readonly [RegExp, string]> = [
-  [/^(?:claude|opus|sonnet|haiku|fable)/i, 'Anthropic'],
-  [/^(?:gpt|o1|o3|o4)(?:[-.]|$)/i, 'OpenAI'],
-  [/^(?:gemini|gemma)/i, 'Google'],
-  [/^grok/i, 'xAI'],
-  [/^glm/i, 'Z.AI'],
-  [/^kimi/i, 'Moonshot'],
-  [/^qwen/i, 'Qwen'],
-  [/^deepseek/i, 'DeepSeek'],
-  [/^minimax/i, 'MiniMax'],
-  [/^mimo/i, 'Xiaomi'],
-  [/^nemotron/i, 'NVIDIA'],
-  [/^(?:llama|muse-spark)/i, 'Meta'],
-  [/^mistral/i, 'Mistral'],
-  [/^mercury/i, 'Inception'],
-  [/^laguna/i, 'Poolside'],
-  [/^solar/i, 'Upstage'],
-  [/^(?:beam|fugu)/i, 'Reflection'],
-  [/^hy\d/i, 'Tencent'],
-  [/^step-/i, 'StepFun'],
+const MODEL_PREFIX_VENDORS: ReadonlyArray<readonly [RegExp, VendorIdentity]> = [
+  [/^(?:claude|opus|sonnet|haiku|fable)/i, { label: 'Anthropic', id: 'anthropic' }],
+  [/^(?:gpt|o1|o3|o4)(?:[-.]|$)/i, { label: 'OpenAI', id: 'openai' }],
+  [/^(?:gemini|gemma)/i, { label: 'Google', id: 'google' }],
+  [/^grok/i, { label: 'xAI', id: 'xai' }],
+  [/^glm/i, { label: 'Z.AI', id: 'zhipu' }],
+  [/^kimi/i, { label: 'Moonshot', id: 'moonshot' }],
+  [/^qwen/i, { label: 'Qwen', id: 'qwen' }],
+  [/^deepseek/i, { label: 'DeepSeek', id: 'deepseek' }],
+  [/^minimax/i, { label: 'MiniMax', id: 'minimax' }],
+  [/^mimo/i, { label: 'Xiaomi', id: 'xiaomimimo' }],
+  [/^nemotron/i, { label: 'NVIDIA', id: 'nvidia' }],
+  [/^(?:llama|muse-spark)/i, { label: 'Meta', id: 'meta' }],
+  [/^mistral/i, { label: 'Mistral', id: 'mistral' }],
+  [/^mercury/i, { label: 'Inception', id: 'inception' }],
+  [/^laguna/i, { label: 'Poolside', id: 'poolside' }],
+  [/^solar/i, { label: 'Upstage', id: 'upstage' }],
+  [/^(?:beam|fugu)/i, { label: 'Reflection', id: 'reflection' }],
+  [/^hy\d/i, { label: 'Tencent', id: 'tencent' }],
+  [/^step-/i, { label: 'StepFun', id: 'stepfun' }],
 ];
+
+/**
+ * 全部已知厂商的图标 slug（去重、去空、按字母序）。
+ *
+ * 【设计意图 (Why)】
+ *   core 与 ui 是两套包：core 说"这个厂商叫 zhipu"，ui 说"zhipu 有没有图标"。
+ *   两边一旦漂移，症状是**静默降级成首字母徽标**（不报错、不破图），几乎不可能被发现。
+ *   因此把厂商 slug 集合作为公开权威导出，让 ui 侧能用一条机械断言守住「每个已知厂商都能查到图标」。
+ */
+export const MODEL_VENDOR_IDS: readonly string[] = Array.from(
+  new Set(
+    [...Object.values(VENDOR_PREFIXES), ...MODEL_PREFIX_VENDORS.map(([, identity]) => identity)]
+      .map((identity) => identity.id)
+      .filter(Boolean),
+  ),
+).sort();
 
 const titleCase = (text: string): string => text.replace(/\b\w/g, (char) => char.toUpperCase()).trim();
 
@@ -335,36 +376,119 @@ function prettifyBase(base: string): string {
 }
 
 /**
- * 厂商判定：优先 ID 前缀，其次主体名推断，最后回退原始前缀/provider 名。
+ * 厂商身份判定：优先 ID 前缀，其次主体名推断。
  *
- * 【规则】前缀命中 `VENDOR_LABELS` 直接用；否则（无前缀的自定义 provider、或 `group` 这类
- * 代理分组名）按主体名推断；两者都判不出时，仅当存在真实前缀才回退为前缀原文。
+ * 【规则】
+ *   - 前缀直接命中厂商表即用；
+ *   - 代理型前缀（`xai-oauth` / `deepseek-direct`）按 `-` 拆段再匹配一次，
+ *     因为这类 slug 是「厂商 + 认证方式」的复合体，厂商仍在首段；
+ *   - `group` / `custom` 是路由分组名，不是厂商，继续回落到主体名推断；
+ *   - 三者都判不出时返回 null，由调用方决定回退文案（展示名回退 provider，图标则留空）。
  */
-export function resolveModelVendor(modelId: string, providerName = ''): string {
+function resolveVendorIdentity(modelId: string): VendorIdentity | null {
   const trimmed = modelId.trim();
   const slash = trimmed.lastIndexOf('/');
   const prefix = slash >= 0 ? trimmed.slice(0, slash).trim().toLowerCase() : '';
   const base = stripProviderPrefix(trimmed);
 
-  if (prefix && VENDOR_LABELS[prefix]) {
-    return VENDOR_LABELS[prefix];
+  if (prefix && VENDOR_PREFIXES[prefix]) {
+    return VENDOR_PREFIXES[prefix];
   }
 
-  for (const [pattern, vendor] of MODEL_PREFIX_VENDORS) {
+  for (const [pattern, identity] of MODEL_PREFIX_VENDORS) {
     if (pattern.test(base)) {
-      return vendor;
+      return identity;
     }
   }
 
-  if (prefix) {
-    // 形如 `group/...` 的代理分组名不是厂商，回退 provider 名由 UI 兜底
-    if (prefix === 'group' || prefix === 'custom') {
-      return providerName.trim();
+  if (prefix && prefix !== 'group' && prefix !== 'custom') {
+    for (const segment of prefix.split('-')) {
+      if (VENDOR_PREFIXES[segment]) return VENDOR_PREFIXES[segment];
     }
-    return prefix;
+    // 未知前缀仍按原文作为展示名（保持历史行为），但没有图标可用
+    return { label: prefix, id: '' };
   }
 
-  return providerName.trim();
+  return null;
+}
+
+/**
+ * 厂商展示名判定。
+ *
+ * 【规则】判不出真实厂商时回退 provider 名——它至少能告诉用户"这个模型挂在哪个入口下"，
+ * 比留空更可用。图标场景不适用这条回退（见 `resolveModelVendorId`）。
+ */
+export function resolveModelVendor(modelId: string, providerName = ''): string {
+  const identity = resolveVendorIdentity(modelId);
+  return identity ? identity.label : providerName.trim();
+}
+
+/**
+ * 厂商图标标识判定（模型维度）。
+ *
+ * 【设计意图 (Why)】
+ *   UI 需要一个**稳定、无空格、与图标文件名一致**的 slug 才能查表渲染品牌图标，
+ *   展示名（`Z.AI` / `Mistral AI` / `Sakana AI`）带空格与标点，不能当键。
+ *
+ * 【约束与规则 (Rules)】
+ *   - 判不出厂商时返回空串，**绝不回退 provider 名**：`cpa` / `nous` 是接入入口而非厂商，
+ *     硬套一个图标等于给用户错误归属；
+ *   - 已知厂商但上游没有官方图标（`InclusionAI` / `Ornith` / 本地 llamacpp）同样返回空串，
+ *     由 UI 降级为首字母 badge；
+ *   - 纯函数，零副作用。
+ */
+export function resolveModelVendorId(modelId: string, providerName = ''): string {
+  // 【规则】厂商身份只由模型 ID 决定；providerName 保留在签名里是为了让调用方
+  // 在两个函数间切换时不必改参数，不参与任何判定。
+  void providerName;
+  const identity = resolveVendorIdentity(modelId);
+  return identity ? identity.id : '';
+}
+
+/**
+ * 「转发型入口」标记词：出现在 provider slug/展示名的**某一段**里，说明它是兼容/代理/聚合入口，
+ * 实际背后可能跑任意厂商，不能按名字给它挂厂商图标。
+ */
+const FORWARDING_TOKENS: ReadonlySet<string> = new Set([
+  'compatible',
+  'proxy',
+  'aggregator',
+  'relay',
+  'router',
+  'gateway',
+  'mirror',
+]);
+
+/**
+ * 厂商图标标识判定（provider 维度）。
+ *
+ * 【为什么需要】选择器的分组标题按 provider 聚合，标题行需要 provider 自身标识；
+ * 而 provider slug 与模型 ID 前缀是两套命名（`nous` / `cpa` / `xai-oauth`），
+ * 只能从 slug 与展示名里逐段找已知厂商，找不到就降级。
+ *
+ * 【规则】
+ *   - 只认完整段匹配，禁止子串模糊匹配——`nousresearch` 里含 `nous` 不代表它是 Nous 厂商图标；
+ *   - 含 `compatible` / `proxy` / `aggregator` 等字样的串整条跳过：这类是「兼容/聚合入口」，
+ *     它们**转发**多家模型，把入口名命中的厂商 logo 挂上去等于给用户错误归属
+ *     （`openai-compatible` 实际可能跑着 DeepSeek，绝不能显示 OpenAI 的标识）；
+ *   - 判不出返回空串，由调用方决定降级或省略。
+ */
+export function resolveProviderVendorId(providerSlug: string, providerName = ''): string {
+  const tokens = (raw: string): string[] =>
+    (raw || '').trim().toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  for (const raw of [providerSlug, providerName]) {
+    const parts = tokens(raw);
+    if (parts.length === 0) continue;
+    // 【规则】必须按 **段** 判转发语义，不能按子串：`openrouter` 里含 `router`，
+    // 但它是货真价实的接入商；而 `openai-compatible` / `deepseek-proxy` 的段里
+    // 才真正携带「我在转发」的语义。
+    if (parts.some((token) => FORWARDING_TOKENS.has(token))) continue;
+    for (const token of parts) {
+      const identity = VENDOR_PREFIXES[token];
+      if (identity) return identity.id;
+    }
+  }
+  return '';
 }
 
 /**
@@ -391,7 +515,7 @@ export function resolveModelVendor(modelId: string, providerName = ''): string {
 export function parseModelDisplay(modelId: string, providerName = ''): ModelDisplayParts {
   const trimmed = (modelId ?? '').trim();
   if (!trimmed) {
-    return { name: '', variant: '', quant: '', context: '', route: '', date: '', vendor: providerName.trim() };
+    return { name: '', variant: '', quant: '', context: '', route: '', date: '', vendor: providerName.trim(), vendorId: '' };
   }
 
   const { base, variant, quant, context, route, date } = splitTrailingTags(stripProviderPrefix(trimmed));
@@ -412,6 +536,7 @@ export function parseModelDisplay(modelId: string, providerName = ''): ModelDisp
     route,
     date,
     vendor: resolveModelVendor(trimmed, providerName),
+    vendorId: resolveModelVendorId(trimmed, providerName),
   };
 }
 

@@ -92,12 +92,38 @@ export async function createDriveSession(options = {}) {
   }
 
   // 1. 动态分配空闲静态伺服端口
+  // 【规则】入口页可被调用方指定（默认验收 harness）：厂商图标预览等「纯渲染产物验证」
+  // 需要一个能挂载 renderXxx 输出的空白宿主页，否则只能去改动 harness 的 mock 数据。
+  const entry = options.entry || '/packages/desktop/__tests__/cdp/e2e-acceptance-harness.html';
+  // 【规则】入口页必须是以 `/` 开头的仓库相对路径：它既被静态服务的默认路由消费，
+  // 又被直接拼进 targetUrl。少了前导斜杠会拼出 `http://host:portpackages/...`，
+  // 页面直接 404 而报错信息完全指不到根因。
+  if (!entry.startsWith('/')) throw new Error(`createDriveSession entry 必须以 / 开头：${entry}`);
+  const entryAbs = path.resolve(rootDir, '.' + entry);
+  if (!entryAbs.startsWith(rootDir)) throw new Error(`createDriveSession entry 越出仓库根目录：${entry}`);
   const server = http.createServer((req, res) => {
-    let reqPath = decodeURIComponent(req.url?.split('?')[0] || '/');
-    if (reqPath === '/') reqPath = '/packages/desktop/__tests__/cdp/e2e-acceptance-harness.html';
-    const filePath = path.join(rootDir, reqPath);
+    let reqPath = '/';
+    try {
+      reqPath = decodeURIComponent(req.url?.split('?')[0] || '/');
+    } catch {
+      res.writeHead(400);
+      res.end('Bad Request');
+      return;
+    }
+    if (reqPath === '/') reqPath = entry;
+    const rootWithSep = rootDir.endsWith(path.sep) ? rootDir : rootDir + path.sep;
+    let filePath = path.resolve(rootDir, '.' + (reqPath.startsWith('/') ? reqPath : '/' + reqPath));
+    // harness 页面挂在深层目录时，相对路径 `icons/lobe/...` 会带上前缀路径，回退到真实产物目录
+    if ((!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) && reqPath.includes('/icons/lobe/')) {
+      const iconRel = reqPath.slice(reqPath.indexOf('icons/lobe/'));
+      const iconsBase = path.resolve(rootDir, 'packages', 'desktop', 'dist', 'renderer', 'icons', 'lobe');
+      const candidate = path.resolve(rootDir, 'packages', 'desktop', 'dist', 'renderer', iconRel);
+      if (candidate.startsWith(iconsBase + path.sep)) {
+        filePath = candidate;
+      }
+    }
 
-    if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+    if ((filePath !== rootDir && !filePath.startsWith(rootWithSep)) || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
       res.writeHead(404);
       res.end('Not Found');
       return;
@@ -129,7 +155,7 @@ export async function createDriveSession(options = {}) {
   const cdpPort = probeServer.address().port;
   await new Promise((resolve) => probeServer.close(resolve));
 
-  const targetUrl = `http://127.0.0.1:${serverPort}/packages/desktop/__tests__/cdp/e2e-acceptance-harness.html`;
+  const targetUrl = `http://127.0.0.1:${serverPort}${entry}`;
 
   const browserProc = spawn(
     browserPath,

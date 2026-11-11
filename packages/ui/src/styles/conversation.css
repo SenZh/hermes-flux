@@ -1901,4 +1901,307 @@ details[open] > summary > .tool-row__expand {
   }
 }
 
+/* ==========================================================================
+ * 模型厂商图标 (Model Vendor Icon)
+ *
+ * 【设计意图】
+ *   列表行、触发按钮、分组标题共用同一个方块：几何固定、行内不跳、颜色全走 Token。
+ *
+ * 【四档形态与双轨自适应的物理依据】
+ *   彩色版是画死的十六进制，两个方向会各自翻车：OpenAI / Anthropic / xAI 的标识本身是黑色
+ *   （深色底上隐形），OpenRouter 的荧光绿 `#C8FF00` 对白底仅 1.18:1（浅色底上隐形）。
+ *   因此清单对每个彩色资产同时记录 colorDarkSafe / colorLightSafe，渲染层据此分四档：
+ *   - `color`：两侧都可读 —— 永远彩色；
+ *   - `--dual`：只在浅色可读 —— 默认 mono，确认 `light` 才出彩色；
+ *   - `--dual-inverse`：只在深色可读 —— 默认 mono，确认 `dark` 才出彩色；
+ *   - `mono`：没有可读的彩色版，或上游只有 mono。
+ *   两个双轨方向都**默认 mono**：`data-appearance` 缺失时无法确定底色，安全侧永远是 mono。
+ *
+ * 【约束与规则】
+ *   - 本段落零硬编码色值，全部走 Token；mono 的着色只认 `currentColor`；
+ *   - `--vendor-icon-src` 由组件行内注入，URL 基准与本文档同为渲染产物根目录；
+ *   - 双轨选择器用 `:not()` 互斥，不依赖规则书写顺序。
+ * ========================================================================== */
+
+.vendor-icon {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  overflow: hidden;
+  vertical-align: middle;
+  user-select: none;
+}
+
+.vendor-icon__color {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.vendor-icon__mono {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background-color: currentColor;
+  -webkit-mask-image: var(--vendor-icon-src);
+  mask-image: var(--vendor-icon-src);
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+}
+
+/* 双轨（浅色出彩色）：默认只显示 mono（安全侧），确认浅色皮肤才切彩色 */
+.vendor-icon--dual:not(.vendor-icon--dual-inverse) .vendor-icon__color {
+  display: none;
+}
+
+.vendor-icon--dual:not(.vendor-icon--dual-inverse) .vendor-icon__mono {
+  display: block;
+}
+
+[data-appearance="light"] .vendor-icon--dual:not(.vendor-icon--dual-inverse) .vendor-icon__color {
+  display: block;
+}
+
+[data-appearance="light"] .vendor-icon--dual:not(.vendor-icon--dual-inverse) .vendor-icon__mono {
+  display: none;
+}
+
+/*
+ * 反向双轨（深色出彩色）：同样是「默认 mono」，只有明确 `data-appearance="dark"` 才出彩色。
+ * 【为什么不用 `--dual` 的默认值】属性缺失时无法确定底色，安全侧一律是 mono；
+ * 若让 inverse 默认出彩色，主机漏设属性时荧光/浅色标识会直接隐形。
+ * 选择器用 `:not()` 与 `--dual` 互斥，消除对规则书写顺序的依赖。
+ */
+.vendor-icon--dual-inverse .vendor-icon__color {
+  display: none;
+}
+
+.vendor-icon--dual-inverse .vendor-icon__mono {
+  display: block;
+}
+
+[data-appearance="dark"] .vendor-icon--dual-inverse .vendor-icon__color {
+  display: block;
+}
+
+[data-appearance="dark"] .vendor-icon--dual-inverse .vendor-icon__mono {
+  display: none;
+}
+
+/*
+ * 无官方图标的厂商：首字母方块，尺寸与图标完全一致，保证行内不跳位。
+ * 【规则 1】必须有 1px 发丝边框：`--secondary` 与行底几乎同色（浅色 #F1F3F6 vs #FFFFFF，
+ * 深色 #16171D vs #1B1C23），只靠底色会让人读成「残缺的图标」而不是「徽标」。
+ * 【规则 2】边框用 `box-shadow: inset` 而不是 `border`：仓库没有全局 `border-box`，
+ * `border` 会把 14px 的内容盒撑成 16px 外径，与同排真图标差 2px，名字起点随之右移。
+ */
+.vendor-icon--badge {
+  box-shadow: inset 0 0 0 1px var(--border);
+  border-radius: var(--radius-inner, 4px);
+  background: var(--secondary);
+  color: var(--muted-foreground);
+  font-size: var(--fs-micro, 10px);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+/* 选中行里图标跟随强调色，与整行激活态同频 */
+.model-option.active .vendor-icon--badge {
+  box-shadow: inset 0 0 0 1px var(--primary-border);
+  color: var(--primary);
+}
+
+/* ==========================================================================
+ * 模型行 → 思考等级二级级联 (Model Reasoning Cascade)
+ *
+ * 【设计意图】
+ *   「思考等级」属于模型选择决策的一部分（挑模型时同时决定要不要深想），
+ *   放在输入舱 footer 里挤占黄金限宽，也割裂了「选谁 + 怎么想」的因果。
+ *   现在它挂在模型行右侧：悬停任意行即在右侧浮出二级面板，选完即应用并收起。
+ *
+ * 【几何约束】
+ *   面板绝对定位在 `.model-option` 的右外侧，因此下拉容器必须 `overflow: visible`
+ *   （已在下拉内联样式里放开），否则面板会被圆角裁掉。
+ *   右侧空间不足时由桌面端追加 `--flip` 翻到左侧；
+ *   上下空间不足时由桌面端夹取 `top`（面板自身也留 `max-height` 兜底），
+ *   保证 5 个等级在短视口里依然全部可点。
+ * ========================================================================== */
+
+.model-dropdown-menu {
+  max-width: calc(100vw - 24px);
+  box-sizing: border-box;
+}
+
+.model-cascade {
+  position: absolute;
+  left: calc(100% + 6px);
+  top: 0;
+  width: 148px;
+  max-height: calc(100vh - var(--geo-titlebar, 42px) - 16px);
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: var(--radius-card, 6px);
+  border: 1px solid var(--border-strong);
+  background: var(--popover);
+  box-shadow: var(--shadow-window);
+  z-index: 220;
+  user-select: none;
+}
+
+.model-cascade--flip {
+  left: auto;
+  right: calc(100% + 6px);
+}
+
+/* 窄屏下左右两侧外延空间都放不下 148px 时，内缩停靠到下拉面板右内缘，绝不溢出视口 */
+.model-cascade--inset {
+  left: auto;
+  right: 8px;
+}
+
+.model-cascade__title {
+  padding: 4px 8px 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--fs-micro, 10px);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+}
+
+.model-cascade__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius-inner, 4px);
+  font-size: var(--fs-aux, 12px);
+  color: var(--foreground);
+  cursor: pointer;
+}
+
+.model-cascade__item:hover,
+.model-cascade__item:focus-visible {
+  background: var(--card-hover);
+  outline: none;
+}
+
+.model-cascade__item:focus-visible {
+  box-shadow: inset 2px 0 0 0 var(--primary-border);
+}
+
+/* 选中态与悬停态必须可辨：obsidian-gold 下 --card-hover 与 primary-subtle 叠出来的底色
+   只差几个色阶，纯靠底色区分等于没有区分，因此再补一条左侧指示条。 */
+.model-cascade__item.active {
+  color: var(--primary);
+  background: var(--primary-subtle);
+  box-shadow: inset 2px 0 0 0 var(--primary-border);
+}
+
+.model-cascade__check {
+  font-size: var(--fs-caption, 11px);
+  font-weight: 700;
+}
+
+/* 行尾的「有二级菜单」提示：默认不可见，悬停/聚焦才浮现，避免常驻噪音。
+   锁定行不提示——它有 data-locked 早退，永远弹不出面板，露出箭头是死 affordance。 */
+.model-option__cascade {
+  flex-shrink: 0;
+  margin-left: 2px;
+  color: var(--muted-foreground);
+  font-size: var(--fs-caption, 11px);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.model-option:not(.is-locked):hover .model-option__cascade,
+.model-option:not(.is-locked):focus-visible .model-option__cascade {
+  opacity: 0.7;
+}
+
+/* ==========================================================================
+ * Provider 分组标题（可折叠）
+ *
+ * 【设计意图】
+ *   标题必须让人一眼看出「这行能点、点了会收起」。因此它有：
+ *   hover 底色、11px 折叠箭头、折叠后的整行弱化，三者共同表达状态。
+ *   曾经的 `::` 前置符已删除——它读起来像拖拽把手，且与箭头语义重复。
+ * ========================================================================== */
+
+.model-provider-group-header {
+  transition: background 0.1s ease, opacity 0.1s ease;
+}
+
+.model-provider-group-header:hover {
+  background: var(--card-hover);
+}
+
+.model-provider-group-header:focus-visible {
+  outline: none;
+  background: var(--card-hover);
+  box-shadow: inset 2px 0 0 0 var(--primary-border);
+}
+
+.model-provider-group-header .provider-accordion-arrow {
+  flex-shrink: 0;
+  font-size: var(--fs-caption, 11px);
+  line-height: 1;
+  color: var(--muted-foreground);
+  opacity: 0.9;
+}
+
+/* 折叠态必须有可辨的整体弱化：仅靠箭头字形翻转在 1x 屏几乎看不出来 */
+.model-provider-group-header[data-collapsed="true"] {
+  opacity: 0.72;
+}
+
+/* 搜索期间折叠被临时忽略：标题退化为纯分组标签，不再暗示「能点」 */
+.model-provider-group-header[data-search-open="true"] {
+  cursor: default;
+}
+
+.model-provider-group-header[data-search-open="true"]:hover {
+  background: var(--popover);
+}
+
+.model-provider-group-header[data-search-open="true"] .provider-accordion-arrow {
+  visibility: hidden;
+}
+
+/*
+ * 选中态与悬停态全部由 CSS 承担。
+ * 【防范的历史坑】行内 `style="background: transparent"` 的内联优先级高于类选择器，
+ * 会把这里的 hover 规则整体压死——真实表现为「悬停整行毫无反馈」，且字符串测试完全看不出来。
+ * 因此 `.model-option` 模板里不得再写任何 `background`。
+ * 锁定行不响应悬停，避免「看起来能点」。
+ */
+.model-option {
+  transition: background 0.1s ease;
+}
+
+.model-option.active {
+  background: var(--accent-subtle);
+}
+
+.model-option:not(.active):not(.is-locked):hover,
+.model-option:not(.active):not(.is-locked):focus-visible {
+  background: var(--card-hover);
+  outline: none;
+}
+
+/* 键盘焦点与鼠标悬停区分：键盘移入行时补一条 2px 左指示条（与分组标题一致），
+   仅靠淡灰底色在亮色/高对比屏上不够醒目。 */
+.model-option:not(.is-locked):focus-visible {
+  box-shadow: inset 2px 0 0 0 var(--primary-border);
+}
+
 

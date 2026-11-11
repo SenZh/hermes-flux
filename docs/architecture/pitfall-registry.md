@@ -232,6 +232,26 @@
 | 注意事项 | `--geo-titlebar` 语义是**内容高**，外围总高恒为 `calc(var(--geo-titlebar) + 1px)`；任何新增依赖顶栏高度的定位必须使用该表达式。微轨 `+1px` 为无条件补偿，展开态由抽屉预算吸收（落在 6px 把手余量内） |
 | 已知债务 | ① `window:is-maximized` 仍用布尔压缩"最大化/全屏"两态（建议后续改判别联合 `mode: 'normal' \| 'maximized' \| 'fullscreen'`）；② 多窗口 `activate` 分支会重复 `registerIpcHandlers`，且 `readTitlebarMaximized` 的 `isDestroyed` 守卫在 `window:maximize` 路径不可达（先读 `isFullScreen()` 即抛），需改为一次性注册 + `BrowserWindow.getFocusedWindow()` |
 
+## P-024 品牌图标只判一侧可读性（另一侧变成隐形图标）
+
+| 项目 | 内容 |
+|---|---|
+| 症状 | 模型选择器里个别厂商图标「有时在、有时不在」：切到浅色皮肤后，荧光/亮色标识消失；切到深色皮肤后，黑色标识消失。没有任何报错，`<img>` 也正常解码 |
+| 根因 | 品牌彩色 SVG 是画死的十六进制，对比度天然只对一侧成立。只按「深色底可读」判定，就会把 `#C8FF00` 这类荧光色放进浅色皮肤（对白底 1.18:1）；只按「浅色底可读」判定，就会把纯黑标识放进深色皮肤 |
+| 识别特征 | 图标节点存在、`naturalWidth > 0`、`display` 非 `none`，但肉眼看不见；且只在某一个皮肤下复现 |
+| 守卫 | ① `scripts/gen-vendor-icons.mjs` 对每个彩色资产同时算 `colorDarkSafe` / `colorLightSafe`（WCAG 相对亮度 + 对比度，取「多数色值达标」，避免多色 logo 因单一高光色被整盘降级）；② `packages/ui/src/lib/vendorIcon.ts` 四档判定 `color / dual / dual-inverse / mono`，两个双轨方向都**默认 mono**；③ `npm test`（vendor-icon 用例钉死四种形态与双向切换）；④ `node scripts/verify/model-vendor-icons.mjs` 在真实 Blink 里断言双面板的 `display` 与解码状态 |
+| 复现命令 | `node scripts/verify/model-vendor-icons.mjs`（dark/light 双面板截图 + `evidence.json`） |
+
+## P-025 把字符串模板组件放到 components/ 下（迁移期门禁判定为新组件）
+
+| 项目 | 内容 |
+|---|---|
+| 症状 | 给既有 `renderXxx` 模板写配套渲染函数，放在 `packages/ui/src/components/` 下，门禁报 `ui/no-new-template-export`「禁止新增模板组件文件，新组件必须使用 .tsx」 |
+| 根因 | 该门禁按**目录**判定「是否新增字符串模板组件」，不区分「独立组件」与「既有模板的渲染辅助函数」；写成 `.tsx` 又无法被 `renderXxx` 调用 |
+| 识别特征 | 文件不拥有独立界面结构，只产出供既有模板复用的 HTML 片段（与 `lib/markdown.ts`、`lib/fileTypeIcons.ts` 同类） |
+| 守卫 | 归类到 `packages/ui/src/lib/`（与既有渲染辅助并列），并在文件头写明「为什么不放 components」 |
+| 备注 | 不是绕过门禁：门禁针对的是新增模板**组件**，渲染辅助函数本就不属于该类别 |
+
 ## 守卫总览
 
 | 守卫 | 命令 | 拦住的坑 |
@@ -256,3 +276,5 @@
 | CSS 扫描盲区兜底 | `npm test`（skins-sot 幂等/对账）+ 波③接扫描面 | P-019 |
 | Agent 切换性能/预取/窗口化守卫 | `npm test`（agent-switch-performance）+ CDP event timing | P-020、P-021、P-022 |
 | 顶栏/微轨几何单真值守卫 | `npm test`（titlebar-geometry + rail-geometry helpers） | P-023 |
+| 品牌图标双向可读性守卫 | `npm test`（vendor-icon 四档）+ Blink 双面板断言 | P-024 |
+| 模板辅助函数归类守卫 | `npm run gates`（ui/no-new-template-export） | P-025 |

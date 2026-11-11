@@ -125,6 +125,7 @@ import {
   type ModelCatalogEntry,
   modelLabelFromCatalog,
   modelCatalogFingerprint,
+  normalizeModelCatalog,
   buildProviderDirectory,
   buildMcpServerRows,
   buildSkillRows,
@@ -568,6 +569,13 @@ interface AppState {
   editingGroupRoomId?: string;
   /** Model menu visibility lives in state so a re-render cannot swallow it. */
   modelMenuOpen: boolean;
+  /**
+   * 思考等级二级面板当前锚定的模型行（`data-model`），undefined 表示未展开。
+   * 【规则】面板是单例、由桌面端定位，不随行渲染 —— 300 行 × 5 项会白白多造上千节点。
+   */
+  modelCascadeModel?: string;
+  /** 已折叠的 provider 分组 slug；点击分组标题切换。 */
+  collapsedProviders: string[];
   /** Context menu for session, bot or group room item */
   sessionContextMenu?: ContextMenuProps;
   /** 全局极客美学二次确认模态状态机，彻底替换 Win32 阻塞式原生 confirm */
@@ -890,6 +898,8 @@ const state: AppState = {
   editingGroupRoomId: undefined,
   profileName: localStorage.getItem('hermes_flux_profile') || localStorage.getItem('hermes_aura_profile') || 'default',
   modelMenuOpen: false,
+  modelCascadeModel: undefined,
+  collapsedProviders: [],
   dockNotice: '',
   sessionListError: '',
   pendingSessionIds: [],
@@ -6509,6 +6519,14 @@ function render(): void {
   const streamAnchor = captureStreamAnchor();
 
   document.documentElement.setAttribute('data-theme', state.theme);
+  // 【规则】皮肤明暗必须同步到一个可被纯 CSS 消费的属性上：厂商图标的双轨切换
+  // （哪些皮肤出品牌原色、哪些出 mono）全部由 `data-appearance` 决定。
+  // 让 CSS 承担这个判断，渲染层就不必为每个图标节点写条件分支，
+  // 换肤时也无需重新渲染选择器树——属性变化会直接触发样式重算。
+  document.documentElement.setAttribute(
+    'data-appearance',
+    SKINS[resolveSkinId(state.theme)]?.variant === 'light' ? 'light' : 'dark',
+  );
   document.documentElement.dataset.maximized = state.isMaximized ? 'true' : 'false';
 
   let currentProjectName: string | undefined;
@@ -6639,6 +6657,7 @@ function render(): void {
                 favoriteModels: state.favoriteModels,
                 recentModels: state.recentModels,
                 modelSearchQuery: state.modelSearchQuery,
+                collapsedProviders: state.collapsedProviders,
                 reasoningLevel: state.reasoningLevel,
                 approvalMode: state.approvalMode,
                 isStreaming: isStreamingActiveForCurrentSession(),
@@ -6812,6 +6831,7 @@ function render(): void {
           favoriteModels: state.favoriteModels,
           recentModels: state.recentModels,
           modelSearchQuery: state.modelSearchQuery,
+          collapsedProviders: state.collapsedProviders,
           reasoningLevel: state.reasoningLevel,
           approvalMode: state.approvalMode,
           isStreaming: isStreamingCurrent,
@@ -7777,12 +7797,25 @@ function bindEvents(): void {
       if (!dropdown) return;
       state.modelMenuOpen = !state.modelMenuOpen;
       dropdown.style.display = state.modelMenuOpen ? 'block' : 'none';
+      modelBtn.setAttribute('aria-expanded', state.modelMenuOpen ? 'true' : 'false');
+      // 【状态对齐】modelBtn.onclick 直写 DOM 而不走整舱 render()（防失焦），
+      // 若不同步对齐 lastInputDockSnapshot.modelMenuOpen，用户在打开后未做其它操作直接点空白或按 Esc 时，
+      // render() 会对比 last(false) === curr(false) 误判快照未变而跳过重绘，菜单直接卡死无法收起。
+      if (lastInputDockSnapshot) {
+        lastInputDockSnapshot = { ...lastInputDockSnapshot, modelMenuOpen: state.modelMenuOpen };
+      }
       if (state.modelMenuOpen) {
+        resetModelSearchOnOpen();
         if (state.availableModels.length === 0) {
           void fetchModelOptions();
         }
         const search = document.getElementById('dock-model-search-input') as HTMLInputElement | null;
-        if (search) search.focus();
+        if (search) {
+          search.value = '';
+          search.focus();
+        }
+      } else {
+        hideModelCascade();
       }
     };
   }
@@ -7790,24 +7823,8 @@ function bindEvents(): void {
   // Bind dropdown options
   bindModelDropdownEvents();
 
-  // Reasoning Dropdown Toggle (对标 OpenChamber 思考下拉卡片)
-  const reasoningBtn = document.getElementById('dock-reasoning-toggle-btn');
-  const reasoningDropdown = document.getElementById('dock-reasoning-dropdown');
-  if (reasoningBtn && reasoningDropdown) {
-    reasoningBtn.onclick = (e) => {
-      e.stopPropagation();
-      const isOpen = reasoningDropdown.style.display === 'block';
-      reasoningDropdown.style.display = isOpen ? 'none' : 'block';
-    };
-    document.querySelectorAll('.reasoning-option').forEach((opt) => {
-      (opt as HTMLElement).onclick = (e) => {
-        e.stopPropagation();
-        const level = (e.currentTarget as HTMLElement).getAttribute('data-level') as AppState['reasoningLevel'];
-        reasoningDropdown.style.display = 'none';
-        if (level) void switchReasoning(level);
-      };
-    });
-  }
+  // 【规则】「思考等级」不再占用输入舱 footer：入口已下沉到模型行右侧的二级级联，
+  // 由 bindModelDropdownEvents() 统一绑定，这里不再有独立下拉。
 
   // Approval Mode Dropdown Toggle
   const approvalBtn = document.getElementById('dock-approval-toggle-btn');
@@ -8754,20 +8771,344 @@ function bindModelDropdownEvents(): void {
     };
   });
 
-  document.querySelectorAll('.model-option').forEach((opt) => {
-    (opt as HTMLElement).onclick = (e) => {
+  // 【规则】列表滚动必须收起级联：面板是 dropdown 的子节点、不在滚动容器内，
+  // 滚轮滚动时行在动而面板不动，会立刻错位到别的行旁边。
+  const scrollList = document.getElementById('model-picker-scroll-list');
+  if (scrollList && !scrollList.dataset.cascadeScrollBound) {
+    scrollList.dataset.cascadeScrollBound = 'true';
+    scrollList.addEventListener('scroll', () => hideModelCascade(), { passive: true });
+  }
+
+  // Provider 分组折叠：点标题把该 provider 的模型整体收起/展开
+  document.querySelectorAll('.model-provider-group-header').forEach((header) => {
+    const el = header as HTMLElement;
+    const toggle = () => {
+      // 搜索期间折叠被临时忽略：此时标题是纯分组标签，点了不该有副作用
+      if (el.getAttribute('data-search-open') === 'true') return;
+      const slug = el.getAttribute('data-provider');
+      if (!slug) return;
+      const idx = state.collapsedProviders.indexOf(slug);
+      if (idx >= 0) state.collapsedProviders.splice(idx, 1);
+      else state.collapsedProviders.push(slug);
+      // 【规则】折叠只重建列表子树，不重建整个 dock —— 否则搜索框与滚动位置一并丢失
+      hideModelCascade();
+      updateModelDropdownSubtree();
+    };
+    el.onclick = (e) => {
       e.stopPropagation();
-      const target = e.currentTarget as HTMLElement;
-      // 【规则】网关标记不可用的模型禁止发起切换：必然被 config.set 拒绝，白跑一次失败
-      if (target.dataset.locked === 'true') return;
-      const model = target.getAttribute('data-model');
-      const provider = target.getAttribute('data-provider') || undefined;
-      const dropdown = document.getElementById('dock-model-dropdown');
-      if (dropdown) dropdown.style.display = 'none';
-      state.modelMenuOpen = false;
-      if (model) void switchModel(model, provider);
+      toggle();
+    };
+    el.onkeydown = (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      e.stopPropagation();
+      toggle();
     };
   });
+
+  // 模型行：点击切换模型；悬停或键盘聚焦时在其右侧浮出「思考等级」二级级联
+  document.querySelectorAll('.model-option').forEach((opt) => {
+    const el = opt as HTMLElement;
+    el.onclick = (e) => {
+      e.stopPropagation();
+      // 【规则】网关标记不可用的模型禁止发起切换：必然被 config.set 拒绝，白跑一次失败
+      if (el.dataset.locked === 'true') return;
+      const model = el.getAttribute('data-model');
+      const provider = el.getAttribute('data-provider') || undefined;
+      hideModelCascade();
+      state.modelMenuOpen = false;
+      if (model) void switchModel(model, provider);
+      else render();
+    };
+    el.onmouseenter = () => {
+      if (el.dataset.locked === 'true') return;
+      showModelCascade(el);
+    };
+    el.onmouseleave = () => {
+      scheduleHideModelCascade();
+    };
+    /**
+     * 【键盘可达性】思考等级此前只有 footer 一个按钮能 Tab 到；该按钮删除后，
+     * 若不给模型行补一条键盘路径，键盘用户将彻底失去设置等级的能力。
+     * 聚焦行即展开级联，↑↓/Home/End 在行间移动，→ 进入级联，Enter/空格选模型，
+     * Esc 收起；级联内部用 ↑↓ 选等级、Enter 应用、Esc 退回行。
+     */
+    el.onfocus = () => {
+      if (el.dataset.locked === 'true') return;
+      showModelCascade(el);
+    };
+    el.onblur = () => {
+      /**
+       * 【为什么必须记下当时的面板归属】失焦 → 聚焦可能在同一个同步块内连续发生
+       * （键盘上下移动、Esc 回退）。此时 setTimeout(0) 里的回调已经在跑新面板的展开之后，
+       * 若只判断「焦点不在级联里」就收起，会把刚为**另一行**打开的面板一起误杀，
+       * 表现为「聚焦别的行，面板闪一下就没了」。
+       * 因此只在「面板仍属于当前这行」时才允许收起。
+       */
+      const ownerModel = rowModelOf(el);
+      window.setTimeout(() => {
+        const cascade = document.getElementById('model-reasoning-cascade');
+        if (cascade && cascade.contains(document.activeElement)) return;
+        if (state.modelCascadeModel !== ownerModel) return;
+        scheduleHideModelCascade();
+      }, 0);
+    };
+    el.onkeydown = (e) => {
+      if (e.key === 'ArrowRight') {
+        if (el.dataset.locked === 'true') return;
+        const cascade = document.getElementById('model-reasoning-cascade');
+        const first = cascade?.querySelector<HTMLElement>('.model-cascade__item');
+        if (first) {
+          e.preventDefault();
+          e.stopPropagation();
+          // 键盘主动展开不被此前的选完抑制窗口拦截
+          cascadeSuppressUntil = 0;
+          showModelCascade(el);
+          first.focus();
+        }
+        return;
+      }
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        el.click();
+        return;
+      }
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End') return;
+      e.preventDefault();
+      const rows = [...document.querySelectorAll<HTMLElement>('.model-option')].filter((r) => r.offsetParent !== null);
+      const current = rows.indexOf(el);
+      if (current < 0) return;
+      const next =
+        e.key === 'Home'
+          ? 0
+          : e.key === 'End'
+            ? rows.length - 1
+            : e.key === 'ArrowDown'
+              ? Math.min(rows.length - 1, current + 1)
+              : Math.max(0, current - 1);
+      rows[next]?.focus();
+    };
+  });
+
+  // 二级级联自身：进入不收起，离开才收起
+  const cascade = document.getElementById('model-reasoning-cascade');
+  if (cascade) {
+    cascade.onmouseenter = () => {
+      cancelHideModelCascade();
+    };
+    cascade.onmouseleave = () => {
+      scheduleHideModelCascade();
+    };
+    const items = [...cascade.querySelectorAll<HTMLElement>('.model-cascade__item')];
+    items.forEach((el, index) => {
+      el.onclick = (e) => {
+        e.stopPropagation();
+        pickReasoningLevel(el);
+      };
+      el.onkeydown = (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          e.stopPropagation();
+          pickReasoningLevel(el);
+          return;
+        }
+        if (e.key === 'Escape' || e.key === 'ArrowLeft') {
+          e.preventDefault();
+          e.stopPropagation();
+          const model = state.modelCascadeModel;
+          // 【规则】Esc 的目标是「收起面板」而不是「把面板重新唤起来」：
+          // 焦点回到模型行会立刻触发该行的 onfocus → showModelCascade，
+          // 必须同时开启抑制窗口，否则 Esc 表现为「按了没反应」。
+          if (model) {
+            cascadeSuppressModel = model;
+            cascadeSuppressUntil = Date.now() + 400;
+          }
+          hideModelCascade();
+          if (model) {
+            document.querySelector<HTMLElement>(`.model-option[data-model="${CSS.escape(model)}"]`)?.focus({
+              preventScroll: true,
+            });
+          }
+          return;
+        }
+        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End') return;
+        e.preventDefault();
+        const next =
+          e.key === 'Home'
+            ? 0
+            : e.key === 'End'
+              ? items.length - 1
+              : e.key === 'ArrowDown'
+                ? Math.min(items.length - 1, index + 1)
+                : Math.max(0, index - 1);
+        items[next]?.focus();
+      };
+    });
+  }
+}
+
+/** 应用某个思考等级（点击与键盘共用同一路径）。 */
+function pickReasoningLevel(item: HTMLElement): void {
+  // 【规则】`data-level` 是字符串，必须过白名单再断言成联合类型：
+  // 模板与消费者不在同一包，直接 as 等于把运行时校验交给运气。
+  const LEVELS: ReadonlySet<string> = new Set(['default', 'none', 'low', 'high', 'max']);
+  const raw = item.getAttribute('data-level');
+  if (!raw || !LEVELS.has(raw)) return;
+  const level = raw as AppState['reasoningLevel'];
+  // 【规则】抑制窗口对所有行生效：选等级会触发 render 重建列表，
+  // 重建后浏览器可能把焦点还给某个模型行，若只按 model 抑制就会漏掉，
+  // 面板立刻又弹回来，表现为「选了没生效」。
+  const returnToModel = state.modelCascadeModel ?? null;
+  cascadeSuppressModel = null;
+  cascadeSuppressUntil = Date.now() + 600;
+  hideModelCascade();
+  void switchReasoning(level);
+  // 【键盘可达性】选完必须把焦点还给原模型行：blur 到 body 会让键盘用户
+  // 从整个界面的第一个可聚焦元素重新 Tab 一遍。
+  // 放到下一帧：switchReasoning 会触发 render 重建列表，此刻旧行节点已被替换。
+  if (returnToModel) {
+    requestAnimationFrame(() => {
+      const row = document.querySelector<HTMLElement>(`.model-option[data-model="${CSS.escape(returnToModel)}"]`);
+      row?.focus({ preventScroll: true });
+    });
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * 模型行 → 思考等级二级级联（单例面板，按需定位）
+ * ------------------------------------------------------------------ */
+
+let modelCascadeHideTimer: number | null = null;
+/**
+ * 刚选完等级的模型行与其抑制窗口。
+ *
+ * 【为什么需要】选完等级会触发 render 重建列表；此时鼠标仍停在该行上，Chromium 会在
+ * DOM 替换后重新派发 mouseenter，面板立刻又弹出来——用户会觉得「选了没生效」。
+ * 抑制 600ms（且仅限同一行）即可让这次选择视觉上真正收住，移开再回来仍然可用。
+ */
+let cascadeSuppressModel: string | null = null;
+let cascadeSuppressUntil = 0;
+
+function cancelHideModelCascade(): void {
+  if (modelCascadeHideTimer !== null) {
+    window.clearTimeout(modelCascadeHideTimer);
+    modelCascadeHideTimer = null;
+  }
+}
+
+/** 收起二级级联。只改 DOM，不触发 render —— 它不参与任何状态快照。 */
+function hideModelCascade(): void {
+  cancelHideModelCascade();
+  const cascade = document.getElementById('model-reasoning-cascade');
+  if (cascade) cascade.style.display = 'none';
+  state.modelCascadeModel = undefined;
+}
+
+/** 离开行/面板后延迟收起，给「鼠标从行移到面板」留出穿越间隙。 */
+function scheduleHideModelCascade(): void {
+  cancelHideModelCascade();
+  modelCascadeHideTimer = window.setTimeout(() => {
+    modelCascadeHideTimer = null;
+    hideModelCascade();
+  }, 160);
+}
+
+/**
+ * 每次打开模型下拉时把搜索态归零。
+ *
+ * 【设计意图 (Why)】
+ *   残留的搜索词会让用户看到上一次过滤后的残缺列表，误以为模型丢了。
+ *   必须**无条件**清空并重建列表子树——挂在 `if (state.modelSearchQuery)` 里看似等价，
+ *   但一旦条件写错（`if (false)`）整段逻辑就静默失效，而文本断言完全看不出来。
+ *
+ * 【约束与规则 (Rules)】
+ *   只改搜索态与列表子树；搜索框的 `value` 由调用方同步（那里还要 focus）。
+ */
+function resetModelSearchOnOpen(): void {
+  state.modelSearchQuery = '';
+  // 【状态对齐】输入舱快照只随整舱 render() 更新；直接改列表子树清掉搜索词时，
+  // 若不同步对齐快照，下一次无关的 render() 会误判「搜索词变了」而整舱 outerHTML 重建，
+  // 直接打断用户在搜索框里的输入焦点。
+  if (lastInputDockSnapshot) {
+    lastInputDockSnapshot = { ...lastInputDockSnapshot, modelSearchQuery: '' };
+  }
+  updateModelDropdownSubtree();
+}
+
+/** 读取模型行的模型 ID（唯一取法，避免各处手写 getAttribute）。 */
+function rowModelOf(row: HTMLElement): string | undefined {
+  return row.getAttribute('data-model') || undefined;
+}
+
+/** 级联面板距视口上下/左右边缘的安全留白（px）。 */
+const CASCADE_VIEWPORT_PADDING_PX = 8;
+
+/**
+ * 把二级级联定位到某一行右侧并显示。
+ *
+ * 【设计意图 (Why)】面板是单例：300 行 × 5 个等级若逐行渲染，会凭空多出上千个节点，
+ * 而同一时刻只可能看一个。定位用相对下拉容器的绝对坐标，滚动时随行一起移动。
+ *
+ * 【约束与规则 (Rules)】右侧空间不足时翻到左侧；上下不足时夹取，绝不溢出视口。
+ */
+function showModelCascade(row: HTMLElement): void {
+  const cascade = document.getElementById('model-reasoning-cascade');
+  const dropdown = document.getElementById('dock-model-dropdown');
+  if (!cascade || !dropdown) return;
+  // 刚选完等级：DOM 重建后浏览器可能补发 mouseenter/focus，这里按住 600ms 不重开
+  const rowModel = row.getAttribute('data-model');
+  if (Date.now() < cascadeSuppressUntil && (cascadeSuppressModel === null || rowModel === cascadeSuppressModel)) return;
+  cancelHideModelCascade();
+
+  state.modelCascadeModel = rowModel || undefined;
+  // 必须先切到 display='block' 再量尺寸：display:none 时 getBoundingClientRect 全为 0，
+  // 算出来的水平翻转与垂直夹取区间毫无意义。
+  cascade.style.display = 'block';
+  cascade.classList.remove('model-cascade--flip', 'model-cascade--inset');
+
+  const rowRect = row.getBoundingClientRect();
+  const dropdownRect = dropdown.getBoundingClientRect();
+  const cascadeRect = cascade.getBoundingClientRect();
+  const cascadeWidth = cascadeRect.width || 148;
+  const cascadeHeight = cascadeRect.height || 0;
+
+  // 1. 水平三档：右侧够放 → 右外侧；左侧够放 → 左外侧；两侧都不够（窄屏/移动端）→ 内缩停靠右内缘
+  const spaceRight = window.innerWidth - dropdownRect.right;
+  const spaceLeft = dropdownRect.left;
+  let useInset = false;
+  if (spaceRight >= cascadeWidth + 12) {
+    // 默认右外侧
+  } else if (spaceLeft >= cascadeWidth + 12) {
+    cascade.classList.add('model-cascade--flip');
+  } else {
+    cascade.classList.add('model-cascade--inset');
+    useInset = true;
+  }
+
+  // 2. 垂直：常规右/左外侧时顶部对齐该行，但必须夹在视口内；
+  //    内缩态（--inset）要避开当前锚定行本身文字，优先放行下方，不够再放行上方。
+  const viewportBottom = window.innerHeight - CASCADE_VIEWPORT_PADDING_PX;
+  let desiredTop = rowRect.top;
+  if (useInset) {
+    const belowTop = rowRect.bottom + 4;
+    const aboveTop = rowRect.top - cascadeHeight - 4;
+    desiredTop = belowTop + cascadeHeight <= viewportBottom ? belowTop : Math.max(CASCADE_VIEWPORT_PADDING_PX, aboveTop);
+  }
+  const maxTop = Math.max(CASCADE_VIEWPORT_PADDING_PX, viewportBottom - cascadeHeight);
+  const clampedTop = Math.min(Math.max(desiredTop, CASCADE_VIEWPORT_PADDING_PX), maxTop);
+  // absolute 定位基准是 padding-box 顶部（视口坐标 dropdownRect.top + dropdown.clientTop），因此须减 clientTop
+  cascade.style.top = `${Math.round(clampedTop - dropdownRect.top - dropdown.clientTop)}px`;
+}
+
+/** 统一收起模型下拉：同步 state、直接写 DOM（兜底防快照跳过）并触发重绘。 */
+function closeModelMenu(): void {
+  hideModelCascade();
+  state.modelMenuOpen = false;
+  const dropdown = document.getElementById('dock-model-dropdown');
+  if (dropdown) dropdown.style.display = 'none';
+  const trigger = document.getElementById('dock-model-selector-btn');
+  if (trigger) trigger.setAttribute('aria-expanded', 'false');
+  render();
 }
 
 function updateModelDropdownSubtree(): void {
@@ -8782,6 +9123,7 @@ function updateModelDropdownSubtree(): void {
     favoriteModels: state.favoriteModels,
     recentModels: state.recentModels,
     modelSearchQuery: state.modelSearchQuery,
+    collapsedProviders: state.collapsedProviders,
     reasoningLevel: state.reasoningLevel,
     approvalMode: state.approvalMode,
     isStreaming: state.isStreaming,
@@ -8820,8 +9162,7 @@ window.addEventListener('keydown', (e) => {
       state.isSettingsOpen = false;
       render();
     } else if (state.modelMenuOpen) {
-      state.modelMenuOpen = false;
-      render();
+      closeModelMenu();
     }
   }
   if (e.key === 'Enter' && state.confirmModal) {
@@ -8834,16 +9175,33 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
-// Close the model menu, reasoning menu or context menu when the pointer goes down outside of it.
-document.addEventListener('mousedown', (e) => {
-  const reasoningDropdown = document.getElementById('dock-reasoning-dropdown');
-  const reasoningBtn = document.getElementById('dock-reasoning-toggle-btn');
-  if (reasoningDropdown && reasoningDropdown.style.display === 'block') {
-    if (!reasoningDropdown.contains(e.target as Node) && !reasoningBtn?.contains(e.target as Node)) {
-      reasoningDropdown.style.display = 'none';
-    }
-  }
+/**
+ * 点击空白处收起浮层。
+ *
+ * 【设计意图 (Why)】
+ *   1. 用 **capture 阶段的 pointerdown**，而不是冒泡阶段的 mousedown：
+ *      浮层内部任何一处 stopPropagation（搜索框、行、分组标题都写了）都不会再让
+ *      「点外面」失效；pointerdown 也覆盖触控板与触摸。
+ *   2. 白名单从「第一个 `.pill-dropdown-wrapper`」改成「下拉根节点 + 触发按钮 + 二级级联」
+ *      三个实名节点：分组标题、列表空白、级联面板都属于菜单自身，点它们不该收起菜单，
+ *      而菜单外的任何像素都必须收起 —— 这正是之前「点空白不消失」的判定漏洞。
+ */
+document.addEventListener(
+  'pointerdown',
+  (e) => {
+    if (!state.modelMenuOpen) return;
+    const target = e.target as Node | null;
+    if (!target) return;
+    const dropdown = document.getElementById('dock-model-dropdown');
+    const trigger = document.getElementById('dock-model-selector-btn');
+    const cascade = document.getElementById('model-reasoning-cascade');
+    if (dropdown?.contains(target) || trigger?.contains(target) || cascade?.contains(target)) return;
+    closeModelMenu();
+  },
+  true,
+);
 
+document.addEventListener('mousedown', (e) => {
   const approvalDropdown = document.getElementById('dock-approval-dropdown');
   const approvalBtn = document.getElementById('dock-approval-toggle-btn');
   if (approvalDropdown && approvalDropdown.style.display === 'block') {
@@ -8858,13 +9216,6 @@ document.addEventListener('mousedown', (e) => {
       state.sessionContextMenu = undefined;
       render();
     }
-  }
-
-  if (!state.modelMenuOpen) return;
-  const wrapper = document.querySelector('.pill-dropdown-wrapper');
-  if (wrapper && !wrapper.contains(e.target as Node)) {
-    state.modelMenuOpen = false;
-    render();
   }
 });
 
@@ -8882,6 +9233,30 @@ function injectConversationDemo(): void {
   state.gatewayConnected = true;
   state.gatewayConnecting = false;
   state.profileName = 'default';
+  // 【规则】演示态必须带上真实的模型目录形状，否则模型选择器的折叠、搜索、思考级联
+  // 在 `?demo=conversation` 下全是空列表，等于没法验收交互。这里走与网关完全相同的归一化入口。
+  const demoEntries = normalizeModelCatalog({
+    providers: [
+      {
+        slug: 'cpa',
+        name: 'cpa',
+        models: ['anthropic/claude-opus-5', 'gemini-3.8-flash', 'deepseek-v4.1-flash', 'qwen3-max'],
+      },
+      { slug: 'nous', name: 'Nous Portal', models: ['zai/glm-5.2', 'kimi-k2', 'openrouter/sonoma-sky'] },
+      { slug: 'xai-oauth', name: 'xAI Grok OAuth', models: ['grok-4.20'] },
+    ],
+  });
+  state.modelCatalog = demoEntries;
+  state.availableModels = demoEntries.map((entry) => entry.id);
+  state.modelDetails = demoEntries.map<ModelDetail>((entry) => ({
+    id: entry.id,
+    provider: entry.providerSlug,
+    name: entry.displayName,
+    displayName: entry.displayName,
+  }));
+  state.modelCatalogHash = modelCatalogFingerprint(demoEntries);
+  state.currentProvider = 'cpa';
+  state.selectedModel = 'gemini-3.8-flash';
   state.activeFocus = { type: 'session', sessionId: 'demo-session' };
   state.hasOlderMessages = true;
   state.messages = [

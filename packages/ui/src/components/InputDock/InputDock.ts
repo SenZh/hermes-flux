@@ -12,6 +12,7 @@
 
 import { t } from '../../i18n/index.js';
 import { formatModelDisplayName, modelLabelFromCatalog, parseModelDisplay, type ModelCatalogEntry } from '@hermes-flux/core';
+import { renderModelVendorIcon, renderProviderVendorIcon, renderVendorIcon } from '../../lib/vendorIcon.js';
 
 export interface InputAttachmentItem {
   id: string;
@@ -187,6 +188,35 @@ export function renderDockNoticeBar(notice?: string): string {
   `;
 }
 
+/**
+ * 思考等级归一（唯一真值）
+ *
+ * 【设计意图 (Why)】
+ *   `off` / `medium` 是历史遗留别名：`off` 等价 `none`，`medium` 在网关映射表里落到 `high`。
+ *   级联面板只有五档，任何未归一的取值都会导致「五档全暗」——用户看不出当前到底哪一档。
+ *
+ * 【约束与规则 (Rules)】
+ *   纯函数、无副作用；未知取值回退 `default`（而不是留空），保证面板永远有且只有一个高亮项。
+ */
+export function normalizeReasoningLevel(
+  level: InputDockProps['reasoningLevel'] | '' | undefined,
+): 'default' | 'none' | 'low' | 'high' | 'max' {
+  switch (level) {
+    case 'none':
+    case 'off':
+      return 'none';
+    case 'low':
+      return 'low';
+    case 'medium':
+    case 'high':
+      return 'high';
+    case 'max':
+      return 'max';
+    default:
+      return 'default';
+  }
+}
+
 export function renderInputDock(props: InputDockProps): string {
   const isStreaming = Boolean(props.isStreaming);
   const modelMenuOpen = Boolean(props.modelMenuOpen);
@@ -196,6 +226,12 @@ export function renderInputDock(props: InputDockProps): string {
   // Model display label
   // 【规则】统一走 core 派生：目录命中优先，未命中按 ID 派生；绝不把裸 ID 直接显示给用户
   const modelLabel = resolveDockModelLabel(props);
+  // 【规则】触发按钮左侧展示当前模型的厂商图标；只有判定出真实厂商才替换齿轮，
+  // 判不出（未选模型 / 未知厂商）保留齿轮表示"通用模型入口"，绝不硬套首字母徽标。
+  // 这里用 suppressBadge 让渲染层直接返回空串，省掉一次额外的 vendorId 预判。
+  const modelIcon = props.selectedModel
+    ? renderModelVendorIcon(props.selectedModel, props.currentProvider ?? '', { size: 16, suppressBadge: true })
+    : '';
 
   const activityPillHtml = activityStatus
     ? `
@@ -238,13 +274,13 @@ export function renderInputDock(props: InputDockProps): string {
   const hasNotices = Boolean(rollbackBarHtml || dockNoticeHtml);
 
   const reasoningLabels: Record<string, string> = {
-    default: '默认',
-    none: 'None',
-    off: 'None',
-    low: 'Low',
-    medium: 'High',
-    high: 'High',
-    max: 'Max',
+    default: t('dock.reasoningDefault'),
+    none: t('dock.reasoningNone'),
+    off: t('dock.reasoningNone'),
+    low: t('dock.reasoningLow'),
+    medium: t('dock.reasoningHigh'),
+    high: t('dock.reasoningHigh'),
+    max: t('dock.reasoningMax'),
   };
 
   const approvalLabels: Record<string, string> = {
@@ -316,8 +352,8 @@ export function renderInputDock(props: InputDockProps): string {
           <div class="composer-dock__footer-group composer-dock__footer-group--end">
             <!-- 1. Model Selector -->
             <div class="pill-dropdown-wrapper">
-              <button id="dock-model-selector-btn" class="composer-ctrl" title="${t('dock.selectModel')}">
-                <svg class="composer-ctrl__icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2"/></svg>
+              <button id="dock-model-selector-btn" class="composer-ctrl" title="${t('dock.selectModel')}" aria-haspopup="listbox" aria-expanded="${modelMenuOpen ? 'true' : 'false'}">
+                ${modelIcon || `<svg class="composer-ctrl__icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2"/></svg>`}
                 <span id="current-model-label" class="composer-ctrl__label">${escapeHtml(modelLabel)}</span>
                 <span class="composer-ctrl__caret" style="font-size: 9px;">▾</span>
               </button>
@@ -332,12 +368,12 @@ export function renderInputDock(props: InputDockProps): string {
                 border: 1px solid var(--border-strong);
                 border-radius: 12px;
                 box-shadow: var(--shadow-window), 0 0 0 1px var(--border-subtle);
-                overflow: hidden;
+                overflow: visible;
                 z-index: 200;
                 user-select: none;
               ">
                 <!-- Top Action & Search Bar -->
-                <div style="padding: 10px 10px 6px; border-bottom: 1px solid var(--border-subtle); background: var(--popover);">
+                <div style="padding: 10px 10px 6px; border-bottom: 1px solid var(--border-subtle); background: var(--popover); border-radius: 12px 12px 0 0;">
                   <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
                     <span id="btn-add-provider" style="font-size: 11.5px; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; gap: 4px;">
                       <span style="font-size: 13px;">+</span> 添加新提供商
@@ -362,8 +398,28 @@ export function renderInputDock(props: InputDockProps): string {
                 </div>
 
                 <!-- Scrollable Model Tree List (Accordion by Provider) -->
-                <div id="model-picker-scroll-list" style="max-height: 320px; overflow-y: auto; padding: 6px 0;">
+                <div id="model-picker-scroll-list" role="listbox" aria-label="${escapeHtml(t('dock.selectModel'))}" style="max-height: 320px; overflow-y: auto; padding: 6px 0;">
                   ${renderModelPickerTree(props)}
+                </div>
+
+                <!-- 二级级联：思考等级。悬停/聚焦任意模型行时由桌面端定位到该行右侧。
+                     独立于行内渲染，避免 300 行 × 5 项重复 DOM。 -->
+                <div id="model-reasoning-cascade" class="model-cascade" role="menu" aria-label="${escapeHtml(t('dock.reasoning'))}" style="display: none;">
+                  <div class="model-cascade__title" role="presentation">${t('dock.reasoning')}</div>
+                  ${['default', 'none', 'low', 'high', 'max']
+                    .map((lvl) => {
+                      // 【规则】单值高亮：`high` 与 `default` 不能同时勾上，否则用户看不出当前到底哪一档。
+                      // `off` 与 `medium` 是历史别名，必须先归一再比对——否则 `medium` 会五档全暗。
+                      const normalized = normalizeReasoningLevel(props.reasoningLevel);
+                      const isSelected = normalized === lvl;
+                      return `
+                    <div class="model-cascade__item${isSelected ? ' active' : ''}" role="menuitemradio" aria-checked="${isSelected ? 'true' : 'false'}" data-level="${lvl}" tabindex="0">
+                      <span>${escapeHtml(reasoningLabels[lvl] || lvl)}</span>
+                      ${isSelected ? '<span class="model-cascade__check">✓</span>' : ''}
+                    </div>
+                  `;
+                    })
+                    .join('')}
                 </div>
 
                 <!-- Bottom Navigation Hint -->
@@ -371,6 +427,7 @@ export function renderInputDock(props: InputDockProps): string {
                   padding: 6px 12px;
                   border-top: 1px solid var(--border-subtle);
                   background: var(--popover);
+                  border-radius: 0 0 12px 12px;
                   font-size: 10.5px;
                   color: var(--text-muted);
                   display: flex;
@@ -383,58 +440,10 @@ export function renderInputDock(props: InputDockProps): string {
               </div>
             </div>
 
-            <!-- 2. Reasoning Dropdown -->
-            <div class="pill-dropdown-wrapper">
-              <button id="dock-reasoning-toggle-btn" class="composer-ctrl" title="${t('dock.reasoning')}">
-                <svg class="composer-ctrl__icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                <span id="current-reasoning-label" class="composer-ctrl__label">${reasoningLabels[props.reasoningLevel] || t('dock.reasoningDefault')}</span>
-                <span class="composer-ctrl__caret" style="font-size: 9px;">▾</span>
-              </button>
+            <!-- 2. 思考等级不再占用输入舱：改为模型行 hover 时右侧弹出的二级级联面板
+                 （见 #model-reasoning-cascade），避免在 740px 的输入舱里再塞一个下拉。 -->
 
-              <div id="dock-reasoning-dropdown" class="reasoning-dropdown-menu" style="
-                display: none;
-                position: absolute;
-                bottom: calc(100% + 8px);
-                right: 0;
-                min-width: 140px;
-                background: var(--bg-card);
-                border: 1px solid var(--border-medium);
-                border-radius: 10px;
-                box-shadow: var(--shadow-window);
-                padding: 6px;
-                max-height: 240px;
-                overflow-y: auto;
-                z-index: 210;
-                user-select: none;
-              ">
-                <div style="font-size: 11px; font-weight: 700; color: var(--text-main); padding: 4px 8px 6px; border-bottom: 1px solid var(--border-subtle);">思考</div>
-                ${['default', 'none', 'low', 'high', 'max']
-                  .map((lvl) => {
-                    const isSelected = props.reasoningLevel === lvl || (lvl === 'default' && (!props.reasoningLevel || props.reasoningLevel === 'high')) || (lvl === 'none' && props.reasoningLevel === 'off');
-                    return `
-                  <div class="reasoning-option ${isSelected ? 'active' : ''}" data-level="${lvl}" style="
-                    padding: 5px 8px;
-                    border-radius: 6px;
-                    font-size: 11.5px;
-                    color: ${isSelected ? 'var(--accent)' : 'var(--text-main)'};
-                    background: ${isSelected ? 'var(--accent-subtle)' : 'transparent'};
-                    cursor: pointer;
-                    display: flex;
-                    align-items: center;
-                    justify-content: space-between;
-                    margin-bottom: 2px;
-                  ">
-                    <span>${reasoningLabels[lvl] || lvl}</span>
-                    ${isSelected ? '<span style="font-weight: 700; font-size: 11px;">✓</span>' : ''}
-                  </div>
-                `;
-                  })
-                  .join('')}
-              </div>
-            </div>
-          </div>
-
-            <!-- Send Action Button -->
+            <!-- Send Action Button：与模型按钮同归右端紧凑组，避免去掉思考按钮后中间出现几百像素空洞 -->
             <button id="dock-send-btn" class="composer-send${isStreaming ? ' composer-send--stop' : ''}" title="${isStreaming ? t('dock.stop') : t('dock.send')}" ${props.disabled ? 'disabled data-locked="true"' : ''}>
               ${
                 isStreaming
@@ -826,6 +835,8 @@ interface ModelPickerRow {
   route: string;
   date: string;
   vendor: string;
+  /** 厂商图标 slug；空串表示判不出或上游无图标，渲染层降级首字母 badge */
+  vendorId: string;
   contextLength?: number;
   supportsVision?: boolean;
   unavailable?: boolean;
@@ -865,6 +876,7 @@ export function resolveModelPickerRows(
       route: entry.route,
       date: entry.date,
       vendor: entry.vendor,
+      vendorId: entry.vendorId ?? '',
       contextLength: entry.contextLength,
       supportsVision: entry.supportsVision,
       unavailable: entry.unavailable,
@@ -890,6 +902,7 @@ export function resolveModelPickerRows(
         route: parts.route,
         date: parts.date,
         vendor: parts.vendor,
+        vendorId: parts.vendorId,
         contextLength: detail.contextLength,
         supportsVision: detail.supportsVision,
       };
@@ -911,6 +924,7 @@ export function resolveModelPickerRows(
       route: parts.route,
       date: parts.date,
       vendor: parts.vendor,
+      vendorId: parts.vendorId,
     };
   });
 }
@@ -923,7 +937,9 @@ export function renderModelPickerTree(props: InputDockProps): string {
   const allDetails = resolveModelPickerRows(props);
   const favorites = new Set(props.favoriteModels || []);
   const recents = props.recentModels || [];
-  const collapsedSet = new Set(props.collapsedProviders || []);
+  // 【规则】搜索时必须无视折叠状态：命中的模型被折叠起来，等于搜索「没结果」，
+  // 用户只能靠再点开分组才知道东西其实在。
+  const collapsedSet = query ? new Set<string>() : new Set(props.collapsedProviders || []);
 
   // Filter models by search query
   const filtered = allDetails.filter((d) => {
@@ -956,7 +972,7 @@ export function renderModelPickerTree(props: InputDockProps): string {
     ${
       !query && favoriteItems.length > 0
         ? `
-      <div class="model-picker-section" style="margin-bottom: 6px;">
+      <div class="model-picker-section" role="group" aria-label="${escapeHtml(t('dock.favorites'))}" style="margin-bottom: 6px;">
         <div style="padding: 4px 12px; font-size: 11px; font-weight: 700; color: #38BDF8; display: flex; align-items: center; gap: 6px;">
           <span>★</span>
           <span>收藏</span>
@@ -971,7 +987,7 @@ export function renderModelPickerTree(props: InputDockProps): string {
     ${
       !query && recentItems.length > 0
         ? `
-      <div class="model-picker-section" style="margin-bottom: 6px;">
+      <div class="model-picker-section" role="group" aria-label="${escapeHtml(t('dock.recents'))}" style="margin-bottom: 6px;">
         <div style="padding: 4px 12px; font-size: 11px; font-weight: 700; color: var(--text-muted); display: flex; align-items: center; gap: 6px;">
           <span>🕒</span>
           <span>最近</span>
@@ -990,21 +1006,19 @@ export function renderModelPickerTree(props: InputDockProps): string {
               // 【规则】分组标题用 provider 展示名（`Nous Portal` / `xAI Grok OAuth`），
               // 而不是大写 slug（`CPA` / `NOUS` / `XAI-OAUTH`）——slug 是路由标识，不是给人看的名字。
               const displayName = models[0]?.providerName || providerSlug;
-              const upperName = `${providerSlug} ${displayName}`.toUpperCase();
               const isCollapsed = collapsedSet.has(providerSlug);
-              let icon = '⬡';
-              if (upperName.includes('OPENCODE')) icon = '📱';
-              else if (upperName.includes('CURSOR')) icon = '⬡';
-              else if (upperName.includes('ANTHROPIC') || upperName.includes('CLAUDE')) icon = '🧠';
-              else if (upperName.includes('OPENAI')) icon = '⚡';
-              else if (upperName.includes('DEEPSEEK')) icon = '🐋';
-              else if (upperName.includes('XAI') || upperName.includes('GROK')) icon = '🤖';
-              else if (upperName.includes('GOOGLE') || upperName.includes('GEMINI')) icon = '✦';
+              // 搜索期间折叠被临时忽略：此时标题不再是折叠开关，视觉上必须同步退化，
+              // 否则用户点它毫无反应，会认为控件坏了。
+              const searchForcedOpen = Boolean(query);
+              // 【规则】标题图标走 provider 维度判定：命中的厂商出品牌 logo，
+              // 判不出（`cpa` / `nous` 这类接入入口）渲染首字母 badge。
+              // 这里彻底移除 emoji —— emoji 与品牌标识语义不符，且各平台字形与基线不一致。
+              const providerIcon = renderProviderVendorIcon(providerSlug, displayName, { size: 13 });
 
               return `
             <div class="model-provider-group" data-provider="${escapeHtml(providerSlug)}" style="margin-bottom: 6px;">
               <!-- Accordion Header -->
-              <div class="model-provider-group-header" data-provider="${escapeHtml(providerSlug)}" style="
+              <div class="model-provider-group-header" data-provider="${escapeHtml(providerSlug)}" data-collapsed="${isCollapsed ? 'true' : 'false'}" data-search-open="${searchForcedOpen ? 'true' : 'false'}" role="button" tabindex="0" aria-expanded="${isCollapsed ? 'false' : 'true'}" aria-disabled="${searchForcedOpen ? 'true' : 'false'}" style="
                 padding: 5px 12px;
                 font-size: 11px;
                 font-weight: 700;
@@ -1018,15 +1032,14 @@ export function renderModelPickerTree(props: InputDockProps): string {
                 user-select: none;
               ">
                 <div style="display: flex; align-items: center; gap: 6px;">
-                  <span style="opacity: 0.5;">::</span>
-                  <span>${icon}</span>
+                  ${providerIcon}
                   <span>${escapeHtml(displayName)}</span>
                   <span style="font-size: 10px; color: var(--text-muted); font-weight: 400;">(${models.length})</span>
                 </div>
-                <span class="provider-accordion-arrow" style="font-size: 9px; opacity: 0.6;">${isCollapsed ? '▸' : '▾'}</span>
+                <span class="provider-accordion-arrow" aria-hidden="true">${isCollapsed ? '▸' : '▾'}</span>
               </div>
               <!-- Accordion Body -->
-              <div class="model-provider-items" style="display: ${isCollapsed ? 'none' : 'block'};">
+              <div class="model-provider-items" role="group" aria-label="${escapeHtml(displayName)}" style="display: ${isCollapsed ? 'none' : 'block'};">
                 ${models.map((item) => renderModelItemRow(item, props.selectedModel, favorites.has(item.id))).join('')}
               </div>
             </div>
@@ -1053,20 +1066,21 @@ function renderModelItemRow(
   const lockHint = locked
     ? escapeHtml(item.providerWarning || t('dock.modelUnavailable'))
     : escapeHtml(item.id);
+  // 【规则】每行左侧的厂商图标按模型身份判定，与分组标题（provider 维度）互不影响：
+  // 同一个 provider 下可能挂着多家厂商的模型（`cpa` 代理同时提供 Gemini 与 DeepSeek）。
+  const vendorIcon = renderVendorIcon({ vendorId: item.vendorId, label: item.vendor, size: 14 });
 
   return `
-    <div class="model-option ${isSelected ? 'active' : ''} ${locked ? 'is-locked' : ''}" data-model="${escapeHtml(item.id)}" data-provider="${escapeHtml(item.provider)}" data-locked="${locked ? 'true' : 'false'}" title="${lockHint}" style="
+    <div class="model-option${isSelected ? ' active' : ''}${locked ? ' is-locked' : ''}" data-model="${escapeHtml(item.id)}" data-provider="${escapeHtml(item.provider)}" data-locked="${locked ? 'true' : 'false'}" title="${lockHint}" role="option" aria-selected="${isSelected ? 'true' : 'false'}" aria-disabled="${locked ? 'true' : 'false'}" tabindex="0"${locked ? '' : ' aria-haspopup="menu"'} style="
       padding: 6px 12px;
       font-size: 12px;
       color: ${isSelected ? 'var(--accent)' : 'var(--text-main)'};
-      background: ${isSelected ? 'var(--accent-subtle)' : 'transparent'};
       cursor: ${locked ? 'not-allowed' : 'pointer'};
       opacity: ${locked ? '0.45' : '1'};
       display: flex;
       align-items: center;
       justify-content: space-between;
-      transition: background 0.1s ease;
-    " onmouseenter="if (!this.classList.contains('active') && this.dataset.locked !== 'true') this.style.background='var(--card-hover)'" onmouseleave="if (!this.classList.contains('active')) this.style.background='transparent'">
+    ">
       <div style="display: flex; align-items: center; gap: 8px; overflow: hidden; min-width: 0; flex: 1 1 auto; white-space: nowrap;">
         <span class="btn-toggle-favorite" data-model="${escapeHtml(item.id)}" style="
           color: ${isFav ? 'var(--accent)' : 'var(--text-faint)'};
@@ -1074,6 +1088,7 @@ function renderModelItemRow(
           cursor: pointer;
           flex-shrink: 0;
         ">${isFav ? '★' : '☆'}</span>
+        ${vendorIcon}
         <span style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; color: inherit;">${escapeHtml(item.name)}</span>
         ${renderModelBadge(item.variant, 'var(--foreground)', 'var(--secondary)')}
         ${renderModelBadge([item.quant, item.context].filter(Boolean).join(' · '), 'var(--muted-foreground)', 'var(--secondary)')}
@@ -1087,6 +1102,7 @@ function renderModelItemRow(
             : ''
         }
         ${isSelected ? '<span style="font-size: var(--fs-caption); color: var(--accent); font-weight: 700;">✓</span>' : ''}
+        <span class="model-option__cascade" aria-hidden="true">›</span>
       </div>
     </div>
   `;

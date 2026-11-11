@@ -85,7 +85,10 @@ test('Delete Session Focus & InputDock Snapshot Invariants', async (t) => {
     // 3. Assert: 必须包含关键的 dock-prompt-input 与限宽外壳（740px 由 .composer-dock 样式承担）
     assert.ok(html.includes('id="dock-prompt-input"'), '必须包含核心 textarea 节点');
     assert.ok(html.includes('input-card-box composer-dock'), '输入舱必须挂载统一外壳类');
-    assert.ok(!html.includes('disabled'), '未禁用状态下禁止含有 disabled 属性');
+    // 【精确断言】只看真正的 HTML `disabled` 属性：
+    // 模型行与分组标题现在带 `aria-disabled="false"` 表达「可操作」，它不阻止输入，
+    // 用 includes('disabled') 会把 aria-disabled 一并误判，等于把可访问性属性当成回归。
+    assert.ok(!/\sdisabled(?=[\s>=])/.test(html), '未禁用状态下禁止含有 disabled 属性');
   });
 
   await t.test('3. 事件防重绑定 (dockEventsBound) 机制断言 - 连续调用防多次注册与泄漏', () => {

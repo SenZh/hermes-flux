@@ -207,6 +207,8 @@ test('modelCatalog - 网关真实响应归一化', async (t) => {
     assert.equal(opus.pricing?.input, '$4.00');
     assert.equal(opus.capabilities?.reasoning, true);
     assert.equal(opus.vendor, 'Anthropic');
+    // 展示名与图标 slug 必须同源派生：只断 vendor 会让「图标查表键」静默丢失
+    assert.equal(opus.vendorId, 'anthropic');
   });
 
   await t.test('6. 跨 provider 同名模型各自保留', () => {
@@ -291,6 +293,7 @@ test('modelCatalogFingerprint - 指纹必须覆盖全部渲染字段', async (t)
     route: '',
     date: '',
     vendor: 'Anthropic',
+    vendorId: 'anthropic',
     displayName: 'Opus 4.8',
     featured: false,
     unavailable: false,
@@ -336,6 +339,12 @@ test('modelCatalogFingerprint - 指纹必须覆盖全部渲染字段', async (t)
     assert.notEqual(reference, fp({ ...base, supportsVision: true }));
     assert.notEqual(reference, fp({ ...base, id: 'anthropic/claude-opus-5' }));
     assert.notEqual(reference, fp({ ...base, vendor: 'OpenAI' }));
+  });
+
+  await t.test('7. vendorId 变化必须改变指纹（图标会换，不重绘就会显示旧品牌）', () => {
+    const reference = fp(base);
+    assert.notEqual(reference, fp({ ...base, vendorId: 'openai' }));
+    assert.notEqual(reference, fp({ ...base, vendorId: '' }));
   });
 
   await t.test('7. 显示名变化必须改变指纹（网关改名场景）', () => {

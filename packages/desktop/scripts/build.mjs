@@ -181,6 +181,24 @@ async function buildAll() {
     path.join(rootDir, 'dist/renderer', 'conversation.css')
   );
 
+  // 模型厂商图标资产同样来自 UI 包：组件以 `icons/lobe/<slug>.svg` 相对 index.html 引用，
+  // 因此必须原样落在渲染产物根目录下，桌面（file://）与浏览器直跑（HTTP 静态服务）才都能解析。
+  const vendorIconSourceDir = path.join(repoDir, 'packages', 'ui', 'src', 'icons', 'lobe');
+  const vendorIconTargetDir = path.join(rootDir, 'dist', 'renderer', 'icons', 'lobe');
+  fs.mkdirSync(vendorIconTargetDir, { recursive: true });
+  let copiedVendorIcons = 0;
+  for (const name of fs.readdirSync(vendorIconSourceDir)) {
+    if (!name.endsWith('.svg')) continue;
+    fs.copyFileSync(path.join(vendorIconSourceDir, name), path.join(vendorIconTargetDir, name));
+    copiedVendorIcons += 1;
+  }
+  // 【规则】MIT 要求所有副本随附许可声明：图标资产进了分发产物，LICENSE 必须同行，
+  // 否则安装包里只有一堆无出处的品牌矢量图。
+  const vendorIconLicense = path.join(vendorIconSourceDir, 'LICENSE');
+  if (!fs.existsSync(vendorIconLicense)) throw new Error('缺少 lobe 图标 LICENSE，禁止在无许可声明的情况下分发品牌资产');
+  fs.copyFileSync(vendorIconLicense, path.join(vendorIconTargetDir, 'LICENSE'));
+  console.log(`  ✔ Model vendor icons copied (${copiedVendorIcons} svg + LICENSE)`);
+
   // 字体清单由 scripts/font-manifest.json 提供（与 tokens/fonts.ts 的 source 字段一一对应）。
   // 只拷贝 latin 子集；中文继续走系统字体，避免引入 MB 级 CJK 字重。
   const fontTargetDir = path.join(rootDir, 'dist/renderer/fonts');
