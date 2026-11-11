@@ -327,16 +327,17 @@ export function diffEndpointAcrossProfiles(
 /**
  * Bot 名称的显示宽度预算（单位：汉字 = 2，半角字符 = 1）。
  *
- * 【算术依据（不再靠注释各说一套）】
- *   字阶 `text-caption` = 11px。汉字宽约等于字号（11px 量级），半角字符约 6.2px。
- *   槽宽真值在 `ProfileAvatarStrip` 里是 56px：
- *     · 完整显示 4 个汉字 = 44px，余 12px；
- *     · 完整显示 8 个半角 = 49.6px，余 6.4px；
- *     · 截断路径为省略号预留 2 单位，剩 6 单位 + `…`(≈8px) ≤ 45px，均不溢出。
- *   旧口径是 48px 槽宽配 8 单位：8 个半角字符顶到 49.6px，会被 CSS 二次裁切，
- *   用户看到"省略号被吃掉"。所以修的是槽宽而不是压缩预算。
+ * 【算术依据】字阶 `text-caption` = 11px；Agent 成员格轨道 64px。
+ *   · 完整显示 5 个汉字 = 55px，余 9px；
+ *   · 完整显示 10 个半角 ≈ 62px（按 6.2px/字符估算，对常规小写偏保守），余 2px；
+ *   · 截断路径为省略号预留 1 单位（U+2026 记半角）；9 单位内容 + `…` ≈ 63.9px，
+ *     已到轨道边缘，因此宽字母与 12px 大字号档由 CSS `truncate` 兜底。
+ *   默认值对应当前唯一消费者（Agent 成员格），不是通用安全值；更窄的槽位必须
+ *   由调用方显式传更小的 `maxUnits`。
+ *   历史：48px 槽宽配 8 单位时，8 个半角字符顶到 49.6px，会被 CSS 吃掉省略号，
+ *   所以先修槽宽，再按 64px 重算预算。
  */
-export const PROFILE_LABEL_MAX_UNITS = 8;
+export const PROFILE_LABEL_MAX_UNITS = 10;
 
 /** CJK 字符按 2 个宽度单位计，其余按 1 个计。 */
 function charUnits(char: string): number {
@@ -364,15 +365,18 @@ function fitUnits(text: string, budget: number): string {
 
 /**
  * 按显示宽度截断 Bot 名称。
- * 【设计意图】头像条是固定槽宽，名字必须单行等宽可预测，不能靠 CSS 各写各的。
- * 【规则】11px 字号下 4 个汉字约 44px，正好落在 48px 槽宽内；超出预算时必须
- *   为省略号预留其自身宽度，即展示 3 个汉字 + `…`，绝不撑破槽宽。
+ * 【设计意图】成员格是固定槽宽，名字必须单行等宽可预测，不能靠 CSS 各写各的。
+ * 【规则】11px 字号下 5 个汉字约 55px，落在 64px 轨道内；超出预算时必须为省略号
+ *   预留 1 单位，即展示 9 单位内容 + `…`。预算内不撑破轨道，宽字母与大字号档
+ *   由 CSS `truncate` 兜底。
  */
 export function truncateProfileLabel(name: string, maxUnits = PROFILE_LABEL_MAX_UNITS): string {
   const text = name.trim();
   if (!text) return '';
   if (textUnits(text) <= maxUnits) return text;
   const ellipsisUnits = charUnits('…');
+  // 预算连省略号都放不下时返回空串，不能返回一个超预算的 `…`。
+  if (maxUnits < ellipsisUnits) return '';
   return `${fitUnits(text, Math.max(0, maxUnits - ellipsisUnits)).trimEnd()}…`;
 }
 

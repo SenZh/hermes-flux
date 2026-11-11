@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { SettingsModal } from '../dist/components-react/settings/SettingsModal.js';
+import { FanOutMemberList } from '../dist/components-react/settings/FanOutMemberList.js';
 import { ModelOptionRow, ModelPickerDialog, ModelPickerField, resolveModelPick } from '../dist/components-react/settings/ModelPicker.js';
 import {
   SETTINGS_SECTIONS,
@@ -276,7 +277,7 @@ test('生效范围是每个 Agent 一个格子：头像 + 名称 + 勾选框，�
 
 test('Agent 成员网格：44px 头像、64px 固定轨道、名称截断但 title 保留全名', () => {
   setLocale('zh-CN');
-  const longName = 'Auralis-Infrastructure-Ops';
+  const longName = 'auralis-infrastructure-ops';
   const html = render(providerSnapshot({
     providerViews: {
       status: 'ready',
@@ -284,6 +285,7 @@ test('Agent 成员网格：44px 头像、64px 固定轨道、名称截断但 tit
         agents: [
           { profile: 'default', displayName: longName, state: 'ready' },
           { profile: 'aura', displayName: '基础设施运维助手', state: 'active' },
+          { profile: 'xiaofawang', displayName: 'xiaofawang', state: 'ready' },
         ],
       })],
     },
@@ -294,8 +296,9 @@ test('Agent 成员网格：44px 头像、64px 固定轨道、名称截断但 tit
   assert.equal(html.includes('w-20'), false, '不再保留 80px 宽的正方形卡片');
   assert.ok(html.includes('agent-grid'), '网格按 64px 固定轨道自动铺列，行数随数量增长');
   assert.ok(html.includes('--ui-text-caption'), '名称字号必须消费用户字号档位变量');
-  assert.ok(html.includes('Auralis…'), '英文名按 8 个半角单位截断');
-  assert.ok(html.includes('基础设…'), '中文名按预算为省略号预留宽度');
+  assert.ok(html.includes('auralis-i…'), '英文名按 10 个半角单位截断，与 64px 轨道匹配');
+  assert.ok(html.includes('基础设施…'), '中文名按预算为省略号预留宽度');
+  assert.ok(html.includes('>xiaofawang<'), '10 个半角字符必须完整显示，不得提前截断');
   assert.ok(html.includes(`title="${longName} · fn"`), '完整名称与 provider 保留在 title');
   assert.ok(html.includes('ring-success'), '当前模型用 success 环表达');
 });
@@ -320,6 +323,36 @@ test('Agent 成员网格：勾选样式只有一种，绿色环单独表达「�
   assert.equal(active.includes('border-success bg-success'), false, '不得再用绿色实底对号区分当前模型');
   assert.ok(active.includes('ring-success'), '当前模型改用头像外环表达');
   assert.ok(html.includes(t('settings.providerBindingLegend')), '界面必须说明绿环与勾选各自代表什么');
+});
+
+test('添加端点：全宽成员列表完整显示 10 字符名，title 保留全名，超长名按 24 单位兜底', () => {
+  setLocale('zh-CN');
+  const html = renderToStaticMarkup(
+    React.createElement(FanOutMemberList, {
+      bots: [
+        { profile: 'xiaofawang', displayName: 'xiaofawang' },
+        { profile: 'ops', displayName: 'auralis-infrastructure-operations-team' },
+      ],
+      selected: ['xiaofawang'],
+      onToggle() {},
+    }),
+  );
+  assert.ok(html.includes('>xiaofawang<'), '常规名在全宽列表里必须完整显示');
+  assert.ok(html.includes('title="xiaofawang"'), 'title 必须保留完整名称');
+  assert.ok(html.includes('aria-label="xiaofawang"'), '勾选框的无障碍名称必须是全名');
+  assert.ok(html.includes('title="auralis-infrastructure-operations-team"'), '超长名同样保留完整 title');
+  assert.ok(html.includes('auralis-infrastructure-…'), '极端长名按 24 单位兜底');
+  const inputFor = (name) => {
+    const match = html.match(new RegExp(`<input[^>]*aria-label="${name}"[^>]*/>`));
+    assert.ok(match, `缺少 ${name} 的勾选框`);
+    return match[0];
+  };
+  assert.ok(inputFor('xiaofawang').includes('checked'), '已选成员必须渲染为勾选');
+  assert.equal(
+    inputFor('auralis-infrastructure-operations-team').includes('checked'),
+    false,
+    '未选成员不得渲染为勾选',
+  );
 });
 
 test('模型行：显示计算后的可读名与品牌图标，绝不直出裸 ID', () => {

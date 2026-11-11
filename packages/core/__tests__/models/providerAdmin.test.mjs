@@ -183,12 +183,18 @@ test('diffEndpointAcrossProfiles：自定义端点的两套拼写必须匹配同
   assert.equal(cell.state, 'same');
 });
 
-test('truncateProfileLabel：中文 4 字内完整显示，超出为省略号预留宽度', () => {
+test('truncateProfileLabel：10 单位内完整显示，超出为省略号预留 1 单位', () => {
   assert.equal(truncateProfileLabel('运维'), '运维');
-  assert.equal(truncateProfileLabel('运维机器'), '运维机器', '8 单位刚好是 4 个汉字，不得截断');
-  assert.equal(truncateProfileLabel('运维机器人一号'), '运维机…', '截断时必须为省略号预留宽度，不能撑破槽宽');
-  assert.equal(truncateProfileLabel('abcdefgh'), 'abcdefgh');
-  assert.equal(truncateProfileLabel('abcdefghi'), 'abcdefg…');
+  assert.equal(truncateProfileLabel('运维机器'), '运维机器', '8 单位（4 汉字）不得截断');
+  assert.equal(truncateProfileLabel('运维机器人'), '运维机器人', '10 单位（5 汉字）是完整显示上限');
+  assert.equal(truncateProfileLabel('运维机器人一'), '运维机器…', '6 汉字刚超上限，截断为 4 汉字 + 省略号');
+  assert.equal(truncateProfileLabel('运维机器人一号'), '运维机器…', '更长的名字仍保持 4 汉字 + 省略号');
+  assert.equal(truncateProfileLabel('abcdefghi'), 'abcdefghi');
+  assert.equal(truncateProfileLabel('abcdefghij'), 'abcdefghij', '10 个半角是完整显示上限');
+  assert.equal(truncateProfileLabel('abcdefghijk'), 'abcdefghi…', '截断态为 9 单位内容 + 省略号');
+  assert.equal(truncateProfileLabel('abcdefghij', 8), 'abcdefg…', '更窄槽位可显式传更小预算');
+  assert.equal(truncateProfileLabel('abc', 0), '', '预算放不下省略号时返回空串，不得超预算');
+  assert.equal(truncateProfileLabel('abc', 1), '…', '预算刚好容纳省略号时只返回省略号');
   assert.equal(truncateProfileLabel('   '), '');
 });
 

@@ -15,6 +15,7 @@ import {
 import { t } from '../../i18n/index.js';
 import { Button } from '../primitives/Button.js';
 import { Input } from '../primitives/Input.js';
+import { FanOutMemberList } from './FanOutMemberList.js';
 import { LoadBoundary } from './LoadBoundary.js';
 import { ModelPickerDialog, ModelPickerField } from './ModelPicker.js';
 import { SegmentedControl } from './SegmentedControl.js';
@@ -83,7 +84,7 @@ function AvailabilityDot({ availability }: { availability: ProviderView['availab
  *   2. `error` 的格子锁定并显示原始原因，绝不渲染成“未配置”；
  *   3. 自定义端点勾选未配置的 Agent 时，先尝试复用其它成员的密钥，失败才就地补密钥；
  *   4. 订阅没有可写的绑定记录，格子只读；
- *   5. 名称最多 8 个显示单位（中文 4 字 / 半角 8 字符），完整名称留在 title 与 aria-label；
+ *   5. 名称最多 10 个显示单位（完整 5 汉字 / 10 半角）；截断态为 9 单位内容 + `…`（汉字通常落 4 字），完整名称留在 title 与 aria-label；
  *   6. 名称字号消费 `--ui-text-caption`（11px × 用户字号档位），不写死 px；
  *   7. 无头像一律 `BotIcon` 兜底，严禁退回首字母；
  *   8. 成员增多时只换行，不横向滚动、不压缩头像。
@@ -731,22 +732,11 @@ function EndpointForm({
       {showFanOut && otherBots.length > 0 ? (
         <div className="flex flex-col gap-1">
           <span className="text-aux text-muted-foreground">{t('settings.customEndpointApplyTo')}</span>
-          <div className="flex flex-wrap gap-x-3 gap-y-2">
-            {otherBots.map((bot) => (
-              <label
-                key={bot.profile}
-                className="flex items-center gap-1 py-1 text-caption text-secondary-foreground"
-              >
-                <input
-                  type="checkbox"
-                  className="size-3 shrink-0 accent-primary"
-                  checked={state.fanOut.includes(bot.profile)}
-                  onChange={() => dispatch({ type: 'toggleFanOut', profile: bot.profile })}
-                />
-                {truncateProfileLabel(bot.displayName)}
-              </label>
-            ))}
-          </div>
+          <FanOutMemberList
+            bots={otherBots}
+            selected={state.fanOut}
+            onToggle={(profile) => dispatch({ type: 'toggleFanOut', profile })}
+          />
           <p className="text-micro text-muted-foreground">{t('settings.customEndpointApplyToHint')}</p>
         </div>
       ) : null}

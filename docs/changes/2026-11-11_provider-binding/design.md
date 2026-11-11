@@ -53,7 +53,7 @@
 每行右侧（窄屏时换到行下方）一块区域，按 `snapshot.bots` 顺序铺 N 个格子，每格 = **头像 + 名称 + checkbox**。
 
 - 头像取 `SettingsBotRow.avatar`；缺头像走确定性图腾，**不得退回首字母**（上一版坑：`providerViews.ts:11-14`）。
-- 名称保留原始拼写，超出宽度按 `truncateProfileLabel` 截断。
+- 名称保留原始拼写，超出宽度按 `truncateProfileLabel` 截断。默认预算按成员格 64px 轨道、11px 字阶标定为 10 单位（完整 5 汉字 / 10 半角，截断态 9 单位 + `…`）；宽字母与 12px 大字号档由 CSS `truncate` 兜底。
 - N 就是 Agent 总数，不做"N/M 生效"这种带分母的表述。
 
 ### 3.2 状态机（四种状态，无第五种）
