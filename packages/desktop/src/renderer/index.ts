@@ -103,6 +103,7 @@ import {
   hasLegacyUnorderedCacheRows,
   shouldTreatOlderDropAsExhausted,
   computeOlderBatchWindowStart,
+  planAverageRowHeightLock,
   shouldExpandWindow,
   shouldSettleInitialBottom,
 } from './messageWindow.js';
@@ -6605,7 +6606,6 @@ function lockAverageRowHeight(): boolean {
   }
   const canvas = document.querySelector<HTMLElement>('.conv-canvas');
   if (!canvas) return false;
-  const windowCount = Math.max(1, messageWindowEnd - messageWindowStart);
   const rows = canvas.querySelectorAll<HTMLElement>('[data-msg-id]');
   if (rows.length < 5) return false;
   let contentH = 0;
@@ -6617,6 +6617,7 @@ function lockAverageRowHeight(): boolean {
    *   只累加「最外层同 id 节点」一次，才是这条消息真正占的高度。
    */
   const seenIds = new Set<string>();
+  const measuredIds: string[] = [];
   for (const row of rows) {
     const id = row.getAttribute('data-msg-id');
     if (id) {
@@ -6624,17 +6625,29 @@ function lockAverageRowHeight(): boolean {
       const outerSame = row.parentElement?.closest('[data-msg-id]');
       if (outerSame && outerSame.getAttribute('data-msg-id') === id) continue;
       seenIds.add(id);
+      measuredIds.push(id);
     }
     const h = row.getBoundingClientRect().height;
     if (Number.isFinite(h) && h > 0) contentH += h;
   }
-  // 【口径 (Rules)】必须用"窗口内消息条数"作分母，不是 DOM 行数：一条消息可能渲染成多个
-  // data-msg-id 节点，用行数会把平均行高算小一半，导致滚动 1px 只走半条消息。
-  // display_kind='hidden' 的行不上屏、也不贡献高度，但仍占一个窗口下标；虚拟坐标系本就按
-  // 下标推进（见 computeContentOffsetPx / computeVirtualHeightPx），因此分母继续用下标条数，
-  // 让"下标 × 平均行高"自洽。隐藏行是低频事件，偏差可忽略。
-  if (contentH <= 0) return false;
-  averageRowHeightPx = Math.max(24, contentH / windowCount);
+  /**
+   * 口径与守卫全部收敛到纯函数（见 planAverageRowHeightLock）。
+   * 【实测依据】切会话瞬间 total=0、窗口塌成 [0,0)，而画布里还挂着上一会话的 57 行，
+   *   分母兜底成 1 会把整棵树的高度锁成单行行高（10804px），586 条会话因此
+   *   撑出 633 万 px 虚拟高度，读者永远到不了列表开头。
+   */
+  const plan = planAverageRowHeightLock({
+    windowStart: messageWindowStart,
+    windowEnd: messageWindowEnd,
+    total: state.messages.length,
+    contentHeightPx: contentH,
+    measuredIds,
+    windowIds: state.messages
+      .slice(messageWindowStart, messageWindowEnd)
+      .map((m) => m.id),
+  });
+  if (!plan.lock) return false;
+  averageRowHeightPx = plan.averageRowHeightPx;
   averageRowHeightLocked = true;
   return true;
 }
@@ -8853,7 +8866,15 @@ function bindEvents(): void {
 
       if (streamScrollCooldown || state.isLoadingOlder) return;
 
-      const prefetchThreshold = Math.max(800, streamEl.clientHeight * 1.0);
+      const viewportPrefetch = Math.max(800, streamEl.clientHeight * 1.0);
+      /**
+       * 【按窗口比例预取 (Rules)】挂载窗口的内容高度可能远超一屏：会话 20261020_150348_4fe41e
+       *   实测 166 条撑出 51130px，若向上扩窗仍用一屏 800px 作阈值，读者要滑完 98% 的窗口
+       *   高度才触发，体感等同于「滑不动」。
+       * 【约束与规则 (Rules)】向上扩窗与连拉判定按窗口高度的一半触发；向下回收保持一屏，
+       *   否则反向滚动时会在距底部半个窗口处就开始回收，窗口反复前移造成抖动。
+       */
+      const expandPrefetch = Math.max(viewportPrefetch, Math.round(streamEl.scrollHeight / 2));
 
       /**
        * 【有界窗口下行回收 (Rules)】窗口是 [start, end) 有界区间，向下滚到区间尾部时
@@ -8864,7 +8885,7 @@ function bindEvents(): void {
        */
       if (messageWindowUserExpanded && messageWindowEnd < state.messages.length) {
         const distanceToEnd = streamEl.scrollHeight - streamEl.scrollTop - streamEl.clientHeight;
-        if (distanceToEnd < prefetchThreshold) {
+        if (distanceToEnd < viewportPrefetch) {
           streamScrollCooldown = true;
           slideMessageWindowForward();
           requestAnimationFrame(() => { streamScrollCooldown = false; });
@@ -8917,8 +8938,8 @@ function bindEvents(): void {
        *   视口顶端已经进入窗口上沿之上（或紧贴），说明读者正在向上回溯，需要扩窗。
        */
       const virtualWindowTop = Math.round(messageWindowStart * averageRowHeightPx);
-      const nearWindowTop = messageWindowStart > 0 && streamEl.scrollTop < virtualWindowTop + prefetchThreshold;
-      const atTrueTop = messageWindowStart === 0 && streamEl.scrollTop < prefetchThreshold;
+      const nearWindowTop = messageWindowStart > 0 && streamEl.scrollTop < virtualWindowTop + expandPrefetch;
+      const atTrueTop = messageWindowStart === 0 && streamEl.scrollTop < expandPrefetch;
 
       if (nearWindowTop || atTrueTop) {
         // 【AGENTS.md 三态隔离】群聊研讨室严禁发起单会话翻页
@@ -8974,7 +8995,7 @@ function bindEvents(): void {
               await loadOlderMessages();
               chain += 1;
               const el = document.getElementById('conversation-stream');
-              const stillNearTop = Boolean(el && el.scrollTop < prefetchThreshold * 0.4);
+              const stillNearTop = Boolean(el && el.scrollTop < expandPrefetch * 0.4);
               if (state.messages.length === before) break;
               if (!stillNearTop || !state.hasOlderMessages) break;
             } while (chain < 40);

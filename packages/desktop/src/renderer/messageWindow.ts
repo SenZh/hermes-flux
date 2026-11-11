@@ -297,3 +297,66 @@ export function computeOlderBatchWindowStart(
   if (isFinalBatch && added <= capacity) return 0;
   return Math.max(0, added - 8);
 }
+
+export interface AverageRowHeightLockInput {
+  windowStart: number;
+  windowEnd: number;
+  /** 当前会话消息总条数，0 表示切会话后消息尚未落地。 */
+  total: number;
+  /** 本次从 DOM 实测到的去重内容高度（px）。 */
+  contentHeightPx: number;
+  /** DOM 里实际测到高度的消息 id（已按最外层节点去重）。 */
+  measuredIds: readonly string[];
+  /** 当前窗口 [windowStart, windowEnd) 切片对应的消息 id。 */
+  windowIds: readonly string[];
+  /** 样本下限，低于它时继续等下一帧。 */
+  minimumSamples?: number;
+  /** 单行高度下限，防止极端小行把虚拟高度压到不可滚。 */
+  floorPx?: number;
+}
+
+export interface AverageRowHeightLockPlan {
+  lock: boolean;
+  averageRowHeightPx: number;
+}
+
+/**
+ * 判定本次 DOM 测量能否用于锁定会话平均行高。
+ *
+ * 【设计意图 (Why)】
+ *   虚拟总高 = 总条数 × 平均行高，这个乘数一旦算错，整条滚动条就废掉。
+ *   实测故障：切会话瞬间 `state.messages` 为空（total=0，窗口塌成 [0,0)），
+ *   而 `.conv-canvas` 里还挂着上一个会话的 57 条 DOM 行。
+ *   旧实现用 `Math.max(1, end - start)` 兜底分母，得到 10804 / 1 = 10804px，
+ *   按会话锁定后不再重算：586 条 × 10804 ≈ 633 万 px，窗口起点 3 即 32412px 偏移，
+ *   读者无论怎么滚都到不了真正的列表开头。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   只加「窗口非空」还不够：消息已落地但 React 尚未提交时，窗口已是 [466,586)、
+ *   DOM 仍是上一会话的行，分子是别人的高度、分母是本会话的条数，锁定值同样失真。
+ *   因此必须要求测量行全部落在当前窗口切片内，分子分母才同源。
+ *
+ * 【约束与规则 (Rules)】
+ *   纯函数；任一条件不满足都返回 `lock: false`，调用方保持默认行高并在下一帧重试。
+ */
+export function planAverageRowHeightLock(input: AverageRowHeightLockInput): AverageRowHeightLockPlan {
+  const notLocked: AverageRowHeightLockPlan = { lock: false, averageRowHeightPx: 0 };
+  const windowCount = Math.floor(input.windowEnd) - Math.floor(input.windowStart);
+  const minimumSamples = input.minimumSamples ?? 5;
+  const floorPx = input.floorPx ?? 24;
+
+  if (!Number.isFinite(input.total) || input.total <= 0) return notLocked;
+  if (!Number.isFinite(windowCount) || windowCount <= 0) return notLocked;
+  if (input.measuredIds.length < minimumSamples) return notLocked;
+  if (!Number.isFinite(input.contentHeightPx) || input.contentHeightPx <= 0) return notLocked;
+
+  const windowIdSet = new Set(input.windowIds);
+  for (const id of input.measuredIds) {
+    if (!windowIdSet.has(id)) return notLocked;
+  }
+
+  return {
+    lock: true,
+    averageRowHeightPx: Math.max(floorPx, input.contentHeightPx / windowCount),
+  };
+}
