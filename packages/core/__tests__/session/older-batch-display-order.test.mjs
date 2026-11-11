@@ -145,3 +145,54 @@ test('父会话血缘行时间晚于本会话锚点时，仍不得被当成「�
   assert.ok(ids.includes('m-99999'), '父会话行即便 id 更大、时间更晚也必须保留，它不属于本会话时间线');
   assert.equal(res.droppedCount, 0, '不得把跨会话行计入丢弃');
 });
+
+test('【真实缺陷】IDB 恢复行缺 sessionId 时，与服务端带 sessionId 的重叠页必须匹配，不得误报 droppedCount 掐死翻页', () => {
+  // 真实复现：从 IDB 恢复出来的本地行没有 sessionId，服务端 REST 行带有 sessionId。
+  // 旧 compositeKey 算出 "row::17467" 与 "sess::row::17467"，全部失配，
+  // 导致 17467..17470 全被当成未见过且被边界过滤，droppedCount=4，上层直接置 exhausted=1 终止翻页！
+  const currentFromIdb = [
+    { id: 'row-17405', rowId: 17405, rawTimestamp: TS_150525 },
+    { id: 'row-17467', rowId: 17467, rawTimestamp: TS_150840 },
+    { id: 'row-17469', rowId: 17469, rawTimestamp: TS_150840 + 10 },
+    { id: 'row-17471', rowId: 17471, rawTimestamp: TS_150840 + 20 },
+  ];
+  const remoteOverlapBatch = [
+    row(17467, 'sess', TS_150840),
+    row(17469, 'sess', TS_150840 + 10),
+    row(17471, 'sess', TS_150840 + 20),
+  ];
+
+  const res = planOlderBatchPrependMergeDetailed(remoteOverlapBatch, currentFromIdb, {
+    timelineSessionId: 'sess',
+    fallbackSessionId: 'sess',
+  });
+
+  assert.equal(res.merged.length, 4, '重叠行不得重复插入');
+  assert.equal(res.droppedCount, 0, '本地已持有的重叠行绝不能计入 droppedCount，否则会误杀后续翻页');
+});
+
+test('【真实缺陷】IDB 恢复的部分缓存继续向早翻页时，有交集批次必须精准去重并把 18541 前插进来', () => {
+  // 场景：本地从 IDB 恢复了半截（不含 18541，最早是 17420），缺 sessionId；
+  // 下一轮翻页批次包含 18541 与重叠的 17420。
+  const currentFromIdb = [
+    { id: 'row-17420', rowId: 17420, rawTimestamp: TS_150525 + 60 },
+    { id: 'row-17436', rowId: 17436, rawTimestamp: TS_150840 },
+  ];
+  const remoteBatch = [
+    row(18541, 'sess', TS_150438),
+    row(17405, 'sess', TS_150525),
+    row(17420, 'sess', TS_150525 + 60),
+  ];
+
+  const res = planOlderBatchPrependMergeDetailed(remoteBatch, currentFromIdb, {
+    timelineSessionId: 'sess',
+    fallbackSessionId: 'sess',
+  });
+
+  assert.deepEqual(
+    res.merged.map((m) => m.rowId),
+    [18541, 17405, 17420, 17436],
+    '重叠行 17420 必须正确识别并切除，18541/17405 前插'
+  );
+  assert.equal(res.droppedCount, 0);
+});

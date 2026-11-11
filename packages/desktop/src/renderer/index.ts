@@ -100,6 +100,9 @@ import {
   windowEndFor,
   windowStartAroundIndex,
   computeHasOlderMessages,
+  hasLegacyUnorderedCacheRows,
+  shouldTreatOlderDropAsExhausted,
+  computeOlderBatchWindowStart,
   shouldExpandWindow,
   shouldSettleInitialBottom,
 } from './messageWindow.js';
@@ -171,6 +174,7 @@ import {
   RpcErrorCode,
   SessionListGeneration,
   CacheService,
+  sortByDisplayAsc,
   type CachedSessionSummary,
   type CachedAgentSummary,
   type CachedMessageRow,
@@ -342,7 +346,10 @@ function persistMessagesToCache(
   for (const message of messages) {
     if (message.sessionId && message.sessionId !== ref.channelId) continue;
     const row = toCachedMessage(message, ref);
-    if (row) rows.push(row);
+    if (row) {
+      row.displaySeq = rows.length + 1;
+      rows.push(row);
+    }
   }
   void cacheService.applyRemoteWindow(ref, rows, fenceMax).catch(() => undefined);
 }
@@ -3197,6 +3204,21 @@ function forgetOlderCursorState(sessionId: string): void {
 }
 /** 截断成功后的会话历史权威源标记：'server-priority' 时禁用“本地更长则保留”合并守卫 */
 const sessionHistoryTrust = new Map<string, 'server-priority'>();
+/**
+ * 标记会话当前从旧版未带 displaySeq 持久化缓存临时恢复。
+ *
+ * 【设计意图 (Why)】断网期间必须保留旧缓存离线可读；仅在远端权威历史真正返回后
+ *   再删旧重建，禁止将其错序历史当成权威基座固化进新版缓存。
+ */
+const untrustedOrderCacheSessions = new Set<string>();
+
+function syncUntrustedCacheOrderFlag(sessionId: string, rows: readonly CachedMessageRow[]): void {
+  if (hasLegacyUnorderedCacheRows(rows)) {
+    untrustedOrderCacheSessions.add(sessionId);
+  } else {
+    untrustedOrderCacheSessions.delete(sessionId);
+  }
+}
 /** core 交互区领域服务单例（截断/分支/目录的唯一 wire 载荷构造入口） */
 const interactiveService = new InteractiveService();
 
@@ -3416,13 +3438,13 @@ async function loadOlderMessages(): Promise<void> {
         const cacheRef: CacheChannelRef = { profile: resolvedProfile, channel: 'session', channelId: sessionId };
         const localOlderRows = await cacheService.readOlderRows(cacheRef, oldestRowId, 100);
         if (localOlderRows.length > 0) {
-          const cachedBatch = localOlderRows.map(toMessageViewModel).reverse();
+          const cachedBatch = sortByDisplayAsc(localOlderRows).map(toMessageViewModel);
           const before = state.messages.length;
           state.messages = planOlderBatchPrependMerge(cachedBatch, state.messages, { timelineSessionId: sessionId, fallbackSessionId: sessionId });
           const added = state.messages.length - before;
           if (added > 0) {
             // 新批次插在列表头部，窗口对齐到本批末尾附近，末端由容量推导保持区间有界
-            messageWindowStart = Math.max(0, added - 8);
+            messageWindowStart = computeOlderBatchWindowStart(added, localOlderRows.length < 100, MESSAGE_WINDOW_CAPACITY);
             messageWindowEnd = windowEndFor(messageWindowStart, state.messages.length, MESSAGE_WINDOW_CAPACITY, INITIAL_RENDER_WINDOW);
             messageWindowUserExpanded = true;
             sessionMessagesCache.set(sessionId, state.messages);
@@ -3533,7 +3555,7 @@ async function loadOlderMessages(): Promise<void> {
         });
         const added = mergeResult.merged.length - before;
 
-        if (added <= 0 && mergeResult.droppedCount > 0) {
+        if (shouldTreatOlderDropAsExhausted(added, batch.length, mergeResult.droppedCount)) {
           /**
            * 【边界异常 (Rules)】整批被「更早边界」丢掉，说明锚点口径与批次会话不一致。
            * 此时绝不能推进游标：行没拿到、游标又前移，等于把这段历史永久丢失。
@@ -3578,10 +3600,13 @@ async function loadOlderMessages(): Promise<void> {
           continue;
         }
 
-        // 【挂载窗口预算 (Rules)】只把本轮新增的这批历史纳入挂载窗口，并保留少量上文做锚点缓冲。
-        // 曾经直接置 0 会让 4000 行历史全量挂载，每轮渲染都在重建整棵 React 树，
-        // 单轮耗时从 200ms 涨到 4s，观感等同于"翻不动"。
-        messageWindowStart = Math.max(0, added - 8);
+        // 【挂载窗口预算 (Rules)】只把本轮新增的这批历史纳入挂载窗口，并保留少量上文做锚点缓冲；
+        // 但若已是最后一批且新增数装得下单个窗口容量，直接对齐到 0，避免把会话首问卡在窗口外。
+        messageWindowStart = computeOlderBatchWindowStart(
+          added,
+          returned < OLDER_BATCH_PAGE_SIZE,
+          MESSAGE_WINDOW_CAPACITY,
+        );
         messageWindowEnd = windowEndFor(messageWindowStart, state.messages.length, MESSAGE_WINDOW_CAPACITY, INITIAL_RENDER_WINDOW);
         messageWindowUserExpanded = true;
         sessionMessagesCache.set(sessionId, state.messages);
@@ -3783,9 +3808,9 @@ async function loadMessagesInner(sessionId: string, targetBotName?: string): Pro
       const opened = await cacheService.openChannel(cacheRef, MESSAGE_CACHE_LIMIT);
       cacheFenceMax = opened.fenceMax;
       const stillCurrent = currentGen === activeLoadMessagesGeneration && state.activeSessionId === sessionId;
-      // 只有当前视口仍为空时才渲染缓存，避免覆盖用户在新会话里已有的内容
       if (opened.rows.length > 0 && stillCurrent && state.messages.length === 0) {
-        state.messages = opened.rows.map(toMessageViewModel).reverse();
+        syncUntrustedCacheOrderFlag(sessionId, opened.rows);
+        state.messages = sortByDisplayAsc(opened.rows).map(toMessageViewModel);
         sessionMessagesCache.set(sessionId, state.messages);
         // 【游标口径 (Rules)】与首屏 REST 同源：都用本地可归属覆盖行数，避免两条路径分叉出两套下界。
         sessionServerOffset.set(sessionId, Math.max(
@@ -3836,7 +3861,13 @@ async function loadMessagesInner(sessionId: string, targetBotName?: string): Pro
       // 合并决策收敛到纯函数 planSessionLoadMerge：截断成功后首次加载以服务端为准（消费 server-priority），
       // 否则保留本地未落盘尾部。消费后清除标记。
       const serverPriority = takeServerPriority(sessionHistoryTrust, sessionId);
-      const merged = planSessionLoadMerge(parsed, existing, serverPriority);
+      const replaceUntrustedCache = untrustedOrderCacheSessions.delete(sessionId);
+      if (replaceUntrustedCache) {
+        await cacheService.dropChannel(cacheRef);
+        cacheFenceMax = 0;
+        sessionServerOffset.delete(sessionId);
+      }
+      const merged = planSessionLoadMerge(parsed, existing, serverPriority || replaceUntrustedCache);
       sessionMessagesCache.set(sessionId, merged);
       persistMessagesToCache(cacheRef, merged, cacheFenceMax);
       syncActiveSessionPreviewToRail(sessionId, merged, resolvedBotName);
@@ -3952,7 +3983,13 @@ async function loadMessagesInner(sessionId: string, targetBotName?: string): Pro
           const parsed = parseRawMessages(list);
           const existing = sessionMessagesCache.get(sessionId);
           const wsServerPriority = takeServerPriority(sessionHistoryTrust, sessionId);
-          const merged = planSessionLoadMerge(parsed, existing, wsServerPriority);
+          const replaceUntrustedCache = untrustedOrderCacheSessions.delete(sessionId);
+          if (replaceUntrustedCache) {
+            await cacheService.dropChannel(cacheRef);
+            cacheFenceMax = 0;
+            sessionServerOffset.delete(sessionId);
+          }
+          const merged = planSessionLoadMerge(parsed, existing, wsServerPriority || replaceUntrustedCache);
           sessionMessagesCache.set(sessionId, merged);
           persistMessagesToCache(cacheRef, merged, cacheFenceMax);
           syncActiveSessionPreviewToRail(sessionId, merged, resolvedBotName);

@@ -178,7 +178,7 @@ export function planOlderBatchPrependMergeDetailed<T extends MinimalIdentifiedMe
 
   // 鏋勯€犲鍚堝敮涓€鍘婚噸閿細(sessionId, rowId) 澶嶅悎閿紭鍏堬紝褰诲簳鏉滅粷鐖跺瓙浼氳瘽灞€閮?rowId 纰版挒
   const compositeKey = (m: T): string => {
-    const sess = m.sessionId || '';
+    const sess = m.sessionId || fallbackId || '';
     if (typeof m.rowId === 'number' && m.rowId > 0) {
       return sess ? `${sess}::row::${m.rowId}` : `row::${m.rowId}`;
     }

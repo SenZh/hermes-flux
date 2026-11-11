@@ -80,8 +80,17 @@ export interface CachedMessageRow {
   profile: string;
   channel: CacheChannel;
   channelId: string;
-  /** session 为 rowId；room 为 seq。单调递增，唯一可靠的排序依据。 */
+  /** session 为 rowId；room 为 seq。用于主键去重、围栏、截断与淘汰（注意：不保证与显示顺序单调）。 */
   orderKey: number;
+  /**
+   * 通道展示顺序号（从 1 递增）。
+   *
+   * 【设计意图 (Why)】网关 messages.id 在压缩搬运场景下与 display_order 不单调，
+   *   直接按 orderKey 排序会把错序的首问搬到列表中间。
+   *   把「展示顺序」从「主键/围栏键 orderKey」解耦，既保留定理 22~26，又还原真实顺序。
+   * 【约束与规则 (Rules)】可选；缺失时（旧数据或纯离线测试）回退 orderKey。
+   */
+  displaySeq?: number;
   role: 'user' | 'assistant' | 'system';
   text: string;
   reasoning?: string;

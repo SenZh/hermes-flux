@@ -29,6 +29,26 @@ export function sortByOrderAsc(rows: readonly CachedMessageRow[]): CachedMessage
 }
 
 /**
+ * 按展示顺序升序排列，返回新数组。
+ *
+ * 【设计意图 (Why)】
+ *   网关 messages.id 与 display_order 不保证单调（官方 session_stored_reads.py:179），
+ *   持久缓存恢复必须优先采用写入时记录的 `displaySeq`，缺失时回退 `orderKey`。
+ * 【防范的历史坑 (Pitfall)】
+ *   仅按 orderKey 排序会把物理 id 较大的会话首问（如 18541 > 17405）搬到列表中间。
+ * 【约束与规则 (Rules)】
+ *   纯函数，不修改入参；同 displaySeq 时以 orderKey 兜底保证稳定全序。
+ */
+export function sortByDisplayAsc(rows: readonly CachedMessageRow[]): CachedMessageRow[] {
+  return [...rows].sort((a, b) => {
+    const da = typeof a.displaySeq === 'number' ? a.displaySeq : a.orderKey;
+    const db = typeof b.displaySeq === 'number' ? b.displaySeq : b.orderKey;
+    if (da !== db) return da - db;
+    return a.orderKey - b.orderKey;
+  });
+}
+
+/**
  * 字段完整度评分：分数高者代表信息更全。
  *
  * 【规则】正文、思维链、工具调用分别计分且工具权重最高——
@@ -49,7 +69,15 @@ function richnessScore(row: CachedMessageRow): number {
  * 【约束】不合并两份的字段（不做字段级并集），避免产生"半新半旧"的怪行。
  */
 function pickRicher(a: CachedMessageRow, b: CachedMessageRow): CachedMessageRow {
-  return richnessScore(b) >= richnessScore(a) ? b : a;
+  const winner = richnessScore(b) >= richnessScore(a) ? b : a;
+  // 展示次序永远采纳最新窗口写入的 displaySeq；若新行未带 displaySeq，则保留已有值避免抹除。
+  if (winner === a && typeof b.displaySeq === 'number' && a.displaySeq !== b.displaySeq) {
+    return { ...a, displaySeq: b.displaySeq };
+  }
+  if (winner === b && typeof b.displaySeq !== 'number' && typeof a.displaySeq === 'number') {
+    return { ...b, displaySeq: a.displaySeq };
+  }
+  return winner;
 }
 
 /**
@@ -118,6 +146,15 @@ export function mergeRemoteWindow(input: RemoteWindowMergeInput): RemoteWindowMe
   const lowerBound = input.remoteMax;
   const upperBound = Math.min(input.fenceMax, Number.MAX_SAFE_INTEGER);
 
+  const remoteKeys = new Set<string>();
+  let remoteMaxDisplaySeq: number | null = null;
+  for (const r of input.remote) {
+    remoteKeys.add(messageKey(r));
+    if (typeof r.displaySeq === 'number') {
+      remoteMaxDisplaySeq = remoteMaxDisplaySeq === null ? r.displaySeq : Math.max(remoteMaxDisplaySeq, r.displaySeq);
+    }
+  }
+
   const kept: CachedMessageRow[] = [];
   for (const row of merged) {
     const isBeyondRemote = row.orderKey > lowerBound;
@@ -128,6 +165,37 @@ export function mergeRemoteWindow(input: RemoteWindowMergeInput): RemoteWindowMe
       continue;
     }
     kept.push(row);
+  }
+
+  // 在途/pending 保留行若不在本次 remote 窗口内且在其之后（orderKey > remoteMax），
+  // 保证其 displaySeq 严格大于 remote 最大 displaySeq 且彼此互不碰撞，既不插错又强幂等。
+  if (remoteMaxDisplaySeq !== null) {
+    let tailSeq = remoteMaxDisplaySeq;
+    const seenTailSeq = new Set<number>();
+    const toKeepTail = (row: CachedMessageRow): boolean =>
+      row.orderKey > lowerBound && !remoteKeys.has(messageKey(row));
+    for (const row of kept) {
+      if (toKeepTail(row) && typeof row.displaySeq === 'number' && row.displaySeq > remoteMaxDisplaySeq) {
+        tailSeq = Math.max(tailSeq, row.displaySeq);
+      }
+    }
+    const adjusted = kept.map((row) => {
+      if (toKeepTail(row)) {
+        if (
+          typeof row.displaySeq === 'number' &&
+          row.displaySeq > remoteMaxDisplaySeq &&
+          !seenTailSeq.has(row.displaySeq)
+        ) {
+          seenTailSeq.add(row.displaySeq);
+          return row;
+        }
+        tailSeq += 1;
+        seenTailSeq.add(tailSeq);
+        return { ...row, displaySeq: tailSeq };
+      }
+      return row;
+    });
+    return { rows: adjusted, evictedKeys };
   }
 
   return { rows: kept, evictedKeys };

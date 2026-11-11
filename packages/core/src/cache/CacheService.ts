@@ -160,9 +160,35 @@ export class CacheService {
   async appendRows(ref: CacheChannelRef, rows: readonly CachedMessageRow[]): Promise<AppendResult> {
     return this.withChannelLock(ref, async () => {
       if (rows.length === 0) return { written: 0, evictedKeys: [] };
-      await this.store.putMessages(rows);
+      let toWrite: readonly CachedMessageRow[] = rows;
+      if (rows.some((r) => typeof r.displaySeq !== 'number')) {
+        const existing = await this.store.listMessages({ ...ref, limit: this.messageCap });
+        const existingByKey = new Map<string, CachedMessageRow>();
+        let maxSeq = 0;
+        for (const r of existing) {
+          existingByKey.set(messageKey(r), r);
+          if (typeof r.displaySeq === 'number' && r.displaySeq > maxSeq) {
+            maxSeq = r.displaySeq;
+          }
+        }
+        for (const r of rows) {
+          if (typeof r.displaySeq === 'number' && r.displaySeq > maxSeq) {
+            maxSeq = r.displaySeq;
+          }
+        }
+        toWrite = rows.map((r) => {
+          if (typeof r.displaySeq === 'number') return r;
+          const prev = existingByKey.get(messageKey(r));
+          if (prev && typeof prev.displaySeq === 'number') {
+            return { ...r, displaySeq: prev.displaySeq };
+          }
+          maxSeq += 1;
+          return { ...r, displaySeq: maxSeq };
+        });
+      }
+      await this.store.putMessages(toWrite);
       const evicted = await this.trimChannel(ref);
-      return { written: rows.length, evictedKeys: evicted };
+      return { written: toWrite.length, evictedKeys: evicted };
     });
   }
 

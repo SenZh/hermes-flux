@@ -238,3 +238,62 @@ export function computeHasOlderMessages(
   // 兜底：无持久化数字 rowId 时，按是否有消息保守返回 true
   return true;
 }
+
+/**
+ * 判断持久化缓存行是否包含缺少 displaySeq 的旧版记录。
+ *
+ * 【设计意图 (Why)】
+ *   旧版缓存仅按 rowId（orderKey）排序落盘，在网关 id 与显示序不单调的会话里
+ *   会把首问排到列表中段。需要识别此类缓存并在远端权威返回后原地重建。
+ * 【防范的历史坑 (Pitfall)】
+ *   断网/离线态下绝不可因缺少 displaySeq 而销毁缓存，必须仅在服务端权威响应到达后才清洗。
+ * 【约束与规则 (Rules)】
+ *   纯函数；空数组返回 false，任一行缺失有限数值 displaySeq 返回 true。
+ */
+export function hasLegacyUnorderedCacheRows(rows: readonly { displaySeq?: unknown }[]): boolean {
+  if (!Array.isArray(rows) || rows.length === 0) return false;
+  return rows.some((row) => typeof row.displaySeq !== 'number' || !Number.isFinite(row.displaySeq));
+}
+
+/**
+ * 判定翻页批次零净增时是否应当作为「整批边界异常」终止翻页。
+ *
+ * 【设计意图 (Why)】
+ *   区分两种「added <= 0」：重叠页（大部分行本地已有，或批首因工具折叠多出少数几条边界行）
+ *   应当继续推进游标；只有整批（droppedCount >= batchLength）都被边界过滤且本地从未持有时，
+ *   推进游标才会永久跳历史，必须停止。
+ * 【防范的历史坑 (Pitfall)】
+ *   曾写为 `droppedCount > 0`，当 500 行重叠页里仅混入 1 条批首合成行未命中时即掐死翻页。
+ * 【约束与规则 (Rules)】
+ *   纯函数；added > 0 或 batchLength <= 0 一律返回 false。
+ */
+export function shouldTreatOlderDropAsExhausted(
+  added: number,
+  batchLength: number,
+  droppedCount: number
+): boolean {
+  if (added > 0 || batchLength <= 0) return false;
+  return droppedCount >= batchLength;
+}
+
+/**
+ * 计算向上翻页插入头部后的虚拟渲染窗口起点。
+ *
+ * 【设计意图 (Why)】
+ *   中间批次保留上文 8 条锚点缓冲，避免一次挂载 4000 行阻塞 React 渲染；
+ *   但已是最后一批（到会话最顶）且新增行数装得下单窗口容量时，直接对齐到 0。
+ * 【防范的历史坑 (Pitfall)】
+ *   曾一律写 `Math.max(0, added - 8)`，末轮只新增 11 条时把第 0~2 条（含会话首问）
+ *   卡在渲染窗口外。
+ * 【约束与规则 (Rules)】
+ *   纯函数；非末轮或新增超容量时保持 `Math.max(0, added - 8)`。
+ */
+export function computeOlderBatchWindowStart(
+  added: number,
+  isFinalBatch: boolean,
+  capacity: number
+): number {
+  if (added <= 0) return 0;
+  if (isFinalBatch && added <= capacity) return 0;
+  return Math.max(0, added - 8);
+}
