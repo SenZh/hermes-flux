@@ -75,6 +75,11 @@ export class ContractViolationError extends Error {
 
 export interface RpcClientOptions {
   url: string;
+  /**
+   * 每次断线重连或唤醒重连前调用，用于刷新一次性凭证（如 ws-ticket）并生成最新 WS URL。
+   * 首次 connect() 直接使用 url；自第二次连接（重连）起优先调用本回调。
+   */
+  resolveUrl?: () => Promise<string | null>;
   /** 候选连接地址池，直连失败或重连时支持按优先级自动轮转（如 [LAN直连, Relay中继]） */
   candidateUrls?: string[];
   timeoutMs?: number;
@@ -151,6 +156,10 @@ function describeError(error: unknown): string {
 
 export class HermesGatewayClient {
   private url: string;
+  private resolveUrl?: () => Promise<string | null>;
+  private initialUrlConsumed = false;
+  private isResolvingUrl = false;
+  private connectEpoch = 0;
   private candidateUrls: string[] = [];
   private currentCandidateIndex = 0;
   private timeoutMs: number;
@@ -184,6 +193,7 @@ export class HermesGatewayClient {
 
   constructor(options: RpcClientOptions) {
     this.url = options.url;
+    this.resolveUrl = options.resolveUrl;
     this.candidateUrls = options.candidateUrls && options.candidateUrls.length > 0
       ? [...options.candidateUrls]
       : [options.url];
@@ -401,6 +411,22 @@ export class HermesGatewayClient {
     }
   }
 
+  /**
+   * 发起 WebSocket 连接。
+   *
+   * 【设计意图 (Why)】
+   *   新版 Hermes 网关（v0.23.1+）的 `/api/auth/ws-ticket` 为 30s 短效且严格一次性消费：
+   *   初次建连或握手失败后一旦断开，重连若复用旧 URL 里的旧 ticket 会被网关永久返回 403。
+   *
+   * 【防范的历史坑 (Pitfall)】
+   *   构造器同步将 ticket 写死进 `this.url`，导致网络抖动、心跳超时或唤醒重连时一直拿着
+   *   已消费/过期的 `?ticket=...` 死循环重连。
+   *
+   * 【约束与规则 (Rules)】
+   *   - 首次建连直接使用构造传入的 `this.url`（保持同步建连行为与测试兼容）；
+   *   - 自第二次尝试起，若配置了 `resolveUrl` 则先递增 `connectEpoch` 异步刷新最新 ticket URL；
+   *   - 任何时候调用 `disconnect()` 均递增 `connectEpoch`，彻底废止在途异步回调。
+   */
   public connect(): void {
     if (typeof WebSocket === 'undefined') {
       console.warn('[HermesGatewayClient] WebSocket runtime is unavailable');
@@ -411,23 +437,66 @@ export class HermesGatewayClient {
       return;
     }
 
+    if (this.isResolvingUrl) {
+      return;
+    }
+
     this.intentionalClose = false;
     this.fsm.transitionTo('CONNECTING');
 
-    try {
-      this.ws = new WebSocket(this.url);
+    if (this.initialUrlConsumed && this.resolveUrl) {
+      const myEpoch = ++this.connectEpoch;
+      this.isResolvingUrl = true;
+      void this.resolveAndOpenWebSocket(myEpoch);
+      return;
+    }
 
-      this.ws.onopen = () => {
+    this.initialUrlConsumed = true;
+    this.openWebSocket(this.url);
+  }
+
+  private async resolveAndOpenWebSocket(myEpoch: number): Promise<void> {
+    try {
+      const nextUrl = await this.resolveUrl?.();
+      if (this.intentionalClose || myEpoch !== this.connectEpoch) {
+        return;
+      }
+      this.isResolvingUrl = false;
+      if (!nextUrl) {
+        this.scheduleReconnect();
+        return;
+      }
+      this.url = nextUrl;
+      this.openWebSocket(nextUrl);
+    } catch (err) {
+      if (this.intentionalClose || myEpoch !== this.connectEpoch) {
+        return;
+      }
+      this.isResolvingUrl = false;
+      log.warn('resolveUrl failed before reconnect, scheduling retry', err);
+      this.scheduleReconnect();
+    }
+  }
+
+  private openWebSocket(targetUrl: string): void {
+    try {
+      const socket = new WebSocket(targetUrl);
+      this.ws = socket;
+
+      socket.onopen = () => {
+        if (this.intentionalClose || this.ws !== socket) return;
         this.fsm.transitionTo('HANDSHAKING');
-        log.info('websocket open, handshaking', { url: this.url });
+        log.info('websocket open, handshaking', { url: targetUrl });
         // 握手探针：网关 `ping` 返回 { pong: true }，是最轻量的存活确认
         this.call('ping', {})
           .then(() => {
+            if (this.intentionalClose || this.ws !== socket) return;
             log.info('handshake ok, connected');
             this.fsm.transitionTo('CONNECTED');
             this.startHeartbeat();
           })
           .catch((err: unknown) => {
+            if (this.intentionalClose || this.ws !== socket) return;
             // 握手探针失败不代表连接不可用（老版本网关可能未注册 ping），
             // 但必须留下证据，避免"假在线"。
             log.warn('handshake ping failed, proceeding as connected', err);
@@ -436,15 +505,18 @@ export class HermesGatewayClient {
           });
       };
 
-      this.ws.onmessage = (event: MessageEvent) => {
+      socket.onmessage = (event: MessageEvent) => {
+        if (this.intentionalClose || this.ws !== socket) return;
         this.handleMessage(event.data);
       };
 
-      this.ws.onerror = (err) => {
+      socket.onerror = (err) => {
+        if (this.ws !== socket) return;
         console.warn('[HermesGatewayClient] WebSocket error:', err);
       };
 
-      this.ws.onclose = () => {
+      socket.onclose = () => {
+        if (this.ws !== socket) return;
         this.stopHeartbeat();
         this.ws = null;
         if (!this.intentionalClose) {
@@ -470,6 +542,8 @@ export class HermesGatewayClient {
 
   public disconnect(): void {
     this.intentionalClose = true;
+    this.connectEpoch++;
+    this.isResolvingUrl = false;
     this.stopHeartbeat();
     this.teardownLifecycleListeners();
     this.clearPendingRequests('Client disconnected');
