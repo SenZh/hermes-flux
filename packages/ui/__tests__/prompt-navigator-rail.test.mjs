@@ -480,3 +480,76 @@ test('行的纵向位置必须引用 PANEL_ROW_PX，不得写死数值', () => {
   const withoutComments = lib.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
   assert.equal((withoutComments.match(/\b40\b/g) ?? []).length, 1, '40 只应出现在 PANEL_ROW_PX 的定义处');
 });
+
+test('加载态渲染契约：isLoadingOlder 切换 is-loading-older 与 aria-busy', () => {
+  const idleHtml = renderToStaticMarkup(
+    createElement(PromptNavigatorRail, {
+      snapshot: { prompts, activeIndex: 1, hasOlder: true, isLoadingOlder: false },
+      actions: { onSelect: () => {}, onLoadOlder: () => {} },
+    })
+  );
+  assert.doesNotMatch(idleHtml, /is-loading-older/, '空闲态不得挂加载类名');
+  assert.doesNotMatch(idleHtml, /aria-busy="true"/, '空闲态不得声明 aria-busy');
+
+  const loadingHtml = renderToStaticMarkup(
+    createElement(PromptNavigatorRail, {
+      snapshot: { prompts, activeIndex: 1, hasOlder: true, isLoadingOlder: true },
+      actions: { onSelect: () => {}, onLoadOlder: () => {} },
+    })
+  );
+  assert.match(loadingHtml, /class="conv-prompt-rail is-loading-older"/, '加载态必须激活轨道脉冲类名');
+  assert.match(loadingHtml, /aria-busy="true"/, '加载态必须宣告 aria-busy');
+});
+
+test('顶部拉取历史：接线、文案 i18n 与方案 1 刻度脉冲流样式契约', () => {
+  const tsx = fs.readFileSync(
+    new URL('../src/components-react/conversation/PromptNavigatorRail.tsx', import.meta.url),
+    'utf8'
+  );
+  assert.match(tsx, /decidePanelWheelAction\(/, '面板滚轮必须委托纯决策函数');
+  assert.match(tsx, /decideGutterKeyAction\(/, '键盘导航必须委托纯决策函数');
+  assert.match(tsx, /decideHotzonePointerAction\(/, '热区悬停必须委托纯决策函数');
+  assert.match(tsx, /planPromptPrependView\(/, '头部插页必须经纯函数同步窗口与面板偏移');
+  assert.match(tsx, /topHotzoneTriggeredRef\.current = false;/, '头部插页后必须复位热区触发锁');
+  assert.match(tsx, /actions\.onLoadOlder\?\.\(\)/, '触发动作必须调用 actions.onLoadOlder');
+  assert.match(tsx, /t\('conversation\.promptNavigator\.querying'\)/, '查询文案必须走 i18n 字典');
+  assert.doesNotMatch(tsx, /正在查询数据/, 'TSX 源码不得出现硬编码中文文案');
+  assert.doesNotMatch(tsx, /cascade-skel/, '面板状态行必须保持极简单行，不得带骨架横条');
+  assert.doesNotMatch(
+    tsx,
+    /\{isLoadingOlder\s*\?\s*\(\s*<div className="conv-prompt-rail__panel-loader"/,
+    '状态行内容节点必须保活，不得在 isLoadingOlder 置假时卸载导致退场动画断头'
+  );
+
+  const i18n = fs.readFileSync(new URL('../src/i18n/index.ts', import.meta.url), 'utf8');
+  assert.match(i18n, /'conversation\.promptNavigator\.querying':\s*'正在查询数据'/);
+  assert.match(i18n, /'conversation\.promptNavigator\.querying':\s*'Querying data'/);
+
+  const css = fs.readFileSync(new URL('../src/styles/conversation.css', import.meta.url), 'utf8');
+  const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(withoutComments, /@keyframes\s+convPromptTickCascade\s*\{/, '轨道刻度脉冲流关键帧必须精确存在');
+  assert.match(withoutComments, /@keyframes\s+convPromptLoaderBarPulse\s*\{/, '面板微脉冲竖条关键帧必须精确存在');
+  assert.match(
+    withoutComments,
+    /\.conv-prompt-rail\.is-loading-older \.conv-prompt-rail__tick:nth-child\(-n\+5\) \.conv-prompt-rail__tick-bar/,
+    '刻度脉冲动画仅允许绑定在 .is-loading-older 下的前 5 根刻度上，稳态零空转'
+  );
+  assert.match(
+    withoutComments,
+    /\.conv-prompt-rail\.is-loading-older \.conv-prompt-rail__loader-bars > span/,
+    '竖条脉冲动画必须限定在 .is-loading-older 状态作用域内，稳态零空转'
+  );
+  const wrapAt = withoutComments.indexOf('.conv-prompt-rail__panel-loader-wrap {');
+  const wrapBlock = withoutComments.slice(wrapAt, withoutComments.indexOf('}', wrapAt));
+  assert.match(wrapBlock, /var\(--duration-exit,\s*200ms\)/, '收起过渡必须消费 --duration-exit 非对称退场时长');
+  assert.match(wrapBlock, /var\(--ease-spring,/, '折叠过渡必须消费 --ease-spring 缓动');
+
+  const openAt = withoutComments.indexOf('.conv-prompt-rail__panel-loader-wrap.is-open {');
+  const openBlock = withoutComments.slice(openAt, withoutComments.indexOf('}', openAt));
+  assert.match(openBlock, /var\(--duration-enter,\s*120ms\)/, '展开过渡必须消费 --duration-enter 非对称入场时长');
+
+  const barAt = withoutComments.indexOf('.conv-prompt-rail__loader-bars > span {');
+  const barBlock = withoutComments.slice(barAt, withoutComments.indexOf('}', barAt));
+  assert.match(barBlock, /border-radius:\s*var\(--radius-pill,\s*9999px\)/, '竖条端帽圆角必须走 --radius-pill Token');
+  assert.doesNotMatch(barBlock, /animation:/, '稳态竖条不得绑定 infinite 动画');
+});

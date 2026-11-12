@@ -13,6 +13,9 @@ import {
   promptMessageIndexAtScrollTop,
   topmostRectTop,
   shouldRebuildPromptIndex,
+  shiftWindowStartForPrepend,
+  buildHostPromptNavigatorSnapshot,
+  isHostPromptNavigatorMetaSame,
 } from '../../dist/renderer/promptNavigator.mjs';
 
 test('TC-017 流式追加助手消息不重建 prompt 表', () => {
@@ -168,4 +171,100 @@ test('TC-023 非虚拟化的 120 条会话里滚动换算正确', () => {
   assert.equal(promptMessageIndexAtScrollTop({ ...base, scrollTop: 1000, total: 0 }), 0);
   // padding 大于 scrollTop 时不得出现负下标
   assert.equal(promptMessageIndexAtScrollTop({ ...base, scrollTop: 0, paddingTop: 400 }), 0);
+});
+
+test('TC-024 头部前置插页时同幅后移挂载窗口起点，保住原视口消息', () => {
+  // 中段视口（start=80）头部新增 40 条后，总长 240、容量 120：start 后移到 120
+  assert.equal(shiftWindowStartForPrepend(80, 40, 240, 120), 120);
+  // 短会话从 0 开始，新增 100 条变 140 条：后移到 maxStart = 20，原末尾消息仍在 [20, 140) 内
+  assert.equal(shiftWindowStartForPrepend(0, 100, 140, 120), 20);
+  // 越过上界时 clamp 到 total - capacity
+  assert.equal(shiftWindowStartForPrepend(100, 50, 150, 120), 30);
+  // 总数不超过容量时恒为 0
+  assert.equal(shiftWindowStartForPrepend(0, 20, 80, 120), 0);
+  // 非法/负数安全兜底
+  assert.equal(shiftWindowStartForPrepend(-5, Number.NaN, 200, 120), 0);
+  assert.equal(shiftWindowStartForPrepend(10, 5, 0, 120), 0);
+});
+
+test('TC-025 宿主快照构造与元信息判等：群聊研讨室严格隔离 hasOlder', () => {
+  const entries = [{ id: 'u1', index: 0, preview: 'a' }];
+  const sessionSnap = buildHostPromptNavigatorSnapshot(entries, 0, {
+    locale: 'zh-CN',
+    hasOlderMessages: true,
+    isLoadingOlder: false,
+    isGroupRoom: false,
+  });
+  assert.deepEqual(sessionSnap, {
+    prompts: entries,
+    activeIndex: 0,
+    locale: 'zh-CN',
+    hasOlder: true,
+    isLoadingOlder: false,
+  });
+
+  // 群聊研讨室即便 hasOlderMessages=true 也必须抑制 hasOlder=false，遵守三态物理隔离
+  const groupSnap = buildHostPromptNavigatorSnapshot(entries, 0, {
+    locale: 'zh-CN',
+    hasOlderMessages: true,
+    isLoadingOlder: false,
+    isGroupRoom: true,
+  });
+  assert.equal(groupSnap.hasOlder, false);
+
+  // 元信息判等：一致时返回 true，任一元信息变化必须返回 false
+  assert.equal(
+    isHostPromptNavigatorMetaSame(sessionSnap, {
+      locale: 'zh-CN',
+      hasOlderMessages: true,
+      isLoadingOlder: false,
+      isGroupRoom: false,
+    }),
+    true
+  );
+  assert.equal(
+    isHostPromptNavigatorMetaSame(sessionSnap, {
+      locale: 'zh-CN',
+      hasOlderMessages: true,
+      isLoadingOlder: true,
+      isGroupRoom: false,
+    }),
+    false
+  );
+  assert.equal(
+    isHostPromptNavigatorMetaSame(sessionSnap, {
+      locale: 'zh-CN',
+      hasOlderMessages: false,
+      isLoadingOlder: false,
+      isGroupRoom: false,
+    }),
+    false
+  );
+  assert.equal(
+    isHostPromptNavigatorMetaSame(sessionSnap, {
+      locale: 'zh-CN',
+      hasOlderMessages: true,
+      isLoadingOlder: false,
+      isGroupRoom: true,
+    }),
+    false
+  );
+  assert.equal(
+    isHostPromptNavigatorMetaSame(sessionSnap, {
+      locale: 'en-US',
+      hasOlderMessages: true,
+      isLoadingOlder: false,
+      isGroupRoom: false,
+    }),
+    false
+  );
+  assert.equal(
+    isHostPromptNavigatorMetaSame(null, {
+      locale: 'zh-CN',
+      hasOlderMessages: true,
+      isLoadingOlder: false,
+      isGroupRoom: false,
+    }),
+    false
+  );
 });

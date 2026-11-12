@@ -13,10 +13,16 @@ import {
   PROMPT_PREVIEW_MAX_CHARS,
   RAIL_VISIBLE_TICKS,
   RAIL_TICK_PITCH_PX,
+  TOP_LOAD_COOLDOWN_MS,
   normalizePromptPreview,
   buildPromptEntries,
   resolveActivePromptIndex,
   planTickWindow,
+  planPromptPrependView,
+  shouldTriggerLoadOlderAtTop,
+  decidePanelWheelAction,
+  decideGutterKeyAction,
+  decideHotzonePointerAction,
   tickWidth,
 } from '../dist/lib/promptNavigator.js';
 
@@ -244,4 +250,256 @@ test('TC-025 activeIndex=-1 时窗口对齐末条', () => {
   assert.deepEqual(planTickWindow(100, 500, 30), plan);
   // 非正容量回落到默认容量
   assert.equal(planTickWindow(100, 50, 0).end - planTickWindow(100, 50, 0).start, RAIL_VISIBLE_TICKS);
+});
+
+test('TC-026 shouldTriggerLoadOlderAtTop 守卫所有阻断条件与冷却边界', () => {
+  assert.equal(TOP_LOAD_COOLDOWN_MS, 250);
+  const valid = {
+    hasOlder: true,
+    isLoadingOlder: false,
+    hasHandler: true,
+    atTop: true,
+    movingUpward: true,
+    elapsedSinceLastTriggerMs: TOP_LOAD_COOLDOWN_MS,
+  };
+  assert.equal(shouldTriggerLoadOlderAtTop(valid), true, '全部条件满足且冷却期满时放行');
+  assert.equal(shouldTriggerLoadOlderAtTop({ ...valid, elapsedSinceLastTriggerMs: undefined }), true);
+  assert.equal(shouldTriggerLoadOlderAtTop({ ...valid, hasOlder: false }), false, '无更早历史时拦截');
+  assert.equal(shouldTriggerLoadOlderAtTop({ ...valid, isLoadingOlder: true }), false, '加载中时拦截防重入');
+  assert.equal(shouldTriggerLoadOlderAtTop({ ...valid, hasHandler: false }), false, '宿主未提供回调时拦截');
+  assert.equal(shouldTriggerLoadOlderAtTop({ ...valid, atTop: false }), false, '未到达顶部时拦截');
+  assert.equal(shouldTriggerLoadOlderAtTop({ ...valid, movingUpward: false }), false, '非向上意图时拦截');
+  assert.equal(
+    shouldTriggerLoadOlderAtTop({ ...valid, elapsedSinceLastTriggerMs: TOP_LOAD_COOLDOWN_MS - 1 }),
+    false,
+    '冷却期内拦截惯性连发'
+  );
+  assert.equal(shouldTriggerLoadOlderAtTop({ ...valid, elapsedSinceLastTriggerMs: -1 }), false, '负数间隔不放行');
+  assert.equal(shouldTriggerLoadOlderAtTop({ ...valid, elapsedSinceLastTriggerMs: Number.NaN }), false, 'NaN 间隔不放行');
+  // 自定义冷却阈值：有效值严格生效，负数/NaN 回落默认值 250ms
+  assert.equal(shouldTriggerLoadOlderAtTop({ ...valid, elapsedSinceLastTriggerMs: 99, cooldownMs: 100 }), false);
+  assert.equal(shouldTriggerLoadOlderAtTop({ ...valid, elapsedSinceLastTriggerMs: 100, cooldownMs: 100 }), true);
+  assert.equal(shouldTriggerLoadOlderAtTop({ ...valid, elapsedSinceLastTriggerMs: 0, cooldownMs: 0 }), true);
+  assert.equal(shouldTriggerLoadOlderAtTop({ ...valid, elapsedSinceLastTriggerMs: 249, cooldownMs: -50 }), false);
+  assert.equal(shouldTriggerLoadOlderAtTop({ ...valid, elapsedSinceLastTriggerMs: 250, cooldownMs: Number.NaN }), true);
+});
+
+test('TC-027 planPromptPrependView 头部插入历史时区分顶部拉取与非顶部锚定', () => {
+  // 场景 1：面板展开且停在顶部 (panelOffset=0)，前置拉回 10 条历史
+  // 必须保留至多 2 行新历史上下文，避免一下甩回 0 点丢失连续感
+  const atTopLarge = planPromptPrependView({
+    previousTotal: 15,
+    nextTotal: 25,
+    capacity: 30,
+    windowStart: 0,
+    highlightedIndex: 0,
+    panelOffset: 0,
+    panelOpen: true,
+  });
+  assert.deepEqual(atTopLarge, { windowStart: 0, highlightedIndex: 10, panelOffset: 8 });
+
+  // 场景 2：大轨道（40 -> 50 条）停在顶部拉取，windowStart 与 panelOffset 同步留 2 条新历史上下文
+  const bigRailAtTop = planPromptPrependView({
+    previousTotal: 40,
+    nextTotal: 50,
+    capacity: 30,
+    windowStart: 0,
+    highlightedIndex: 0,
+    panelOffset: 0,
+    panelOpen: true,
+  });
+  assert.deepEqual(bigRailAtTop, { windowStart: 8, highlightedIndex: 10, panelOffset: 8 });
+
+  // 场景 3：仅拉回 1 条时，delta < 2 直接落到 0
+  const atTopTiny = planPromptPrependView({
+    previousTotal: 15,
+    nextTotal: 16,
+    capacity: 30,
+    windowStart: 0,
+    highlightedIndex: 0,
+    panelOffset: 0,
+    panelOpen: true,
+  });
+  assert.deepEqual(atTopTiny, { windowStart: 0, highlightedIndex: 1, panelOffset: 0 });
+
+  // 场景 4：总条数仍不超过面板可见行数（2 -> 6），panelOffset 必须安全夹在 0
+  const stillUnderOnePage = planPromptPrependView({
+    previousTotal: 2,
+    nextTotal: 6,
+    capacity: 30,
+    windowStart: 0,
+    highlightedIndex: 0,
+    panelOffset: 0,
+    panelOpen: true,
+  });
+  assert.deepEqual(stillUnderOnePage, { windowStart: 0, highlightedIndex: 4, panelOffset: 0 });
+
+  // 场景 5：面板非顶部或面板关闭但保留非零偏移时全额补偿 delta，保持阅读锚点静止
+  const midScroll = planPromptPrependView({
+    previousTotal: 40,
+    nextTotal: 50,
+    capacity: 30,
+    windowStart: 5,
+    highlightedIndex: 8,
+    panelOffset: 4,
+    panelOpen: true,
+  });
+  assert.deepEqual(midScroll, { windowStart: 15, highlightedIndex: 18, panelOffset: 14 });
+
+  const closedWithOffset = planPromptPrependView({
+    previousTotal: 40,
+    nextTotal: 50,
+    capacity: 30,
+    windowStart: 2,
+    highlightedIndex: 5,
+    panelOffset: 3,
+    panelOpen: false,
+  });
+  assert.deepEqual(closedWithOffset, { windowStart: 12, highlightedIndex: 15, panelOffset: 13 });
+
+  const closedRail = planPromptPrependView({
+    previousTotal: 40,
+    nextTotal: 50,
+    capacity: 30,
+    windowStart: 0,
+    highlightedIndex: null,
+    panelOffset: 0,
+    panelOpen: false,
+  });
+  assert.deepEqual(closedRail, { windowStart: 10, highlightedIndex: null, panelOffset: 0 });
+
+  // 场景 6：空表 / delta <= 0 / previousTotal <= 0 安全夹取，不得出现负数或越界
+  assert.deepEqual(
+    planPromptPrependView({
+      previousTotal: 5,
+      nextTotal: 0,
+      capacity: 30,
+      windowStart: 3,
+      highlightedIndex: 2,
+      panelOffset: 1,
+      panelOpen: true,
+    }),
+    { windowStart: 0, highlightedIndex: null, panelOffset: 0 }
+  );
+  assert.deepEqual(
+    planPromptPrependView({
+      previousTotal: 20,
+      nextTotal: 15,
+      capacity: 30,
+      windowStart: 5,
+      highlightedIndex: 19,
+      panelOffset: 10,
+      panelOpen: true,
+    }),
+    { windowStart: 0, highlightedIndex: 14, panelOffset: 7 }
+  );
+  assert.deepEqual(
+    planPromptPrependView({
+      previousTotal: 0,
+      nextTotal: 10,
+      capacity: 30,
+      windowStart: 0,
+      highlightedIndex: null,
+      panelOffset: 0,
+      panelOpen: false,
+    }),
+    { windowStart: 0, highlightedIndex: null, panelOffset: 0 }
+  );
+});
+
+test('TC-028 decidePanelWheelAction 区分触顶拉取与面板滚动', () => {
+  const base = {
+    total: 20,
+    panelOffset: 0,
+    hasOlder: true,
+    isLoadingOlder: false,
+    hasHandler: true,
+    elapsedSinceLastTriggerMs: 300,
+  };
+  // 面板在顶部且向上滚轮 -> 触发拉取
+  assert.deepEqual(decidePanelWheelAction({ ...base, deltaY: -40 }), { type: 'load-older' });
+  // 面板在顶部但向下滚轮 -> 正常滚动到第 1 行，绝不误触发拉取
+  assert.deepEqual(decidePanelWheelAction({ ...base, deltaY: 40 }), { type: 'scroll', nextOffset: 1 });
+  // 面板尚未到顶（offset=3）向上滚轮 -> 向上滚一行而不提前请求
+  assert.deepEqual(decidePanelWheelAction({ ...base, panelOffset: 3, deltaY: -40 }), { type: 'scroll', nextOffset: 2 });
+  // 到达底部夹紧至 total - 8 = 12
+  assert.deepEqual(decidePanelWheelAction({ ...base, panelOffset: 12, deltaY: 40 }), { type: 'scroll', nextOffset: 12 });
+  // 加载中 / 无更早历史 / 冷却期内均拦截为 noop
+  assert.deepEqual(decidePanelWheelAction({ ...base, deltaY: -40, isLoadingOlder: true }), { type: 'noop' });
+  assert.deepEqual(decidePanelWheelAction({ ...base, deltaY: -40, hasOlder: false }), { type: 'noop' });
+  assert.deepEqual(decidePanelWheelAction({ ...base, deltaY: -40, elapsedSinceLastTriggerMs: 100 }), { type: 'noop' });
+  // 空列表或零位移
+  assert.deepEqual(decidePanelWheelAction({ ...base, total: 0, deltaY: -40 }), { type: 'noop' });
+  assert.deepEqual(decidePanelWheelAction({ ...base, deltaY: 0 }), { type: 'noop' });
+});
+
+test('TC-029 decideGutterKeyAction 覆盖首条越顶拉取与全部导航键位', () => {
+  const base = {
+    anchor: 0,
+    start: 0,
+    total: 20,
+    hasOlder: true,
+    isLoadingOlder: false,
+    hasHandler: true,
+    elapsedSinceLastTriggerMs: 300,
+  };
+  // 停在全局第 0 条继续按 ArrowUp -> 触发拉取
+  assert.deepEqual(decideGutterKeyAction({ ...base, key: 'ArrowUp' }), { type: 'load-older' });
+  // 无更早历史时停在首条按 ArrowUp -> noop
+  assert.deepEqual(decideGutterKeyAction({ ...base, key: 'ArrowUp', hasOlder: false }), { type: 'noop' });
+  // 非首条按 ArrowUp -> 仅移动高亮
+  assert.deepEqual(decideGutterKeyAction({ ...base, key: 'ArrowUp', anchor: 2, start: 0 }), { type: 'highlight', target: 1 });
+  assert.deepEqual(decideGutterKeyAction({ ...base, key: 'ArrowUp', anchor: 5, start: 5 }), { type: 'highlight', target: 4 });
+  // 其余键位
+  assert.deepEqual(decideGutterKeyAction({ ...base, key: 'ArrowDown', anchor: 2 }), { type: 'highlight', target: 3 });
+  assert.deepEqual(decideGutterKeyAction({ ...base, key: 'Home', anchor: 10 }), { type: 'highlight', target: 0 });
+  assert.deepEqual(decideGutterKeyAction({ ...base, key: 'End', anchor: 2 }), { type: 'highlight', target: 19 });
+  assert.deepEqual(decideGutterKeyAction({ ...base, key: 'Enter', anchor: 7 }), { type: 'select', target: 7 });
+  assert.deepEqual(decideGutterKeyAction({ ...base, key: ' ', anchor: -1 }), { type: 'select', target: 0 });
+  assert.deepEqual(decideGutterKeyAction({ ...base, key: 'Escape' }), { type: 'escape' });
+  assert.deepEqual(decideGutterKeyAction({ ...base, key: 'Tab' }), { type: 'noop' });
+  assert.deepEqual(decideGutterKeyAction({ ...base, key: 'ArrowUp', total: 0 }), { type: 'noop' });
+});
+
+test('TC-030 decideHotzonePointerAction 覆盖顶/底热区、触顶锁与复位后连续触发', () => {
+  const base = {
+    gutterHeight: 360,
+    edgePx: 18,
+    hasMoreAbove: false,
+    topHotzoneTriggered: false,
+    hasOlder: true,
+    isLoadingOlder: false,
+    hasHandler: true,
+    elapsedSinceLastTriggerMs: 300,
+  };
+  // 顶部热区且本地已无上文 -> 触发拉取
+  assert.deepEqual(decideHotzonePointerAction({ ...base, offsetY: 10 }), {
+    type: 'top-load-older',
+    shouldTrigger: true,
+  });
+  // 已触发锁定中，同一次悬停不得连发
+  assert.deepEqual(decideHotzonePointerAction({ ...base, offsetY: 10, topHotzoneTriggered: true }), {
+    type: 'top-load-older',
+    shouldTrigger: false,
+  });
+  // 新历史插页复位 topHotzoneTriggered=false 后，允许继续探测下一批
+  assert.deepEqual(decideHotzonePointerAction({ ...base, offsetY: 10, topHotzoneTriggered: false }), {
+    type: 'top-load-older',
+    shouldTrigger: true,
+  });
+  // 顶部仍有本地刻度时先向上轮播并复位锁定
+  assert.deepEqual(decideHotzonePointerAction({ ...base, offsetY: 10, hasMoreAbove: true, topHotzoneTriggered: true }), {
+    type: 'top-carousel',
+    resetTriggered: true,
+  });
+  // 底部热区 -> 向下轮播并复位顶部触发锁
+  assert.deepEqual(decideHotzonePointerAction({ ...base, offsetY: 350 }), {
+    type: 'bottom-carousel',
+    resetTriggered: true,
+  });
+  // 中间安全区 -> 停止轮播并复位触发锁
+  assert.deepEqual(decideHotzonePointerAction({ ...base, offsetY: 180 }), {
+    type: 'stop',
+    resetTriggered: true,
+  });
 });

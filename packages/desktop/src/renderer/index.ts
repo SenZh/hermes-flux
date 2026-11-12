@@ -118,7 +118,14 @@ import {
   shouldSettleInitialBottom,
 } from './messageWindow.js';
 import { profilesDiffer } from './profileRefresh.js';
-import { promptMessageIndexAtScrollTop, topmostRectTop, shouldRebuildPromptIndex } from './promptNavigator.js';
+import {
+  promptMessageIndexAtScrollTop,
+  topmostRectTop,
+  shouldRebuildPromptIndex,
+  shiftWindowStartForPrepend,
+  buildHostPromptNavigatorSnapshot,
+  isHostPromptNavigatorMetaSame,
+} from './promptNavigator.js';
 
 import {
   HermesGatewayClient,
@@ -3006,7 +3013,49 @@ const PROMPT_READ_LINE_PX = 100;
 const EMPTY_PROMPT_NAVIGATOR_SNAPSHOT: PromptNavigatorSnapshot = Object.freeze({
   prompts: Object.freeze([]) as readonly PromptEntry[],
   activeIndex: -1,
+  hasOlder: false,
+  isLoadingOlder: false,
 });
+
+/** 统一群聊研讨室三态判定：hostedRoomIds、groupRooms 列表或当前焦点为 group 均视为群聊域。 */
+function isGroupConversationActive(sessionId = state.activeSessionId): boolean {
+  return (
+    hostedRoomIds.has(sessionId) ||
+    state.groupRooms.some((g) => g.roomId === sessionId) ||
+    state.activeFocus.type === 'group'
+  );
+}
+
+function currentPromptNavigatorMeta() {
+  return {
+    locale: state.lang,
+    hasOlderMessages: state.hasOlderMessages,
+    isLoadingOlder: state.isLoadingOlder,
+    isGroupRoom: isGroupConversationActive(),
+  };
+}
+
+/** 统一构造导航器快照：三态隔离下群聊研讨室禁止暴露单会话翻页入口。 */
+function buildPromptNavigatorSnapshot(
+  prompts: readonly PromptEntry[],
+  activeIndex: number
+): PromptNavigatorSnapshot {
+  return buildHostPromptNavigatorSnapshot(prompts, activeIndex, currentPromptNavigatorMeta());
+}
+
+/** 仅比较元信息（hasOlder / isLoadingOlder / locale），不变时避免重复重建快照对象。 */
+function isPromptNavigatorMetaSame(snapshot: PromptNavigatorSnapshot | null): boolean {
+  return isHostPromptNavigatorMetaSame(snapshot, currentPromptNavigatorMeta());
+}
+
+/** 同步导航器的加载态与历史余量元信息，不触发宿主全量 render。 */
+function syncPromptNavigatorMeta(): void {
+  const current = promptNavigatorSnapshot;
+  if (!current) return;
+  if (isPromptNavigatorMetaSame(current)) return;
+  promptNavigatorSnapshot = buildPromptNavigatorSnapshot(current.prompts, current.activeIndex);
+  syncPromptNavigator();
+}
 
 let promptNavigatorSnapshot: PromptNavigatorSnapshot | null = null;
 let promptNavigatorEntries: PromptEntry[] = [];
@@ -3078,8 +3127,8 @@ function rebuildPromptEntries(): boolean {
   promptNavigatorCache = { sessionId: state.activeSessionId, messagesRef: state.messages };
   if (sessionChanged) {
     promptNavigatorSnapshot = promptNavigatorEntries.length === 0
-      ? { prompts: promptNavigatorEntries, activeIndex: -1, locale: state.lang }
-      : { prompts: promptNavigatorEntries, activeIndex: promptNavigatorEntries.length - 1, locale: state.lang };
+      ? buildPromptNavigatorSnapshot(promptNavigatorEntries, -1)
+      : buildPromptNavigatorSnapshot(promptNavigatorEntries, promptNavigatorEntries.length - 1);
     syncPromptNavigator();
     return true;
   }
@@ -3111,8 +3160,11 @@ function syncPromptNavigatorFromScroll(): void {
   }
   if (sessionReset) return;
   if (promptNavigatorEntries.length === 0) {
-    if (promptNavigatorSnapshot && promptNavigatorSnapshot.prompts.length > 0) {
-      promptNavigatorSnapshot = { prompts: promptNavigatorEntries, activeIndex: -1, locale: state.lang };
+    if (
+      promptNavigatorSnapshot &&
+      (promptNavigatorSnapshot.prompts.length > 0 || !isPromptNavigatorMetaSame(promptNavigatorSnapshot))
+    ) {
+      promptNavigatorSnapshot = buildPromptNavigatorSnapshot(promptNavigatorEntries, -1);
       syncPromptNavigator();
     }
     return;
@@ -3128,8 +3180,8 @@ function syncPromptNavigatorFromScroll(): void {
     total,
   });
   const next = resolveActivePromptIndex(promptNavigatorEntries, messageIndex);
-  if (next === (promptNavigatorSnapshot?.activeIndex ?? -1)) return;
-  promptNavigatorSnapshot = { prompts: promptNavigatorEntries, activeIndex: next, locale: state.lang };
+  if (next === (promptNavigatorSnapshot?.activeIndex ?? -1) && isPromptNavigatorMetaSame(promptNavigatorSnapshot)) return;
+  promptNavigatorSnapshot = buildPromptNavigatorSnapshot(promptNavigatorEntries, next);
   syncPromptNavigator();
 }
 
@@ -3138,6 +3190,9 @@ function createPromptNavigatorActions(): PromptNavigatorActions {
   return {
     onSelect: (messageId: string) => {
       jumpToPrompt(messageId);
+    },
+    onLoadOlder: () => {
+      void loadOlderMessages({ preserveViewportWindow: true });
     },
   };
 }
@@ -3436,7 +3491,7 @@ function parseRawMessages(list: any[]): MessageViewModel[] {
   });
 }
 
-async function loadOlderMessages(): Promise<void> {
+async function loadOlderMessages(options?: { preserveViewportWindow?: boolean }): Promise<void> {
   const sessionId = state.activeSessionId;
   if (!sessionId || !gatewayClient) return;
   if (state.isLoadingOlder) {
@@ -3444,15 +3499,16 @@ async function loadOlderMessages(): Promise<void> {
     // 超过 20 秒仍是 true，视为陈旧锁，强制复位后继续拉取，避免永久卡在"正在加载更早历史"。
     if (performance.now() - olderLoadingStartedAt > 20000) {
       state.isLoadingOlder = false;
+      syncPromptNavigatorMeta();
     } else {
       return;
     }
   }
 
   // 【AGENTS.md 三态隔离铁律】群聊研讨室严格走 groups.* 协议，绝对禁止打单会话 REST
-  const isRoom = hostedRoomIds.has(sessionId) || state.groupRooms.some((g) => g.roomId === sessionId) || state.activeFocus.type === 'group';
-  if (isRoom) {
+  if (hostedRoomIds.has(sessionId) || isGroupConversationActive(sessionId)) {
     state.isLoadingOlder = false;
+    syncPromptNavigatorMeta();
     return;
   }
 
@@ -3462,8 +3518,12 @@ async function loadOlderMessages(): Promise<void> {
     || 'default';
 
   const guard = { sessionId, generation: activeLoadMessagesGeneration };
+  const preserveViewportWindow = Boolean(options?.preserveViewportWindow);
+  const wasNearBottomBeforeLoad = isStreamNearBottom(document.getElementById('conversation-stream'));
   state.isLoadingOlder = true;
   olderLoadingStartedAt = performance.now();
+  // 提示词导航器即刻同步加载态，确保 0ms 触发动画而非等全量 render()。
+  syncPromptNavigatorMeta();
   const startedAt = performance.now();
   const anchor = captureStreamAnchor();
   /** 任一页网络/协议失败：本轮不推进耗尽结论，保留"还有更早历史"的入口。 */
@@ -3505,10 +3565,22 @@ async function loadOlderMessages(): Promise<void> {
           state.messages = planOlderBatchPrependMerge(cachedBatch, state.messages, { timelineSessionId: sessionId, fallbackSessionId: sessionId });
           const added = state.messages.length - before;
           if (added > 0) {
-            // 新批次插在列表头部，窗口对齐到本批末尾附近，末端由容量推导保持区间有界
-            messageWindowStart = computeOlderBatchWindowStart(added, localOlderRows.length < 100, MESSAGE_WINDOW_CAPACITY);
+            if (preserveViewportWindow) {
+              messageWindowStart = shiftWindowStartForPrepend(
+                messageWindowStart,
+                added,
+                state.messages.length,
+                MESSAGE_WINDOW_CAPACITY
+              );
+              if (!wasNearBottomBeforeLoad) {
+                messageWindowUserExpanded = true;
+              }
+            } else {
+              // 新批次插在列表头部，窗口对齐到本批末尾附近，末端由容量推导保持区间有界
+              messageWindowStart = computeOlderBatchWindowStart(added, localOlderRows.length < 100, MESSAGE_WINDOW_CAPACITY);
+              messageWindowUserExpanded = true;
+            }
             messageWindowEnd = windowEndFor(messageWindowStart, state.messages.length, MESSAGE_WINDOW_CAPACITY, INITIAL_RENDER_WINDOW);
-            messageWindowUserExpanded = true;
             sessionMessagesCache.set(sessionId, state.messages);
             state.hasOlderMessages = true;
             batchAppended = true;
@@ -3568,6 +3640,7 @@ async function loadOlderMessages(): Promise<void> {
         );
         if (guarded.status === 'discarded') {
           state.isLoadingOlder = false;
+          syncPromptNavigatorMeta();
           return;
         }
         const outcome = guarded.value;
@@ -3675,15 +3748,27 @@ async function loadOlderMessages(): Promise<void> {
           continue;
         }
 
-        // 【挂载窗口预算 (Rules)】只把本轮新增的这批历史纳入挂载窗口，并保留少量上文做锚点缓冲；
-        // 但若已是最后一批且新增数装得下单个窗口容量，直接对齐到 0，避免把会话首问卡在窗口外。
-        messageWindowStart = computeOlderBatchWindowStart(
-          added,
-          returned < OLDER_BATCH_PAGE_SIZE,
-          MESSAGE_WINDOW_CAPACITY,
-        );
+        if (preserveViewportWindow) {
+          messageWindowStart = shiftWindowStartForPrepend(
+            messageWindowStart,
+            added,
+            state.messages.length,
+            MESSAGE_WINDOW_CAPACITY,
+          );
+          if (!wasNearBottomBeforeLoad) {
+            messageWindowUserExpanded = true;
+          }
+        } else {
+          // 【挂载窗口预算 (Rules)】只把本轮新增的这批历史纳入挂载窗口，并保留少量上文做锚点缓冲；
+          // 但若已是最后一批且新增数装得下单个窗口容量，直接对齐到 0，避免把会话首问卡在窗口外。
+          messageWindowStart = computeOlderBatchWindowStart(
+            added,
+            returned < OLDER_BATCH_PAGE_SIZE,
+            MESSAGE_WINDOW_CAPACITY,
+          );
+          messageWindowUserExpanded = true;
+        }
         messageWindowEnd = windowEndFor(messageWindowStart, state.messages.length, MESSAGE_WINDOW_CAPACITY, INITIAL_RENDER_WINDOW);
-        messageWindowUserExpanded = true;
         sessionMessagesCache.set(sessionId, state.messages);
 
         // 缓存分桶纯洁性：只把当前会话自身的消息落盘，父会话历史只在内存合成；
@@ -3710,15 +3795,27 @@ async function loadOlderMessages(): Promise<void> {
     }
 
     if (batchAppended) {
+      if (preserveViewportWindow) {
+        // 挂载窗口的条数与 ID 可能完全不变（start 同幅后移），但虚拟高度与偏移已增大，必须强制更新窗口容器几何。
+        canvasStructureDirty = true;
+        if (!wasNearBottomBeforeLoad) {
+          suppressPinBottomOnce = true;
+        }
+      }
       // 【状态收敛铁律】必须先同步关闭加载态再渲染：
       // rAF 在窗口不可见/后台标签页会被节流甚至永不触发，曾导致 isLoadingOlder 永久为 true，
       // 之后所有翻页请求在第一行守卫处被吞掉，界面永久卡在"正在加载更早历史"。
       state.isLoadingOlder = false;
       render();
-      const reapplyAnchor = (): void => applyStreamAnchor(anchor, false);
+      syncPromptNavigatorMeta();
+      const reapplyAnchor = preserveViewportWindow && wasNearBottomBeforeLoad
+        ? (): void => applyStreamAnchor(anchor, true)
+        : (): void => applyStreamAnchor(anchor, false);
       reapplyAnchor();
+      syncPromptNavigatorFromScroll();
       requestAnimationFrame(() => {
         reapplyAnchor();
+        syncPromptNavigatorFromScroll();
         requestAnimationFrame(reapplyAnchor);
       });
       logScroll.debug('older batch prepended via element anchor', {
@@ -3743,6 +3840,7 @@ async function loadOlderMessages(): Promise<void> {
   }
   state.isLoadingOlder = false;
   render();
+  syncPromptNavigatorMeta();
 }
 
 /**
@@ -7639,6 +7737,7 @@ function mountReactShellComponents(): void {
   }
   // 缓存命中时是两次引用比较；未命中才整表重建并按 scrollTop 重算当前项。
   rebuildPromptEntries();
+  syncPromptNavigatorMeta();
   syncPromptNavigator();
   /**
    * 首屏贴底不变式：窗口覆盖末尾 + 读者未回溯 ⇒ 视口应在底部。

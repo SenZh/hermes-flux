@@ -130,3 +130,81 @@ export function shouldRebuildPromptIndex(input: PromptIndexRebuildInput): boolea
   if (input.cachedMessagesRef === null) return true;
   return input.cachedMessagesRef !== input.messagesRef;
 }
+
+/**
+ * 头部前置插入历史后平移挂载窗口起点，使当前视口内消息继续留在窗口中。
+ *
+ * 【设计意图 (Why)】
+ *   用户通过提示词导航器触发历史拉取时，正文视口可能停在中部或尾部，而非顶部；
+ *   若沿用滚到顶翻页的「重置到 0」策略，会把当前正读消息瞬间踢出挂载窗口。
+ *   按新增条数 `added` 同幅后移 `previousStart`，即可保证原本挂载的消息 100% 留在新窗口内，
+ *   配合元素锚点补偿实现正文视口零跳动。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 非有限数一律兜底为 0 / 1；
+ *   2. 结果严格夹在 `[0, max(0, total - capacity)]` 之内。
+ */
+export function shiftWindowStartForPrepend(
+  previousStart: number,
+  added: number,
+  total: number,
+  capacity: number
+): number {
+  const safeTotal = isFiniteNumber(total) && total > 0 ? Math.floor(total) : 0;
+  const safeCap = isFiniteNumber(capacity) && capacity > 0 ? Math.floor(capacity) : 1;
+  const maxStart = Math.max(0, safeTotal - safeCap);
+  const base = isFiniteNumber(previousStart) && previousStart > 0 ? Math.floor(previousStart) : 0;
+  const delta = isFiniteNumber(added) && added > 0 ? Math.floor(added) : 0;
+  const shifted = base + delta;
+  if (shifted <= 0) return 0;
+  if (shifted >= maxStart) return maxStart;
+  return shifted;
+}
+
+export interface HostPromptNavigatorMetaInput {
+  locale: string;
+  hasOlderMessages: boolean;
+  isLoadingOlder: boolean;
+  isGroupRoom: boolean;
+}
+
+export interface HostPromptNavigatorSnapshotLike<TEntry = unknown> {
+  prompts: readonly TEntry[];
+  activeIndex: number;
+  locale?: string;
+  hasOlder?: boolean;
+  isLoadingOlder?: boolean;
+}
+
+/**
+ * 统一构造宿主侧提示词导航器快照：群聊研讨室严格隔离，绝不暴露单会话翻页入口。
+ */
+export function buildHostPromptNavigatorSnapshot<TEntry>(
+  prompts: readonly TEntry[],
+  activeIndex: number,
+  meta: HostPromptNavigatorMetaInput
+): HostPromptNavigatorSnapshotLike<TEntry> {
+  return {
+    prompts,
+    activeIndex,
+    locale: meta.locale,
+    hasOlder: Boolean(meta.hasOlderMessages && !meta.isGroupRoom),
+    isLoadingOlder: Boolean(meta.isLoadingOlder),
+  };
+}
+
+/**
+ * 判断导航器元信息是否与当前宿主状态一致；一致时跳过快照引用切换，避免无意义重绘。
+ */
+export function isHostPromptNavigatorMetaSame(
+  snapshot: HostPromptNavigatorSnapshotLike | null,
+  meta: HostPromptNavigatorMetaInput
+): boolean {
+  if (!snapshot) return false;
+  const expectedHasOlder = Boolean(meta.hasOlderMessages && !meta.isGroupRoom);
+  return (
+    Boolean(snapshot.hasOlder) === expectedHasOlder &&
+    Boolean(snapshot.isLoadingOlder) === Boolean(meta.isLoadingOlder) &&
+    snapshot.locale === meta.locale
+  );
+}
