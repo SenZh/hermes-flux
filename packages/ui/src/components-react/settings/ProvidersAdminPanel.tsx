@@ -83,6 +83,7 @@ function AvailabilityDot({ availability }: { availability: ProviderView['availab
  *   1. `active` 的格子锁定：取消必须先切模型（用户已确认的策略）；
  *   2. `error` 的格子锁定并显示原始原因，绝不渲染成“未配置”；
  *   3. 自定义端点勾选未配置的 Agent 时，先尝试复用其它成员的密钥，失败才就地补密钥；
+ *      勾选同时把它设为该 Agent 的默认模型（绿环），否则用户点完看不出任何变化；
  *   4. 订阅没有可写的绑定记录，格子只读；
  *   5. 名称最多 10 个显示单位（完整 5 汉字 / 10 半角）；截断态为 9 单位内容 + `…`（汉字通常落 4 字），完整名称留在 title 与 aria-label；
  *   6. 名称字号消费 `--ui-text-caption`（11px × 用户字号档位），不写死 px；
@@ -370,20 +371,19 @@ function ProviderRow({
         <div className="flex min-w-0 flex-1 items-start gap-2">
           <AvailabilityDot availability={view.availability} />
           <div className="min-w-0 flex-1">
+            {/* 【规则】名称、类型与模型数量必须在同一排：模型数是选型的一等信息，
+                单独占一行会把行的视觉重心拆成两层。端点地址/配置文件路径不再展示。 */}
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <span className="truncate text-body text-foreground">{view.name}</span>
+              <span className="min-w-0 truncate text-body text-foreground">{view.name}</span>
               <span className="shrink-0 rounded-inner border border-border px-1 text-micro text-muted-foreground">
                 {isSubscription ? t('settings.providerKindSubscription') : t('settings.providerKindCustom')}
               </span>
+              {modelLabel ? (
+                <span className="shrink-0 whitespace-nowrap text-caption text-muted-foreground">{modelLabel}</span>
+              ) : null}
             </div>
-            {detail || modelLabel ? (
-              <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                {detail ? (
-                  <span className="truncate font-code text-caption text-muted-foreground">{detail}</span>
-                ) : null}
-                {detail && modelLabel ? <span className="text-caption text-faint">·</span> : null}
-                {modelLabel ? <span className="text-caption text-muted-foreground">{modelLabel}</span> : null}
-              </div>
+            {detail ? (
+              <div className="mt-1 min-w-0 truncate text-caption text-muted-foreground">{detail}</div>
             ) : null}
           </div>
         </div>
@@ -458,13 +458,32 @@ function ProviderRow({
 /**
  * 副标题的取值。
  * 【设计意图】订阅的 `detail` 里塞的是内部标记（deviceCode / externalCli），
- *   直接展示等于把实现细节丢给用户。这里翻成人话，地址类保持原样（它就该是原样）。
+ *   直接展示等于把实现细节丢给用户。地址类与配置文件路径也不再进入列表：
+ *   用户要判断的是"这套来源能不能用"，不是它的物理位置（设置项里都查得到）。
+ * 【规则】自定义端点的 `detail` 恒为 `base_url`，整段隐藏；订阅只保留套餐等人类可读片段。
  */
-function describeDetail(view: ProviderView): string {
-  if (view.kind === 'custom') return view.detail;
+export function describeDetail(view: ProviderView): string {
+  if (view.kind === 'custom') return '';
   if (view.detail === 'deviceCode') return '';
   if (view.detail === 'externalCli') return '';
-  return view.detail;
+  return view.detail
+    .split(' · ')
+    .map((part) => part.trim())
+    .filter((part) => part && !isEndpointLocation(part))
+    .join(' · ');
+}
+
+/** 像 URL 或文件路径的片段：列表行不承担"配置在哪"的展示职责。 */
+function isEndpointLocation(text: string): boolean {
+  return /^(https?|wss?|ftp|file):/i.test(text)
+    || text.startsWith('/')
+    || text.startsWith('~/')
+    || text.startsWith('.\\')
+    || text.startsWith('./')
+    || text.startsWith('..\\')
+    || text.startsWith('../')
+    || text.startsWith('\\\\')
+    || /^[A-Za-z]:[\\/]/.test(text);
 }
 
 /* -------------------------------------------------------------------------- */

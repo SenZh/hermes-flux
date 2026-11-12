@@ -4,7 +4,9 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { SettingsModal } from '../dist/components-react/settings/SettingsModal.js';
 import { FanOutMemberList } from '../dist/components-react/settings/FanOutMemberList.js';
+import { describeDetail } from '../dist/components-react/settings/ProvidersAdminPanel.js';
 import { ModelOptionRow, ModelPickerDialog, ModelPickerField, resolveModelPick } from '../dist/components-react/settings/ModelPicker.js';
+import { renderModelVendorIcon } from '../dist/lib/vendorIcon.js';
 import {
   SETTINGS_SECTIONS,
   filterSettingsSections,
@@ -322,7 +324,9 @@ test('Agent 成员网格：勾选样式只有一种，绿色环单独表达「�
   assert.ok(ready.includes('bg-primary text-primary-foreground'), '已配置的勾选不得再画成另一种绿色空心对号');
   assert.equal(active.includes('border-success bg-success'), false, '不得再用绿色实底对号区分当前模型');
   assert.ok(active.includes('ring-success'), '当前模型改用头像外环表达');
-  assert.ok(html.includes(t('settings.providerBindingLegend')), '界面必须说明绿环与勾选各自代表什么');
+  assert.ok(html.includes('绿环'), '界面必须说明绿环的含义');
+  assert.ok(html.includes('默认模型'), '绿环代表的必须是该 Bot 使用的默认模型');
+  assert.equal(html.includes('勾选 = 已配置'), false, '已配置的解释按用户要求删除');
 });
 
 test('添加端点：全宽成员列表完整显示 10 字符名，title 保留全名，超长名按 24 单位兜底', () => {
@@ -355,7 +359,7 @@ test('添加端点：全宽成员列表完整显示 10 字符名，title 保留�
   );
 });
 
-test('模型行：显示计算后的可读名与品牌图标，绝不直出裸 ID', () => {
+test('模型行：显示计算后的可读名与厂商图标，绝不直出裸 ID', () => {
   setLocale('zh-CN');
   const html = renderToStaticMarkup(
     React.createElement(ModelOptionRow, {
@@ -367,8 +371,105 @@ test('模型行：显示计算后的可读名与品牌图标，绝不直出裸 I
   assert.ok(html.includes('Opus 4.8 Fast'), '必须显示 core 派生出的完整可读名');
   assert.equal((html.match(/Fast/g) ?? []).length, 1, '名字里已有 Fast，不得再叠一枚 Fast 标签');
   assert.equal(html.includes('>anthropic/claude-opus-4.8-fast<'), false, '裸 ID 不得作为可见文本');
-  assert.ok(html.includes('<svg'), '模型行必须带品牌图标');
+  assert.ok(html.includes('vendor-icon'), '模型行必须复用输入舱的厂商图标（lobe 品牌资产）');
+  assert.ok(html.includes('icons/lobe/anthropic.svg'), '厂商图标必须指向真实的品牌资产，不能用通用描边图形冒充');
   assert.ok(html.includes(t('settings.providerCurrent')), '当前模型必须标注');
+});
+
+test('模型行：认不出厂商时回落首字母 badge，不留空洞', () => {
+  setLocale('zh-CN');
+  const html = renderToStaticMarkup(
+    React.createElement(ModelOptionRow, { modelId: 'mystery-model-x', providerName: '' }),
+  );
+  assert.ok(html.includes('vendor-icon--badge'), '无官方图标时必须渲染 badge 兜底');
+  assert.ok(html.includes('>?<'), '判不出厂商时用占位符，绝不返回空节点让行首塌陷');
+});
+
+test('厂商图标：React 设置页与输入舱字符串模板必须同构、同资产', () => {
+  setLocale('zh-CN');
+  const classTokens = (html) =>
+    [...html.matchAll(/class="([^"]*)"/g)]
+      .flatMap((match) => match[1].split(/\s+/))
+      .filter((token) => token.startsWith('vendor-icon'))
+      .join(' ');
+  for (const [modelId, providerName] of [
+    ['anthropic/claude-opus-4.8-fast', 'Anthropic'],
+    ['gpt-5.6', 'OpenAI'],
+    ['cpa/gemini-3.8-flash', 'cpa'],
+    ['qwen/qwen3-32b', 'Qwen'],
+    ['nvidia/nemotron-4', 'NVIDIA'],
+  ]) {
+    const react = renderToStaticMarkup(
+      React.createElement(ModelOptionRow, { modelId, providerName }),
+    );
+    const template = renderModelVendorIcon(modelId, providerName);
+    assert.equal(
+      classTokens(react),
+      classTokens(template),
+      `${modelId} 的图标 class 序列必须一致（含 dual 内部 color→mono 顺序）`,
+    );
+    assert.equal(
+      react.includes('icons/lobe/'),
+      template.includes('icons/lobe/'),
+      `${modelId} 的资产路径口径必须一致（都走 lobe，或都走 badge）`,
+    );
+  }
+});
+
+test('提供商行：名称/类型/模型数同排，URL 与配置文件路径退出列表', () => {
+  setLocale('zh-CN');
+  const html = render(providerSnapshot({
+    providerViews: {
+      status: 'ready',
+      data: [
+        providerView({}),
+        providerView({
+          key: 'subscription:xai-oauth',
+          kind: 'subscription',
+          id: 'xai-oauth',
+          name: 'xAI Grok OAuth',
+          detail: 'SuperGrok · /opt/data/auth.json',
+          models: [],
+          availability: 'ready',
+        }),
+      ],
+    },
+  }));
+  assert.equal(html.includes('http://gw.example/v1'), false, '自定义端点地址不得出现在列表行');
+  assert.equal(html.includes('/opt/data/auth.json'), false, '配置文件路径不得出现在列表行');
+  assert.ok(html.includes('SuperGrok'), '订阅套餐仍要保留');
+  assert.ok(html.includes(t('settings.providerModels', { count: 2 })), '模型数量必须展示');
+  const title = html.slice(html.indexOf('data-provider-key="custom:fn"'));
+  assert.ok(title.indexOf('>fn<') < title.indexOf(t('settings.providerKindCustom')), '顺序：名称 → 类型');
+  assert.ok(
+    title.indexOf(t('settings.providerKindCustom')) < title.indexOf(t('settings.providerModels', { count: 2 })),
+    '顺序：类型 → 模型数（同一排，不再单独占一行）',
+  );
+});
+
+test('describeDetail：自定义端点整段隐藏，订阅只去掉 URL/路径并保留套餐', () => {
+  assert.equal(describeDetail({ kind: 'custom', detail: 'https://ai.codepower.cloud/v1' }), '', '端点地址不再进入列表');
+  assert.equal(describeDetail({ kind: 'subscription', detail: 'deviceCode' }), '');
+  assert.equal(describeDetail({ kind: 'subscription', detail: 'externalCli' }), '');
+  assert.equal(
+    describeDetail({ kind: 'subscription', detail: 'SuperGrok · /opt/data/auth.json' }),
+    'SuperGrok',
+    '凭据文件路径剔除，套餐保留',
+  );
+  assert.equal(
+    describeDetail({ kind: 'subscription', detail: 'SuperGrok · Nous Portal' }),
+    'SuperGrok · Nous Portal',
+    '人类可读来源不得被误杀',
+  );
+  assert.equal(
+    describeDetail({ kind: 'subscription', detail: 'C:\\Users\\me\\auth.json' }),
+    '',
+    'Windows 路径同样剔除',
+  );
+  assert.equal(describeDetail({ kind: 'subscription', detail: 'wss://gw.example/ws' }), '', 'WebSocket 地址剔除');
+  assert.equal(describeDetail({ kind: 'subscription', detail: 'file:///opt/data/auth.json' }), '', 'file URL 剔除');
+  assert.equal(describeDetail({ kind: 'subscription', detail: '~/data/auth.json' }), '', '家目录简写剔除');
+  assert.equal(describeDetail({ kind: 'subscription', detail: '\\\\host\\share\\auth.json' }), '', 'UNC 路径剔除');
 });
 
 test('查看模型弹框：复用模型行、标注当前模型、列出可读名', () => {

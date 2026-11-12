@@ -1,68 +1,79 @@
 import * as React from 'react';
-import {
-  Bot as BotIcon,
-  Boxes,
-  Brain,
-  Check,
-  ChevronDown,
-  Cloud,
-  Cpu,
-  Flame,
-  Hexagon,
-  Infinity as InfinityIcon,
-  Moon,
-  Smartphone,
-  Sparkles,
-  Waves,
-  Wind,
-  Zap,
-} from 'lucide-react';
+import { Check, ChevronDown } from 'lucide-react';
 import { t } from '../../i18n/index.js';
-import { presentModel, type ModelBrand, type ModelPresentation } from '../../lib/modelPresentation.js';
+import { describeModelVendorIcon } from '../../lib/vendorIcon.js';
+import { presentModel, type ModelPresentation } from '../../lib/modelPresentation.js';
 import { Button } from '../primitives/Button.js';
 import { Input } from '../primitives/Input.js';
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '../primitives/Menu.js';
 
 /**
- * 模型品牌图形。
+ * 模型厂商图标（React 版）。
  *
  * 【设计意图 (Why)】
- *   设置页禁止 emoji，品牌识别必须用同一套 lucide 描边语言。
- *   形状只承担"这是哪家模型"的快速识别，颜色一律继承主题前景，不写死品牌色，
- *   否则换肤后会撞色、也会被 Token 门禁拦下。
+ *   与输入舱模型切换器必须是**同一个图标**：设置页曾经用 lucide 通用描边图形
+ *   （Anthropic = 大脑、OpenAI = 闪电）冒充品牌，用户认不出是哪家。现在两条渲染路径
+ *   共用 `describeModelVendorIcon` 的判定与 lobe 品牌资产，只差一层 DOM 表达。
  *
  * 【约束与规则 (Rules)】
- *   1. 未知品牌回退 `Boxes`，绝不返回 null 让行首塌陷；
- *   2. 图形只做装饰，`aria-hidden`，可读名由相邻文本承担。
+ *   1. 资产路径相对渲染产物根目录（desktop 构建会把 `icons/lobe` 拷进 dist/renderer）；
+ *   2. 判不出厂商时渲染首字母 badge，绝不返回 null 让行首塌陷；
+ *   3. 图形只做装饰，`aria-hidden`；可读名由相邻文本承担，`title` 只放厂商展示名。
  */
-const BRAND_ICONS: Readonly<Record<ModelBrand, React.ComponentType<{ className?: string; 'aria-hidden'?: React.AriaAttributes['aria-hidden'] }>>> = {
-  anthropic: Brain,
-  openai: Zap,
-  google: Sparkles,
-  deepseek: Waves,
-  xai: BotIcon,
-  qwen: Wind,
-  moonshot: Moon,
-  zai: Hexagon,
-  minimax: Boxes,
-  meta: InfinityIcon,
-  mistral: Flame,
-  nvidia: Cpu,
-  xiaomi: Smartphone,
-  tencent: Cloud,
-  local: Boxes,
-  unknown: Boxes,
-};
-
-export function ModelBrandIcon({
-  brand,
-  className = 'size-4',
+export function ModelVendorIcon({
+  modelId,
+  providerName = '',
+  // 与输入舱模型列表行同档 14px（触发按钮是 16px）；行内图标必须比模型名退后一层。
+  size = 14,
+  className = 'text-muted-foreground',
 }: {
-  brand: ModelBrand;
+  modelId: string;
+  providerName?: string;
+  size?: number;
   className?: string;
 }): React.ReactElement {
-  const Icon = BRAND_ICONS[brand] ?? Boxes;
-  return <Icon aria-hidden="true" className={`${className} shrink-0 text-muted-foreground`} />;
+  const icon = describeModelVendorIcon(modelId, providerName, { size });
+  const classes = ['vendor-icon', className].filter(Boolean).join(' ');
+  const boxStyle: React.CSSProperties = { width: icon.size, height: icon.size };
+  const title = icon.label || undefined;
+
+  if (icon.variant === 'badge') {
+    return (
+      <span className={`${classes} vendor-icon--badge`} style={boxStyle} title={title} aria-hidden="true">
+        {icon.badgeLetter}
+      </span>
+    );
+  }
+
+  // SAFETY: CSS 自定义属性不在 React.CSSProperties 的类型面内；值来自已判定的厂商资产路径，
+  // 不含用户输入，也不需要运行时转义。
+  const monoSrc = { '--vendor-icon-src': `url('${icon.monoSrc}')` } as React.CSSProperties;
+  const mono = <span className="vendor-icon__mono" style={monoSrc} />;
+  const color = (
+    <img
+      className="vendor-icon__color"
+      src={icon.colorSrc}
+      alt=""
+      width={icon.size}
+      height={icon.size}
+      draggable={false}
+      decoding="async"
+    />
+  );
+
+  if (icon.variant === 'mono') {
+    return <span className={classes} style={boxStyle} title={title} aria-hidden="true">{mono}</span>;
+  }
+  if (icon.variant === 'color') {
+    return <span className={classes} style={boxStyle} title={title} aria-hidden="true">{color}</span>;
+  }
+  const dualClass = icon.variant === 'dual-inverse' ? 'vendor-icon--dual vendor-icon--dual-inverse' : 'vendor-icon--dual';
+  return (
+    <span className={`${classes} ${dualClass}`} style={boxStyle} title={title} aria-hidden="true">
+      {color}
+      {mono}
+    </span>
+  );
 }
 
 /**
@@ -90,7 +101,7 @@ export function ModelOptionRow({
   const view: ModelPresentation = presentModel(modelId, providerName);
   return (
     <span className="flex min-w-0 flex-1 items-center gap-2">
-      <ModelBrandIcon brand={view.brand} />
+      <ModelVendorIcon modelId={modelId} providerName={providerName} />
       <span className="min-w-0 flex-1 truncate text-caption text-foreground">{view.name}</span>
       {current ? <span className="shrink-0 text-micro text-success">{t('settings.providerCurrent')}</span> : null}
       {selected ? <Check aria-hidden="true" className="size-3 shrink-0 text-primary" strokeWidth={2.5} /> : null}
@@ -182,7 +193,7 @@ export function ModelPickerField({
         >
           {selected ? (
             <>
-              <ModelBrandIcon brand={selected.brand} />
+              <ModelVendorIcon modelId={value} providerName={providerName} />
               <span className="min-w-0 flex-1 truncate text-caption text-foreground">{selected.name}</span>
             </>
           ) : (

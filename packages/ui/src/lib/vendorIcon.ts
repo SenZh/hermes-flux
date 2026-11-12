@@ -133,18 +133,64 @@ function clampSize(size: number | undefined): number {
 }
 
 /**
+ * 渲染无关的图标描述：决定画哪个变体、取哪个资产、badge 用哪个字母。
+ *
+ * 【设计意图 (Why)】输入舱是字符串模板、设置页是 React，两条渲染路径如果各自判断
+ *   "这个厂商用彩色还是 mono"，迟早会漂成两套。描述层是唯一判定入口，两边只负责
+ *   把同一份描述画成 DOM。
+ */
+export interface VendorIconDescriptor {
+  variant: VendorIconVariant;
+  /** 展示名（`title` 用）；内部 slug 不进入这里 */
+  label: string;
+  /** 已夹在合法区间的边长 */
+  size: number;
+  /** mono 资产 URL；badge 时为空串 */
+  monoSrc: string;
+  /** 彩色资产 URL；badge 时为空串 */
+  colorSrc: string;
+  /** badge 形态的首字符 */
+  badgeLetter: string;
+}
+
+export function describeVendorIcon(options: RenderVendorIconOptions): VendorIconDescriptor {
+  const { vendorId, label = '', size } = options;
+  const iconSize = clampSize(size);
+  const variant = resolveVendorIconVariant(vendorId);
+  const base = variant === 'badge' ? '' : `${ICON_DIR}/${vendorId}`;
+  return {
+    variant,
+    label: label.trim(),
+    size: iconSize,
+    monoSrc: base ? `${base}.svg` : '',
+    colorSrc: base ? `${base}-color.svg` : '',
+    badgeLetter: vendorIconBadgeLetter(label, vendorId),
+  };
+}
+
+/**
  * 渲染单个厂商图标。
  *
  * 【规则】输出始终是一个 `.vendor-icon` 方块，宽度高度由 `size` 固定，
  * 因此无论图标、徽标还是 badge，行内对齐都不会跳。
  */
 export function renderVendorIcon(options: RenderVendorIconOptions): string {
-  const { vendorId, label = '', size, className = '', suppressBadge = false } = options;
-  const iconSize = clampSize(size);
-  const variant = resolveVendorIconVariant(vendorId);
+  return renderVendorIconDescriptor(describeVendorIcon(options), {
+    className: options.className,
+    suppressBadge: options.suppressBadge,
+  });
+}
+
+/** 把图标描述画成字符串 DOM；React 版在 ModelPicker 里画同一份描述。 */
+function renderVendorIconDescriptor(
+  icon: VendorIconDescriptor,
+  options: { className?: string; suppressBadge?: boolean } = {},
+): string {
+  const { className = '', suppressBadge = false } = options;
+  const { variant, size: iconSize } = icon;
   // 【规则】`title` 只取调用方给的展示名：vendorId 是内部 slug，绝不能露给用户
   // （`title="anthropic"` 这种半成品提示比没有提示更糟）。label 为空则干脆不加 title。
-  const title = label.trim();
+  const title = icon.label;
   const classes = ['vendor-icon', className].filter(Boolean).join(' ');
   const boxStyle = `width:${iconSize}px;height:${iconSize}px;`;
   const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
@@ -153,15 +199,13 @@ export function renderVendorIcon(options: RenderVendorIconOptions): string {
   // 再给图标挂 aria-label 只会让读屏把同一个名字念两遍。
   if (variant === 'badge') {
     if (suppressBadge) return '';
-    const letter = vendorIconBadgeLetter(label, vendorId);
-    return `<span class="${classes} vendor-icon--badge"${titleAttr} aria-hidden="true" style="${boxStyle}">${escapeHtml(letter)}</span>`;
+    return `<span class="${classes} vendor-icon--badge"${titleAttr} aria-hidden="true" style="${boxStyle}">${escapeHtml(icon.badgeLetter)}</span>`;
   }
 
-  const slug = escapeHtml(vendorId);
   // mono 用 CSS mask 绘制，颜色由 currentColor 决定，因此能随皮肤与选中态变色。
-  const mono = `<span class="vendor-icon__mono" style="--vendor-icon-src:url('${ICON_DIR}/${slug}.svg');"></span>`;
+  const mono = `<span class="vendor-icon__mono" style="--vendor-icon-src:url('${escapeHtml(icon.monoSrc)}');"></span>`;
   const color =
-    `<img class="vendor-icon__color" src="${ICON_DIR}/${slug}-color.svg" alt="" ` +
+    `<img class="vendor-icon__color" src="${escapeHtml(icon.colorSrc)}" alt="" ` +
     `width="${iconSize}" height="${iconSize}" draggable="false" decoding="async">`;
 
   if (variant === 'mono') {
@@ -176,25 +220,39 @@ export function renderVendorIcon(options: RenderVendorIconOptions): string {
 }
 
 /**
- * 按模型 ID 渲染图标（模型行、触发按钮、设置页共用入口）。
+ * 按模型 ID 解析图标描述（React 与字符串模板共用的唯一入口）。
  *
  * 【规则】厂商判定全部交给 core（`parseModelDisplay` 同时给出展示名与 slug），
  * UI 只做「slug → 图标」的纯查表，保证所有模型展示场景的口径完全一致；
- * `title` 用的也必须是展示名，绝不能把内部 slug 露给用户。
+ * `label` 用的也必须是展示名，绝不能把内部 slug 露给用户。
+ */
+export function describeModelVendorIcon(
+  modelId: string,
+  providerName = '',
+  options: { size?: number; label?: string } = {},
+): VendorIconDescriptor {
+  const parts = parseModelDisplay(modelId, providerName);
+  return describeVendorIcon({
+    vendorId: parts.vendorId,
+    label: options.label ?? parts.vendor,
+    size: options.size,
+  });
+}
+
+/**
+ * 按模型 ID 渲染图标（模型行、触发按钮、设置页共用入口）。
+ *
+ * 【规则】与 `describeModelVendorIcon` 同一份判定；字符串路径只多做 DOM 转义。
  */
 export function renderModelVendorIcon(
   modelId: string,
   providerName = '',
   options: { size?: number; className?: string; label?: string; suppressBadge?: boolean } = {},
 ): string {
-  const parts = parseModelDisplay(modelId, providerName);
-  return renderVendorIcon({
-    vendorId: parts.vendorId,
-    label: options.label ?? parts.vendor,
-    size: options.size,
-    className: options.className,
-    suppressBadge: options.suppressBadge,
-  });
+  return renderVendorIconDescriptor(
+    describeModelVendorIcon(modelId, providerName, { size: options.size, label: options.label }),
+    { className: options.className, suppressBadge: options.suppressBadge },
+  );
 }
 
 /**
