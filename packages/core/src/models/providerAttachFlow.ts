@@ -105,6 +105,9 @@ export function reduceAttachFlow(
       if (flow.phase !== 'submitting' || flow.token !== event.token) return flow;
       if (event.outcome.ok) return null;
       if (event.outcome.needsKey) {
+        // 首次进入补密钥阶段：清空草稿（此前没有可复用的输入）。
+        // 二次仍缺密钥：保留用户刚输入的草稿与错误原因，否则用户要重打一遍密钥才知道为什么还是不行。
+        const retry = flow.previousPhase === 'needs-key';
         return {
           phase: 'needs-key',
           providerKey: flow.providerKey,
@@ -112,8 +115,8 @@ export function reduceAttachFlow(
           profile: flow.profile,
           intent: flow.intent,
           token: flow.token,
-          draftKey: '',
-          error: flow.previousPhase === 'needs-key' ? event.outcome.message : undefined,
+          draftKey: retry ? flow.draftKey ?? '' : '',
+          error: retry ? event.outcome.message : undefined,
         };
       }
       if (flow.previousPhase === 'needs-key') {

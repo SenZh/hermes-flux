@@ -305,6 +305,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     const fetchOptions: any = {
       method: options.method || 'GET',
       headers,
+      // 【规则】必须带超时：REST 代理无超时会让调用方的在途锁（如提供商绑定合流）永久占用，
+      //   界面从此点不动，只能重启。超时统一按一次网关往返的上限处理。
+      signal: AbortSignal.timeout(30_000),
     };
     if (options.body && options.method !== 'GET') {
       headers['Content-Type'] = 'application/json';

@@ -307,7 +307,7 @@ export function AgentBindingGrid({
                     variant="ghost"
                     size="sm"
                     type="button"
-                    disabled={busy || attachBusy}
+                    disabled={busy}
                     onClick={onCancelAttach}
                   >
                     {t('settings.cancel')}
@@ -344,7 +344,7 @@ export function AgentBindingGrid({
                     variant="ghost"
                     size="sm"
                     type="button"
-                    disabled={busy || attachBusy}
+                    disabled={busy}
                     onClick={onCancelAttach}
                   >
                     {t('settings.cancel')}
@@ -1239,6 +1239,12 @@ export function ProvidersAdminPanel({
   const [modelPendingId, setModelPendingId] = React.useState('');
   const [attachFlow, setAttachFlow] = React.useState<ProviderAttachFlow | null>(null);
   const attachToken = React.useRef(0);
+  /**
+   * 当前仍「活着」的提交令牌。
+   * 【为什么需要】用户取消后，迟滞的成功响应仍会返回；此时不能再弹「已启用」提示，
+   *   否则用户会收到一条自己刚取消掉的操作结果。归零即视为作废。
+   */
+  const attachLiveToken = React.useRef(0);
   const [deleteState, runDelete] = useRowAction();
   const [logoutState, runLogout] = useRowAction();
 
@@ -1248,6 +1254,29 @@ export function ProvidersAdminPanel({
   const views = snapshot.providerViews.status === 'ready' ? snapshot.providerViews.data : undefined;
   const activeFlow = reconcileAttachFlow(attachFlow, views);
 
+  /**
+   * 上一帧的已就绪目录。
+   * 【为什么必须留住】每次绑定写入后壳层会先置 `loading` 再重读；`LoadBoundary` 在
+   *   loading 下只渲染一行文案，整张提供商表连同 `submitting` 的确认条会被卸载重建，
+   *   用户看到闪一下"加载中"，确认条"全部禁用"的视觉契约也被打断。
+   *   重读期间沿用上一帧列表，首次加载仍走正常的加载文案。
+   */
+  const lastViewsRef = React.useRef<readonly ProviderView[] | undefined>(undefined);
+  if (snapshot.providerViews.status === 'ready') lastViewsRef.current = snapshot.providerViews.data;
+  const providerViewsState = snapshot.providerViews.status === 'loading' && lastViewsRef.current
+    ? { status: 'ready' as const, data: lastViewsRef.current as ProviderView[] }
+    : snapshot.providerViews;
+
+  /**
+   * 【规则】收敛结果必须回写 state，否则「目录刷新后自动收起」只是渲染层错觉：
+   *   state 里仍留着旧 flow，目标格子一旦再次变回 absent（另一行解绑、另一窗口删除、
+   *   重新拉取），确认条会凭空复现，甚至带着过期的 submitting 全禁用态。
+   * 【规则】只在派生为 null 且 state 非空时回写，避免无谓重渲染。
+   */
+  React.useEffect(() => {
+    if (attachFlow && !activeFlow) setAttachFlow(null);
+  }, [attachFlow, activeFlow]);
+
   const submitAttach = (intent: BindingAttachIntent, apiKey?: string): void => {
     if (!activeFlow || isAttachFlowBusy(activeFlow)) return;
     const targetView = views?.find((item) => item.key === activeFlow.providerKey);
@@ -1256,12 +1285,14 @@ export function ProvidersAdminPanel({
     const targetProfile = activeFlow.profile;
     const targetProviderId = activeFlow.providerId;
     const token = ++attachToken.current;
+    attachLiveToken.current = token;
     setAttachFlow((prev) => (prev ? reduceAttachFlow(prev, { type: 'choose', intent, token }) : null));
     void actions
       .onToggleProviderAgent(targetProviderId, targetProfile, true, apiKey, { attachIntent: intent })
       .then((result) => {
         setAttachFlow((prev) => (prev ? reduceAttachFlow(prev, { type: 'settle', token, outcome: result }) : null));
-        if (result.ok && intent === 'enable-only') {
+        // 用户取消或已切到别的格子时令牌作废：迟滞的成功结果不得再弹提示。
+        if (result.ok && intent === 'enable-only' && attachLiveToken.current === token) {
           actions.onNotify(t('settings.providerAttachEnableOnlyDone', { provider: providerName, bot: botName }));
         }
       })
@@ -1271,6 +1302,12 @@ export function ProvidersAdminPanel({
           prev ? reduceAttachFlow(prev, { type: 'settle', token, outcome: { ok: false, message } }) : null,
         );
       });
+  };
+
+  /** 取消：作废在途令牌，迟滞响应不得再改动界面。 */
+  const cancelAttach = (): void => {
+    attachLiveToken.current = 0;
+    setAttachFlow((prev) => (prev ? reduceAttachFlow(prev, { type: 'cancel' }) : null));
   };
 
   /**
@@ -1346,7 +1383,7 @@ export function ProvidersAdminPanel({
         ) : null}
 
         <LoadBoundary
-          state={snapshot.providerViews}
+          state={providerViewsState}
           onRetry={actions.onReloadProviders}
           emptyLabel={t('settings.providersEmpty')}
         >
@@ -1390,8 +1427,7 @@ export function ProvidersAdminPanel({
                       onConfirmAttach={submitAttach}
                       onEditAttachKey={(draftKey) =>
                         setAttachFlow((prev) => (prev ? reduceAttachFlow(prev, { type: 'edit-key', draftKey }) : null))}
-                      onCancelAttach={() =>
-                        setAttachFlow((prev) => (prev ? reduceAttachFlow(prev, { type: 'cancel' }) : null))}
+                      onCancelAttach={cancelAttach}
                       onActivateModel={(model, confirmExpensive) =>
                         activateModel(view, model, confirmExpensive)}
                       onEdit={() => openEdit(view)}

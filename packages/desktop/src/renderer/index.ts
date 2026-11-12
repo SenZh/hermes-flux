@@ -7619,6 +7619,12 @@ function createSettingsActions(): SettingsActions {
               await reloadProviderCatalog();
               return { ok: false, message: t('settings.providerToggleNotDefault') };
             }
+            // 对称守卫：本次只要求启用，网关却把它设成了默认模型。
+            // 不能报成功——界面会亮绿环、提示还会说"默认模型未变"，等于对用户撒谎。
+            if (!plan.makeDefault && outcome.currentIsDefault === true) {
+              await reloadProviderCatalog();
+              return { ok: false, message: t('settings.providerAttachDefaultChanged') };
+            }
             // 等回读完成再清 pending：否则用户会看到"点了没反应"的旧勾选态。
             await reloadProviderCatalog();
             return { ok: true };

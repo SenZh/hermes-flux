@@ -643,7 +643,7 @@ test('行内不再有笼统的「使用」：模型列表按需展开，动作�
   );
 });
 
-test('AgentBindingGrid：行内确认条三种相严格分流（needs-key 隐藏意图按钮，submitting 全禁用）', () => {
+test('AgentBindingGrid：行内确认条三种相严格分流（needs-key 隐藏意图按钮，submitting 只留取消可点）', () => {
   setLocale('zh-CN');
   const view = providerView({
     agents: [
@@ -714,7 +714,8 @@ test('AgentBindingGrid：行内确认条三种相严格分流（needs-key 隐藏
     'needs-key 阶段严禁同时渲染「启用并设为默认」意图按钮',
   );
 
-  // 3. submitting：确认条内所有按钮必须 disabled
+  // 3. submitting：意图按钮必须禁用，但「取消」必须仍可点——REST 代理可能挂起，
+  //    把取消也禁用会让用户被永久锁在设置弹窗里。
   const submittingHtml = renderToStaticMarkup(
     React.createElement(AgentBindingGrid, {
       ...baseProps,
@@ -729,10 +730,15 @@ test('AgentBindingGrid：行内确认条三种相严格分流（needs-key 隐藏
     }),
   );
   const attachSection = submittingHtml.slice(submittingHtml.indexOf('data-attach-phase="submitting"'));
-  const buttons = [...attachSection.matchAll(/<button[^>]*>/g)].map((match) => match[0]);
+  const buttons = [...attachSection.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g)]
+    .map((match) => ({ tag: match[0], label: match[1].replace(/<[^>]*>/g, '').trim() }));
   assert.ok(buttons.length >= 2, 'submitting 阶段必须有按钮占位');
-  for (const tag of buttons) {
-    assert.ok(/\sdisabled(=|>|\s)/.test(tag), `submitting 阶段按钮必须全部禁用: ${tag}`);
+  for (const { tag, label } of buttons) {
+    if (label === t('settings.cancel')) {
+      assert.equal(/\sdisabled(=|>|\s)/.test(tag), false, '提交中必须仍能取消，否则用户被锁死在弹窗里');
+      continue;
+    }
+    assert.ok(/\sdisabled(=|>|\s)/.test(tag), `submitting 阶段非取消按钮必须禁用: ${tag}`);
   }
 });
 

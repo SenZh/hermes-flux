@@ -124,6 +124,24 @@ test('对已经处于目标状态的勾选发 noop，不发无意义请求', () 
   assert.equal(planBindingToggle(view(), 'aura', false).kind, 'noop');
 });
 
+test('取消勾选方向不受意图影响：带意图仍然只能是 detach', () => {
+  assert.deepEqual(planBindingToggle(view(), 'default', false, 'enable-only'), {
+    kind: 'detach',
+    profile: 'default',
+  });
+  assert.deepEqual(planBindingToggle(view(), 'default', false, 'enable-and-default'), {
+    kind: 'detach',
+    profile: 'default',
+  });
+  const active = view({
+    agents: [
+      { profile: 'default', displayName: 'default', state: 'active', detail: 'm1' },
+      { profile: 'aura', displayName: 'aura', state: 'absent' },
+    ],
+  });
+  assert.equal(planBindingToggle(active, 'default', false, 'enable-only').kind, 'blocked-active');
+});
+
 test('读取失败的 Agent 两个方向都阻断，并把原始原因带出来', () => {
   const broken = view({
     agents: [

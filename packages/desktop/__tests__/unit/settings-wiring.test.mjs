@@ -168,6 +168,10 @@ test('勾选未配置的自定义端点：先从其它成员复制密钥，复�
     '只有本次要求改默认模型时才校验结论，且必须报失败，不能留下"有勾无环"',
   );
   assert.ok(
+    block.includes('!plan.makeDefault && outcome.currentIsDefault === true'),
+    '对称守卫：只要求启用却被网关改成默认模型时必须报错，不能提示"默认模型未变"',
+  );
+  assert.ok(
     block.includes('settings.providerToggleNotDefault'),
     '校验失败必须给出可读原因，不能静默返回',
   );
