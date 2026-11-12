@@ -20,7 +20,7 @@ import {
 import { t } from '../../i18n/index.js';
 import { Button } from '../primitives/Button.js';
 import { Input } from '../primitives/Input.js';
-import { BotAvatarGrid, BotAvatarToggle } from './BotAvatarToggle.js';
+import { BotAvatarGrid, BotAvatarToggle, type BotAvatarState } from './BotAvatarToggle.js';
 import { FanOutMemberList } from './FanOutMemberList.js';
 import { InlineStrip } from './InlineStrip.js';
 import { LoadBoundary } from './LoadBoundary.js';
@@ -183,19 +183,9 @@ export function AgentBindingGrid({
    *   会在提交瞬间被卸载，换成三个禁用按钮，用户以为密钥丢了。
    */
   const keyForm = attachFlow && attachFlow.phase === 'needs-key'
-    ? {
-        intent: attachFlow.intent,
-        draftKey: attachFlow.draftKey,
-        error: attachFlow.error,
-        submitting: false,
-      }
+    ? { intent: attachFlow.intent, draftKey: attachFlow.draftKey, error: attachFlow.error }
     : attachFlow && attachFlow.phase === 'submitting' && attachFlow.previousPhase === 'needs-key'
-      ? {
-          intent: attachFlow.intent,
-          draftKey: attachFlow.draftKey ?? '',
-          error: undefined,
-          submitting: true,
-        }
+      ? { intent: attachFlow.intent, draftKey: attachFlow.draftKey ?? '', error: undefined }
       : null;
 
   return (
@@ -233,6 +223,14 @@ export function AgentBindingGrid({
                     ? t('settings.providerAttachTargetPending')
                     : '';
           const dimmed = busy || pendingProfile === agent.profile || isAttachTargetBusy;
+          const avatarState: BotAvatarState = agent.state === 'active'
+            ? { kind: 'current' }
+            : agent.state === 'error'
+              ? {
+                  kind: 'failed',
+                  reason: agent.detail || t('settings.providerToggleBlockedError', { profile: agent.displayName }),
+                }
+              : { kind: 'plain' };
           return (
             <div
               key={agent.profile}
@@ -245,12 +243,10 @@ export function AgentBindingGrid({
                 avatar={bot?.avatar}
                 checked={checked}
                 disabled={disabled}
-                current={agent.state === 'active'}
-                failed={agent.state === 'error'}
+                state={avatarState}
                 dimmed={dimmed}
                 statusText={statusText ? `${view.name} · ${statusText}` : view.name}
-                expanded={isAttachTarget ? Boolean(attachFlow) : undefined}
-                controls={isAttachTarget ? stripId : undefined}
+                expandable={isAttachTarget && attachFlow ? { controls: stripId } : undefined}
                 onToggle={() => change(agent, !checked)}
               />
             </div>
@@ -832,10 +828,16 @@ function EndpointForm({
       ) : null}
 
       {showFanOut && bots.length > 0 ? (
-        <div className="flex flex-col gap-2">
+        <div
+          role="group"
+          aria-labelledby="custom-endpoint-apply-to"
+          className="flex min-w-0 flex-col gap-2"
+        >
           <div className="flex flex-col gap-1">
-            <span className="text-aux text-muted-foreground">{t('settings.customEndpointApplyTo')}</span>
-            <p className="text-micro text-muted-foreground">{t('settings.customEndpointApplyToHint')}</p>
+            <span id="custom-endpoint-apply-to" className="text-body font-medium text-foreground">
+              {t('settings.customEndpointApplyTo')}
+            </span>
+            <span className="text-micro text-muted-foreground">{t('settings.customEndpointApplyToHint')}</span>
           </div>
           <FanOutMemberList
             bots={bots}
@@ -867,7 +869,11 @@ function EndpointForm({
         </p>
       ) : null}
 
-      <div className="mt-1 flex items-center gap-2">
+      {/*
+        【规则】动作条与字段同处一个滚动区：整块内容一起滚动，不存在浮层压住头像网格
+          或盖住字段的可能。字段增多时用户滚到底即可，位置始终在表单末尾。
+      */}
+      <div className="mt-1 flex items-center gap-2 border-t border-border-subtle pt-3">
         <Button variant="outline" size="sm" type="button" disabled={disabled || !draft.baseUrl.trim()} onClick={() => { void probe(); }}>
           {t('settings.customEndpointTest')}
         </Button>
@@ -927,7 +933,7 @@ function LoginPanel({
     );
   }
   return (
-    <div className="flex flex-col gap-2 rounded-panel border border-border-subtle bg-panel p-3">
+    <InlineStrip label={t('settings.loginCode')} busy={state.pending}>
       <p className="text-caption text-muted-foreground">{t('settings.loginCode')}</p>
       <div className="flex flex-wrap items-center gap-2">
         <code className="rounded-inner bg-input px-2 py-1 font-code text-body text-foreground">{state.userCode}</code>
@@ -951,7 +957,7 @@ function LoginPanel({
           {t('settings.cancel')}
         </Button>
       </div>
-    </div>
+    </InlineStrip>
   );
 }
 
@@ -1245,6 +1251,15 @@ export function ProvidersAdminPanel({
    *   否则用户会收到一条自己刚取消掉的操作结果。归零即视为作废。
    */
   const attachLiveToken = React.useRef(0);
+  /**
+   * 确认条当前值的最新副本。
+   * 【为什么需要】结算失败时确认条可能已被目录收敛清空（写入已生效、目标格子不再是 absent）。
+   *   此时错误不能挂在条上，否则等于静默丢掉——必须转成行级提示。
+   */
+  const attachFlowRef = React.useRef<ProviderAttachFlow | null>(null);
+  attachFlowRef.current = attachFlow;
+  /** 确认条已收起后才到的失败原因：按 provider key 挂在行上。 */
+  const [attachRowErrors, setAttachRowErrors] = React.useState<Record<string, string>>({});
   const [deleteState, runDelete] = useRowAction();
   const [logoutState, runLogout] = useRowAction();
 
@@ -1284,23 +1299,47 @@ export function ProvidersAdminPanel({
     const botName = bots.find((bot) => bot.profile === activeFlow.profile)?.displayName || activeFlow.profile;
     const targetProfile = activeFlow.profile;
     const targetProviderId = activeFlow.providerId;
+    const targetKey = activeFlow.providerKey;
     const token = ++attachToken.current;
     attachLiveToken.current = token;
+    setAttachRowErrors((prev) => {
+      if (!prev[targetKey]) return prev;
+      const next = { ...prev };
+      delete next[targetKey];
+      return next;
+    });
     setAttachFlow((prev) => (prev ? reduceAttachFlow(prev, { type: 'choose', intent, token }) : null));
-    void actions
-      .onToggleProviderAgent(targetProviderId, targetProfile, true, apiKey, { attachIntent: intent })
-      .then((result) => {
-        setAttachFlow((prev) => (prev ? reduceAttachFlow(prev, { type: 'settle', token, outcome: result }) : null));
-        // 用户取消或已切到别的格子时令牌作废：迟滞的成功结果不得再弹提示。
-        if (result.ok && intent === 'enable-only' && attachLiveToken.current === token) {
-          actions.onNotify(t('settings.providerAttachEnableOnlyDone', { provider: providerName, bot: botName }));
-        }
-      })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : t('settings.providerToggleFailed');
+
+    /**
+     * 【规则】失败原因必须有一条无论确认条是否存活都能落地的通路：
+     *   写入可能已经生效（目标格子不再 absent），确认条会被目录收敛清空，
+     *   此时把错误塞回条里等于丢弃。条还在就原位显示，条没了就挂到行上。
+     */
+    const settleFailure = (message: string): void => {
+      if (attachFlowRef.current) {
         setAttachFlow((prev) =>
           prev ? reduceAttachFlow(prev, { type: 'settle', token, outcome: { ok: false, message } }) : null,
         );
+        return;
+      }
+      setAttachRowErrors((prev) => ({ ...prev, [targetKey]: message }));
+    };
+
+    void actions
+      .onToggleProviderAgent(targetProviderId, targetProfile, true, apiKey, { attachIntent: intent })
+      .then((result) => {
+        if (result.ok) {
+          setAttachFlow((prev) => (prev ? reduceAttachFlow(prev, { type: 'settle', token, outcome: result }) : null));
+          // 用户取消或已切到别的格子时令牌作废：迟滞的成功结果不得再弹提示。
+          if (intent === 'enable-only' && attachLiveToken.current === token) {
+            actions.onNotify(t('settings.providerAttachEnableOnlyDone', { provider: providerName, bot: botName }));
+          }
+          return;
+        }
+        settleFailure(result.message || t('settings.providerToggleFailed'));
+      })
+      .catch((error: unknown) => {
+        settleFailure(error instanceof Error ? error.message : t('settings.providerToggleFailed'));
       });
   };
 
@@ -1408,7 +1447,7 @@ export function ProvidersAdminPanel({
                       ? deleteState.error
                       : logoutState.id === view.id
                         ? logoutState.error
-                        : '';
+                        : attachRowErrors[view.key] || '';
                   return (
                     <ProviderRow
                       key={view.key}

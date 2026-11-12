@@ -7615,6 +7615,9 @@ function createSettingsActions(): SettingsActions {
               return { ok: false, message: outcome.current.message || t('settings.providerToggleFailed') };
             }
             // 仅在本次意图要求设默认、且网关忽略 make_default 时才报错，避免留下"有勾无环"。
+            // 【规则】失败也要先回读：端点已经写进网关，列表必须如实反映。
+            //   错误本身由界面另存为行级提示，不依赖确认条存活——回读后目标格子不再是
+            //   `absent`，确认条会被目录收敛清空，把错误挂在条上等于静默丢掉它。
             if (plan.makeDefault && outcome.currentIsDefault === false) {
               await reloadProviderCatalog();
               return { ok: false, message: t('settings.providerToggleNotDefault') };

@@ -1226,37 +1226,60 @@ export async function runFeature(featureId) {
       const fanOut = await session.evaluate(`(() => {
         const label = Array.from(document.querySelectorAll('span')).find((n) => n.textContent.trim() === '保存时配置到');
         const section = label.parentElement.parentElement;
-        const grid = section.querySelector('.agent-grid');
-        const cells = grid ? Array.from(grid.querySelectorAll('label')) : [];
+        const cells = Array.from(section.querySelectorAll('label'));
         return {
-          hasGrid: Boolean(grid),
+          hasGrid: cells.length > 0 && cells.every((c) => Boolean(c.querySelector('span.rounded-full'))),
           cellCount: cells.length,
           checkedCount: cells.filter((c) => c.querySelector('input').checked).length,
           lockedCount: cells.filter((c) => c.querySelector('input').disabled).length,
-          avatarSized: cells.every((c) => Boolean(c.querySelector('span.size-11'))),
+          lockedBadges: section.querySelectorAll('[data-bot-badge="locked"]').length,
+          checkedBadges: section.querySelectorAll('[data-bot-badge="checked"]').length,
           nativeCheckboxes: section.querySelectorAll('input[type=checkbox]:not(.sr-only)').length,
         };
       })()`);
-      if (!fanOut.hasGrid) throw new Error('「保存时配置到」必须使用头像网格');
+      if (!fanOut.hasGrid) throw new Error('「保存时配置到」必须使用头像选择，而不是原生复选框');
       if (fanOut.cellCount !== 2) throw new Error(`两个 Bot 都要出现，实测 ${fanOut.cellCount}`);
       if (fanOut.lockedCount !== 1) throw new Error(`当前 Bot 必须锁定，实测 ${fanOut.lockedCount}`);
       if (fanOut.checkedCount !== 1) throw new Error(`当前 Bot 必须默认勾选，实测 ${fanOut.checkedCount}`);
-      if (!fanOut.avatarSized) throw new Error('每个格子必须是 44px 头像');
+      if (fanOut.lockedBadges !== 1) throw new Error(`保存目标必须用锁形角标，实测 ${fanOut.lockedBadges}`);
       if (fanOut.nativeCheckboxes !== 0) throw new Error('不得再出现原生可见复选框');
 
       await session.evaluate(`(() => {
         const label = Array.from(document.querySelectorAll('span')).find((n) => n.textContent.trim() === '保存时配置到');
         const section = label.parentElement.parentElement;
-        const cell = Array.from(section.querySelectorAll('.agent-grid label')).find((c) => c.textContent.trim() === 'aura');
+        const cell = Array.from(section.querySelectorAll('label')).find((c) => c.textContent.trim() === 'aura');
         cell.click();
         return true;
       })()`);
       await session.waitFor(`(() => {
         const label = Array.from(document.querySelectorAll('span')).find((n) => n.textContent.trim() === '保存时配置到');
         const section = label.parentElement.parentElement;
-        const cell = Array.from(section.querySelectorAll('.agent-grid label')).find((c) => c.textContent.trim() === 'aura');
+        const cell = Array.from(section.querySelectorAll('label')).find((c) => c.textContent.trim() === 'aura');
         return cell.querySelector('input').checked;
       })()`, 5000, 'aura toggled on');
+
+      console.log('  7. 滚到底后「保存」必须真实可见可点（弹框高度受限，动作条不能被推出可达区）...');
+      const saveReachable = await session.evaluate(`(async () => {
+        const dialogs = Array.from(document.querySelectorAll('[role=dialog]'));
+        const dlg = dialogs[dialogs.length - 1];
+        const scroller = dlg.querySelector('.overflow-y-auto');
+        scroller.scrollTop = scroller.scrollHeight;
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const save = Array.from(dlg.querySelectorAll('button')).find((b) => b.textContent.trim() === '保存');
+        if (!save) return { found: false };
+        const r = save.getBoundingClientRect();
+        const d = dlg.getBoundingClientRect();
+        return {
+          found: true,
+          visible: r.top >= d.top && r.bottom <= d.bottom && r.height > 0,
+          hitTestable: dlg.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)),
+        };
+      })()`);
+      console.log('     · 保存按钮可达性:', saveReachable);
+      if (!saveReachable.found) throw new Error('必须存在「保存」按钮');
+      if (!saveReachable.visible) throw new Error('滚到底后「保存」必须完整落在弹框可视区内');
+      if (!saveReachable.hitTestable) throw new Error('「保存」必须真实可点，不能被其它元素盖住');
+      await session.screenshot(path.join(featureArtifactsDir, 'screenshot-save-reachable.png'));
 
       const screenshot = path.join(featureArtifactsDir, 'screenshot.png');
       await session.screenshot(screenshot);
@@ -1269,6 +1292,7 @@ export async function runFeature(featureId) {
         opened,
         afterFailure,
         fanOut,
+        saveReachable,
         screenshots: [screenshotChoosing, screenshot],
       };
       fs.writeFileSync(path.join(featureArtifactsDir, 'evidence.json'), JSON.stringify(evidence, null, 2));

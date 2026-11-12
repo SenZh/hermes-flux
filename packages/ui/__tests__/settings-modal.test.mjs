@@ -329,7 +329,7 @@ test('Agent 成员网格：勾选样式只有一种，绿色环单独表达「�
   assert.equal(html.includes('勾选 = 已配置'), false, '已配置的解释按用户要求删除');
 });
 
-test('添加端点：成员选择与列表页同一套头像网格，保存目标恒勾选且锁定', () => {
+test('添加端点：成员选择与列表页同一套头像语义，保存目标用锁形角标区别于普通勾选', () => {
   setLocale('zh-CN');
   const html = renderToStaticMarkup(
     React.createElement(FanOutMemberList, {
@@ -342,14 +342,13 @@ test('添加端点：成员选择与列表页同一套头像网格，保存目�
       onToggle() {},
     }),
   );
-  assert.ok(html.includes('class="agent-grid"'), '必须复用列表页的头像网格，而不是原生复选框列表');
   assert.ok(html.includes('title="xiaofawang"'), 'title 必须保留完整名称');
   assert.ok(html.includes('aria-label="xiaofawang"'), '勾选框的无障碍名称必须是全名');
   assert.ok(
     html.includes('title="auralis-infrastructure-operations-team"'),
     '超长名同样保留完整 title',
   );
-  assert.ok(html.includes('auralis-infr'), '超长名按头像格 10 单位截断');
+  assert.ok(html.includes('auralis-infra'), '超长名按紧凑规格截断');
   const inputFor = (name) => {
     const match = html.match(new RegExp(`<input[^>]*aria-label="${name}"[^>]*/>`));
     assert.ok(match, `缺少 ${name} 的勾选框`);
@@ -376,12 +375,41 @@ test('添加端点：保存目标本身必须出现、勾选且不可取消', ()
       onToggle() {},
     }),
   );
-  const lockedInput = html.match(/<input[^>]*aria-label="default"[^>]*\/>/);
+  const lockedInput = html.match(/<input[^>]*aria-label="default[^"]*"[^>]*\/>/);
   assert.ok(lockedInput, '保存目标必须出现在成员网格里');
   assert.ok(lockedInput[0].includes('checked'), '保存目标恒为勾选');
   assert.ok(lockedInput[0].includes('disabled'), '保存目标不可取消勾选');
+  assert.ok(
+    lockedInput[0].includes(t('settings.customEndpointApplyToLocked')),
+    '锁定原因必须进入可访问名称，否则读屏只会说"复选框，已选中，不可用"',
+  );
   const otherInput = html.match(/<input[^>]*aria-label="ops"[^>]*\/>/);
   assert.equal(otherInput[0].includes('disabled'), false, '其它成员必须可勾选');
+});
+
+test('添加端点：锁定格与普通勾选格的视觉必须可区分（锁 vs 对号）', () => {
+  setLocale('zh-CN');
+  const html = renderToStaticMarkup(
+    React.createElement(FanOutMemberList, {
+      bots: [
+        { profile: 'default', displayName: 'default' },
+        { profile: 'ops', displayName: 'ops' },
+      ],
+      selected: ['ops'],
+      lockedProfile: 'default',
+      onToggle() {},
+    }),
+  );
+  assert.ok(html.includes('data-bot-badge="locked"'), '保存目标必须有独立的锁定角标');
+  assert.ok(html.includes('data-bot-badge="checked"'), '普通勾选必须用对号角标');
+  const lockedBadge = html.match(/data-bot-badge="locked"[^>]*>[\s\S]*?<\/span>/);
+  assert.ok(lockedBadge, '锁定角标必须渲染出内容');
+  assert.ok(lockedBadge[0].includes('<svg'), '锁定角标必须是图形，不能只是换个底色');
+  assert.notEqual(
+    lockedBadge[0].match(/class="[^"]*"/)[0],
+    html.match(/data-bot-badge="checked"[^>]*>[\s\S]*?<\/span>/)[0].match(/class="[^"]*"/)[0],
+    '锁定角标与勾选角标的样式必须不同，否则触屏与截图里读不出差别',
+  );
 });
 
 test('模型行：显示计算后的可读名与厂商图标，绝不直出裸 ID', () => {
