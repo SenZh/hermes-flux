@@ -1,7 +1,7 @@
 # 多 Agent 群聊
 
 > 本文件由 `npm run contract:doc` 从网关契约、探针结果与源码调用点自动生成，请勿手工编辑。
-> 契约快照：4364a2dd0064… · 同步于 2026-11-01T01:48:16.956Z
+> 契约快照：e3cf16a3d983… · 同步于 2026-11-12T09:29:35.736Z
 
 | 方法 | 入参（契约） | 出参（契约） | 调用点 | 真实探针 |
 | --- | --- | --- | --- | --- |
@@ -11,7 +11,7 @@
 | `groups.log` | `profile` `room_id` `since_seq` `limit` `include_disbanded` | `events` `cursor` `latest_seq` `has_more` `authority` | `packages/core/src/group/groupService.ts:284` | ✅ 0.22.5 |
 | `groups.rename` | `profile` `room_id` `event_id` `name` | `room` | `packages/core/src/group/groupService.ts:359` | ✅ 0.22.5 |
 | `groups.send` | `profile` `room_id` `event_id` `payload` | `event` `client_event_id` `accepted` `driver_started` | `packages/core/src/group/groupService.ts:250` | ✅ 0.22.5 |
-| `groups.state` | `profile` `room_id` `include_disbanded` | `room` `driver_status` | `packages/core/src/group/groupService.ts:148` | ✅ 0.22.5 |
+| `groups.state` | `profile` `room_id` `include_disbanded` | `room` `driver_status` `context` | `packages/core/src/group/groupService.ts:148` | ✅ 0.22.5 |
 
 ## 明细
 

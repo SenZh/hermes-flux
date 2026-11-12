@@ -625,6 +625,20 @@
           "resultKeys": [
             "task_id"
           ]
+        },
+        {
+          "module": "prompt",
+          "method": "prompt.cancel",
+          "ok": false,
+          "skipped": true,
+          "reason": "未做真实网关验证：取消需要真实排队中的准入（仅在有在途回合时存在），离线探针造不出该状态，误传真实 admission_id 又会撤掉用户自己的排队消息；目前仅由本地参数构造单测与契约表守护"
+        },
+        {
+          "module": "prompt",
+          "method": "prompt.steer_queued",
+          "ok": false,
+          "skipped": true,
+          "reason": "未做真实网关验证：立即执行需要真实排队中的准入与在途回合，离线探针造不出该状态；目前仅由本地参数构造单测与契约表守护"
         }
       ]
     },
@@ -1437,6 +1451,20 @@
       "ok": false,
       "skipped": true,
       "reason": "环境热重载会改变运行中的凭据状态，须与 model.save_key 成对执行，禁止单独探针"
+    },
+    {
+      "module": "prompt",
+      "method": "prompt.cancel",
+      "ok": false,
+      "skipped": true,
+      "reason": "未做真实网关验证：取消需要真实排队中的准入（仅在有在途回合时存在），离线探针造不出该状态，误传真实 admission_id 又会撤掉用户自己的排队消息；目前仅由本地参数构造单测与契约表守护"
+    },
+    {
+      "module": "prompt",
+      "method": "prompt.steer_queued",
+      "ok": false,
+      "skipped": true,
+      "reason": "未做真实网关验证：立即执行需要真实排队中的准入与在途回合，离线探针造不出该状态；目前仅由本地参数构造单测与契约表守护"
     }
   ],
   "note": "主基线录制自 0.22.5；extensions 模块（mcp.servers.status / skills.manage / skills.reload）录制自 0.21.6 @ 2026-11-08T13:22:20.724Z，逐条带 gatewayVersion 标注。"

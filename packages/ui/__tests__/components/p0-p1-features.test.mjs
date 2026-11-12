@@ -211,7 +211,7 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
     assert.ok(!failedToolsHtml.includes('<details class="conv-package" open'), '无运行态工具时严禁默认展开');
   });
 
-  await t.test('4. 输入框自适应与智能折叠/展开', () => {
+  await t.test('4. 输入框自适应增高与 220px 上限', () => {
     const dockHtml = renderInputDock({
       selectedModel: 'gpt-4o',
       reasoningLevel: 'default',
@@ -219,14 +219,15 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
       isStreaming: false,
     });
 
-    assert.ok(dockHtml.includes('dock-input-collapse-toggle'), '必须包含折叠收起切换按键');
-    // 【规则】自适应高度约束在共享样式表里（`.composer-dock__textarea`），不在模板字符串中。
-    // 旧断言在 dockHtml 里搜 `max-height: 240px`，实际命中的是思考下拉——思考已下沉到模型行，
-    // 这条断言才暴露出它一直在测错对象。
+    // 【规则】不再提供手动折叠：输入区随内容增高到上限后转内部滚动。
+    assert.ok(!dockHtml.includes('dock-input-collapse-toggle'), '收起按钮已移除');
+    assert.ok(!dockHtml.includes('已达上限'), '不得出现上限文案');
     const dockCss = fs.readFileSync(new URL('../../src/styles/conversation.css', import.meta.url), 'utf8');
     const textareaRule = /\.composer-dock__textarea\s*\{([\s\S]*?)\}/.exec(dockCss);
     assert.ok(textareaRule, '必须定义 .composer-dock__textarea');
-    assert.match(textareaRule[1], /max-height:\s*240px/, '输入框必须具备自适应伸展最大高度约束 (240px)');
+    assert.match(textareaRule[1], /min-height:\s*66px/, '默认高度必须从 66px 起步（两行正文）');
+    assert.match(textareaRule[1], /max-height:\s*220px/, '上限必须是 220px');
+    assert.match(textareaRule[1], /overflow-y:\s*auto/, '触顶后交给内部滚动');
   });
 
   await t.test('5. 新建任务弹窗: 单选与多选 Agent 真实头像渲染、Workspace 下拉选择与标题自动生成', () => {

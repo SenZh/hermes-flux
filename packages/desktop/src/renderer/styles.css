@@ -228,8 +228,8 @@
   --primary-foreground: #FFFFFF;
   --accent-text: #FFFFFF;
   --ring: #0D7A5E;
-  --success: #10B981;
-  --jade-pulse: #10B981;
+  --success: #047857;
+  --jade-pulse: #047857;
   --success-glow: rgba(16, 185, 129, 0.25);
   --jade-glow: rgba(16, 185, 129, 0.25);
   --warning: #F59E0B;
@@ -273,8 +273,8 @@
   --bg-card: #FFFFFF;
   --card-hover: #ECEBE5;
   --bg-card-hover: #ECEBE5;
-  --card-active: #FFFFFF;
-  --bg-card-active: #FFFFFF;
+  --card-active: #E3E1DA;
+  --bg-card-active: #E3E1DA;
   --popover: #FFFFFF;
   --bg-elevated: #FFFFFF;
   --sidebar: #F4F4F1;
@@ -293,8 +293,8 @@
   --text-main: #1F2328;
   --secondary-foreground: #57606A;
   --text-secondary: #57606A;
-  --muted-foreground: #5F6B7A;
-  --text-muted: #5F6B7A;
+  --muted-foreground: #57626F;
+  --text-muted: #57626F;
   --faint: #AFB8C1;
   --text-faint: #AFB8C1;
   --primary: #2563EB;
@@ -312,8 +312,8 @@
   --primary-foreground: #FFFFFF;
   --accent-text: #FFFFFF;
   --ring: #2563EB;
-  --success: #10B981;
-  --jade-pulse: #10B981;
+  --success: #047857;
+  --jade-pulse: #047857;
   --success-glow: rgba(16, 185, 129, 0.40);
   --jade-glow: rgba(16, 185, 129, 0.40);
   --warning: #F59E0B;
@@ -396,8 +396,8 @@
   --primary-foreground: #0E0F13;
   --accent-text: #0E0F13;
   --ring: #4AA8C8;
-  --success: #5FB978;
-  --jade-pulse: #5FB978;
+  --success: #047857;
+  --jade-pulse: #047857;
   --success-glow: rgba(95, 185, 120, 0.40);
   --jade-glow: rgba(95, 185, 120, 0.40);
   --warning: #F59E0B;
@@ -1030,9 +1030,20 @@ button {
   /* 移动端交互控件最小触控热区保护 (>= 44x44px) */
   .icon-btn,
   .composer-icon-btn,
-  .composer-send {
+  .composer-send,
+  .composer-stop,
+  .queue-action-btn,
+  .model-dropdown__refresh,
+  .dock-banner__close {
     min-width: 44px !important;
     min-height: 44px !important;
+  }
+
+  /* 【规则】附件删除键刻意排除在 44px 兜底之外：缩略图只有 56px，
+     44px 热区会盖住 61.7% 面积，点图预览就会误删附件。它保持 28px 桌面尺寸。 */
+  .composer-attach__remove {
+    min-width: 28px !important;
+    min-height: 28px !important;
   }
 
   .msg-action-btn {
@@ -1125,15 +1136,9 @@ button {
   box-shadow: none !important;
 }
 
-/* Floating Input Dock：外壳视觉 100% 由 conversation.css 的 .composer-dock 维护，
-   此处不再重复声明背景 / 圆角 / 边框，避免 !important 反复覆盖导致聚焦态失效 */
-.composer-dock__textarea {
-  color: var(--foreground) !important;
-}
-.composer-dock__textarea::placeholder {
-  color: var(--muted-foreground) !important;
-  opacity: 0.8;
-}
+/* Floating Input Dock：外壳与编辑区的视觉 100% 由 conversation.css 的 .composer-dock 维护。
+   这里刻意不再声明 textarea 的颜色与占位符透明度 —— 同一属性两处定义会形成双标真值，
+   历史上就是靠 !important 把占位符压成 0.8，而样式表里写的是 0.9。 */
 
 /* Micro pill option buttons in Input Dock */
 .micro-pill-option {
@@ -1222,18 +1227,8 @@ blockquote {
   border-color: var(--border-subtle) !important;
 }
 
-/* 核心约束：输入框边框杜绝使用天青强调色，聚焦态沿用统一的主色 1px 环 */
-[data-theme="ayu-light"] .composer-dock {
-  background: var(--bg-card) !important;
-  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent) !important;
-  box-shadow: none !important;
-}
-
-[data-theme="ayu-light"] .composer-dock:focus-within {
-  border-color: color-mix(in srgb, var(--foreground) 14%, transparent) !important;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 22%, transparent) !important;
-}
-
+/* 输入舱的表面、边框与聚焦态统一由 conversation.css 的语义 Token 接管，
+   皮肤差异只允许来自 --input / --border 等 slot，禁止在此处 !important 覆写。 */
 /* THEME D 注释头已随皮肤块迁入生成区 */
 
 

@@ -1,12 +1,12 @@
 # Bot 档案与资产
 
 > 本文件由 `npm run contract:doc` 从网关契约、探针结果与源码调用点自动生成，请勿手工编辑。
-> 契约快照：4364a2dd0064… · 同步于 2026-11-01T01:48:16.956Z
+> 契约快照：e3cf16a3d983… · 同步于 2026-11-12T09:29:35.736Z
 
 | 方法 | 入参（契约） | 出参（契约） | 调用点 | 真实探针 |
 | --- | --- | --- | --- | --- |
 | `profiles.configure` | `profile` `name` `ui_meta` `ui_meta_expected_revisions` `soul` `description` `model` `provider` `confirm_expensive_model` `disabled_skills` `enabled_toolsets` `enabled_mcp_servers` | `ok` `applied` `confirm_required` `confirm_message` | `packages/core/src/profile/profileService.ts:163` | ✅ 0.22.5 |
-| `profiles.create` | `profile` `name` `description` `clone_from` `clone_all` `clone_channels` `no_skills` `no_alias` `soul` `model` `provider` `share_auth` `mirror_credentials` | `ok` `name` `path` `soul_written` `model_set` `mirrored` | `packages/core/src/profile/profileService.ts:128` | ✅ 0.22.5 |
+| `profiles.create` | `profile` `name` `description` `clone_from` `clone_all` `clone_channels` `no_skills` `no_alias` `soul` `model` `provider` `share_auth` `mirror_credentials` | `ok` `name` `path` `soul_written` `model_set` `mirrored` `warnings` | `packages/core/src/profile/profileService.ts:128` | ✅ 0.22.5 |
 | `profiles.describe` | `profile` `name` | `name` `description` `soul` `model` `skills` `toolsets` `toolsets_pinned` `mcp_servers` | `packages/core/src/profile/profileService.ts:95` | ✅ 0.22.5 |
 | `profiles.get_asset` | `profile` `name` `asset` | `found` `mime` `size` `data` | `packages/core/src/profile/profileService.ts:193` | ✅ 0.22.5 |
 | `profiles.list` | `profile` `include_sessions` | `profiles` `bot_mode_protocol` `install_id` | `packages/core/src/profile/profileService.ts:71`<br>`packages/core/src/rpc/client.ts:985`<br>`packages/desktop/src/renderer/settingsController.ts:155` | ✅ 0.22.5 |

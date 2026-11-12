@@ -454,24 +454,30 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
       'Must define ayu-left-rail selector'
     );
 
-    // 3. Invariant: Composer dock 在任何皮肤下都只用中性前景色描边，禁止强调色
-    const dockMatch = cssContent.match(/\[data-theme="ayu-light"\]\s+\.composer-dock\s*\{([\s\S]*?)\}/);
-    assert.ok(dockMatch, 'Must define [data-theme="ayu-light"] .composer-dock');
-    const dockBlock = dockMatch[1];
-    assert.ok(
-      dockBlock.includes('color-mix(in srgb, var(--foreground) 10%, transparent)'),
-      'Composer dock must draw its hairline from the neutral foreground token'
+    // 3. Invariant: 输入舱外壳在任何皮肤下都只用语义发丝线 + 内陷输入面，禁止强调色
+    const convCss = fs.readFileSync(
+      path.resolve(__dirname, '../src/styles/conversation.css'),
+      'utf8',
     );
-    assert.ok(!dockBlock.includes('var(--accent)'), 'Composer dock container must NOT use accent border');
+    const dockMatch = convCss.match(/\.input-card-box\.composer-dock\s*\{([\s\S]*?)\}/);
+    assert.ok(dockMatch, 'Must define .input-card-box.composer-dock');
+    const dockBlock = dockMatch[1];
+    assert.ok(dockBlock.includes('background: var(--input)'), 'Composer dock must sit on the sunken input surface');
+    assert.ok(dockBlock.includes('border: 1px solid var(--border)'), 'Composer dock must draw one semantic hairline');
+    assert.ok(!dockBlock.includes('var(--primary)'), 'Composer dock container must NOT use primary');
+    assert.ok(!dockBlock.includes('var(--accent)'), 'Composer dock container must NOT use accent');
 
-    // 4. Invariant: 聚焦态同样只允许中性前景色，禁止 accent / primary
-    const focusMatch = cssContent.match(/\[data-theme="ayu-light"\]\s+\.composer-dock:focus-within\s*\{([\s\S]*?)\}/);
-    assert.ok(focusMatch, 'Must define [data-theme="ayu-light"] .composer-dock:focus-within');
+    // 4. Invariant: 聚焦不描边、不叠环
+    const focusMatch = convCss.match(/\.input-card-box\.composer-dock:focus-within\s*\{([\s\S]*?)\}/);
+    assert.ok(focusMatch, 'Must define .input-card-box.composer-dock:focus-within');
     const focusBlock = focusMatch[1];
-    assert.ok(focusBlock.includes('var(--foreground) 22%'), 'Composer dock focus ring must stay neutral');
-    assert.ok(!focusBlock.includes('var(--accent-border)'), 'Composer dock focus must NOT use accent-border');
-    assert.ok(!focusBlock.includes('var(--accent)'), 'Composer dock focus must NOT use accent');
+    assert.ok(focusBlock.includes('box-shadow: none'), 'Composer dock focus must not add a ring');
     assert.ok(!focusBlock.includes('var(--primary)'), 'Composer dock focus must NOT use primary');
+    assert.ok(!focusBlock.includes('var(--accent)'), 'Composer dock focus must NOT use accent');
+    assert.ok(
+      !cssContent.includes('[data-theme="ayu-light"] .composer-dock'),
+      'Legacy ayu-light !important overrides must be gone',
+    );
   });
 
   await t.test('User bubble must consume --chat-user-message-bg token', async () => {

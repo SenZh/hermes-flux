@@ -401,16 +401,23 @@ const layoutRules = {
     const out = [];
     const joined = ctx.codeLines.join('\n');
 
-    // 输入舱必须锁定 740px 黄金限宽——这是硬性可静态断言的常量
-    if (file.endsWith('InputDock/InputDock.ts') && !/max-width:\s*740px/.test(joined)) {
-      out.push({
-        file,
-        line: 1,
-        lineIdx: 0,
-        ruleId: 'layout/input-dock-width',
-        message: 'InputDock 必须保持 max-width: 740px 黄金限宽（AGENTS.md 六-2）',
-        snippet: '',
-      });
+    // 输入舱必须锁定 740px 黄金限宽——这是硬性可静态断言的常量。
+    // 重设计后几何归口 conversation.css，因此要取 `.input-card-box.composer-dock` 那一个规则块，
+    // 而不是全文 includes：整个样式表里有 4 处 740px，删掉外壳那条仍然会绿。
+    if (file.endsWith('InputDock/InputDock.ts')) {
+      const dockCssPath = path.join(REPO_ROOT, 'packages/ui/src/styles/conversation.css');
+      const dockCss = fs.existsSync(dockCssPath) ? fs.readFileSync(dockCssPath, 'utf8') : '';
+      const shellRule = /\.input-card-box\.composer-dock\s*\{([\s\S]*?)\}/.exec(dockCss);
+      if (!shellRule || !/max-width:\s*740px/.test(shellRule[1])) {
+        out.push({
+          file,
+          line: 1,
+          lineIdx: 0,
+          ruleId: 'layout/input-dock-width',
+          message: '输入舱外壳 .input-card-box.composer-dock 必须声明 max-width: 740px（AGENTS.md 六-2）',
+          snippet: '',
+        });
+      }
     }
 
     // 已登记偏差：实际值与规范不符时进 warnings（不阻断，但不隐身）
@@ -692,6 +699,49 @@ const rawMonospaceRules = {
           message: `[theme/no-raw-monospace] :${i + 1} 禁止裸写 font-family: monospace，必须改用 var(--font-mono)`,
         });
       }
+    });
+
+    return [];
+  },
+};
+
+/**
+ * 探针 ⑤：theme/border-token-as-color
+ *
+ * 【设计意图 (Why)】
+ *   `--border*` 系列在 skins.ts 里的 sources 全部指向 `--border-medium` / `--border-subtle`
+ *   / `--border-strong`，语义上永远是描边。它们被拿来当 `color:` 时，实际拿到的是
+ *   半透明线条色：实测五套皮肤对比度 1.57~3.37:1，全部不达 AA 4.5:1，
+ *   用户看到的是"文字几乎消失"，而换肤门禁只查硬编码色相，根本拦不住这种语义误用。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 判定口径精确到「`color:` 属性引用 `--border*`」：`border-color:` 合法，不拦；
+ *   2. 与既有规则同构（正则 + 去注释行视图），不引入 AST 依赖，保持秒级执行；
+ *   3. 存量违规由债务基线冻结，只拦新增。
+ */
+const borderTokenAsColorRules = {
+  id: 'theme-border-as-color',
+  gate: 'Gate 4',
+  title: '描边色语义（theme/border-token-as-color）',
+  check(file, ctx) {
+    if (!isSkinSurface(file) || file.includes('/tokens/')) return [];
+    if (!ctx.warnings) ctx.warnings = [];
+
+    ctx.codeLines.forEach((line, i) => {
+      // 只匹配独立的 color 属性，排除 border-color / background-color / caret-color 等
+      const m = /(?:^|[;{\s"'])color\s*:\s*([^;`"'>]*)/.exec(line);
+      if (!m) return;
+      if (!/var\(\s*--border(?:-subtle|-strong)?\s*[,)]/.test(m[1])) return;
+      if (hasInlineAllowance(ctx.rawLines, i, 'theme')) return;
+      ctx.warnings.push({
+        file,
+        line: i + 1,
+        ruleId: 'theme/border-token-as-color',
+        message:
+          `[theme/border-token-as-color] :${i + 1} ` +
+          '--border* 是描边色，不能用于文字/图标前景（五套皮肤实测 1.57~3.37:1，全部不达 AA）；' +
+          '文字请用 --foreground / --secondary-foreground / --muted-foreground',
+      });
     });
 
     return [];
@@ -1445,6 +1495,7 @@ export const RULES = [
   templateExportRules,
   inlineHexRules,
   rawMonospaceRules,
+  borderTokenAsColorRules,
   literalFontSizeRules,
   ghostTokenRules,
   i18nRules,

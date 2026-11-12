@@ -41,6 +41,9 @@ import type {
   SlashExecParams,
   SlashExecResult,
   SessionUsageResult,
+  AdmissionStatus,
+  CanonicalSteerQueuedParams,
+  PromptCancelParams,
 } from '../rpc/contracts/gateway-contract.generated.js';
 import type { IRpcCaller } from '../rpc/types.js';
 import { isClientTempId, isDurableRowId } from './truncatePlan.js';
@@ -287,6 +290,54 @@ export class InteractiveService {
       'session.usage',
       { session_id: sessionId, profile: profile ?? null }
     );
+  }
+
+  /**
+   * 取消一条排队中的提示词 (Canonical Queue Cancel)
+   *
+   * 【设计意图 (Why)】
+   *   Canonical 网关把排队项当作独立准入（`admission_id`），取消必须按准入撤销，
+   *   而不是按会话或文本匹配——否则并发排队时会撤错条目。
+   *
+   * 【约束与规则 (Rules)】
+   *   两个参数缺一即拒绝，绝不发出半截请求；返回准入状态供 UI 显式呈现。
+   */
+  public async cancelQueued(
+    bridge: IRpcCaller,
+    sessionId: string,
+    admissionId: string
+  ): Promise<AdmissionStatus> {
+    if (!sessionId || !admissionId) {
+      throw new Error('Session ID and admission ID are mandatory for cancelQueued');
+    }
+    const params: PromptCancelParams = { session_id: sessionId, admission_id: admissionId };
+    return bridge.request<AdmissionStatus, PromptCancelParams>('prompt.cancel', params);
+  }
+
+  /**
+   * 立即执行排队项 (Canonical Queue Steer)
+   *
+   * 【设计意图 (Why)】
+   *   用户点「立即发送」时，期望它插到当前回合前面跑，而不是等当前回合自然结束。
+   *   网关为此提供 `prompt.steer_queued`，按准入插入执行。
+   *
+   * 【约束与规则 (Rules)】只接受准入 id，不接受文本；改文本走「取消 + 放回输入舱」。
+   */
+  public async steerQueued(
+    bridge: IRpcCaller,
+    sessionId: string,
+    admissionId: string,
+    profile?: string
+  ): Promise<AdmissionStatus> {
+    if (!sessionId || !admissionId) {
+      throw new Error('Session ID and admission ID are mandatory for steerQueued');
+    }
+    const params: CanonicalSteerQueuedParams = {
+      session_id: sessionId,
+      admission_id: admissionId,
+      profile: profile ?? null,
+    };
+    return bridge.request<AdmissionStatus, CanonicalSteerQueuedParams>('prompt.steer_queued', params);
   }
 }
 

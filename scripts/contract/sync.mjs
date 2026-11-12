@@ -85,20 +85,51 @@ function parseInterfaces(text) {
   return map;
 }
 
-/** 解析网关的 RpcMethods 注册表：'method' -> { params: X; result: Y } */
+/**
+ * 解析网关的方法注册表：'method' -> { params: X; result: Y }
+ *
+ * 【设计意图 (Why)】
+ *   网关把方法分成两张注册表：`RpcMethods`（经典通道）与 `CanonicalRpcMethods`
+ *   （hermes-gateway-v1 会话权威独有）。只解析前者会漏掉 `prompt.cancel` /
+ *   `prompt.steer_queued` 这类只有新协议才提供的方法，契约校验随即把合法调用判成"不存在"。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   第一版按"先到先得"合并，并假设经典表字段更宽。实测 25 个同名方法里有 11 个经典表更窄
+ *   （`prompt.submit` 缺 `attachments`/`model_override` 等 9 个字段，`session.create` 缺 20 个），
+ *   而客户端守卫拿这张表做白名单硬拦截 —— 结果是把 canonical 合法字段在本地直接拒掉，
+ *   网关根本收不到请求。
+ *
+ * 【约束与规则 (Rules)】
+ *   同名方法取**参数并集**：白名单只回答"这个字段允不允许出现"，
+ *   两张表任一声明过就必须放行。结果类型保留先解析到的那个（返回结构由网关决定，不做并集）。
+ */
 function parseMethodRegistry(text) {
-  const start = text.indexOf('export interface RpcMethods {');
-  if (start < 0) fail('网关契约里找不到 RpcMethods 注册表');
-  const bodyStart = text.indexOf('{', start) + 1;
-  const closeIdx = text.indexOf('\n}', bodyStart);
-  const body = text.slice(bodyStart, closeIdx);
-
   const methods = new Map();
-  const re = /'([\w.]+)':\s*\{\s*params:\s*(\w+);\s*result:\s*(\w+)\s*\}/g;
-  let match;
-  while ((match = re.exec(body)) !== null) {
-    methods.set(match[1], { paramsType: match[2], resultType: match[3] });
-  }
+
+  const collect = (interfaceName) => {
+    const start = text.indexOf(`export interface ${interfaceName} {`);
+    if (start < 0) return;
+    const bodyStart = text.indexOf('{', start) + 1;
+    const closeIdx = text.indexOf('\n}', bodyStart);
+    const body = text.slice(bodyStart, closeIdx);
+
+    const re = /'([\w.]+)':\s*\{\s*params:\s*(\w+);\s*result:\s*(\w+)\s*\}/g;
+    let match;
+    while ((match = re.exec(body)) !== null) {
+      const existing = methods.get(match[1]);
+      methods.set(match[1], {
+        paramsType: existing?.paramsType ?? match[2],
+        resultType: existing?.resultType ?? match[3],
+        /** 同名方法要合并的第二张参数类型；生成表格时取并集 */
+        paramsTypes: [...(existing?.paramsTypes ?? []), match[2]],
+      });
+    }
+  };
+
+  collect('RpcMethods');
+  collect('CanonicalRpcMethods');
+
+  if (methods.size === 0) fail('网关契约里找不到 RpcMethods / CanonicalRpcMethods 注册表');
   return methods;
 }
 
@@ -131,7 +162,13 @@ fs.writeFileSync(OUT_CONTRACT, source, 'utf8');
 
 const tableEntries = [];
 for (const [method, types] of [...methods.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-  const params = interfaces.get(types.paramsType) ?? [];
+  // 【规则】同名方法的参数取并集：白名单只回答"这个字段允不允许出现"，
+  //   两张注册表任一声明过就必须放行，否则 canonical 的宽参数会在本地被误拒。
+  const paramFields = new Set();
+  for (const paramsType of types.paramsTypes) {
+    for (const field of interfaces.get(paramsType) ?? []) paramFields.add(field);
+  }
+  const params = [...paramFields];
   const result = interfaces.get(types.resultType) ?? [];
   tableEntries.push(
     `  '${method}': { paramsType: '${types.paramsType}', resultType: '${types.resultType}', ` +

@@ -28,6 +28,9 @@ test('InteractiveService - 交互区领域服务全量契约测试', async (t) =
       if (method === 'session.usage') {
         return { context_used: 42000, context_max: 128000, avg_tps: 85.5 };
       }
+      if (method === 'prompt.cancel' || method === 'prompt.steer_queued') {
+        return { admission_id: params.admission_id, status: 'terminal', sequence: 1, outcome: 'cancelled', authority_epoch: 1, execution_generation: null, ref: { profile_id: 'default', session_id: params.session_id } };
+      }
       throw new Error(`Unknown method: ${method}`);
     },
   };
@@ -192,5 +195,27 @@ test('InteractiveService - 交互区领域服务全量契约测试', async (t) =
       async () => service.getSessionUsage(mockBridge, ''),
       /Session ID is mandatory/
     );
+  });
+
+  await t.test('9. 队列控制：按准入 id 定位，缺一即拒绝', async () => {
+    calls.length = 0;
+
+    await service.cancelQueued(mockBridge, 'sess-1', 'adm-1');
+    assert.deepEqual(calls.at(-1), {
+      method: 'prompt.cancel',
+      params: { session_id: 'sess-1', admission_id: 'adm-1' },
+    });
+
+    await service.steerQueued(mockBridge, 'sess-1', 'adm-2', 'default');
+    assert.deepEqual(calls.at(-1), {
+      method: 'prompt.steer_queued',
+      params: { session_id: 'sess-1', admission_id: 'adm-2', profile: 'default' },
+    });
+
+    const before = calls.length;
+    await assert.rejects(async () => service.cancelQueued(mockBridge, 'sess-1', ''), /admission ID are mandatory/);
+    await assert.rejects(async () => service.cancelQueued(mockBridge, '', 'adm-1'), /admission ID are mandatory/);
+    await assert.rejects(async () => service.steerQueued(mockBridge, 'sess-1', ''), /admission ID are mandatory/);
+    assert.equal(calls.length, before, '缺参数绝不许穿透到网络层');
   });
 });

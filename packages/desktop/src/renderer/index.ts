@@ -221,6 +221,20 @@ import {
 import { parseTranscriptRows } from './transcriptRows.js';
 import { DesktopCacheStore } from './cache/DesktopCacheStore.js';
 import { loadProviderCatalog } from './providerCatalog.js';
+import { localizeSlashDescription, toSlashOptions } from './slashCatalog.js';
+import { mergeMentionCandidates, parseMentionToken } from './mentionToken.js';
+import { buildAliasSet, filterDesktopCommands, normalizeCommandName } from './slashVisibility.js';
+import {
+  applyEnqueueReceipt,
+  canSendDraft,
+  clampComposerHeight,
+  planEnqueue,
+  planEnterAction,
+  planQueueAction,
+  queuedAfterAction,
+  resolveComposerPhase,
+  shouldShowQueueButton,
+} from './queueControl.js';
 
 /** 头像绑定/解绑写操作的在途合流表：同键同签名复用 promise，异签名拒绝重入。 */
 const inFlightProviderBindings = new Map<string, { signature: string; promise: Promise<ToggleProviderAgentResult> }>();
@@ -659,7 +673,7 @@ interface AppState {
   /** Conversations optimistically inserted while the gateway persists them. */
   pendingSessionIds: string[];
   reasoningLevel: 'default' | 'none' | 'low' | 'high' | 'max' | 'off' | 'medium';
-  approvalMode: 'auto' | 'ask' | 'sandbox';
+  approvalMode: 'manual' | 'smart' | 'off';
   isStreaming: boolean;
   gatewayConnected: boolean;
   gatewayConnecting: boolean;
@@ -739,6 +753,14 @@ interface AppState {
   fileSearchOpen: boolean;
   fileSearchQuery: string;
   attachments: InputAttachmentItem[];
+  /**
+   * 运行中的待发送队列（来自网关 `pending_rows`）。
+   *
+   * 【设计意图 (Why)】
+   *   排队项由服务端持久化，客户端只做展示与三个控制动作；本地不另建一份真相。
+   *   `admissionId` 是网关准入 id，三个动作（放回编辑 / 立即发送 / 取消）都按它定位。
+   */
+  queuedMessages: Array<{ id: string; admissionId: string; text: string }>;
   slashPopperOpen: boolean;
   slashItems: SlashCommandOption[];
   mentionPopperOpen: boolean;
@@ -1014,7 +1036,7 @@ const state: AppState = {
   recentModels: safeParseJson<string[]>(localStorage.getItem('hermes_flux_recent_models') || localStorage.getItem('hermes_aura_recent_models'), [], isStringArray),
   modelSearchQuery: '',
   reasoningLevel: 'high',
-  approvalMode: 'auto',
+  approvalMode: 'smart',
   isStreaming: false,
   gatewayConnected: false,
   gatewayConnecting: Boolean(localStorage.getItem('hermes_flux_gateway_url') || localStorage.getItem('hermes_aura_gateway_url')),
@@ -1055,6 +1077,7 @@ const state: AppState = {
   gitDiffs: [],
   memories: [],
   attachments: [],
+  queuedMessages: [],
   slashPopperOpen: false,
   slashItems: [],
   mentionPopperOpen: false,
@@ -3409,6 +3432,10 @@ const interactiveService = new InteractiveService();
 
 /** commands.catalog 预取的目录快照（本地降级检索源，complete.slash 不可用时兜底） */
 let slashCatalogSnapshot: SlashCommandOption[] = [];
+/** 网关 desktop 分级标记（键为归一命令名），决定桌面端是否展示 */
+let slashDesktopMarks = new Map<string, string | null | undefined>();
+/** 网关 canon 推导出的别名集合，别名不在补全列表重复出现 */
+let slashAliasSet = new Set<string>();
 let slashCatalogLoaded = false;
 let slashDebounce: ReturnType<typeof setTimeout> | undefined;
 let pathDebounce: ReturnType<typeof setTimeout> | undefined;
@@ -3424,12 +3451,16 @@ function resolveActiveCwd(): string {
   return proj?.path || '';
 }
 
-/** 将文件补全项与 Agent 项合并进 mention popper（Agent 在上、文件在下，按 query 过滤） */
-function mergeMentionFiles(fileItems: MentionReferenceOption[], query: string): void {
-  const agentItems = state.mentionItems.filter((m) => m.type === 'agent');
-  const q = query.toLowerCase();
-  const filteredFiles = fileItems.filter((f) => f.name.toLowerCase().includes(q));
-  state.mentionItems = [...agentItems, ...filteredFiles].slice(0, 12);
+/** 将文件补全项与 Agent 项合并进 mention popper（Agent 在上、文件在下） */
+function mergeMentionFiles(
+  fileItems: MentionReferenceOption[],
+  query: string,
+  filesFromGateway: boolean,
+  agentItems: MentionReferenceOption[] = state.mentionItems.filter((m) => m.type === 'agent'),
+): void {
+  // 【规则】网关返回的文件项是权威结果，不再二次过滤 —— 历史上这里用 includes 再筛一遍，
+  //   把网关已经模糊命中的 `src/opt/a.ts` 又按字面 `opt` 筛掉，表现为「路径搜不到」。
+  state.mentionItems = mergeMentionCandidates({ agentItems, fileItems, query, filesFromGateway });
   state.mentionPopperOpen = state.mentionItems.length > 0;
   render();
 }
@@ -3439,24 +3470,45 @@ async function prefetchSlashCatalog(): Promise<void> {
   try {
     const cat = await interactiveService.getCommandsCatalog(rpcCaller, state.activeSessionId || undefined, state.profileName || undefined);
     const items: SlashCommandOption[] = [];
+    // 【规则】desktop 是分级标记，不是描述。历史上 `meta?.desktop || ''` 把 `hidden`/`terminal`
+    //   当文案用，既污染说明又丢掉了分级信息，TUI 专属命令因此全部涌进 GUI 弹框。
+    const desktopMarks = new Map<string, string | null | undefined>();
+    const descByCommand = new Map<string, string>();
+    for (const pair of cat.pairs || []) {
+      if (!pair[0]) continue;
+      descByCommand.set(normalizeCommandName(pair[0]), pair[1] || '');
+    }
+    for (const [name, meta] of Object.entries(cat.commands || {})) {
+      const bare = normalizeCommandName(name);
+      desktopMarks.set(bare, meta?.desktop);
+    }
     const pushCmd = (name: string, desc: string) => {
       if (!name) return;
       const normalized = name.startsWith('/') ? name : `/${name}`;
-      items.push({ name: normalized, description: desc });
+      items.push({ name: normalized, description: localizeSlashDescription(normalized, desc, t) });
     };
     for (const pair of cat.pairs || []) {
       if (pair[0]) pushCmd(pair[0], pair[1] || '');
     }
-    if (cat.commands) {
-      for (const [name, meta] of Object.entries(cat.commands)) {
-        pushCmd(name, meta?.desktop || '');
-      }
+    for (const [name, meta] of Object.entries(cat.commands || {})) {
+      // 说明取 pairs 的原文；desktop 只作分级，绝不回落到说明文字。
+      pushCmd(name, descByCommand.get(normalizeCommandName(name)) || '');
+      void meta;
     }
     for (const skillName of Object.keys(cat.skills || {})) {
-      if (skillName) items.push({ name: skillName.startsWith('/') ? skillName : `/${skillName}`, description: 'Skill', isSkill: true });
+      // 【规则】技能条目的说明走字典，不得裸写英文 'Skill' 混进中文界面。
+      if (skillName) items.push({ name: skillName.startsWith('/') ? skillName : `/${skillName}`, description: t('slash.skillKind'), isSkill: true });
     }
+    // 别名折叠与桌面可见性都在快照上做一遍：降级通道与实时通道必须同源，
+    // 否则断网时弹框会多出实时通道没有的条目。
+    slashAliasSet = buildAliasSet(cat.canon);
+    slashDesktopMarks = desktopMarks;
     const seen = new Set<string>();
-    slashCatalogSnapshot = items.filter((it) => (seen.has(it.name) ? false : (seen.add(it.name), true)));
+    slashCatalogSnapshot = filterDesktopCommands({
+      items: items.filter((it) => (seen.has(it.name) ? false : (seen.add(it.name), true))),
+      desktopMarks,
+      aliases: slashAliasSet,
+    });
     slashCatalogLoaded = true;
   } catch {
     // gate-degrade: 目录预取失败属可选加速，回退到按键时实时补全，不阻断输入
@@ -3481,22 +3533,22 @@ function requestSlashCompletion(query: string): void {
         );
         if (mySeq !== slashSeq) return;
         const replaceFrom = typeof res.replace_from === 'number' ? res.replace_from : undefined;
-        resolved = (res.items || []).map((it) => ({
-          name: it.text,
-          description: it.meta || it.display || '',
-          isSkill: it.kind === 'skill',
-          replaceFrom: it.kind ? replaceFrom : undefined,
-        }));
+        resolved = toSlashOptions(res.items || [], replaceFrom, t);
       } catch {
         // gate-degrade: complete.slash 失败降级到目录快照
         resolved = null;
       }
     }
     if (mySeq !== slashSeq) return;
-    const base = resolved && resolved.length > 0
-      ? resolved
+    // 【规则】`resolved !== null` 就代表请求成功，哪怕过滤后为空 —— 用 `length > 0` 判定
+    //   会把「全部被隐藏」误判成「请求失败」，回退到快照后隐藏静默失效。
+    const base = resolved !== null
+      ? filterDesktopCommands({ items: resolved, desktopMarks: slashDesktopMarks, aliases: slashAliasSet })
       : slashCatalogSnapshot.filter((c) => c.name.toLowerCase().includes(query.toLowerCase()));
-    state.slashItems = base.slice(0, 12);
+    // 【规则】不得截断：complete.slash 是网关按前缀过滤的权威通道，条数由网关决定。
+    //   历史实现写死 slice(0, 12)，`/s` 这类宽前缀下第 13 条起永远不可见，用户会以为命令不存在。
+    //   浮层列表本身有 max-height + overflow-y，超长由滚动承担，不靠丢数据换高度。
+    state.slashItems = base;
     state.slashPopperOpen = state.slashItems.length > 0;
     render();
   }, 120);
@@ -3508,13 +3560,13 @@ function inputTokenSnapshot(): { fullText: string } {
 }
 
 /** 文件补全：complete.path 按当前 cwd + 光标 token 检索，失败降级最近打开文件 */
-function requestPathCompletion(word: string): void {
+function requestPathCompletion(word: string, agentItems?: MentionReferenceOption[]): void {
   if (pathDebounce) clearTimeout(pathDebounce);
-  const el = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
-  const fullText = el ? el.value : '';
   pathDebounce = setTimeout(async () => {
     const mySeq = ++pathSeq;
     let fileItems: MentionReferenceOption[] = [];
+    // 【规则】只有网关真的返回过结果才标记为权威，降级路径必须走本地模糊匹配。
+    let fromGateway = false;
     if (gatewayClient) {
       try {
         const cwd = resolveActiveCwd();
@@ -3531,6 +3583,7 @@ function requestPathCompletion(word: string): void {
           name: it.text,
           detail: it.meta || '',
         }));
+        fromGateway = true;
       } catch {
         // gate-degrade: complete.path 失败降级到已打开文件列表
         fileItems = state.openFiles.map((f) => ({ type: 'file' as const, name: f.path, detail: t('mention.recentFile') }));
@@ -3539,7 +3592,7 @@ function requestPathCompletion(word: string): void {
       fileItems = state.openFiles.map((f) => ({ type: 'file' as const, name: f.path, detail: t('mention.recentFile') }));
     }
     if (mySeq !== pathSeq) return;
-    mergeMentionFiles(fileItems, word);
+    mergeMentionFiles(fileItems, word, fromGateway, agentItems);
   }, 120);
 }
 
@@ -4900,12 +4953,9 @@ async function switchReasoning(effort: AppState['reasoningLevel']): Promise<void
   render();
 }
 
-async function switchApproval(mode: 'auto' | 'ask' | 'sandbox'): Promise<void> {
+async function switchApproval(mode: 'manual' | 'smart' | 'off'): Promise<void> {
   state.approvalMode = mode;
   render();
-
-  // Map internal UI mode to gateway approval_mode (off | smart | manual)
-  const gatewayModeMap: Record<string, string> = { auto: 'off', ask: 'smart', sandbox: 'manual' };
 
   if (!gatewayClient || !state.activeSessionId) return;
 
@@ -4920,7 +4970,7 @@ async function switchApproval(mode: 'auto' | 'ask' | 'sandbox'): Promise<void> {
     await gatewayClient.call('config.set', {
       session_id: liveId,
       key: 'approval_mode',
-      value: gatewayModeMap[mode] || 'smart',
+      value: mode,
     });
     state.dockNotice = '';
   } catch (e) {
@@ -5608,6 +5658,121 @@ async function routeSend(text: string): Promise<void> {
       void exhaustive;
       return;
     }
+  }
+}
+
+/**
+ * 把当前草稿加入待发送队列（运行中专用）。
+ *
+ * 【设计意图 (Why)】
+ *   运行中用户仍可继续写，主按钮此时是「加入队列」：草稿交给网关排到 FIFO 尾部，
+ *   由服务端在回合结束后接续执行。客户端不自己维护队列真相，只把准入回执写进展示态。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 走 `prompt.submit` 的 `queued: true`，不另开 RPC；
+ *   2. 成功后按 `admission_id` 追加一条展示行，文本取提交前的草稿；
+ *   3. 失败必须显式提示并保留草稿，绝不静默清空。
+ */
+async function enqueueDraft(): Promise<void> {
+  const el = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
+  const draft = planEnqueue({
+    text: el?.value ?? '',
+    hasGateway: Boolean(gatewayClient),
+    // liveId 的探测在下面做：这里先按"有会话"放行，真正的通道缺失由 ensureLiveSessionId 返回。
+    hasLiveSession: true,
+  });
+  if (draft.kind === 'skip') return;
+  if (draft.kind === 'fail') {
+    setTimedDockNotice(t(draft.reasonKey as Parameters<typeof t>[0]));
+    render();
+    return;
+  }
+  if (!state.activeSessionId) {
+    await createNewSession();
+  }
+  const liveId = await ensureLiveSessionId();
+  if (!liveId) {
+    // 【规则】入队失败的原因是通道缺失，不是"回合进行中"：复用 busyEnterBlocked 会把用户引向停止按钮。
+    setTimedDockNotice(t('dock.queueNoLive'));
+    render();
+    return;
+  }
+  try {
+    const receipt = await gatewayClient!.call<{
+      admission_id?: string | null;
+      status?: string | null;
+      user_row_id?: number | null;
+    }>('prompt.submit', {
+      session_id: liveId,
+      text: draft.text,
+      queued: true,
+    });
+    const outcome = applyEnqueueReceipt(receipt, draft.text);
+    if (outcome.kind === 'failed') {
+      // 失败保留草稿：用户写的内容不能因为网关没回 admission_id 就被清掉。
+      setTimedDockNotice(t(outcome.reasonKey as Parameters<typeof t>[0]));
+      render();
+      return;
+    }
+    state.queuedMessages = [...state.queuedMessages, outcome.entry];
+    if (el) {
+      el.value = '';
+      el.style.height = '';
+    }
+    setTimedDockNotice('');
+    render();
+  } catch (err) {
+    setTimedDockNotice(`${t('dock.queueFailed')}: ${describeRpcError(err)}`);
+    render();
+  }
+}
+
+/**
+ * 队列行的三个动作（放回编辑 / 立即发送 / 取消）。
+ *
+ * 【设计意图 (Why)】
+ *   队列真相在网关，客户端只按 `admission_id` 发指令，失败一律保留原行并显式提示。
+ *   三个动作都会让该准入离开排队态，因此成功后必须同步移除本地展示行 ——
+ *   否则「立即发送」执行完的那行会永久留在界面上，而网关里早已不存在。
+ *
+ * 【约束与规则 (Rules)】
+ *   - 放回编辑：撤销该准入，再把文本写回输入舱并聚焦，让用户继续改；
+ *   - 立即发送：`prompt.steer_queued` 插到当前回合前执行；
+ *   - 取消：`prompt.cancel` 按准入撤销；
+ *   - 未知 action 直接忽略，绝不默认落到取消。
+ */
+async function handleQueueAction(action: string, admissionId: string): Promise<void> {
+  const entry = state.queuedMessages.find((q) => q.admissionId === admissionId);
+  if (!entry) return;
+  const plan = planQueueAction(action, entry.text);
+  if (plan.kind === 'unknown') return;
+
+  const liveId = await ensureLiveSessionId();
+  if (!liveId) {
+    setTimedDockNotice(t('chat.forkNoLive'));
+    render();
+    return;
+  }
+  try {
+    if (plan.kind === 'steer') {
+      await interactiveService.steerQueued(rpcCaller, liveId, admissionId, state.profileName || undefined);
+    } else {
+      await interactiveService.cancelQueued(rpcCaller, liveId, admissionId);
+    }
+    state.queuedMessages = queuedAfterAction(state.queuedMessages, admissionId) as typeof state.queuedMessages;
+
+    if (plan.kind === 'replace') {
+      const el = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
+      if (el) {
+        el.value = plan.restoreText;
+        el.focus({ preventScroll: true });
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }
+    render();
+  } catch (err) {
+    setTimedDockNotice(`${t('dock.queueActionFailed')}: ${describeRpcError(err)}`);
+    render();
   }
 }
 
@@ -8335,6 +8500,7 @@ function render(): void {
     favoriteModelsHash: state.favoriteModels.join(','),
     attachmentsCount: state.attachments.length,
     attachmentsHash: state.attachments.map((a) => `${a.id}:${a.name}`).join(','),
+    queuedHash: state.queuedMessages.map((q) => `${q.admissionId}:${q.text}`).join('|'),
     rollbackArmedHash: state.rollbackArmed
       ? `${state.rollbackArmed.targetId}:${state.rollbackArmed.removedCount}`
       : '',
@@ -8402,10 +8568,12 @@ function render(): void {
                 reasoningLevel: state.reasoningLevel,
                 approvalMode: state.approvalMode,
                 isStreaming: isStreamingActiveForCurrentSession(),
+                hasDraft: Boolean(draftText.trim()) || state.attachments.length > 0,
                 disabled: !state.gatewayConnected,
                 modelMenuOpen: state.modelMenuOpen,
                 notice: state.dockNotice,
                 attachments: state.attachments,
+                queuedMessages: state.queuedMessages,
                 slashPopperOpen: state.slashPopperOpen,
                 slashItems: state.slashItems,
                 mentionPopperOpen: state.mentionPopperOpen,
@@ -8575,10 +8743,12 @@ function render(): void {
           reasoningLevel: state.reasoningLevel,
           approvalMode: state.approvalMode,
           isStreaming: isStreamingCurrent,
+          hasDraft: Boolean(draftText.trim()) || state.attachments.length > 0,
           disabled: !state.gatewayConnected,
           modelMenuOpen: state.modelMenuOpen,
           notice: state.dockNotice,
           attachments: state.attachments,
+          queuedMessages: state.queuedMessages,
           slashPopperOpen: state.slashPopperOpen,
           slashItems: state.slashItems,
           mentionPopperOpen: state.mentionPopperOpen,
@@ -9576,7 +9746,7 @@ function bindEvents(): void {
   // 【规则】「思考等级」不再占用输入舱 footer：入口已下沉到模型行右侧的二级级联，
   // 由 bindModelDropdownEvents() 统一绑定，这里不再有独立下拉。
 
-  // Approval Mode Dropdown Toggle
+  // 审批三态：manual / smart / off（网关唯一真值，历史 auto/ask/sandbox 已归一）
   const approvalBtn = document.getElementById('dock-approval-toggle-btn');
   const approvalDropdown = document.getElementById('dock-approval-dropdown');
   if (approvalBtn && approvalDropdown) {
@@ -9584,12 +9754,14 @@ function bindEvents(): void {
       e.stopPropagation();
       const isOpen = approvalDropdown.style.display === 'block';
       approvalDropdown.style.display = isOpen ? 'none' : 'block';
+      approvalBtn.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
     };
-    document.querySelectorAll('.approval-option').forEach((opt) => {
-      (opt as HTMLElement).onclick = (e) => {
+    approvalDropdown.querySelectorAll<HTMLElement>('.composer-approval-option').forEach((opt) => {
+      opt.onclick = (e) => {
         e.stopPropagation();
-        const mode = (e.currentTarget as HTMLElement).getAttribute('data-mode') as AppState['approvalMode'];
+        const mode = opt.dataset.mode as AppState['approvalMode'] | undefined;
         approvalDropdown.style.display = 'none';
+        approvalBtn.setAttribute('aria-expanded', 'false');
         if (mode) void switchApproval(mode);
       };
     });
@@ -9618,96 +9790,122 @@ function bindEvents(): void {
     };
   }
 
-  // Event delegation on input-dock-container for notices and rollback cancel
+  // Event delegation on input-dock-container for notices, rollback cancel and queue actions
   const dockContainer = document.querySelector<HTMLElement>('.input-dock-container');
   if (dockContainer && !dockContainer.dataset.dockClickBound) {
     dockContainer.dataset.dockClickBound = 'true';
     dockContainer.addEventListener('click', (e) => {
-      const cancelAction = (e.target as HTMLElement).closest<HTMLElement>('[data-action="rollback-cancel"]');
+      const target = e.target as HTMLElement;
+      const cancelAction = target.closest<HTMLElement>('[data-action="rollback-cancel"]');
       if (cancelAction) {
         e.stopPropagation();
         e.preventDefault();
         handleRollbackCancel();
+        return;
+      }
+      const queueAction = target.closest<HTMLElement>('.queue-action-btn');
+      if (queueAction) {
+        e.stopPropagation();
+        e.preventDefault();
+        const admissionId = queueAction.dataset.queueId || '';
+        const action = queueAction.dataset.action || '';
+        if (admissionId) void handleQueueAction(action, admissionId);
       }
     });
   }
 
-  // Send message & IME Composition defense
+  // 发送 / 停止 与 IME 组合防御
   const sendBtn = document.getElementById('dock-send-btn') as HTMLButtonElement | null;
+  const queueBtn = document.getElementById('dock-queue-btn') as HTMLButtonElement | null;
+  const stopBtn = document.getElementById('dock-stop-btn') as HTMLButtonElement | null;
   const inputEl = document.getElementById('dock-prompt-input') as HTMLTextAreaElement;
   let isComposing = false;
 
-  const handleSend = (source: 'button' | 'enter') => {
+  // 输入区高度：66px 起步，按 scrollHeight 增长，触顶 220px 后转内部滚动。
+  // 【规则】先把 height 归 auto 再量 scrollHeight，回删时高度才能同步收回；
+  //   高度不做过渡，避免高频输入时把排版抖动放大成跳行。边界值定义在 queueControl.ts。
+  const syncComposerHeight = () => {
+    if (!inputEl) return;
+    // 先归 auto 再量：否则回删时读到的是被旧高度撑住的滚动高度，高度会卡在上限。
+    inputEl.style.height = 'auto';
+    inputEl.style.height = `${clampComposerHeight(inputEl.scrollHeight)}px`;
+  };
+
+  const submitDraft = () => {
     if (!inputEl) return;
     const text = inputEl.value.trim();
-
-    if (state.isStreaming) {
-      // Clicking the stop button interrupts; pressing Enter must not.
-      if (source === 'button') {
-        void interruptTurn();
-      } else {
-        state.dockNotice = '当前回合仍在生成中，可点击右侧停止按钮中断';
-        render();
-      }
-      return;
-    }
-
     if (!text) return;
     inputEl.value = '';
+    syncComposerHeight();
     void routeSend(text);
   };
 
-  // 发送按钮可用性：与 OpenChamber 一致，空内容时降到 30% 不透明度且不可点。
-  // 【防范的历史坑 (Pitfall)】流式期间按钮切换成中断动作，必须保持可点击；
-  //   网关未连接时模板已写入 disabled + data-locked，这里不得擅自解锁。
+  const handleSend = (source: 'button' | 'enter') => {
+    if (!inputEl) return;
+    // 【规则】相位与回车动作都走纯决策层，渲染与按键读同一份输入：
+    //   历史上渲染读 isStreamingActiveForCurrentSession()、按键读 state.isStreaming，
+    //   切换会话后两者分歧，界面明明是发送按钮，回车却弹「回合仍在生成中」。
+    //   运行态下发送按钮并不存在（主按钮是停止），入队按钮有自己的 onclick，
+    //   因此这里只需把 idle 交给 submitDraft、把 running 交给 enqueueDraft。
+    const action = planEnterAction({
+      phase: resolveComposerPhase({ activeTurn: isStreamingActiveForCurrentSession() }),
+      text: inputEl.value,
+      attachmentCount: state.attachments.length,
+    });
+    if (action.kind === 'submit') submitDraft();
+    if (action.kind === 'enqueue') void enqueueDraft();
+  };
+
+  // 空内容时发送禁用；网关未连接时模板已写死 disabled + data-locked，这里不得擅自解锁。
+  // 【规则】附件真值只有 state.attachments 一处，不再查 DOM 类名。
   const syncSendAvailability = () => {
     if (!sendBtn || !inputEl || sendBtn.dataset.locked === 'true') return;
-    const hasAttachments = Boolean(document.querySelector('.composer-attachment-pill'));
-    sendBtn.disabled = !state.isStreaming && !inputEl.value.trim() && !hasAttachments;
+    sendBtn.disabled = !canSendDraft({
+      text: inputEl.value,
+      attachmentCount: state.attachments.length,
+    });
   };
 
   if (sendBtn) sendBtn.onclick = () => handleSend('button');
+  if (queueBtn) {
+    queueBtn.onclick = () => {
+      void enqueueDraft();
+    };
+  }
+  if (stopBtn) {
+    stopBtn.onclick = () => {
+      void interruptTurn();
+    };
+  }
+  // 运行态草稿有无只切按钮可见性，绝不触发整舱重绘（否则 textarea 与光标会被销毁）
+  const syncQueueButtonVisibility = () => {
+    if (!queueBtn || !inputEl) return;
+    queueBtn.hidden = !shouldShowQueueButton({
+      text: inputEl.value,
+      attachmentCount: state.attachments.length,
+    });
+  };
   syncSendAvailability();
+  syncComposerHeight();
+  // 【规则】无条件补一次：附件增减会触发整舱重建，但重建路径不保证再走这里，
+  //   不能依赖"附件变化必然重绘"这种隐式契约。
+  syncQueueButtonVisibility();
   if (inputEl) {
     if (inputEl.dataset.dockEventsBound !== 'true') {
-      inputEl.addEventListener('input', syncSendAvailability);
       inputEl.dataset.dockEventsBound = 'true';
-      const collapseBtn = document.getElementById('dock-input-collapse-toggle') as HTMLButtonElement | null;
-      let isManuallyCollapsed = false;
-
-      const adjustHeight = () => {
-        if (isManuallyCollapsed) return;
-        inputEl.style.height = 'auto';
-        const scrollHeight = inputEl.scrollHeight;
-        const targetHeight = Math.min(Math.max(scrollHeight, 52), 240);
-        inputEl.style.height = `${targetHeight}px`;
-
-        if (collapseBtn) {
-          if (scrollHeight > 100) {
-            collapseBtn.style.display = 'inline-block';
-            collapseBtn.textContent = t('dock.collapse');
-          } else {
-            collapseBtn.style.display = 'none';
-          }
-        }
-      };
-
-      if (collapseBtn) {
-        collapseBtn.onclick = (e) => {
-          e.preventDefault();
-          isManuallyCollapsed = !isManuallyCollapsed;
-          if (isManuallyCollapsed) {
-            inputEl.style.height = '64px';
-            collapseBtn.textContent = t('dock.showMore');
-          } else {
-            adjustHeight();
-            collapseBtn.textContent = t('dock.collapse');
-          }
-        };
-      }
+      inputEl.addEventListener('compositionstart', () => {
+        isComposing = true;
+      });
+      inputEl.addEventListener('compositionend', () => {
+        isComposing = false;
+        syncComposerHeight();
+      });
+      inputEl.addEventListener('input', syncSendAvailability);
+      inputEl.addEventListener('input', syncQueueButtonVisibility);
+      syncQueueButtonVisibility();
 
       inputEl.addEventListener('input', () => {
-        adjustHeight();
+        if (!isComposing) syncComposerHeight();
         const textBeforeCursor = inputEl.value.slice(0, inputEl.selectionStart || inputEl.value.length);
 
         // 斜杠命令 (/): 处于开头或空格后 → complete.slash 动态补全（失败降级目录快照）
@@ -9722,37 +9920,47 @@ function bindEvents(): void {
         }
 
         // 智能引用 (@): Agent 项本地枚举 + 文件项走 complete.path 动态检索
-        const mentionMatch = /(?:^|\s)@([a-zA-Z0-9_\u4e00-\u9fa5\.-]*)$/.exec(textBeforeCursor);
-        if (mentionMatch) {
-          const query = mentionMatch[1].toLowerCase();
+        // 【规则】token 解析走纯函数：`@` 之后可能是路径（含 `/`、`~`、`.`），
+        //   用「只允许字母数字」的正则会把 `/opt` 这类输入整个漏掉，表现为「@ 搜不到路径」。
+        const mentionToken = parseMentionToken(textBeforeCursor);
+        if (mentionToken) {
+          const query = mentionToken.query;
           const agentItems: MentionReferenceOption[] = [];
-          const isBotChat = state.activeFocus.type === 'bot';
           const isGroupChat = state.activeFocus.type === 'group';
 
-          if (isGroupChat) {
-            agentItems.push({ type: 'agent', name: 'all', detail: t('mention.allDetail') });
-            // 设计意图 (Why): 群聊内 @ 成员补全必须匹配当前聚焦的群聊房间成员。
-            // 防范的历史坑 (Pitfall): 曾误用 editingGroupRoomId，导致常规打字时 currentRoom 恒为 undefined，参会 Bot 列表全部丢失。
-            // 规则 (Rules): 严格从 state.activeFocus 提取 activeRoomId。
-            const activeRoomId = state.activeFocus.type === 'group' ? state.activeFocus.roomId : undefined;
-            const currentRoom = state.groupRooms.find((r) => r.roomId === activeRoomId);
-            if (currentRoom) {
-              for (const member of currentRoom.members) {
-                agentItems.push({ type: 'agent', name: member, detail: t('mention.groupMember') });
+          // 【规则】含路径分隔符的 token 不参与 Bot 名过滤：
+          //   拿 `/opt` 去筛 Bot 只会得到空列表，把用户真正想要的路径候选挤掉。
+          if (!mentionToken.isPath) {
+            if (isGroupChat) {
+              agentItems.push({ type: 'agent', name: 'all', detail: t('mention.allDetail') });
+              // 设计意图 (Why): 群聊内 @ 成员补全必须匹配当前聚焦的群聊房间成员。
+              // 防范的历史坑 (Pitfall): 曾误用 editingGroupRoomId，导致常规打字时 currentRoom 恒为 undefined，参会 Bot 列表全部丢失。
+              // 规则 (Rules): 严格从 state.activeFocus 提取 activeRoomId。
+              const activeRoomId = state.activeFocus.type === 'group' ? state.activeFocus.roomId : undefined;
+              const currentRoom = state.groupRooms.find((r) => r.roomId === activeRoomId);
+              if (currentRoom) {
+                for (const member of currentRoom.members) {
+                  agentItems.push({ type: 'agent', name: member, detail: t('mention.groupMember') });
+                }
               }
-            }
-          } else if (!isBotChat) {
-            for (const p of state.profiles) {
-              agentItems.push({ type: 'agent', name: p.displayName || p.name, detail: p.name });
+            } else {
+              // 【规则】专职 Bot 主工位同样要列 @ 候选：该会话的发路由 planSendRoute 判定为 mention-btw，
+              //   浮层不给任何 Bot 就等于把「旁路外援」这条唯一通道藏起来。
+              //   只是主工位不应把「自己」列为候选 —— 自指既无意义，也会让 btw 路由指向本 Bot。
+              const selfName = state.activeFocus.type === 'bot' ? state.activeFocus.botName : null;
+              for (const p of state.profiles) {
+                if (selfName && (p.name === selfName || p.displayName === selfName)) continue;
+                agentItems.push({ type: 'agent', name: p.displayName || p.name, detail: p.name });
+              }
             }
           }
 
-          const filteredAgents = agentItems.filter((m) => m.name.toLowerCase().includes(query));
+          const filteredAgents = agentItems.filter((m) => m.name.toLowerCase().includes(query.toLowerCase()));
           state.mentionItems = filteredAgents;
           state.mentionPopperOpen = filteredAgents.length > 0;
           state.slashPopperOpen = false;
           render();
-          requestPathCompletion(query);
+          requestPathCompletion(query, agentItems);
           return;
         } else if (state.mentionPopperOpen) {
           state.mentionPopperOpen = false;
@@ -9787,11 +9995,9 @@ function bindEvents(): void {
         });
       }
 
-      // Initial auto adjustment for restored drafts
-      adjustHeight();
+      // 恢复草稿后按真实内容重新量一次高度
+      syncComposerHeight();
 
-      inputEl.addEventListener('compositionstart', () => { isComposing = true; });
-      inputEl.addEventListener('compositionend', () => { isComposing = false; });
       inputEl.onkeydown = (e) => {
         if (e.key === 'Escape') {
           if (state.slashPopperOpen || state.mentionPopperOpen) {
@@ -11043,6 +11249,23 @@ document.addEventListener('mousedown', (e) => {
   if (approvalDropdown && approvalDropdown.style.display === 'block') {
     if (!approvalDropdown.contains(e.target as Node) && !approvalBtn?.contains(e.target as Node)) {
       approvalDropdown.style.display = 'none';
+    }
+  }
+
+  // 【规则】/ 与 @ 浮层必须响应外部点击：它们只在输入事件里开合，
+  //   没有外部点击通道时，用户点空白处浮层会一直挂着，直到再次键入才消失。
+  //   判据是「点击目标既不在浮层内、也不在输入舱内」——点输入舱本身不该收起，
+  //   否则用户点一下输入框想继续打字，列表会先消失。
+  if (state.slashPopperOpen || state.mentionPopperOpen) {
+    const target = e.target as Node | null;
+    const popper = document.querySelector('.composer-popper');
+    const dock = document.querySelector('.input-dock-container');
+    const insidePopper = popper ? popper.contains(target) : false;
+    const insideDock = dock ? dock.contains(target) : false;
+    if (!insidePopper && !insideDock) {
+      state.slashPopperOpen = false;
+      state.mentionPopperOpen = false;
+      render();
     }
   }
 

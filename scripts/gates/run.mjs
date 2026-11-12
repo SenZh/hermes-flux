@@ -80,6 +80,12 @@ function resolveTargets() {
   if (flags.changed || flags.staged) {
     const changed = new Set(changedFiles({ stagedOnly: flags.staged }));
     const all = SCAN_ROOTS.flatMap((root) => listSourceFiles(root));
+    // 【防范的历史坑 (Pitfall)】改动集为空时不能静默返回空数组：那样 `--changed` 会变成
+    //   "扫了 0 个文件、0 条违规"的假绿，比不跑更危险。这里回退到全量，并显式说明。
+    if (changed.size === 0) {
+      console.log('  ! 改动集为空（工作树干净），已回退为全量扫描');
+      return all;
+    }
     return all.filter((f) => changed.has(f));
   }
   return SCAN_ROOTS.flatMap((root) => listSourceFiles(root));
@@ -98,6 +104,8 @@ function resolveCssTargets() {
   const existing = CSS_SCAN_TARGETS.filter((rel) => fs.existsSync(path.join(REPO_ROOT, rel)));
   if (!flags.changed && !flags.staged) return existing;
   const changed = new Set(changedFiles({ stagedOnly: flags.staged }));
+  // 与源码集合同一条规则：空集回退全量，避免样式表检查被静默跳过。
+  if (changed.size === 0) return existing;
   return existing.filter((rel) => changed.has(rel));
 }
 
