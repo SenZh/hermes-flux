@@ -178,7 +178,13 @@ import {
   applyTurnFailed,
   applyEnteredRead,
   reconcileAuthoritativeActivity,
+  ActivityTransitionTracker,
   type ActivityState,
+  type ActivityDomain,
+  type ActivityTransition,
+  GroupLogPollerManager,
+  captureGroupLogBaseline,
+  type GroupMessageEntry,
   applyBotActivity,
   syncBotProfiles,
   syncActiveSessionToBot,
@@ -577,6 +583,13 @@ declare global {
     /** E2E / CDP 对账触发器：全量刷新并对账会话列表 */
     __fluxFetchSessions?: () => Promise<void>;
     __fluxRender?: () => void;
+    __fluxActivity?: {
+      startTurn: (domain: ActivityDomain, entityId: string) => void;
+      completeTurn: (domain: ActivityDomain, entityId: string, isFocused: boolean) => void;
+      failTurn: (domain: ActivityDomain, entityId: string) => void;
+      enterRead: (domain: ActivityDomain, entityId: string) => void;
+      syncProjects: () => void;
+    };
     __fluxSelectSession?: (id: string, options?: { preserveFocus?: boolean; botName?: string }) => Promise<void>;
     __fluxLoadOlderMessages?: () => Promise<void>;
     /** E2E / CDP 消息微操作栏动作派发器 */
@@ -1180,6 +1193,89 @@ const unreadBotNames = new Set<string>();
 const activeRunningGroupRoomIds = new Set<string>();
 const activeRunningSessionIds = new Set<string>();
 const activeRunningBotNames = new Set<string>();
+
+const activityTransitionTracker = new ActivityTransitionTracker({ windowMs: 850 });
+let activityTransitionRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearTransitionRefreshTimer(): void {
+  if (activityTransitionRefreshTimer !== null) {
+    clearTimeout(activityTransitionRefreshTimer);
+    activityTransitionRefreshTimer = null;
+  }
+}
+
+function scheduleTransitionRefresh(): void {
+  clearTransitionRefreshTimer();
+  const delayMs = activityTransitionTracker.nextExpiryDelayMs(Date.now());
+  if (delayMs === null) return;
+  activityTransitionRefreshTimer = setTimeout(() => {
+    activityTransitionRefreshTimer = null;
+    scheduleTransitionRefresh();
+    render();
+  }, delayMs);
+}
+
+function completeEntityTurn(
+  domain: ActivityDomain,
+  running: Set<string>,
+  unread: Set<string>,
+  entityId: string,
+  isFocused: boolean
+): void {
+  if (!entityId) return;
+  const wasRunning = running.has(entityId) || (domain === 'session' && activeStreamingStoredSessionId === entityId);
+  applyTurnCompleted(running, unread, entityId, isFocused);
+  if (wasRunning) {
+    activityTransitionTracker.recordCompleted(domain, entityId, isFocused ? 'read' : 'unread', Date.now());
+    scheduleTransitionRefresh();
+  }
+}
+
+window.__fluxActivity = {
+  startTurn: (domain, entityId) => {
+    const sets = domain === 'session'
+      ? [activeRunningSessionIds, unreadSessionIds]
+      : domain === 'bot'
+      ? [activeRunningBotNames, unreadBotNames]
+      : [activeRunningGroupRoomIds, unreadGroupRoomIds];
+    applyTurnStarted(sets[0], sets[1], entityId);
+    activityTransitionTracker.clear(domain, entityId);
+    render();
+  },
+  completeTurn: (domain, entityId, isFocused) => {
+    const sets = domain === 'session'
+      ? [activeRunningSessionIds, unreadSessionIds]
+      : domain === 'bot'
+      ? [activeRunningBotNames, unreadBotNames]
+      : [activeRunningGroupRoomIds, unreadGroupRoomIds];
+    completeEntityTurn(domain, sets[0], sets[1], entityId, isFocused);
+    render();
+  },
+  failTurn: (domain, entityId) => {
+    const running = domain === 'session'
+      ? activeRunningSessionIds
+      : domain === 'bot'
+      ? activeRunningBotNames
+      : activeRunningGroupRoomIds;
+    applyTurnFailed(running, entityId);
+    activityTransitionTracker.clear(domain, entityId);
+    render();
+  },
+  enterRead: (domain, entityId) => {
+    const unread = domain === 'session'
+      ? unreadSessionIds
+      : domain === 'bot'
+      ? unreadBotNames
+      : unreadGroupRoomIds;
+    applyEnteredRead(unread, entityId);
+    activityTransitionTracker.clear(domain, entityId);
+    render();
+  },
+  syncProjects: () => {
+    syncProjectSessions();
+    render();
+  },
+};
 
 /**
  * 传输层到持久层的目标会话 ID 归一化（调用 Core 权威句柄注册器）。
@@ -2254,7 +2350,9 @@ async function fetchGroupRooms(): Promise<void> {
         const existing = state.groupRooms.find((old) => old.roomId === r.roomId);
         if (existing && r.updatedAt && existing.updatedAt && r.updatedAt > existing.updatedAt) {
           if (state.activeFocus.type !== 'group' || state.activeFocus.roomId !== r.roomId) {
-            unreadGroupRoomIds.add(r.roomId);
+            if (!activeRunningGroupRoomIds.has(r.roomId)) {
+              unreadGroupRoomIds.add(r.roomId);
+            }
           }
         }
         const normUpdatedAt = typeof r.updatedAt === 'number' ? (r.updatedAt > 1e11 ? r.updatedAt : r.updatedAt * 1000) : Date.now();
@@ -2323,6 +2421,7 @@ async function openGroupRoom(roomId: string): Promise<void> {
   disarmRollbackOnLeave();
   state.activeFocus = { type: 'group', roomId };
   applyEnteredRead(unreadGroupRoomIds, roomId);
+  activityTransitionTracker.clear('group', roomId);
   const targetRoom = state.groupRooms.find((r) => r.roomId === roomId);
 
   state.activeSessionId = roomId;
@@ -2341,6 +2440,7 @@ async function openGroupRoom(roomId: string): Promise<void> {
   state.activeGroupSpeaker = null;
 
   // 从 groups.log 拉取官方事件流
+  let fetchedLogs: GroupMessageEntry[] = [];
   try {
     const guarded = await runGuarded(
       guard,
@@ -2351,6 +2451,7 @@ async function openGroupRoom(roomId: string): Promise<void> {
     );
     if (guarded.status === 'discarded') return;
     const logs = guarded.value;
+    fetchedLogs = logs ? [...logs] : [];
     if (logs && logs.length > 0) {
       state.messages = logs.map((entry, idx) => {
         const senderName = entry.senderProfile || 'Agent';
@@ -2396,9 +2497,8 @@ async function openGroupRoom(roomId: string): Promise<void> {
   syncActiveGroupSpeakerFromMessages();
   render();
 
-  // 若为托管房间，进入时自动启动持续同步
-  if (hostedRoomIds.has(roomId)) {
-    void pollGroupRoomLog(roomId);
+  if (hostedRoomIds.has(roomId) && activeRunningGroupRoomIds.has(roomId) && !groupPollerManager.isPolling(roomId)) {
+    groupPollerManager.startAwaitReply(roomId, captureGroupLogBaseline(fetchedLogs));
   }
 }
 
@@ -2430,6 +2530,7 @@ async function openBotChat(botProfile: string): Promise<void> {
 
   // 清除属于该智能体的未读标记（仅针对该 Bot 本身，会话状态严格独立）
   applyEnteredRead(unreadBotNames, botProfile);
+  activityTransitionTracker.clear('bot', botProfile);
 
   // 1. 若内存缓存已持有该 Bot 的 Forever Chat ID，0ms 瞬间秒开切入！
   const cachedSessionId = botForeverChatCache.get(botProfile);
@@ -4260,6 +4361,7 @@ async function loadMessagesInner(sessionId: string, targetBotName?: string): Pro
           currentStreamingId: activeStreamingStoredSessionId,
         });
         if (reconciled) {
+          activityTransitionTracker.clear('session', sessionId);
           logSession.info('reconciled orphan running state via authoritative gateway status', { sessionId });
           render();
         }
@@ -4546,6 +4648,7 @@ async function deleteSession(id: string): Promise<void> {
     persistDraftsToStorage();
     unreadSessionIds.delete(id);
     activeRunningSessionIds.delete(id);
+    activityTransitionTracker.clear('session', id);
     defaultSessionHandleRegistry.unregister(id);
 
     // 持久化缓存清理：清空该会话在 IndexedDB 中的消息通道并持久化最新索引
@@ -4597,6 +4700,7 @@ async function deleteSession(id: string): Promise<void> {
       persistDraftsToStorage();
       unreadSessionIds.delete(id);
       activeRunningSessionIds.delete(id);
+      activityTransitionTracker.clear('session', id);
       if (activeStreamingStoredSessionId === id) {
         tokenCoalescer.clear();
         disarmTurnWatchdog();
@@ -4794,6 +4898,7 @@ async function selectSession(id: string, options?: { preserveFocus?: boolean; bo
   state.activeLiveSessionId = ''; // must be re-resolved through session.resume
   activeLoadMessagesGeneration += 1;
   applyEnteredRead(unreadSessionIds, id);
+  activityTransitionTracker.clear('session', id);
   state.modelMenuOpen = false;
 
   // 严格更新互斥单焦点：仅当未要求保持焦点时，更新为普通会话焦点
@@ -4987,14 +5092,16 @@ function armTurnWatchdog(): void {
     turnWatchdogTimer = null;
     if (!state.isStreaming) return;
     tokenCoalescer.flush();
-    // 看门狗超时同样属于"回合异常终止"：必须收尾三个域的运行态，
-    // 否则会话/Bot/群聊会永久停在"进行中"且永不进入未读（历史坑）。
+    const timedOutSessionId = activeStreamingStoredSessionId;
+    const timedOutBotName = activeStreamingBotName;
     settleTurnTermination({
       runningSessionIds: activeRunningSessionIds,
       runningBotNames: activeRunningBotNames,
-      sessionId: activeStreamingStoredSessionId,
-      botName: activeStreamingBotName,
+      sessionId: timedOutSessionId,
+      botName: timedOutBotName,
     });
+    if (timedOutSessionId) activityTransitionTracker.clear('session', timedOutSessionId);
+    if (timedOutBotName) activityTransitionTracker.clear('bot', timedOutBotName);
     state.isStreaming = false;
     // 【在场指示器】看门狗解除锁定后回合已不在运行：时长锚点必须一并清空，
     // 否则指示器会拿着一个早已超时的锚点算出虚高的语气档。
@@ -5128,13 +5235,26 @@ async function interruptTurn(): Promise<void> {
     }
   }
 
-  // 中断同样属于"回合终止"：必须收尾运行态，否则该会话/Bot 永久停在"进行中"
+  const interruptedSessionId = activeStreamingStoredSessionId;
+  const interruptedBotName = activeStreamingBotName;
+  const interruptedGroupRoomId =
+    !interruptedSessionId && !interruptedBotName && state.activeFocus.type === 'group'
+      ? state.activeFocus.roomId
+      : null;
   settleTurnTermination({
     runningSessionIds: activeRunningSessionIds,
     runningBotNames: activeRunningBotNames,
-    sessionId: activeStreamingStoredSessionId,
-    botName: activeStreamingBotName,
+    runningGroupRoomIds: activeRunningGroupRoomIds,
+    sessionId: interruptedSessionId,
+    botName: interruptedBotName,
+    groupRoomId: interruptedGroupRoomId,
   });
+  if (interruptedSessionId) activityTransitionTracker.clear('session', interruptedSessionId);
+  if (interruptedBotName) activityTransitionTracker.clear('bot', interruptedBotName);
+  if (interruptedGroupRoomId) {
+    groupPollerManager.stop(interruptedGroupRoomId);
+    activityTransitionTracker.clear('group', interruptedGroupRoomId);
+  }
 
   state.isStreaming = false;
   // 【在场指示器】用户主动中断：落中断终态（TTL 8s 自动退场），让「已停手」被看见一次
@@ -5173,6 +5293,7 @@ async function sendGroupMessage(roomId: string, text: string): Promise<void> {
   const threadId = activeGroupThreadId && now - activeGroupThreadAt < GROUP_THREAD_GAP_MS
     ? activeGroupThreadId
     : undefined;
+  const baseline = captureGroupLogBaseline(groupRoomStore.getLogs(roomId));
 
   const userMsgId = `grp-usr-${now}`;
   state.messages.push({
@@ -5191,8 +5312,8 @@ async function sendGroupMessage(roomId: string, text: string): Promise<void> {
     state.groupRooms = [targetRoom, ...state.groupRooms.filter((r) => r.roomId !== roomId)];
   }
   applyTurnStarted(activeRunningGroupRoomIds, unreadGroupRoomIds, roomId);
-  // 【在场指示器】人类刚发话：此刻没有 Agent 在说话，说话者必须显式清空（绝不沿用上一位）
   syncActiveGroupSpeakerFromMessages();
+  activityTransitionTracker.clear('group', roomId);
 
   render();
   scrollStreamToBottom('group message sent');
@@ -5202,13 +5323,43 @@ async function sendGroupMessage(roomId: string, text: string): Promise<void> {
     activeGroupThreadId = res.event?.payload?.thread_id || threadId || null;
     activeGroupThreadAt = now;
 
-    // 发送成功后回读房间日志，并有限轮询等待成员回合的回复落盘
     void refreshGroupRoomLog(roomId);
-    void pollGroupRoomLog(roomId);
+    groupPollerManager.startAwaitReply(roomId, baseline);
   } catch (err) {
     applyTurnFailed(activeRunningGroupRoomIds, roomId);
+    activityTransitionTracker.clear('group', roomId);
     console.error('[Flux] groups.send failed:', err);
     setTimedDockNotice(t('group.sendFailed', { error: describeRpcError(err) }));
+    render();
+  }
+}
+
+function syncGroupRoomLogsToState(roomId: string, logs: readonly GroupMessageEntry[]): void {
+  if (!logs || logs.length === 0) return;
+  const lastEntry = logs[logs.length - 1];
+  const targetRoom = state.groupRooms.find((r) => r.roomId === roomId);
+  if (targetRoom && lastEntry) {
+    targetRoom.lastMessage = lastEntry.text;
+    const rawEntryTs = lastEntry.timestamp || Date.now();
+    targetRoom.updatedAt = typeof rawEntryTs === 'number'
+      ? (rawEntryTs > 1e11 ? rawEntryTs : rawEntryTs * 1000)
+      : Date.now();
+    state.groupRooms = [targetRoom, ...state.groupRooms.filter((r) => r.roomId !== roomId)];
+  }
+  if (state.activeFocus.type === 'group' && state.activeFocus.roomId === roomId) {
+    state.messages = logs.map((entry, idx) => {
+      const senderName = entry.senderProfile || 'Agent';
+      return {
+        id: entry.messageId || `g_msg_${idx}`,
+        role: entry.actorKind === 'user' || entry.senderProfile === 'user' ? 'user' : 'assistant',
+        content: entry.text,
+        sender: senderName,
+        senderAvatar: resolveAgentAvatar(senderName),
+        timestamp: formatTimestamp(entry.timestamp || Date.now()),
+      };
+    });
+    pendingScrollToBottom = true;
+    syncActiveGroupSpeakerFromMessages();
     render();
   }
 }
@@ -5219,32 +5370,7 @@ async function refreshGroupRoomLog(roomId: string): Promise<number> {
   if (!client) return 0;
   try {
     const logs = await groupRoomStore.fetchLogs(roomId, client);
-    if (!logs || logs.length === 0) return 0;
-    const lastEntry = logs[logs.length - 1];
-    const targetRoom = state.groupRooms.find((r) => r.roomId === roomId);
-    if (targetRoom && lastEntry) {
-      targetRoom.lastMessage = lastEntry.text;
-      const rawEntryTs = lastEntry.timestamp || Date.now();
-      targetRoom.updatedAt = typeof rawEntryTs === 'number' ? (rawEntryTs > 1e11 ? rawEntryTs : rawEntryTs * 1000) : Date.now();
-      state.groupRooms = [targetRoom, ...state.groupRooms.filter((r) => r.roomId !== roomId)];
-    }
-    if (state.activeFocus.type === 'group' && state.activeFocus.roomId === roomId) {
-      state.messages = logs.map((entry, idx) => {
-        const senderName = entry.senderProfile || 'Agent';
-        return {
-          id: entry.messageId || `g_msg_${idx}`,
-          role: entry.actorKind === 'user' || entry.senderProfile === 'user' ? 'user' : 'assistant',
-          content: entry.text,
-          sender: senderName,
-          senderAvatar: resolveAgentAvatar(senderName),
-          timestamp: formatTimestamp(entry.timestamp || Date.now()),
-        };
-      });
-      pendingScrollToBottom = true;
-      // 【在场指示器】回读到新日志即按末条真实事件刷新说话者（不猜、不沿用）
-      syncActiveGroupSpeakerFromMessages();
-      render();
-    }
+    syncGroupRoomLogsToState(roomId, logs);
     return logs.length;
   } catch (e) {
     console.warn('[Flux] refreshGroupRoomLog failed:', e);
@@ -5252,103 +5378,27 @@ async function refreshGroupRoomLog(roomId: string): Promise<number> {
   }
 }
 
-/**
- * 有限轮询群聊日志，等待成员回合的回复落盘
- *
- * 【设计意图 (Why)】
- * groups.send 只是把人类消息写进房间日志（driver_started=true），
- * 成员的回复由网关 driver 异步产出，必须回读 groups.log 才能上屏。
- *
- * 【防范的历史坑 (Pitfall)】
- * 只读一次会永远看不到回复；用 setInterval 常驻轮询又会造成定时器泄漏与空转。
- * 这里采用有界轮询（最多 8 轮 × 2.5s），连续两轮无新增即提前结束。
- *
- * 【规则 (Rules)】
- * - 轮次与间隔必须硬编码上限，禁止无界等待；
- * - 房间切换后后台静默轮询直至结果落盘，自动标记为未读小绿点。
- */
-let activeGroupPollerTimer: ReturnType<typeof setTimeout> | null = null;
-
-function clearGroupPoller(): void {
-  if (activeGroupPollerTimer) {
-    clearTimeout(activeGroupPollerTimer);
-    activeGroupPollerTimer = null;
-  }
-}
-
-/**
- * 持续轮询群聊房间日志，直到房间不再处于激活态或连续空转超时
- */
-async function pollGroupRoomLog(roomId: string, maxRounds = 30, intervalMs = 1200): Promise<void> {
-  clearGroupPoller();
-  let round = 0;
-  let stagnantCount = 0;
-  let lastCount = -1;
-
-  const step = async () => {
-    if (state.activeFocus.type !== 'group' || state.activeFocus.roomId !== roomId) {
-      // 用户已切到其他界面，群聊在后台继续静默等待 Agent 回复落盘
-      round++;
-      const count = await refreshGroupRoomLog(roomId);
-      if (count > lastCount) {
-        // 后台完成：退出 running 并置未读小绿点（用户不在该房间）
-        applyTurnCompleted(activeRunningGroupRoomIds, unreadGroupRoomIds, roomId, false);
-        render();
-        clearGroupPoller();
-        return;
-      }
-      if (round >= maxRounds) {
-        applyTurnFailed(activeRunningGroupRoomIds, roomId);
-        render();
-        clearGroupPoller();
-        return;
-      }
-      activeGroupPollerTimer = setTimeout(() => {
-        void step();
-      }, intervalMs);
-      return;
+const groupPollerManager = new GroupLogPollerManager<GroupMessageEntry>({
+  fetchLogs: (roomId) => {
+    if (!gatewayClient) {
+      return Promise.reject(new Error('Gateway not connected'));
     }
-
-    round++;
-    const count = await refreshGroupRoomLog(roomId);
-    const lastMsg = state.messages.length > 0 ? state.messages[state.messages.length - 1] : null;
-    const hasAgentReplied = Boolean(lastMsg && lastMsg.role === 'assistant');
-
-    if (count > lastCount) {
-      lastCount = count;
-      stagnantCount = 0;
-      // 只要检测到已有 Agent 回复落盘，立即在首帧解除 running 状态！
-      if (hasAgentReplied) {
-        applyTurnCompleted(activeRunningGroupRoomIds, unreadGroupRoomIds, roomId, true);
-        render();
-      }
-    } else {
-      stagnantCount++;
-    }
-
-    // 若已经有回复且连续 2 轮无新消息，或者未回复但空转达到 6 轮，立即停止轮询，杜绝无界空转
-    if ((hasAgentReplied && stagnantCount >= 2) || (stagnantCount >= 5 && round >= 6) || round >= maxRounds) {
-      // 收尾：有回复走完成（当前聚焦即已读），无回复的超时视为失败而非未读
-      if (hasAgentReplied) {
-        applyTurnCompleted(activeRunningGroupRoomIds, unreadGroupRoomIds, roomId, true);
-      } else {
-        applyTurnFailed(activeRunningGroupRoomIds, roomId);
-      }
-      render();
-      clearGroupPoller();
-      return;
-    }
-
-    const nextInterval = stagnantCount > 2 ? 2000 : intervalMs;
-    activeGroupPollerTimer = setTimeout(() => {
-      void step();
-    }, nextInterval);
-  };
-
-  activeGroupPollerTimer = setTimeout(() => {
-    void step();
-  }, intervalMs);
-}
+    return groupRoomStore.fetchLogs(roomId, gatewayClient);
+  },
+  isFocused: (roomId) => state.activeFocus.type === 'group' && state.activeFocus.roomId === roomId,
+  onSyncLogs: (roomId, logs) => {
+    syncGroupRoomLogsToState(roomId, logs);
+  },
+  onCompleted: (roomId, focused) => {
+    completeEntityTurn('group', activeRunningGroupRoomIds, unreadGroupRoomIds, roomId, focused);
+    render();
+  },
+  onFailed: (roomId) => {
+    applyTurnFailed(activeRunningGroupRoomIds, roomId);
+    activityTransitionTracker.clear('group', roomId);
+    render();
+  },
+});
 
 async function sendMessage(text: string): Promise<void> {
   const trimmed = text.trim();
@@ -5453,6 +5503,7 @@ async function sendMessage(text: string): Promise<void> {
   if (state.activeSessionId) {
     // 回合开始：进入 running 并当场清除该会话的历史未读残留（禁止"运行中 + 未读绿点"并存）
     applyTurnStarted(activeRunningSessionIds, unreadSessionIds, state.activeSessionId);
+    activityTransitionTracker.clear('session', state.activeSessionId);
     // 即时更新当前会话的最新消息副标题与时间戳，并排在会话列表最前
     const activeSess = state.sessions.find((s) => s.id === state.activeSessionId);
     if (activeSess) {
@@ -5468,6 +5519,7 @@ async function sendMessage(text: string): Promise<void> {
   activeStreamingBotName = currentFocus.type === 'bot' ? currentFocus.botName : null;
   if (currentFocus.type === 'bot') {
     applyTurnStarted(activeRunningBotNames, unreadBotNames, currentFocus.botName);
+    activityTransitionTracker.clear('bot', currentFocus.botName);
     const focusBotName = currentFocus.botName;
     const nowMs = Date.now();
     updateBotLatestActivity(focusBotName, trimmed, nowMs);
@@ -5573,10 +5625,16 @@ async function sendMessage(text: string): Promise<void> {
     if (submitResult?.status && submitResult.status !== 'streaming' && submitResult.status !== 'queued') {
       assistantMsg.content = `[网关未受理本轮] status=${String(submitResult.status)}`;
       state.isStreaming = false;
-      // 【在场指示器】网关未受理 = 回合失败终态，必须显式展示而不是静默回到 idle
       armPresenceTerminal({ kind: 'failed', message: `status=${String(submitResult.status)}` });
-      if (activeStreamingStoredSessionId) applyTurnFailed(activeRunningSessionIds, activeStreamingStoredSessionId);
-      if (activeStreamingBotName) { applyTurnFailed(activeRunningBotNames, activeStreamingBotName); activeStreamingBotName = null; }
+      if (activeStreamingStoredSessionId) {
+        applyTurnFailed(activeRunningSessionIds, activeStreamingStoredSessionId);
+        activityTransitionTracker.clear('session', activeStreamingStoredSessionId);
+      }
+      if (activeStreamingBotName) {
+        applyTurnFailed(activeRunningBotNames, activeStreamingBotName);
+        activityTransitionTracker.clear('bot', activeStreamingBotName);
+        activeStreamingBotName = null;
+      }
       activeStreamingMessageId = null;
       activeStreamingStoredSessionId = null;
       activeStreamingLiveId = null;
@@ -5593,10 +5651,16 @@ async function sendMessage(text: string): Promise<void> {
     console.error('[Hermes Gateway] prompt.submit failed:', err);
     assistantMsg.content = `[提交失败] ${describeRpcError(err)}`;
     state.isStreaming = false;
-    // 【在场指示器】提交失败同样是终态：把 RPC 原因透传给指示器，用户能看到为什么停了
     armPresenceTerminal({ kind: 'failed', message: describeRpcError(err) });
-    if (activeStreamingStoredSessionId) applyTurnFailed(activeRunningSessionIds, activeStreamingStoredSessionId);
-    if (activeStreamingBotName) { applyTurnFailed(activeRunningBotNames, activeStreamingBotName); activeStreamingBotName = null; }
+    if (activeStreamingStoredSessionId) {
+      applyTurnFailed(activeRunningSessionIds, activeStreamingStoredSessionId);
+      activityTransitionTracker.clear('session', activeStreamingStoredSessionId);
+    }
+    if (activeStreamingBotName) {
+      applyTurnFailed(activeRunningBotNames, activeStreamingBotName);
+      activityTransitionTracker.clear('bot', activeStreamingBotName);
+      activeStreamingBotName = null;
+    }
     activeStreamingMessageId = null;
     activeStreamingStoredSessionId = null;
     activeStreamingLiveId = null;
@@ -6125,7 +6189,7 @@ function applyTurnActions(actions: TurnAction[]): void {
         if (completedTargetId) {
           // 回合完成：退出 running；焦点不在该会话时置未读（显式传入焦点判定，禁止函数内从全局反推）
           const isFocused = completedTargetId === state.activeSessionId;
-          applyTurnCompleted(activeRunningSessionIds, unreadSessionIds, completedTargetId, isFocused);
+          completeEntityTurn('session', activeRunningSessionIds, unreadSessionIds, completedTargetId, isFocused);
           // 【核心隔离固化】仅当当前焦点处于该会话时，state.messages 才属于该会话！
           // 若用户已切到其他会话，绝不能拿当前会话的 state.messages 去覆盖后台会话的缓存！
           if (isFocused) {
@@ -6159,7 +6223,7 @@ function applyTurnActions(actions: TurnAction[]): void {
           if (finalMsg?.content) {
             updateBotLatestActivity(activeStreamingBotName, finalMsg.content, Date.now());
           }
-          applyTurnCompleted(activeRunningBotNames, unreadBotNames, activeStreamingBotName, isBotFocused);
+          completeEntityTurn('bot', activeRunningBotNames, unreadBotNames, activeStreamingBotName, isBotFocused);
           activeStreamingBotName = null;
         }
         syncProfileLastMessages();
@@ -6189,9 +6253,11 @@ function applyTurnActions(actions: TurnAction[]): void {
         if (failedTargetId) {
           // 回合失败：退出 running，但绝不置未读（失败没有可查看的成果）
           applyTurnFailed(activeRunningSessionIds, failedTargetId);
+          activityTransitionTracker.clear('session', failedTargetId);
         }
         if (activeStreamingBotName) {
           applyTurnFailed(activeRunningBotNames, activeStreamingBotName);
+          activityTransitionTracker.clear('bot', activeStreamingBotName);
           activeStreamingBotName = null;
         }
         syncProfileLastMessages();
@@ -6481,6 +6547,9 @@ function disconnect(): void {
   }
   tokenCoalescer.clear();
   disarmTurnWatchdog();
+  groupPollerManager.stopAll();
+  activityTransitionTracker.clearAll();
+  clearTransitionRefreshTimer();
   activeStreamingMessageId = null;
   activeStreamingStoredSessionId = null;
   activeStreamingLiveId = null;
@@ -6774,9 +6843,18 @@ interface RailDecorCacheEntry<T> { stamp: string; value: T }
 const railSessionDecorCache = new WeakMap<LeftRailSession, RailDecorCacheEntry<LeftRailSession>>();
 const railGroupDecorCache = new WeakMap<LeftRailGroupRoom, RailDecorCacheEntry<LeftRailGroupRoom>>();
 const railProfileDecorCache = new WeakMap<LeftRailProfile, RailDecorCacheEntry<LeftRailProfile>>();
+const railProjectDecorCache = new WeakMap<LeftRailProject, {
+  sourceSessions: LeftRailSession[] | undefined;
+  decoratedSessions: LeftRailSession[];
+  value: LeftRailProject;
+}>();
 let lastDecoratedSessions: LeftRailSession[] = [];
 let lastDecoratedGroups: LeftRailGroupRoom[] = [];
 let lastDecoratedProfiles: LeftRailProfile[] = [];
+let lastProjectsSourceRef: LeftRailProject[] | null = null;
+let lastProjectsVersionSnapshot = -1;
+let lastDecoratedSessionsForProjects: readonly LeftRailSession[] | null = null;
+let lastDecoratedProjects: LeftRailProject[] = [];
 
 interface LeftRailSnapshotInputs {
   sessions: LeftRailSession[];
@@ -6825,13 +6903,16 @@ function stableArray<T>(next: T[], previous: T[]): T[] {
   return next.length === previous.length && next.every((item, index) => item === previous[index]) ? previous : next;
 }
 
-function decorateRailSessions(): LeftRailSession[] {
+function decorateRailSessions(nowMs: number): LeftRailSession[] {
   const next = state.sessions.map((s) => {
     const activityState = resolveActivityState(s.id, {
       runningIds: activeRunningSessionIds,
       unreadIds: unreadSessionIds,
       streamingId: activeStreamingStoredSessionId,
     });
+    const transitionRes = activityTransitionTracker.resolveTransition('session', s.id, activityState, nowMs);
+    const activityTransition: ActivityTransition = transitionRes.transition;
+    const activityTransitionToken = transitionRes.transitionToken;
     const cached = railSessionDecorCache.get(s);
     if (cached
       && cached.value.title === s.title
@@ -6843,10 +6924,18 @@ function decorateRailSessions(): LeftRailSession[] {
       && cached.value.botName === s.botName
       && cached.value.botDisplayName === s.botDisplayName
       && cached.value.botAvatar === s.botAvatar
-      && cached.value.activityState === activityState) {
+      && cached.value.activityState === activityState
+      && cached.value.activityTransition === activityTransition
+      && cached.value.activityTransitionToken === activityTransitionToken) {
       return cached.value;
     }
-    const value: LeftRailSession = { ...s, isPinned: s.pinned, activityState };
+    const value: LeftRailSession = {
+      ...s,
+      isPinned: s.pinned,
+      activityState,
+      activityTransition,
+      activityTransitionToken,
+    };
     railSessionDecorCache.set(s, { stamp: '', value });
     return value;
   });
@@ -6854,16 +6943,33 @@ function decorateRailSessions(): LeftRailSession[] {
   return lastDecoratedSessions;
 }
 
-function decorateRailGroups(): LeftRailGroupRoom[] {
+function decorateRailGroups(nowMs: number): LeftRailGroupRoom[] {
   const next = state.groupRooms.map((g) => {
     const activityState = resolveActivityState(g.roomId, {
       runningIds: activeRunningGroupRoomIds,
       unreadIds: unreadGroupRoomIds,
     });
-    const stamp = [g.name, (g.members || []).join('\u0002'), g.lastMessage, g.updatedAt, g.createdAt, activityState].join('\u0001');
+    const transitionRes = activityTransitionTracker.resolveTransition('group', g.roomId, activityState, nowMs);
+    const activityTransition: ActivityTransition = transitionRes.transition;
+    const activityTransitionToken = transitionRes.transitionToken;
+    const stamp = [
+      g.name,
+      (g.members || []).join('\u0002'),
+      g.lastMessage,
+      g.updatedAt,
+      g.createdAt,
+      activityState,
+      activityTransition,
+      activityTransitionToken ?? '',
+    ].join('\u0001');
     const cached = railGroupDecorCache.get(g);
     if (cached && cached.stamp === stamp) return cached.value;
-    const value: LeftRailGroupRoom = { ...g, activityState };
+    const value: LeftRailGroupRoom = {
+      ...g,
+      activityState,
+      activityTransition,
+      activityTransitionToken,
+    };
     railGroupDecorCache.set(g, { stamp, value });
     return value;
   });
@@ -6871,22 +6977,92 @@ function decorateRailGroups(): LeftRailGroupRoom[] {
   return lastDecoratedGroups;
 }
 
-function decorateRailProfiles(): LeftRailProfile[] {
+function decorateRailProfiles(nowMs: number): LeftRailProfile[] {
   const next = state.profiles.map((p) => {
     const avatar = p.avatar || resolveAgentAvatar(p.name) || (p.displayName ? resolveAgentAvatar(p.displayName) : '') || '';
     const activityState = resolveActivityState(p.name, {
       runningIds: activeRunningBotNames,
       unreadIds: unreadBotNames,
     });
-    const stamp = [p.name, p.displayName, avatar, p.description, p.lastMessage, p.lastTime, p.timestamp, p.isDefault ? 1 : 0, activityState].join('\u0001');
+    const transitionRes = activityTransitionTracker.resolveTransition('bot', p.name, activityState, nowMs);
+    const activityTransition: ActivityTransition = transitionRes.transition;
+    const activityTransitionToken = transitionRes.transitionToken;
+    const stamp = [
+      p.name,
+      p.displayName,
+      avatar,
+      p.description,
+      p.lastMessage,
+      p.lastTime,
+      p.timestamp,
+      p.isDefault ? 1 : 0,
+      activityState,
+      activityTransition,
+      activityTransitionToken ?? '',
+    ].join('\u0001');
     const cached = railProfileDecorCache.get(p);
     if (cached && cached.stamp === stamp) return cached.value;
-    const value: LeftRailProfile = { ...p, avatar, activityState };
+    const value: LeftRailProfile = {
+      ...p,
+      avatar,
+      activityState,
+      activityTransition,
+      activityTransitionToken,
+    };
     railProfileDecorCache.set(p, { stamp, value });
     return value;
   });
   lastDecoratedProfiles = stableArray(next, lastDecoratedProfiles);
   return lastDecoratedProfiles;
+}
+
+function decorateRailProjects(decoratedSessions: readonly LeftRailSession[]): LeftRailProject[] {
+  if (
+    lastProjectsSourceRef === state.projects
+    && lastProjectsVersionSnapshot === projectsVersion
+    && lastDecoratedSessionsForProjects === decoratedSessions
+  ) {
+    return lastDecoratedProjects;
+  }
+
+  const decoratedById = new Map<string, LeftRailSession>();
+  for (const s of decoratedSessions) {
+    decoratedById.set(s.id, s);
+  }
+
+  const next = state.projects.map((proj) => {
+    const rawSessions = proj.sessions;
+    const mappedSessions = (rawSessions || []).map((s) => decoratedById.get(s.id) ?? s);
+    const cached = railProjectDecorCache.get(proj);
+    if (
+      cached
+      && cached.sourceSessions === rawSessions
+      && cached.value.id === proj.id
+      && cached.value.name === proj.name
+      && cached.value.path === proj.path
+      && cached.decoratedSessions.length === mappedSessions.length
+      && cached.decoratedSessions.every((item, idx) => item === mappedSessions[idx])
+    ) {
+      return cached.value;
+    }
+    const stableSessions = cached ? stableArray(mappedSessions, cached.decoratedSessions) : mappedSessions;
+    const value: LeftRailProject = {
+      ...proj,
+      sessions: stableSessions,
+    };
+    railProjectDecorCache.set(proj, {
+      sourceSessions: rawSessions,
+      decoratedSessions: stableSessions,
+      value,
+    });
+    return value;
+  });
+
+  lastProjectsSourceRef = state.projects;
+  lastProjectsVersionSnapshot = projectsVersion;
+  lastDecoratedSessionsForProjects = decoratedSessions;
+  lastDecoratedProjects = stableArray(next, lastDecoratedProjects);
+  return lastDecoratedProjects;
 }
 
 function getTitlebarSnapshot(): TitlebarSnapshot {
@@ -6925,15 +7101,16 @@ function getTitlebarSnapshot(): TitlebarSnapshot {
  * 三态装饰严格按域隔离：会话读会话集合、群聊读群聊集合、Bot 只读 Bot 集合，互不冒泡。
  */
 function getLeftRailSnapshot(): LeftRailSnapshot {
-  const sessions = decorateRailSessions();
-  const groups = decorateRailGroups();
-  // 强制穿透：优先从全局头像缓存解析真实头像资产，消除时序冲刷导致的头像丢失
-  const profiles = decorateRailProfiles();
+  const nowMs = Date.now();
+  const sessions = decorateRailSessions(nowMs);
+  const groups = decorateRailGroups(nowMs);
+  const profiles = decorateRailProfiles(nowMs);
+  const projects = decorateRailProjects(sessions);
   const inputs: LeftRailSnapshotInputs = {
     sessions,
     groups,
     profiles,
-    projects: state.projects,
+    projects,
     projectsVersion,
     activeSessionId: state.activeSessionId,
     activeFocus: state.activeFocus,
@@ -6960,7 +7137,7 @@ function getLeftRailSnapshot(): LeftRailSnapshot {
       profileName: state.profileName,
       profiles,
       groups,
-      projects: state.projects,
+      projects,
       activeRailTab: state.activeRailTab,
       searchQuery: state.sessionSearchQuery,
       isSessionsGroupExpanded: state.isSessionsGroupExpanded,
@@ -9618,6 +9795,15 @@ function bindEvents(): void {
             restoreComposerFocus();
             if (gatewayClient) {
               void groupRoomStore.disbandRoom(ctx.targetId, gatewayClient).then(async () => {
+                groupPollerManager.stop(ctx.targetId);
+                settleTurnTermination({
+                  runningSessionIds: activeRunningSessionIds,
+                  runningBotNames: activeRunningBotNames,
+                  runningGroupRoomIds: activeRunningGroupRoomIds,
+                  groupRoomId: ctx.targetId,
+                });
+                unreadGroupRoomIds.delete(ctx.targetId);
+                activityTransitionTracker.clear('group', ctx.targetId);
                 await fetchGroupRooms();
                 if (state.activeFocus.type === 'group' && state.activeFocus.roomId === ctx.targetId) {
                   if (state.sessions.length > 0) void selectSession(state.sessions[0].id);
@@ -11432,11 +11618,19 @@ async function init(): Promise<void> {
     }
   });
 
+  const syncPageHiddenAttr = (): void => {
+    if (document.visibilityState === 'hidden') {
+      document.documentElement.dataset.pageHidden = 'true';
+    } else {
+      delete document.documentElement.dataset.pageHidden;
+    }
+  };
+  syncPageHiddenAttr();
+
   // 页面从隐藏恢复但未触发窗口 focus 时，也要及时同步服务端改名/改描述。
   document.addEventListener('visibilitychange', () => {
-    // 【在场指示器能耗管制】CSS 侧 `html[data-app-hidden="true"] .conv-presence *`
-    // 依赖这个属性暂停动画；宿主不写它，那条规则就是死代码。
     document.documentElement.dataset.appHidden = String(document.visibilityState === 'hidden');
+    syncPageHiddenAttr();
     if (document.visibilityState === 'visible') void refreshProfilesFromServer();
   });
 }
