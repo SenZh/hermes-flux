@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -63,7 +64,8 @@ async function waitForServer(baseUrl, child, deadlineMs = 15000) {
 }
 
 test('浏览器直跑 /__gw/auth 凭据透传与失败显式化', { timeout: 40000 }, async (t) => {
-  const seen = { login: [], ticket: [], proxy: [] };
+  const seen = { login: [], ticket: [], proxy: [], wsUpgrade: [] };
+  const activeWsSockets = new Set();
 
   const gateway = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
@@ -98,6 +100,40 @@ test('浏览器直跑 /__gw/auth 凭据透传与失败显式化', { timeout: 400
     return send(404, { error: 'not_found' });
   });
 
+  gateway.on('upgrade', (req, socket) => {
+    const reqUrl = new URL(req.url, 'http://127.0.0.1');
+    const origin = req.headers.origin || '';
+    const ticket = reqUrl.searchParams.get('ticket') || '';
+    const expectedOrigin = `http://127.0.0.1:${gateway.address().port}`;
+    seen.wsUpgrade.push({ origin, ticket, cookie: req.headers.cookie || '' });
+
+    if (origin !== expectedOrigin || ticket !== 'TICKET-XYZ') {
+      socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
+    const key = req.headers['sec-websocket-key'];
+    const accept = crypto
+      .createHash('sha1')
+      .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+      .digest('base64');
+    socket.on('error', () => {});
+    socket.on('end', () => socket.end());
+    activeWsSockets.add(socket);
+    socket.on('close', () => activeWsSockets.delete(socket));
+    socket.write(
+      `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`
+    );
+
+    socket.on('data', (chunk) => {
+      if (chunk.length >= 2 && (chunk[0] & 0x0f) === 0x01) {
+        const msg = Buffer.from('{"pong":true}', 'utf8');
+        socket.write(Buffer.concat([Buffer.from([0x81, msg.length]), msg]));
+      }
+    });
+  });
+
   const gwPort = await listenDynamic(gateway);
   const livePort = await freePort();
   const baseUrl = `http://127.0.0.1:${livePort}`;
@@ -120,6 +156,10 @@ test('浏览器直跑 /__gw/auth 凭据透传与失败显式化', { timeout: 400
     child.kill();
     child.stdout.destroy();
     child.stderr.destroy();
+    for (const sock of activeWsSockets) {
+      sock.destroy();
+    }
+    gateway.closeAllConnections?.();
     await new Promise((resolve) => gateway.close(resolve));
   });
 
@@ -204,5 +244,127 @@ test('浏览器直跑 /__gw/auth 凭据透传与失败显式化', { timeout: 400
       false,
       '旧实现的 401 预登录警告必须消失',
     );
+  });
+
+  await t.test('7. /inject.js 暴露 proxyWebSocketUrl 将跨源地址重写为同源 /__gw/ws', async () => {
+    const injectRes = await fetch(`${baseUrl}/inject.js`);
+    assert.equal(injectRes.status, 200);
+    const injectCode = await injectRes.text();
+    assert.match(injectCode, /proxyWebSocketUrl\s*:/, '必须注入 proxyWebSocketUrl 宿主钩子');
+    assert.match(injectCode, /\/__gw\/ws\?target=/, '必须映射到同源 /__gw/ws 隧道');
+  });
+
+  await t.test('8. /__gw/ws 同源隧道覆盖跨源 Origin 并支持双向 WebSocket 通信', async () => {
+    const authRes = await postJson('/__gw/auth', {
+      url: `http://127.0.0.1:${gwPort}`,
+      username: 'alice',
+      password: 'correct-horse',
+    });
+    assert.equal(authRes.data.ok, true);
+    const targetWsUrl = `ws://127.0.0.1:${gwPort}/api/ws?ticket=TICKET-XYZ`;
+    const proxyUpgrade = (pathAndQuery, originHeader) =>
+      new Promise((resolve, reject) => {
+        const req = http.request(
+          {
+            hostname: '127.0.0.1',
+            port: livePort,
+            path: pathAndQuery,
+            method: 'GET',
+            headers: {
+              Connection: 'Upgrade',
+              Upgrade: 'websocket',
+              'Sec-WebSocket-Version': '13',
+              'Sec-WebSocket-Key': crypto.randomBytes(16).toString('base64'),
+              Origin: originHeader,
+            },
+          }
+        );
+        req.on('upgrade', (res, sock) => { sock.on('error', () => {}); resolve({ statusCode: res.statusCode, sock }); });
+        req.on('response', (res) => {
+          res.resume();
+          resolve({ statusCode: res.statusCode, sock: null });
+        });
+        req.on('error', reject);
+        req.end();
+      });
+
+    const directBlocked = await new Promise((resolve) => {
+      const req = http.request({
+        hostname: '127.0.0.1',
+        port: gwPort,
+        path: '/api/ws?ticket=TICKET-XYZ',
+        method: 'GET',
+        headers: {
+          Connection: 'Upgrade',
+          Upgrade: 'websocket',
+          'Sec-WebSocket-Version': '13',
+          'Sec-WebSocket-Key': crypto.randomBytes(16).toString('base64'),
+          Origin: baseUrl,
+        },
+      });
+      req.on('response', (res) => { res.resume(); resolve(res.statusCode); });
+      req.on('upgrade', (_res, sock) => { sock.destroy(); resolve(101); });
+      req.end();
+    });
+    assert.equal(directBlocked, 403, '不经隧道直接携带 9120 Origin 必须被假网关 403 拒绝');
+
+    const proxied = await proxyUpgrade(`/__gw/ws?target=${encodeURIComponent(targetWsUrl)}`, baseUrl);
+    assert.equal(proxied.statusCode, 101, '经 /__gw/ws 隧道必须完成 101 升级');
+    const latestUpgrade = seen.wsUpgrade.at(-1);
+    assert.equal(latestUpgrade.origin, `http://127.0.0.1:${gwPort}`, '隧道必须注入与网关同源的 Origin');
+    assert.equal(latestUpgrade.cookie, 'session=sid-42', '隧道必须透传已登录会话 Cookie');
+
+    const received = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('WS 隧道双向收发超时')), 3000);
+      proxied.sock.on('data', (chunk) => {
+        if (chunk.length >= 2 && (chunk[0] & 0x0f) === 0x01) {
+          clearTimeout(timer);
+          const len = chunk[1] & 0x7f;
+          resolve(chunk.subarray(2, 2 + len).toString('utf8'));
+        }
+      });
+      const payload = Buffer.from('{"ping":1}', 'utf8');
+      const mask = crypto.randomBytes(4);
+      const masked = Buffer.alloc(payload.length);
+      for (let i = 0; i < payload.length; i++) masked[i] = payload[i] ^ mask[i % 4];
+      proxied.sock.write(Buffer.concat([Buffer.from([0x81, 0x80 | payload.length]), mask, masked]));
+    });
+    proxied.sock.destroy();
+    assert.equal(received, '{"pong":true}', '隧道必须完整透传双向 WebSocket 帧');
+
+    const badProto = await proxyUpgrade(`/__gw/ws?target=${encodeURIComponent(`http://127.0.0.1:${gwPort}/api/ws`)}`, baseUrl);
+    assert.equal(badProto.statusCode, 400, '非法目标协议必须被隧道拒绝 (400)');
+
+    const missingTarget = await proxyUpgrade('/__gw/ws', baseUrl);
+    assert.equal(missingTarget.statusCode, 400, '缺失 target 参数必须被拒绝 (400)');
+
+    const malformedTarget = await proxyUpgrade('/__gw/ws?target=not%3A%2F%2F%5B', baseUrl);
+    assert.equal(malformedTarget.statusCode, 400, '畸形 target URL 必须被拒绝 (400)');
+
+    const selfProxy = await proxyUpgrade(`/__gw/ws?target=${encodeURIComponent(`ws://127.0.0.1:${livePort}/__gw/ws`)}`, baseUrl);
+    assert.equal(selfProxy.statusCode, 400, '递归指向 /__gw/ws 必须被拒绝 (400)');
+
+    const evilOrigin = await proxyUpgrade(`/__gw/ws?target=${encodeURIComponent(targetWsUrl)}`, 'https://evil.example.com');
+    assert.equal(evilOrigin.statusCode, 403, '外部非回环 Origin 请求本地代理必须被拒绝 (403)');
+
+    const upstreamRejected = await proxyUpgrade(`/__gw/ws?target=${encodeURIComponent(`ws://127.0.0.1:${gwPort}/api/ws?ticket=EXPIRED`)}`, baseUrl);
+    assert.equal(upstreamRejected.statusCode, 403, '上游网关拒绝升级时必须透传 403 状态码');
+
+    const unreachablePort = await freePort();
+    const upstreamDown = await proxyUpgrade(`/__gw/ws?target=${encodeURIComponent(`ws://127.0.0.1:${unreachablePort}/api/ws`)}`, baseUrl);
+    assert.equal(upstreamDown.statusCode, 502, '上游不可达时必须返回 502');
+
+    const badPath = await proxyUpgrade('/__gw/unknown', baseUrl);
+    assert.equal(badPath.statusCode, 404, '非 /__gw/ws 路径升级必须拒绝 (404)');
+
+    const closingConn = await proxyUpgrade(`/__gw/ws?target=${encodeURIComponent(targetWsUrl)}`, baseUrl);
+    assert.equal(closingConn.statusCode, 101);
+    const serverSideSock = [...activeWsSockets].at(-1);
+    const closedOnGateway = new Promise((resolve) => {
+      serverSideSock.once('close', () => resolve(true));
+      setTimeout(() => resolve(false), 2000);
+    });
+    closingConn.sock.destroy();
+    assert.equal(await closedOnGateway, true, '客户端断开后代理必须同步销毁上游连接防止孤儿句柄泄漏');
   });
 });

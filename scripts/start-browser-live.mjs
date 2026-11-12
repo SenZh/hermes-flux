@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { attachGatewayWsProxy } from './lib/ws-proxy.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -22,6 +23,7 @@ const GW_BASE = (process.env.FLUX_GATEWAY_URL || process.env.HERMES_GATEWAY_URL 
 const PORT = Number(process.env.PORT) || 9120;
 
 let sessionCookie = '';
+let authenticatedOrigin = '';
 let lastKnownBaseUrl = '';
 
 process.on('uncaughtException', (err) => {
@@ -111,9 +113,15 @@ async function authenticateWithCredentials(baseUrl, username, password) {
   const setCookies = typeof loginRes.headers.getSetCookie === 'function'
     ? loginRes.headers.getSetCookie()
     : [loginRes.headers.get('set-cookie') || ''];
-  sessionCookie = setCookies.map((c) => c.split(';')[0]).filter(Boolean).join('; ');
+  sessionCookie = setCookies.map((c) => c.split(';')[0].trim()).filter(Boolean).join('; ');
   if (!sessionCookie) {
+    authenticatedOrigin = '';
     throw new Error('登录成功但网关未下发会话 Cookie，无法换取 WS ticket');
+  }
+  try {
+    authenticatedOrigin = new URL(base).origin;
+  } catch {
+    authenticatedOrigin = '';
   }
 
   const ticketRes = await fetch(`${base}/api/auth/ws-ticket`, {
@@ -282,6 +290,10 @@ async function start() {
             const r = await fetch('/__gw/proxy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options || {}) });
             return await r.json();
           },
+          proxyWebSocketUrl: (wsUrl) => {
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            return proto + '//' + location.host + '/__gw/ws?target=' + encodeURIComponent(wsUrl);
+          },
           appendLog: () => {},
           getLogDir: async () => null,
           clipboardWrite: async (t) => {
@@ -354,6 +366,8 @@ async function start() {
     });
     fs.createReadStream(fullPath).pipe(res);
   });
+
+  attachGatewayWsProxy(server, () => sessionCookie, () => authenticatedOrigin);
 
   server.listen(PORT, '127.0.0.1', () => {
     const liveUrl = `http://127.0.0.1:${PORT}/`;

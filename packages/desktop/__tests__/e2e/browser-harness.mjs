@@ -27,6 +27,7 @@ import os from 'node:os';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { login, fetchTicket, httpProxy, liveGatewayBase, liveGatewayEnvReady } from './live-gateway-client.mjs';
+import { attachGatewayWsProxy } from '../../../../scripts/lib/ws-proxy.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -138,6 +139,10 @@ export async function launchLiveApp({ rootDir = path.resolve('.') } = {}) {
             const r = await fetch('/__gw/proxy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options || {}) });
             return await r.json();
           },
+          proxyWebSocketUrl: (wsUrl) => {
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            return proto + '//' + location.host + '/__gw/ws?target=' + encodeURIComponent(wsUrl);
+          },
           appendLog: () => {},
           getLogDir: async () => null,
           clipboardWrite: async () => true,
@@ -165,6 +170,7 @@ export async function launchLiveApp({ rootDir = path.resolve('.') } = {}) {
     fs.createReadStream(filePath).pipe(res);
   });
   server.__cookie = cookie;
+  attachGatewayWsProxy(server, () => server.__cookie || cookie);
 
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const webPort = server.address().port;
