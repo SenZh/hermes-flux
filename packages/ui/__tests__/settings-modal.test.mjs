@@ -762,12 +762,122 @@ test('AgentBindingGrid：行内确认条三种相严格分流（needs-key 隐藏
     .map((match) => ({ tag: match[0], label: match[1].replace(/<[^>]*>/g, '').trim() }));
   assert.ok(buttons.length >= 2, 'submitting 阶段必须有按钮占位');
   for (const { tag, label } of buttons) {
-    if (label === t('settings.cancel')) {
-      assert.equal(/\sdisabled(=|>|\s)/.test(tag), false, '提交中必须仍能取消，否则用户被锁死在弹窗里');
+    // 【规则】提交中该按钮文案是「收起」而非「取消」：cancel 事件只作废本地令牌，
+    //   在途 RPC 不会中止，网关照常写入，叫「取消」等于承诺一个做不到的语义。
+    if (label === t('settings.providerAttachDismiss')) {
+      assert.equal(/\sdisabled(=|>|\s)/.test(tag), false, '提交中必须仍能收起，否则用户被锁死在弹窗里');
       continue;
     }
-    assert.ok(/\sdisabled(=|>|\s)/.test(tag), `submitting 阶段非取消按钮必须禁用: ${tag}`);
+    assert.ok(/\sdisabled(=|>|\s)/.test(tag), `submitting 阶段非收起按钮必须禁用: ${tag}`);
   }
+});
+
+test('AgentBindingGrid：壳层忙态下取消仍必须可点（真实锁死场景，busy=true）', () => {
+  setLocale('zh-CN');
+  const view = providerView({
+    agents: [
+      { profile: 'default', displayName: 'default', state: 'active' },
+      { profile: 'aura', displayName: 'aura', state: 'absent' },
+    ],
+  });
+  // 【为什么必须单独一条】上一条测试传的是 busy: false，而真实链路里
+  //   ProviderRow 传下来的是 `busy || pending`，提交期间恒为 true。
+  //   于是「取消跟着 busy 一起禁用」这个回归在旧测试下全绿，用户却被永久锁死：
+  //   REST 一旦挂住，三个按钮同时 50% 灰掉，点取消毫无反应。
+  const html = renderToStaticMarkup(
+    React.createElement(AgentBindingGrid, {
+      view,
+      bots: [{ profile: 'aura', displayName: 'aura' }],
+      busy: true,
+      attachFlow: {
+        phase: 'submitting',
+        providerKey: view.key,
+        providerId: view.id,
+        profile: 'aura',
+        intent: 'enable-only',
+        token: 5,
+      },
+      onToggle: async () => ({ ok: true }),
+      onRequestAttach() {},
+      onConfirmAttach() {},
+      onEditAttachKey() {},
+      onCancelAttach() {},
+    }),
+  );
+  const attachSection = html.slice(html.indexOf('data-attach-phase="submitting"'));
+  const dismissTags = [...attachSection.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g)]
+    .filter((match) => match[1].replace(/<[^>]*>/g, '').trim() === t('settings.providerAttachDismiss'))
+    .map((match) => match[0]);
+  assert.equal(dismissTags.length, 1, '提交中必须有且只有一个收起出口');
+  assert.equal(
+    /\sdisabled(=|>|\s)/.test(dismissTags[0]),
+    false,
+    'busy=true 时收起仍不得禁用：收起只作废本地令牌，不与任何在途请求冲突',
+  );
+});
+
+test('AgentBindingGrid：提交中必须有可宣告的进度文案，否则读屏用户看不到任何变化', () => {
+  setLocale('zh-CN');
+  const view = providerView({
+    agents: [{ profile: 'aura', displayName: 'aura', state: 'absent' }],
+  });
+  const html = renderToStaticMarkup(
+    React.createElement(AgentBindingGrid, {
+      view,
+      bots: [{ profile: 'aura', displayName: 'aura' }],
+      busy: true,
+      attachFlow: {
+        phase: 'submitting',
+        providerKey: view.key,
+        providerId: view.id,
+        profile: 'aura',
+        intent: 'enable-only',
+        token: 6,
+      },
+      onToggle: async () => ({ ok: true }),
+      onRequestAttach() {},
+      onConfirmAttach() {},
+      onEditAttachKey() {},
+      onCancelAttach() {},
+    }),
+  );
+  assert.ok(html.includes(t('settings.providerAttachSubmitting')), '提交中必须显示「正在写入网关…」');
+  assert.ok(html.includes('aria-live="polite"'), '进度文案必须是 aria-live 区域，否则读屏不宣告');
+});
+
+test('AgentBindingGrid：补密钥后提交（previousPhase=needs-key）同样必须宣告进度', () => {
+  setLocale('zh-CN');
+  const view = providerView({
+    agents: [{ profile: 'aura', displayName: 'aura', state: 'absent' }],
+  });
+  // 【为什么必须单独一条】`keyForm` 在 `submitting && previousPhase === 'needs-key'` 时非空，
+  //   若进度文案的判断排在 keyForm 之后，这条真实路径（补完密钥点保存）永远拿不到宣告：
+  //   输入框与保存按钮一起变灰，读屏却仍念「将执行：仅启用」。上一条测试没有 previousPhase，
+  //   结构上碰不到这个分支。
+  const html = renderToStaticMarkup(
+    React.createElement(AgentBindingGrid, {
+      view,
+      bots: [{ profile: 'aura', displayName: 'aura' }],
+      busy: true,
+      attachFlow: {
+        phase: 'submitting',
+        providerKey: view.key,
+        providerId: view.id,
+        profile: 'aura',
+        intent: 'enable-only',
+        token: 7,
+        previousPhase: 'needs-key',
+        draftKey: 'sk-draft',
+      },
+      onToggle: async () => ({ ok: true }),
+      onRequestAttach() {},
+      onConfirmAttach() {},
+      onEditAttachKey() {},
+      onCancelAttach() {},
+    }),
+  );
+  assert.ok(html.includes(t('settings.providerAttachSubmitting')), '补密钥提交路径同样必须显示进度文案');
+  assert.ok(html.includes('type="password"'), '提交中必须保持密钥形态，输入框不得被卸载');
 });
 
 test('AgentBindingGrid：补密钥后提交必须保持密钥形态，输入框不得消失', () => {

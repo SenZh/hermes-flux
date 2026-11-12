@@ -157,6 +157,16 @@ export function AgentBindingGrid({
   };
 
   const attachBusy = attachFlow ? isAttachFlowBusy(attachFlow) : false;
+  /**
+   * 取消为什么恒可点（不得跟随 `busy` 禁用）：
+   * 【设计意图 (Why)】取消的语义是"我不再关心这次结果"，它只作废本地令牌并收起确认条，
+   *   壳层在途请求继续跑完也不会回写界面。因此它与任何在途操作都不冲突。
+   * 【防范的历史坑 (Pitfall)】上一版把 `busy`（含本行 attach 提交与 providerAdminBusy）
+   *   一起接到取消按钮上：REST 一旦挂住，三个按钮同时 50% 灰掉，用户被永久锁死在设置弹窗里，
+   *   体感就是"点取消也没反应、卡住了"。单测因为 `busy` 传 false 而全绿，用户却锁死。
+   * 【约束与规则 (Rules)】`busy` 只允许禁用"会写网关"的控件（意图按钮、保存、头像格），
+   *   纯本地退出的控件（取消）永远不得禁用。
+   */
   const targetBotName = attachFlow
     ? bots.find((bot) => bot.profile === attachFlow.profile)?.displayName
       || view.agents.find((agent) => agent.profile === attachFlow.profile)?.displayName
@@ -281,9 +291,17 @@ export function AgentBindingGrid({
                 : t('settings.providerAttachTitle', { provider: view.name, bot: targetBotName })
             }
             hint={
-              keyForm || attachFlow.phase === 'submitting'
-                ? t('settings.providerAttachNeedsKeyIntent', { intent: intentLabel })
-                : t('settings.providerAttachChooseHint')
+              /*
+               * 【规则】submitting 必须最先判断：`keyForm` 在
+               *   `phase === 'submitting' && previousPhase === 'needs-key'` 时同样非空
+               *   （见上方 keyForm 定义），若让 keyForm 先命中，「补密钥 → 保存」这条真实路径
+               *   的进度文案永不可达，读屏用户看到输入框与按钮一起变灰却没有任何宣告。
+               */
+              attachFlow.phase === 'submitting'
+                ? `${t('settings.providerAttachSubmitting')} · ${t('settings.providerAttachNeedsKeyIntent', { intent: intentLabel })}`
+                : keyForm
+                  ? t('settings.providerAttachNeedsKeyIntent', { intent: intentLabel })
+                  : t('settings.providerAttachChooseHint')
             }
           >
             {keyForm ? (
@@ -296,10 +314,10 @@ export function AgentBindingGrid({
                     value={keyForm.draftKey}
                     disabled={attachBusy}
                     onChange={(event) => onEditAttachKey(event.target.value)}
-                    className="h-7 w-56 font-code text-caption"
+                    className="h-7 w-56 font-code text-aux"
                   />
                   <Button
-                    size="sm"
+                    size="xs"
                     type="button"
                     disabled={!keyForm.draftKey.trim() || busy || attachBusy}
                     onClick={() => onConfirmAttach(keyForm.intent, keyForm.draftKey)}
@@ -308,12 +326,11 @@ export function AgentBindingGrid({
                   </Button>
                   <Button
                     variant="ghost"
-                    size="sm"
+                    size="xs"
                     type="button"
-                    disabled={busy}
                     onClick={onCancelAttach}
                   >
-                    {t('settings.cancel')}
+                    {attachBusy ? t('settings.providerAttachDismiss') : t('settings.cancel')}
                   </Button>
                 </div>
                 {keyForm.error ? (
@@ -327,7 +344,7 @@ export function AgentBindingGrid({
                 <div className="flex flex-wrap items-center gap-2">
                   {/* 强调色留给"不改变默认模型"的安全路径：本改动正是为了阻止顺手切默认。 */}
                   <Button
-                    size="sm"
+                    size="xs"
                     type="button"
                     disabled={busy || attachBusy}
                     onClick={() => onConfirmAttach('enable-only')}
@@ -336,7 +353,7 @@ export function AgentBindingGrid({
                   </Button>
                   <Button
                     variant="outline"
-                    size="sm"
+                    size="xs"
                     type="button"
                     disabled={busy || attachBusy}
                     onClick={() => onConfirmAttach('enable-and-default')}
@@ -345,12 +362,13 @@ export function AgentBindingGrid({
                   </Button>
                   <Button
                     variant="ghost"
-                    size="sm"
+                    size="xs"
                     type="button"
-                    disabled={busy}
                     onClick={onCancelAttach}
                   >
-                    {t('settings.cancel')}
+                    {/* 【规则】提交中只能「收起」不能「取消」：cancel 事件只作废本地令牌，
+                        在途 RPC 不会中止、网关照常写入。叫「取消」等于承诺一个做不到的语义。 */}
+                    {attachBusy ? t('settings.providerAttachDismiss') : t('settings.cancel')}
                   </Button>
                 </div>
                 {attachFlow.phase === 'choosing' && attachFlow.error ? (

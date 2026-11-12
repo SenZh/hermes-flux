@@ -15,7 +15,9 @@ import * as React from 'react';
  *
  * 【约束与规则 (Rules)】
  *   1. 横向内距统一 12px（`px-3`）、纵向 8px（`py-2`），与 `agent-grid` 的 8px 列间距同族；
- *   2. 标题用 `text-body` + `font-medium`，提示用 `text-caption` + `text-muted-foreground`；
+ *   2. 标题用 `text-aux` + `font-medium`，提示用 `text-caption` + `text-muted-foreground`；
+ *      【为什么不用 text-body】本条的标题与 11px 提示、28px 按钮同处一行密集区，
+ *      13px 标题会把整条视觉重心压到和行标题同级，用户读起来像"弹了一个大框"；
  *   3. `role="group"` 必须有名字：`title`+`titleId` 成对，或退到 `label`，
  *      三者都不给就是无名分组，读屏只会念"组"；
  *   4. `busy` 只映射到 `aria-busy`，不禁用任何控件——禁用是控件自己的语义。
@@ -51,11 +53,23 @@ export function InlineStrip({
       {title || hint ? (
         <div className="flex flex-col gap-1">
           {title ? (
-            <span id={titleId} className="text-body font-medium text-foreground">
+            <span id={titleId} className="text-aux font-medium text-foreground">
               {title}
             </span>
           ) : null}
-          {hint ? <span className="text-caption text-muted-foreground">{hint}</span> : null}
+          {hint ? (
+            <span
+              className="text-caption text-muted-foreground"
+              /*
+               * 【规则】提交阶段的进度文案必须可被读屏宣告，否则"点了没反应"对键盘与读屏用户
+               *   就是字面事实：按钮全禁用、没有任何文本变化。
+               */
+              role="status"
+              aria-live="polite"
+            >
+              {hint}
+            </span>
+          ) : null}
         </div>
       ) : null}
       {children}
