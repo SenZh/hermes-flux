@@ -163,17 +163,25 @@ test('勾选未配置的自定义端点：先从其它成员复制密钥，复�
     block.includes('makeDefault: plan.makeDefault'),
     '是否改默认模型必须消费 core 的计划，壳层不得再自己写死 false',
   );
+  // 默认模型的两条守卫已收敛进 core 的 classifyAttachWrite（行为断言见
+  // packages/ui/__tests__/provider-attach-orchestration.test.mjs）。这里只钉住
+  // 壳层没有绕开它自己重写判定，也不再把结论静默吞掉。
   assert.ok(
-    block.includes('if (plan.makeDefault && outcome.currentIsDefault === false)'),
-    '只有本次要求改默认模型时才校验结论，且必须报失败，不能留下"有勾无环"',
+    block.includes('classifyAttachWrite(plan, outcome)'),
+    '默认模型结论必须由 core 的 classifyAttachWrite 统一裁定，壳层不得自行比较 isCurrent',
   );
-  assert.ok(
-    block.includes('!plan.makeDefault && outcome.currentIsDefault === true'),
-    '对称守卫：只要求启用却被网关改成默认模型时必须报错，不能提示"默认模型未变"',
+  assert.equal(
+    /plan\.makeDefault\s*&&\s*outcome\.currentIsDefault/.test(block),
+    false,
+    '壳层不得再手写默认模型守卫：两个方向必须共用同一份真值，否则一边补了另一边会忘',
   );
   assert.ok(
     block.includes('settings.providerToggleNotDefault'),
     '校验失败必须给出可读原因，不能静默返回',
+  );
+  assert.ok(
+    block.includes('settings.providerAttachDefaultChanged'),
+    '只要求启用却被改成默认模型时同样必须报错，不能提示"默认模型未变"',
   );
 
   const toggleBlock = source.slice(

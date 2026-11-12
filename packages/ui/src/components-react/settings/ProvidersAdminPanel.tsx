@@ -25,6 +25,13 @@ import { FanOutMemberList } from './FanOutMemberList.js';
 import { InlineStrip } from './InlineStrip.js';
 import { LoadBoundary } from './LoadBoundary.js';
 import { ModelPickerDialog, ModelPickerField } from './ModelPicker.js';
+import {
+  classifyAttachWrite,
+  pickProviderViewsState,
+  routeAttachFailure,
+  shouldClearAttachFlow,
+  shouldNotifyEnableOnly,
+} from './providerAttachOrchestration.js';
 import { SegmentedControl } from './SegmentedControl.js';
 import { SettingField } from './SettingRow.js';
 import { SettingsSectionHeading } from './SettingsSectionHeading.js';
@@ -1266,31 +1273,30 @@ export function ProvidersAdminPanel({
   // 宿主漏字段时不能让整棵设置树崩掉：设置页是全屏对话框，崩了等于什么都点不了。
   const bots = snapshot.bots ?? [];
   const failures = snapshot.providerFailures ?? [];
-  const views = snapshot.providerViews.status === 'ready' ? snapshot.providerViews.data : undefined;
-  const activeFlow = reconcileAttachFlow(attachFlow, views);
 
   /**
    * 上一帧的已就绪目录。
    * 【为什么必须留住】每次绑定写入后壳层会先置 `loading` 再重读；`LoadBoundary` 在
    *   loading 下只渲染一行文案，整张提供商表连同 `submitting` 的确认条会被卸载重建，
    *   用户看到闪一下"加载中"，确认条"全部禁用"的视觉契约也被打断。
-   *   重读期间沿用上一帧列表，首次加载仍走正常的加载文案。
+   *   判定由 `pickProviderViewsState` 承担（可穷举单测），这里只保存上一帧。
    */
   const lastViewsRef = React.useRef<readonly ProviderView[] | undefined>(undefined);
-  if (snapshot.providerViews.status === 'ready') lastViewsRef.current = snapshot.providerViews.data;
-  const providerViewsState = snapshot.providerViews.status === 'loading' && lastViewsRef.current
-    ? { status: 'ready' as const, data: lastViewsRef.current as ProviderView[] }
-    : snapshot.providerViews;
+  const picked = pickProviderViewsState(snapshot.providerViews, lastViewsRef.current);
+  lastViewsRef.current = picked.lastReady;
+  const providerViewsState = picked.state;
+  const views = providerViewsState.status === 'ready' ? providerViewsState.data : undefined;
+  const activeFlow = reconcileAttachFlow(attachFlow, views);
 
   /**
    * 【规则】收敛结果必须回写 state，否则「目录刷新后自动收起」只是渲染层错觉：
    *   state 里仍留着旧 flow，目标格子一旦再次变回 absent（另一行解绑、另一窗口删除、
    *   重新拉取），确认条会凭空复现，甚至带着过期的 submitting 全禁用态。
-   * 【规则】只在派生为 null 且 state 非空时回写，避免无谓重渲染。
+   *   判定由 `shouldClearAttachFlow` 承担（可穷举单测）。
    */
   React.useEffect(() => {
-    if (attachFlow && !activeFlow) setAttachFlow(null);
-  }, [attachFlow, activeFlow]);
+    if (shouldClearAttachFlow(attachFlow, views)) setAttachFlow(null);
+  }, [attachFlow, views]);
 
   const submitAttach = (intent: BindingAttachIntent, apiKey?: string): void => {
     if (!activeFlow || isAttachFlowBusy(activeFlow)) return;
@@ -1313,10 +1319,16 @@ export function ProvidersAdminPanel({
     /**
      * 【规则】失败原因必须有一条无论确认条是否存活都能落地的通路：
      *   写入可能已经生效（目标格子不再 absent），确认条会被目录收敛清空，
-     *   此时把错误塞回条里等于丢弃。条还在就原位显示，条没了就挂到行上。
+     *   此时把错误塞回条里等于丢弃。落点由 `routeAttachFailure` 判定（可穷举单测）：
+     *   只有确认条仍是「这次提交的这一条」才写条内，否则一律落行级。
      */
     const settleFailure = (message: string): void => {
-      if (attachFlowRef.current) {
+      const surface = routeAttachFailure(attachFlowRef.current, {
+        providerKey: targetKey,
+        profile: targetProfile,
+        token,
+      });
+      if (surface.kind === 'strip') {
         setAttachFlow((prev) =>
           prev ? reduceAttachFlow(prev, { type: 'settle', token, outcome: { ok: false, message } }) : null,
         );
@@ -1331,7 +1343,7 @@ export function ProvidersAdminPanel({
         if (result.ok) {
           setAttachFlow((prev) => (prev ? reduceAttachFlow(prev, { type: 'settle', token, outcome: result }) : null));
           // 用户取消或已切到别的格子时令牌作废：迟滞的成功结果不得再弹提示。
-          if (intent === 'enable-only' && attachLiveToken.current === token) {
+          if (shouldNotifyEnableOnly(result, intent, attachLiveToken.current, token)) {
             actions.onNotify(t('settings.providerAttachEnableOnlyDone', { provider: providerName, bot: botName }));
           }
           return;

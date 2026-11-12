@@ -2,6 +2,15 @@ export { SettingsModal } from './SettingsModal.js';
 export { mountSettingsModal } from './mount.js';
 export { ProvidersAdminPanel } from './ProvidersAdminPanel.js';
 export {
+  classifyAttachWrite,
+  pickProviderViewsState,
+  routeAttachFailure,
+  shouldClearAttachFlow,
+  shouldNotifyEnableOnly,
+  type AttachFailureSurface,
+  type AttachWriteVerdict,
+} from './providerAttachOrchestration.js';
+export {
   SETTINGS_SECTIONS,
   filterSettingsSections,
   resolveSettingsSection,
