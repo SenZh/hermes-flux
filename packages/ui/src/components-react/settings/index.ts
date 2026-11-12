@@ -2,13 +2,12 @@ export { SettingsModal } from './SettingsModal.js';
 export { mountSettingsModal } from './mount.js';
 export { ProvidersAdminPanel } from './ProvidersAdminPanel.js';
 export {
-  classifyAttachWrite,
+  messageKeyForVerdict,
   pickProviderViewsState,
-  routeAttachFailure,
-  shouldClearAttachFlow,
+  planAttachSettlement,
   shouldNotifyEnableOnly,
-  type AttachFailureSurface,
-  type AttachWriteVerdict,
+  type AttachSettlement,
+  type AttachVerdictMessageKey,
 } from './providerAttachOrchestration.js';
 export {
   SETTINGS_SECTIONS,

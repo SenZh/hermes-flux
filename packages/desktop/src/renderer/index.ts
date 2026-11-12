@@ -82,7 +82,7 @@ import {
   applyFontPreferences,
   setLocale,
   collectTouchedFiles,
-  classifyAttachWrite,
+  messageKeyForVerdict,
   type FontPreferences,
 } from '@hermes-flux/ui';
 
@@ -210,6 +210,7 @@ import {
   planProviderRemoval,
   normalizeEndpointId,
   draftForBindingAttach,
+  classifyAttachWrite,
 } from '@hermes-flux/core';
 
 import { parseTranscriptRows } from './transcriptRows.js';
@@ -7613,23 +7614,19 @@ function createSettingsActions(): SettingsActions {
             const draft = draftForBindingAttach(row, view.models, key);
             const outcome = await controller.save(profile, draft, { fanOutTo: [], makeDefault: plan.makeDefault });
             // 【规则】默认模型两条守卫的判定统一由 core 的 `classifyAttachWrite` 表达，
-            //   壳层只做映射：这样"要求设默认却没设"与"只要求启用却被改成默认"两个方向
-            //   共用同一份可穷举的真值，不会一边补了另一边忘掉。
+            //   壳层只做 `kind → i18n` 映射：这样"要求设默认却没设"与"只要求启用却被改成默认"
+            //   两个方向共用同一份可穷举的真值，不会一边补了另一边忘掉。
             const verdict = classifyAttachWrite(plan, outcome);
             if (verdict.kind === 'failed') {
               return { ok: false, message: outcome.current.message || t('settings.providerToggleFailed') };
             }
-            if (verdict.kind !== 'ok') {
+            const verdictKey = messageKeyForVerdict(verdict);
+            if (verdictKey) {
               // 【规则】失败也要先回读：端点已经写进网关，列表必须如实反映。
               //   错误本身由界面另存为行级提示，不依赖确认条存活——回读后目标格子不再是
               //   `absent`，确认条会被目录收敛清空，把错误挂在条上等于静默丢掉它。
               await reloadProviderCatalog();
-              return {
-                ok: false,
-                message: verdict.kind === 'default-not-applied'
-                  ? t('settings.providerToggleNotDefault')
-                  : t('settings.providerAttachDefaultChanged'),
-              };
+              return { ok: false, message: t(verdictKey) };
             }
             // 等回读完成再清 pending：否则用户会看到"点了没反应"的旧勾选态。
             await reloadProviderCatalog();

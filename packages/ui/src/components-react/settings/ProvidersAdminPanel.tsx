@@ -8,6 +8,8 @@ import {
   planBindingToggle,
   reconcileAttachFlow,
   reduceAttachFlow,
+  routeAttachFailure,
+  shouldClearAttachFlow,
   normalizeEndpointId,
   type BindingAttachIntent,
   type CustomEndpointDraft,
@@ -26,10 +28,8 @@ import { InlineStrip } from './InlineStrip.js';
 import { LoadBoundary } from './LoadBoundary.js';
 import { ModelPickerDialog, ModelPickerField } from './ModelPicker.js';
 import {
-  classifyAttachWrite,
   pickProviderViewsState,
-  routeAttachFailure,
-  shouldClearAttachFlow,
+  planAttachSettlement,
   shouldNotifyEnableOnly,
 } from './providerAttachOrchestration.js';
 import { SegmentedControl } from './SegmentedControl.js';
@@ -1317,41 +1317,37 @@ export function ProvidersAdminPanel({
     setAttachFlow((prev) => (prev ? reduceAttachFlow(prev, { type: 'choose', intent, token }) : null));
 
     /**
-     * 【规则】失败原因必须有一条无论确认条是否存活都能落地的通路：
-     *   写入可能已经生效（目标格子不再 absent），确认条会被目录收敛清空，
-     *   此时把错误塞回条里等于丢弃。落点由 `routeAttachFailure` 判定（可穷举单测）：
-     *   只有确认条仍是「这次提交的这一条」才写条内，否则一律落行级。
+     * 【规则】一次提交结束后该发生什么，全部由 `planAttachSettlement` 判定（可穷举单测）：
+     *   失败落点由 core 的 `routeAttachFailure` 决定归属，条没了就挂到行级，绝不静默丢弃。
      */
-    const settleFailure = (message: string): void => {
+    const settle = (result: { ok: boolean; needsKey?: boolean; message?: string }, failureMessage: string): void => {
       const surface = routeAttachFailure(attachFlowRef.current, {
         providerKey: targetKey,
         profile: targetProfile,
         token,
       });
-      if (surface.kind === 'strip') {
-        setAttachFlow((prev) =>
-          prev ? reduceAttachFlow(prev, { type: 'settle', token, outcome: { ok: false, message } }) : null,
-        );
+      const plan = planAttachSettlement(result, surface, failureMessage);
+      if (plan.kind === 'settle-strip') {
+        setAttachFlow((prev) => (prev ? reduceAttachFlow(prev, { type: 'settle', token, outcome: plan.outcome }) : null));
         return;
       }
-      setAttachRowErrors((prev) => ({ ...prev, [targetKey]: message }));
+      setAttachRowErrors((prev) => ({ ...prev, [plan.providerKey]: plan.message }));
     };
 
     void actions
       .onToggleProviderAgent(targetProviderId, targetProfile, true, apiKey, { attachIntent: intent })
       .then((result) => {
-        if (result.ok) {
-          setAttachFlow((prev) => (prev ? reduceAttachFlow(prev, { type: 'settle', token, outcome: result }) : null));
-          // 用户取消或已切到别的格子时令牌作废：迟滞的成功结果不得再弹提示。
-          if (shouldNotifyEnableOnly(result, intent, attachLiveToken.current, token)) {
-            actions.onNotify(t('settings.providerAttachEnableOnlyDone', { provider: providerName, bot: botName }));
-          }
-          return;
+        settle(result, result.message || t('settings.providerToggleFailed'));
+        // 用户取消或已切到别的格子时令牌作废：迟滞的成功结果不得再弹提示。
+        if (shouldNotifyEnableOnly(result, intent, attachLiveToken.current, token)) {
+          actions.onNotify(t('settings.providerAttachEnableOnlyDone', { provider: providerName, bot: botName }));
         }
-        settleFailure(result.message || t('settings.providerToggleFailed'));
       })
       .catch((error: unknown) => {
-        settleFailure(error instanceof Error ? error.message : t('settings.providerToggleFailed'));
+        settle(
+          { ok: false },
+          error instanceof Error ? error.message : t('settings.providerToggleFailed'),
+        );
       });
   };
 

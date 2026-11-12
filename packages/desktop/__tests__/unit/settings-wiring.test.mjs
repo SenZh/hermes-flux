@@ -170,18 +170,14 @@ test('勾选未配置的自定义端点：先从其它成员复制密钥，复�
     block.includes('classifyAttachWrite(plan, outcome)'),
     '默认模型结论必须由 core 的 classifyAttachWrite 统一裁定，壳层不得自行比较 isCurrent',
   );
+  assert.ok(
+    block.includes('messageKeyForVerdict(verdict)'),
+    '结论到文案必须走 messageKeyForVerdict，壳层不得自己拼 i18n key',
+  );
   assert.equal(
     /plan\.makeDefault\s*&&\s*outcome\.currentIsDefault/.test(block),
     false,
     '壳层不得再手写默认模型守卫：两个方向必须共用同一份真值，否则一边补了另一边会忘',
-  );
-  assert.ok(
-    block.includes('settings.providerToggleNotDefault'),
-    '校验失败必须给出可读原因，不能静默返回',
-  );
-  assert.ok(
-    block.includes('settings.providerAttachDefaultChanged'),
-    '只要求启用却被改成默认模型时同样必须报错，不能提示"默认模型未变"',
   );
 
   const toggleBlock = source.slice(

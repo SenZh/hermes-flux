@@ -162,3 +162,74 @@ export function reconcileAttachFlow(
   if (!agent || agent.state !== 'absent') return null;
   return flow;
 }
+
+/**
+ * 确认条是否该被目录收敛清空。
+ *
+ * 【规则】只在派生为 null 且 state 仍非空时返回 true，避免无谓重渲染。
+ * 【规则】目录未就绪（`undefined`）时不得清空：未知 ≠ 空。
+ */
+export function shouldClearAttachFlow(
+  flow: ProviderAttachFlow | null,
+  views: readonly ProviderView[] | undefined,
+): boolean {
+  if (!flow) return false;
+  return reconcileAttachFlow(flow, views) === null;
+}
+
+/**
+ * 失败该显示在哪里。
+ *
+ * 【规则】只有确认条仍是「这次提交的那一条」时才允许写在条内：
+ *   同 provider、同 profile、仍处于提交阶段、且令牌一致，四个条件缺一不可。
+ *   判据不能只看"存在确认条"——提交期间用户可能已经点开另一个头像，
+ *   此时把错误塞进新条会被令牌门拒绝，错误就静默消失了。
+ * 【规则】`providerKey` 与 `profile` 必须同时校验：同一 profile 可能挂在多条提供商上，
+ *   只比其中一个会把错误写到另一行的条里。
+ */
+export type AttachFailureSurface =
+  | { kind: 'strip' }
+  | { kind: 'row'; providerKey: string };
+
+export function routeAttachFailure(
+  flow: ProviderAttachFlow | null,
+  target: { providerKey: string; profile: string; token: number },
+): AttachFailureSurface {
+  if (
+    flow
+    && flow.providerKey === target.providerKey
+    && flow.profile === target.profile
+    && flow.phase === 'submitting'
+    && flow.token === target.token
+  ) {
+    return { kind: 'strip' };
+  }
+  return { kind: 'row', providerKey: target.providerKey };
+}
+
+/** 网关写入结果的三态判定。 */
+export type AttachWriteVerdict =
+  | { kind: 'failed' }
+  | { kind: 'default-not-applied' }
+  | { kind: 'default-changed' }
+  | { kind: 'ok' };
+
+/**
+ * 写入结果判定（网关语义，属 core 领域）。
+ *
+ * 【规则】两条守卫都必须报失败，且方向对称：
+ *   要求设默认却没设 → `default-not-applied`（否则留下"有勾无环"）；
+ *   只要求启用却被设成默认 → `default-changed`（否则提示会说"默认模型未变"，等于撒谎）。
+ * 【规则】`currentIsDefault` 为 `undefined` 时无法判断，按成功处理：
+ *   不能因为网关没回这个字段就阻断一次真实成功的写入。
+ * 【规则】写入本身失败优先，不进入默认模型判定。
+ */
+export function classifyAttachWrite(
+  plan: { makeDefault: boolean },
+  outcome: { currentOk: boolean; currentIsDefault?: boolean },
+): AttachWriteVerdict {
+  if (!outcome.currentOk) return { kind: 'failed' };
+  if (plan.makeDefault && outcome.currentIsDefault === false) return { kind: 'default-not-applied' };
+  if (!plan.makeDefault && outcome.currentIsDefault === true) return { kind: 'default-changed' };
+  return { kind: 'ok' };
+}

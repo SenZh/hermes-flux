@@ -11,7 +11,8 @@ import path from 'node:path';
  *   界面从此点不动，只能重启应用。这条不是"防御性编程"，是可复现的死锁。
  *
  * 【为什么用静态断言】主进程 IPC 依赖 Electron 运行时，无法在 Node 测试里直接挂载。
- *   这条守卫的价值在于"超时参数存在且挂在 fetch 上"——删掉它就必须变红。
+ *   因此这里做**结构化**校验：把 `fetchOptions` 的对象字面量切出来按花括号配对，
+ *   只在这个字面量内部找 `signal`。区间子串扫描会被任何同名变量骗过。
  */
 const root = process.cwd();
 const source = fs.readFileSync(path.join(root, 'packages/desktop/src/main/ipc.ts'), 'utf8');
@@ -23,24 +24,41 @@ function handlerBody(channel) {
   return source.slice(start, nextHandler === -1 ? source.length : nextHandler);
 }
 
+/** 从 `const fetchOptions = {` 起，按花括号配对切出完整对象字面量。 */
+function fetchOptionsLiteral(body) {
+  const at = body.indexOf('const fetchOptions');
+  assert.notEqual(at, -1, '必须构造 fetchOptions');
+  const open = body.indexOf('{', at);
+  assert.notEqual(open, -1, 'fetchOptions 必须是对象字面量');
+  let depth = 0;
+  for (let i = open; i < body.length; i += 1) {
+    const ch = body[i];
+    if (ch === '{') depth += 1;
+    else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) return body.slice(open, i + 1);
+    }
+  }
+  assert.fail('fetchOptions 对象字面量未闭合');
+}
+
 test('gateway:http-proxy 必须给 fetch 挂超时，否则在途锁会被永久占用', () => {
   const body = handlerBody('gateway:http-proxy');
-  assert.ok(body.includes('signal:'), 'fetch 必须带 signal，否则请求可以无限挂起');
   assert.ok(
     /signal:\s*AbortSignal\.timeout\(\s*\d[\d_]*\s*\)/.test(body),
-    'signal 必须是 AbortSignal.timeout(...)：手写 AbortController 容易漏掉清理',
+    '必须使用 AbortSignal.timeout(...)：手写 AbortController 容易漏掉清理',
   );
   const match = body.match(/AbortSignal\.timeout\(\s*(\d[\d_]*)\s*\)/);
   const ms = Number(match[1].replace(/_/g, ''));
   assert.ok(ms > 0 && ms <= 120_000, `超时必须是有界正数且在 2 分钟内，实测 ${ms}`);
 });
 
-test('超时必须落在 fetchOptions 上，而不是只声明不用', () => {
+test('signal 必须写在 fetchOptions 对象字面量内部，声明在外部等于没生效', () => {
   const body = handlerBody('gateway:http-proxy');
-  const optionsAt = body.indexOf('const fetchOptions');
-  assert.notEqual(optionsAt, -1, '必须构造 fetchOptions');
-  const fetchAt = body.indexOf('fetch(fullUrl, fetchOptions)');
-  assert.notEqual(fetchAt, -1, '必须把 fetchOptions 交给 fetch');
-  const slice = body.slice(optionsAt, fetchAt);
-  assert.ok(slice.includes('signal:'), 'signal 必须在 fetchOptions 对象内部，否则不会生效');
+  const literal = fetchOptionsLiteral(body);
+  assert.ok(
+    /signal:\s*AbortSignal\.timeout\(/.test(literal),
+    `signal 必须属于 fetchOptions 自身字段，实测字面量为 ${literal}`,
+  );
+  assert.notEqual(body.indexOf('fetch(fullUrl, fetchOptions)'), -1, '必须把 fetchOptions 交给 fetch');
 });
