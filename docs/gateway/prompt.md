@@ -1,7 +1,7 @@
 # 对话提交与旁路
 
 > 本文件由 `npm run contract:doc` 从网关契约、探针结果与源码调用点自动生成，请勿手工编辑。
-> 契约快照：4364a2dd0064… · 同步于 2026-11-01T01:48:16.956Z
+> 契约快照：e3cf16a3d983… · 同步于 2026-11-12T07:11:12.771Z
 
 | 方法 | 入参（契约） | 出参（契约） | 调用点 | 真实探针 |
 | --- | --- | --- | --- | --- |
@@ -10,7 +10,7 @@
 | `image.attach_bytes` | `session_id` `profile` `content_base64` `data` `filename` `ext` | `name` `width` `height` `token_estimate` `attached` `path` `count` `remainder` `text` `bytes` `message` | `packages/desktop/src/renderer/index.ts:5233` | 跳过：图片二进制字节附加通道需依赖在线活跃通道与图文模型，在离线探针下显式跳过，由契约表与 CDP 物理测试严格守护 |
 | `prompt.background` | `session_id` `profile` `text` | `task_id` | `packages/desktop/src/renderer/index.ts:5456` | 跳过：后台子代理旁路呼叫需活跃会话与跨 profile 计算宿主，应答经事件流异步到达，离线探针显式跳过，由契约表与路由单测守护 |
 | `prompt.btw` | `session_id` `profile` `text` | `task_id` | `packages/core/src/session/handoffService.ts:58` | ✅ 0.22.5 |
-| `prompt.submit` | `session_id` `profile` `text` `display_kind` `interrupted` `queued` `surface` `voice_context` `voice_turn` `title_preview` `truncate_before_user_ordinal` `truncate_before_row_id` `truncate_before_message_id` `confirm_truncate` `confirm_empty_truncate` `confirm_deep_truncate` `rebind_survivor_row_ids` | `status` `voice_stopped` `user_row_id` `survivor_user_row_ids` `survivor_row_id_map` `turn_isolation` | `packages/core/src/session/interactiveService.ts:107`<br>`packages/desktop/src/renderer/index.ts:5257` | ✅ 0.22.5 |
+| `prompt.submit` | `session_id` `profile` `text` `display_kind` `interrupted` `queued` `surface` `voice_context` `voice_turn` `title_preview` `truncate_before_user_ordinal` `truncate_before_row_id` `truncate_before_message_id` `confirm_truncate` `confirm_empty_truncate` `confirm_deep_truncate` `rebind_survivor_row_ids` | `status` `voice_stopped` `user_row_id` `survivor_user_row_ids` `survivor_row_id_map` `turn_isolation` `admission_id` `forwarded` | `packages/core/src/session/interactiveService.ts:107`<br>`packages/desktop/src/renderer/index.ts:5257` | ✅ 0.22.5 |
 | `slash.exec` | `session_id` `command` `profile` | `output` `warning` `type` `target` `message` `notice` `display` `name` `status` | `packages/core/src/session/interactiveService.ts:272` | 跳过：斜杠指令执行需活跃会话与在线命令分发器（exec/alias/send/prefill/skill），离线探针显式跳过，由契约表与领域单测守护 |
 
 ## 明细
