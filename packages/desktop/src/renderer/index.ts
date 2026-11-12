@@ -641,7 +641,7 @@ interface AppState {
   /** Conversations optimistically inserted while the gateway persists them. */
   pendingSessionIds: string[];
   reasoningLevel: 'default' | 'none' | 'low' | 'high' | 'max' | 'off' | 'medium';
-  approvalMode: 'auto' | 'ask' | 'sandbox';
+  approvalMode: 'manual' | 'smart' | 'off';
   isStreaming: boolean;
   gatewayConnected: boolean;
   gatewayConnecting: boolean;
@@ -698,6 +698,14 @@ interface AppState {
   fileSearchOpen: boolean;
   fileSearchQuery: string;
   attachments: InputAttachmentItem[];
+  /**
+   * 运行中的待发送队列（来自网关 `pending_rows`）。
+   *
+   * 【设计意图 (Why)】
+   *   排队项由服务端持久化，客户端只做展示与三个控制动作；本地不另建一份真相。
+   *   `admissionId` 是网关准入 id，三个动作（放回编辑 / 立即发送 / 取消）都按它定位。
+   */
+  queuedMessages: Array<{ id: string; admissionId: string; text: string }>;
   slashPopperOpen: boolean;
   slashItems: SlashCommandOption[];
   mentionPopperOpen: boolean;
@@ -973,7 +981,7 @@ const state: AppState = {
   recentModels: safeParseJson<string[]>(localStorage.getItem('hermes_flux_recent_models') || localStorage.getItem('hermes_aura_recent_models'), [], isStringArray),
   modelSearchQuery: '',
   reasoningLevel: 'high',
-  approvalMode: 'auto',
+  approvalMode: 'smart',
   isStreaming: false,
   gatewayConnected: false,
   gatewayConnecting: Boolean(localStorage.getItem('hermes_flux_gateway_url') || localStorage.getItem('hermes_aura_gateway_url')),
@@ -1014,6 +1022,7 @@ const state: AppState = {
   gitDiffs: [],
   memories: [],
   attachments: [],
+  queuedMessages: [],
   slashPopperOpen: false,
   slashItems: [],
   mentionPopperOpen: false,
@@ -4741,12 +4750,9 @@ async function switchReasoning(effort: AppState['reasoningLevel']): Promise<void
   render();
 }
 
-async function switchApproval(mode: 'auto' | 'ask' | 'sandbox'): Promise<void> {
+async function switchApproval(mode: 'manual' | 'smart' | 'off'): Promise<void> {
   state.approvalMode = mode;
   render();
-
-  // Map internal UI mode to gateway approval_mode (off | smart | manual)
-  const gatewayModeMap: Record<string, string> = { auto: 'off', ask: 'smart', sandbox: 'manual' };
 
   if (!gatewayClient || !state.activeSessionId) return;
 
@@ -4761,7 +4767,7 @@ async function switchApproval(mode: 'auto' | 'ask' | 'sandbox'): Promise<void> {
     await gatewayClient.call('config.set', {
       session_id: liveId,
       key: 'approval_mode',
-      value: gatewayModeMap[mode] || 'smart',
+      value: mode,
     });
     state.dockNotice = '';
   } catch (e) {
@@ -5384,6 +5390,111 @@ async function routeSend(text: string): Promise<void> {
       void exhaustive;
       return;
     }
+  }
+}
+
+/**
+ * 把当前草稿加入待发送队列（运行中专用）。
+ *
+ * 【设计意图 (Why)】
+ *   运行中用户仍可继续写，主按钮此时是「加入队列」：草稿交给网关排到 FIFO 尾部，
+ *   由服务端在回合结束后接续执行。客户端不自己维护队列真相，只把准入回执写进展示态。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 走 `prompt.submit` 的 `queued: true`，不另开 RPC；
+ *   2. 成功后按 `admission_id` 追加一条展示行，文本取提交前的草稿；
+ *   3. 失败必须显式提示并保留草稿，绝不静默清空。
+ */
+async function enqueueDraft(): Promise<void> {
+  const el = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
+  const text = el ? el.value.trim() : '';
+  if (!text) return;
+  if (!gatewayClient) {
+    setTimedDockNotice(t('chat.gatewayNotConnected'));
+    render();
+    return;
+  }
+  if (!state.activeSessionId) {
+    await createNewSession();
+  }
+  const liveId = await ensureLiveSessionId();
+  if (!liveId) {
+    setTimedDockNotice(t('dock.busyEnterBlocked'));
+    render();
+    return;
+  }
+  try {
+    const receipt = await gatewayClient.call<{ admission_id?: string; status?: string }>('prompt.submit', {
+      session_id: liveId,
+      text,
+      queued: true,
+    });
+    const admissionId = receipt?.admission_id;
+    if (!admissionId) {
+      setTimedDockNotice(t('dock.queueFailed'));
+      render();
+      return;
+    }
+    state.queuedMessages = [...state.queuedMessages, { id: admissionId, admissionId, text }];
+    if (el) {
+      el.value = '';
+      el.style.height = '';
+    }
+    setTimedDockNotice('');
+    render();
+  } catch (err) {
+    setTimedDockNotice(`${t('dock.queueFailed')}: ${describeRpcError(err)}`);
+    render();
+  }
+}
+
+/**
+ * 队列行的三个动作（放回编辑 / 立即发送 / 取消）。
+ *
+ * 【设计意图 (Why)】
+ *   队列真相在网关，客户端只按 `admission_id` 发指令；三种动作对应三个 Canonical 方法，
+ *   失败一律保留原行并显式提示，绝不乐观删除后静默吞错。
+ *
+ * 【约束与规则 (Rules)】
+ *   - 放回编辑：先撤销该准入，再把文本写回输入舱并聚焦，保证用户能改；
+ *   - 立即发送：`prompt.steer_queued` 插到当前回合前执行；
+ *   - 取消：`prompt.cancel` 按准入撤销。
+ */
+async function handleQueueAction(action: string, admissionId: string): Promise<void> {
+  const entry = state.queuedMessages.find((q) => q.admissionId === admissionId);
+  if (!entry) return;
+  const liveId = await ensureLiveSessionId();
+  if (!liveId) {
+    setTimedDockNotice(t('chat.forkNoLive'));
+    render();
+    return;
+  }
+  try {
+    if (action === 'queue-steer') {
+      await interactiveService.steerQueued(rpcCaller, liveId, admissionId, state.profileName || undefined);
+      render();
+      return;
+    }
+    if (action === 'queue-cancel') {
+      await interactiveService.cancelQueued(rpcCaller, liveId, admissionId);
+      state.queuedMessages = state.queuedMessages.filter((q) => q.admissionId !== admissionId);
+      render();
+      return;
+    }
+    if (action === 'queue-replace') {
+      await interactiveService.cancelQueued(rpcCaller, liveId, admissionId);
+      state.queuedMessages = state.queuedMessages.filter((q) => q.admissionId !== admissionId);
+      const el = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
+      if (el) {
+        el.value = entry.text;
+        el.focus({ preventScroll: true });
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      render();
+    }
+  } catch (err) {
+    setTimedDockNotice(`${t('dock.queueActionFailed')}: ${describeRpcError(err)}`);
+    render();
   }
 }
 
@@ -7777,6 +7888,7 @@ function render(): void {
     favoriteModelsHash: state.favoriteModels.join(','),
     attachmentsCount: state.attachments.length,
     attachmentsHash: state.attachments.map((a) => `${a.id}:${a.name}`).join(','),
+    queuedHash: state.queuedMessages.map((q) => `${q.admissionId}:${q.text}`).join('|'),
     rollbackArmedHash: state.rollbackArmed
       ? `${state.rollbackArmed.targetId}:${state.rollbackArmed.removedCount}`
       : '',
@@ -7844,11 +7956,13 @@ function render(): void {
                 reasoningLevel: state.reasoningLevel,
                 approvalMode: state.approvalMode,
                 isStreaming: isStreamingActiveForCurrentSession(),
+                hasDraft: Boolean(draftText.trim()) || state.attachments.length > 0,
                 disabled: !state.gatewayConnected,
                 modelMenuOpen: state.modelMenuOpen,
                 notice: state.dockNotice,
                 activityStatus: isStreamingActiveForCurrentSession() ? state.agentActivityStatus : undefined,
                 attachments: state.attachments,
+                queuedMessages: state.queuedMessages,
                 slashPopperOpen: state.slashPopperOpen,
                 slashItems: state.slashItems,
                 mentionPopperOpen: state.mentionPopperOpen,
@@ -8018,11 +8132,13 @@ function render(): void {
           reasoningLevel: state.reasoningLevel,
           approvalMode: state.approvalMode,
           isStreaming: isStreamingCurrent,
+          hasDraft: Boolean(draftText.trim()) || state.attachments.length > 0,
           disabled: !state.gatewayConnected,
           modelMenuOpen: state.modelMenuOpen,
           notice: state.dockNotice,
           activityStatus: isStreamingCurrent ? state.agentActivityStatus : undefined,
           attachments: state.attachments,
+          queuedMessages: state.queuedMessages,
           slashPopperOpen: state.slashPopperOpen,
           slashItems: state.slashItems,
           mentionPopperOpen: state.mentionPopperOpen,
@@ -9020,7 +9136,7 @@ function bindEvents(): void {
   // 【规则】「思考等级」不再占用输入舱 footer：入口已下沉到模型行右侧的二级级联，
   // 由 bindModelDropdownEvents() 统一绑定，这里不再有独立下拉。
 
-  // Approval Mode Dropdown Toggle
+  // 审批三态：manual / smart / off（网关唯一真值，历史 auto/ask/sandbox 已归一）
   const approvalBtn = document.getElementById('dock-approval-toggle-btn');
   const approvalDropdown = document.getElementById('dock-approval-dropdown');
   if (approvalBtn && approvalDropdown) {
@@ -9028,12 +9144,14 @@ function bindEvents(): void {
       e.stopPropagation();
       const isOpen = approvalDropdown.style.display === 'block';
       approvalDropdown.style.display = isOpen ? 'none' : 'block';
+      approvalBtn.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
     };
-    document.querySelectorAll('.approval-option').forEach((opt) => {
-      (opt as HTMLElement).onclick = (e) => {
+    approvalDropdown.querySelectorAll<HTMLElement>('.composer-approval-option').forEach((opt) => {
+      opt.onclick = (e) => {
         e.stopPropagation();
-        const mode = (e.currentTarget as HTMLElement).getAttribute('data-mode') as AppState['approvalMode'];
+        const mode = opt.dataset.mode as AppState['approvalMode'] | undefined;
         approvalDropdown.style.display = 'none';
+        approvalBtn.setAttribute('aria-expanded', 'false');
         if (mode) void switchApproval(mode);
       };
     });
@@ -9062,96 +9180,112 @@ function bindEvents(): void {
     };
   }
 
-  // Event delegation on input-dock-container for notices and rollback cancel
+  // Event delegation on input-dock-container for notices, rollback cancel and queue actions
   const dockContainer = document.querySelector<HTMLElement>('.input-dock-container');
   if (dockContainer && !dockContainer.dataset.dockClickBound) {
     dockContainer.dataset.dockClickBound = 'true';
     dockContainer.addEventListener('click', (e) => {
-      const cancelAction = (e.target as HTMLElement).closest<HTMLElement>('[data-action="rollback-cancel"]');
+      const target = e.target as HTMLElement;
+      const cancelAction = target.closest<HTMLElement>('[data-action="rollback-cancel"]');
       if (cancelAction) {
         e.stopPropagation();
         e.preventDefault();
         handleRollbackCancel();
+        return;
+      }
+      const queueAction = target.closest<HTMLElement>('.queue-action-btn');
+      if (queueAction) {
+        e.stopPropagation();
+        e.preventDefault();
+        const admissionId = queueAction.dataset.queueId || '';
+        const action = queueAction.dataset.action || '';
+        if (admissionId) void handleQueueAction(action, admissionId);
       }
     });
   }
 
-  // Send message & IME Composition defense
+  // 发送 / 停止 与 IME 组合防御
   const sendBtn = document.getElementById('dock-send-btn') as HTMLButtonElement | null;
+  const queueBtn = document.getElementById('dock-queue-btn') as HTMLButtonElement | null;
+  const stopBtn = document.getElementById('dock-stop-btn') as HTMLButtonElement | null;
   const inputEl = document.getElementById('dock-prompt-input') as HTMLTextAreaElement;
   let isComposing = false;
 
-  const handleSend = (source: 'button' | 'enter') => {
+  // 输入区高度：44px 起步，按 scrollHeight 增长，触顶 220px 后转内部滚动。
+  // 【规则】先把 height 归 auto 再量 scrollHeight，回删时高度才能同步收回；
+  //   高度不做过渡，避免高频输入时把排版抖动放大成跳行。
+  const COMPOSER_MIN_HEIGHT = 44;
+  const COMPOSER_MAX_HEIGHT = 220;
+  const syncComposerHeight = () => {
+    if (!inputEl) return;
+    inputEl.style.height = 'auto';
+    const next = Math.min(Math.max(inputEl.scrollHeight, COMPOSER_MIN_HEIGHT), COMPOSER_MAX_HEIGHT);
+    inputEl.style.height = `${next}px`;
+  };
+
+  const submitDraft = () => {
     if (!inputEl) return;
     const text = inputEl.value.trim();
+    if (!text) return;
+    inputEl.value = '';
+    syncComposerHeight();
+    void routeSend(text);
+  };
 
+  const handleSend = (source: 'button' | 'enter') => {
+    if (!inputEl) return;
     if (state.isStreaming) {
-      // Clicking the stop button interrupts; pressing Enter must not.
-      if (source === 'button') {
-        void interruptTurn();
-      } else {
-        state.dockNotice = '当前回合仍在生成中，可点击右侧停止按钮中断';
+      // 运行中主按钮已经是停止，回车不承担中断职责。
+      if (source === 'enter') {
+        setTimedDockNotice(t('dock.busyEnterBlocked'));
         render();
       }
       return;
     }
-
-    if (!text) return;
-    inputEl.value = '';
-    void routeSend(text);
+    submitDraft();
   };
 
-  // 发送按钮可用性：与 OpenChamber 一致，空内容时降到 30% 不透明度且不可点。
-  // 【防范的历史坑 (Pitfall)】流式期间按钮切换成中断动作，必须保持可点击；
-  //   网关未连接时模板已写入 disabled + data-locked，这里不得擅自解锁。
+  // 空内容时发送禁用；网关未连接时模板已写死 disabled + data-locked，这里不得擅自解锁。
   const syncSendAvailability = () => {
     if (!sendBtn || !inputEl || sendBtn.dataset.locked === 'true') return;
     const hasAttachments = Boolean(document.querySelector('.composer-attachment-pill'));
-    sendBtn.disabled = !state.isStreaming && !inputEl.value.trim() && !hasAttachments;
+    sendBtn.disabled = !inputEl.value.trim() && !hasAttachments;
   };
 
   if (sendBtn) sendBtn.onclick = () => handleSend('button');
+  if (queueBtn) {
+    queueBtn.onclick = () => {
+      void enqueueDraft();
+    };
+  }
+  if (stopBtn) {
+    stopBtn.onclick = () => {
+      void interruptTurn();
+    };
+  }
+  // 运行态草稿有无只切按钮可见性，绝不触发整舱重绘（否则 textarea 与光标会被销毁）
+  const syncQueueButtonVisibility = () => {
+    if (!queueBtn || !inputEl) return;
+    queueBtn.hidden = !inputEl.value.trim() && state.attachments.length === 0;
+  };
   syncSendAvailability();
+  syncComposerHeight();
   if (inputEl) {
     if (inputEl.dataset.dockEventsBound !== 'true') {
-      inputEl.addEventListener('input', syncSendAvailability);
       inputEl.dataset.dockEventsBound = 'true';
-      const collapseBtn = document.getElementById('dock-input-collapse-toggle') as HTMLButtonElement | null;
-      let isManuallyCollapsed = false;
-
-      const adjustHeight = () => {
-        if (isManuallyCollapsed) return;
-        inputEl.style.height = 'auto';
-        const scrollHeight = inputEl.scrollHeight;
-        const targetHeight = Math.min(Math.max(scrollHeight, 52), 240);
-        inputEl.style.height = `${targetHeight}px`;
-
-        if (collapseBtn) {
-          if (scrollHeight > 100) {
-            collapseBtn.style.display = 'inline-block';
-            collapseBtn.textContent = t('dock.collapse');
-          } else {
-            collapseBtn.style.display = 'none';
-          }
-        }
-      };
-
-      if (collapseBtn) {
-        collapseBtn.onclick = (e) => {
-          e.preventDefault();
-          isManuallyCollapsed = !isManuallyCollapsed;
-          if (isManuallyCollapsed) {
-            inputEl.style.height = '64px';
-            collapseBtn.textContent = t('dock.showMore');
-          } else {
-            adjustHeight();
-            collapseBtn.textContent = t('dock.collapse');
-          }
-        };
-      }
+      inputEl.addEventListener('compositionstart', () => {
+        isComposing = true;
+      });
+      inputEl.addEventListener('compositionend', () => {
+        isComposing = false;
+        syncComposerHeight();
+      });
+      inputEl.addEventListener('input', syncSendAvailability);
+      inputEl.addEventListener('input', syncQueueButtonVisibility);
+      syncQueueButtonVisibility();
 
       inputEl.addEventListener('input', () => {
-        adjustHeight();
+        if (!isComposing) syncComposerHeight();
         const textBeforeCursor = inputEl.value.slice(0, inputEl.selectionStart || inputEl.value.length);
 
         // 斜杠命令 (/): 处于开头或空格后 → complete.slash 动态补全（失败降级目录快照）
@@ -9231,11 +9365,9 @@ function bindEvents(): void {
         });
       }
 
-      // Initial auto adjustment for restored drafts
-      adjustHeight();
+      // 恢复草稿后按真实内容重新量一次高度
+      syncComposerHeight();
 
-      inputEl.addEventListener('compositionstart', () => { isComposing = true; });
-      inputEl.addEventListener('compositionend', () => { isComposing = false; });
       inputEl.onkeydown = (e) => {
         if (e.key === 'Escape') {
           if (state.slashPopperOpen || state.mentionPopperOpen) {

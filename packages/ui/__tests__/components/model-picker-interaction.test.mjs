@@ -256,11 +256,12 @@ test('思考等级二级级联 - 从 footer 下沉到模型行', async (t) => {
     const afterStart = dock.slice(startAt);
     const sendAt = afterStart.indexOf('id="dock-send-btn"');
     assert.ok(sendAt > 0, '发送键必须存在');
-    // 从 --end 自身开标签起算：到发送键为止，未闭合的 div 只能等于 1（即 --end 自身）
+    // 从 --end 自身开标签起算：到发送键为止，未闭合的 div 只能等于 2
+    // （--end 容器 + 承载发送/停止上下排列的 .composer-action-stack）。
     const beforeSend = afterStart.slice(0, sendAt);
     const openDivs = (beforeSend.match(/<div\b/g) ?? []).length;
     const closeDivs = (beforeSend.match(/<\/div>/g) ?? []).length;
-    assert.equal(openDivs - closeDivs, 1, '发送键必须紧包在 composer-dock__footer-group--end 内部');
+    assert.equal(openDivs - closeDivs, 2, '发送键必须紧包在 composer-dock__footer-group--end 内的动作列里');
   });
 
   await t.test('思考等级历史别名必须归一，五档永不全暗', () => {

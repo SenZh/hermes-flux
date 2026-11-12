@@ -1030,7 +1030,8 @@ button {
   /* 移动端交互控件最小触控热区保护 (>= 44x44px) */
   .icon-btn,
   .composer-icon-btn,
-  .composer-send {
+  .composer-send,
+  .composer-stop {
     min-width: 44px !important;
     min-height: 44px !important;
   }
@@ -1222,18 +1223,8 @@ blockquote {
   border-color: var(--border-subtle) !important;
 }
 
-/* 核心约束：输入框边框杜绝使用天青强调色，聚焦态沿用统一的主色 1px 环 */
-[data-theme="ayu-light"] .composer-dock {
-  background: var(--bg-card) !important;
-  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent) !important;
-  box-shadow: none !important;
-}
-
-[data-theme="ayu-light"] .composer-dock:focus-within {
-  border-color: color-mix(in srgb, var(--foreground) 14%, transparent) !important;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 22%, transparent) !important;
-}
-
+/* 输入舱的表面、边框与聚焦态统一由 conversation.css 的语义 Token 接管，
+   皮肤差异只允许来自 --input / --border 等 slot，禁止在此处 !important 覆写。 */
 /* THEME D 注释头已随皮肤块迁入生成区 */
 
 

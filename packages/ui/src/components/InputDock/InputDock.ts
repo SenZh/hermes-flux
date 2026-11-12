@@ -87,8 +87,18 @@ export interface InputDockProps {
   modelSearchQuery?: string;
   collapsedProviders?: string[];
   reasoningLevel: 'default' | 'none' | 'low' | 'high' | 'max' | 'off' | 'medium';
-  approvalMode: 'auto' | 'ask' | 'sandbox';
+  /** 网关三态；auto / ask / sandbox 仅作为历史入参兼容，渲染前统一归一。 */
+  approvalMode: ApprovalMode | 'auto' | 'ask' | 'sandbox';
   isStreaming: boolean;
+  /**
+   * 运行中草稿是否有内容。
+   *
+   * 【设计意图 (Why)】
+   *   运行态的主按钮列有两种形态：空草稿只有停止；有草稿时发送（入队）叠在停止上方。
+   *   草稿文本只存在于 textarea 的 DOM 里，组件是纯渲染函数不能读 DOM，
+   *   所以宿主必须把「有没有草稿」这一位显式传进来。
+   */
+  hasDraft?: boolean;
   disabled?: boolean;
   modelMenuOpen?: boolean;
   notice?: string;
@@ -105,38 +115,12 @@ export interface InputDockProps {
 export function renderRollbackNoticeBar(banner?: RollbackBannerView | null): string {
   if (!banner) return '';
   return `
-    <div class="rollback-pending-banner" data-rollback-pending="true" data-count="${banner.removedCount}" style="
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 7px 12px;
-      background: var(--bg-backdrop);
-      border: 1px solid var(--border-medium);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border-radius: 10px;
-      font-size: 11.5px;
-      color: var(--text-main);
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-      animation: flux-fade-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-    ">
-      <span style="display: inline-flex; align-items: center; gap: 8px; min-width: 0;">
-        <span aria-hidden="true" style="color: var(--accent); font-weight: 700; font-size: 13px;">↺</span>
-        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500;">${t('chat.rollbackArmed', { count: banner.removedCount, anchor: banner.anchorLabel })}</span>
+    <div class="rollback-pending-banner dock-banner" data-rollback-pending="true" data-count="${banner.removedCount}">
+      <span class="dock-banner__body">
+        <span class="dock-banner__glyph" aria-hidden="true">↺</span>
+        <span class="dock-banner__text">${t('chat.rollbackArmed', { count: banner.removedCount, anchor: banner.anchorLabel })}</span>
       </span>
-      <button class="rollback-banner-cancel" data-action="rollback-cancel" type="button" style="
-        background: transparent;
-        border: none;
-        border-radius: 4px;
-        color: var(--accent);
-        font-size: 11.5px;
-        font-weight: 600;
-        padding: 4px 8px;
-        cursor: pointer;
-        white-space: nowrap;
-        transition: opacity 0.15s ease;
-      ">${t('chat.rollbackCancel')}</button>
+      <button class="rollback-banner-cancel dock-banner__action" data-action="rollback-cancel" type="button">${t('chat.rollbackCancel')}</button>
     </div>
   `;
 }
@@ -145,45 +129,14 @@ export function renderDockNoticeBar(notice?: string): string {
   const clean = (notice || '').trim();
   if (!clean) return '';
   return `
-    <div id="dock-notice" role="status" style="
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      font-size: 11.5px;
-      line-height: 1.4;
-      color: var(--text-secondary);
-      background: var(--bg-backdrop);
-      border: 1px solid var(--border-medium);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border-radius: 10px;
-      padding: 7px 12px;
-      word-break: break-word;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-      animation: flux-fade-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-    ">
-      <div style="display: flex; align-items: center; gap: 8px;">
-        <span style="color: var(--accent); font-size: 12px;">ℹ</span>
-        <span style="font-weight: 500;">${escapeHtml(clean)}</span>
-      </div>
-      <button id="dock-notice-close" type="button" aria-label="${t('dock.noticeClose')}" title="${t('dock.noticeClose')}" style="
-        background: transparent;
-        border: none;
-        cursor: pointer;
-        color: var(--text-muted);
-        opacity: 0.75;
-        padding: 4px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-width: 24px;
-        min-height: 24px;
-        border-radius: 4px;
-        font-size: 14px;
-        line-height: 1;
-        transition: opacity 0.15s ease;
-      ">×</button>
+    <div id="dock-notice" class="dock-banner" role="status">
+      <span class="dock-banner__body">
+        <span class="dock-banner__glyph" aria-hidden="true">ℹ</span>
+        <span class="dock-banner__text">${escapeHtml(clean)}</span>
+      </span>
+      <button id="dock-notice-close" class="dock-banner__close" type="button" aria-label="${t('dock.noticeClose')}" title="${t('dock.noticeClose')}">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
     </div>
   `;
 }
@@ -217,240 +170,223 @@ export function normalizeReasoningLevel(
   }
 }
 
+/**
+ * 审批三态（唯一真值）
+ *
+ * 【设计意图 (Why)】
+ *   Hermes 网关只认 `approvals.mode` 的三值：manual / smart / off。
+ *   历史 UI 曾用 auto / ask / sandbox 三套别名，导致同一状态在不同面板叫不同名字。
+ *   现在入口统一归一，展示与写回共用一个联合类型，非法状态在类型层不可表达。
+ */
+export const APPROVAL_MODES = ['manual', 'smart', 'off'] as const;
+export type ApprovalMode = (typeof APPROVAL_MODES)[number];
+
+export function normalizeApprovalMode(mode?: string): ApprovalMode {
+  if (mode === 'manual' || mode === 'smart' || mode === 'off') return mode;
+  // 历史别名：sandbox = 每步询问，auto = 全放行，ask = 智能
+  if (mode === 'sandbox') return 'manual';
+  if (mode === 'auto') return 'off';
+  return 'smart';
+}
+
+/** 主按钮只由「回合相位」决定：运行中永远是停止，空闲永远是发送（空草稿时禁用）。 */
+export type ComposerPhase = 'idle' | 'running';
+export type ComposerPrimaryAction = 'send' | 'stop';
+
+export function resolveComposerPrimaryAction(phase: ComposerPhase): ComposerPrimaryAction {
+  return phase === 'running' ? 'stop' : 'send';
+}
+
+/** 思考等级展示文案：五档唯一出口，标签与级联共用。 */
+export function reasoningLevelLabel(level: InputDockProps['reasoningLevel'] | '' | undefined): string {
+  switch (normalizeReasoningLevel(level)) {
+    case 'none':
+      return t('dock.reasoningNone');
+    case 'low':
+      return t('dock.reasoningLow');
+    case 'high':
+      return t('dock.reasoningHigh');
+    case 'max':
+      return t('dock.reasoningMax');
+    default:
+      return t('dock.reasoningDefault');
+  }
+}
+
+const SEND_GLYPH = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><path d="M9 5.5 19.5 12 9 18.5Z"/><path d="M9 12h5.2"/></svg>`;
+
+const CARET_GLYPH = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>`;
+
+const PAPERCLIP_GLYPH = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M21.4 11.05 12.25 20.2a6 6 0 0 1-8.49-8.49l9.2-9.19a4 4 0 0 1 5.65 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.83l8.48-8.48"/></svg>`;
+
+const LOCK_GLYPH = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>`;
+
+const SHIELD_CHECK_GLYPH = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4.3 3 8.3 7.5 9.5 4.5-1.2 7.5-5.2 7.5-9.5V6L12 3Z"/><path d="m8.8 11.8 2.2 2.2 4.2-4.2"/></svg>`;
+
+const FAST_FORWARD_GLYPH = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 5 7 7-7 7"/><path d="m13 5 7 7-7 7"/></svg>`;
+
+const ENTER_GLYPH = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 5v6a2 2 0 0 1-2 2H5"/><path d="m9 9-4 4 4 4"/></svg>`;
+
+const IMAGE_GLYPH = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m21 16-5-5L5 20"/></svg>`;
+
+const FILE_GLYPH = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/></svg>`;
+
+const APPROVAL_ICON: Record<ApprovalMode, string> = {
+  manual: LOCK_GLYPH,
+  smart: SHIELD_CHECK_GLYPH,
+  off: FAST_FORWARD_GLYPH,
+};
+
+const APPROVAL_LABEL_KEY = {
+  manual: 'dock.approvalManual',
+  smart: 'dock.approvalSmart',
+  off: 'dock.approvalOff',
+} as const;
+
+const APPROVAL_HINT_KEY = {
+  manual: 'dock.approvalManualHint',
+  smart: 'dock.approvalSmartHint',
+  off: 'dock.approvalOffHint',
+} as const;
+
+function renderApprovalMenu(active: ApprovalMode): string {
+  return APPROVAL_MODES.map((mode) => {
+    const on = mode === active;
+    return `
+      <button class="composer-approval-option${on ? ' is-active' : ''}" type="button" role="menuitemradio" aria-checked="${on ? 'true' : 'false'}" data-mode="${mode}">
+        <span class="composer-approval-option__icon" aria-hidden="true">${APPROVAL_ICON[mode]}</span>
+        <span class="composer-approval-option__text">
+          <span class="composer-approval-option__label">${escapeHtml(t(APPROVAL_LABEL_KEY[mode]))}</span>
+          <span class="composer-approval-option__hint">${escapeHtml(t(APPROVAL_HINT_KEY[mode]))}</span>
+        </span>
+        ${on ? '<span class="composer-approval-option__check" aria-hidden="true">✓</span>' : ''}
+      </button>
+    `;
+  }).join('');
+}
+
 export function renderInputDock(props: InputDockProps): string {
   const isStreaming = Boolean(props.isStreaming);
   const modelMenuOpen = Boolean(props.modelMenuOpen);
   const notice = (props.notice || '').trim();
   const activityStatus = (props.activityStatus || '').trim();
+  const phase: ComposerPhase = isStreaming ? 'running' : 'idle';
+  const primary = resolveComposerPrimaryAction(phase);
+  const approval = normalizeApprovalMode(props.approvalMode);
+  const levelLabel = reasoningLevelLabel(props.reasoningLevel);
 
-  // Model display label
-  // 【规则】统一走 core 派生：目录命中优先，未命中按 ID 派生；绝不把裸 ID 直接显示给用户
+  // 模型名称与图标都必须来自同一条解析链：名称走 core 目录派生，图标走共享的厂商判定，
+  // 与设置页 `ModelOptionRow` 保持同一套数据源，禁止在两处各写一遍。
   const modelLabel = resolveDockModelLabel(props);
-  // 【规则】触发按钮左侧展示当前模型的厂商图标；只有判定出真实厂商才替换齿轮，
-  // 判不出（未选模型 / 未知厂商）保留齿轮表示"通用模型入口"，绝不硬套首字母徽标。
-  // 这里用 suppressBadge 让渲染层直接返回空串，省掉一次额外的 vendorId 预判。
   const modelIcon = props.selectedModel
     ? renderModelVendorIcon(props.selectedModel, props.currentProvider ?? '', { size: 16, suppressBadge: true })
-    : '';
+    : `<svg class="composer-ctrl__icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2"/></svg>`;
 
   const activityPillHtml = activityStatus
-    ? `
-      <div class="agent-activity-pill" style="
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        background: var(--bg-backdrop);
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
-        border: 1px solid var(--border-medium);
-        border-radius: 9999px;
-        padding: 3px 12px;
-        font-size: 11px;
-        color: var(--text-main);
-        margin-bottom: 8px;
-        pointer-events: auto;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25), var(--specular-line);
-        user-select: none;
-        animation: flux-fade-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-      ">
-        <span class="activity-status-dot" style="
-          width: 6px;
-          height: 6px;
-          border-radius: 50%;
-          background: #10B981;
-          box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
-          display: inline-block;
-          animation: flux-pulse 2s infinite ease-in-out;
-        "></span>
-        <span style="font-weight: 500; letter-spacing: -0.01em;">${escapeHtml(modelLabel)}</span>
-        <span style="color: var(--text-muted); opacity: 0.5;">·</span>
-        <span style="color: var(--text-secondary); font-family: var(--font-mono, monospace); font-size: 10.5px;">${escapeHtml(activityStatus)}</span>
-      </div>
-    `
+    ? `<div class="agent-activity-pill">
+        <span class="agent-activity-pill__dot" aria-hidden="true"></span>
+        <span class="agent-activity-pill__model">${escapeHtml(modelLabel)}</span>
+        <span class="agent-activity-pill__sep" aria-hidden="true">·</span>
+        <span class="agent-activity-pill__status">${escapeHtml(activityStatus)}</span>
+      </div>`
     : '';
 
   const rollbackBarHtml = renderRollbackNoticeBar(props.rollbackBanner);
   const dockNoticeHtml = renderDockNoticeBar(notice);
   const hasNotices = Boolean(rollbackBarHtml || dockNoticeHtml);
 
-  const reasoningLabels: Record<string, string> = {
-    default: t('dock.reasoningDefault'),
-    none: t('dock.reasoningNone'),
-    off: t('dock.reasoningNone'),
-    low: t('dock.reasoningLow'),
-    medium: t('dock.reasoningHigh'),
-    high: t('dock.reasoningHigh'),
-    max: t('dock.reasoningMax'),
-  };
-
-  const approvalLabels: Record<string, string> = {
-    auto: '自动',
-    ask: '询问',
-    sandbox: '沙箱',
-  };
-
   return `
-    <div class="input-dock-container" style="
-      position: absolute;
-      bottom: 20px;
-      left: 0;
-      right: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 0 24px;
-      pointer-events: none;
-      z-index: 40;
-    ">
+    <div class="input-dock-container" data-phase="${phase}">
       ${activityPillHtml}
 
-      <!-- Queue Tray (if any queued messages) -->
       ${renderQueueTray(props.queuedMessages)}
 
-      <!-- Notice Stack (Rollback Banner & Timed Dock Notices strictly above composer box) -->
       ${
         hasNotices
-          ? `<div class="dock-notice-stack" style="
-              width: 100%;
-              max-width: 740px;
-              display: flex;
-              flex-direction: column;
-              gap: 6px;
-              margin-bottom: 8px;
-              pointer-events: auto;
-              box-sizing: border-box;
-            ">
+          ? `<div class="dock-notice-stack">
               ${rollbackBarHtml}
               ${dockNoticeHtml}
             </div>`
           : ''
       }
 
+      <!-- 附件轨在输入舱外部上方：缩略图不参与正文排版，也不与行内 @ 引用混排 -->
+      ${renderAttachmentTray(props.attachments)}
+
       <div class="input-card-box composer-dock">
         <!-- Popper 固定挂载点：开合只替换本占位子树，绝不重建 textarea（键盘时序军规） -->
         <div id="composer-popper-mount">${renderSlashPopper(props.slashItems, props.slashPopperOpen)}${renderMentionPopper(props.mentionItems, props.mentionPopperOpen)}</div>
 
-        <!-- Attachment Tray (if any attachments pending send) -->
-        ${renderAttachmentTray(props.attachments)}
-
-        <!-- 编辑器区：与 OpenChamber 一致，只承担输入与内边距 -->
         <div class="composer-dock__editor">
           <textarea id="dock-prompt-input" class="composer-dock__textarea" rows="1" placeholder="${props.disabled ? t('dock.placeholderDisabled') : t('dock.placeholder')}" ${props.disabled ? 'disabled' : ''}></textarea>
-
-          <button id="dock-input-collapse-toggle" class="composer-dock__collapse" type="button" style="display: none;">${t('dock.collapse')}</button>
         </div>
 
-        <!-- Footer：左侧附件，右侧模型 / 思考 / 发送（对标 OpenChamber） -->
         <div class="composer-dock__footer">
           <div class="composer-dock__footer-group">
-            <!-- File Attach -->
-            <button id="dock-attach-file-btn" class="composer-icon-btn" title="${t('dock.attachTooltip')}">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-            </button>
+            <button id="dock-attach-file-btn" class="composer-icon-btn" type="button" title="${t('dock.attachTooltip')}" aria-label="${t('dock.attachTooltip')}">${PAPERCLIP_GLYPH}</button>
+
+            <div class="pill-dropdown-wrapper">
+              <button id="dock-approval-toggle-btn" class="composer-icon-btn" type="button" title="${t('dock.approval')}: ${escapeHtml(t(APPROVAL_LABEL_KEY[approval]))}" aria-label="${t('dock.approval')}: ${escapeHtml(t(APPROVAL_LABEL_KEY[approval]))}" aria-haspopup="menu" aria-expanded="false">
+                ${APPROVAL_ICON[approval]}
+              </button>
+              <div id="dock-approval-dropdown" class="composer-approval-menu" role="menu" aria-label="${t('dock.approval')}" style="display: none;">
+                ${renderApprovalMenu(approval)}
+              </div>
+            </div>
           </div>
 
           <div class="composer-dock__footer-group composer-dock__footer-group--end">
-            <!-- 1. Model Selector -->
             <div class="pill-dropdown-wrapper">
-              <button id="dock-model-selector-btn" class="composer-ctrl" title="${t('dock.selectModel')}" aria-haspopup="listbox" aria-expanded="${modelMenuOpen ? 'true' : 'false'}">
-                ${modelIcon || `<svg class="composer-ctrl__icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2"/></svg>`}
+              <button id="dock-model-selector-btn" class="composer-ctrl" type="button" title="${escapeHtml(modelLabel)} / ${escapeHtml(levelLabel)}" aria-haspopup="listbox" aria-expanded="${modelMenuOpen ? 'true' : 'false'}">
+                ${modelIcon}
                 <span id="current-model-label" class="composer-ctrl__label">${escapeHtml(modelLabel)}</span>
-                <span class="composer-ctrl__caret" style="font-size: 9px;">▾</span>
+                <span class="composer-ctrl__sep" aria-hidden="true">/</span>
+                <span class="composer-ctrl__level">${escapeHtml(levelLabel)}</span>
+                <span class="composer-ctrl__caret" aria-hidden="true">${CARET_GLYPH}</span>
               </button>
 
-              <div id="dock-model-dropdown" class="model-dropdown-menu" style="
-                display: ${modelMenuOpen ? 'block' : 'none'};
-                position: absolute;
-                bottom: calc(100% + 8px);
-                right: 0;
-                width: 320px;
-                background: var(--bg-card);
-                border: 1px solid var(--border-strong);
-                border-radius: 12px;
-                box-shadow: var(--shadow-window), 0 0 0 1px var(--border-subtle);
-                overflow: visible;
-                z-index: 200;
-                user-select: none;
-              ">
-                <!-- Top Action & Search Bar -->
-                <div style="padding: 10px 10px 6px; border-bottom: 1px solid var(--border-subtle); background: var(--popover); border-radius: 12px 12px 0 0;">
-                  <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <span id="btn-add-provider" style="font-size: 11.5px; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; gap: 4px;">
-                      <span style="font-size: 13px;">+</span> 添加新提供商
-                    </span>
-                    <span id="btn-refresh-models" style="font-size: 11px; color: var(--text-muted); cursor: pointer;" title="刷新列表">刷新 ↻</span>
-                  </div>
-                  <div style="position: relative; display: flex; align-items: center;">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position: absolute; left: 9px; color: var(--text-muted);"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                    <input id="dock-model-search-input" type="text" placeholder="搜索模型" value="${escapeHtml(props.modelSearchQuery || '')}" style="
-                      width: 100%;
-                      height: 28px;
-                      padding: 0 10px 0 28px;
-                      border-radius: 6px;
-                      border: 1px solid var(--border-medium);
-                      background: var(--bg-panel);
-                      color: var(--text-main);
-                      font-size: 12px;
-                      outline: none;
-                      box-sizing: border-box;
-                    " />
-                  </div>
+              <div id="dock-model-dropdown" class="model-dropdown-menu" style="display: ${modelMenuOpen ? 'block' : 'none'};" role="listbox" aria-label="${t('dock.selectModel')}">
+                <div class="model-dropdown__search">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                  <input id="dock-model-search-input" type="text" placeholder="${t('dock.searchModel')}" value="${escapeHtml(props.modelSearchQuery || '')}" aria-label="${t('dock.searchModel')}" />
+                  <button id="btn-refresh-models" class="model-dropdown__refresh" type="button" title="${t('dock.refresh')}" aria-label="${t('dock.refresh')}">↻</button>
                 </div>
 
-                <!-- Scrollable Model Tree List (Accordion by Provider) -->
-                <div id="model-picker-scroll-list" role="listbox" aria-label="${escapeHtml(t('dock.selectModel'))}" style="max-height: 320px; overflow-y: auto; padding: 6px 0;">
+                <div id="model-picker-scroll-list" class="model-dropdown__list" role="listbox" aria-label="${t('dock.selectModel')}">
                   ${renderModelPickerTree(props)}
                 </div>
 
-                <!-- 二级级联：思考等级。悬停/聚焦任意模型行时由桌面端定位到该行右侧。
-                     独立于行内渲染，避免 300 行 × 5 项重复 DOM。 -->
-                <div id="model-reasoning-cascade" class="model-cascade" role="menu" aria-label="${escapeHtml(t('dock.reasoning'))}" style="display: none;">
+                <!-- 二级级联：思考等级。悬停/聚焦任意模型行时由桌面端定位到该行右侧，独立于行渲染 -->
+                <div id="model-reasoning-cascade" class="model-cascade" role="menu" aria-label="${t('dock.reasoning')}" style="display: none;">
                   <div class="model-cascade__title" role="presentation">${t('dock.reasoning')}</div>
-                  ${['default', 'none', 'low', 'high', 'max']
+                  ${(['default', 'none', 'low', 'high', 'max'] as const)
                     .map((lvl) => {
-                      // 【规则】单值高亮：`high` 与 `default` 不能同时勾上，否则用户看不出当前到底哪一档。
-                      // `off` 与 `medium` 是历史别名，必须先归一再比对——否则 `medium` 会五档全暗。
-                      const normalized = normalizeReasoningLevel(props.reasoningLevel);
-                      const isSelected = normalized === lvl;
+                      const isSelected = normalizeReasoningLevel(props.reasoningLevel) === lvl;
                       return `
-                    <div class="model-cascade__item${isSelected ? ' active' : ''}" role="menuitemradio" aria-checked="${isSelected ? 'true' : 'false'}" data-level="${lvl}" tabindex="0">
-                      <span>${escapeHtml(reasoningLabels[lvl] || lvl)}</span>
-                      ${isSelected ? '<span class="model-cascade__check">✓</span>' : ''}
-                    </div>
-                  `;
+                        <div class="model-cascade__item${isSelected ? ' active' : ''}" role="menuitemradio" aria-checked="${isSelected ? 'true' : 'false'}" data-level="${lvl}" tabindex="0">
+                          <span>${escapeHtml(lvl === 'default' ? t('dock.reasoningDefault') : lvl === 'none' ? t('dock.reasoningNone') : lvl === 'low' ? t('dock.reasoningLow') : lvl === 'high' ? t('dock.reasoningHigh') : t('dock.reasoningMax'))}</span>
+                          ${isSelected ? '<span class="model-cascade__check" aria-hidden="true">✓</span>' : ''}
+                        </div>
+                      `;
                     })
                     .join('')}
                 </div>
 
-                <!-- Bottom Navigation Hint -->
-                <div style="
-                  padding: 6px 12px;
-                  border-top: 1px solid var(--border-subtle);
-                  background: var(--popover);
-                  border-radius: 0 0 12px 12px;
-                  font-size: 10.5px;
-                  color: var(--text-muted);
-                  display: flex;
-                  align-items: center;
-                  justify-content: space-between;
-                ">
-                  <span>↑↓ 选择模型</span>
-                  <span>Esc 关闭</span>
+                <div class="model-dropdown__hint">
+                  <span>↑↓ ${t('dock.modelHintMove')}</span>
+                  <span>esc ${t('dock.modelHintClose')}</span>
                 </div>
               </div>
             </div>
 
-            <!-- 2. 思考等级不再占用输入舱：改为模型行 hover 时右侧弹出的二级级联面板
-                 （见 #model-reasoning-cascade），避免在 740px 的输入舱里再塞一个下拉。 -->
-
-            <!-- Send Action Button：与模型按钮同归右端紧凑组，避免去掉思考按钮后中间出现几百像素空洞 -->
-            <button id="dock-send-btn" class="composer-send${isStreaming ? ' composer-send--stop' : ''}" title="${isStreaming ? t('dock.stop') : t('dock.send')}" ${props.disabled ? 'disabled data-locked="true"' : ''}>
+            <div class="composer-action-stack">
               ${
-                isStreaming
-                  ? `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>`
-                  : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>`
+                primary === 'send'
+                  ? `<button id="dock-send-btn" class="composer-send" type="button" title="${t('dock.send')}" aria-label="${t('dock.send')}" ${props.disabled ? 'disabled data-locked="true"' : ''}>${SEND_GLYPH}</button>`
+                  : `<button id="dock-queue-btn" class="composer-send" type="button" title="${t('dock.queueSubmit')}" aria-label="${t('dock.queueSubmit')}"${props.hasDraft ? '' : ' hidden'}>${SEND_GLYPH}</button>
+                     <button id="dock-stop-btn" class="composer-stop" type="button" title="${t('dock.stopTurn')}" aria-label="${t('dock.stopTurn')}"><span class="composer-stop__block" aria-hidden="true"></span></button>`
               }
-            </button>
+            </div>
           </div>
         </div>
       </div>
@@ -460,204 +396,38 @@ export function renderInputDock(props: InputDockProps): string {
 
 /**
  * 待发送消息队列挂载托盘 (Queue Tray)
+ *
+ * 【规则】每行只有三个动作：放回编辑、立即发送、取消。
+ *   顺序与主按钮一致（左到右 = 从轻到重），不再提供上下移动与「打断插队」。
  */
 export function renderQueueTray(queued?: InputQueuedItem[]): string {
   if (!queued || queued.length === 0) return '';
 
   return `
-    <div class="pending-queue-tray" style="
-      pointer-events: auto;
-      width: 100%;
-      max-width: 740px;
-      margin: 0 auto 6px;
-      background: var(--bg-card);
-      border: 1px solid var(--border-medium);
-      border-radius: 10px;
-      padding: 6px 10px;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-      backdrop-filter: blur(20px);
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-      animation: flux-fade-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-    ">
-      <div style="display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 600; color: var(--text-secondary); border-bottom: 1px solid var(--border-subtle); padding-bottom: 4px;">
-        <div style="display: flex; align-items: center; gap: 6px;">
-          <span style="color: var(--accent);">⏳</span>
-          <span>${t('queue.title')} (${queued.length})</span>
-        </div>
-        <!-- 强行打断插队动作 -->
-        <button class="queue-interrupt-push-btn" data-action="interrupt-and-push" title="${t('queue.interruptAndPush')}" style="
-          background: var(--accent-subtle);
-          border: 1px solid var(--accent-border);
-          color: var(--accent);
-          border-radius: 4px;
-          padding: 1.5px 6px;
-          font-size: 10px;
-          font-family: var(--font-mono);
-          cursor: pointer;
-          display: inline-flex;
-          align-items: center;
-          gap: 3px;
-        ">
-          <span>⚡</span>
-          <span>${t('queue.interruptAndPush')}</span>
-        </button>
+    <div class="pending-queue-tray">
+      <div class="pending-queue-tray__head">
+        <span>${t('queue.title')} · ${queued.length}</span>
       </div>
-
-      <div class="queue-items-list" style="display: flex; flex-direction: column; gap: 4px; max-height: 120px; overflow-y: auto;">
-        ${queued
-          .map((item, idx) => {
-            const shortText = item.text.length > 50 ? `${item.text.slice(0, 50)}…` : item.text;
-            return `
-            <div class="queue-item-card" data-queue-id="${item.id}" style="
-              display: flex;
-              align-items: center;
-              justify-content: space-between;
-              gap: 8px;
-              padding: 3px 6px;
-              background: var(--bg-panel);
-              border: 1px solid var(--border-subtle);
-              border-radius: 6px;
-              font-size: 11px;
-              font-family: var(--font-mono);
-              color: var(--text-main);
-            ">
-              <div style="display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;">
-                <span style="color: var(--text-muted); font-size: 10px;">#${idx + 1}</span>
-                <span style="overflow: hidden; text-overflow: ellipsis;">${escapeHtml(shortText)}</span>
-                ${item.model ? `<span style="font-size: 9.5px; padding: 0 4px; background: var(--popover); border-radius: 3px; color: var(--text-muted);">${escapeHtml(item.model)}</span>` : ''}
-              </div>
-              <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
-                <button class="queue-action-btn" data-action="queue-up" data-queue-id="${item.id}" title="${t('queue.moveUp')}" style="background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 1px 3px;">▲</button>
-                <button class="queue-action-btn" data-action="queue-down" data-queue-id="${item.id}" title="${t('queue.moveDown')}" style="background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 1px 3px;">▼</button>
-                <button class="queue-action-btn" data-action="queue-edit" data-queue-id="${item.id}" title="${t('queue.edit')}" style="background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 1px 3px; font-size: 10px;">✎</button>
-                <button class="queue-action-btn" data-action="queue-cancel" data-queue-id="${item.id}" title="${t('queue.cancel')}" style="background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 1px 3px; font-size: 12px;">×</button>
-              </div>
+      ${queued
+        .map((item, idx) => {
+          const shortText = item.text.length > 80 ? `${item.text.slice(0, 80)}…` : item.text;
+          return `
+            <div class="pending-queue-row" data-queue-id="${item.id}">
+              <span class="pending-queue-row__index">${idx + 1}</span>
+              <span class="pending-queue-row__text" title="${escapeHtml(item.text)}">${escapeHtml(shortText)}</span>
+              <span class="pending-queue-row__actions">
+                <button class="queue-action-btn" data-action="queue-replace" data-queue-id="${item.id}" title="${t('queue.edit')}" aria-label="${t('queue.edit')}">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11.5"/><path d="m7.2 10.2 4.8 4.8 4.8-4.8"/><path d="M4.5 20.5h15"/></svg>
+                </button>
+                <button class="queue-action-btn" data-action="queue-steer" data-queue-id="${item.id}" title="${t('queue.interruptAndPush')}" aria-label="${t('queue.interruptAndPush')}">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8Z"/></svg>
+                </button>
+                <button class="queue-action-btn" data-action="queue-cancel" data-queue-id="${item.id}" title="${t('queue.cancel')}" aria-label="${t('queue.cancel')}">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
+              </span>
             </div>
           `;
-          })
-          .join('')}
-      </div>
-    </div>
-  `;
-}
-
-/**
- * 待发送附件暂存托盘 (Attachment Tray)
- *
- * 【设计意图 (Why)】
- * 1. 结构化展现用户粘贴或拖入的图片与文档资产；
- * 2. 采用微距双层卡片排版：上部呈现高质量微缩图，下部清晰标注逻辑序列标号（如 Image 1, Doc 1）与原始文件名；
- * 3. 方便 Agent 理解用户提问中针对具体图文指代的精确上下文。
- *
- * 【约束与规则 (Rules)】
- * - 纯 UI 表现层，严禁调用网络或原生 IPC；
- * - 样式使用主题 Token，严禁硬编码颜色值。
- */
-export function renderAttachmentTray(attachments?: InputAttachmentItem[]): string {
-  if (!attachments || attachments.length === 0) return '';
-
-  let imgIndex = 0;
-  let docIndex = 0;
-
-  return `
-    <div class="composer-attachment-tray" style="
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      padding-bottom: 6px;
-      margin-bottom: 4px;
-      border-bottom: 1px solid var(--border-subtle);
-    ">
-      ${attachments
-        .map((att) => {
-          const isImg = att.type === 'image';
-          if (isImg) imgIndex++;
-          else docIndex++;
-          const defaultLabel = isImg ? `Image ${imgIndex}` : `Doc ${docIndex}`;
-          const displayLabel = att.label || defaultLabel;
-
-          return `
-          <div class="composer-attachment-pill composer-attachment-card" data-att-id="${att.id}" style="
-            display: inline-flex;
-            flex-direction: column;
-            width: 76px;
-            background: var(--bg-panel);
-            border: 1px solid var(--border-medium);
-            border-radius: 6px;
-            overflow: hidden;
-            position: relative;
-            user-select: none;
-            transition: border-color 0.15s ease, background 0.15s ease;
-          ">
-            <!-- Top Thumbnail Box -->
-            <div style="
-              width: 100%;
-              height: 48px;
-              background: var(--bg-card);
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              position: relative;
-              overflow: hidden;
-            ">
-              ${
-                isImg && att.previewUrl
-                  ? `<img src="${att.previewUrl}" alt="${escapeHtml(att.name)}" style="width: 100%; height: 100%; object-fit: cover;" />`
-                  : `<span style="font-size: 20px; line-height: 1; color: var(--accent); opacity: 0.85;">${att.type === 'pdf' ? '📕' : '📄'}</span>`
-              }
-              <button class="btn-remove-attachment" data-att-id="${att.id}" title="${t('common.remove')}" aria-label="${t('common.remove')}" style="
-                position: absolute;
-                top: 2px;
-                right: 2px;
-                width: 16px;
-                height: 16px;
-                border-radius: 50%;
-                background: var(--bg-backdrop);
-                color: var(--text-main);
-                border: 1px solid var(--border-subtle);
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 11px;
-                line-height: 1;
-                cursor: pointer;
-                padding: 0;
-                opacity: 0.8;
-                transition: opacity 0.15s ease, transform 0.1s ease;
-              ">×</button>
-            </div>
-            <!-- Bottom Metadata Label & Filename -->
-            <div style="
-              padding: 3px 4px 4px;
-              display: flex;
-              flex-direction: column;
-              gap: 1px;
-              background: var(--bg-panel);
-            ">
-              <span class="attachment-index-label" style="
-                font-size: 9.5px;
-                font-weight: 700;
-                font-family: var(--font-mono);
-                color: var(--accent);
-                line-height: 1.2;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-              ">${escapeHtml(displayLabel)}</span>
-              <span class="attachment-filename-label" title="${escapeHtml(att.name)}" style="
-                font-size: 9px;
-                font-family: var(--font-sans);
-                color: var(--text-muted);
-                line-height: 1.2;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-              ">${escapeHtml(att.name)}</span>
-            </div>
-          </div>
-        `;
         })
         .join('')}
     </div>
@@ -665,108 +435,113 @@ export function renderAttachmentTray(attachments?: InputAttachmentItem[]): strin
 }
 
 /**
- * 斜杠命令补全悬浮面板 (Slash Command Popper)
+ * 附件轨 (Attachment Rail)
+ *
+ * 【设计意图 (Why)】
+ *   图片必须以缩略图出现在输入舱**外部上方**：它证明「这份图会随消息发出」，
+ *   而不是正文里的一段文本。文档退化为同名胶囊，避免 56px 缩略图里塞一个文字盲盒。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 图片 56×56、文档 38px 胶囊，两者共用 8px 圆角与 1px 发丝边；
+ *   2. 删除按钮 16px，永远在缩略图右上角，不挤占文件名；
+ *   3. 容器保留 `composer-attachment-pill` 类，宿主用它判断「当前是否有附件」。
+ */
+export function renderAttachmentTray(attachments?: InputAttachmentItem[]): string {
+  if (!attachments || attachments.length === 0) return '';
+
+  return `
+    <div class="composer-attach-rail">
+      ${attachments
+        .map((att) => {
+          const isImg = att.type === 'image';
+          const removeBtn = `<button class="composer-attach__remove btn-remove-attachment" data-att-id="${att.id}" type="button" title="${t('common.remove')}" aria-label="${t('common.remove')}">
+            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>`;
+
+          if (isImg) {
+            return `
+              <div class="composer-attachment-pill composer-attach-thumb" data-att-id="${att.id}">
+                ${att.previewUrl ? `<img class="composer-attach-thumb__img" src="${att.previewUrl}" alt="${escapeHtml(att.name)}" />` : `<span class="composer-attach-thumb__glyph" aria-hidden="true">${IMAGE_GLYPH}</span>`}
+                ${removeBtn}
+              </div>
+            `;
+          }
+
+          return `
+            <div class="composer-attachment-pill composer-attach-file" data-att-id="${att.id}">
+              <span class="composer-attach-file__glyph" aria-hidden="true">${FILE_GLYPH}</span>
+              <span class="composer-attach-file__name" title="${escapeHtml(att.name)}">${escapeHtml(att.name)}</span>
+              ${removeBtn}
+            </div>
+          `;
+        })
+        .join('')}
+    </div>
+  `;
+}
+
+/**
+ * 斜杠命令补全浮层
+ *
+ * 【规则】命令名用主前景色 + 无衬线，描述退到 muted；底部提示统一使用矢量 Enter，
+ *   不再出现 `SKILL` 标签或字符符号。
  */
 export function renderSlashPopper(items?: SlashCommandOption[], open = false): string {
   if (!open || !items || items.length === 0) return '';
 
   return `
-    <div class="composer-slash-popper" style="
-      position: absolute;
-      bottom: calc(100% + 6px);
-      left: 12px;
-      width: 260px;
-      max-height: 220px;
-      overflow-y: auto;
-      background: var(--bg-card);
-      border: 1px solid var(--border-strong);
-      border-radius: 10px;
-      box-shadow: var(--shadow-window);
-      padding: 4px;
-      z-index: 100;
-      user-select: none;
-      backdrop-filter: blur(20px);
-    ">
-      <div style="font-size: 10.5px; font-weight: 600; color: var(--text-muted); padding: 4px 8px 3px; border-bottom: 1px solid var(--border-subtle);">
-        ${t('dock.slashHeader')}
-      </div>
-      ${items
-        .map((cmd) => {
-          return `
-          <div class="slash-item-option" data-command="${escapeHtml(cmd.name)}" data-replace-from="${cmd.replaceFrom ?? ''}" style="
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 5px 8px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 11.5px;
-            color: var(--text-main);
-            transition: background 0.1s ease;
-          " onmouseenter="this.style.background='var(--card-hover)'" onmouseleave="this.style.background='transparent'">
-            <div style="display: flex; align-items: center; gap: 6px;">
-              <span style="color: var(--accent); font-weight: 600; font-family: var(--font-mono);">${escapeHtml(cmd.name)}</span>
-              ${cmd.isSkill ? '<span style="font-size: 9px; padding: 1px 4px; background: var(--accent-subtle); color: var(--accent); border-radius: 3px;">SKILL</span>' : ''}
+    <div class="composer-slash-popper composer-popper">
+      <div class="composer-popper__head">/ ${t('dock.slashHeader')}</div>
+      <div class="composer-popper__list">
+        ${items
+          .map(
+            (cmd) => `
+            <div class="slash-item-option composer-popper__row" data-command="${escapeHtml(cmd.name)}" data-replace-from="${cmd.replaceFrom ?? ''}" role="option" tabindex="0">
+              <span class="composer-popper__name">${escapeHtml(cmd.name)}</span>
+              <span class="composer-popper__desc">${escapeHtml(cmd.description)}</span>
             </div>
-            <span style="font-size: 10.5px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 110px;">${escapeHtml(cmd.description)}</span>
-          </div>
-        `;
-        })
-        .join('')}
+          `,
+          )
+          .join('')}
+      </div>
+      <div class="composer-popper__foot">
+        <span>↑↓ ${t('dock.popperSelect')}</span>
+        <span class="composer-popper__enter">${ENTER_GLYPH}${t('dock.popperInsert')}</span>
+      </div>
     </div>
   `;
 }
 
 /**
- * @ 智能引用补全悬浮面板 (Mention Popper)
+ * @ 引用补全浮层
+ *
+ * 【规则】文件名一律主前景色（深色白字、浅色黑字），路径退到 muted；
+ *   与命令浮层共用同一套行高、内距与底部提示，禁止两套视觉语言。
  */
 export function renderMentionPopper(items?: MentionReferenceOption[], open = false): string {
   if (!open || !items || items.length === 0) return '';
 
   return `
-    <div class="composer-mention-popper" style="
-      position: absolute;
-      bottom: calc(100% + 6px);
-      left: 12px;
-      width: 280px;
-      max-height: 220px;
-      overflow-y: auto;
-      background: var(--bg-card);
-      border: 1px solid var(--border-strong);
-      border-radius: 10px;
-      box-shadow: var(--shadow-window);
-      padding: 4px;
-      z-index: 100;
-      user-select: none;
-      backdrop-filter: blur(20px);
-    ">
-      <div style="font-size: 10.5px; font-weight: 600; color: var(--text-muted); padding: 4px 8px 3px; border-bottom: 1px solid var(--border-subtle);">
-        ${t('dock.mentionHeader')}
+    <div class="composer-mention-popper composer-popper">
+      <div class="composer-popper__head">@ ${t('dock.mentionHeader')}</div>
+      <div class="composer-popper__list">
+        ${items
+          .map((m) => {
+            const isFile = m.type === 'file';
+            return `
+              <div class="mention-item-option composer-popper__row" data-mention="${escapeHtml(m.name)}" data-type="${m.type}" role="option" tabindex="0">
+                <span class="composer-popper__glyph" aria-hidden="true">${isFile ? FILE_GLYPH : '<span class="composer-popper__avatar">' + escapeHtml(m.name.slice(0, 1)) + '</span>'}</span>
+                <span class="composer-popper__name">${escapeHtml(m.name)}</span>
+                ${m.detail ? `<span class="composer-popper__desc">${escapeHtml(m.detail)}</span>` : ''}
+              </div>
+            `;
+          })
+          .join('')}
       </div>
-      ${items
-        .map((m) => {
-          const isFile = m.type === 'file';
-          return `
-          <div class="mention-item-option" data-mention="${escapeHtml(m.name)}" data-type="${m.type}" style="
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 5px 8px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 11.5px;
-            color: var(--text-main);
-            transition: background 0.1s ease;
-          " onmouseenter="this.style.background='var(--card-hover)'" onmouseleave="this.style.background='transparent'">
-            <div style="display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis;">
-              <span style="color: ${isFile ? 'var(--text-muted)' : 'var(--accent)'}; font-size: 12px;">${isFile ? '📄' : '🤖'}</span>
-              <span style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(m.name)}</span>
-            </div>
-            ${m.detail ? `<span style="font-size: 10px; color: var(--text-muted); flex-shrink: 0;">${escapeHtml(m.detail)}</span>` : ''}
-          </div>
-        `;
-        })
-        .join('')}
+      <div class="composer-popper__foot">
+        <span>↑↓ ${t('dock.popperSelect')}</span>
+        <span class="composer-popper__enter">${ENTER_GLYPH}${t('dock.popperInsert')}</span>
+      </div>
     </div>
   `;
 }
@@ -973,7 +748,7 @@ export function renderModelPickerTree(props: InputDockProps): string {
       !query && favoriteItems.length > 0
         ? `
       <div class="model-picker-section" role="group" aria-label="${escapeHtml(t('dock.favorites'))}" style="margin-bottom: 6px;">
-        <div style="padding: 4px 12px; font-size: 11px; font-weight: 700; color: #38BDF8; display: flex; align-items: center; gap: 6px;">
+        <div style="padding: 4px 12px; font-size: 11px; font-weight: 700; color: var(--muted-foreground); display: flex; align-items: center; gap: 6px;">
           <span>★</span>
           <span>收藏</span>
         </div>
@@ -1167,6 +942,15 @@ export interface RenderInputDockSnapshot {
   attachmentsCount?: number;
   attachmentsHash?: string;
   rollbackArmedHash?: string;
+  /**
+   * 运行态主按钮列的形态由草稿有无决定。
+   *
+   * 【规则】它**不参与**快照比对：草稿每个按键都会变，一旦参与就会整舱 outerHTML 重建，
+   *   textarea 与光标一起被销毁。宿主在 input 事件里直接切 #dock-queue-btn 的 hidden。
+   */
+  hasDraft?: boolean;
+  /** 队列指纹：条数与文本变化都要重绘托盘。 */
+  queuedHash?: string;
 }
 
 /**
@@ -1207,6 +991,7 @@ export function hasDockSnapshotChanged(
     last.favoriteModelsHash !== curr.favoriteModelsHash ||
     last.attachmentsCount !== curr.attachmentsCount ||
     last.attachmentsHash !== curr.attachmentsHash ||
-    last.rollbackArmedHash !== curr.rollbackArmedHash
+    last.rollbackArmedHash !== curr.rollbackArmedHash ||
+    last.queuedHash !== curr.queuedHash
   );
 }

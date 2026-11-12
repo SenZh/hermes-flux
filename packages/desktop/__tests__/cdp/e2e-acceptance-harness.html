@@ -182,7 +182,8 @@
                 selectedModel: 'gpt-4o',
                 reasoningLevel: 'default',
                 approvalMode: 'auto',
-                isStreaming: false,
+                // 由 cdpApp.isStreaming 驱动，验证运行态只剩停止按钮、按钮列变高
+                isStreaming: Boolean(this.isStreaming),
                 disabled: false,
                 attachments: this.attachments || [],
                 slashPopperOpen: this.slashPopperOpen,

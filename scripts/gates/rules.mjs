@@ -401,16 +401,21 @@ const layoutRules = {
     const out = [];
     const joined = ctx.codeLines.join('\n');
 
-    // 输入舱必须锁定 740px 黄金限宽——这是硬性可静态断言的常量
-    if (file.endsWith('InputDock/InputDock.ts') && !/max-width:\s*740px/.test(joined)) {
-      out.push({
-        file,
-        line: 1,
-        lineIdx: 0,
-        ruleId: 'layout/input-dock-width',
-        message: 'InputDock 必须保持 max-width: 740px 黄金限宽（AGENTS.md 六-2）',
-        snippet: '',
-      });
+    // 输入舱必须锁定 740px 黄金限宽——这是硬性可静态断言的常量。
+    // 重设计后几何归口 conversation.css，模板与样式表任一处声明都算数。
+    if (file.endsWith('InputDock/InputDock.ts')) {
+      const dockCssPath = path.join(REPO_ROOT, 'packages/ui/src/styles/conversation.css');
+      const dockCss = fs.existsSync(dockCssPath) ? fs.readFileSync(dockCssPath, 'utf8') : '';
+      if (!/max-width:\s*740px/.test(`${joined}\n${dockCss}`)) {
+        out.push({
+          file,
+          line: 1,
+          lineIdx: 0,
+          ruleId: 'layout/input-dock-width',
+          message: 'InputDock 必须保持 max-width: 740px 黄金限宽（AGENTS.md 六-2）',
+          snippet: '',
+        });
+      }
     }
 
     // 已登记偏差：实际值与规范不符时进 warnings（不阻断，但不隐身）

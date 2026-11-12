@@ -10,7 +10,7 @@ import {
 } from '../../dist/components/InputDock/InputDock.js';
 
 test('InputDock Enhanced - 队列托盘、附件托盘、手风琴模型器与Popper测试', async (t) => {
-  await t.test('1. 待发送队列托盘 (renderQueueTray)：多条排队与紧急打断插队按钮', () => {
+  await t.test('1. 待发送队列托盘 (renderQueueTray)：多条排队与三动作', () => {
     const queueItems = [
       { id: 'q1', text: '先帮我写个单测', model: 'claude-3-7-sonnet' },
       { id: 'q2', text: '然后补齐文档' },
@@ -18,31 +18,30 @@ test('InputDock Enhanced - 队列托盘、附件托盘、手风琴模型器与Po
     const html = renderQueueTray(queueItems);
 
     assert.ok(html.includes('pending-queue-tray'), '必须渲染排队托盘容器');
-    assert.ok(html.includes('(2)'), '显示排队数量');
-    assert.ok(html.includes('data-action="interrupt-and-push"'), '必须包含打断并执行快捷动作');
-    assert.ok(html.includes('#1'), '包含序号 1');
+    assert.ok(html.includes('· 2'), '显示排队数量');
+    assert.ok(html.includes('pending-queue-row__index'), '包含序号位');
     assert.ok(html.includes('先帮我写个单测'), '包含文本摘要');
-    assert.ok(html.includes('data-action="queue-up"'), '包含上移按钮');
-    assert.ok(html.includes('data-action="queue-down"'), '包含下移按钮');
-    assert.ok(html.includes('data-action="queue-edit"'), '包含编辑按钮');
-    assert.ok(html.includes('data-action="queue-cancel"'), '包含取消按钮');
+    assert.ok(html.includes('data-action="queue-replace"'), '包含放回编辑');
+    assert.ok(html.includes('data-action="queue-steer"'), '包含立即发送');
+    assert.ok(html.includes('data-action="queue-cancel"'), '包含取消');
+    assert.ok(!html.includes('data-action="queue-up"'), '上下移动已收敛');
+    assert.ok(!html.includes('interrupt-and-push'), '整队打断已移除');
 
     // 边界：空队列返回空
     assert.equal(renderQueueTray([]), '');
     assert.equal(renderQueueTray(undefined), '');
   });
 
-  await t.test('2. 附件暂存托盘 (renderAttachmentTray)：图片缩略图与移除小叉', () => {
+  await t.test('2. 附件轨 (renderAttachmentTray)：图片缩略图与文档胶囊', () => {
     const attachments = [
       { id: 'att-1', name: 'screenshot.png', type: 'image', previewUrl: 'blob:mock-img' },
       { id: 'att-2', name: 'architecture.pdf', type: 'pdf' },
     ];
     const html = renderAttachmentTray(attachments);
 
-    assert.ok(html.includes('composer-attachment-tray'), '必须渲染附件托盘');
-    assert.ok(html.includes('composer-attachment-card'), '必须渲染附件双层缩略图卡片');
-    assert.ok(html.includes('Image 1'), '必须自动为第1张图片标注 Image 1 序号');
-    assert.ok(html.includes('Doc 1'), '必须自动为第1份文档标注 Doc 1 序号');
+    assert.ok(html.includes('composer-attach-rail'), '必须渲染附件轨');
+    assert.ok(html.includes('composer-attach-thumb'), '图片必须渲染 56px 缩略图');
+    assert.ok(html.includes('composer-attach-file'), '文档必须退化为胶囊');
     assert.ok(html.includes('src="blob:mock-img"'), '图片附件渲染缩略图');
     assert.ok(html.includes('screenshot.png'), '渲染文件名');
     assert.ok(html.includes('architecture.pdf'), '渲染文档名');
@@ -52,7 +51,7 @@ test('InputDock Enhanced - 队列托盘、附件托盘、手风琴模型器与Po
     assert.equal(renderAttachmentTray([]), '');
   });
 
-  await t.test('3. 斜杠补全面板 (renderSlashPopper)：系统指令与 Skill 标识', () => {
+  await t.test('3. 斜杠补全面板 (renderSlashPopper)：命令与描述同行', () => {
     const items = [
       { name: '/clear', description: '清空会话屏幕' },
       { name: '/code-review', description: '代码架构质量审查', isSkill: true },
@@ -63,7 +62,7 @@ test('InputDock Enhanced - 队列托盘、附件托盘、手风琴模型器与Po
     assert.ok(openHtml.includes('composer-slash-popper'), '展示补全面板');
     assert.ok(openHtml.includes('/clear'), '包含普通命令');
     assert.ok(openHtml.includes('/code-review'), '包含 Skill 命令');
-    assert.ok(openHtml.includes('SKILL'), '包含 Skill 徽章标识');
+    assert.ok(openHtml.includes('composer-popper__foot'), '底部键盘提示必须存在');
 
     // open = false
     assert.equal(renderSlashPopper(items, false), '', '关闭时不应输出任何 HTML');
@@ -79,8 +78,8 @@ test('InputDock Enhanced - 队列托盘、附件托盘、手风琴模型器与Po
     assert.ok(openHtml.includes('composer-mention-popper'), '展示引用面板');
     assert.ok(openHtml.includes('packages/core/src/rpc.ts'), '包含文件项');
     assert.ok(openHtml.includes('架构师王工'), '包含 Agent 项');
-    assert.ok(openHtml.includes('📄'), '文件图标');
-    assert.ok(openHtml.includes('🤖'), 'Agent 图标');
+    assert.ok(openHtml.includes('composer-popper__glyph'), '文件项走矢量图标');
+    assert.ok(openHtml.includes('composer-popper__avatar'), 'Agent 项走首字母头像');
 
     assert.equal(renderMentionPopper(items, false), '');
   });
@@ -127,7 +126,7 @@ test('InputDock Enhanced - 队列托盘、附件托盘、手风琴模型器与Po
     // 740px 黄金限宽已收敛到 conversation.css 的 .composer-dock（组件只输出语义类名）
     assert.ok(dockHtml.includes('input-card-box composer-dock'), '输入舱必须挂载统一外壳类，由样式表承担 740px 限宽');
     assert.ok(dockHtml.includes('pending-queue-tray'), '宿主必须自动挂载待发送队列抽屉');
-    assert.ok(dockHtml.includes('composer-attachment-tray'), '宿主必须自动挂载附件暂存托盘');
+    assert.ok(dockHtml.includes('composer-attach-rail'), '宿主必须自动挂载附件轨');
     assert.ok(dockHtml.includes('dock-prompt-input'), '必须包含核心输入框');
   });
 

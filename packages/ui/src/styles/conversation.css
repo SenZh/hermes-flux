@@ -1301,45 +1301,190 @@ details[open] > summary > .tool-row__expand {
      4. 字号挂 --chat-text-markdown / --chat-text-meta，跟随设置里的字号档位同步缩放。
    ========================================================================== */
 
+.input-dock-container {
+  position: absolute;
+  bottom: 20px;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 24px;
+  pointer-events: none;
+}
+
+.input-dock-container > * {
+  pointer-events: auto;
+}
+
+/* 运行态活动胶囊：只在回合进行中出现，模型名与活动文案共用一条基线 */
+.agent-activity-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 3px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill, 9999px);
+  background: var(--popover);
+  color: var(--foreground);
+  font-size: var(--fs-caption, 11px);
+  box-shadow: var(--shadow-card);
+  user-select: none;
+  animation: flux-fade-in 0.12s ease-out;
+}
+
+.agent-activity-pill__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.agent-activity-pill__model {
+  font-weight: 500;
+}
+
+.agent-activity-pill__sep {
+  color: var(--faint);
+}
+
+.agent-activity-pill__status {
+  color: var(--secondary-foreground);
+  font-size: var(--fs-micro, 10px);
+}
+
+.dock-notice-stack {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-width: 740px;
+  margin-bottom: 8px;
+}
+
+/*
+ * 输入舱上方的提示条（回滚横幅 / 操作提示）。
+ * 【规则】两者共用同一外壳与字阶，只靠 glyph 与是否可关闭区分，不再各自内联一套样式。
+ */
+.dock-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel, 8px);
+  background: var(--popover);
+  color: var(--foreground);
+  font-size: var(--fs-aux, 12px);
+  line-height: 1.5;
+}
+
+.dock-banner__body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dock-banner__glyph {
+  flex-shrink: 0;
+  color: var(--secondary-foreground);
+}
+
+.dock-banner__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-banner__action {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border: none;
+  border-radius: var(--radius-inner, 4px);
+  background: transparent;
+  color: var(--foreground);
+  font-family: inherit;
+  font-size: var(--fs-aux, 12px);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.dock-banner__action:hover {
+  background: var(--card-hover);
+}
+
+.dock-banner__close {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-inner, 4px);
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.dock-banner__close:hover {
+  background: var(--card-hover);
+  color: var(--foreground);
+}
+
+/*
+ * 输入舱外壳
+ * 【设计意图 (Why)】
+ *   输入面用 `--input`（内陷面）而不是 `--card`：深色下它比舞台更深，浅色下它是白纸上的
+ *   一层极浅灰，输入框因此「沉进」舞台，而不是浮起一张白卡。
+ * 【约束与规则 (Rules)】
+ *   1. 1px 发丝边 + 12px 圆角 + 零投影，与对话区代码块同源；
+ *   2. 聚焦不描边、不叠外环 —— 光标与正文本身承担焦点表达；
+ *   3. 全部语义 Token，禁止裸写色值。
+ */
 .input-card-box.composer-dock {
   pointer-events: auto;
   position: relative;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   max-width: 740px;
   margin: 0 auto;
   padding: 0;
-  display: flex;
-  flex-direction: column;
   overflow: visible;
-  background: var(--bg-card);
-  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  background: var(--input);
+  border: 1px solid var(--border);
   border-radius: var(--radius-window);
   box-shadow: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-/* 聚焦：OpenChamber 的 focus-within:ring-1 —— 外圈 1px 环，边框本身几乎不动。
-   【防范的历史坑 (Pitfall)】这里不能挂 --primary：本项目 ayu-light 皮肤的主色是天青，
-     历史约束明确要求输入舱任何状态都用中性石板色，天青环会让输入框像被高亮选中。 */
 .input-card-box.composer-dock:focus-within {
-  border-color: color-mix(in srgb, var(--foreground) 14%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 22%, transparent);
+  border-color: var(--border);
+  box-shadow: none;
 }
 
 .composer-dock__editor {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  padding: 14px 12px 4px;
+  padding: 0 14px;
 }
 
+/*
+ * 编辑区：44px 起步，随内容增高到 220px 后转内部滚动。
+ * 【防范的历史坑】不得写 `height` 过渡：高频输入时高度动画会把排版抖动放大成「跳行」。
+ *   JS 只改 `style.height`，且先归 auto 再量 scrollHeight，回删时才能同步收回。
+ */
 .composer-dock__textarea {
+  box-sizing: border-box;
   width: 100%;
-  min-height: 52px;
-  max-height: 240px;
+  min-height: 44px;
+  max-height: 220px;
   margin: 0;
-  padding: 0;
+  padding: 11px 0;
   border: none;
   outline: none;
   resize: none;
@@ -1347,53 +1492,34 @@ details[open] > summary > .tool-row__expand {
   color: var(--foreground);
   font-family: var(--font-sans);
   font-size: var(--chat-text-markdown);
-  line-height: 24px;
-  box-sizing: border-box;
+  line-height: 22px;
   overflow-y: auto;
   caret-color: var(--foreground);
+  scrollbar-width: thin;
 }
 
 .composer-dock__textarea::placeholder {
   color: var(--muted-foreground);
-  opacity: 0.8;
+  opacity: 0.9;
 }
 
 .composer-dock__textarea:disabled {
   cursor: not-allowed;
 }
 
-/* 折叠按钮默认隐藏，由宿主在内容超长时切 display */
-.composer-dock__collapse {
-  align-self: flex-end;
-  margin-top: 2px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--muted-foreground);
-  font-family: var(--font-sans);
-  font-size: var(--chat-text-meta);
-  cursor: pointer;
-  opacity: 0.7;
-  transition: opacity 0.12s ease;
-}
-
-.composer-dock__collapse:hover {
-  opacity: 1;
-}
-
 .composer-dock__footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
-  padding: 2px 8px 8px;
+  padding: 0 10px 8px;
 }
 
 .composer-dock__footer-group {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -1401,23 +1527,118 @@ details[open] > summary > .tool-row__expand {
   justify-content: flex-end;
 }
 
-/* dropdown 锚点：模型 / 思考菜单向上弹出，锚点必须跟随控件本身，
-   否则下拉会以整个输入舱为参照物漂到面板左侧 */
+/* dropdown 锚点：模型 / 审批菜单向上弹出，锚点必须跟随控件本身 */
 .pill-dropdown-wrapper {
   position: relative;
   display: inline-flex;
   min-width: 0;
 }
 
-/* 纯文本控件（模型 / 思考深度）：图标 + 标签，无背景无描边 */
+/*
+ * 纯图标控件：28px 命中区 / 6px 圆角 / 零边框零底色。
+ * 发送与停止只换 glyph，不换容器 —— 容器一换就会出现「按钮忽然变大」的错觉。
+ */
+.composer-icon-btn,
+.composer-send,
+.composer-stop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-card, 6px);
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.composer-icon-btn {
+  color: var(--muted-foreground);
+}
+
+.composer-icon-btn:hover {
+  background: var(--card-hover);
+  color: var(--foreground);
+}
+
+.composer-send {
+  color: var(--foreground);
+}
+
+.composer-send:hover:not(:disabled) {
+  background: var(--card-hover);
+}
+
+.composer-send:disabled {
+  color: var(--faint);
+  cursor: not-allowed;
+  background: transparent;
+}
+
+/* 【规则】hidden 必须显式压回 display:none：作者样式里的 inline-flex 会盖掉 UA 的 [hidden]，
+   不写这一条，「运行中无草稿」时入队按钮仍然占位可见。 */
+.composer-send[hidden],
+.composer-stop[hidden] {
+  display: none;
+}
+
+/* 停止：红色实心方块 + 慢呼吸；颜色只落在这 10px 方块上，不铺整颗按钮 */
+.composer-stop {
+  color: var(--destructive);
+}
+
+.composer-stop:hover {
+  background: color-mix(in srgb, var(--destructive) 12%, transparent);
+}
+
+.composer-stop__block {
+  display: block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2.5px;
+  background: currentColor;
+  animation: composer-stop-breath 2.4s ease-in-out infinite;
+}
+
+@keyframes composer-stop-breath {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.62;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-stop__block {
+    animation: none;
+  }
+}
+
+/* 运行态：发送在上、停止在下。空闲态只剩发送，列高自动塌缩，不留空档。 */
+.composer-action-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+/*
+ * 模型触发控件：图标 + 模型名 + `/` + 思考等级。
+ * 【约束与规则】无方框、无描边、无角标；hover 只加一层悬浮底。
+ */
 .composer-ctrl {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   height: 28px;
-  min-width: 0;
-  padding: 0;
+  max-width: 290px;
+  padding: 0 5px;
   border: none;
+  border-radius: var(--radius-card, 6px);
   background: transparent;
   color: var(--foreground);
   font-family: var(--font-sans);
@@ -1425,11 +1646,11 @@ details[open] > summary > .tool-row__expand {
   font-weight: 500;
   line-height: 1;
   cursor: pointer;
-  transition: opacity 0.12s ease;
+  transition: background 0.12s ease;
 }
 
 .composer-ctrl:hover {
-  opacity: 0.7;
+  background: var(--card-hover);
 }
 
 .composer-ctrl__icon {
@@ -1439,63 +1660,463 @@ details[open] > summary > .tool-row__expand {
 
 .composer-ctrl__label {
   min-width: 0;
-  max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.composer-ctrl__caret {
+.composer-ctrl__sep {
+  flex-shrink: 0;
+  color: var(--faint);
+}
+
+.composer-ctrl__level {
   flex-shrink: 0;
   color: var(--muted-foreground);
-  opacity: 0.8;
 }
 
-/* 纯图标按钮（附件）：与控件同高，hover 只抬亮度 */
-.composer-icon-btn {
+.composer-ctrl__caret {
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: none;
-  background: transparent;
+  flex-shrink: 0;
   color: var(--muted-foreground);
-  cursor: pointer;
-  transition: color 0.12s ease, opacity 0.12s ease;
 }
 
-.composer-icon-btn:hover {
+/*
+ * 审批三态菜单：锁 / 盾勾 / 双箭头，行内给出后果说明。
+ * 【规则】当前项只加悬浮底与勾选，不用主色，避免与模型选中态抢注意力。
+ */
+.composer-approval-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 210;
+  width: 300px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-window);
+  background: var(--popover);
+  box-shadow: var(--shadow-window);
+  user-select: none;
+}
+
+.composer-approval-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  width: 100%;
+  padding: 8px;
+  border: none;
+  border-radius: var(--radius-card, 6px);
+  background: transparent;
+  color: var(--secondary-foreground);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.composer-approval-option:hover {
+  background: var(--card-hover);
+}
+
+.composer-approval-option.is-active {
+  background: var(--card-hover);
   color: var(--foreground);
 }
 
-/* 发送 / 中断：纯图标，无边框无底色 */
-.composer-send {
+.composer-approval-option__icon {
+  display: inline-flex;
+  margin-top: 2px;
+  color: inherit;
+}
+
+.composer-approval-option__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.composer-approval-option__label {
+  color: var(--foreground);
+  font-size: var(--fs-aux, 12px);
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.composer-approval-option__hint {
+  color: var(--muted-foreground);
+  font-size: var(--fs-micro, 10px);
+  line-height: 1.5;
+}
+
+.composer-approval-option__check {
+  color: var(--foreground);
+  font-size: var(--fs-caption, 11px);
+}
+
+/*
+ * 模型下拉外壳：向上弹出，宽度 320，搜索固定头部，列表独立滚动。
+ * 【防范的历史坑】外壳不得 `overflow: hidden` —— 思考级联要挂到面板左右外侧。
+ */
+.model-dropdown-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 200;
+  width: 320px;
+  max-width: calc(100vw - 24px);
+  box-sizing: border-box;
+  overflow: visible;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-window);
+  background: var(--popover);
+  box-shadow: var(--shadow-window);
+  user-select: none;
+}
+
+.model-dropdown__search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--muted-foreground);
+}
+
+.model-dropdown__search input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: var(--fs-aux, 12px);
+}
+
+.model-dropdown__search input::placeholder {
+  color: var(--muted-foreground);
+}
+
+.model-dropdown__refresh {
+  flex-shrink: 0;
+  padding: 0 2px;
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: var(--fs-caption, 11px);
+  cursor: pointer;
+}
+
+.model-dropdown__refresh:hover {
+  color: var(--foreground);
+}
+
+.model-dropdown__list {
+  max-height: 320px;
+  padding: 5px 0;
+  overflow-y: auto;
+}
+
+.model-dropdown__hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--muted-foreground);
+  font-size: var(--fs-micro, 10px);
+}
+
+/*
+ * 附件轨：在输入舱外部上方。图片 56×56，文档退化为胶囊，两者共用 8px 圆角与发丝边。
+ */
+.composer-attach-rail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 740px;
+  margin: 0 auto 8px;
+}
+
+.composer-attach-thumb {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel, 8px);
+  background: var(--card);
+  color: var(--muted-foreground);
+}
+
+.composer-attach-thumb__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.composer-attach-file {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  max-width: 220px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel, 8px);
+  background: var(--card);
+  color: var(--secondary-foreground);
+  font-size: var(--fs-aux, 12px);
+}
+
+.composer-attach-file__glyph {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+}
+
+.composer-attach-file__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-attach__remove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--popover);
+  color: var(--foreground);
+  box-shadow: 0 0 0 1px var(--border-subtle);
+  cursor: pointer;
+}
+
+.composer-attach-file .composer-attach__remove {
+  position: static;
+  flex-shrink: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted-foreground);
+}
+
+.composer-attach__remove:hover {
+  color: var(--foreground);
+}
+
+/*
+ * 待发送队列托盘：与输入舱同宽，行高 30，每行三个动作（放回编辑 / 立即发送 / 取消）。
+ */
+.pending-queue-tray {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 740px;
+  margin: 0 auto 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel, 8px);
+  background: var(--card);
+}
+
+.pending-queue-tray__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--secondary-foreground);
+  font-size: var(--fs-caption, 11px);
+}
+
+.pending-queue-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 5px 6px 5px 12px;
+  color: var(--foreground);
+  font-size: var(--fs-aux, 12px);
+}
+
+.pending-queue-row + .pending-queue-row {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.pending-queue-row:hover {
+  background: var(--card-hover);
+}
+
+.pending-queue-row__index {
+  width: 10px;
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+  font-size: var(--fs-micro, 10px);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.pending-queue-row__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-queue-row__actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 1px;
+}
+
+.queue-action-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: none;
+  border-radius: var(--radius-inner, 4px);
   background: transparent;
-  color: var(--primary);
+  color: var(--muted-foreground);
   cursor: pointer;
-  transition: opacity 0.12s ease;
 }
 
-.composer-send:hover {
-  opacity: 0.78;
+.queue-action-btn:hover {
+  background: var(--card-hover);
+  color: var(--foreground);
 }
 
-.composer-send:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
+/*
+ * / 与 @ 浮层：共用一套行高、内距、底部键盘提示。
+ * 【规则】命令名与文件名一律主前景色（深色白字、浅色黑字），不进 accent 蓝。
+ */
+.composer-popper {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 12px;
+  z-index: 100;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-window);
+  background: var(--popover);
+  box-shadow: var(--shadow-window);
+  user-select: none;
 }
 
-.composer-send--stop {
-  color: var(--destructive);
+.composer-slash-popper {
+  width: 320px;
+  max-width: calc(100vw - 32px);
+}
+
+.composer-mention-popper {
+  width: 340px;
+  max-width: calc(100vw - 32px);
+}
+
+.composer-popper__head {
+  padding: 8px 12px 6px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
+  font-size: var(--fs-micro, 10px);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.composer-popper__list {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 5px 0;
+}
+
+.composer-popper__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px;
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: var(--fs-aux, 12px);
+  cursor: pointer;
+}
+
+.composer-popper__row:hover,
+.composer-popper__row.is-active {
+  background: var(--card-hover);
+}
+
+.composer-popper__glyph {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+}
+
+.composer-popper__avatar {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-inner, 4px);
+  background: var(--card-active);
+  color: var(--secondary-foreground);
+  font-size: var(--fs-micro, 10px);
+  font-weight: 600;
+}
+
+.composer-popper__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.composer-popper__desc {
+  flex-shrink: 0;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+  font-size: var(--fs-caption, 11px);
+}
+
+.composer-popper__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
+  font-size: var(--fs-micro, 10px);
+}
+
+.composer-popper__enter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 /* ==========================================================================
