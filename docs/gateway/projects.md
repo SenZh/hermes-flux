@@ -1,7 +1,7 @@
 # 工程与工作区
 
 > 本文件由 `npm run contract:doc` 从网关契约、探针结果与源码调用点自动生成，请勿手工编辑。
-> 契约快照：e3cf16a3d983… · 同步于 2026-11-12T07:11:12.771Z
+> 契约快照：e3cf16a3d983… · 同步于 2026-11-12T09:06:33.222Z
 
 | 方法 | 入参（契约） | 出参（契约） | 调用点 | 真实探针 |
 | --- | --- | --- | --- | --- |
@@ -9,7 +9,7 @@
 | `projects.create` | `profile` `name` `folders` `slug` `primary_path` `description` `icon` `color` `board_slug` `use` | `project` | `packages/core/src/project/projectService.ts:160` | ✅ 0.22.5 |
 | `projects.delete` | `profile` `id` | `projects` `active_id` | `packages/core/src/project/projectService.ts:202` | ✅ 0.22.5 |
 | `projects.get` | `profile` `id` | `project` | `packages/core/src/project/projectService.ts:110` | ✅ 0.22.5 |
-| `projects.list` | `profile` | `projects` `active_id` | `packages/core/src/project/projectService.ts:66`<br>`packages/desktop/src/renderer/index.ts:2114` | ✅ 0.22.5 |
+| `projects.list` | `profile` | `projects` `active_id` | `packages/core/src/project/projectService.ts:66`<br>`packages/desktop/src/renderer/index.ts:2123` | ✅ 0.22.5 |
 | `projects.remove_folder` | `profile` `id` `path` | `project` | `packages/core/src/project/projectService.ts:268` | ✅ 0.22.5 |
 | `projects.set_active` | `profile` `id` | `active_id` | `packages/core/src/project/projectService.ts:222` | ✅ 0.22.5 |
 | `projects.tree` | `profile` `preview_limit` `session_limit` | `projects` `active_id` `scoped_session_ids` | `packages/core/src/project/projectService.ts:285` | ✅ 0.22.5 |
@@ -56,7 +56,7 @@
 - 真实探针：已通过（网关 0.22.5，录制于 2026-11-01T01:59:35.303Z）
 - 调用点：
   - `packages/core/src/project/projectService.ts:66`
-  - `packages/desktop/src/renderer/index.ts:2114`
+  - `packages/desktop/src/renderer/index.ts:2123`
 
 ### `projects.remove_folder`
 

@@ -85,20 +85,41 @@ function parseInterfaces(text) {
   return map;
 }
 
-/** 解析网关的 RpcMethods 注册表：'method' -> { params: X; result: Y } */
+/**
+ * 解析网关的方法注册表：'method' -> { params: X; result: Y }
+ *
+ * 【设计意图 (Why)】
+ *   网关把方法分成两张注册表：`RpcMethods`（经典通道）与 `CanonicalRpcMethods`
+ *   （hermes-gateway-v1 会话权威独有）。只解析前者会漏掉 `prompt.cancel` /
+ *   `prompt.steer_queued` 这类只有新协议才提供的方法，契约校验随即把合法调用判成"不存在"。
+ *
+ * 【约束与规则 (Rules)】
+ *   两张表按同名方法去重合并：同一方法若两边都有，以经典表为准（字段更宽），
+ *   避免后解析的窄定义覆盖掉已存在的宽定义。
+ */
 function parseMethodRegistry(text) {
-  const start = text.indexOf('export interface RpcMethods {');
-  if (start < 0) fail('网关契约里找不到 RpcMethods 注册表');
-  const bodyStart = text.indexOf('{', start) + 1;
-  const closeIdx = text.indexOf('\n}', bodyStart);
-  const body = text.slice(bodyStart, closeIdx);
-
   const methods = new Map();
-  const re = /'([\w.]+)':\s*\{\s*params:\s*(\w+);\s*result:\s*(\w+)\s*\}/g;
-  let match;
-  while ((match = re.exec(body)) !== null) {
-    methods.set(match[1], { paramsType: match[2], resultType: match[3] });
-  }
+
+  const collect = (interfaceName) => {
+    const start = text.indexOf(`export interface ${interfaceName} {`);
+    if (start < 0) return;
+    const bodyStart = text.indexOf('{', start) + 1;
+    const closeIdx = text.indexOf('\n}', bodyStart);
+    const body = text.slice(bodyStart, closeIdx);
+
+    const re = /'([\w.]+)':\s*\{\s*params:\s*(\w+);\s*result:\s*(\w+)\s*\}/g;
+    let match;
+    while ((match = re.exec(body)) !== null) {
+      if (!methods.has(match[1])) {
+        methods.set(match[1], { paramsType: match[2], resultType: match[3] });
+      }
+    }
+  };
+
+  collect('RpcMethods');
+  collect('CanonicalRpcMethods');
+
+  if (methods.size === 0) fail('网关契约里找不到 RpcMethods / CanonicalRpcMethods 注册表');
   return methods;
 }
 
