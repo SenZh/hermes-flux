@@ -22,7 +22,6 @@ test('Delete Session Focus & InputDock Snapshot Invariants', async (t) => {
       disabled: false,
       modelMenuOpen: false,
       notice: '',
-      activityStatus: undefined,
       modelCount: 12,
       modelCatalogHash: 'anthropic:claude-3-7-sonnet:Sonnet 3.7',
       modelSearchQuery: '',
@@ -41,7 +40,7 @@ test('Delete Session Focus & InputDock Snapshot Invariants', async (t) => {
     assert.equal(hasDockSnapshotChanged(null, baseSnapshot), true, '初始首帧必须返回 true');
     assert.equal(hasDockSnapshotChanged(undefined, baseSnapshot), true, '无前置快照必须返回 true');
 
-    // 变异验证：11 个关键呈现属性发生任何变化时，必须返回 true
+    // 变异验证：任一关键呈现属性发生任何变化时，必须返回 true
     assert.equal(hasDockSnapshotChanged(baseSnapshot, { ...baseSnapshot, isStreaming: true }), true, '流式状态变化必须触发更新');
     assert.equal(hasDockSnapshotChanged(baseSnapshot, { ...baseSnapshot, notice: '错误提示' }), true, '通知变化必须触发更新');
     assert.equal(hasDockSnapshotChanged(baseSnapshot, { ...baseSnapshot, selectedModel: 'openai/gpt-4o' }), true, '模型变化必须触发更新');
@@ -49,7 +48,6 @@ test('Delete Session Focus & InputDock Snapshot Invariants', async (t) => {
     assert.equal(hasDockSnapshotChanged(baseSnapshot, { ...baseSnapshot, approvalMode: 'manual' }), true, '审批模式变化必须触发更新');
     assert.equal(hasDockSnapshotChanged(baseSnapshot, { ...baseSnapshot, disabled: true }), true, '网关禁用态变化必须触发更新');
     assert.equal(hasDockSnapshotChanged(baseSnapshot, { ...baseSnapshot, modelMenuOpen: true }), true, '菜单开关变化必须触发更新');
-    assert.equal(hasDockSnapshotChanged(baseSnapshot, { ...baseSnapshot, activityStatus: 'running' }), true, '活动状态变化必须触发更新');
     assert.equal(hasDockSnapshotChanged(baseSnapshot, { ...baseSnapshot, modelCount: 15 }), true, '模型总数变化必须触发更新');
     assert.equal(
       hasDockSnapshotChanged(baseSnapshot, { ...baseSnapshot, currentProvider: 'openrouter' }),

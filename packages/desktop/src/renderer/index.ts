@@ -66,6 +66,8 @@ import {
   attachMotionController,
   mountMessageList,
   mountPromptNavigator,
+  mountAgentPresence,
+  type AgentPresenceSnapshot,
   buildPromptEntries,
   resolveActivePromptIndex,
   type PromptEntry,
@@ -150,9 +152,12 @@ import {
   type NormalizedSession,
   type ModelDetail,
   type ModelCatalogEntry,
-  modelLabelFromCatalog,
   modelCatalogFingerprint,
   normalizeModelCatalog,
+  deriveAgentPresence,
+  presenceTone,
+  resolveGroupSpeaker,
+  type AgentPresence,
   buildProviderDirectory,
   buildMcpServerRows,
   buildSkillRows,
@@ -700,7 +705,30 @@ interface AppState {
   browserFrame?: { url: string; title: string; screenshotUrl?: string };
   gitDiffs: Array<{ file: string; additions: number; deletions: number; patch?: string }>;
   memories: Array<{ category: string; content: string; updated?: string }>;
-  agentActivityStatus?: string;
+  /**
+   * 回合开始的本地时间戳；在场指示器的时长分层唯一输入。
+   *
+   * 【设计意图 (Why)】「卡住 60 秒」与「刚开始 1 秒」必须能被区分，否则指示器永远同一句话。
+   * 【约束与规则 (Rules)】只在 `turn-started` 写入、`turn-completed` 清空；中断/失败不清空，
+   *   由终态压过在途痕迹（见 core `deriveAgentPresence` 的优先级）。
+   */
+  turnStartedAt?: number;
+  /**
+   * 回合终态（失败/中断）的短暂展示态。
+   *
+   * 【设计意图 (Why)】回合结束后流式痕迹立刻消失，若没有这一段缓冲，
+   *   用户只会看到指示器直接跳回 idle，完全读不到「为什么停了」。
+   * 【约束与规则 (Rules)】TTL（`PRESENCE_TERMINAL_TTL_MS`）到期后必须清空并重渲染；
+   *   重复写入必须先清旧定时器，否则旧定时器会把新终态提前抹掉。
+   */
+  presenceTerminal?: { kind: 'failed'; message: string } | { kind: 'interrupted' };
+  /**
+   * 群聊当前说话者；null/undefined 表示未知。
+   *
+   * 【约束与规则 (Rules)】未知时指示器必须走降级路径（不高亮、不加前缀），
+   *   绝对不允许猜测或沿用上一位说话者——伪造说话者比不显示更糟。
+   */
+  activeGroupSpeaker?: string | null;
   inspectorFullscreen?: boolean;
   // Multi-tab file viewer & OpenChamber toolbar states
   openFiles: Array<{ id?: string; path: string; content: string; language?: string; isDiff?: boolean }>;
@@ -2234,6 +2262,37 @@ async function fetchGroupRooms(): Promise<void> {
   }
 }
 
+/**
+ * 群聊当前说话者的唯一写入口。
+ *
+ * 【设计意图 (Why)】
+ *   在场指示器在群聊里必须回答「谁在干活」。`groups.log` 的每条事件都带真实的
+ *   `senderProfile`（来自官方 `actor.display_name || actor.profile`），
+ *   因此「末条 assistant 事件的发送者」就是最权威的说话者事实。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   1. 曾考虑用 `groups.send` 的响应当说话者——那是**人类用户自己**，不是 Agent 成员，
+ *      会导致指示器高亮一个没在干活的头像。宁可 null 降级，也绝不伪造。
+ *   2. `senderProfile` 可能是 **displayName**，而房间 `members` 存的是 **profile name**。
+ *      直接写入会让组件侧的「说话者必须在成员列表里」守卫判定为未知而全量降级——
+ *      接线看似通了、实际永远不高亮。因此这里必须做一次 displayName → member 归一化。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 只在群聊域写；非群聊域一律置 null，避免跨域残留；
+ *   2. 末条是用户消息（人类刚发话、成员尚未应答）时置 null——此刻确实没有 Agent 在说话；
+ *   3. 归一化失败（sender 不在成员列表）时置 null，绝不沿用上一位。
+ */
+function syncActiveGroupSpeakerFromMessages(): void {
+  if (state.activeFocus.type !== 'group') {
+    state.activeGroupSpeaker = null;
+    return;
+  }
+  const roomId = state.activeFocus.roomId;
+  const members = state.groupRooms.find((g) => g.roomId === roomId)?.members ?? [];
+  // 归一化与倒序查找全部在 core 的纯函数里（可单测，且符合「壳层不写域逻辑」的分层铁律）
+  state.activeGroupSpeaker = resolveGroupSpeaker(state.messages, members, state.profiles);
+}
+
 /** 进入指定多 Agent 研讨会议室并载入研讨记录 */
 async function openGroupRoom(roomId: string): Promise<void> {
   if (!roomId || !gatewayClient) return;
@@ -2255,6 +2314,8 @@ async function openGroupRoom(roomId: string): Promise<void> {
   // 切换房间时重置线程上下文，避免跨房间误用同一 thread_id
   activeGroupThreadId = null;
   activeGroupThreadAt = 0;
+  // 【在场指示器】换房间立刻清空说话者：上一个房间的成员绝不能在新房间被高亮
+  state.activeGroupSpeaker = null;
 
   // 从 groups.log 拉取官方事件流
   try {
@@ -2308,6 +2369,8 @@ async function openGroupRoom(roomId: string): Promise<void> {
   pendingScrollToBottom = true;
   // 无论拿到日志还是回落种子通知，研讨记录都已落地：离开骨架相位。
   state.messagesPhase = 'ready';
+  // 【在场指示器】按真实日志末条事件推导说话者（详见 syncActiveGroupSpeakerFromMessages 注释）
+  syncActiveGroupSpeakerFromMessages();
   render();
 
   // 若为托管房间，进入时自动启动持续同步
@@ -4348,8 +4411,6 @@ async function createNewSession(options?: { profile?: string; projectId?: string
 
     // Reset streaming indicators for the newly focused session
     state.isStreaming = activeStreamingStoredSessionId === handles.storedId;
-    state.agentActivityStatus = isStreamingActiveForCurrentSession() ? state.agentActivityStatus : undefined;
-    updateActivityPill(state.agentActivityStatus);
 
     // session.list does not expose a brand-new session until its first turn is persisted
     if (!state.pendingSessionIds.includes(handles.storedId)) {
@@ -4452,8 +4513,6 @@ async function deleteSession(id: string): Promise<void> {
       activeStreamingLiveId = null;
       activeStreamingBotName = null;
       state.isStreaming = false;
-      state.agentActivityStatus = undefined;
-      updateActivityPill(undefined);
     }
 
     if (state.activeSessionId === id) {
@@ -4493,8 +4552,6 @@ async function deleteSession(id: string): Promise<void> {
         activeStreamingLiveId = null;
         activeStreamingBotName = null;
         state.isStreaming = false;
-        state.agentActivityStatus = undefined;
-        updateActivityPill(undefined);
       }
       if (state.activeSessionId === id) {
         handleArmedOnDelete(id);
@@ -4691,10 +4748,8 @@ async function selectSession(id: string, options?: { preserveFocus?: boolean; bo
     state.activeFocus = { type: 'session', sessionId: id };
   }
 
-  // Sync isStreaming and agentActivityStatus with the target session
+  // Sync isStreaming with the target session
   state.isStreaming = activeStreamingStoredSessionId === id;
-  state.agentActivityStatus = isStreamingActiveForCurrentSession() ? state.agentActivityStatus : undefined;
-  updateActivityPill(state.agentActivityStatus);
 
   // Force reset messages snapshot to re-bind reactive DOM for streaming
   lastMessagesSnapshot = null;
@@ -4891,6 +4946,10 @@ function armTurnWatchdog(): void {
       botName: activeStreamingBotName,
     });
     state.isStreaming = false;
+    // 【在场指示器】看门狗解除锁定后回合已不在运行：时长锚点必须一并清空，
+    // 否则指示器会拿着一个早已超时的锚点算出虚高的语气档。
+    state.turnStartedAt = undefined;
+    turnStartedSessionId = null;
     activeStreamingMessageId = null;
     activeStreamingStoredSessionId = null;
     activeStreamingLiveId = null;
@@ -4913,6 +4972,61 @@ function isStreamingActiveForCurrentSession(): boolean {
     activeStreamingStoredSessionId === state.activeSessionId &&
     state.isStreaming
   );
+}
+
+/**
+ * 在场指示器终态（failed / interrupted）的展示时长。
+ *
+ * 【设计意图 (Why)】终态需要被看见，但不能永久挂在对话区顶部——它不是历史，是即时反馈。
+ * 【约束与规则 (Rules)】8s 是「读得完一句话 + 不会误以为是当前状态」的折中值。
+ */
+const PRESENCE_TERMINAL_TTL_MS = 8_000;
+
+/** 终态展示的清理定时器；重复写入必须先清旧定时器（见 armPresenceTerminal 注释）。 */
+let presenceTerminalTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * 清除在场终态并撤销它的退场定时器。
+ *
+ * 【约束与规则 (Rules)】清 state 与清定时器必须成对出现：只清 state 不清定时器，
+ *   定时器到期时会去清一条已经不属于它的终态（若期间又来了新终态就会被提前抹掉）。
+ */
+function clearPresenceTerminal(): void {
+  if (presenceTerminalTimer) {
+    clearTimeout(presenceTerminalTimer);
+    presenceTerminalTimer = null;
+  }
+  state.presenceTerminal = undefined;
+}
+
+/**
+ * 写入在场终态并按 TTL 自动退场。
+ *
+ * 【设计意图 (Why)】
+ *   `turn-failed` / `interruptTurn()` 之后流式痕迹立刻消失，若不给终态一段展示窗口，
+ *   指示器会直接跳回 idle，用户读不到「为什么停了」。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   连续两次失败（或失败后立刻中断）时，若不清旧定时器，**第一个**定时器到期
+ *   会把**第二个**终态提前清掉，表现为「终态闪一下就没了」。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 写入前必须先 `clearTimeout` 旧定时器；
+ *   2. 到期回调只清「当前仍是这条终态」的情形——引用比较，避免误伤后续新终态；
+ *   3. 到期必须 `render()`，否则 state 变了界面不变（Failure Is Not Silent）。
+ */
+function armPresenceTerminal(terminal: NonNullable<AppState['presenceTerminal']>): void {
+  if (presenceTerminalTimer) {
+    clearTimeout(presenceTerminalTimer);
+    presenceTerminalTimer = null;
+  }
+  state.presenceTerminal = terminal;
+  presenceTerminalTimer = setTimeout(() => {
+    presenceTerminalTimer = null;
+    if (state.presenceTerminal !== terminal) return;
+    state.presenceTerminal = undefined;
+    render();
+  }, PRESENCE_TERMINAL_TTL_MS);
 }
 
 function setTimedDockNotice(msg: string, durationMs = 4000): void {
@@ -4973,8 +5087,8 @@ async function interruptTurn(): Promise<void> {
   });
 
   state.isStreaming = false;
-  state.agentActivityStatus = undefined;
-  updateActivityPill(undefined);
+  // 【在场指示器】用户主动中断：落中断终态（TTL 8s 自动退场），让「已停手」被看见一次
+  armPresenceTerminal({ kind: 'interrupted' });
   activeStreamingMessageId = null;
   activeStreamingStoredSessionId = null;
   activeStreamingLiveId = null;
@@ -5027,6 +5141,8 @@ async function sendGroupMessage(roomId: string, text: string): Promise<void> {
     state.groupRooms = [targetRoom, ...state.groupRooms.filter((r) => r.roomId !== roomId)];
   }
   applyTurnStarted(activeRunningGroupRoomIds, unreadGroupRoomIds, roomId);
+  // 【在场指示器】人类刚发话：此刻没有 Agent 在说话，说话者必须显式清空（绝不沿用上一位）
+  syncActiveGroupSpeakerFromMessages();
 
   render();
   scrollStreamToBottom('group message sent');
@@ -5075,6 +5191,8 @@ async function refreshGroupRoomLog(roomId: string): Promise<number> {
         };
       });
       pendingScrollToBottom = true;
+      // 【在场指示器】回读到新日志即按末条真实事件刷新说话者（不猜、不沿用）
+      syncActiveGroupSpeakerFromMessages();
       render();
     }
     return logs.length;
@@ -5318,12 +5436,14 @@ async function sendMessage(text: string): Promise<void> {
   sessionMessagesCache.set(state.activeSessionId, [...state.messages]);
 
   state.isStreaming = true;
-  state.agentActivityStatus = 'thinking';
+  // 【在场指示器】乐观发送路径同样要立起时长锚点，否则本地先上屏的回合没有时长分层
+  state.turnStartedAt = Date.now();
+  turnStartedSessionId = state.activeSessionId;
+  clearPresenceTerminal();
   tokenCoalescer.clear();
   armTurnWatchdog();
   pendingScrollToBottom = true;
   render();
-  updateActivityPill('thinking');
   scrollStreamToBottom('message sent');
   logStream.info('turn started', { session: state.activeLiveSessionId, chars: trimmed.length });
 
@@ -5403,8 +5523,8 @@ async function sendMessage(text: string): Promise<void> {
     if (submitResult?.status && submitResult.status !== 'streaming' && submitResult.status !== 'queued') {
       assistantMsg.content = `[网关未受理本轮] status=${String(submitResult.status)}`;
       state.isStreaming = false;
-      state.agentActivityStatus = undefined;
-      updateActivityPill(undefined);
+      // 【在场指示器】网关未受理 = 回合失败终态，必须显式展示而不是静默回到 idle
+      armPresenceTerminal({ kind: 'failed', message: `status=${String(submitResult.status)}` });
       if (activeStreamingStoredSessionId) applyTurnFailed(activeRunningSessionIds, activeStreamingStoredSessionId);
       if (activeStreamingBotName) { applyTurnFailed(activeRunningBotNames, activeStreamingBotName); activeStreamingBotName = null; }
       activeStreamingMessageId = null;
@@ -5423,8 +5543,8 @@ async function sendMessage(text: string): Promise<void> {
     console.error('[Hermes Gateway] prompt.submit failed:', err);
     assistantMsg.content = `[提交失败] ${describeRpcError(err)}`;
     state.isStreaming = false;
-    state.agentActivityStatus = undefined;
-    updateActivityPill(undefined);
+    // 【在场指示器】提交失败同样是终态：把 RPC 原因透传给指示器，用户能看到为什么停了
+    armPresenceTerminal({ kind: 'failed', message: describeRpcError(err) });
     if (activeStreamingStoredSessionId) applyTurnFailed(activeRunningSessionIds, activeStreamingStoredSessionId);
     if (activeStreamingBotName) { applyTurnFailed(activeRunningBotNames, activeStreamingBotName); activeStreamingBotName = null; }
     activeStreamingMessageId = null;
@@ -5650,66 +5770,6 @@ function formatTimestamp(ts: number | string, now: Date = new Date()): string {
   return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${timeStr}`;
 }
 
-function updateActivityPill(statusText?: string): void {
-  const container = document.querySelector('.input-dock-container');
-  if (!container) return;
-  const existingPill = container.querySelector('.agent-activity-pill') as HTMLElement | null;
-
-  // Only display pill if the focused session is the active streaming session
-  const shouldShow = Boolean(statusText && isStreamingActiveForCurrentSession());
-
-  if (!shouldShow) {
-    if (existingPill) existingPill.remove();
-    return;
-  }
-
-  // 【规则】显示名统一走 core 派生目录，禁止在此处各自拼 `displayName || name || id`
-  const modelLabel =
-    modelLabelFromCatalog(state.modelCatalog, state.selectedModel, state.currentProvider) ||
-    state.selectedModel ||
-    'Hermes Agent';
-
-  if (existingPill) {
-    const textSpan = existingPill.querySelector('span:last-child');
-    if (textSpan) textSpan.textContent = statusText || '';
-  } else {
-    const pillHtml = `
-      <div class="agent-activity-pill" style="
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        background: var(--bg-backdrop);
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
-        border: 1px solid var(--border-medium);
-        border-radius: 9999px;
-        padding: 3px 12px;
-        font-size: 11px;
-        color: var(--text-main);
-        margin-bottom: 8px;
-        pointer-events: auto;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25), var(--specular-line);
-        user-select: none;
-        animation: flux-fade-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-      ">
-        <span class="activity-status-dot" style="
-          width: 6px;
-          height: 6px;
-          border-radius: 50%;
-          background: var(--success);
-          box-shadow: 0 0 8px var(--success-glow);
-          display: inline-block;
-          animation: flux-pulse 2s infinite ease-in-out;
-        "></span>
-        <span style="font-weight: 500; letter-spacing: -0.01em;">${escapeHtml(modelLabel)}</span>
-        <span style="color: var(--text-muted); opacity: 0.5;">·</span>
-        <span style="color: var(--text-secondary); font-family: var(--font-mono, monospace); font-size: 10.5px;">${escapeHtml(statusText || '')}</span>
-      </div>
-    `;
-    container.insertAdjacentHTML('afterbegin', pillHtml);
-  }
-}
-
 /** Writes the authoritative turn text back into the streamed assistant bubble. */
 function setMessageContent(messageId: string, text: string): void {
   const target = state.messages.find((m) => m.id === messageId);
@@ -5740,37 +5800,22 @@ function applyTurnActions(actions: TurnAction[]): void {
           state.isStreaming = true;
           needsRender = true;
         }
-        state.agentActivityStatus = 'thinking';
-        updateActivityPill('thinking');
+        // 【在场指示器】新回合开始：重置时长锚点并清掉上一轮的终态残留
+        state.turnStartedAt = Date.now();
+        turnStartedSessionId = activeStreamingStoredSessionId || state.activeSessionId;
+        clearPresenceTerminal();
         armTurnWatchdog();
         break;
 
       case 'append-content':
-        if (state.agentActivityStatus !== 'writing response') {
-          state.agentActivityStatus = 'writing response';
-          updateActivityPill('writing response');
-        }
         tokenCoalescer.push({ messageId: action.messageId, delta: action.text, isThought: false });
         break;
 
       case 'append-thought':
-        if (state.agentActivityStatus !== 'thinking') {
-          state.agentActivityStatus = 'thinking';
-          updateActivityPill('thinking');
-        }
         tokenCoalescer.push({ messageId: action.messageId, delta: action.text, isThought: true });
         break;
 
       case 'tool-start': {
-        const rawName = String(action.toolCall.name || '').toLowerCase();
-        let status = 'executing tool';
-        if (rawName.includes('read') || rawName.includes('file')) status = 'reading a file';
-        else if (rawName.includes('shell') || rawName.includes('bash') || rawName.includes('cmd') || rawName.includes('terminal')) status = 'running command';
-        else if (rawName.includes('edit') || rawName.includes('patch') || rawName.includes('write')) status = 'editing a file';
-        else if (rawName.includes('grep') || rawName.includes('search') || rawName.includes('find') || rawName.includes('glob')) status = 'searching files';
-        state.agentActivityStatus = status;
-        updateActivityPill(status);
-
         const now = Date.now();
         const target = state.messages.find((m) => m.id === action.messageId);
         if (target) {
@@ -5809,9 +5854,6 @@ function applyTurnActions(actions: TurnAction[]): void {
       }
 
       case 'tool-complete': {
-        state.agentActivityStatus = 'thinking';
-        updateActivityPill('thinking');
-
         const now = Date.now();
         const updateTc = (target?: MessageViewModel) => {
           if (target && target.toolCalls) {
@@ -5957,8 +5999,10 @@ function applyTurnActions(actions: TurnAction[]): void {
         }
         syncProfileLastMessages();
         state.isStreaming = false;
-        state.agentActivityStatus = undefined;
-        updateActivityPill(undefined);
+        // 【在场指示器】回合正常结束：时长锚点与终态都必须归零，否则指示器会停在上一轮的时长档位上
+        state.turnStartedAt = undefined;
+        turnStartedSessionId = null;
+        clearPresenceTerminal();
         activeStreamingMessageId = null;
         activeStreamingStoredSessionId = null;
         activeStreamingLiveId = null;
@@ -5987,8 +6031,8 @@ function applyTurnActions(actions: TurnAction[]): void {
         }
         syncProfileLastMessages();
         state.isStreaming = false;
-        state.agentActivityStatus = undefined;
-        updateActivityPill(undefined);
+        // 【在场指示器】失败是终态：先落终态快照（TTL 后自动退场），再收尾流式状态
+        armPresenceTerminal({ kind: 'failed', message: action.message });
         activeStreamingMessageId = null;
         activeStreamingStoredSessionId = null;
         activeStreamingLiveId = null;
@@ -6023,6 +6067,9 @@ function applyTurnActions(actions: TurnAction[]): void {
   }
 
   if (needsRender) render();
+  // 【在场指示器】事件驱动的即时推送：工具开始/结束与正文/思考切换不一定会触发全量 render
+  // （token 走 coalescer 直写、工具插槽走 rAF 补丁），若只靠 1s 节拍器，工具态会晚一拍才出现。
+  syncAgentPresence();
 }
 
 /** Inspector-side events (artifacts, browser frames, workspace diffs). */
@@ -7067,6 +7114,337 @@ function syncReactMessageList(force = false): void {
 }
 
 /* --------------------------------------------------------------------------
+ * Agent 在场指示器：宿主快照、指纹去重与挂载
+ * -------------------------------------------------------------------------- */
+
+/** 在场指示器挂载句柄；null 表示 host 尚未出现（首帧模板还没落地） */
+let updateReactAgentPresence: (() => void) | null = null;
+/** 当前挂载实例：全量重建换 host 时必须先 unmount，否则 React root 挂在脱离文档的节点上泄漏 */
+let presenceMountHandle: ConversationMount | null = null;
+/** 当前挂载所在的 host 元素：全量重建会换掉 host，必须能识别并重挂 */
+let agentPresenceHost: HTMLElement | null = null;
+/**
+ * 待渲染快照：`mountAgentPresence` 的 getSnapshot 回调只读它。
+ *
+ * 【设计意图 (Why)】若 getSnapshot 自己再构造一次，指纹与真正渲染出去的那份会是两个不同时刻的
+ *   对象（`sinceMs`/`now` 每次调用都在变），跨语气档边界时会出现「指纹说变了、渲染却是旧的」。
+ *   由 `syncAgentPresence` 构造一次、指纹与渲染共用同一份，语义才严密。
+ */
+let pendingPresenceSnapshot: AgentPresenceSnapshot | null = null;
+/** 上一次推送给 React 的快照指纹：流式期间宿主每帧 render，不比对就会每帧协调一次 React 树 */
+let lastAgentPresenceFingerprint = '';
+/** 在场节拍器：只在存在非 idle 状态时运行（见 ensurePresenceTicker 注释） */
+let presenceTickerTimer: ReturnType<typeof setInterval> | null = null;
+/**
+ * 群聊回合的本地开始时刻。
+ *
+ * 【设计意图 (Why)】群聊回合走 `groups.*` 协议，从不写 `state.isStreaming` 与
+ *   `state.turnStartedAt`（那条链路属于单会话 `prompt.submit`）。若群聊直接借用
+ *   `state.turnStartedAt`，用户一边看群聊、一边有后台单会话在跑时，群聊指示器会读到
+ *   另一个域的时长，语气档直接错乱。
+ *
+ * 【约束与规则 (Rules)】只由 `ensureGroupTurnClock()` 维护：房间进入运行集合时立锚点、
+ *   离开时清空。禁止在快照构造里写它（快照必须无副作用）。
+ */
+let groupTurnStartedAt: number | undefined;
+/**
+ * `state.turnStartedAt` 所属的会话 id。
+ *
+ * 【设计意图 (Why)】`turnStartedAt` 是全局单值，而会话是多个。用户在 A 发消息后切到 B，
+ *   B 恰好也在流式（后台回合）时，快照会拿 A 的锚点算 B 的时长，语气档直接虚高到「还在想」。
+ *
+ * 【约束与规则 (Rules)】写入 `turnStartedAt` 时必须同步写本字段；快照构造时若与
+ *   当前 `activeSessionId` 不一致，一律视为「时长未知」（undefined → sinceMs 记 0），
+ *   绝不把别的会话的时长借用过来。
+ */
+let turnStartedSessionId: string | null = null;
+
+/**
+ * 在场节拍器周期。
+ *
+ * 【设计意图 (Why)】时长分层阈值是 8s / 30s，1s 的采样粒度足以在跨档后一秒内换语气，
+ *   又不至于把宿主主线程拖进高频循环。
+ */
+const PRESENCE_TICK_MS = 1_000;
+
+/**
+ * 当前焦点域的「是否正在跑回合」与所属群聊房间。
+ *
+ * 【设计意图 (Why)】
+ *   群聊回合从不写 `state.isStreaming`（那条链路属于单会话 prompt.submit），
+ *   它的运行态真值在 `activeRunningGroupRoomIds`。若快照沿用单聊判定，
+ *   群聊指示器会永久停在 idle——整个群聊形态直接失效。
+ *
+ * 【约束与规则 (Rules)】纯读取，不写任何状态；两个消费者（快照构造与节拍器）共用同一口径，
+ *   禁止各写一份判定（否则「有没有在跑」会出现两种答案）。
+ */
+function resolvePresenceDomain(): { groupRoomId: string | null; isRunning: boolean } {
+  const groupRoomId = state.activeFocus.type === 'group' ? state.activeFocus.roomId : null;
+  return {
+    groupRoomId,
+    isRunning: groupRoomId ? activeRunningGroupRoomIds.has(groupRoomId) : isStreamingActiveForCurrentSession(),
+  };
+}
+
+/**
+ * 维护群聊回合时钟。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 只在群聊运行中才立锚点；进入运行态那一刻取当前时间；
+ *   2. 回合结束（或被切走）必须清空，否则下一次进群聊会继承上回的长度；
+ *   3. 由 `syncAgentPresence` 调用——快照构造本身必须保持无副作用。
+ */
+function ensureGroupTurnClock(groupRoomId: string | null, isRunning: boolean): void {
+  if (!groupRoomId || !isRunning) {
+    groupTurnStartedAt = undefined;
+    return;
+  }
+  if (typeof groupTurnStartedAt !== 'number') groupTurnStartedAt = Date.now();
+}
+
+/**
+ * 按在场状态启停节拍器。
+ *
+ * 【设计意图 (Why)】
+ *   `sinceMs` 与语气档是在宿主侧用 `Date.now()` 算出来的快照字段。而流式期间宿主**不会**
+ *   每帧 `render()`（token 走 coalescer 直写 DOM、工具插槽走 rAF 补丁），
+ *   因此若只靠 render 推送：① 语气永远停在「正在思考」不会升级；② 工具开始/结束不换文案。
+ *   节拍器负责把这两类「无 render 事件的时间推进」补上。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   无条件常驻 `setInterval` 会在 idle 时也每秒唤醒主线程，属于典型空转；
+ *   而且仓库已有「禁止无管制 infinite 动效」的能耗军规。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 只有非 idle 才运行；进入 idle / 终态退场后必须 `clearInterval`；
+ *   2. 推送走 `syncAgentPresence`，指纹去重保证「内容没变就不碰 React」；
+ *   3. 禁止改用 `requestAnimationFrame` 常驻循环（会占满合成器）。
+ */
+function ensurePresenceTicker(kind: AgentPresence['kind']): void {
+  const shouldRun = kind !== 'idle';
+  if (shouldRun && !presenceTickerTimer) {
+    presenceTickerTimer = setInterval(() => {
+      syncAgentPresence();
+    }, PRESENCE_TICK_MS);
+    return;
+  }
+  if (!shouldRun && presenceTickerTimer) {
+    clearInterval(presenceTickerTimer);
+    presenceTickerTimer = null;
+  }
+}
+
+/**
+ * 当前会话所属 Agent 的展示身份。
+ *
+ * 【设计意图 (Why)】在场指示器的头像必须与左轨、标题栏是**同一个 Agent**，
+ *   否则用户会看到「标题栏是小发王、对话区是默认 Bot」这种身份错位。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 专职 Bot 工位直接读 `activeFocus.botName`；
+ *   2. 普通会话读会话行上的 `botName / botDisplayName / botAvatar`（网关回填）；
+ *   3. 全都没有时回落 `state.profileName`，但**绝不编造 displayName**——
+ *      共享头像原语会用确定性图腾兜底，编造反而制造假身份。
+ */
+function resolvePresenceSoloIdentity(): { name: string; displayName?: string; avatar?: string } {
+  const focus = state.activeFocus;
+  const activeSession = state.sessions.find((s) => s.id === state.activeSessionId);
+  const name =
+    (focus.type === 'bot' ? focus.botName : '') ||
+    activeSession?.botName ||
+    state.profileName ||
+    'default';
+
+  const profile = state.profiles.find(
+    (p) =>
+      p.name.toLowerCase() === name.toLowerCase() ||
+      (p.displayName && p.displayName.toLowerCase() === name.toLowerCase()),
+  );
+
+  return {
+    name,
+    displayName: profile?.displayName || activeSession?.botDisplayName || undefined,
+    avatar: profile?.avatar || activeSession?.botAvatar || resolveAgentAvatar(name) || undefined,
+  };
+}
+
+/**
+ * 当前群聊房间的成员身份。
+ *
+ * 【约束与规则 (Rules)】成员列表只认 `state.groupRooms` 里的真实房间；
+ *   房间还没到达时返回 null，由调用方降级到单聊身份，绝不凭空造成员。
+ *   成员名保持 profile name（`groupService.ts` 归一化后的 `m.profile`），
+ *   与 `activeGroupSpeaker` 同域，避免组件侧「说话者必须在成员里」的守卫误判降级。
+ *
+ * 【注意】说话者**不在**本函数内决定：它取决于「此刻是否真的有人在干活」，
+ *   必须由调用方按运行态裁决（见 buildAgentPresenceSnapshot）。
+ */
+function resolvePresenceGroupIdentity(): {
+  members: string[];
+  profiles: Array<{ name: string; displayName?: string; avatar?: string }>;
+} | null {
+  const focus = state.activeFocus;
+  const roomId = focus.type === 'group' ? focus.roomId : state.activeSessionId;
+  const room = state.groupRooms.find((g) => g.roomId === roomId);
+  if (!room) return null;
+  const members = Array.isArray(room.members) ? room.members.filter((m) => typeof m === 'string' && m.length > 0) : [];
+  if (members.length === 0) return null;
+  return {
+    members,
+    profiles: state.profiles.map((p) => ({
+      name: p.name,
+      displayName: p.displayName,
+      avatar: p.avatar || resolveAgentAvatar(p.name) || undefined,
+    })),
+  };
+}
+
+/**
+ * 构造在场指示器快照。
+ *
+ * 【设计意图 (Why)】
+ *   宿主只负责把**原始事实**翻译成 core 的输入形状：是否流式、末条 assistant 消息、
+ *   未收敛的子代理、终态。所有「该显示什么状态」的判断都在 core 的纯函数里，
+ *   宿主一旦自己写 if/else 投影文案，就退回到双真值面时代。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   旧实现把状态投影散在「输入舱胶囊模板注入」与「InputDock 的活动状态字段」两处，
+ *   各自演化出英文机器串（thinking / writing response / reading a file），
+ *   且与工具轨迹胶囊的判定不一致。现在工具类别由 core 的 `classifyPresenceTool` 统一裁决。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. `message` 只取**末条 assistant 消息**：末条 user 消息的工具调用永远不属于本回合；
+ *   2. 工具 `args` 必须是字符串（core 侧按 JSON 或纯文本解析）；
+ *   3. 本函数必须无副作用，且可在任意 render 阶段被调用。
+ */
+function buildAgentPresenceSnapshot(): AgentPresenceSnapshot {
+  const now = Date.now();
+  const domain = resolvePresenceDomain();
+  const isStreaming = domain.isRunning;
+
+  let lastAssistant: MessageViewModel | null = null;
+  for (let i = state.messages.length - 1; i >= 0; i -= 1) {
+    if (state.messages[i].role === 'assistant') {
+      lastAssistant = state.messages[i];
+      break;
+    }
+  }
+
+  const pendingDelegations = state.sideAgentCapsules.filter(
+    (capsule) => capsule.kind === 'delegation' && capsule.status === 'pending',
+  );
+
+  const terminal = state.presenceTerminal;
+  const presence: AgentPresence = deriveAgentPresence({
+    isStreaming,
+    message: lastAssistant
+      ? {
+          thought: lastAssistant.thought,
+          content: lastAssistant.content,
+          toolCalls: (lastAssistant.toolCalls ?? []).map((call) => ({
+            name: call.name,
+            status: call.status,
+            args: call.args,
+          })),
+        }
+      : null,
+    activeSubagents: pendingDelegations.length,
+    subagentProfile: pendingDelegations[0]?.profile,
+    lastError: terminal?.kind === 'failed' ? terminal.message : undefined,
+    interrupted: terminal?.kind === 'interrupted',
+    // 【域隔离 (Rules)】群聊读自己的回合时钟；单聊必须校验会话归属，绝不借用别的会话的锚点
+    turnStartedAt: domain.groupRoomId
+      ? groupTurnStartedAt
+      : turnStartedSessionId === state.activeSessionId
+        ? state.turnStartedAt
+        : undefined,
+    now,
+  });
+
+  const groupIdentity = isGroupConversationActive() ? resolvePresenceGroupIdentity() : null;
+  const identity: AgentPresenceSnapshot['identity'] = groupIdentity
+    ? {
+        kind: 'group',
+        members: groupIdentity.members,
+        /**
+         * 【铁律 (Rules)】说话者只在「此刻确实有 Agent 在干活」时才非 null：
+         *   回合未运行时（idle / failed / interrupted）没人说话，必须走降级路径，
+         *   否则用户会看到一个早就说完话的成员头像继续被高亮。
+         *   未知一律 null，绝不沿用上一位，也绝不猜成员。
+         */
+        speaker: domain.isRunning ? (state.activeGroupSpeaker ?? null) : null,
+        profiles: groupIdentity.profiles,
+      }
+    : { kind: 'solo', ...resolvePresenceSoloIdentity() };
+
+  return { presence, identity, locale: state.lang };
+}
+
+/**
+ * 在场快照指纹。
+ *
+ * 【设计意图 (Why)】流式期间宿主每帧都在 `render()`；若每帧都 `root.render()`，
+ *   React 会把整棵指示器子树重新协调一次（眨眼时钟所在的组件也被反复调用），
+ *   白白吃掉主线程预算。与 `lastTitlebarSnapshotJson` 同一手法，只把**影响呈现**的字段
+ *   编进指纹。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 指纹必须覆盖 presence.kind / 语气档 / 目标 / 失败原因 / 身份 / 说话者 / 成员数 / locale；
+ *   2. 刻意**不**包含 `sinceMs`：它每毫秒都在变，进了指纹等于关掉去重；
+ *      语气档（tone）已经承载了「时长是否跨档」这一唯一可感知变化；
+ *   3. 不可序列化时降级为每次都推送（宁可多渲染，也绝不漏一次真实更新）。
+ */
+function agentPresenceFingerprint(snapshot: AgentPresenceSnapshot): string {
+  const { presence, identity, locale } = snapshot;
+  const detail =
+    presence.kind === 'tool'
+      ? `tool:${presence.tool}:${presence.target}:${presence.runningCount}`
+      : presence.kind === 'delegating'
+        ? `delegating:${presence.profile}:${presence.count}`
+        : presence.kind === 'failed'
+          ? `failed:${presence.message}`
+          : presence.kind;
+
+  const identityKey =
+    identity.kind === 'group'
+      ? `group:${identity.speaker ?? '-'}:${identity.members.length}:${identity.members.join(',')}:${identity.profiles.length}`
+      : `solo:${identity.name}:${identity.displayName ?? ''}:${identity.avatar ?? ''}`;
+
+  return snapshotFingerprint({ kind: presence.kind, tone: presenceTone(presence), detail, identityKey, locale });
+}
+
+/**
+ * 供 `mountAgentPresence` 读取的快照出口。
+ *
+ * 【约束与规则 (Rules)】禁止在此重新构造快照：只返回 `syncAgentPresence` 已算好的那一份，
+ *   否则指纹与实际渲染的内容会错位（见 `pendingPresenceSnapshot` 注释）。
+ *   尚无快照时（挂载前的极端时序）现算一次兜底，绝不返回 null。
+ */
+function getAgentPresenceSnapshot(): AgentPresenceSnapshot {
+  if (!pendingPresenceSnapshot) pendingPresenceSnapshot = buildAgentPresenceSnapshot();
+  return pendingPresenceSnapshot;
+}
+
+/**
+ * 推送在场快照（唯一入口）。
+ *
+ * 【约束与规则 (Rules)】挂载与推送都走这里；指纹相同直接返回，不碰 React 树。
+ */
+function syncAgentPresence(): void {
+  if (!updateReactAgentPresence) return;
+  const domain = resolvePresenceDomain();
+  ensureGroupTurnClock(domain.groupRoomId, domain.isRunning);
+  // 【唯一快照 (Rules)】指纹与渲染必须共用同一份快照对象（见 pendingPresenceSnapshot 注释）
+  pendingPresenceSnapshot = buildAgentPresenceSnapshot();
+  const snapshot = pendingPresenceSnapshot;
+  const fingerprint = agentPresenceFingerprint(snapshot);
+  ensurePresenceTicker(snapshot.presence.kind);
+  if (fingerprint === lastAgentPresenceFingerprint) return;
+  lastAgentPresenceFingerprint = fingerprint;
+  updateReactAgentPresence();
+}
+
+/* --------------------------------------------------------------------------
  * 设置中心：快照构造、动作表与网关数据装载
  * -------------------------------------------------------------------------- */
 
@@ -7759,6 +8137,50 @@ function mountReactShellComponents(): void {
   syncReactMessageList();
 
   /**
+   * Agent 在场指示器挂载与推送。
+   *
+   * 【设计意图 (Why)】
+   *   与 `mountPromptNavigator` 完全同构：host 常驻 `.flux-middle-pod`，只挂一次 createRoot，
+   *   之后只推快照。指示器内部的眨眼时钟（`usePresenceTicker`）因此不会被宿主每帧
+   *   `render()` 重置成「永远睁眼」。
+   *
+   * 【防范的历史坑 (Pitfall)】
+   *   1. 放在 `syncReactMessageList()` 之后：首帧 host 已存在但消息列表还没建，
+   *      提前推送读到的是空消息集，指示器会停在 idle，直到下一次 render 才修正。
+   *   2. host 绝不可放进 `#conversation-stream`——那里会被 `renderConversationCanvas` 整块销毁。
+   *   3. **全量重建会换掉 host 节点**（`root.innerHTML = html` 里 `renderMiddlePod` 重新产出模板）。
+   *      若只判 `!updateReactAgentPresence`，重建后旧 root 挂在已脱离文档的节点上，
+   *      指示器从此永久消失。因此必须按 host 引用比对（与 `syncReactMessageList` 同法）。
+   *
+   * 【约束与规则 (Rules)】同一 host 只挂一次；推送统一走 `syncAgentPresence`（指纹去重）。
+   */
+  const presenceHost = document.getElementById('react-conv-presence-host');
+  if (presenceHost !== agentPresenceHost) {
+    // 全量重建换掉了 host：旧 root 挂在已脱离文档的节点上，必须先卸载再换新（否则泄漏）
+    presenceMountHandle?.unmount();
+    presenceMountHandle = null;
+    updateReactAgentPresence = null;
+    agentPresenceHost = presenceHost;
+    lastAgentPresenceFingerprint = '';
+    if (presenceHost) {
+      // 先立群聊回合时钟再挂载：mount 内部会立刻读一次快照，锚点晚一步会让首帧语气档为 0
+      const initialDomain = resolvePresenceDomain();
+      ensureGroupTurnClock(initialDomain.groupRoomId, initialDomain.isRunning);
+      // 挂载前先算好首帧快照：mount 内部会同步调用一次 getSnapshot
+      pendingPresenceSnapshot = buildAgentPresenceSnapshot();
+      presenceMountHandle = mountAgentPresence(presenceHost, getAgentPresenceSnapshot);
+      updateReactAgentPresence = presenceMountHandle.update;
+      // 挂载时 mount 内部已渲染首帧：同步记录指纹，避免下一次 render 白推一遍
+      lastAgentPresenceFingerprint = agentPresenceFingerprint(pendingPresenceSnapshot);
+    } else {
+      // host 消失（如切到无对话区布局）：节拍器必须一起停，否则每秒空转
+      ensurePresenceTicker('idle');
+      pendingPresenceSnapshot = null;
+    }
+  }
+  syncAgentPresence();
+
+  /**
    * 提示词导航轨挂载与推送。
    * 【设计意图 (Why)】必须放在 syncReactMessageList 之后：首帧 host 已存在但消息列表还没建，
    *   提前挂载读到的是旧窗口信息。
@@ -7906,7 +8328,6 @@ function render(): void {
     disabled: !state.gatewayConnected,
     modelMenuOpen: state.modelMenuOpen,
     notice: state.dockNotice,
-    activityStatus: isStreamingCurrent ? state.agentActivityStatus : undefined,
     modelCount: state.availableModels.length,
     modelCatalogHash: state.modelCatalogHash,
     modelSearchQuery: state.modelSearchQuery,
@@ -7984,7 +8405,6 @@ function render(): void {
                 disabled: !state.gatewayConnected,
                 modelMenuOpen: state.modelMenuOpen,
                 notice: state.dockNotice,
-                activityStatus: isStreamingActiveForCurrentSession() ? state.agentActivityStatus : undefined,
                 attachments: state.attachments,
                 slashPopperOpen: state.slashPopperOpen,
                 slashItems: state.slashItems,
@@ -8158,7 +8578,6 @@ function render(): void {
           disabled: !state.gatewayConnected,
           modelMenuOpen: state.modelMenuOpen,
           notice: state.dockNotice,
-          activityStatus: isStreamingCurrent ? state.agentActivityStatus : undefined,
           attachments: state.attachments,
           slashPopperOpen: state.slashPopperOpen,
           slashItems: state.slashItems,
@@ -10725,6 +11144,10 @@ async function init(): Promise<void> {
   // 代码高亮引擎空闲预热：首屏先用轻量高亮，避免 300ms 的语法编译阻塞首屏。
   warmUpHighlighting();
 
+  // 【在场指示器能耗管制】必须写一次初值：仅靠 visibilitychange 事件，
+  // 冷启动时若页面已在后台（Electron 预创建窗口），CSS 的暂停规则永远收不到 true。
+  document.documentElement.dataset.appHidden = String(document.visibilityState === 'hidden');
+
   if (isConversationDemoMode()) {
     injectConversationDemo();
     render();
@@ -10788,6 +11211,9 @@ async function init(): Promise<void> {
 
   // 页面从隐藏恢复但未触发窗口 focus 时，也要及时同步服务端改名/改描述。
   document.addEventListener('visibilitychange', () => {
+    // 【在场指示器能耗管制】CSS 侧 `html[data-app-hidden="true"] .conv-presence *`
+    // 依赖这个属性暂停动画；宿主不写它，那条规则就是死代码。
+    document.documentElement.dataset.appHidden = String(document.visibilityState === 'hidden');
     if (document.visibilityState === 'visible') void refreshProfilesFromServer();
   });
 }
