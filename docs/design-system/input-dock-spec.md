@@ -147,6 +147,11 @@ resolveComposerPrimaryAction(phase) // idle -> send, running -> stop
 4. 斜杠命令条数由网关 `complete.slash` 决定，客户端不得截断；超长由列表 `max-height` + `overflow-y` 承担。
 5. 命令名保留原文（技术标识），说明走 i18n 字典 `slash.<command>`，未收录的命令回退网关原文，不编造。
 6. `@` 候选在三种会话下都必须可用：群聊取房间成员并置顶 `all`；普通会话取全部 Bot；专职 Bot 主工位取其他 Bot 并排除自身（自指会把 `mention-btw` 路由指向本 Bot）。
+7. **桌面可见性**：网关 `commands.catalog.commands[name].desktop` 是分级标记（`hidden`/`terminal`/`advanced`/`composer-voice`/`settings`/null），不是文案。`hidden` 与 `terminal` 不进入补全列表；说明一律取 `pairs` 原文，绝不回落该字段。
+8. **别名折叠**：`canon` 中 `键 !== 值` 的条目不在列表重复出现，只保留主命令。键值均需 `trim()`，网关存在 `"s "`、`"v "` 这类带尾随空格的条目。
+9. **隐藏 ≠ 禁用**：可见性只作用于补全列表，手输命令仍可执行。`routeSend` 不得加白名单校验。
+10. **`@` 路径补全**：`@` 之后的 token 允许路径字符（`/`、`~`、`.`），含分隔符时不再参与 Bot 名过滤。网关返回的文件项是权威结果，不得二次过滤；本地降级才走分段模糊匹配（`opt` 命中 `src/opt/a.ts`）。
+11. **浮层开合**：`/` 与 `@` 浮层必须响应外部 `mousedown` 关闭；点击输入舱内部不关闭（用户点输入框要继续打字，列表不应先消失）。
 
 ### 5.4 附件轨
 

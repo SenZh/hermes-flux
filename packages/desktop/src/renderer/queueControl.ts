@@ -55,14 +55,33 @@ export function planEnqueue(input: {
 /**
  * 入队回执落地。
  *
- * 【规则】没有 `admission_id` 就是没排上队：必须报失败并**保留草稿**，
- *   绝不能因为 HTTP 200 就清空输入框，把用户写的内容吞掉。
+ * 【设计意图 (Why)】
+ *   网关 `prompt.submit` 的真实回执里 `admission_id` 是**可选**的：
+ *   实测运行态排队返回 `{status:'queued'}`，空闲态返回 `{status:'streaming', user_row_id}`，
+ *   两者都不带 `admission_id`。旧实现把「没有 admission_id」直接判成失败，
+ *   于是每一次成功的排队都被报成「加入队列失败」，草稿还留在输入框里。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 判据是回执的 `status`，不是 `admission_id` 是否存在；
+ *   2. `status` 缺失或为终态失败才判失败，且必须保留草稿；
+ *   3. 没有 `admission_id` 时用 `user_row_id` 或文本生成稳定展示 id，
+ *      保证同一批排队行不会互相覆盖。
  */
-export function applyEnqueueReceipt(receipt: { admission_id?: string } | null | undefined, text: string):
-  | { kind: 'queued'; entry: { id: string; admissionId: string; text: string } }
+export function applyEnqueueReceipt(
+  receipt: { admission_id?: string | null; status?: string | null; user_row_id?: number | null } | null | undefined,
+  text: string,
+): | { kind: 'queued'; entry: { id: string; admissionId: string; text: string } }
   | { kind: 'failed'; reasonKey: string } {
-  const admissionId = receipt?.admission_id;
-  if (!admissionId) return { kind: 'failed', reasonKey: 'dock.queueFailed' };
+  if (!receipt) return { kind: 'failed', reasonKey: 'dock.queueFailed' };
+
+  const status = typeof receipt.status === 'string' ? receipt.status.trim().toLowerCase() : '';
+  // 网关把排队成功表达为 queued / streaming；其余（含 error/failed）都算没排上。
+  const accepted = status === 'queued' || status === 'streaming' || status === 'started';
+  if (!accepted) return { kind: 'failed', reasonKey: 'dock.queueFailed' };
+
+  const admissionId = typeof receipt.admission_id === 'string' && receipt.admission_id
+    ? receipt.admission_id
+    : `local-${typeof receipt.user_row_id === 'number' ? receipt.user_row_id : Date.now()}-${text.length}`;
   return { kind: 'queued', entry: { id: admissionId, admissionId, text } };
 }
 

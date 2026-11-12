@@ -60,9 +60,9 @@ test('入队决策：空草稿跳过，两种失败给不同原因', async (t) =
   });
 });
 
-test('入队回执：没有 admission_id 就是没排上队', async (t) => {
+test('入队回执：判据是 status，不是 admission_id', async (t) => {
   await t.test('回执带准入 id 时落地为队列行', () => {
-    const outcome = applyEnqueueReceipt({ admission_id: 'adm-9' }, '排队内容');
+    const outcome = applyEnqueueReceipt({ admission_id: 'adm-9', status: 'queued' }, '排队内容');
     assert.equal(outcome.kind, 'queued');
     assert.deepEqual(outcome.kind === 'queued' ? outcome.entry : null, {
       id: 'adm-9',
@@ -71,10 +71,36 @@ test('入队回执：没有 admission_id 就是没排上队', async (t) => {
     });
   });
 
-  await t.test('缺 admission_id 判失败，调用方据此保留草稿', () => {
+  await t.test('运行态排队：网关只回 status=queued，必须判成功', () => {
+    // 【规则】网关实测运行态回执就是 {status:'queued'}，没有 admission_id。
+    //   历史实现要求 admission_id，于是每次成功排队都报「加入队列失败」。
+    const outcome = applyEnqueueReceipt({ status: 'queued' }, '排队内容');
+    assert.equal(outcome.kind, 'queued');
+    assert.ok(outcome.kind === 'queued' && outcome.entry.admissionId.length > 0, '必须生成稳定展示 id');
+  });
+
+  await t.test('空闲态提交：status=streaming 同样算排上', () => {
+    const outcome = applyEnqueueReceipt({ status: 'streaming', user_row_id: 44507 }, '内容');
+    assert.equal(outcome.kind, 'queued');
+  });
+
+  await t.test('无 status 或失败终态才判失败，并保留草稿', () => {
     assert.deepEqual(applyEnqueueReceipt({}, '内容'), { kind: 'failed', reasonKey: 'dock.queueFailed' });
     assert.deepEqual(applyEnqueueReceipt(null, '内容'), { kind: 'failed', reasonKey: 'dock.queueFailed' });
     assert.deepEqual(applyEnqueueReceipt(undefined, '内容'), { kind: 'failed', reasonKey: 'dock.queueFailed' });
+    assert.deepEqual(applyEnqueueReceipt({ status: 'failed' }, '内容'), { kind: 'failed', reasonKey: 'dock.queueFailed' });
+    assert.deepEqual(applyEnqueueReceipt({ status: 'terminal' }, '内容'), { kind: 'failed', reasonKey: 'dock.queueFailed' });
+  });
+
+  await t.test('status 大小写与空格不敏感', () => {
+    assert.equal(applyEnqueueReceipt({ status: ' QUEUED ' }, 'x').kind, 'queued');
+  });
+
+  await t.test('同一批多条排队行不会互相覆盖', () => {
+    const a = applyEnqueueReceipt({ status: 'queued', user_row_id: 1 }, '第一条');
+    const b = applyEnqueueReceipt({ status: 'queued', user_row_id: 2 }, '第二条');
+    assert.ok(a.kind === 'queued' && b.kind === 'queued');
+    assert.notEqual(a.entry.id, b.entry.id);
   });
 });
 
