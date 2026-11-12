@@ -24,6 +24,11 @@ export interface HermesDesktopBridge extends IPlatformBridge {
     body?: any;
     params?: any;
   }) => Promise<any>;
+  /**
+   * 宿主提供的 WebSocket 地址重写钩子。
+   * 浏览器直跑或测试宿主用它将跨源 WS 地址转为同源代理，规避跨源 Origin 被拒。
+   */
+  proxyWebSocketUrl?: (wsUrl: string) => string;
   openFileDialog: () => Promise<string[] | null>;
   readFile: (path: string) => Promise<string | null>;
   saveFile: (options: { fileName: string; content: string; isBase64?: boolean }) => Promise<{ success: boolean; canceled?: boolean; filePath?: string; error?: string }>;

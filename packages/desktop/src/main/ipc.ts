@@ -8,6 +8,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { appendExternalLogRecord, getLogDir } from './logFile';
 import { resolveTitlebarMaximized, resolveWindowToggle } from './windowControl';
+import { extractCookieHeader } from './cookieHeader';
 import type { LogRecord } from '@hermes-flux/core';
 
 /**
@@ -214,13 +215,8 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
           return { ok: false, message: `登录接口异常 HTTP ${loginRes.status}`, latency };
         }
 
-        // Extract cookie header
-        let cookies = '';
-        if (typeof (loginRes.headers as any).getSetCookie === 'function') {
-          cookies = (loginRes.headers as any).getSetCookie().join('; ');
-        } else {
-          cookies = loginRes.headers.get('set-cookie') || '';
-        }
+        // 仅保留 name=value 段，避免把 Path/HttpOnly/SameSite 属性带入后续 Cookie 请求头
+        const cookies = extractCookieHeader(loginRes.headers);
         activeGatewayCookies = cookies;
 
         // Mint WS Ticket

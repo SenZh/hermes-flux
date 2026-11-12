@@ -94,6 +94,7 @@ import { applyOptimisticCut, planSessionLoadMerge, planRollbackLeaveRestore, tak
 import { createToolPatchQueue } from './toolPatchQueue.js';
 import { decideConversationPush } from './conversationPush.js';
 import { resolveColdStartFocus } from './coldStartFocus.js';
+import { buildGatewayWsUrl, createGatewayReconnectResolver } from './gatewayConnection.js';
 import { createSettingsController, resolveGatewayPassword } from './settingsController.js';
 import { createProviderAdminRest } from './providerAdminRest.js';
 import { createProviderAdminController, planDeleteTarget } from './providerAdminController.js';
@@ -6033,15 +6034,26 @@ async function connect(targetUrl?: string): Promise<void> {
 
     currentTicket = test.ticket;
 
-    // Build WS URL
     const baseUrl = getEffectiveUrl(state.gatewayUrl);
-    let wsUrl = baseUrl.replace('http://', 'ws://').replace('https://', 'wss://') + '/api/ws';
-    if (test.ticket) {
-      wsUrl += `?ticket=${encodeURIComponent(test.ticket)}`;
-    }
+    const buildWsUrl = (ticket?: string): string =>
+      buildGatewayWsUrl(baseUrl, ticket, desktopApi?.proxyWebSocketUrl);
 
     gatewayClient = new HermesGatewayClient({
-      url: wsUrl,
+      url: buildWsUrl(test.ticket),
+      resolveUrl: createGatewayReconnectResolver({
+        epoch,
+        getCurrentEpoch: () => connectionEpoch,
+        authenticate: () => testConnection(state.gatewayUrl, state.username, state.password),
+        buildUrl: buildWsUrl,
+        onRefreshed: (refreshed) => {
+          state.gatewayLatencyMs = refreshed.latency;
+          state.testStatus = refreshed;
+          if (refreshed.ok) {
+            currentTicket = refreshed.ticket;
+          }
+        },
+        fallbackErrorMessage: t('chat.gatewayNotConnected'),
+      }),
       autoConnect: true,
       timeoutMs: 25000,
     });
@@ -6145,6 +6157,7 @@ async function connect(targetUrl?: string): Promise<void> {
 }
 
 function disconnect(): void {
+  connectionEpoch++;
   stopProfileAutoRefresh();
   if (gatewayClient) {
     gatewayClient.disconnect();
