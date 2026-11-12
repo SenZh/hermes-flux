@@ -252,6 +252,26 @@
 | 守卫 | 归类到 `packages/ui/src/lib/`（与既有渲染辅助并列），并在文件头写明「为什么不放 components」 |
 | 备注 | 不是绕过门禁：门禁针对的是新增模板**组件**，渲染辅助函数本就不属于该类别 |
 
+## P-026 勾选提供商只写配置关系，不改主模型（点完"什么都没发生"）
+
+| 项目 | 内容 |
+|---|---|
+| 症状 | 在提供商行里给某个 Bot 点头像后，勾号出现、绿环不亮；该 Bot 的默认模型仍是旧提供商。再点一次变成取消绑定，用户永远切不到这套提供商 |
+| 根因 | 绑定写入固定 `makeDefault: false`，只建立"这个 profile 配过该端点"的记录；而 `active`/`ready` 的格子点击分别返回 `blocked`/`noop`，界面上没有任何一步能把已配置的端点提为主模型 |
+| 识别特征 | `GET /api/providers/custom-endpoints?profile=X` 里端点存在且 `is_current=false`；`model.options` 的 `provider` 仍是旧值 |
+| 守卫 | ① `planBindingToggle` 的 `attach` 明确携带 `makeDefault: true`；② `resolveBindingDefaultModel` 纯函数单测（声明模型失效时退到运行时目录）；③ 真网关 CDP 复现：点空头像后 `state` 必须变 `active` 且网关 `current.provider` 切到该端点 |
+| 备注 | 已配置但非默认的端点仍通过"查看模型"切默认；格子继续承担绑定/解绑，避免丢失成员管理能力 |
+
+## P-027 用 config.yaml 的声明目录冒充运行时可用模型（模型列表指向不存在的模型）
+
+| 项目 | 内容 |
+|---|---|
+| 症状 | 设置页"查看模型"只列一个早已下架的模型（实测 cpa 显示 `deepseek-v4.1-flash`），实际端点只有 `cpa/gemini-3.8-flash`；点它会被网关拒绝或切到不可用的路由 |
+| 根因 | `/api/providers/custom-endpoints` 的 `models` 来自 config 的 `models:` 映射（创建时写死的静态目录）；端点换上游/换代理后运行时目录由 `/api/model/options` 现算，两者已经分叉。归并时错把端点数清单放在优先位 |
+| 识别特征 | 同一 provider 在两个接口里的 `models` 不一致；端点数与 `model.options` 的 `total_models` 相同但 id 不同 |
+| 守卫 | ① `mergeProviderViews` 固定"运行时目录优先、端点声明兜底"；② `providerViews.test` 用 cpa/fn 的真实响应形状钉死优先级；③ 切默认时 `resolveBindingDefaultModel` 只从运行时目录里挑模型 |
+| 复现命令 | 对同一 profile 同时取 `/api/providers/custom-endpoints` 与 `/api/model/options?explicit_only=true`，比较同名 provider 的 `models` |
+
 ## 守卫总览
 
 | 守卫 | 命令 | 拦住的坑 |
@@ -278,3 +298,5 @@
 | 顶栏/微轨几何单真值守卫 | `npm test`（titlebar-geometry + rail-geometry helpers） | P-023 |
 | 品牌图标双向可读性守卫 | `npm test`（vendor-icon 四档）+ Blink 双面板断言 | P-024 |
 | 模板辅助函数归类守卫 | `npm run gates`（ui/no-new-template-export） | P-025 |
+| 绑定默认模型守卫 | `npm test`（providerBinding attach 形状 + resolveBindingDefaultModel）+ 真网关 CDP | P-026 |
+| 运行时模型目录优先守卫 | `npm test`（providerViews 优先级用例）+ `/api/model/options` 对比 | P-027 |
