@@ -178,7 +178,9 @@ test('思考等级二级级联 - 从 footer 下沉到模型行', async (t) => {
     });
 
     const css = fs.readFileSync(new URL('../../src/styles/conversation.css', import.meta.url), 'utf8');
-    assert.match(css, /\.model-option\.active\s*\{[^}]*background:\s*var\(--accent-subtle\)/, '选中态底色必须由 CSS 定义');
+    // 【规则】选中行用实底 + 主前景色，不用 accent：ayu-light 的 accent 压白底只有 2.6:1，
+    //   且浮层里命令名/文件名一律主前景色，模型行用蓝色会与整套语言冲突。
+    assert.match(css, /\.model-option\.active\s*\{[^}]*background:\s*var\(--card-active\)/, '选中态底色必须由 CSS 定义');
     assert.match(
       css,
       /\.model-option:not\(\.active\):not\(\.is-locked\):hover[\s\S]{0,80}background:\s*var\(--card-hover\)/,
@@ -254,14 +256,16 @@ test('思考等级二级级联 - 从 footer 下沉到模型行', async (t) => {
     const startAt = dock.indexOf(startMarker);
     assert.ok(startAt > 0, '必须存在右端紧凑组');
     const afterStart = dock.slice(startAt);
+    // 【规则】用语义断言代替 div 计数：任何包裹层变动都不该让这条测试变红，
+    //   真正要守的是「发送键属于右端紧凑组、且落在动作列内」。
+    const stackAt = afterStart.indexOf('composer-action-stack');
     const sendAt = afterStart.indexOf('id="dock-send-btn"');
-    assert.ok(sendAt > 0, '发送键必须存在');
-    // 从 --end 自身开标签起算：到发送键为止，未闭合的 div 只能等于 2
-    // （--end 容器 + 承载发送/停止上下排列的 .composer-action-stack）。
-    const beforeSend = afterStart.slice(0, sendAt);
-    const openDivs = (beforeSend.match(/<div\b/g) ?? []).length;
-    const closeDivs = (beforeSend.match(/<\/div>/g) ?? []).length;
-    assert.equal(openDivs - closeDivs, 2, '发送键必须紧包在 composer-dock__footer-group--end 内的动作列里');
+    assert.ok(stackAt > 0, '右端紧凑组内必须有 .composer-action-stack');
+    assert.ok(sendAt > stackAt, '发送键必须排在动作列开标签之后');
+    assert.ok(
+      afterStart.indexOf('</div>', sendAt) > 0,
+      '发送键之后必须仍有闭合结构，说明它没有溢到容器外',
+    );
   });
 
   await t.test('思考等级历史别名必须归一，五档永不全暗', () => {

@@ -557,12 +557,14 @@ function escapeHtml(str: string): string {
 
 function formatContextLength(tokens?: number): string {
   if (!tokens || typeof tokens !== 'number') return '';
-  if (tokens >= 10000) {
-    const wan = (tokens / 10000).toFixed(1).replace(/\.0$/, '');
-    return `${wan}万`;
+  // 【规则】一万以上统一走 1M/2M 这类量级，不再裸拼中文「万」：
+  //   中文单位混进 en 界面会变成 `12.8万`，可读性比 `128K` 更差。
+  if (tokens >= 1000000) {
+    const millions = (tokens / 1000000).toFixed(1).replace(/\.0$/, '');
+    return `${millions}M`;
   }
   if (tokens >= 1000) {
-    return `${(tokens / 1000).toFixed(0)}k`;
+    return `${(tokens / 1000).toFixed(0)}K`;
   }
   return String(tokens);
 }
@@ -747,10 +749,10 @@ export function renderModelPickerTree(props: InputDockProps): string {
     ${
       !query && favoriteItems.length > 0
         ? `
-      <div class="model-picker-section" role="group" aria-label="${escapeHtml(t('dock.favorites'))}" style="margin-bottom: 6px;">
-        <div style="padding: 4px 12px; font-size: 11px; font-weight: 700; color: var(--muted-foreground); display: flex; align-items: center; gap: 6px;">
-          <span>★</span>
-          <span>收藏</span>
+      <div class="model-picker-section" role="group" aria-label="${escapeHtml(t('dock.favorites'))}">
+        <div class="model-picker-section__head">
+          <span aria-hidden="true">★</span>
+          <span>${escapeHtml(t('dock.favorites'))}</span>
         </div>
         ${favoriteItems.map((item) => renderModelItemRow(item, props.selectedModel, true)).join('')}
       </div>
@@ -762,10 +764,10 @@ export function renderModelPickerTree(props: InputDockProps): string {
     ${
       !query && recentItems.length > 0
         ? `
-      <div class="model-picker-section" role="group" aria-label="${escapeHtml(t('dock.recents'))}" style="margin-bottom: 6px;">
-        <div style="padding: 4px 12px; font-size: 11px; font-weight: 700; color: var(--text-muted); display: flex; align-items: center; gap: 6px;">
-          <span>🕒</span>
-          <span>最近</span>
+      <div class="model-picker-section" role="group" aria-label="${escapeHtml(t('dock.recents'))}">
+        <div class="model-picker-section__head">
+          <span aria-hidden="true">🕒</span>
+          <span>${escapeHtml(t('dock.recents'))}</span>
         </div>
         ${recentItems.map((item) => renderModelItemRow(item, props.selectedModel, favorites.has(item.id))).join('')}
       </div>
@@ -791,26 +793,14 @@ export function renderModelPickerTree(props: InputDockProps): string {
               const providerIcon = renderProviderVendorIcon(providerSlug, displayName, { size: 13 });
 
               return `
-            <div class="model-provider-group" data-provider="${escapeHtml(providerSlug)}" style="margin-bottom: 6px;">
+            <div class="model-provider-group" data-provider="${escapeHtml(providerSlug)}">
               <!-- Accordion Header -->
-              <div class="model-provider-group-header" data-provider="${escapeHtml(providerSlug)}" data-collapsed="${isCollapsed ? 'true' : 'false'}" data-search-open="${searchForcedOpen ? 'true' : 'false'}" role="button" tabindex="0" aria-expanded="${isCollapsed ? 'false' : 'true'}" aria-disabled="${searchForcedOpen ? 'true' : 'false'}" style="
-                padding: 5px 12px;
-                font-size: 11px;
-                font-weight: 700;
-                color: var(--text-muted);
-                letter-spacing: 0.04em;
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                background: var(--popover);
-                cursor: pointer;
-                user-select: none;
-              ">
-                <div style="display: flex; align-items: center; gap: 6px;">
+              <div class="model-provider-group-header" data-provider="${escapeHtml(providerSlug)}" data-collapsed="${isCollapsed ? 'true' : 'false'}" data-search-open="${searchForcedOpen ? 'true' : 'false'}" role="button" tabindex="0" aria-expanded="${isCollapsed ? 'false' : 'true'}" aria-disabled="${searchForcedOpen ? 'true' : 'false'}">
+                <span class="model-provider-group-header__title">
                   ${providerIcon}
                   <span>${escapeHtml(displayName)}</span>
-                  <span style="font-size: 10px; color: var(--text-muted); font-weight: 400;">(${models.length})</span>
-                </div>
+                  <span class="model-provider-group-header__count">(${models.length})</span>
+                </span>
                 <span class="provider-accordion-arrow" aria-hidden="true">${isCollapsed ? '▸' : '▾'}</span>
               </div>
               <!-- Accordion Body -->
@@ -821,7 +811,7 @@ export function renderModelPickerTree(props: InputDockProps): string {
           `;
             })
             .join('')
-        : '<div style="padding: 16px; text-align: center; color: var(--text-muted); font-size: 12px;">未找到匹配的模型</div>'
+        : `<div class="model-dropdown__empty">${escapeHtml(t('dock.noModelMatch'))}</div>`
     }
   `;
 }
@@ -846,39 +836,21 @@ function renderModelItemRow(
   const vendorIcon = renderVendorIcon({ vendorId: item.vendorId, label: item.vendor, size: 14 });
 
   return `
-    <div class="model-option${isSelected ? ' active' : ''}${locked ? ' is-locked' : ''}" data-model="${escapeHtml(item.id)}" data-provider="${escapeHtml(item.provider)}" data-locked="${locked ? 'true' : 'false'}" title="${lockHint}" role="option" aria-selected="${isSelected ? 'true' : 'false'}" aria-disabled="${locked ? 'true' : 'false'}" tabindex="0"${locked ? '' : ' aria-haspopup="menu"'} style="
-      padding: 6px 12px;
-      font-size: 12px;
-      color: ${isSelected ? 'var(--accent)' : 'var(--text-main)'};
-      cursor: ${locked ? 'not-allowed' : 'pointer'};
-      opacity: ${locked ? '0.45' : '1'};
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    ">
-      <div style="display: flex; align-items: center; gap: 8px; overflow: hidden; min-width: 0; flex: 1 1 auto; white-space: nowrap;">
-        <span class="btn-toggle-favorite" data-model="${escapeHtml(item.id)}" style="
-          color: ${isFav ? 'var(--accent)' : 'var(--text-faint)'};
-          font-size: var(--fs-caption);
-          cursor: pointer;
-          flex-shrink: 0;
-        ">${isFav ? '★' : '☆'}</span>
+    <div class="model-option${isSelected ? ' active' : ''}${locked ? ' is-locked' : ''}" data-model="${escapeHtml(item.id)}" data-provider="${escapeHtml(item.provider)}" data-locked="${locked ? 'true' : 'false'}" title="${lockHint}" role="option" aria-selected="${isSelected ? 'true' : 'false'}" aria-disabled="${locked ? 'true' : 'false'}" tabindex="0"${locked ? '' : ' aria-haspopup="menu"'}>
+      <span class="model-option__main">
+        <span class="btn-toggle-favorite model-option__fav${isFav ? ' is-on' : ''}" data-model="${escapeHtml(item.id)}">${isFav ? '★' : '☆'}</span>
         ${vendorIcon}
-        <span style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; color: inherit;">${escapeHtml(item.name)}</span>
-        ${renderModelBadge(item.variant, 'var(--foreground)', 'var(--secondary)')}
-        ${renderModelBadge([item.quant, item.context].filter(Boolean).join(' · '), 'var(--muted-foreground)', 'var(--secondary)')}
-      </div>
-      <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
-        ${locked ? `<span style="font-size: var(--fs-micro); padding: 0 4px; background: var(--secondary); color: var(--muted-foreground); border-radius: 4px;">${escapeHtml(t('dock.modelLockedBadge'))}</span>` : ''}
-        ${item.supportsVision ? '<span style="font-size: var(--fs-micro); padding: 0 4px; background: var(--secondary); color: var(--muted-foreground); border-radius: 4px;">VISION</span>' : ''}
-        ${
-          contextBadge
-            ? `<span style="font-size: var(--fs-micro); color: var(--muted-foreground); font-family: var(--font-mono);">${contextBadge}</span>`
-            : ''
-        }
-        ${isSelected ? '<span style="font-size: var(--fs-caption); color: var(--accent); font-weight: 700;">✓</span>' : ''}
+        <span class="model-option__name">${escapeHtml(item.name)}</span>
+        ${renderModelBadge(item.variant, 'model-option__badge--name')}
+        ${renderModelBadge([item.quant, item.context].filter(Boolean).join(' · '), 'model-option__badge--meta')}
+      </span>
+      <span class="model-option__trailing">
+        ${locked ? `<span class="model-option__badge model-option__badge--meta">${escapeHtml(t('dock.modelLockedBadge'))}</span>` : ''}
+        ${item.supportsVision ? `<span class="model-option__badge model-option__badge--meta">VISION</span>` : ''}
+        ${contextBadge ? `<span class="model-option__context">${contextBadge}</span>` : ''}
+        ${isSelected ? '<span class="model-option__check" aria-hidden="true">✓</span>' : ''}
         <span class="model-option__cascade" aria-hidden="true">›</span>
-      </div>
+      </span>
     </div>
   `;
 }
@@ -901,9 +873,9 @@ function renderModelItemRow(
  * 【约束与规则 (Rules)】
  *   文案为空时严格返回空串，不留空标签占位。
  */
-function renderModelBadge(text: string, color: string, background: string): string {
+function renderModelBadge(text: string, variant: 'model-option__badge--name' | 'model-option__badge--meta'): string {
   if (!text) return '';
-  return `<span style="flex-shrink: 0; white-space: nowrap; font-size: var(--fs-micro); line-height: 1.4; padding: 0 4px; border-radius: 4px; color: ${color}; background: ${background};">${escapeHtml(text)}</span>`;
+  return `<span class="model-option__badge ${variant}">${escapeHtml(text)}</span>`;
 }
 
 /**

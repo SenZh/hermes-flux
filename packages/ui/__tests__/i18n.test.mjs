@@ -12,6 +12,38 @@ test('i18n standard dictionary parity and placeholder interpolation', async (t) 
     assert.deepEqual(zhKeys, enKeys, 'All keys between languages must be identical');
   });
 
+  await t.test('输入舱新增键必须双语齐备且非空', () => {
+    // 这些键由输入舱重设计引入；任一侧漏写都会让界面出现裸 key 或空标签。
+    const dockKeys = [
+      'dock.approval',
+      'dock.approvalManual',
+      'dock.approvalSmart',
+      'dock.approvalOff',
+      'dock.approvalManualHint',
+      'dock.approvalSmartHint',
+      'dock.approvalOffHint',
+      'dock.stopTurn',
+      'dock.popperSelect',
+      'dock.popperInsert',
+      'dock.modelHintMove',
+      'dock.modelHintClose',
+      'dock.noModelMatch',
+      'dock.queueSubmit',
+      'dock.queueFailed',
+      'dock.queueActionFailed',
+      'dock.busyEnterBlocked',
+    ];
+    for (const key of dockKeys) {
+      assert.ok(key in zhDict, `zhDict 缺少 ${key}`);
+      assert.ok(key in enDict, `enDict 缺少 ${key}`);
+      assert.ok(zhDict[key].trim().length > 0, `${key} 的中文不能为空`);
+      assert.ok(enDict[key].trim().length > 0, `${key} 的英文不能为空`);
+    }
+    // 审批三态文案必须三档互不相同，否则用户看不出切换了哪一档
+    const labels = [zhDict['dock.approvalManual'], zhDict['dock.approvalSmart'], zhDict['dock.approvalOff']];
+    assert.equal(new Set(labels).size, 3, '审批三态的中文文案必须互不相同');
+  });
+
   await t.test('t() function must resolve keys and format parameters', () => {
     setLocale('zh-CN');
     assert.equal(translate('rail.newChat'), '新建会话');

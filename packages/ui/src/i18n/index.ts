@@ -167,7 +167,7 @@ export const zhDict = {
   'dock.recents': '最近',
   'dock.reasoning': '思考',
   'dock.reasoningDefault': '默认',
-  'dock.reasoningNone': '关',
+  'dock.reasoningNone': '关闭',
   'dock.reasoningLow': '低',
   'dock.reasoningHigh': '高',
   'dock.reasoningMax': '最高',
@@ -185,6 +185,7 @@ export const zhDict = {
   'dock.popperInsert': '插入',
   'dock.modelHintMove': '移动',
   'dock.modelHintClose': '关闭',
+  'dock.noModelMatch': '未找到匹配的模型',
   'dock.queueSubmit': '加入待发送队列',
   'dock.queueFailed': '加入队列失败',
   'dock.queueActionFailed': '队列操作失败',
@@ -816,12 +817,12 @@ export const enDict: Record<I18nKey, string> = {
   'dock.popperInsert': 'insert',
   'dock.modelHintMove': 'move',
   'dock.modelHintClose': 'close',
+  'dock.noModelMatch': 'No matching models',
   'dock.queueSubmit': 'Add to pending queue',
   'dock.queueFailed': 'Failed to add to the queue',
   'dock.queueActionFailed': 'Queue action failed',
   'dock.busyEnterBlocked': 'The current turn is still running. Use the stop button to interrupt it.',
 
-  // Input Dock & Expansion
   // Input Dock & Expansion
   'dock.noticeClose': 'Dismiss notice',
 

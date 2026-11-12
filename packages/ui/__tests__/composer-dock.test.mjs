@@ -85,6 +85,36 @@ test('Composer dock - 输入舱语义与几何', async (t) => {
     assert.ok(editor.includes('font-size: var(--chat-text-markdown)'), '字号跟随设置档位');
     assert.ok(!editor.includes('transition'), '高度不得做过渡');
   });
+
+  await t.test('6. 附件删除键：视觉 16px 圆盘，桌面命中区 28px，且禁止抬到 44px', () => {
+    const remove = blockOf('.composer-attach__remove');
+    assert.ok(remove.includes('width: 28px') && remove.includes('height: 28px'), '桌面命中区 28px');
+    assert.ok(!remove.includes('width: 16px'), '本体不得是 16px（否则热区不足）');
+
+    const disc = blockOf('.composer-attach__remove::before');
+    assert.ok(disc.includes('width: 16px') && disc.includes('height: 16px'), '圆盘视觉 16px');
+    // 【规则】abspos 子项必须显式居中，place-items 对绝对定位不生效。
+    assert.ok(disc.includes('inset: 0'), '圆盘必须显式 inset 才能居中');
+    assert.ok(disc.includes('margin: auto'), '圆盘必须 margin:auto 才能在 inset 盒里居中');
+
+    const file = blockOf('.composer-attach-file .composer-attach__remove');
+    assert.ok(file.includes('width: 20px') && file.includes('height: 20px'), '文档胶囊里的删除键收回 20px');
+
+    const desktopCss = fs.readFileSync(path.join(repoRoot, 'packages/desktop/src/renderer/styles.css'), 'utf8');
+    const mobileBlock = desktopCss.slice(desktopCss.indexOf('@media (max-width: 768px)'));
+    assert.ok(
+      /\.composer-attach__remove\s*\{[^}]*min-width:\s*28px/.test(mobileBlock),
+      '移动端必须把附件删除键钉回 28px：44px 会盖住 56px 缩略图的 61.7% 面积，点图预览就会误删',
+    );
+  });
+
+  await t.test('7. 分隔符是文字不是线条：必须用文字色 Token', () => {
+    const sep = blockOf('.composer-ctrl__sep');
+    assert.ok(sep.includes('var(--muted-foreground)'), '分隔符必须用文字色');
+    // 【规则】--border-strong 是半透明描边色，五套皮肤实测 1.57~3.37:1，全部不达 AA。
+    assert.ok(!sep.includes('var(--border-strong)'), '分隔符禁止复用描边色');
+    assert.ok(!sep.includes('var(--faint)'), '分隔符禁止用 faint（ayu-light 仅 2.01:1）');
+  });
 });
 
 test('Composer dock - 渲染产物与状态机', async (t) => {
@@ -173,7 +203,7 @@ test('Composer dock - 纯函数状态机', async (t) => {
 
   await t.test('思考等级五档文案唯一', () => {
     assert.equal(reasoningLevelLabel('default'), '默认');
-    assert.equal(reasoningLevelLabel('off'), '关');
+    assert.equal(reasoningLevelLabel('off'), '关闭');
     assert.equal(reasoningLevelLabel('medium'), '高');
     assert.equal(reasoningLevelLabel('max'), '最高');
   });

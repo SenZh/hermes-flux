@@ -95,11 +95,10 @@ test('改名锚点：幽灵旧名在组件文件清零，新槽名计数稳定�
   for (const [name, src] of [['--bg-hover', dock], ['--bg-surface-1', dock], ['--bg-surface-1', mid], ['--bg-main', railReact], ['--bg-main', railModel]]) {
     assert.equal((src.match(new RegExp('var\\(' + name, 'g')) ?? []).length, 0, `幽灵旧名 ${name} 复活`);
   }
-  // 【舱重写】输入舱的配色已整体归口 conversation.css 的语义类，模板不再逐处消费
-  // --card-hover / --popover。这两个计数随重写删除，改为断言模板里不再出现裸色消费点：
-  // 输入舱模板只允许输出语义类名，任何 var(--*) 都必须留在样式表里。
+  // 【舱重写】输入舱的配色已整体归口 conversation.css 的语义类：模板不再消费任何
+  // 颜色 Token，只输出语义类名。这里守住"归零"这个事实，防止又有人往模板里塞内联色。
   assert.equal((dock.match(/var\(--card-hover\)/g) ?? []).length, 0, '输入舱模板不得再消费 --card-hover');
-  assert.equal((dock.match(/var\(--popover\)/g) ?? []).length, 1, '输入舱模板仅模型分组标题保留一处 --popover');
+  assert.equal((dock.match(/var\(--popover\)/g) ?? []).length, 0, '输入舱模板不得再消费 --popover');
   // 工具胶囊模板链路已整体删除（流式补丁通道改用 ToolBlocks 组件静态渲染），
   // 因此 MiddlePod 不再有任何 --popover 消费点。
   assert.equal((mid.match(/var\(--popover\)/g) ?? []).length, 0, 'MiddlePod 工具模板删除后不得再残留 --popover 消费');

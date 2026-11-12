@@ -77,7 +77,7 @@ try {
   // ---------- 附件轨 + 队列托盘 ----------
   await applyState({
     attachments: [
-      { id: 'a1', name: 'shot.png', type: 'image', previewUrl: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60"><rect width="60" height="60" fill="%23C2A184"/></svg>' },
+      { id: 'a1', name: 'shot.png', type: 'image', previewUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADwAAAA8CAIAAAC1nk4lAAAAUklEQVR4nO3OAQkAIBAAMcNbxComM4b3MFiArXv2OOv7QDpMWlo6QFpaOkBaWjpAWlo6QFpaOkBaWjpAWlo6QFpaOkBaWjpAWlo6QFpaOmBk+gGbesH3N5ThNQAAAABJRU5ErkJggg==' },
       { id: 'a2', name: 'brief.pdf', type: 'pdf' },
     ],
     queuedMessages: [

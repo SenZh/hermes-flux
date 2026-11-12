@@ -402,17 +402,19 @@ const layoutRules = {
     const joined = ctx.codeLines.join('\n');
 
     // 输入舱必须锁定 740px 黄金限宽——这是硬性可静态断言的常量。
-    // 重设计后几何归口 conversation.css，模板与样式表任一处声明都算数。
+    // 重设计后几何归口 conversation.css，因此要取 `.input-card-box.composer-dock` 那一个规则块，
+    // 而不是全文 includes：整个样式表里有 4 处 740px，删掉外壳那条仍然会绿。
     if (file.endsWith('InputDock/InputDock.ts')) {
       const dockCssPath = path.join(REPO_ROOT, 'packages/ui/src/styles/conversation.css');
       const dockCss = fs.existsSync(dockCssPath) ? fs.readFileSync(dockCssPath, 'utf8') : '';
-      if (!/max-width:\s*740px/.test(`${joined}\n${dockCss}`)) {
+      const shellRule = /\.input-card-box\.composer-dock\s*\{([\s\S]*?)\}/.exec(dockCss);
+      if (!shellRule || !/max-width:\s*740px/.test(shellRule[1])) {
         out.push({
           file,
           line: 1,
           lineIdx: 0,
           ruleId: 'layout/input-dock-width',
-          message: 'InputDock 必须保持 max-width: 740px 黄金限宽（AGENTS.md 六-2）',
+          message: '输入舱外壳 .input-card-box.composer-dock 必须声明 max-width: 740px（AGENTS.md 六-2）',
           snippet: '',
         });
       }

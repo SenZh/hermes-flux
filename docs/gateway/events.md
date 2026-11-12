@@ -1,7 +1,7 @@
 # 下行事件流
 
 > 本文件由 `npm run contract:doc` 从网关契约、探针结果与源码调用点自动生成，请勿手工编辑。
-> 契约快照：e3cf16a3d983… · 同步于 2026-11-12T09:06:33.222Z
+> 契约快照：e3cf16a3d983… · 同步于 2026-11-12T09:29:35.736Z
 
 网关通过 JSON-RPC 通知 `event` 帧向下推送，payload 形状由 `BackendGatewayEventMap` 定义。
 

@@ -206,6 +206,15 @@ import {
 import { parseTranscriptRows } from './transcriptRows.js';
 import { DesktopCacheStore } from './cache/DesktopCacheStore.js';
 import { loadProviderCatalog } from './providerCatalog.js';
+import {
+  applyEnqueueReceipt,
+  canSendDraft,
+  clampComposerHeight,
+  planEnqueue,
+  planQueueAction,
+  queuedAfterAction,
+  shouldShowQueueButton,
+} from './queueControl.js';
 
 /**
  * 客户端缓存服务（冷启动快照 + 消息正文）。
@@ -5407,10 +5416,15 @@ async function routeSend(text: string): Promise<void> {
  */
 async function enqueueDraft(): Promise<void> {
   const el = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
-  const text = el ? el.value.trim() : '';
-  if (!text) return;
-  if (!gatewayClient) {
-    setTimedDockNotice(t('chat.gatewayNotConnected'));
+  const draft = planEnqueue({
+    text: el?.value ?? '',
+    hasGateway: Boolean(gatewayClient),
+    // liveId 的探测在下面做：这里先按"有会话"放行，真正的通道缺失由 ensureLiveSessionId 返回。
+    hasLiveSession: true,
+  });
+  if (draft.kind === 'skip') return;
+  if (draft.kind === 'fail') {
+    setTimedDockNotice(t(draft.reasonKey as Parameters<typeof t>[0]));
     render();
     return;
   }
@@ -5424,18 +5438,19 @@ async function enqueueDraft(): Promise<void> {
     return;
   }
   try {
-    const receipt = await gatewayClient.call<{ admission_id?: string; status?: string }>('prompt.submit', {
+    const receipt = await gatewayClient!.call<{ admission_id?: string }>('prompt.submit', {
       session_id: liveId,
-      text,
+      text: draft.text,
       queued: true,
     });
-    const admissionId = receipt?.admission_id;
-    if (!admissionId) {
-      setTimedDockNotice(t('dock.queueFailed'));
+    const outcome = applyEnqueueReceipt(receipt, draft.text);
+    if (outcome.kind === 'failed') {
+      // 失败保留草稿：用户写的内容不能因为网关没回 admission_id 就被清掉。
+      setTimedDockNotice(t(outcome.reasonKey as Parameters<typeof t>[0]));
       render();
       return;
     }
-    state.queuedMessages = [...state.queuedMessages, { id: admissionId, admissionId, text }];
+    state.queuedMessages = [...state.queuedMessages, outcome.entry];
     if (el) {
       el.value = '';
       el.style.height = '';
@@ -5452,17 +5467,22 @@ async function enqueueDraft(): Promise<void> {
  * 队列行的三个动作（放回编辑 / 立即发送 / 取消）。
  *
  * 【设计意图 (Why)】
- *   队列真相在网关，客户端只按 `admission_id` 发指令；三种动作对应三个 Canonical 方法，
- *   失败一律保留原行并显式提示，绝不乐观删除后静默吞错。
+ *   队列真相在网关，客户端只按 `admission_id` 发指令，失败一律保留原行并显式提示。
+ *   三个动作都会让该准入离开排队态，因此成功后必须同步移除本地展示行 ——
+ *   否则「立即发送」执行完的那行会永久留在界面上，而网关里早已不存在。
  *
  * 【约束与规则 (Rules)】
- *   - 放回编辑：先撤销该准入，再把文本写回输入舱并聚焦，保证用户能改；
+ *   - 放回编辑：撤销该准入，再把文本写回输入舱并聚焦，让用户继续改；
  *   - 立即发送：`prompt.steer_queued` 插到当前回合前执行；
- *   - 取消：`prompt.cancel` 按准入撤销。
+ *   - 取消：`prompt.cancel` 按准入撤销；
+ *   - 未知 action 直接忽略，绝不默认落到取消。
  */
 async function handleQueueAction(action: string, admissionId: string): Promise<void> {
   const entry = state.queuedMessages.find((q) => q.admissionId === admissionId);
   if (!entry) return;
+  const plan = planQueueAction(action, entry.text);
+  if (plan.kind === 'unknown') return;
+
   const liveId = await ensureLiveSessionId();
   if (!liveId) {
     setTimedDockNotice(t('chat.forkNoLive'));
@@ -5470,28 +5490,22 @@ async function handleQueueAction(action: string, admissionId: string): Promise<v
     return;
   }
   try {
-    if (action === 'queue-steer') {
+    if (plan.kind === 'steer') {
       await interactiveService.steerQueued(rpcCaller, liveId, admissionId, state.profileName || undefined);
-      render();
-      return;
-    }
-    if (action === 'queue-cancel') {
+    } else {
       await interactiveService.cancelQueued(rpcCaller, liveId, admissionId);
-      state.queuedMessages = state.queuedMessages.filter((q) => q.admissionId !== admissionId);
-      render();
-      return;
     }
-    if (action === 'queue-replace') {
-      await interactiveService.cancelQueued(rpcCaller, liveId, admissionId);
-      state.queuedMessages = state.queuedMessages.filter((q) => q.admissionId !== admissionId);
+    state.queuedMessages = queuedAfterAction(state.queuedMessages, admissionId) as typeof state.queuedMessages;
+
+    if (plan.kind === 'replace') {
       const el = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
       if (el) {
-        el.value = entry.text;
+        el.value = plan.restoreText;
         el.focus({ preventScroll: true });
         el.dispatchEvent(new Event('input', { bubbles: true }));
       }
-      render();
     }
+    render();
   } catch (err) {
     setTimedDockNotice(`${t('dock.queueActionFailed')}: ${describeRpcError(err)}`);
     render();
@@ -9213,14 +9227,12 @@ function bindEvents(): void {
 
   // 输入区高度：44px 起步，按 scrollHeight 增长，触顶 220px 后转内部滚动。
   // 【规则】先把 height 归 auto 再量 scrollHeight，回删时高度才能同步收回；
-  //   高度不做过渡，避免高频输入时把排版抖动放大成跳行。
-  const COMPOSER_MIN_HEIGHT = 44;
-  const COMPOSER_MAX_HEIGHT = 220;
+  //   高度不做过渡，避免高频输入时把排版抖动放大成跳行。边界值定义在 queueControl.ts。
   const syncComposerHeight = () => {
     if (!inputEl) return;
+    // 先归 auto 再量：否则回删时读到的是被旧高度撑住的滚动高度，高度会卡在上限。
     inputEl.style.height = 'auto';
-    const next = Math.min(Math.max(inputEl.scrollHeight, COMPOSER_MIN_HEIGHT), COMPOSER_MAX_HEIGHT);
-    inputEl.style.height = `${next}px`;
+    inputEl.style.height = `${clampComposerHeight(inputEl.scrollHeight)}px`;
   };
 
   const submitDraft = () => {
@@ -9246,10 +9258,13 @@ function bindEvents(): void {
   };
 
   // 空内容时发送禁用；网关未连接时模板已写死 disabled + data-locked，这里不得擅自解锁。
+  // 【规则】附件真值只有 state.attachments 一处，不再查 DOM 类名。
   const syncSendAvailability = () => {
     if (!sendBtn || !inputEl || sendBtn.dataset.locked === 'true') return;
-    const hasAttachments = Boolean(document.querySelector('.composer-attachment-pill'));
-    sendBtn.disabled = !inputEl.value.trim() && !hasAttachments;
+    sendBtn.disabled = !canSendDraft({
+      text: inputEl.value,
+      attachmentCount: state.attachments.length,
+    });
   };
 
   if (sendBtn) sendBtn.onclick = () => handleSend('button');
@@ -9266,10 +9281,16 @@ function bindEvents(): void {
   // 运行态草稿有无只切按钮可见性，绝不触发整舱重绘（否则 textarea 与光标会被销毁）
   const syncQueueButtonVisibility = () => {
     if (!queueBtn || !inputEl) return;
-    queueBtn.hidden = !inputEl.value.trim() && state.attachments.length === 0;
+    queueBtn.hidden = !shouldShowQueueButton({
+      text: inputEl.value,
+      attachmentCount: state.attachments.length,
+    });
   };
   syncSendAvailability();
   syncComposerHeight();
+  // 【规则】无条件补一次：附件增减会触发整舱重建，但重建路径不保证再走这里，
+  //   不能依赖"附件变化必然重绘"这种隐式契约。
+  syncQueueButtonVisibility();
   if (inputEl) {
     if (inputEl.dataset.dockEventsBound !== 'true') {
       inputEl.dataset.dockEventsBound = 'true';

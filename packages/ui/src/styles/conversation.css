@@ -1373,8 +1373,8 @@ details[open] > summary > .tool-row__expand {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 7px 12px;
+  gap: 12px;
+  padding: 8px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-panel, 8px);
   background: var(--popover);
@@ -1422,8 +1422,8 @@ details[open] > summary > .tool-row__expand {
   display: grid;
   flex-shrink: 0;
   place-items: center;
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: none;
   border-radius: var(--radius-inner, 4px);
@@ -1470,7 +1470,7 @@ details[open] > summary > .tool-row__expand {
 }
 
 .composer-dock__editor {
-  padding: 0 14px;
+  padding: 0 16px;
 }
 
 /*
@@ -1513,7 +1513,7 @@ details[open] > summary > .tool-row__expand {
   justify-content: space-between;
   gap: 8px;
   min-width: 0;
-  padding: 0 10px 8px;
+  padding: 0 12px 8px;
 }
 
 .composer-dock__footer-group {
@@ -1590,7 +1590,7 @@ details[open] > summary > .tool-row__expand {
 }
 
 .composer-stop:hover {
-  background: color-mix(in srgb, var(--destructive) 12%, transparent);
+  background: var(--card-hover);
 }
 
 .composer-stop__block {
@@ -1636,7 +1636,7 @@ details[open] > summary > .tool-row__expand {
   gap: 6px;
   height: 28px;
   max-width: 290px;
-  padding: 0 5px;
+  padding: 0 6px;
   border: none;
   border-radius: var(--radius-card, 6px);
   background: transparent;
@@ -1665,9 +1665,13 @@ details[open] > summary > .tool-row__expand {
   white-space: nowrap;
 }
 
+/* 【规则】分隔符是文字而非线条：必须用文字色 Token。
+   实测 --border-strong 在五套皮肤上只有 1.57~3.37:1（ayu-light 3.37），
+   它本质是半透明描边色，语义上不属于文字，复用会让「模型名 / 等级」的斜杠几乎消失。
+   --muted-foreground 实测 5.33~10.48:1，五套皮肤全部过 AA。 */
 .composer-ctrl__sep {
   flex-shrink: 0;
-  color: var(--faint);
+  color: var(--muted-foreground);
 }
 
 .composer-ctrl__level {
@@ -1801,8 +1805,12 @@ details[open] > summary > .tool-row__expand {
 }
 
 .model-dropdown__refresh {
+  display: inline-grid;
   flex-shrink: 0;
-  padding: 0 2px;
+  place-items: center;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
   border: none;
   background: transparent;
   color: var(--muted-foreground);
@@ -1890,29 +1898,56 @@ details[open] > summary > .tool-row__expand {
   white-space: nowrap;
 }
 
+/*
+ * 附件删除：视觉 16px 圆盘，桌面命中区 28px。
+ * 【防范的历史坑 (Pitfall)】
+ *   1. 圆盘用 `::before` 绘制时必须写 `inset: 0; margin: auto`：它是绝对定位子项，
+ *      `place-items: center` 对 abspos 不生效，缺 inset 会让圆盘偏到左上角、与叉错位。
+ *   2. 命中区严禁在移动端抬到 44px：缩略图只有 56px，44px 会覆盖 61.7% 面积，
+ *      用户想点图预览却删掉了附件 —— 这是数据丢失级误触，因此这里显式豁免 44px 规则。
+ */
 .composer-attach__remove {
   position: absolute;
-  top: 3px;
-  right: 3px;
+  top: 0;
+  right: 0;
   display: grid;
   place-items: center;
-  width: 16px;
-  height: 16px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: none;
-  border-radius: 50%;
-  background: var(--popover);
+  background: transparent;
   color: var(--foreground);
-  box-shadow: 0 0 0 1px var(--border-subtle);
   cursor: pointer;
 }
 
+.composer-attach__remove::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 16px;
+  height: 16px;
+  margin: auto;
+  border-radius: 50%;
+  background: var(--popover);
+  box-shadow: 0 0 0 1px var(--border-subtle);
+}
+
+.composer-attach__remove > svg {
+  position: relative;
+}
+
+/* 文档胶囊里的删除键不再画圆盘，收回到 20px：38px 的胶囊里放 28px 空盒会吃掉文件名宽度。 */
 .composer-attach-file .composer-attach__remove {
   position: static;
   flex-shrink: 0;
-  background: transparent;
-  box-shadow: none;
+  width: 20px;
+  height: 20px;
   color: var(--muted-foreground);
+}
+
+.composer-attach-file .composer-attach__remove::before {
+  display: none;
 }
 
 .composer-attach__remove:hover {
@@ -1948,7 +1983,7 @@ details[open] > summary > .tool-row__expand {
   align-items: center;
   gap: 8px;
   min-width: 0;
-  padding: 5px 6px 5px 12px;
+  padding: 4px 4px 4px 12px;
   color: var(--foreground);
   font-size: var(--fs-aux, 12px);
 }
@@ -1988,8 +2023,8 @@ details[open] > summary > .tool-row__expand {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: none;
   border-radius: var(--radius-inner, 4px);
@@ -2870,8 +2905,13 @@ details[open] > summary > .tool-row__expand {
   transition: background 0.1s ease;
 }
 
+/*
+ * 选中行：实底 + 主前景色，不用 accent。
+ * 【防范的历史坑】ayu-light 的 accent 是 #4AA8C8，12px 文字压白底只有约 2.6:1；
+ *   而且浮层里的命令名/文件名一律主前景色，模型行用蓝色会与整套语言冲突。
+ */
 .model-option.active {
-  background: var(--accent-subtle);
+  background: var(--card-active);
 }
 
 .model-option:not(.active):not(.is-locked):hover,
@@ -2884,6 +2924,146 @@ details[open] > summary > .tool-row__expand {
    仅靠淡灰底色在亮色/高对比屏上不够醒目。 */
 .model-option:not(.is-locked):focus-visible {
   box-shadow: inset 2px 0 0 0 var(--primary-border);
+}
+
+/*
+ * 模型选择器的行内骨架。
+ * 【规则】模板只输出语义类名，行高/内距/字阶/省略策略全部在这里定义一次：
+ *   收藏、最近、provider 分组、模型行四处共用同一套 30px 行与 12px 左右内距。
+ */
+.model-picker-section {
+  margin-bottom: 6px;
+}
+
+.model-picker-section__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  color: var(--muted-foreground);
+  font-size: var(--fs-caption, 11px);
+  font-weight: 500;
+}
+
+.model-provider-group {
+  margin-bottom: 6px;
+}
+
+.model-provider-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 12px;
+  background: var(--popover);
+  color: var(--muted-foreground);
+  font-size: var(--fs-caption, 11px);
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+}
+
+.model-provider-group-header__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.model-provider-group-header__count {
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+
+.model-dropdown__empty {
+  padding: 16px;
+  color: var(--muted-foreground);
+  font-size: var(--fs-aux, 12px);
+  text-align: center;
+}
+
+.model-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  color: var(--foreground);
+  font-size: var(--fs-aux, 12px);
+  cursor: pointer;
+}
+
+.model-option.is-locked {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.model-option__main {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.model-option__fav {
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+  font-size: var(--fs-caption, 11px);
+  cursor: pointer;
+}
+
+.model-option__fav.is-on {
+  color: var(--foreground);
+}
+
+.model-option__name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-option__trailing {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 【规则】标签必须禁止收缩：flex 默认 shrink:1，窄容器下会被压扁，文字溢出自带背景之外。 */
+.model-option__badge {
+  flex-shrink: 0;
+  padding: 0 4px;
+  border-radius: var(--radius-inner, 4px);
+  background: var(--secondary);
+  font-size: var(--fs-micro, 10px);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.model-option__badge--name {
+  color: var(--foreground);
+}
+
+.model-option__badge--meta {
+  color: var(--muted-foreground);
+}
+
+.model-option__context {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro, 10px);
+}
+
+.model-option__check {
+  color: var(--foreground);
+  font-size: var(--fs-caption, 11px);
+  font-weight: 700;
 }
 
 

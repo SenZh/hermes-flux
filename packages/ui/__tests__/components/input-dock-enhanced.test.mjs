@@ -18,7 +18,7 @@ test('InputDock Enhanced - 队列托盘、附件托盘、手风琴模型器与Po
     const html = renderQueueTray(queueItems);
 
     assert.ok(html.includes('pending-queue-tray'), '必须渲染排队托盘容器');
-    assert.ok(html.includes('· 2'), '显示排队数量');
+    assert.equal((html.match(/pending-queue-row"/g) || []).length, 2, '两条排队各渲染一行');
     assert.ok(html.includes('pending-queue-row__index'), '包含序号位');
     assert.ok(html.includes('先帮我写个单测'), '包含文本摘要');
     assert.ok(html.includes('data-action="queue-replace"'), '包含放回编辑');
@@ -40,7 +40,7 @@ test('InputDock Enhanced - 队列托盘、附件托盘、手风琴模型器与Po
     const html = renderAttachmentTray(attachments);
 
     assert.ok(html.includes('composer-attach-rail'), '必须渲染附件轨');
-    assert.ok(html.includes('composer-attach-thumb'), '图片必须渲染 56px 缩略图');
+    assert.ok(html.includes('composer-attach-thumb'), '图片必须渲染缩略图容器');
     assert.ok(html.includes('composer-attach-file'), '文档必须退化为胶囊');
     assert.ok(html.includes('src="blob:mock-img"'), '图片附件渲染缩略图');
     assert.ok(html.includes('screenshot.png'), '渲染文件名');
@@ -104,7 +104,7 @@ test('InputDock Enhanced - 队列托盘、附件托盘、手风琴模型器与Po
     assert.ok(html.includes('Anthropic'), '包含 Anthropic 厂商标题');
     assert.ok(html.includes('OpenAI'), '包含 OpenAI 厂商标题');
     assert.ok(html.includes('VISION'), '包含 Vision 多模态微标');
-    assert.ok(html.includes('20万'), '包含上下文长度');
+    assert.ok(html.includes('200K'), '上下文长度必须按 K/M 量级呈现，不混中文单位');
 
     // 验证手风琴折叠状态
     assert.ok(html.includes('display: none;'), '折叠的厂商 items 容器必须为 display: none');

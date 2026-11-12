@@ -676,12 +676,12 @@ function buildModules(ctx) {
           // 取消必须针对一条**已排队**的准入；排队态只在有在途回合时存在，
           // 离线探针造不出这种状态，且误传真实 admission_id 会撤掉用户自己的排队消息。
           params: () => ({ session_id: ctx.promptLiveId, admission_id: 'flux-probe-none' }),
-          skip: () => '取消需要真实排队中的准入，离线探针无法造出排队态；由队列单测与契约表守护',
+          skip: () => '未做真实网关验证：取消需要真实排队中的准入（仅在有在途回合时存在），离线探针造不出该状态，误传真实 admission_id 又会撤掉用户自己的排队消息；目前仅由本地参数构造单测与契约表守护',
         },
         {
           method: 'prompt.steer_queued',
           params: () => ({ session_id: ctx.promptLiveId, admission_id: 'flux-probe-none' }),
-          skip: () => '立即执行需要真实排队中的准入与在途回合，离线探针无法造出该状态；由队列单测与契约表守护',
+          skip: () => '未做真实网关验证：立即执行需要真实排队中的准入与在途回合，离线探针造不出该状态；目前仅由本地参数构造单测与契约表守护',
         },
       ],
     },

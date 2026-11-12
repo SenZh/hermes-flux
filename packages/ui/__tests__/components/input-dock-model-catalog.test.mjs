@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 
 import {
   resolveDockModelLabel,
@@ -230,7 +231,7 @@ test('renderInputDock / renderModelPickerTree - 渲染面不泄露裸 ID', async
     assert.ok(!html.includes('>anthropic/claude-opus-4.8-fast<'));
   });
 
-  await t.test('4. 标签声明 flex-shrink:0，防止窄容器压扁裁切', () => {
+  await t.test('4. 标签类声明 flex-shrink:0，防止窄容器压扁裁切', () => {
     const html = renderModelPickerTree({
       ...baseProps,
       selectedModel: 'qwen/qwen3-32b-Q4_K_M',
@@ -239,8 +240,11 @@ test('renderInputDock / renderModelPickerTree - 渲染面不泄露裸 ID', async
       ],
       currentProvider: 'llamacpp',
     });
-    assert.ok(html.includes('flex-shrink: 0'), '标签必须禁止收缩');
+    // 【规则】标签结构已迁到样式表：模板只输出 .model-option__badge，禁止收缩由 CSS 承担。
+    assert.ok(html.includes('model-option__badge'), '标签必须挂语义类');
     assert.ok(html.includes('Q4_K_M'));
+    const css = fs.readFileSync(new URL('../../src/styles/conversation.css', import.meta.url), 'utf8');
+    assert.match(css, /\.model-option__badge\s*\{[^}]*flex-shrink:\s*0/, '标签必须禁止收缩');
   });
 
   await t.test('5. 标签字号只使用设计系统七档内的 --fs-micro', () => {
@@ -249,8 +253,12 @@ test('renderInputDock / renderModelPickerTree - 渲染面不泄露裸 ID', async
       selectedModel: 'a/b',
       modelCatalog: [entry({ id: 'a/b', name: 'AB Fast', variant: 'Fast' })],
     });
-    assert.ok(html.includes('var(--fs-micro)'));
+    const css = fs.readFileSync(new URL('../../src/styles/conversation.css', import.meta.url), 'utf8');
+    const badgeRule = /\.model-option__badge\s*\{([\s\S]*?)\}/.exec(css);
+    assert.ok(badgeRule, '必须定义 .model-option__badge');
+    assert.match(badgeRule[1], /font-size:\s*var\(--fs-micro/, '标签字号必须落在 --fs-micro');
     assert.ok(!html.includes('--fs-overline'), '--fs-overline 是规格外第 8 档，禁止使用');
+    assert.ok(!css.includes('--fs-overline'), '样式表也不得引入规格外第 8 档');
   });
 
   await t.test('6. 空标签不产生空 span（计数可证伪）', () => {
@@ -259,7 +267,7 @@ test('renderInputDock / renderModelPickerTree - 渲染面不泄露裸 ID', async
       selectedModel: 'a/b',
       modelCatalog: [entry({ id: 'a/b', name: 'AB' })],
     });
-    const badgeCount = (html.match(/line-height: 1\.4; padding: 0 4px; border-radius: 4px;/g) ?? []).length;
+    const badgeCount = (html.match(/class="model-option__badge/g) ?? []).length;
     assert.equal(badgeCount, 0, '无变体/量化/上下文时不得渲染任何标签');
   });
 
@@ -269,7 +277,7 @@ test('renderInputDock / renderModelPickerTree - 渲染面不泄露裸 ID', async
       selectedModel: 'a/b',
       modelCatalog: [entry({ id: 'a/b', name: 'AB Fast', variant: 'Fast' })],
     });
-    const badgeCount = (html.match(/line-height: 1\.4; padding: 0 4px; border-radius: 4px;/g) ?? []).length;
+    const badgeCount = (html.match(/class="model-option__badge/g) ?? []).length;
     assert.equal(badgeCount, 1);
   });
 
@@ -283,7 +291,10 @@ test('renderInputDock / renderModelPickerTree - 渲染面不泄露裸 ID', async
       ],
     });
     assert.ok(html.includes('data-locked="true"'));
-    assert.ok(html.includes('cursor: not-allowed'));
+    assert.ok(html.includes('model-option is-locked') || html.includes('is-locked'), '锁定行必须带 is-locked 类');
+    // 【规则】禁用光标由 CSS 承担，模板不再内联 cursor。
+    const css = fs.readFileSync(new URL('../../src/styles/conversation.css', import.meta.url), 'utf8');
+    assert.match(css, /\.model-option\.is-locked\s*\{[^}]*cursor:\s*not-allowed/, '禁用光标必须由 CSS 定义');
     assert.ok(html.includes('不可用'));
     assert.ok(html.includes('需要升级订阅'));
   });

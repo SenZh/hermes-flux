@@ -1031,9 +1031,19 @@ button {
   .icon-btn,
   .composer-icon-btn,
   .composer-send,
-  .composer-stop {
+  .composer-stop,
+  .queue-action-btn,
+  .model-dropdown__refresh,
+  .dock-banner__close {
     min-width: 44px !important;
     min-height: 44px !important;
+  }
+
+  /* 【规则】附件删除键刻意排除在 44px 兜底之外：缩略图只有 56px，
+     44px 热区会盖住 61.7% 面积，点图预览就会误删附件。它保持 28px 桌面尺寸。 */
+  .composer-attach__remove {
+    min-width: 28px !important;
+    min-height: 28px !important;
   }
 
   .msg-action-btn {
@@ -1126,15 +1136,9 @@ button {
   box-shadow: none !important;
 }
 
-/* Floating Input Dock：外壳视觉 100% 由 conversation.css 的 .composer-dock 维护，
-   此处不再重复声明背景 / 圆角 / 边框，避免 !important 反复覆盖导致聚焦态失效 */
-.composer-dock__textarea {
-  color: var(--foreground) !important;
-}
-.composer-dock__textarea::placeholder {
-  color: var(--muted-foreground) !important;
-  opacity: 0.8;
-}
+/* Floating Input Dock：外壳与编辑区的视觉 100% 由 conversation.css 的 .composer-dock 维护。
+   这里刻意不再声明 textarea 的颜色与占位符透明度 —— 同一属性两处定义会形成双标真值，
+   历史上就是靠 !important 把占位符压成 0.8，而样式表里写的是 0.9。 */
 
 /* Micro pill option buttons in Input Dock */
 .micro-pill-option {
