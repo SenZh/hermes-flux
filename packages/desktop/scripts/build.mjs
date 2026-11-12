@@ -163,8 +163,9 @@ async function buildAll() {
   // transcriptRows 单独编译：它以 external 保留 @hermes-flux/ui 与 core 的裸说明符，
   // 否则 React 的 CJS 依赖会被塞进 ESM 产物，Node 直接 import 时炸 "Dynamic require of util"。
   await esbuild.build({
-    entryPoints: [path.join(rootDir, 'src/renderer/transcriptRows.ts')],
-    outfile: path.join(rootDir, 'dist/renderer/transcriptRows.mjs'),
+    entryPoints: [path.join(rootDir, 'src/renderer/transcriptRows.ts'), path.join(rootDir, 'src/renderer/slashCatalog.ts')],
+    outdir: path.join(rootDir, 'dist/renderer'),
+    outExtension: { '.js': '.mjs' },
     bundle: true,
     platform: 'node',
     target: 'node20',
@@ -172,7 +173,7 @@ async function buildAll() {
     external: ['@hermes-flux/ui', '@hermes-flux/core'],
     sourcemap: true,
   });
-  console.log('  ✔ Transcript rows module compiled');
+  console.log('  ✔ Transcript rows + slash catalog modules compiled');
 
   // 4. Copy static assets
   fs.copyFileSync(

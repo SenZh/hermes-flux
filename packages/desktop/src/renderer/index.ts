@@ -206,6 +206,7 @@ import {
 import { parseTranscriptRows } from './transcriptRows.js';
 import { DesktopCacheStore } from './cache/DesktopCacheStore.js';
 import { loadProviderCatalog } from './providerCatalog.js';
+import { localizeSlashDescription, toSlashOptions } from './slashCatalog.js';
 import {
   applyEnqueueReceipt,
   canSendDraft,
@@ -3338,7 +3339,7 @@ async function prefetchSlashCatalog(): Promise<void> {
     const pushCmd = (name: string, desc: string) => {
       if (!name) return;
       const normalized = name.startsWith('/') ? name : `/${name}`;
-      items.push({ name: normalized, description: localizeSlashDescription(normalized, desc) });
+      items.push({ name: normalized, description: localizeSlashDescription(normalized, desc, t) });
     };
     for (const pair of cat.pairs || []) {
       if (pair[0]) pushCmd(pair[0], pair[1] || '');
@@ -3378,12 +3379,7 @@ function requestSlashCompletion(query: string): void {
         );
         if (mySeq !== slashSeq) return;
         const replaceFrom = typeof res.replace_from === 'number' ? res.replace_from : undefined;
-        resolved = (res.items || []).map((it) => ({
-          name: it.text,
-          description: localizeSlashDescription(it.text, it.meta || it.display || ''),
-          isSkill: it.kind === 'skill',
-          replaceFrom: it.kind ? replaceFrom : undefined,
-        }));
+        resolved = toSlashOptions(res.items || [], replaceFrom, t);
       } catch {
         // gate-degrade: complete.slash 失败降级到目录快照
         resolved = null;
@@ -3400,26 +3396,6 @@ function requestSlashCompletion(query: string): void {
     state.slashPopperOpen = state.slashItems.length > 0;
     render();
   }, 120);
-}
-
-/**
- * 斜杠命令说明的本地化。
- *
- * 【设计意图 (Why)】
- *   `complete.slash` 的 `meta` 是网关英文原文（`Start a new session (fresh session ID + history)`），
- *   直接上屏等于把 CLI 帮助文本塞进中文界面。命令名是技术标识必须保留原文，
- *   但说明是自然语言，必须跟随界面语言。
- *
- * 【约束与规则 (Rules)】
- *   1. 字典只覆盖已确认存在的命令；未收录的命令回退网关原文，绝不编造说明；
- *   2. 命令名（`/compress`）永不翻译，只翻译它后面那句说明。
- */
-function localizeSlashDescription(name: string, fallback: string): string {
-  const bare = name.replace(/^\//, '');
-  const key = `slash.${bare}` as Parameters<typeof t>[0];
-  const translated = t(key);
-  // t() 对缺失键会原样返回键名，据此判定是否命中字典。
-  return translated === key ? fallback : translated;
 }
 
 function inputTokenSnapshot(): { fullText: string } {
