@@ -8,6 +8,9 @@
 
 export type ActivityState = 'running' | 'unread' | 'read';
 
+/** 完成瞬态跃迁标记：用于列表行或状态点在刚完成时播放一次收敛动画 */
+export type ActivityTransition = 'none' | 'just-completed';
+
 export interface LeftRailSession {
   id: string;
   title: string;
@@ -20,6 +23,8 @@ export interface LeftRailSession {
   botDisplayName?: string;
   botAvatar?: string;
   activityState?: ActivityState;
+  activityTransition?: ActivityTransition;
+  activityTransitionToken?: number;
 }
 
 export interface LeftRailGroupRoom {
@@ -30,6 +35,8 @@ export interface LeftRailGroupRoom {
   updatedAt?: number;
   createdAt?: number;
   activityState?: ActivityState;
+  activityTransition?: ActivityTransition;
+  activityTransitionToken?: number;
 }
 
 export interface LeftRailProject {
@@ -49,6 +56,8 @@ export interface LeftRailProfile {
   timestamp?: number;
   isDefault?: boolean;
   activityState?: ActivityState;
+  activityTransition?: ActivityTransition;
+  activityTransitionToken?: number;
 }
 
 export type LeftRailActiveFocus =

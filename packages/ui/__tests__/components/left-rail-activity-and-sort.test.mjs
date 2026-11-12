@@ -95,20 +95,20 @@ test('双轨架构：52px 微轨常驻且可无限滚动', async (t) => {
 });
 
 test('三态指示器在微轨与主工位卡上精准映射', async (t) => {
-  await t.test('running 只出呼吸脉冲，unread 只出翡翠点，read 两者皆无', () => {
+  await t.test('running 只出运行指示器，unread 只出已完成指示器，read 两者皆无', () => {
     const markup = renderRail({ activeFocus: { type: 'bot', botName: 'default' }, profileName: 'default' });
     const wang = between(markup, 'data-station-profile="arch-wang"', 'data-station-profile="fe-zhang"');
-    assert.ok(wang.includes('activity-pulse-indicator'), '执行中 Agent 必须有脉冲');
-    assert.equal(wang.includes('activity-unread-badge'), false, '执行中严禁再出未读点');
+    assert.ok(wang.includes('activity-pulse-indicator'), '执行中 Agent 必须有运行指示器');
+    assert.equal(wang.includes('activity-unread-badge'), false, '执行中严禁再出未读角标');
 
     const zhang = between(markup, 'data-station-profile="fe-zhang"', 'data-station-profile="qa-li"');
-    assert.ok(zhang.includes('activity-unread-badge'), '未读 Agent 必须有绿点');
-    assert.equal(zhang.includes('activity-pulse-indicator'), false, '未读严禁出脉冲');
+    assert.ok(zhang.includes('activity-unread-badge'), '未读 Agent 必须有已完成指示器');
+    assert.equal(zhang.includes('activity-pulse-indicator'), false, '未读严禁出运行指示器');
 
     const li = markup.slice(markup.indexOf('data-station-profile="qa-li"'));
     const liBadge = li.slice(0, li.indexOf('</button>'));
-    assert.equal(liBadge.includes('activity-pulse-indicator'), false, '已读严禁脉冲');
-    assert.equal(liBadge.includes('activity-unread-badge'), false, '已读严禁绿点');
+    assert.equal(liBadge.includes('activity-pulse-indicator'), false, '已读严禁运行指示器');
+    assert.equal(liBadge.includes('activity-unread-badge'), false, '已读严禁已完成指示器');
   });
 
   await t.test('主工位卡展示当前 Agent 的名称、最新摘要、时间与运行态', () => {
@@ -305,5 +305,235 @@ test('变异检验：把状态预期改错必然变红', async (t) => {
   await t.test('隔离断言具备杀伤力：故意放错 botName 会被检出', () => {
     const markup = renderRail({ sessions: [{ id: 's-leak', title: '错域会话', botName: 'fe-zhang', timestamp: NOW }] });
     assert.equal(markup.includes('错域会话'), false, 'Default 视角下不得出现小张会话');
+  });
+});
+
+test('全挂点统一三态与完成瞬态跃迁契约（微轨/主工位卡/会话/项目内会话/群聊/群聊汇总）', async (t) => {
+  const countMatches = (text, re) => (text.match(re) || []).length;
+
+  await t.test('corner 保持简洁角标，inline 渲染 24 颗云朵 A 微粒与对应 entityKind 状态词，零 SVG 且三态互斥', () => {
+    const markup = renderRail({
+      activeFocus: { type: 'bot', botName: 'bot-run' },
+      profileName: 'bot-run',
+      profiles: [
+        { name: 'default', displayName: 'Default 助理', isDefault: true, activityState: 'read', timestamp: NOW },
+        { name: 'bot-run', displayName: '运行Bot', activityState: 'running', lastMessage: '生成中', timestamp: NOW },
+        { name: 'bot-unread-new', displayName: '刚完成Bot', activityState: 'unread', activityTransition: 'just-completed', activityTransitionToken: 11, lastMessage: '刚完成', timestamp: NOW - 1000 },
+        { name: 'bot-unread-old', displayName: '历史未读Bot', activityState: 'unread', lastMessage: '历史未读', timestamp: NOW - 2000 },
+        { name: 'bot-read', displayName: '已读Bot', activityState: 'read', lastMessage: '已读', timestamp: NOW - 3000 },
+      ],
+      sessions: [
+        { id: 's-run', title: '运行中会话', botName: 'bot-run', timestamp: NOW, activityState: 'running' },
+        { id: 's-unread-new', title: '刚完成未读会话', botName: 'bot-run', timestamp: NOW - 100, activityState: 'unread', activityTransition: 'just-completed', activityTransitionToken: 21 },
+        { id: 's-unread-old', title: '历史未读会话', botName: 'bot-run', timestamp: NOW - 200, activityState: 'unread' },
+        { id: 's-read', title: '普通已读会话', botName: 'bot-run', timestamp: NOW - 300, activityState: 'read' },
+      ],
+      groups: [
+        { roomId: 'g-run', name: '运行群', members: ['bot-run'], updatedAt: NOW, activityState: 'running' },
+        { roomId: 'g-unread-new', name: '刚完成群', members: ['bot-run'], updatedAt: NOW - 100, activityState: 'unread', activityTransition: 'just-completed', activityTransitionToken: 31 },
+        { roomId: 'g-unread-old', name: '历史未读群', members: ['bot-run'], updatedAt: NOW - 200, activityState: 'unread' },
+        { roomId: 'g-read', name: '已读群', members: ['bot-run'], updatedAt: NOW - 300, activityState: 'read' },
+      ],
+    });
+
+    const botRunStation = between(markup, 'data-station-profile="bot-run"', '</button>');
+    assert.ok(botRunStation.includes('flux-activity-dot--running'));
+    assert.ok(botRunStation.includes('activity-pulse-indicator'));
+    assert.ok(botRunStation.includes('data-placement="corner"'));
+    assert.ok(botRunStation.includes('ring-2 ring-sidebar'));
+    assert.equal(botRunStation.includes('flux-cloud-canvas'), false, 'corner 态绝不可渲染云朵画布');
+    assert.equal(botRunStation.includes('activity-unread-badge'), false);
+
+    const botUnreadNewStation = between(markup, 'data-station-profile="bot-unread-new"', '</button>');
+    assert.ok(botUnreadNewStation.includes('flux-activity-dot--unread'));
+    assert.ok(botUnreadNewStation.includes('data-transition="just-completed"'));
+    assert.ok(botUnreadNewStation.includes('data-placement="corner"'));
+    assert.equal(botUnreadNewStation.includes('flux-cloud-canvas'), false, 'corner 态绝不可渲染云朵画布');
+    assert.equal(botUnreadNewStation.includes('activity-pulse-indicator'), false);
+
+    const botUnreadOldStation = between(markup, 'data-station-profile="bot-unread-old"', '</button>');
+    assert.ok(botUnreadOldStation.includes('flux-activity-dot--unread'));
+    assert.ok(botUnreadOldStation.includes('data-transition="none"'), '缺省未读必须为 none，避免重挂载集体闪动');
+    assert.equal(botUnreadOldStation.includes('flux-cloud-canvas'), false);
+
+    const botReadStation = between(markup, 'data-station-profile="bot-read"', '</button>');
+    assert.equal(botReadStation.includes('flux-activity-dot'), false, '静态已读 BOT 微轨严禁渲染指示器');
+    assert.equal(botReadStation.includes('flux-cloud-indicator'), false);
+
+    const primaryCard = between(markup, 'rail-primary-agent-card', '</button>');
+    assert.ok(primaryCard.includes('flux-cloud-indicator--running'));
+    assert.ok(primaryCard.includes('data-placement="inline"'));
+    assert.equal(countMatches(primaryCard, /class="flux-cloud-dot"/g), 24, '主工位卡运行态必须渲染 24 颗云朵微粒');
+    assert.ok(primaryCard.includes('思考中'), 'Bot 主工位卡运行态必须显示「思考中」');
+
+    const sRun = between(markup, 'data-id="s-run"', '</button>');
+    assert.ok(sRun.includes('flux-cloud-indicator--running'));
+    assert.ok(sRun.includes('data-placement="inline"'));
+    assert.equal(countMatches(sRun, /class="flux-cloud-dot"/g), 24, '会话运行态必须渲染 24 颗云朵微粒');
+    assert.ok(sRun.includes('执行中'), '会话运行态必须显示「执行中」');
+    assert.equal(sRun.includes('<svg'), false, 'SessionRow 运行态严禁包含 <svg');
+    assert.equal(sRun.includes('activity-unread-badge'), false);
+
+    const sUnreadNew = between(markup, 'data-id="s-unread-new"', '</button>');
+    assert.ok(sUnreadNew.includes('flux-cloud-indicator--unread'));
+    assert.ok(sUnreadNew.includes('data-transition="just-completed"'));
+    assert.ok(sUnreadNew.includes('flux-cloud-ripple'), 'just-completed 必须渲染散开波纹');
+    assert.equal(countMatches(sUnreadNew, /class="flux-cloud-dot"/g), 24, '会话完成态必须渲染 24 颗云朵微粒');
+    assert.ok(sUnreadNew.includes('已完成'), '未读态必须显示「已完成」');
+    assert.equal(sUnreadNew.includes('<svg'), false, 'SessionRow 未读态严禁包含 <svg');
+    assert.equal(sUnreadNew.includes('activity-pulse-indicator'), false);
+
+    const sUnreadOld = between(markup, 'data-id="s-unread-old"', '</button>');
+    assert.ok(sUnreadOld.includes('flux-cloud-indicator--unread'));
+    assert.ok(sUnreadOld.includes('data-transition="none"'));
+    assert.equal(sUnreadOld.includes('flux-cloud-ripple'), false, '静态历史未读不得渲染波纹');
+    assert.ok(sUnreadOld.includes('已完成'));
+
+    const sRead = between(markup, 'data-id="s-read"', '</button>');
+    assert.equal(sRead.includes('flux-activity-dot'), false);
+    assert.equal(sRead.includes('flux-cloud-indicator'), false);
+    assert.equal(sRead.includes('flux-cloud-settle'), false);
+
+    const gRun = between(markup, 'data-room-id="g-run"', '</button>');
+    assert.ok(gRun.includes('flux-cloud-indicator--running'));
+    assert.ok(gRun.includes('data-placement="inline"'));
+    assert.equal(countMatches(gRun, /class="flux-cloud-dot"/g), 24, '群聊运行态必须渲染 24 颗云朵微粒');
+    assert.ok(gRun.includes('协作中'), '群聊运行态必须显示「协作中」');
+
+    const gUnreadNew = between(markup, 'data-room-id="g-unread-new"', '</button>');
+    assert.ok(gUnreadNew.includes('flux-cloud-indicator--unread'));
+    assert.ok(gUnreadNew.includes('data-transition="just-completed"'));
+    assert.ok(gUnreadNew.includes('已完成'));
+
+    const gUnreadOld = between(markup, 'data-room-id="g-unread-old"', '</button>');
+    assert.ok(gUnreadOld.includes('data-transition="none"'));
+
+    const gRead = between(markup, 'data-room-id="g-read"', '</button>');
+    assert.equal(gRead.includes('flux-activity-dot'), false);
+    assert.equal(gRead.includes('flux-cloud-indicator'), false);
+
+    const groupOverviewBtn = between(markup, 'id="rail-station-groups-btn"', '</button>');
+    assert.ok(groupOverviewBtn.includes('flux-activity-dot--running'));
+    assert.ok(groupOverviewBtn.includes('data-status="running"'));
+    assert.ok(groupOverviewBtn.includes('data-placement="corner"'));
+    assert.equal(groupOverviewBtn.includes('flux-cloud-canvas'), false, '微轨群聊总按钮保持简洁角标');
+    assert.equal(groupOverviewBtn.includes('activity-unread-badge'), false, 'running 优先于 unread');
+  });
+
+  await t.test('项目面板 ProjectCard 内嵌套会话完整呈现三态与 just-completed 跃迁', () => {
+    const markup = renderRail({
+      activeRailTab: 'projects',
+      projects: [
+        {
+          id: 'proj-alpha',
+          name: '核心工程',
+          sessions: [
+            { id: 'ps-run', title: '构建中', timestamp: NOW, activityState: 'running' },
+            { id: 'ps-unread-new', title: '刚完成', timestamp: NOW - 100, activityState: 'unread', activityTransition: 'just-completed', activityTransitionToken: 5 },
+            { id: 'ps-unread-old', title: '历史未读', timestamp: NOW - 200, activityState: 'unread' },
+            { id: 'ps-read', title: '已读项', timestamp: NOW - 300, activityState: 'read' },
+          ],
+        },
+      ],
+    });
+
+    const psRun = between(markup, 'data-id="ps-run"', '</button>');
+    assert.ok(psRun.includes('flux-cloud-indicator--running'));
+    assert.equal(countMatches(psRun, /class="flux-cloud-dot"/g), 24);
+    assert.ok(psRun.includes('执行中'));
+    assert.equal(psRun.includes('activity-unread-badge'), false);
+
+    const psUnreadNew = between(markup, 'data-id="ps-unread-new"', '</button>');
+    assert.ok(psUnreadNew.includes('flux-cloud-indicator--unread'));
+    assert.ok(psUnreadNew.includes('data-transition="just-completed"'));
+    assert.ok(psUnreadNew.includes('已完成'));
+
+    const psUnreadOld = between(markup, 'data-id="ps-unread-old"', '</button>');
+    assert.ok(psUnreadOld.includes('data-transition="none"'));
+
+    const psRead = between(markup, 'data-id="ps-read"', '</button>');
+    assert.equal(psRead.includes('flux-activity-dot'), false);
+    assert.equal(psRead.includes('flux-cloud-indicator'), false);
+  });
+
+  await t.test('read 瞬态窗口仅在 just-completed 时渲染 .activity-settle-fade 且绝不带脉冲/未读类', () => {
+    const markup = renderRail({
+      activeFocus: { type: 'bot', botName: 'default' },
+      profileName: 'default',
+      profiles: [
+        { name: 'default', displayName: 'Default 助理', isDefault: true, activityState: 'read', activityTransition: 'just-completed', activityTransitionToken: 99, timestamp: NOW },
+      ],
+      sessions: [
+        { id: 's-settle', title: '刚结束聚焦会话', timestamp: NOW, activityState: 'read', activityTransition: 'just-completed', activityTransitionToken: 100 },
+        { id: 's-plain', title: '普通已读', timestamp: NOW - 100, activityState: 'read' },
+      ],
+      groups: [
+        { roomId: 'g-settle', name: '刚结束聚焦群', members: ['default'], updatedAt: NOW, activityState: 'read', activityTransition: 'just-completed', activityTransitionToken: 101 },
+      ],
+    });
+
+    for (const chunk of [
+      between(markup, 'data-station-profile="default"', '</button>'),
+      between(markup, 'id="rail-station-groups-btn"', '</button>'),
+    ]) {
+      assert.ok(chunk.includes('activity-settle-fade'), 'corner just-completed read 必须渲染收敛淡出元素');
+      assert.ok(chunk.includes('flux-activity-dot--settle'));
+      assert.ok(chunk.includes('data-status="read"'));
+      assert.ok(chunk.includes('data-transition="just-completed"'));
+      assert.ok(chunk.includes('aria-hidden="true"'));
+      assert.equal(chunk.includes('activity-pulse-indicator'), false, 'settle 绝不可含 running 类名');
+      assert.equal(chunk.includes('activity-unread-badge'), false, 'settle 绝不可含 unread 类名');
+    }
+
+    for (const chunk of [
+      between(markup, 'rail-primary-agent-card', '</button>'),
+      between(markup, 'data-id="s-settle"', '</button>'),
+      between(markup, 'data-room-id="g-settle"', '</button>'),
+    ]) {
+      assert.ok(chunk.includes('activity-settle-fade'), 'inline just-completed read 必须渲染收敛淡出元素');
+      assert.ok(chunk.includes('flux-cloud-settle'));
+      assert.equal(countMatches(chunk, /class="flux-cloud-settle-dot"/g), 7, 'inline 收敛淡出必须带 7 颗核心蓝粒');
+      assert.ok(chunk.includes('data-status="read"'));
+      assert.ok(chunk.includes('data-transition="just-completed"'));
+      assert.ok(chunk.includes('aria-hidden="true"'));
+      assert.equal(chunk.includes('activity-pulse-indicator'), false, 'settle 绝不可含 running 类名');
+      assert.equal(chunk.includes('activity-unread-badge'), false, 'settle 绝不可含 unread 类名');
+    }
+
+    const plainRow = between(markup, 'data-id="s-plain"', '</button>');
+    assert.equal(plainRow.includes('activity-settle-fade'), false);
+    assert.equal(plainRow.includes('flux-activity-dot'), false);
+    assert.equal(plainRow.includes('flux-cloud-settle'), false);
+    assert.equal(plainRow.includes('flux-cloud-indicator'), false);
+  });
+
+  await t.test('变异检验：微轨群聊汇总严格遵循 running > unread > read 及最新 token 优先', () => {
+    const unreadMarkup = renderRail({
+      groups: [
+        { roomId: 'g-old', name: '旧未读', members: ['default'], updatedAt: NOW - 500, activityState: 'unread' },
+        { roomId: 'g-new', name: '刚完成', members: ['default'], updatedAt: NOW - 100, activityState: 'unread', activityTransition: 'just-completed', activityTransitionToken: 42 },
+      ],
+    });
+    const btnUnread = between(unreadMarkup, 'id="rail-station-groups-btn"', '</button>');
+    assert.ok(btnUnread.includes('flux-activity-dot--unread'));
+    assert.ok(btnUnread.includes('data-status="unread"'));
+    assert.ok(btnUnread.includes('data-transition="just-completed"'));
+    assert.equal(btnUnread.includes('activity-pulse-indicator'), false);
+
+    const plainUnreadMarkup = renderRail({
+      groups: [
+        { roomId: 'g-old', name: '旧未读', members: ['default'], updatedAt: NOW, activityState: 'unread' },
+      ],
+    });
+    const btnPlainUnread = between(plainUnreadMarkup, 'id="rail-station-groups-btn"', '</button>');
+    assert.ok(btnPlainUnread.includes('data-transition="none"'));
+
+    const readMarkup = renderRail({
+      groups: [
+        { roomId: 'g-read', name: '纯已读', members: ['default'], updatedAt: NOW, activityState: 'read' },
+      ],
+    });
+    const btnRead = between(readMarkup, 'id="rail-station-groups-btn"', '</button>');
+    assert.equal(btnRead.includes('flux-activity-dot'), false);
   });
 });

@@ -22,6 +22,7 @@ const PRIMITIVES_DIR = path.join(UI_SRC, 'components-react/primitives');
  * 【约束】consumed 至少一项；pending 的每项必须写清消费它的后续 PR，禁止"以后再说"。
  */
 const CONSUMPTION = {
+  ActivityIndicator: { state: 'consumed', consumers: ['components-react/LeftRail.tsx'] },
   Button: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/settings/LoadBoundary.tsx', 'components-react/settings/ProvidersAdminPanel.tsx', 'components-react/settings/ModelPicker.tsx', 'components-react/gallery/Gallery.tsx'] },
   Input: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/settings/ProvidersAdminPanel.tsx', 'components-react/settings/ModelPicker.tsx'] },
   Badge: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/gallery/Gallery.tsx'] },
@@ -99,7 +100,7 @@ test('primitives 消费守卫：登记表结构完整且状态合法', async (t)
     const consumed = Object.entries(CONSUMPTION).filter(([, entry]) => entry.state === 'consumed').map(([name]) => name).sort();
     assert.ok(consumed.length >= 3, `已消费 primitives 不得少于 3 个，当前 ${consumed.length}`);
     // 冻结当前消费集合：删除任何一项都必须先解释清楚，不能悄悄发生
-    assert.deepEqual(consumed, ['Badge', 'Button', 'Input', 'ListRow', 'Menu', 'Skeleton', 'Stat', 'Surface', 'Toolbar'], '已消费集合只增不减；若确有迁移请同步更新本断言并在 PR 里说明');
+    assert.deepEqual(consumed, ['ActivityIndicator', 'Badge', 'Button', 'Input', 'ListRow', 'Menu', 'Skeleton', 'Stat', 'Surface', 'Toolbar'], '已消费集合只增不减；若确有迁移请同步更新本断言并在 PR 里说明');
   });
 });
 

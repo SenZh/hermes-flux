@@ -94,6 +94,10 @@
   --duration-exit: 200ms;
   --duration-fast: 140ms;
   --duration-normal: 240ms;
+
+  --flux-activity-blue: #60A5FA;
+  --flux-activity-blue-done: #3B82F6;
+  --flux-activity-blue-soft: rgba(96, 165, 250, 0.16);
 }
 
 /* ═══ AUTO-GENERATED SKIN TABLE — 唯一真值源 packages/ui/src/tokens/skins.ts — 手改无效 ═══ */
@@ -816,40 +820,13 @@ html[data-rail-resizing] webview {
 }
 
 /* Animations */
-/* ═══ 任务执行状态指示微动效（running 呼吸漫射 vs unread 静态翡翠绿） ═══ */
-/* gate-perf-allow: 运行中脉冲动效仅作用于活跃执行中的小圆点，规模受限，不破坏主线程性能 */
-.activity-pulse-indicator[data-status="running"] {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--primary) !important;
-  box-shadow: 0 0 6px color-mix(in srgb, var(--primary) 75%, transparent);
-  animation: fluxActivityPulse 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
-
-@keyframes fluxActivityPulse {
-  0%, 100% {
-    opacity: 1;
-    transform: scale(1);
-    box-shadow: 0 0 6px color-mix(in srgb, var(--primary) 80%, transparent);
-  }
-  50% {
-    opacity: 0.35;
-    transform: scale(0.8);
-    box-shadow: 0 0 2px color-mix(in srgb, var(--primary) 25%, transparent);
-  }
-}
-
-/* 任务执行完成未读：静态翡翠绿，静止无打扰 */
-.activity-unread-badge[data-status="unread"] {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--success) !important;
-  box-shadow: none !important;
-  animation: none !important;
+[data-appearance="light"],
+[data-theme="warm-paper"],
+[data-theme="jade-white"],
+[data-theme="ayu-light"] {
+  --flux-activity-blue: #2563EB;
+  --flux-activity-blue-done: #1D4ED8;
+  --flux-activity-blue-soft: rgba(37, 99, 235, 0.14);
 }
 
 /* jadePulse 已删除：唯一消费者是已移除的左舵模板；其无休止 CSS 动画与集中时钟军规冲突，

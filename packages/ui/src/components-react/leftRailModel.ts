@@ -13,6 +13,7 @@ import { t } from '../i18n/index.js';
 import { resolveDataPhase, type DataPhase } from './loadPhase.js';
 import type {
   ActivityState,
+  ActivityTransition,
   LeftRailActiveFocus,
   LeftRailGroupRoom,
   LeftRailProfile,
@@ -23,6 +24,7 @@ import type {
 
 export type {
   ActivityState,
+  ActivityTransition,
   DataPhase,
   LeftRailActiveFocus,
   LeftRailGroupRoom,
@@ -49,7 +51,9 @@ export interface LeftRailModelInput {
   /** 会话域首次到达相位；缺省 ready。 */
   sessionsPhase?: DataPhase;
   error?: string;
-}export interface LeftRailModel {
+}
+
+export interface LeftRailModel {
   currentFocus: LeftRailActiveFocus;
   selectedAgent: LeftRailProfile;
   isDefaultHq: boolean;
@@ -63,6 +67,11 @@ export interface LeftRailModelInput {
   isGroupsOpen: boolean;
   hasRunningGroup: boolean;
   hasUnreadGroup: boolean;
+  groupOverviewActivity: {
+    state: ActivityState;
+    transition: ActivityTransition;
+    transitionToken?: number;
+  };
   /** Agent 域首次到达相位：loading 时微轨与主工位卡只出骨架，不伪造默认助理。 */
   profilesPhase: DataPhase;
   /** 会话域首次到达相位：loading 时会话区只出骨架行，不说"暂无历史会话"。 */
@@ -143,6 +152,53 @@ function matchesQuery(query: string, ...fields: Array<string | undefined>): bool
   return fields.some((field) => (field || '').toLowerCase().includes(query));
 }
 
+function pickLatestJustCompletedGroup(
+  groups: readonly LeftRailGroupRoom[],
+): LeftRailGroupRoom | undefined {
+  let latest: LeftRailGroupRoom | undefined;
+  let latestToken = -1;
+  for (const group of groups) {
+    if (group.activityTransition !== 'just-completed') continue;
+    const token = typeof group.activityTransitionToken === 'number' && Number.isFinite(group.activityTransitionToken)
+      ? group.activityTransitionToken
+      : -1;
+    if (!latest || token > latestToken) {
+      latest = group;
+      latestToken = token;
+    }
+  }
+  return latest;
+}
+
+function resolveGroupOverviewActivity(
+  visibleGroups: readonly LeftRailGroupRoom[],
+): LeftRailModel['groupOverviewActivity'] {
+  if (visibleGroups.some((g) => g.activityState === 'running')) {
+    return { state: 'running', transition: 'none' };
+  }
+  const unreadGroups = visibleGroups.filter((g) => g.activityState === 'unread');
+  if (unreadGroups.length > 0) {
+    const latestJustCompleted = pickLatestJustCompletedGroup(unreadGroups);
+    if (latestJustCompleted) {
+      return {
+        state: 'unread',
+        transition: 'just-completed',
+        transitionToken: latestJustCompleted.activityTransitionToken,
+      };
+    }
+    return { state: 'unread', transition: 'none' };
+  }
+  const latestReadJustCompleted = pickLatestJustCompletedGroup(visibleGroups);
+  if (latestReadJustCompleted) {
+    return {
+      state: 'read',
+      transition: 'just-completed',
+      transitionToken: latestReadJustCompleted.activityTransitionToken,
+    };
+  }
+  return { state: 'read', transition: 'none' };
+}
+
 /**
  * 从壳层的原始快照派生抽屉与微轨的完整视图模型。
  * 【约束与规则】纯函数；同样的输入必须给出逐字节一致的排序结果（排序键包含稳定兜底）。
@@ -218,6 +274,7 @@ export function buildLeftRailModel(input: LeftRailModelInput): LeftRailModel {
     }));
 
   const showProjectsDeck = activeRailTab === 'projects';
+  const groupOverviewActivity = resolveGroupOverviewActivity(visibleGroups);
   return {
     currentFocus,
     selectedAgent,
@@ -230,8 +287,9 @@ export function buildLeftRailModel(input: LeftRailModelInput): LeftRailModel {
     visibleProjects,
     isSessionsOpen: input.isSessionsGroupExpanded !== false,
     isGroupsOpen: input.isGroupsGroupExpanded !== false,
-    hasRunningGroup: visibleGroups.some((g) => g.activityState === 'running'),
-    hasUnreadGroup: visibleGroups.some((g) => g.activityState === 'unread'),
+    hasRunningGroup: groupOverviewActivity.state === 'running',
+    hasUnreadGroup: groupOverviewActivity.state === 'unread',
+    groupOverviewActivity,
     profilesPhase: resolveDataPhase(input.profilesPhase),
     sessionsPhase: resolveDataPhase(input.sessionsPhase),
     showProjectsDeck,
