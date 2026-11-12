@@ -329,7 +329,7 @@ test('Agent 成员网格：勾选样式只有一种，绿色环单独表达「�
   assert.equal(html.includes('勾选 = 已配置'), false, '已配置的解释按用户要求删除');
 });
 
-test('添加端点：全宽成员列表完整显示 10 字符名，title 保留全名，超长名按 24 单位兜底', () => {
+test('添加端点：成员选择与列表页同一套头像网格，保存目标恒勾选且锁定', () => {
   setLocale('zh-CN');
   const html = renderToStaticMarkup(
     React.createElement(FanOutMemberList, {
@@ -338,14 +338,18 @@ test('添加端点：全宽成员列表完整显示 10 字符名，title 保留�
         { profile: 'ops', displayName: 'auralis-infrastructure-operations-team' },
       ],
       selected: ['xiaofawang'],
+      lockedProfile: 'default',
       onToggle() {},
     }),
   );
-  assert.ok(html.includes('>xiaofawang<'), '常规名在全宽列表里必须完整显示');
+  assert.ok(html.includes('class="agent-grid"'), '必须复用列表页的头像网格，而不是原生复选框列表');
   assert.ok(html.includes('title="xiaofawang"'), 'title 必须保留完整名称');
   assert.ok(html.includes('aria-label="xiaofawang"'), '勾选框的无障碍名称必须是全名');
-  assert.ok(html.includes('title="auralis-infrastructure-operations-team"'), '超长名同样保留完整 title');
-  assert.ok(html.includes('auralis-infrastructure-…'), '极端长名按 24 单位兜底');
+  assert.ok(
+    html.includes('title="auralis-infrastructure-operations-team"'),
+    '超长名同样保留完整 title',
+  );
+  assert.ok(html.includes('auralis-infr'), '超长名按头像格 10 单位截断');
   const inputFor = (name) => {
     const match = html.match(new RegExp(`<input[^>]*aria-label="${name}"[^>]*/>`));
     assert.ok(match, `缺少 ${name} 的勾选框`);
@@ -357,6 +361,27 @@ test('添加端点：全宽成员列表完整显示 10 字符名，title 保留�
     false,
     '未选成员不得渲染为勾选',
   );
+});
+
+test('添加端点：保存目标本身必须出现、勾选且不可取消', () => {
+  setLocale('zh-CN');
+  const html = renderToStaticMarkup(
+    React.createElement(FanOutMemberList, {
+      bots: [
+        { profile: 'default', displayName: 'default' },
+        { profile: 'ops', displayName: 'ops' },
+      ],
+      selected: [],
+      lockedProfile: 'default',
+      onToggle() {},
+    }),
+  );
+  const lockedInput = html.match(/<input[^>]*aria-label="default"[^>]*\/>/);
+  assert.ok(lockedInput, '保存目标必须出现在成员网格里');
+  assert.ok(lockedInput[0].includes('checked'), '保存目标恒为勾选');
+  assert.ok(lockedInput[0].includes('disabled'), '保存目标不可取消勾选');
+  const otherInput = html.match(/<input[^>]*aria-label="ops"[^>]*\/>/);
+  assert.equal(otherInput[0].includes('disabled'), false, '其它成员必须可勾选');
 });
 
 test('模型行：显示计算后的可读名与厂商图标，绝不直出裸 ID', () => {
@@ -709,6 +734,84 @@ test('AgentBindingGrid：行内确认条三种相严格分流（needs-key 隐藏
   for (const tag of buttons) {
     assert.ok(/\sdisabled(=|>|\s)/.test(tag), `submitting 阶段按钮必须全部禁用: ${tag}`);
   }
+});
+
+test('AgentBindingGrid：补密钥后提交必须保持密钥形态，输入框不得消失', () => {
+  setLocale('zh-CN');
+  const view = providerView({
+    agents: [
+      { profile: 'default', displayName: 'default', state: 'active' },
+      { profile: 'aura', displayName: 'aura', state: 'absent' },
+    ],
+  });
+  const html = renderToStaticMarkup(
+    React.createElement(AgentBindingGrid, {
+      view,
+      bots: [{ profile: 'aura', displayName: 'aura' }],
+      busy: false,
+      attachFlow: {
+        phase: 'submitting',
+        providerKey: view.key,
+        providerId: view.id,
+        profile: 'aura',
+        intent: 'enable-only',
+        token: 3,
+        previousPhase: 'needs-key',
+        draftKey: 'sk-draft',
+      },
+      onToggle: async () => ({ ok: true }),
+      onRequestAttach() {},
+      onConfirmAttach() {},
+      onEditAttachKey() {},
+      onCancelAttach() {},
+    }),
+  );
+  assert.ok(html.includes('type="password"'), '从补密钥发起的提交必须保留密码框，不能换成意图按钮');
+  assert.ok(html.includes('value="sk-draft"'), '已输入的密钥必须保留在框内');
+  assert.equal(
+    html.includes(`>${t('settings.providerAttachEnableOnly')}</button>`),
+    false,
+    '提交中不得再出现意图按钮',
+  );
+});
+
+test('AgentBindingGrid：确认条必须可被读屏定位，密码框必须有名称，目标头像声明展开态', () => {
+  setLocale('zh-CN');
+  const view = providerView({
+    agents: [
+      { profile: 'default', displayName: 'default', state: 'active' },
+      { profile: 'aura', displayName: 'aura', state: 'absent' },
+    ],
+  });
+  const html = renderToStaticMarkup(
+    React.createElement(AgentBindingGrid, {
+      view,
+      bots: [{ profile: 'aura', displayName: 'aura' }],
+      busy: false,
+      attachFlow: {
+        phase: 'needs-key',
+        providerKey: view.key,
+        providerId: view.id,
+        profile: 'aura',
+        intent: 'enable-only',
+        token: 4,
+        draftKey: '',
+      },
+      onToggle: async () => ({ ok: true }),
+      onRequestAttach() {},
+      onConfirmAttach() {},
+      onEditAttachKey() {},
+      onCancelAttach() {},
+    }),
+  );
+  assert.ok(html.includes('role="group"'), '确认条必须是一个有名字的分组，不能是裸 div');
+  assert.ok(/aria-labelledby="attach-strip-[^"]+-title"/.test(html), '确认条必须用标题做可访问名称');
+  assert.ok(
+    html.includes(`aria-label="${t('settings.customEndpointKey')}"`),
+    '密码框必须有可访问名称，否则读屏只说"编辑框"',
+  );
+  assert.ok(/aria-expanded="true"/.test(html), '展开确认条的头像必须声明 aria-expanded');
+  assert.ok(/aria-controls="attach-strip-[^"]+"/.test(html), '头像必须指向它展开的那条确认条');
 });
 
 test('没有模型的提供商：模型区说明为空，且不存在可点的空列表', () => {
