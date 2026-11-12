@@ -42,16 +42,28 @@ export interface PromptEntry {
   preview: string;
 }
 
+/** 触发顶部历史拉取的最小节流间隔（ms），抑制惯性滚轮连发。 */
+export const TOP_LOAD_COOLDOWN_MS = 250;
+
+/** 头部前置插入新历史后，在顶部上下文中保留的新增行数。 */
+const PREPEND_CONTEXT_ROWS = 2;
+
 export interface PromptNavigatorSnapshot {
   prompts: readonly PromptEntry[];
   /** 指向 prompts 的下标，-1 表示尚未定位 */
   activeIndex: number;
   locale?: string;
+  /** 是否仍存在更早历史（本地持久化缓存或远端） */
+  hasOlder?: boolean;
+  /** 当前是否正在查询更早历史 */
+  isLoadingOlder?: boolean;
 }
 
 export interface PromptNavigatorActions {
   /** 传消息 id，不传易失下标 */
   onSelect: (messageId: string) => void;
+  /** 导航器滑动到顶部边界后，通知宿主查询更早历史 */
+  onLoadOlder?: () => void;
 }
 
 /** 有限数判定，非有限一律走兜底。 */
@@ -380,4 +392,278 @@ export function tickWidth(
   const step = isFiniteNumber(distance) && distance > 0 ? Math.floor(distance) : 0;
   const factor = step >= TICK_WIDTH_DECAY.length ? 0 : TICK_WIDTH_DECAY[step];
   return Math.round((base + (20 - base) * factor) * 100) / 100;
+}
+
+export interface TopBoundaryLoadCheckInput {
+  /** 是否仍存在更早历史 */
+  hasOlder: boolean;
+  /** 是否已在加载中 */
+  isLoadingOlder: boolean;
+  /** 宿主是否提供拉取回调 */
+  hasHandler: boolean;
+  /** 当前是否位于顶部边界 */
+  atTop: boolean;
+  /** 当前意图是否向更早方向越顶 */
+  movingUpward: boolean;
+  /** 距上次触发的经过毫秒数；缺失视为已过冷却 */
+  elapsedSinceLastTriggerMs?: number;
+  /** 冷却阈值（ms），默认 TOP_LOAD_COOLDOWN_MS */
+  cooldownMs?: number;
+}
+
+/**
+ * 判定提示词导航器到达最顶部时是否应当自动触发拉取更早历史。
+ *
+ * 【设计意图 (Why)】
+ *   把触顶拉取的前置守卫与节流逻辑收敛到纯函数，防止滚轮惯性事件连发或
+ *   在 hasOlder=false / isLoadingOlder=true 时向宿主发出无效或并发请求。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. hasOlder / hasHandler 任一为假，或 isLoadingOlder 为真，恒返回 false；
+ *   2. 必须同时满足处于顶部（atTop）且向更早方向移动（movingUpward）；
+ *   3. 冷却期未满（0 <= elapsed < cooldown）拦截连发；非有限/负数间隔不触发误放行。
+ */
+export function shouldTriggerLoadOlderAtTop(input: TopBoundaryLoadCheckInput): boolean {
+  if (!input.hasOlder || input.isLoadingOlder || !input.hasHandler) return false;
+  if (!input.atTop || !input.movingUpward) return false;
+  const cooldown = isFiniteNumber(input.cooldownMs) && input.cooldownMs >= 0
+    ? input.cooldownMs
+    : TOP_LOAD_COOLDOWN_MS;
+  if (input.elapsedSinceLastTriggerMs !== undefined) {
+    if (!isFiniteNumber(input.elapsedSinceLastTriggerMs) || input.elapsedSinceLastTriggerMs < 0) {
+      return false;
+    }
+    if (input.elapsedSinceLastTriggerMs < cooldown) return false;
+  }
+  return true;
+}
+
+export interface PromptPrependViewInput {
+  /** 插入前条目数 */
+  previousTotal: number;
+  /** 插入后条目数 */
+  nextTotal: number;
+  /** 轨道窗口容量 */
+  capacity: number;
+  /** 插入前轨道起点 */
+  windowStart: number;
+  /** 插入前高亮下标 */
+  highlightedIndex: number | null;
+  /** 插入前面板偏移 */
+  panelOffset: number;
+  /** 面板当前是否处于展开态 */
+  panelOpen: boolean;
+}
+
+export interface PromptPrependViewResult {
+  windowStart: number;
+  highlightedIndex: number | null;
+  panelOffset: number;
+}
+
+/**
+ * 计算头部前置插入更早提问后的轨道窗口、高亮与面板偏移。
+ *
+ * 【设计意图 (Why)】
+ *   用户在面板顶部触发拉取后，新历史插在数组头部，全部旧条目下标右移 delta：
+ *   若只平移 windowStart / highlightedIndex 而忽略 panelOffset，面板会瞬间失去锚点；
+ *   而若在 panelOffset=0 时盲目加满 delta，新拉到的历史又全部被藏到视口上方。
+ *   在顶部触发时保留少量新历史上下文（2 行），让用户无缝沿着时间线继续上滑。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. delta <= 0 时仅对各值做安全夹取；
+ *   2. panelOpen && panelOffset === 0 时，panelOffset 与 windowStart 回留至多 PREPEND_CONTEXT_ROWS 行新历史；
+ *   3. 其余场景全额补偿 delta，保持当前阅读锚点静止。
+ */
+export function planPromptPrependView(input: PromptPrependViewInput): PromptPrependViewResult {
+  const nextTotal = isFiniteNumber(input.nextTotal) && input.nextTotal > 0 ? Math.floor(input.nextTotal) : 0;
+  const previousTotal = isFiniteNumber(input.previousTotal) && input.previousTotal > 0 ? Math.floor(input.previousTotal) : 0;
+  const cap = isFiniteNumber(input.capacity) && input.capacity > 0 ? Math.max(1, Math.floor(input.capacity)) : RAIL_VISIBLE_TICKS;
+  if (nextTotal === 0) {
+    return { windowStart: 0, highlightedIndex: null, panelOffset: 0 };
+  }
+
+  const maxWindowStart = Math.max(0, nextTotal - cap);
+  const maxPanelOffset = Math.max(0, nextTotal - PANEL_VISIBLE_ROWS);
+  const baseWindow = isFiniteNumber(input.windowStart) ? Math.floor(input.windowStart) : 0;
+  const baseOffset = isFiniteNumber(input.panelOffset) ? Math.floor(input.panelOffset) : 0;
+  const baseHighlighted = input.highlightedIndex !== null && isFiniteNumber(input.highlightedIndex)
+    ? Math.floor(input.highlightedIndex)
+    : null;
+
+  const delta = nextTotal - previousTotal;
+  if (delta <= 0 || previousTotal <= 0) {
+    return {
+      windowStart: clamp(baseWindow, 0, maxWindowStart),
+      highlightedIndex: baseHighlighted === null ? null : clamp(baseHighlighted, 0, nextTotal - 1),
+      panelOffset: clamp(baseOffset, 0, maxPanelOffset),
+    };
+  }
+
+  const nextHighlighted = baseHighlighted === null ? null : clamp(baseHighlighted + delta, 0, nextTotal - 1);
+  if (input.panelOpen && baseOffset <= 0) {
+    const contextReserve = Math.min(PREPEND_CONTEXT_ROWS, delta);
+    return {
+      windowStart: clamp(baseWindow + delta - contextReserve, 0, maxWindowStart),
+      highlightedIndex: nextHighlighted,
+      panelOffset: clamp(delta - contextReserve, 0, maxPanelOffset),
+    };
+  }
+
+  return {
+    windowStart: clamp(baseWindow + delta, 0, maxWindowStart),
+    highlightedIndex: nextHighlighted,
+    panelOffset: baseOffset > 0 ? clamp(baseOffset + delta, 0, maxPanelOffset) : 0,
+  };
+}
+
+export type PanelWheelAction =
+  | { type: 'noop' }
+  | { type: 'load-older' }
+  | { type: 'scroll'; nextOffset: number };
+
+/**
+ * 决策面板滚轮动作：已处于最顶行且继续向上滚轮时触发拉取更早历史，否则推进面板偏移。
+ */
+export function decidePanelWheelAction(input: {
+  total: number;
+  deltaY: number;
+  panelOffset: number;
+  hasOlder: boolean;
+  isLoadingOlder: boolean;
+  hasHandler: boolean;
+  elapsedSinceLastTriggerMs?: number;
+  cooldownMs?: number;
+}): PanelWheelAction {
+  const total = isFiniteNumber(input.total) && input.total > 0 ? Math.floor(input.total) : 0;
+  if (total === 0 || !isFiniteNumber(input.deltaY) || input.deltaY === 0) {
+    return { type: 'noop' };
+  }
+  const step = input.deltaY > 0 ? 1 : -1;
+  const currentOffset = isFiniteNumber(input.panelOffset) ? Math.floor(input.panelOffset) : 0;
+  if (step < 0 && currentOffset <= 0) {
+    const canLoad = shouldTriggerLoadOlderAtTop({
+      hasOlder: input.hasOlder,
+      isLoadingOlder: input.isLoadingOlder,
+      hasHandler: input.hasHandler,
+      atTop: true,
+      movingUpward: true,
+      elapsedSinceLastTriggerMs: input.elapsedSinceLastTriggerMs,
+      cooldownMs: input.cooldownMs,
+    });
+    return canLoad ? { type: 'load-older' } : { type: 'noop' };
+  }
+  const maxOffset = Math.max(0, total - PANEL_VISIBLE_ROWS);
+  return {
+    type: 'scroll',
+    nextOffset: clamp(currentOffset + step, 0, maxOffset),
+  };
+}
+
+export type GutterKeyAction =
+  | { type: 'noop' }
+  | { type: 'load-older' }
+  | { type: 'highlight'; target: number }
+  | { type: 'select'; target: number }
+  | { type: 'escape' };
+
+/**
+ * 决策轨道键盘动作：在窗口首条（anchor <= 0 && start === 0）继续按 ArrowUp 时触发更早历史拉取。
+ */
+export function decideGutterKeyAction(input: {
+  key: string;
+  anchor: number;
+  start: number;
+  total: number;
+  hasOlder: boolean;
+  isLoadingOlder: boolean;
+  hasHandler: boolean;
+  elapsedSinceLastTriggerMs?: number;
+  cooldownMs?: number;
+}): GutterKeyAction {
+  const total = isFiniteNumber(input.total) && input.total > 0 ? Math.floor(input.total) : 0;
+  if (total === 0) return { type: 'noop' };
+  const anchor = isFiniteNumber(input.anchor) ? Math.floor(input.anchor) : 0;
+  const start = isFiniteNumber(input.start) ? Math.floor(input.start) : 0;
+
+  switch (input.key) {
+    case 'ArrowUp': {
+      if (anchor <= 0 && start <= 0) {
+        const canLoad = shouldTriggerLoadOlderAtTop({
+          hasOlder: input.hasOlder,
+          isLoadingOlder: input.isLoadingOlder,
+          hasHandler: input.hasHandler,
+          atTop: true,
+          movingUpward: true,
+          elapsedSinceLastTriggerMs: input.elapsedSinceLastTriggerMs,
+          cooldownMs: input.cooldownMs,
+        });
+        return canLoad ? { type: 'load-older' } : { type: 'noop' };
+      }
+      return { type: 'highlight', target: clamp(anchor - 1, 0, total - 1) };
+    }
+    case 'ArrowDown':
+      return { type: 'highlight', target: clamp(anchor + 1, 0, total - 1) };
+    case 'Home':
+      return { type: 'highlight', target: 0 };
+    case 'End':
+      return { type: 'highlight', target: total - 1 };
+    case 'Enter':
+    case ' ':
+      return { type: 'select', target: anchor >= 0 ? clamp(anchor, 0, total - 1) : 0 };
+    case 'Escape':
+      return { type: 'escape' };
+    default:
+      return { type: 'noop' };
+  }
+}
+
+export type HotzonePointerAction =
+  | { type: 'top-carousel'; resetTriggered: true }
+  | { type: 'top-load-older'; shouldTrigger: boolean }
+  | { type: 'bottom-carousel'; resetTriggered: true }
+  | { type: 'stop'; resetTriggered: true };
+
+/**
+ * 决策轨道热区悬停动作：指针位于顶部热区且已无更多本地上文刻度时，触发一轮更早历史拉取。
+ */
+export function decideHotzonePointerAction(input: {
+  offsetY: number;
+  gutterHeight: number;
+  edgePx: number;
+  hasMoreAbove: boolean;
+  topHotzoneTriggered: boolean;
+  hasOlder: boolean;
+  isLoadingOlder: boolean;
+  hasHandler: boolean;
+  elapsedSinceLastTriggerMs?: number;
+  cooldownMs?: number;
+}): HotzonePointerAction {
+  const offsetY = isFiniteNumber(input.offsetY) ? input.offsetY : 0;
+  const gutterHeight = isFiniteNumber(input.gutterHeight) ? input.gutterHeight : 0;
+  const edgePx = isFiniteNumber(input.edgePx) && input.edgePx > 0 ? input.edgePx : 0;
+
+  if (offsetY <= edgePx) {
+    if (input.hasMoreAbove) {
+      return { type: 'top-carousel', resetTriggered: true };
+    }
+    const shouldTrigger =
+      !input.topHotzoneTriggered &&
+      shouldTriggerLoadOlderAtTop({
+        hasOlder: input.hasOlder,
+        isLoadingOlder: input.isLoadingOlder,
+        hasHandler: input.hasHandler,
+        atTop: true,
+        movingUpward: true,
+        elapsedSinceLastTriggerMs: input.elapsedSinceLastTriggerMs,
+        cooldownMs: input.cooldownMs,
+      });
+    return { type: 'top-load-older', shouldTrigger };
+  }
+
+  if (offsetY >= gutterHeight - edgePx) {
+    return { type: 'bottom-carousel', resetTriggered: true };
+  }
+
+  return { type: 'stop', resetTriggered: true };
 }

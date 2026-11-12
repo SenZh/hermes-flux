@@ -1894,6 +1894,142 @@ details[open] > summary > .tool-row__expand {
   background: linear-gradient(to top, var(--popover) 10%, transparent 100%);
 }
 
+/* 顶部历史查询中（方案 1 · 刻度脉冲流 + 极简单行提示）：
+   1. 仅在 .is-loading-older 激活时运行，稳态零合成器空转；
+   2. 轨道前 5 根刻度自下而上依次右对齐脉冲拉伸，panels 同步平滑滑出单行提示；
+   3. 全部颜色与字体走语义 Token，对齐 4/8px 网格。 */
+@keyframes convPromptTickCascade {
+  0%, 100% {
+    opacity: 0.45;
+    transform: scaleX(1);
+    background-color: var(--muted-foreground);
+  }
+  40% {
+    opacity: 1;
+    transform: scaleX(1.65);
+    background-color: var(--foreground);
+  }
+}
+
+.conv-prompt-rail.is-loading-older .conv-prompt-rail__tick:nth-child(-n+5) .conv-prompt-rail__tick-bar {
+  transform-origin: right center;
+  animation: convPromptTickCascade 1.05s cubic-bezier(0.22, 0.61, 0.36, 1) infinite;
+}
+
+.conv-prompt-rail.is-loading-older .conv-prompt-rail__tick:nth-child(5) .conv-prompt-rail__tick-bar {
+  animation-delay: 0ms;
+}
+
+.conv-prompt-rail.is-loading-older .conv-prompt-rail__tick:nth-child(4) .conv-prompt-rail__tick-bar {
+  animation-delay: 90ms;
+}
+
+.conv-prompt-rail.is-loading-older .conv-prompt-rail__tick:nth-child(3) .conv-prompt-rail__tick-bar {
+  animation-delay: 180ms;
+}
+
+.conv-prompt-rail.is-loading-older .conv-prompt-rail__tick:nth-child(2) .conv-prompt-rail__tick-bar {
+  animation-delay: 270ms;
+}
+
+.conv-prompt-rail.is-loading-older .conv-prompt-rail__tick:nth-child(1) .conv-prompt-rail__tick-bar {
+  animation-delay: 360ms;
+}
+
+.conv-prompt-rail__panel-loader-wrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    grid-template-rows var(--duration-exit, 200ms) var(--ease-spring, cubic-bezier(0.16, 1, 0.3, 1)),
+    opacity var(--duration-exit, 200ms) ease,
+    visibility 0ms linear var(--duration-exit, 200ms);
+}
+
+.conv-prompt-rail__panel-loader-wrap.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+  transition:
+    grid-template-rows var(--duration-enter, 120ms) var(--ease-spring, cubic-bezier(0.16, 1, 0.3, 1)),
+    opacity var(--duration-enter, 120ms) ease,
+    visibility 0ms linear 0ms;
+}
+
+.conv-prompt-rail__panel-loader-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.conv-prompt-rail__panel-loader {
+  height: 28px;
+  padding: 0 8px;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: var(--radius-inner, 4px);
+  color: var(--muted-foreground);
+  font-family: var(--conv-font-sans);
+  font-size: var(--conv-micro-size);
+  line-height: 16px;
+  user-select: none;
+}
+
+@keyframes convPromptLoaderBarPulse {
+  0%, 100% {
+    opacity: 0.25;
+    transform: scaleY(0.6);
+  }
+  50% {
+    opacity: 0.95;
+    transform: scaleY(1);
+  }
+}
+
+.conv-prompt-rail__loader-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.conv-prompt-rail__loader-bars > span {
+  display: block;
+  width: 2px;
+  border-radius: var(--radius-pill, 9999px);
+  background: var(--foreground);
+  opacity: 0.45;
+  transform-origin: bottom center;
+}
+
+.conv-prompt-rail.is-loading-older .conv-prompt-rail__loader-bars > span {
+  animation: convPromptLoaderBarPulse 900ms cubic-bezier(0.22, 0.61, 0.36, 1) infinite;
+}
+
+.conv-prompt-rail__loader-bars > span:nth-child(1) {
+  height: 6px;
+  animation-delay: 0ms;
+}
+
+.conv-prompt-rail__loader-bars > span:nth-child(2) {
+  height: 10px;
+  animation-delay: 150ms;
+}
+
+.conv-prompt-rail__loader-bars > span:nth-child(3) {
+  height: 7px;
+  animation-delay: 300ms;
+}
+
+.conv-prompt-rail__panel-loader-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* 窄屏不显示导航轨：正文列已被压到 720px 以下，命中带没有安全落点 */
 @media (max-width: 720px) {
   .conv-prompt-rail {
@@ -1906,12 +2042,19 @@ details[open] > summary > .tool-row__expand {
     animation: none;
   }
 
+  .conv-prompt-rail.is-loading-older .conv-prompt-rail__tick:nth-child(-n+5) .conv-prompt-rail__tick-bar,
+  .conv-prompt-rail.is-loading-older .conv-prompt-rail__loader-bars > span {
+    animation: none;
+    opacity: 0.75;
+  }
+
   .conv-prompt-rail__gutter,
   .conv-prompt-rail__tape,
   .conv-prompt-rail__tick,
   .conv-prompt-rail__tick-bar,
   .conv-prompt-rail__panel-track,
-  .conv-prompt-rail__panel-row {
+  .conv-prompt-rail__panel-row,
+  .conv-prompt-rail__panel-loader-wrap {
     transition: none;
   }
 }
