@@ -315,7 +315,9 @@ export async function runFeature(featureId) {
   if (!fs.existsSync(featureArtifactsDir)) fs.mkdirSync(featureArtifactsDir, { recursive: true });
 
   const session = await createDriveSession(
-    featureId === 'first-paint-skeleton' || featureId === 'prompt-navigator-rail'
+    featureId === 'first-paint-skeleton'
+      || featureId === 'prompt-navigator-rail'
+      || featureId === 'provider-bot-binding'
       ? { htmlPath: '/packages/desktop/dist/renderer/index.html' }
       : {}
   );
@@ -1100,8 +1102,204 @@ export async function runFeature(featureId) {
       fs.writeFileSync(path.join(featureArtifactsDir, 'evidence.json'), JSON.stringify(railEvidence, null, 2));
       console.log(`  ✔ 提示词导航轨验证成功！证据已落盘: ${railScreenshot}`);
       return true;
+    } else if (featureId === 'provider-bot-binding') {
+      console.log('  1. 打开设置 › 模型与提供商，注入一条自定义端点与两个 Bot（走真实渲染路径）...');
+      await session.waitFor('document.getElementById("flux-app-root")?.childElementCount > 0', 15000, 'renderer first paint');
+      await session.click('#btn-open-settings');
+      await session.waitFor('document.querySelector("[data-testid=settings-dialog]") !== null', 8000, 'settings dialog');
+      await session.click('[data-settings-section=providers]');
+      await session.waitFor('window.__fluxState.settingsProviderViews.status !== "loading"', 15000, 'provider load settled');
+
+      const injected = await session.evaluate(`(() => {
+        const s = window.__fluxState;
+        s.profiles = [
+          { name: 'default', displayName: 'default' },
+          { name: 'aura', displayName: 'aura' },
+        ];
+        s.scopedProfile = 'default';
+        s.settingsProviderViews = { status: 'ready', data: [{
+          key: 'custom:fn', kind: 'custom', id: 'fn', name: 'Fn 网关',
+          models: ['fn/m1'], detail: 'http://127.0.0.1:9/v1', availability: 'ready',
+          agents: [
+            { profile: 'default', displayName: 'default', state: 'active', detail: 'fn/m1' },
+            { profile: 'aura', displayName: 'aura', state: 'absent' },
+          ],
+        }] };
+        s.settingsCustomEndpoints = { status: 'ready', data: [
+          { id: 'fn', name: 'Fn 网关', baseUrl: 'http://127.0.0.1:9/v1', models: ['fn/m1'], hasApiKey: true },
+        ] };
+        s.settingsEndpointProfiles = { fn: ['default'] };
+        window.__fluxRender();
+        return 'ok';
+      })()`);
+      if (String(injected) !== 'ok') throw new Error(`提供商状态注入失败: ${injected}`);
+      await session.waitFor('document.querySelector("[data-agent-profile=aura]") !== null', 8000, 'aura avatar');
+
+      console.log('  2. 未配置头像点击前不得有任何确认条，也不得写入配置...');
+      const before = await session.evaluate(`(() => ({
+        strips: document.querySelectorAll('[data-attach-phase]').length,
+        profiles: JSON.stringify(window.__fluxState.settingsEndpointProfiles),
+      }))()`);
+      if (before.strips !== 0) throw new Error(`初始不得有确认条，实测 ${before.strips}`);
+
+      console.log('  3. 真实点击未配置头像：只展开确认条，不写任何配置...');
+      await session.click('[data-agent-profile=aura]');
+      await session.waitFor('document.querySelector("[data-attach-phase=choosing]") !== null', 5000, 'choosing strip');
+      const opened = await session.evaluate(`(() => {
+        const strip = document.querySelector('[data-attach-phase=choosing]');
+        const buttons = Array.from(strip.querySelectorAll('button')).map((b) => b.textContent.trim());
+        const avatar = document.querySelector('[data-agent-profile=aura] input');
+        return {
+          profile: strip.getAttribute('data-attach-profile'),
+          buttons,
+          hasPassword: Boolean(strip.querySelector('input[type=password]')),
+          role: strip.firstElementChild.getAttribute('role'),
+          labelled: Boolean(strip.firstElementChild.getAttribute('aria-labelledby')),
+          expanded: avatar.getAttribute('aria-expanded'),
+          controls: avatar.getAttribute('aria-controls'),
+          focusedInsideStrip: strip.contains(document.activeElement),
+          profiles: JSON.stringify(window.__fluxState.settingsEndpointProfiles),
+        };
+      })()`);
+      if (opened.profile !== 'aura') throw new Error(`确认条必须挂在 aura 上，实测 ${opened.profile}`);
+      if (opened.buttons.length !== 3) throw new Error(`确认条必须只有三个动作，实测 ${JSON.stringify(opened.buttons)}`);
+      if (opened.hasPassword) throw new Error('选择意图阶段不得出现密钥框');
+      if (opened.role !== 'group') throw new Error(`确认条必须是 group，实测 ${opened.role}`);
+      if (!opened.labelled) throw new Error('确认条必须用标题做可访问名称');
+      if (opened.expanded !== 'true') throw new Error(`头像必须声明展开态，实测 ${opened.expanded}`);
+      if (!opened.controls) throw new Error('头像必须指向它展开的确认条');
+      if (!opened.focusedInsideStrip) throw new Error('展开确认条后焦点必须进入条内，否则读屏用户以为点击没反应');
+      if (opened.profiles !== before.profiles) throw new Error('展开确认条不得写入任何配置');
+
+      const screenshotChoosing = path.join(featureArtifactsDir, 'screenshot-choosing.png');
+      await session.screenshot(screenshotChoosing);
+
+      console.log('  4. 点「仅启用」：无网关时写入失败必须在条内原位显式呈现...');
+      await session.evaluate(`(() => {
+        const strip = document.querySelector('[data-attach-phase=choosing]');
+        strip.querySelectorAll('button')[0].click();
+        return true;
+      })()`);
+      await session.waitFor(
+        'Boolean(document.querySelector("[data-attach-phase=choosing] [role=alert], [data-attach-phase=needs-key]"))',
+        8000,
+        'failure surfaced in place',
+      );
+      const afterFailure = await session.evaluate(`(() => {
+        const strip = document.querySelector('[data-attach-phase]');
+        return {
+          phase: strip.getAttribute('data-attach-phase'),
+          alert: (strip.querySelector('[role=alert]')?.textContent || '').trim(),
+          cancelEnabled: Array.from(strip.querySelectorAll('button')).some((b) => b.textContent.trim() === '取消' && !b.disabled),
+        };
+      })()`);
+      if (afterFailure.phase !== 'needs-key' && !afterFailure.alert) {
+        throw new Error(`失败必须显式可见，实测 ${JSON.stringify(afterFailure)}`);
+      }
+      if (!afterFailure.cancelEnabled) throw new Error('失败后必须能取消，否则用户被锁死在确认条里');
+
+      console.log('  5. 取消：确认条必须收起，且不得再弹成功提示...');
+      await session.evaluate(`(() => {
+        const strip = document.querySelector('[data-attach-phase]');
+        const buttons = Array.from(strip.querySelectorAll('button'));
+        buttons[buttons.length - 1].click();
+        return true;
+      })()`);
+      await session.waitFor('document.querySelector("[data-attach-phase]") === null', 5000, 'cancel clears strip');
+
+      console.log('  6. 添加提供商 › 自定义端点：「保存时配置到」必须是同一套头像网格，保存目标恒勾选且锁定...');
+      await session.evaluate(`(() => {
+        const buttons = Array.from(document.querySelectorAll('button'));
+        const add = buttons.find((b) => b.textContent.trim() === '添加提供商');
+        add.click();
+        return true;
+      })()`);
+      await session.waitFor('document.querySelectorAll("[role=dialog]").length >= 2', 5000, 'add dialog');
+      await session.evaluate(`(() => {
+        const dialogs = Array.from(document.querySelectorAll('[role=dialog]'));
+        const dlg = dialogs[dialogs.length - 1];
+        const seg = Array.from(dlg.querySelectorAll('button')).filter((b) => b.textContent.trim().startsWith('自定义'));
+        seg[seg.length - 1].click();
+        return true;
+      })()`);
+      await session.waitFor('document.body.textContent.includes("保存时配置到")', 5000, 'fan-out section');
+      const fanOut = await session.evaluate(`(() => {
+        const label = Array.from(document.querySelectorAll('span')).find((n) => n.textContent.trim() === '保存时配置到');
+        const section = label.parentElement.parentElement;
+        const cells = Array.from(section.querySelectorAll('label'));
+        return {
+          hasGrid: cells.length > 0 && cells.every((c) => Boolean(c.querySelector('span.rounded-full'))),
+          cellCount: cells.length,
+          checkedCount: cells.filter((c) => c.querySelector('input').checked).length,
+          lockedCount: cells.filter((c) => c.querySelector('input').disabled).length,
+          lockedBadges: section.querySelectorAll('[data-bot-badge="locked"]').length,
+          checkedBadges: section.querySelectorAll('[data-bot-badge="checked"]').length,
+          nativeCheckboxes: section.querySelectorAll('input[type=checkbox]:not(.sr-only)').length,
+        };
+      })()`);
+      if (!fanOut.hasGrid) throw new Error('「保存时配置到」必须使用头像选择，而不是原生复选框');
+      if (fanOut.cellCount !== 2) throw new Error(`两个 Bot 都要出现，实测 ${fanOut.cellCount}`);
+      if (fanOut.lockedCount !== 1) throw new Error(`当前 Bot 必须锁定，实测 ${fanOut.lockedCount}`);
+      if (fanOut.checkedCount !== 1) throw new Error(`当前 Bot 必须默认勾选，实测 ${fanOut.checkedCount}`);
+      if (fanOut.lockedBadges !== 1) throw new Error(`保存目标必须用锁形角标，实测 ${fanOut.lockedBadges}`);
+      if (fanOut.nativeCheckboxes !== 0) throw new Error('不得再出现原生可见复选框');
+
+      await session.evaluate(`(() => {
+        const label = Array.from(document.querySelectorAll('span')).find((n) => n.textContent.trim() === '保存时配置到');
+        const section = label.parentElement.parentElement;
+        const cell = Array.from(section.querySelectorAll('label')).find((c) => c.textContent.trim() === 'aura');
+        cell.click();
+        return true;
+      })()`);
+      await session.waitFor(`(() => {
+        const label = Array.from(document.querySelectorAll('span')).find((n) => n.textContent.trim() === '保存时配置到');
+        const section = label.parentElement.parentElement;
+        const cell = Array.from(section.querySelectorAll('label')).find((c) => c.textContent.trim() === 'aura');
+        return cell.querySelector('input').checked;
+      })()`, 5000, 'aura toggled on');
+
+      console.log('  7. 滚到底后「保存」必须真实可见可点（弹框高度受限，动作条不能被推出可达区）...');
+      const saveReachable = await session.evaluate(`(async () => {
+        const dialogs = Array.from(document.querySelectorAll('[role=dialog]'));
+        const dlg = dialogs[dialogs.length - 1];
+        const scroller = dlg.querySelector('.overflow-y-auto');
+        scroller.scrollTop = scroller.scrollHeight;
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const save = Array.from(dlg.querySelectorAll('button')).find((b) => b.textContent.trim() === '保存');
+        if (!save) return { found: false };
+        const r = save.getBoundingClientRect();
+        const d = dlg.getBoundingClientRect();
+        return {
+          found: true,
+          visible: r.top >= d.top && r.bottom <= d.bottom && r.height > 0,
+          hitTestable: dlg.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)),
+        };
+      })()`);
+      console.log('     · 保存按钮可达性:', saveReachable);
+      if (!saveReachable.found) throw new Error('必须存在「保存」按钮');
+      if (!saveReachable.visible) throw new Error('滚到底后「保存」必须完整落在弹框可视区内');
+      if (!saveReachable.hitTestable) throw new Error('「保存」必须真实可点，不能被其它元素盖住');
+      await session.screenshot(path.join(featureArtifactsDir, 'screenshot-save-reachable.png'));
+
+      const screenshot = path.join(featureArtifactsDir, 'screenshot.png');
+      await session.screenshot(screenshot);
+      const evidence = {
+        featureId,
+        timestamp: new Date().toISOString(),
+        durationMs: Date.now() - startTime,
+        status: 'PASSED',
+        before,
+        opened,
+        afterFailure,
+        fanOut,
+        saveReachable,
+        screenshots: [screenshotChoosing, screenshot],
+      };
+      fs.writeFileSync(path.join(featureArtifactsDir, 'evidence.json'), JSON.stringify(evidence, null, 2));
+      console.log(`  ✔ 提供商头像绑定验证成功！证据已落盘: ${screenshot}`);
+      return true;
     } else {
-      throw new Error(`Unknown feature ID: ${featureId}. Supported features: bot-primary-chat, session-management, group-room, input-dock-controls, interactive-chat-stage, clean-light-theme, prompt-navigator-rail`);
+      throw new Error(`Unknown feature ID: ${featureId}. Supported features: bot-primary-chat, session-management, group-room, input-dock-controls, interactive-chat-stage, clean-light-theme, prompt-navigator-rail, provider-bot-binding`);
     }
   } finally {
     await session.cleanup();

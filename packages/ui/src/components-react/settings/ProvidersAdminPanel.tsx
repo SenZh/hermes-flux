@@ -1,27 +1,46 @@
 import * as React from 'react';
-import { Bot as BotIcon, Check } from 'lucide-react';
 import {
   deriveEndpointId,
   draftFromEndpoint,
   emptyEndpointDraft,
-  truncateProfileLabel,
+  isAttachFlowBusy,
+  openAttachFlow,
+  planBindingToggle,
+  reconcileAttachFlow,
+  reduceAttachFlow,
+  routeAttachFailure,
+  shouldClearAttachFlow,
   normalizeEndpointId,
+  type BindingAttachIntent,
   type CustomEndpointDraft,
   type CustomEndpointRow,
   type EndpointProbe,
   type OauthProviderRow,
+  type ProviderAttachFlow,
   type ProviderView,
 } from '@hermes-flux/core';
 import { t } from '../../i18n/index.js';
 import { Button } from '../primitives/Button.js';
 import { Input } from '../primitives/Input.js';
+import { BotAvatarGrid, BotAvatarToggle, type BotAvatarState } from './BotAvatarToggle.js';
 import { FanOutMemberList } from './FanOutMemberList.js';
+import { InlineStrip } from './InlineStrip.js';
 import { LoadBoundary } from './LoadBoundary.js';
 import { ModelPickerDialog, ModelPickerField } from './ModelPicker.js';
+import {
+  pickProviderViewsState,
+  planAttachSettlement,
+  shouldNotifyEnableOnly,
+} from './providerAttachOrchestration.js';
 import { SegmentedControl } from './SegmentedControl.js';
 import { SettingField } from './SettingRow.js';
 import { SettingsSectionHeading } from './SettingsSectionHeading.js';
-import type { SettingsActions, SettingsBotRow, SettingsSnapshot } from './settingsModel.js';
+import type {
+  SettingsActions,
+  SettingsBotRow,
+  SettingsSnapshot,
+  ToggleProviderAgentResult,
+} from './settingsModel.js';
 
 const EMPTY_FORM: CustomEndpointDraft = emptyEndpointDraft();
 
@@ -68,9 +87,8 @@ function AvailabilityDot({ availability }: { availability: ProviderView['availab
  * 【设计意图 (Why)】
  *   provider 的一行就是“一个 id + 一组 Agent 成员”。成员选择必须像一张名单：
  *   头像和名称先被认出来，选中与当前模型都长在头像上。
- *   不再给每个成员套一层正方形卡片：卡片边框会吃掉宽度，头像只能做到 24px，
- *   用户还得先辨认"这是勾选框还是卡片"。现在头像直接放大到 44px，勾选压在其右下角，
- *   当前模型用 success 环表达，视觉信息密度更高。
+ *   头像格子本身由 `BotAvatarToggle` 提供（与「保存时配置到」共用同一实现），
+ *   本组件只负责把每个 Agent 的绑定状态翻译成它的 props。
  *
  * 【防范的历史坑 (Pitfall)】
  *   1. 上一版用首字母头像 + “N/5 生效”，分母是什么从没交代过。
@@ -78,31 +96,39 @@ function AvailabilityDot({ availability }: { availability: ProviderView['availab
  *   3. 网格曾经放在标题与动作按钮之间，动作按钮占用宽度不同，同一份名单会在
  *      自定义端点行排出 4 列、订阅行排出 5 列；网格现在必须横跨整行，列数才稳定。
  *   4. 正在使用的 Agent 被取消勾选，会让它的主模型指向不存在的 provider。
+ *   5. 过去点击未启用自定义端点头像同时写配置并强切默认模型，只想挂备选提供商时被迫改主模型；
+ *      现在必须由行内确认条显式选择「仅启用」或「启用并设为默认」。
  *
  * 【约束与规则 (Rules)】
  *   1. `active` 的格子锁定：取消必须先切模型（用户已确认的策略）；
  *   2. `error` 的格子锁定并显示原始原因，绝不渲染成“未配置”；
- *   3. 自定义端点勾选未配置的 Agent 时，先尝试复用其它成员的密钥，失败才就地补密钥；
- *      勾选同时把它设为该 Agent 的默认模型（绿环），否则用户点完看不出任何变化；
+ *   3. 点击未配置自定义端点由 `planBindingToggle` 判定为 `confirm-attach`，只展开行内确认条而不写任何配置；
+ *      确认后先尝试复用其它成员的密钥，失败才原地切换为 `needs-key` 补密钥（此时隐藏两个意图按钮）；
  *   4. 订阅没有可写的绑定记录，格子只读；
- *   5. 名称最多 10 个显示单位（完整 5 汉字 / 10 半角）；截断态为 9 单位内容 + `…`（汉字通常落 4 字），完整名称留在 title 与 aria-label；
- *   6. 名称字号消费 `--ui-text-caption`（11px × 用户字号档位），不写死 px；
- *   7. 无头像一律 `BotIcon` 兜底，严禁退回首字母；
- *   8. 成员增多时只换行，不横向滚动、不压缩头像。
+ *   5. 确认条展开后必须接管焦点并自我宣告，否则用户点完看不到勾选变化会以为失灵；
+ *   6. 提交中且来源是补密钥时必须保持密钥形态，不得在提交瞬间把输入框换成三个禁用按钮。
  */
-function AgentBindingGrid({
+export function AgentBindingGrid({
   view,
   bots,
   busy,
+  attachFlow,
   onToggle,
+  onRequestAttach,
+  onConfirmAttach,
+  onEditAttachKey,
+  onCancelAttach,
 }: {
   view: ProviderView;
   bots: readonly SettingsBotRow[];
   busy: boolean;
-  onToggle: (profile: string, nextChecked: boolean, apiKey?: string) => Promise<{ ok: boolean; message?: string; needsKey?: boolean }>;
+  attachFlow: ProviderAttachFlow | null;
+  onToggle: (profile: string, nextChecked: boolean, apiKey?: string) => Promise<ToggleProviderAgentResult>;
+  onRequestAttach: (profile: string) => void;
+  onConfirmAttach: (intent: BindingAttachIntent, apiKey?: string) => void;
+  onEditAttachKey: (draftKey: string) => void;
+  onCancelAttach: () => void;
 }): React.ReactElement {
-  const [keyFor, setKeyFor] = React.useState('');
-  const [keyValue, setKeyValue] = React.useState('');
   const [pendingProfile, setPendingProfile] = React.useState('');
   const [error, setError] = React.useState('');
 
@@ -113,35 +139,7 @@ function AgentBindingGrid({
     setPendingProfile('');
     if (!result.ok) {
       setError(result.message || '');
-      return;
     }
-    setKeyFor('');
-    setKeyValue('');
-  };
-
-  /**
-   * 勾选未配置的自定义端点。
-   *
-   * 【设计意图 (Why)】壳层会先尝试从其它成员复制密钥；只有确实没有可复用来源时
-   *   （`needsKey`）才把输入框打开。过去一勾选就要求重输密钥，用户刚取消再勾回来
-   *   也要重打一遍，属明显多余。
-   */
-  const attach = async (profile: string): Promise<void> => {
-    setPendingProfile(profile);
-    setError('');
-    const result = await onToggle(profile, true);
-    setPendingProfile('');
-    if (result.ok) {
-      setKeyFor('');
-      setKeyValue('');
-      return;
-    }
-    if (result.needsKey) {
-      setKeyFor(profile);
-      setKeyValue('');
-      return;
-    }
-    setError(result.message || '');
   };
 
   const change = (agent: ProviderView['agents'][number], nextChecked: boolean): void => {
@@ -149,12 +147,63 @@ function AgentBindingGrid({
       void run(agent.profile, false);
       return;
     }
-    if (view.kind === 'custom') {
-      void attach(agent.profile);
+    // 判定唯一来自 core：不在此处私自判断 absent && custom。
+    const plan = planBindingToggle(view, agent.profile, true);
+    if (plan.kind === 'confirm-attach') {
+      onRequestAttach(agent.profile);
       return;
     }
     void run(agent.profile, true);
   };
+
+  const attachBusy = attachFlow ? isAttachFlowBusy(attachFlow) : false;
+  /**
+   * 取消为什么恒可点（不得跟随 `busy` 禁用）：
+   * 【设计意图 (Why)】取消的语义是"我不再关心这次结果"，它只作废本地令牌并收起确认条，
+   *   壳层在途请求继续跑完也不会回写界面。因此它与任何在途操作都不冲突。
+   * 【防范的历史坑 (Pitfall)】上一版把 `busy`（含本行 attach 提交与 providerAdminBusy）
+   *   一起接到取消按钮上：REST 一旦挂住，三个按钮同时 50% 灰掉，用户被永久锁死在设置弹窗里，
+   *   体感就是"点取消也没反应、卡住了"。单测因为 `busy` 传 false 而全绿，用户却锁死。
+   * 【约束与规则 (Rules)】`busy` 只允许禁用"会写网关"的控件（意图按钮、保存、头像格），
+   *   纯本地退出的控件（取消）永远不得禁用。
+   */
+  const targetBotName = attachFlow
+    ? bots.find((bot) => bot.profile === attachFlow.profile)?.displayName
+      || view.agents.find((agent) => agent.profile === attachFlow.profile)?.displayName
+      || attachFlow.profile
+    : '';
+  const intentLabel = attachFlow && attachFlow.phase !== 'choosing'
+    ? attachFlow.intent === 'enable-only'
+      ? t('settings.providerAttachEnableOnly')
+      : t('settings.providerAttachEnableAndDefault')
+    : '';
+  const stripId = `attach-strip-${view.key.replace(/[^A-Za-z0-9_-]/g, '-')}`;
+  const stripTitleId = `${stripId}-title`;
+  /**
+   * 【规则】确认条是头像点击的直接结果，键盘与读屏用户必须被带进去：
+   *   否则焦点留在 checkbox 上、勾选态又没变，用户会以为点击没生效。
+   * 【规则】只在"从无到有"时接管焦点，提交失败重绘不得抢走用户正在输入的密钥。
+   */
+  const stripRef = React.useRef<HTMLDivElement | null>(null);
+  const hadStrip = React.useRef(false);
+  React.useEffect(() => {
+    const opened = Boolean(attachFlow);
+    if (opened && !hadStrip.current) {
+      stripRef.current?.querySelector<HTMLElement>('button:not([disabled]), input:not([disabled])')?.focus();
+    }
+    hadStrip.current = opened;
+  }, [attachFlow]);
+
+  /**
+   * 补密钥形态的取值。
+   * 【规则】提交中且来源是补密钥时同样算作密钥形态：否则输入框与已输入的掩码
+   *   会在提交瞬间被卸载，换成三个禁用按钮，用户以为密钥丢了。
+   */
+  const keyForm = attachFlow && attachFlow.phase === 'needs-key'
+    ? { intent: attachFlow.intent, draftKey: attachFlow.draftKey, error: attachFlow.error }
+    : attachFlow && attachFlow.phase === 'submitting' && attachFlow.previousPhase === 'needs-key'
+      ? { intent: attachFlow.intent, draftKey: attachFlow.draftKey ?? '', error: undefined }
+      : null;
 
   return (
     <div className="mt-2 flex flex-col gap-2">
@@ -170,14 +219,16 @@ function AgentBindingGrid({
           ? t('settings.providerBindingTitleAll')
           : t('settings.providerBindingTitleEditable')}
       </span>
-      <div className="agent-grid">
+      <BotAvatarGrid>
         {view.agents.map((agent) => {
           const bot = bots.find((item) => item.profile === agent.profile);
           const checked = agent.state === 'active' || agent.state === 'ready';
           const locked = agent.state === 'active' || agent.state === 'error';
           // 订阅是账号级来源：登录一次默认对所有 Agent 生效，没有按 Agent 可写的绑定，因此只读。
           const subscription = view.kind === 'subscription';
-          const disabled = busy || locked || subscription || pendingProfile === agent.profile;
+          const isAttachTargetBusy = attachBusy && attachFlow?.profile === agent.profile;
+          const isAttachTarget = attachFlow?.profile === agent.profile;
+          const disabled = busy || locked || subscription || pendingProfile === agent.profile || isAttachTargetBusy;
           const statusText =
             agent.state === 'active'
               ? t('settings.providerBindingActive')
@@ -185,76 +236,40 @@ function AgentBindingGrid({
                 ? agent.detail || t('settings.providerToggleBlockedError', { profile: agent.displayName })
                 : subscription
                   ? t('settings.providerBindingSubscriptionAll')
-                  : '';
-          const dimmed = busy || pendingProfile === agent.profile;
-          const label = statusText
-            ? `${agent.displayName} · ${view.name} · ${statusText}`
-            : `${agent.displayName} · ${view.name}`;
+                  : isAttachTarget
+                    ? t('settings.providerAttachTargetPending')
+                    : '';
+          const dimmed = busy || pendingProfile === agent.profile || isAttachTargetBusy;
+          const avatarState: BotAvatarState = agent.state === 'active'
+            ? { kind: 'current' }
+            : agent.state === 'error'
+              ? {
+                  kind: 'failed',
+                  reason: agent.detail || t('settings.providerToggleBlockedError', { profile: agent.displayName }),
+                }
+              : { kind: 'plain' };
           return (
-            <label
+            <div
               key={agent.profile}
-              title={label}
-              data-agent-profile={agent.profile}
               data-agent-state={agent.state}
-              className={[
-                'group flex w-16 flex-col items-center gap-1 rounded-card py-1',
-                'has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-foreground/70',
-                disabled ? 'cursor-not-allowed' : 'cursor-pointer',
-                dimmed ? 'opacity-60' : '',
-              ].join(' ')}
+              className={isAttachTarget && !attachBusy ? 'rounded-card ring-1 ring-border-strong' : undefined}
             >
-              <input
-                type="checkbox"
-                className="sr-only"
+              <BotAvatarToggle
+                profile={agent.profile}
+                displayName={agent.displayName}
+                avatar={bot?.avatar}
                 checked={checked}
                 disabled={disabled}
-                aria-label={label}
-                onChange={(event) => change(agent, event.target.checked)}
+                state={avatarState}
+                dimmed={dimmed}
+                statusText={statusText ? `${view.name} · ${statusText}` : view.name}
+                expandable={isAttachTarget && attachFlow ? { controls: stripId } : undefined}
+                onToggle={() => change(agent, !checked)}
               />
-              {/* 头像本身就是勾选面：不再外包一层正方形卡片，把有限宽度让给头像和名字。
-                  当前模型用 success 环表达，勾选用压在头像右下角的对号表达。 */}
-              <span className="relative">
-                <span
-                  className={[
-                    'flex size-11 items-center justify-center overflow-hidden rounded-full bg-card-active',
-                    agent.state === 'active' ? 'ring-2 ring-success ring-offset-2 ring-offset-popover' : '',
-                    agent.state === 'error' ? 'border-2 border-dashed border-destructive/60' : '',
-                    checked || agent.state === 'error' ? '' : 'opacity-55',
-                  ].join(' ')}
-                >
-                  {bot?.avatar ? (
-                    <img src={bot.avatar} alt="" className="size-11 object-cover" />
-                  ) : (
-                    <BotIcon aria-hidden="true" className="size-6 text-muted-foreground" />
-                  )}
-                </span>
-                {checked ? (
-                  <span
-                    aria-hidden="true"
-                    className="absolute -bottom-1 -right-1 flex size-4 items-center justify-center rounded-full bg-primary text-primary-foreground ring-2 ring-popover"
-                  >
-                    <Check aria-hidden="true" className="size-3" strokeWidth={2.5} />
-                  </span>
-                ) : null}
-                {agent.state === 'error' ? (
-                  <span
-                    aria-hidden="true"
-                    className="absolute -right-1 -top-1 size-2 rounded-full bg-destructive ring-2 ring-popover"
-                  />
-                ) : null}
-              </span>
-              <span
-                className={`w-full truncate text-center font-ui leading-tight ${
-                  agent.state === 'active' ? 'font-semibold text-foreground' : 'font-medium text-secondary-foreground'
-                }`}
-                style={{ fontSize: 'var(--ui-text-caption, var(--fs-caption))' }}
-              >
-                {truncateProfileLabel(agent.displayName)}
-              </span>
-            </label>
+            </div>
           );
         })}
-      </div>
+      </BotAvatarGrid>
 
       {view.agents
         .filter((agent) => agent.state === 'error')
@@ -264,31 +279,106 @@ function AgentBindingGrid({
           </p>
         ))}
 
-      {keyFor ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-panel border border-border-subtle bg-panel px-2 py-2">
-          <span className="text-caption text-muted-foreground">
-            {t('settings.providerBindingNeedsKey', {
-              profile: view.agents.find((agent) => agent.profile === keyFor)?.displayName || keyFor,
-            })}
-          </span>
-          <Input
-            type="password"
-            autoComplete="off"
-            value={keyValue}
-            onChange={(event) => setKeyValue(event.target.value)}
-            className="h-7 w-56 font-code text-caption"
-          />
-          <Button
-            size="sm"
-            type="button"
-            disabled={!keyValue.trim() || busy}
-            onClick={() => { void run(keyFor, true, keyValue); }}
+      {attachFlow ? (
+        <div ref={stripRef} data-attach-phase={attachFlow.phase} data-attach-profile={attachFlow.profile}>
+          <InlineStrip
+            id={stripId}
+            titleId={stripTitleId}
+            busy={attachBusy}
+            title={
+              keyForm
+                ? t('settings.providerAttachNeedsKey', { provider: view.name, bot: targetBotName })
+                : t('settings.providerAttachTitle', { provider: view.name, bot: targetBotName })
+            }
+            hint={
+              /*
+               * 【规则】submitting 必须最先判断：`keyForm` 在
+               *   `phase === 'submitting' && previousPhase === 'needs-key'` 时同样非空
+               *   （见上方 keyForm 定义），若让 keyForm 先命中，「补密钥 → 保存」这条真实路径
+               *   的进度文案永不可达，读屏用户看到输入框与按钮一起变灰却没有任何宣告。
+               */
+              attachFlow.phase === 'submitting'
+                ? `${t('settings.providerAttachSubmitting')} · ${t('settings.providerAttachNeedsKeyIntent', { intent: intentLabel })}`
+                : keyForm
+                  ? t('settings.providerAttachNeedsKeyIntent', { intent: intentLabel })
+                  : t('settings.providerAttachChooseHint')
+            }
           >
-            {t('settings.customEndpointSave')}
-          </Button>
-          <Button variant="ghost" size="sm" type="button" onClick={() => { setKeyFor(''); setKeyValue(''); }}>
-            {t('settings.cancel')}
-          </Button>
+            {keyForm ? (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    type="password"
+                    autoComplete="off"
+                    aria-label={t('settings.customEndpointKey')}
+                    value={keyForm.draftKey}
+                    disabled={attachBusy}
+                    onChange={(event) => onEditAttachKey(event.target.value)}
+                    className="h-7 w-56 font-code text-aux"
+                  />
+                  <Button
+                    size="xs"
+                    type="button"
+                    disabled={!keyForm.draftKey.trim() || busy || attachBusy}
+                    onClick={() => onConfirmAttach(keyForm.intent, keyForm.draftKey)}
+                  >
+                    {t('settings.providerAttachSaveAndEnable')}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    type="button"
+                    onClick={onCancelAttach}
+                  >
+                    {attachBusy ? t('settings.providerAttachDismiss') : t('settings.cancel')}
+                  </Button>
+                </div>
+                {keyForm.error ? (
+                  <p className="text-caption text-destructive" role="alert">
+                    {keyForm.error}
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* 强调色留给"不改变默认模型"的安全路径：本改动正是为了阻止顺手切默认。 */}
+                  <Button
+                    size="xs"
+                    type="button"
+                    disabled={busy || attachBusy}
+                    onClick={() => onConfirmAttach('enable-only')}
+                  >
+                    {t('settings.providerAttachEnableOnly')}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    type="button"
+                    disabled={busy || attachBusy}
+                    onClick={() => onConfirmAttach('enable-and-default')}
+                  >
+                    {t('settings.providerAttachEnableAndDefault')}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    type="button"
+                    onClick={onCancelAttach}
+                  >
+                    {/* 【规则】提交中只能「收起」不能「取消」：cancel 事件只作废本地令牌，
+                        在途 RPC 不会中止、网关照常写入。叫「取消」等于承诺一个做不到的语义。 */}
+                    {attachBusy ? t('settings.providerAttachDismiss') : t('settings.cancel')}
+                  </Button>
+                </div>
+                {attachFlow.phase === 'choosing' && attachFlow.error ? (
+                  <p className="text-caption text-destructive" role="alert">
+                    {attachFlow.error}
+                  </p>
+                ) : null}
+              </>
+            )}
+          </InlineStrip>
         </div>
       ) : null}
 
@@ -316,7 +406,12 @@ function ProviderRow({
   bots,
   scopedProfile,
   currentAgentName,
+  attachFlow,
   onToggleAgent,
+  onRequestAttach,
+  onConfirmAttach,
+  onEditAttachKey,
+  onCancelAttach,
   onActivateModel,
   onEdit,
   onDelete,
@@ -331,7 +426,12 @@ function ProviderRow({
   scopedProfile: string;
   /** 「设为当前模型」作用到哪一个 Agent——必须写在按钮上，不能靠隐式作用域。 */
   currentAgentName: string;
-  onToggleAgent: (profile: string, nextChecked: boolean, apiKey?: string) => Promise<{ ok: boolean; message?: string; needsKey?: boolean }>;
+  attachFlow: ProviderAttachFlow | null;
+  onToggleAgent: (profile: string, nextChecked: boolean, apiKey?: string) => Promise<ToggleProviderAgentResult>;
+  onRequestAttach: (profile: string) => void;
+  onConfirmAttach: (intent: BindingAttachIntent, apiKey?: string) => void;
+  onEditAttachKey: (draftKey: string) => void;
+  onCancelAttach: () => void;
   /**
    * 在弹框里点一个模型后落到网关。
    * 【规则】高价模型第一次调用只返回 `confirmRequired`，弹框不关；
@@ -428,7 +528,12 @@ function ProviderRow({
         view={view}
         bots={bots}
         busy={busy || pending}
+        attachFlow={attachFlow}
         onToggle={onToggleAgent}
+        onRequestAttach={onRequestAttach}
+        onConfirmAttach={onConfirmAttach}
+        onEditAttachKey={onEditAttachKey}
+        onCancelAttach={onCancelAttach}
       />
 
       {view.manualHint ? (
@@ -621,7 +726,6 @@ function EndpointForm({
 }): React.ReactElement {
   const { draft } = state;
   const derivedId = draft.id || deriveEndpointId(draft.name);
-  const otherBots = bots.filter((bot) => bot.profile !== scopedProfile);
   const hasStoredKey = draft.id.length > 0;
   // 新建必须带明文密钥；编辑留空表示保留原密钥。
   const keyMissing = showFanOut && draft.apiKey.kind !== 'set';
@@ -748,15 +852,24 @@ function EndpointForm({
         </p>
       ) : null}
 
-      {showFanOut && otherBots.length > 0 ? (
-        <div className="flex flex-col gap-1">
-          <span className="text-aux text-muted-foreground">{t('settings.customEndpointApplyTo')}</span>
+      {showFanOut && bots.length > 0 ? (
+        <div
+          role="group"
+          aria-labelledby="custom-endpoint-apply-to"
+          className="flex min-w-0 flex-col gap-2"
+        >
+          <div className="flex flex-col gap-1">
+            <span id="custom-endpoint-apply-to" className="text-body font-medium text-foreground">
+              {t('settings.customEndpointApplyTo')}
+            </span>
+            <span className="text-micro text-muted-foreground">{t('settings.customEndpointApplyToHint')}</span>
+          </div>
           <FanOutMemberList
-            bots={otherBots}
+            bots={bots}
             selected={state.fanOut}
+            lockedProfile={scopedProfile}
             onToggle={(profile) => dispatch({ type: 'toggleFanOut', profile })}
           />
-          <p className="text-micro text-muted-foreground">{t('settings.customEndpointApplyToHint')}</p>
         </div>
       ) : null}
 
@@ -781,7 +894,11 @@ function EndpointForm({
         </p>
       ) : null}
 
-      <div className="mt-1 flex items-center gap-2">
+      {/*
+        【规则】动作条与字段同处一个滚动区：整块内容一起滚动，不存在浮层压住头像网格
+          或盖住字段的可能。字段增多时用户滚到底即可，位置始终在表单末尾。
+      */}
+      <div className="mt-1 flex items-center gap-2 border-t border-border-subtle pt-3">
         <Button variant="outline" size="sm" type="button" disabled={disabled || !draft.baseUrl.trim()} onClick={() => { void probe(); }}>
           {t('settings.customEndpointTest')}
         </Button>
@@ -841,7 +958,7 @@ function LoginPanel({
     );
   }
   return (
-    <div className="flex flex-col gap-2 rounded-panel border border-border-subtle bg-panel p-3">
+    <InlineStrip label={t('settings.loginCode')} busy={state.pending}>
       <p className="text-caption text-muted-foreground">{t('settings.loginCode')}</p>
       <div className="flex flex-wrap items-center gap-2">
         <code className="rounded-inner bg-input px-2 py-1 font-code text-body text-foreground">{state.userCode}</code>
@@ -865,7 +982,7 @@ function LoginPanel({
           {t('settings.cancel')}
         </Button>
       </div>
-    </div>
+    </InlineStrip>
   );
 }
 
@@ -1151,8 +1268,112 @@ export function ProvidersAdminPanel({
   const [editing, setEditing] = React.useState<CustomEndpointRow | null>(null);
   const [query, setQuery] = React.useState('');
   const [modelPendingId, setModelPendingId] = React.useState('');
+  const [attachFlow, setAttachFlow] = React.useState<ProviderAttachFlow | null>(null);
+  const attachToken = React.useRef(0);
+  /**
+   * 当前仍「活着」的提交令牌。
+   * 【为什么需要】用户取消后，迟滞的成功响应仍会返回；此时不能再弹「已启用」提示，
+   *   否则用户会收到一条自己刚取消掉的操作结果。归零即视为作废。
+   */
+  const attachLiveToken = React.useRef(0);
+  /**
+   * 确认条当前值的最新副本。
+   * 【为什么需要】结算失败时确认条可能已被目录收敛清空（写入已生效、目标格子不再是 absent）。
+   *   此时错误不能挂在条上，否则等于静默丢掉——必须转成行级提示。
+   */
+  const attachFlowRef = React.useRef<ProviderAttachFlow | null>(null);
+  attachFlowRef.current = attachFlow;
+  /** 确认条已收起后才到的失败原因：按 provider key 挂在行上。 */
+  const [attachRowErrors, setAttachRowErrors] = React.useState<Record<string, string>>({});
   const [deleteState, runDelete] = useRowAction();
   const [logoutState, runLogout] = useRowAction();
+
+  // 宿主漏字段时不能让整棵设置树崩掉：设置页是全屏对话框，崩了等于什么都点不了。
+  const bots = snapshot.bots ?? [];
+  const failures = snapshot.providerFailures ?? [];
+
+  /**
+   * 上一帧的已就绪目录。
+   * 【为什么必须留住】每次绑定写入后壳层会先置 `loading` 再重读；`LoadBoundary` 在
+   *   loading 下只渲染一行文案，整张提供商表连同 `submitting` 的确认条会被卸载重建，
+   *   用户看到闪一下"加载中"，确认条"全部禁用"的视觉契约也被打断。
+   *   判定由 `pickProviderViewsState` 承担（可穷举单测），这里只保存上一帧。
+   */
+  const lastViewsRef = React.useRef<readonly ProviderView[] | undefined>(undefined);
+  const picked = pickProviderViewsState(snapshot.providerViews, lastViewsRef.current);
+  lastViewsRef.current = picked.lastReady;
+  const providerViewsState = picked.state;
+  const views = providerViewsState.status === 'ready' ? providerViewsState.data : undefined;
+  const activeFlow = reconcileAttachFlow(attachFlow, views);
+
+  /**
+   * 【规则】收敛结果必须回写 state，否则「目录刷新后自动收起」只是渲染层错觉：
+   *   state 里仍留着旧 flow，目标格子一旦再次变回 absent（另一行解绑、另一窗口删除、
+   *   重新拉取），确认条会凭空复现，甚至带着过期的 submitting 全禁用态。
+   *   判定由 `shouldClearAttachFlow` 承担（可穷举单测）。
+   */
+  React.useEffect(() => {
+    if (shouldClearAttachFlow(attachFlow, views)) setAttachFlow(null);
+  }, [attachFlow, views]);
+
+  const submitAttach = (intent: BindingAttachIntent, apiKey?: string): void => {
+    if (!activeFlow || isAttachFlowBusy(activeFlow)) return;
+    const targetView = views?.find((item) => item.key === activeFlow.providerKey);
+    const providerName = targetView?.name || activeFlow.providerId;
+    const botName = bots.find((bot) => bot.profile === activeFlow.profile)?.displayName || activeFlow.profile;
+    const targetProfile = activeFlow.profile;
+    const targetProviderId = activeFlow.providerId;
+    const targetKey = activeFlow.providerKey;
+    const token = ++attachToken.current;
+    attachLiveToken.current = token;
+    setAttachRowErrors((prev) => {
+      if (!prev[targetKey]) return prev;
+      const next = { ...prev };
+      delete next[targetKey];
+      return next;
+    });
+    setAttachFlow((prev) => (prev ? reduceAttachFlow(prev, { type: 'choose', intent, token }) : null));
+
+    /**
+     * 【规则】一次提交结束后该发生什么，全部由 `planAttachSettlement` 判定（可穷举单测）：
+     *   失败落点由 core 的 `routeAttachFailure` 决定归属，条没了就挂到行级，绝不静默丢弃。
+     */
+    const settle = (result: { ok: boolean; needsKey?: boolean; message?: string }, failureMessage: string): void => {
+      const surface = routeAttachFailure(attachFlowRef.current, {
+        providerKey: targetKey,
+        profile: targetProfile,
+        token,
+      });
+      const plan = planAttachSettlement(result, surface, failureMessage);
+      if (plan.kind === 'settle-strip') {
+        setAttachFlow((prev) => (prev ? reduceAttachFlow(prev, { type: 'settle', token, outcome: plan.outcome }) : null));
+        return;
+      }
+      setAttachRowErrors((prev) => ({ ...prev, [plan.providerKey]: plan.message }));
+    };
+
+    void actions
+      .onToggleProviderAgent(targetProviderId, targetProfile, true, apiKey, { attachIntent: intent })
+      .then((result) => {
+        settle(result, result.message || t('settings.providerToggleFailed'));
+        // 用户取消或已切到别的格子时令牌作废：迟滞的成功结果不得再弹提示。
+        if (shouldNotifyEnableOnly(result, intent, attachLiveToken.current, token)) {
+          actions.onNotify(t('settings.providerAttachEnableOnlyDone', { provider: providerName, bot: botName }));
+        }
+      })
+      .catch((error: unknown) => {
+        settle(
+          { ok: false },
+          error instanceof Error ? error.message : t('settings.providerToggleFailed'),
+        );
+      });
+  };
+
+  /** 取消：作废在途令牌，迟滞响应不得再改动界面。 */
+  const cancelAttach = (): void => {
+    attachLiveToken.current = 0;
+    setAttachFlow((prev) => (prev ? reduceAttachFlow(prev, { type: 'cancel' }) : null));
+  };
 
   /**
    * 在弹框里点一个模型。
@@ -1170,9 +1391,6 @@ export function ProvidersAdminPanel({
     return result;
   };
 
-  // 宿主漏字段时不能让整棵设置树崩掉：设置页是全屏对话框，崩了等于什么都点不了。
-  const bots = snapshot.bots ?? [];
-  const failures = snapshot.providerFailures ?? [];
   const scoped = snapshot.scopedProfile || snapshot.gateway.profileName || 'default';
   const scopedDisplayName = bots.find((bot) => bot.profile === scoped)?.displayName || scoped;
   const needle = query.trim().toLowerCase();
@@ -1230,7 +1448,7 @@ export function ProvidersAdminPanel({
         ) : null}
 
         <LoadBoundary
-          state={snapshot.providerViews}
+          state={providerViewsState}
           onRetry={actions.onReloadProviders}
           emptyLabel={t('settings.providersEmpty')}
         >
@@ -1244,16 +1462,18 @@ export function ProvidersAdminPanel({
             return (
               <div className="flex flex-col">
                 {visible.map((view) => {
+                  const rowAttachFlow = activeFlow?.providerKey === view.key ? activeFlow : null;
                   const pending =
                     modelPendingId === view.id ||
                     (deleteState.pending && deleteState.id === view.id) ||
-                    (logoutState.pending && logoutState.id === view.id);
+                    (logoutState.pending && logoutState.id === view.id) ||
+                    (rowAttachFlow ? isAttachFlowBusy(rowAttachFlow) : false);
                   const error =
                     deleteState.id === view.id
                       ? deleteState.error
                       : logoutState.id === view.id
                         ? logoutState.error
-                        : '';
+                        : attachRowErrors[view.key] || '';
                   return (
                     <ProviderRow
                       key={view.key}
@@ -1264,8 +1484,15 @@ export function ProvidersAdminPanel({
                       bots={bots}
                       scopedProfile={scoped}
                       currentAgentName={scopedDisplayName}
+                      attachFlow={rowAttachFlow}
                       onToggleAgent={(profile, nextChecked, apiKey) =>
                         actions.onToggleProviderAgent(view.id, profile, nextChecked, apiKey)}
+                      onRequestAttach={(profile) =>
+                        setAttachFlow(openAttachFlow({ providerKey: view.key, providerId: view.id, profile }))}
+                      onConfirmAttach={submitAttach}
+                      onEditAttachKey={(draftKey) =>
+                        setAttachFlow((prev) => (prev ? reduceAttachFlow(prev, { type: 'edit-key', draftKey }) : null))}
+                      onCancelAttach={cancelAttach}
                       onActivateModel={(model, confirmExpensive) =>
                         activateModel(view, model, confirmExpensive)}
                       onEdit={() => openEdit(view)}

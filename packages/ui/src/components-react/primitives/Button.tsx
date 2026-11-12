@@ -19,7 +19,20 @@ const buttonVariants = cva('box-border inline-flex items-center justify-center g
       ghost: 'text-foreground hover:bg-accent',
       destructive: 'bg-destructive text-foreground hover:opacity-90',
     },
-    size: { default: 'h-9 px-4 py-2', sm: 'h-8 px-3', lg: 'h-10 px-6', icon: 'size-9' },
+    /*
+     * 【设计意图 (Why)】xs 档服务"贴在密集行内的确认动作"（行内确认条、行内表单），
+     *   这类场景的按钮与 11~12px 的说明文字同排，用 sm 的 32px 高度 + 13px 字号会把
+     *   一整条说明压成三行大字，用户的评价是"按钮太大、字体太大、太丑"。
+     * 【约束与规则 (Rules)】xs 是桌面端下限：h-7 = 28px，恰好等于审查规范的
+     *   桌面触控热区下限 28px，禁止再往下开档；移动端形态不得使用 xs。
+     */
+    size: {
+      default: 'h-9 px-4 py-2',
+      sm: 'h-8 px-3',
+      xs: 'h-7 px-2 text-aux',
+      lg: 'h-10 px-6',
+      icon: 'size-9',
+    },
   },
   defaultVariants: { variant: 'default', size: 'default' },
 });

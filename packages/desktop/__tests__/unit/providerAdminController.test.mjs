@@ -102,6 +102,17 @@ test('save：当前 Bot 的 make_default 跟随用户选择，扇出一律 false
   assert.equal(saves[1][2].base_url, 'https://llm.internal/v1');
 });
 
+test('save：makeDefault 为 false 时 payload 的 make_default 为 false，且不误刷新主模型目录', async () => {
+  const { controller, calls, state } = makeDeps();
+  const outcome = await controller.save('aura', draft, { fanOutTo: [], makeDefault: false });
+  assert.equal(outcome.currentOk, true);
+  assert.equal(outcome.overall, 'success');
+  const saves = calls.filter((call) => call[0] === 'saveEndpoint');
+  assert.equal(saves.length, 1);
+  assert.equal(saves[0][2].make_default, false, '仅启用模式不得发送 make_default: true');
+  assert.equal(state.catalogChanges, 0, '仅启用且响应未标记 current 时不应触发目录切主模型刷新');
+});
+
 test('save：网关写入成功但没把端点标成 current 时，必须如实报告而不是报成功', async () => {
   const endpointRow = {
     id: 'internal-gateway',

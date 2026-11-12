@@ -20,6 +20,7 @@ import {
   type SettingsSectionId,
   type SettingsSnapshot,
   type SettingsActions,
+  type ToggleProviderAgentResult,
   type GatewayDraft,
   type SettingsLoadable,
   type McpServerRow as SettingsMcpRow,
@@ -81,6 +82,7 @@ import {
   applyFontPreferences,
   setLocale,
   collectTouchedFiles,
+  messageKeyForVerdict,
   type FontPreferences,
 } from '@hermes-flux/ui';
 
@@ -208,11 +210,15 @@ import {
   planProviderRemoval,
   normalizeEndpointId,
   draftForBindingAttach,
+  classifyAttachWrite,
 } from '@hermes-flux/core';
 
 import { parseTranscriptRows } from './transcriptRows.js';
 import { DesktopCacheStore } from './cache/DesktopCacheStore.js';
 import { loadProviderCatalog } from './providerCatalog.js';
+
+/** 头像绑定/解绑写操作的在途合流表：同键同签名复用 promise，异签名拒绝重入。 */
+const inFlightProviderBindings = new Map<string, { signature: string; promise: Promise<ToggleProviderAgentResult> }>();
 
 /**
  * 客户端缓存服务（冷启动快照 + 消息正文）。
@@ -7527,12 +7533,12 @@ function createSettingsActions(): SettingsActions {
      *
      * 【规则】判定全部交给 core 的 planBindingToggle，壳层只执行与回显：
      *   正在使用的 Agent 不允许取消（用户已确认的策略：先改模型再移除）；
+     *   未配置的自定义端点必须带 `attachIntent`，缺意图一律返回 `confirmRequired: true` 且不写任何配置；
      *   自定义端点新增必须补密钥（网关不回明文）；订阅只能引导去登录。
-     * 【规则】勾选一个空头像就是"让这个 Bot 默认用它"：`makeDefault` 为 true，
-     *   模型取运行时目录里真实存在的那个（`resolveBindingDefaultModel`）。
-     *   早期写成 `makeDefault: false`，于是点完只有勾、没有绿环，用户以为点击没生效。
+     * 【规则】是否改写默认模型跟随 `plan.makeDefault`，模型取运行时目录里真实存在的那个
+     *   （`resolveBindingDefaultModel`）；仅当 `plan.makeDefault` 为真时才校验 `currentIsDefault`。
      */
-    onToggleProviderAgent: async (providerId, profile, nextChecked, apiKey) => {
+    onToggleProviderAgent: async (providerId, profile, nextChecked, apiKey, options) => {
       const controller = getProviderAdminController();
       const targetId = normalizeEndpointId(providerId);
       const view = state.settingsProviderViews.status === 'ready'
@@ -7540,7 +7546,7 @@ function createSettingsActions(): SettingsActions {
         : undefined;
       if (!view) return { ok: false, message: t('settings.providerDeleteUnknown') };
 
-      const plan = planBindingToggle(view, profile, nextChecked);
+      const plan = planBindingToggle(view, profile, nextChecked, options?.attachIntent);
       switch (plan.kind) {
         case 'noop':
           return { ok: true };
@@ -7552,70 +7558,102 @@ function createSettingsActions(): SettingsActions {
           return { ok: false, message: plan.message || t('settings.providerToggleBlockedError', { profile }) };
         case 'login-required':
           return { ok: false, message: t('settings.providerToggleLoginRequired', { profile }) };
-        case 'detach': {
-          const result = await controller.remove([profile], view.id);
-          if (result.ok) {
+        case 'confirm-attach':
+          return { ok: false, confirmRequired: true, message: t('settings.providerAttachConfirmRequired') };
+        default:
+          break;
+      }
+
+      const flightKey = `${targetId}\u0000${profile}`;
+      const signature = plan.kind + (plan.kind === 'attach' ? plan.intent : '');
+      const existing = inFlightProviderBindings.get(flightKey);
+      if (existing) {
+        if (existing.signature === signature) return existing.promise;
+        return { ok: false, message: t('settings.providerAttachBusy') };
+      }
+
+      const promise = (async (): Promise<ToggleProviderAgentResult> => {
+        switch (plan.kind) {
+          case 'detach': {
+            const result = await controller.remove([profile], view.id);
+            if (result.ok) {
+              // 等回读完成再清 pending：否则用户会看到"点了没反应"的旧勾选态。
+              await reloadProviderCatalog();
+              return { ok: true };
+            }
+            return { ok: false, message: result.message || t('settings.providerToggleFailed') };
+          }
+          case 'attach': {
+            const row = state.settingsCustomEndpoints.status === 'ready'
+              ? state.settingsCustomEndpoints.data.find(
+                  (item) => normalizeEndpointId(item.id) === targetId,
+                )
+              : undefined;
+            if (!row) return { ok: false, message: t('settings.providerEditUnavailable') };
+            let key = (apiKey ?? '').trim();
+            if (!key) {
+              // 先尝试从其它成员复制：取消绑定会连密钥一起删，用户刚勾回来不该被要求重输。
+              const sources = (state.settingsEndpointProfiles[targetId] ?? [])
+                .filter((source) => source !== profile);
+              const copied = await controller.resolveEndpointKey(view.id, sources);
+              if (!copied.ok) {
+                if (copied.reason === 'no-readable-key') {
+                  // 确实没有可读来源（所有成员都缺密钥）：这时才让用户就地补一次。
+                  return {
+                    ok: false,
+                    needsKey: true,
+                    message: t('settings.providerToggleNeedsKey', { profile }),
+                  };
+                }
+                // 读取故障必须原样透出，不能伪装成"请重输密钥"（Failure Is Not Empty）。
+                return { ok: false, message: copied.message || t('settings.providerToggleFailed') };
+              }
+              key = copied.key;
+            }
+            // 模型取运行时目录里真实存在的那个；是否切换默认模型由 plan.makeDefault 决定。
+            const draft = draftForBindingAttach(row, view.models, key);
+            const outcome = await controller.save(profile, draft, { fanOutTo: [], makeDefault: plan.makeDefault });
+            // 【规则】默认模型两条守卫的判定统一由 core 的 `classifyAttachWrite` 表达，
+            //   壳层只做 `kind → i18n` 映射：这样"要求设默认却没设"与"只要求启用却被改成默认"
+            //   两个方向共用同一份可穷举的真值，不会一边补了另一边忘掉。
+            const verdict = classifyAttachWrite(plan, outcome);
+            if (verdict.kind === 'failed') {
+              return { ok: false, message: outcome.current.message || t('settings.providerToggleFailed') };
+            }
+            const verdictKey = messageKeyForVerdict(verdict);
+            if (verdictKey) {
+              // 【规则】失败也要先回读：端点已经写进网关，列表必须如实反映。
+              //   错误本身由界面另存为行级提示，不依赖确认条存活——回读后目标格子不再是
+              //   `absent`，确认条会被目录收敛清空，把错误挂在条上等于静默丢掉它。
+              await reloadProviderCatalog();
+              return { ok: false, message: t(verdictKey) };
+            }
             // 等回读完成再清 pending：否则用户会看到"点了没反应"的旧勾选态。
             await reloadProviderCatalog();
             return { ok: true };
           }
-          return { ok: false, message: result.message || t('settings.providerToggleFailed') };
-        }
-        case 'logout-subscription': {
-          // 订阅的绑定就是该 Agent 的 OAuth 登录态，只能走断开登录，不能删端点。
-          const result = await controller.logoutOauth(profile, view.id);
-          if (result.ok) {
-            await reloadProviderCatalog();
-            return { ok: true };
-          }
-          return { ok: false, message: result.message || t('settings.providerToggleFailed') };
-        }
-        case 'attach': {
-          const row = state.settingsCustomEndpoints.status === 'ready'
-            ? state.settingsCustomEndpoints.data.find(
-                (item) => normalizeEndpointId(item.id) === targetId,
-              )
-            : undefined;
-          if (!row) return { ok: false, message: t('settings.providerEditUnavailable') };
-          let key = (apiKey ?? '').trim();
-          if (!key) {
-            // 先尝试从其它成员复制：取消绑定会连密钥一起删，用户刚勾回来不该被要求重输。
-            const sources = (state.settingsEndpointProfiles[targetId] ?? [])
-              .filter((source) => source !== profile);
-            const copied = await controller.resolveEndpointKey(view.id, sources);
-            if (!copied.ok) {
-              if (copied.reason === 'no-readable-key') {
-                // 确实没有可读来源（所有成员都缺密钥）：这时才让用户就地补一次。
-                return {
-                  ok: false,
-                  needsKey: true,
-                  message: t('settings.providerToggleNeedsKey', { profile }),
-                };
-              }
-              // 读取故障必须原样透出，不能伪装成"请重输密钥"（Failure Is Not Empty）。
-              return { ok: false, message: copied.message || t('settings.providerToggleFailed') };
+          case 'logout-subscription': {
+            // 订阅的绑定就是该 Agent 的 OAuth 登录态，只能走断开登录，不能删端点。
+            const result = await controller.logoutOauth(profile, view.id);
+            if (result.ok) {
+              await reloadProviderCatalog();
+              return { ok: true };
             }
-            key = copied.key;
+            return { ok: false, message: result.message || t('settings.providerToggleFailed') };
           }
-          // 点空头像 = 让这个 Bot 默认使用这套提供商：声明模型已不在运行时目录时切到目录首项，
-          // 否则主模型会指向一个网关根本选不到的 id。
-          const draft = draftForBindingAttach(row, view.models, key);
-          const outcome = await controller.save(profile, draft, { fanOutTo: [], makeDefault: plan.makeDefault });
-          if (!outcome.currentOk) {
-            return { ok: false, message: outcome.current.message || t('settings.providerToggleFailed') };
-          }
-          // 网关接受写入但没把端点标成 current 时，不能报成功：界面会留下"有勾无环"，
-          // 正是用户报的"点了没生效"。
-          if (plan.makeDefault && outcome.currentIsDefault === false) {
-            await reloadProviderCatalog();
-            return { ok: false, message: t('settings.providerToggleNotDefault') };
-          }
-          // 等回读完成再清 pending：否则用户会看到"点了没反应"的旧勾选态。
-          await reloadProviderCatalog();
-          return { ok: true };
+          default:
+            return { ok: false, message: t('settings.providerToggleFailed') };
         }
-        default:
-          return { ok: false, message: t('settings.providerToggleFailed') };
+      })();
+
+      const entry = { signature, promise };
+      inFlightProviderBindings.set(flightKey, entry);
+      try {
+        return await promise;
+      } finally {
+        if (inFlightProviderBindings.get(flightKey) === entry) {
+          inFlightProviderBindings.delete(flightKey);
+        }
       }
     },
     onNotify: (message) => showToast(message),

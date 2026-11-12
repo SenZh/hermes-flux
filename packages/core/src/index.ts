@@ -15,6 +15,7 @@ export * from './models/modelCatalog.js';
 export * from './models/providerDirectory.js';
 export * from './models/providerAdmin.js';
 export * from './models/providerViews.js';
+export * from './models/providerAttachFlow.js';
 export * from './rpc/profileNormalize.js';
 export * from './session/eventReducer.js';
 export * from './session/sessionRegistry.js';

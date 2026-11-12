@@ -4,7 +4,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { SettingsModal } from '../dist/components-react/settings/SettingsModal.js';
 import { FanOutMemberList } from '../dist/components-react/settings/FanOutMemberList.js';
-import { describeDetail } from '../dist/components-react/settings/ProvidersAdminPanel.js';
+import { AgentBindingGrid, describeDetail } from '../dist/components-react/settings/ProvidersAdminPanel.js';
 import { ModelOptionRow, ModelPickerDialog, ModelPickerField, resolveModelPick } from '../dist/components-react/settings/ModelPicker.js';
 import { renderModelVendorIcon } from '../dist/lib/vendorIcon.js';
 import {
@@ -329,7 +329,7 @@ test('Agent 成员网格：勾选样式只有一种，绿色环单独表达「�
   assert.equal(html.includes('勾选 = 已配置'), false, '已配置的解释按用户要求删除');
 });
 
-test('添加端点：全宽成员列表完整显示 10 字符名，title 保留全名，超长名按 24 单位兜底', () => {
+test('添加端点：成员选择与列表页同一套头像语义，保存目标用锁形角标区别于普通勾选', () => {
   setLocale('zh-CN');
   const html = renderToStaticMarkup(
     React.createElement(FanOutMemberList, {
@@ -338,14 +338,17 @@ test('添加端点：全宽成员列表完整显示 10 字符名，title 保留�
         { profile: 'ops', displayName: 'auralis-infrastructure-operations-team' },
       ],
       selected: ['xiaofawang'],
+      lockedProfile: 'default',
       onToggle() {},
     }),
   );
-  assert.ok(html.includes('>xiaofawang<'), '常规名在全宽列表里必须完整显示');
   assert.ok(html.includes('title="xiaofawang"'), 'title 必须保留完整名称');
   assert.ok(html.includes('aria-label="xiaofawang"'), '勾选框的无障碍名称必须是全名');
-  assert.ok(html.includes('title="auralis-infrastructure-operations-team"'), '超长名同样保留完整 title');
-  assert.ok(html.includes('auralis-infrastructure-…'), '极端长名按 24 单位兜底');
+  assert.ok(
+    html.includes('title="auralis-infrastructure-operations-team"'),
+    '超长名同样保留完整 title',
+  );
+  assert.ok(html.includes('auralis-infra'), '超长名按紧凑规格截断');
   const inputFor = (name) => {
     const match = html.match(new RegExp(`<input[^>]*aria-label="${name}"[^>]*/>`));
     assert.ok(match, `缺少 ${name} 的勾选框`);
@@ -356,6 +359,56 @@ test('添加端点：全宽成员列表完整显示 10 字符名，title 保留�
     inputFor('auralis-infrastructure-operations-team').includes('checked'),
     false,
     '未选成员不得渲染为勾选',
+  );
+});
+
+test('添加端点：保存目标本身必须出现、勾选且不可取消', () => {
+  setLocale('zh-CN');
+  const html = renderToStaticMarkup(
+    React.createElement(FanOutMemberList, {
+      bots: [
+        { profile: 'default', displayName: 'default' },
+        { profile: 'ops', displayName: 'ops' },
+      ],
+      selected: [],
+      lockedProfile: 'default',
+      onToggle() {},
+    }),
+  );
+  const lockedInput = html.match(/<input[^>]*aria-label="default[^"]*"[^>]*\/>/);
+  assert.ok(lockedInput, '保存目标必须出现在成员网格里');
+  assert.ok(lockedInput[0].includes('checked'), '保存目标恒为勾选');
+  assert.ok(lockedInput[0].includes('disabled'), '保存目标不可取消勾选');
+  assert.ok(
+    lockedInput[0].includes(t('settings.customEndpointApplyToLocked')),
+    '锁定原因必须进入可访问名称，否则读屏只会说"复选框，已选中，不可用"',
+  );
+  const otherInput = html.match(/<input[^>]*aria-label="ops"[^>]*\/>/);
+  assert.equal(otherInput[0].includes('disabled'), false, '其它成员必须可勾选');
+});
+
+test('添加端点：锁定格与普通勾选格的视觉必须可区分（锁 vs 对号）', () => {
+  setLocale('zh-CN');
+  const html = renderToStaticMarkup(
+    React.createElement(FanOutMemberList, {
+      bots: [
+        { profile: 'default', displayName: 'default' },
+        { profile: 'ops', displayName: 'ops' },
+      ],
+      selected: ['ops'],
+      lockedProfile: 'default',
+      onToggle() {},
+    }),
+  );
+  assert.ok(html.includes('data-bot-badge="locked"'), '保存目标必须有独立的锁定角标');
+  assert.ok(html.includes('data-bot-badge="checked"'), '普通勾选必须用对号角标');
+  const lockedBadge = html.match(/data-bot-badge="locked"[^>]*>[\s\S]*?<\/span>/);
+  assert.ok(lockedBadge, '锁定角标必须渲染出内容');
+  assert.ok(lockedBadge[0].includes('<svg'), '锁定角标必须是图形，不能只是换个底色');
+  assert.notEqual(
+    lockedBadge[0].match(/class="[^"]*"/)[0],
+    html.match(/data-bot-badge="checked"[^>]*>[\s\S]*?<\/span>/)[0].match(/class="[^"]*"/)[0],
+    '锁定角标与勾选角标的样式必须不同，否则触屏与截图里读不出差别',
   );
 });
 
@@ -604,13 +657,305 @@ test('行内不再有笼统的「使用」：模型列表按需展开，动作�
     providerViews: { status: 'ready', data: [providerView()] },
   }));
   assert.equal(html.includes('>设为当前模型<'), false, '不得再有不说作用于哪个 Agent 的「使用」');
-  assert.equal(html.includes('设为默认'), false, '用户明确问过"设为默认什么意思"，这个词不能再出现');
+  assert.equal(html.includes('>设为默认<'), false, '不得再有笼统的「设为默认」动作按钮');
   assert.ok(html.includes(t('settings.providerModelsExpand')), '模型列表要有明确入口');
   assert.ok(html.includes('aria-haspopup="dialog"'), '入口必须打开弹框，不再在行内直接展开');
   assert.equal(html.includes('data-model-id='), false, '模型列表默认折叠，不能把所有模型铺在行里');
   assert.ok(html.includes(t('settings.providerEdit')), '编辑入口必须存在');
   assert.ok(html.includes(t('settings.providerDelete')), '删除入口必须存在');
   assert.equal(html.includes(t('settings.refresh')), false, '常驻刷新按钮已删除：动作后自动重拉，失败态有重试');
+  assert.equal(t('settings.providerBindingHint').includes('勾选即'), false, '绑定提示不得再声称勾选即设为默认');
+  assert.ok(
+    t('settings.providerBindingHint').includes(t('settings.providerAttachEnableOnly')),
+    '绑定提示必须说明存在仅启用与启用并设为默认两种选择',
+  );
+});
+
+test('AgentBindingGrid：行内确认条三种相严格分流（needs-key 隐藏意图按钮，submitting 只留取消可点）', () => {
+  setLocale('zh-CN');
+  const view = providerView({
+    agents: [
+      { profile: 'default', displayName: 'default', state: 'active' },
+      { profile: 'aura', displayName: 'aura', state: 'absent' },
+    ],
+  });
+  const baseProps = {
+    view,
+    bots: [
+      { profile: 'default', displayName: 'default' },
+      { profile: 'aura', displayName: 'aura' },
+    ],
+    busy: false,
+    onToggle: async () => ({ ok: true }),
+    onRequestAttach() {},
+    onConfirmAttach() {},
+    onEditAttachKey() {},
+    onCancelAttach() {},
+  };
+
+  // 1. choosing：有两个意图按钮，无 password 输入
+  const choosingHtml = renderToStaticMarkup(
+    React.createElement(AgentBindingGrid, {
+      ...baseProps,
+      attachFlow: {
+        phase: 'choosing',
+        providerKey: view.key,
+        providerId: view.id,
+        profile: 'aura',
+      },
+    }),
+  );
+  assert.ok(choosingHtml.includes(t('settings.providerAttachTitle', { provider: view.name, bot: 'aura' })));
+  assert.ok(choosingHtml.includes(`>${t('settings.providerAttachEnableOnly')}</button>`), 'choosing 必须渲染仅启用按钮');
+  assert.ok(choosingHtml.includes(`>${t('settings.providerAttachEnableAndDefault')}</button>`), 'choosing 必须渲染启用并设为默认按钮');
+  assert.equal(choosingHtml.includes('type="password"'), false, 'choosing 不得渲染密码输入框');
+
+  // 2. needs-key：有 password 输入框，严禁渲染两个意图按钮
+  const needsKeyHtml = renderToStaticMarkup(
+    React.createElement(AgentBindingGrid, {
+      ...baseProps,
+      attachFlow: {
+        phase: 'needs-key',
+        providerKey: view.key,
+        providerId: view.id,
+        profile: 'aura',
+        intent: 'enable-only',
+        token: 1,
+        draftKey: '',
+      },
+    }),
+  );
+  assert.ok(needsKeyHtml.includes('type="password"'), 'needs-key 必须渲染密码输入框');
+  assert.ok(needsKeyHtml.includes(`>${t('settings.providerAttachSaveAndEnable')}</button>`), 'needs-key 必须有唯一提交出口');
+  assert.ok(
+    needsKeyHtml.includes(t('settings.providerAttachNeedsKeyIntent', { intent: t('settings.providerAttachEnableOnly') })),
+    'needs-key 必须写明当前将执行的意图',
+  );
+  assert.equal(
+    needsKeyHtml.includes(`>${t('settings.providerAttachEnableOnly')}</button>`),
+    false,
+    'needs-key 阶段严禁同时渲染「仅启用」意图按钮',
+  );
+  assert.equal(
+    needsKeyHtml.includes(`>${t('settings.providerAttachEnableAndDefault')}</button>`),
+    false,
+    'needs-key 阶段严禁同时渲染「启用并设为默认」意图按钮',
+  );
+
+  // 3. submitting：意图按钮必须禁用，但「取消」必须仍可点——REST 代理可能挂起，
+  //    把取消也禁用会让用户被永久锁在设置弹窗里。
+  const submittingHtml = renderToStaticMarkup(
+    React.createElement(AgentBindingGrid, {
+      ...baseProps,
+      attachFlow: {
+        phase: 'submitting',
+        providerKey: view.key,
+        providerId: view.id,
+        profile: 'aura',
+        intent: 'enable-and-default',
+        token: 2,
+      },
+    }),
+  );
+  const attachSection = submittingHtml.slice(submittingHtml.indexOf('data-attach-phase="submitting"'));
+  const buttons = [...attachSection.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g)]
+    .map((match) => ({ tag: match[0], label: match[1].replace(/<[^>]*>/g, '').trim() }));
+  assert.ok(buttons.length >= 2, 'submitting 阶段必须有按钮占位');
+  for (const { tag, label } of buttons) {
+    // 【规则】提交中该按钮文案是「收起」而非「取消」：cancel 事件只作废本地令牌，
+    //   在途 RPC 不会中止，网关照常写入，叫「取消」等于承诺一个做不到的语义。
+    if (label === t('settings.providerAttachDismiss')) {
+      assert.equal(/\sdisabled(=|>|\s)/.test(tag), false, '提交中必须仍能收起，否则用户被锁死在弹窗里');
+      continue;
+    }
+    assert.ok(/\sdisabled(=|>|\s)/.test(tag), `submitting 阶段非收起按钮必须禁用: ${tag}`);
+  }
+});
+
+test('AgentBindingGrid：壳层忙态下取消仍必须可点（真实锁死场景，busy=true）', () => {
+  setLocale('zh-CN');
+  const view = providerView({
+    agents: [
+      { profile: 'default', displayName: 'default', state: 'active' },
+      { profile: 'aura', displayName: 'aura', state: 'absent' },
+    ],
+  });
+  // 【为什么必须单独一条】上一条测试传的是 busy: false，而真实链路里
+  //   ProviderRow 传下来的是 `busy || pending`，提交期间恒为 true。
+  //   于是「取消跟着 busy 一起禁用」这个回归在旧测试下全绿，用户却被永久锁死：
+  //   REST 一旦挂住，三个按钮同时 50% 灰掉，点取消毫无反应。
+  const html = renderToStaticMarkup(
+    React.createElement(AgentBindingGrid, {
+      view,
+      bots: [{ profile: 'aura', displayName: 'aura' }],
+      busy: true,
+      attachFlow: {
+        phase: 'submitting',
+        providerKey: view.key,
+        providerId: view.id,
+        profile: 'aura',
+        intent: 'enable-only',
+        token: 5,
+      },
+      onToggle: async () => ({ ok: true }),
+      onRequestAttach() {},
+      onConfirmAttach() {},
+      onEditAttachKey() {},
+      onCancelAttach() {},
+    }),
+  );
+  const attachSection = html.slice(html.indexOf('data-attach-phase="submitting"'));
+  const dismissTags = [...attachSection.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g)]
+    .filter((match) => match[1].replace(/<[^>]*>/g, '').trim() === t('settings.providerAttachDismiss'))
+    .map((match) => match[0]);
+  assert.equal(dismissTags.length, 1, '提交中必须有且只有一个收起出口');
+  assert.equal(
+    /\sdisabled(=|>|\s)/.test(dismissTags[0]),
+    false,
+    'busy=true 时收起仍不得禁用：收起只作废本地令牌，不与任何在途请求冲突',
+  );
+});
+
+test('AgentBindingGrid：提交中必须有可宣告的进度文案，否则读屏用户看不到任何变化', () => {
+  setLocale('zh-CN');
+  const view = providerView({
+    agents: [{ profile: 'aura', displayName: 'aura', state: 'absent' }],
+  });
+  const html = renderToStaticMarkup(
+    React.createElement(AgentBindingGrid, {
+      view,
+      bots: [{ profile: 'aura', displayName: 'aura' }],
+      busy: true,
+      attachFlow: {
+        phase: 'submitting',
+        providerKey: view.key,
+        providerId: view.id,
+        profile: 'aura',
+        intent: 'enable-only',
+        token: 6,
+      },
+      onToggle: async () => ({ ok: true }),
+      onRequestAttach() {},
+      onConfirmAttach() {},
+      onEditAttachKey() {},
+      onCancelAttach() {},
+    }),
+  );
+  assert.ok(html.includes(t('settings.providerAttachSubmitting')), '提交中必须显示「正在写入网关…」');
+  assert.ok(html.includes('aria-live="polite"'), '进度文案必须是 aria-live 区域，否则读屏不宣告');
+});
+
+test('AgentBindingGrid：补密钥后提交（previousPhase=needs-key）同样必须宣告进度', () => {
+  setLocale('zh-CN');
+  const view = providerView({
+    agents: [{ profile: 'aura', displayName: 'aura', state: 'absent' }],
+  });
+  // 【为什么必须单独一条】`keyForm` 在 `submitting && previousPhase === 'needs-key'` 时非空，
+  //   若进度文案的判断排在 keyForm 之后，这条真实路径（补完密钥点保存）永远拿不到宣告：
+  //   输入框与保存按钮一起变灰，读屏却仍念「将执行：仅启用」。上一条测试没有 previousPhase，
+  //   结构上碰不到这个分支。
+  const html = renderToStaticMarkup(
+    React.createElement(AgentBindingGrid, {
+      view,
+      bots: [{ profile: 'aura', displayName: 'aura' }],
+      busy: true,
+      attachFlow: {
+        phase: 'submitting',
+        providerKey: view.key,
+        providerId: view.id,
+        profile: 'aura',
+        intent: 'enable-only',
+        token: 7,
+        previousPhase: 'needs-key',
+        draftKey: 'sk-draft',
+      },
+      onToggle: async () => ({ ok: true }),
+      onRequestAttach() {},
+      onConfirmAttach() {},
+      onEditAttachKey() {},
+      onCancelAttach() {},
+    }),
+  );
+  assert.ok(html.includes(t('settings.providerAttachSubmitting')), '补密钥提交路径同样必须显示进度文案');
+  assert.ok(html.includes('type="password"'), '提交中必须保持密钥形态，输入框不得被卸载');
+});
+
+test('AgentBindingGrid：补密钥后提交必须保持密钥形态，输入框不得消失', () => {
+  setLocale('zh-CN');
+  const view = providerView({
+    agents: [
+      { profile: 'default', displayName: 'default', state: 'active' },
+      { profile: 'aura', displayName: 'aura', state: 'absent' },
+    ],
+  });
+  const html = renderToStaticMarkup(
+    React.createElement(AgentBindingGrid, {
+      view,
+      bots: [{ profile: 'aura', displayName: 'aura' }],
+      busy: false,
+      attachFlow: {
+        phase: 'submitting',
+        providerKey: view.key,
+        providerId: view.id,
+        profile: 'aura',
+        intent: 'enable-only',
+        token: 3,
+        previousPhase: 'needs-key',
+        draftKey: 'sk-draft',
+      },
+      onToggle: async () => ({ ok: true }),
+      onRequestAttach() {},
+      onConfirmAttach() {},
+      onEditAttachKey() {},
+      onCancelAttach() {},
+    }),
+  );
+  assert.ok(html.includes('type="password"'), '从补密钥发起的提交必须保留密码框，不能换成意图按钮');
+  assert.ok(html.includes('value="sk-draft"'), '已输入的密钥必须保留在框内');
+  assert.equal(
+    html.includes(`>${t('settings.providerAttachEnableOnly')}</button>`),
+    false,
+    '提交中不得再出现意图按钮',
+  );
+});
+
+test('AgentBindingGrid：确认条必须可被读屏定位，密码框必须有名称，目标头像声明展开态', () => {
+  setLocale('zh-CN');
+  const view = providerView({
+    agents: [
+      { profile: 'default', displayName: 'default', state: 'active' },
+      { profile: 'aura', displayName: 'aura', state: 'absent' },
+    ],
+  });
+  const html = renderToStaticMarkup(
+    React.createElement(AgentBindingGrid, {
+      view,
+      bots: [{ profile: 'aura', displayName: 'aura' }],
+      busy: false,
+      attachFlow: {
+        phase: 'needs-key',
+        providerKey: view.key,
+        providerId: view.id,
+        profile: 'aura',
+        intent: 'enable-only',
+        token: 4,
+        draftKey: '',
+      },
+      onToggle: async () => ({ ok: true }),
+      onRequestAttach() {},
+      onConfirmAttach() {},
+      onEditAttachKey() {},
+      onCancelAttach() {},
+    }),
+  );
+  assert.ok(html.includes('role="group"'), '确认条必须是一个有名字的分组，不能是裸 div');
+  assert.ok(/aria-labelledby="attach-strip-[^"]+-title"/.test(html), '确认条必须用标题做可访问名称');
+  assert.ok(
+    html.includes(`aria-label="${t('settings.customEndpointKey')}"`),
+    '密码框必须有可访问名称，否则读屏只说"编辑框"',
+  );
+  assert.ok(/aria-expanded="true"/.test(html), '展开确认条的头像必须声明 aria-expanded');
+  assert.ok(/aria-controls="attach-strip-[^"]+"/.test(html), '头像必须指向它展开的那条确认条');
 });
 
 test('没有模型的提供商：模型区说明为空，且不存在可点的空列表', () => {

@@ -494,6 +494,7 @@ export function profilesWithProvider(view: ProviderView): string[] {
  * 【设计意图 (Why)】
  *   界面上一个勾选框同时承担三件事：新增绑定、移除绑定、以及"这件事现在做不了"。
  *   把判定放在纯函数里，视图只负责渲染，测试才能穷举四种状态 × 两个方向。
+ *   把"配置给这个 Bot"与"切为这个 Bot 的默认模型"拆成两步意图，防止误点直接覆盖当前主模型。
  *
  * 【防范的历史坑 (Pitfall)】
  *   1. `active` 的 Agent 一旦被取消勾选，它的当前主模型就指向一个不存在的 provider。
@@ -501,14 +502,20 @@ export function profilesWithProvider(view: ProviderView): string[] {
  *   2. `error` 的 Agent 与 `absent` 长得像，但前者是"读不到"，不能当成"没配"去写。
  *   3. 自定义端点的新增需要明文密钥（GET 不回密钥），订阅不需要（登录态按 profile 回落）。
  *      这个差异必须在计划里显式表达，不能由视图自己猜。
+ *   4. 点击未启用头像曾直接按 `makeDefault: true` 落盘，只想给 Bot 挂载备选提供商时被迫改掉主模型。
+ *      现在必须由用户显式给出意图，缺意图一律先走 `confirm-attach`。
  *
  * 【约束与规则 (Rules)】
  *   1. 纯函数，不做任何网络与状态写入；
  *   2. 已处于目标状态的点击返回 `noop`，不发无意义请求；
- *   3. 未知 profile 返回 `unknown-profile`，由调用方提示重读，不静默忽略。
+ *   3. 未知 profile 返回 `unknown-profile`，由调用方提示重读，不静默忽略；
+ *   4. 勾选未配置的自定义端点且缺少 `attachIntent` 时，必须返回 `confirm-attach`，不得猜默认意图。
  */
+export type BindingAttachIntent = 'enable-only' | 'enable-and-default';
+
 export type BindingTogglePlan =
-  | { kind: 'attach'; profile: string; requiresApiKey: boolean; makeDefault: true }
+  | { kind: 'confirm-attach'; profile: string; requiresApiKey: boolean }
+  | { kind: 'attach'; profile: string; requiresApiKey: boolean; makeDefault: boolean; intent: BindingAttachIntent }
   | { kind: 'login-required'; profile: string }
   | { kind: 'detach'; profile: string }
   | { kind: 'logout-subscription'; profile: string }
@@ -543,6 +550,7 @@ export function planBindingToggle(
   view: ProviderView,
   profile: string,
   nextChecked: boolean,
+  attachIntent?: BindingAttachIntent,
 ): BindingTogglePlan {
   const agent = view.agents.find((item) => item.profile === profile);
   if (!agent) return { kind: 'unknown-profile', profile };
@@ -555,9 +563,14 @@ export function planBindingToggle(
     // 订阅没有可写的端点记录：它的绑定由该 profile 上的 OAuth 登录态决定，
     // 客户端没有任何接口能把"登录态"复制到另一个 Agent。所以只能引导去登录。
     if (view.kind === 'subscription') return { kind: 'login-required', profile };
-    // 【用户已确认的语义】点一个空头像 = "让这个 Bot 用这套提供商"，不是单纯写一条配置。
-    //   只写配置不改主模型时，绿环不会亮，用户会认为点击没生效。
-    return { kind: 'attach', profile, requiresApiKey: true, makeDefault: true };
+    if (!attachIntent) return { kind: 'confirm-attach', profile, requiresApiKey: true };
+    return {
+      kind: 'attach',
+      profile,
+      requiresApiKey: true,
+      makeDefault: attachIntent === 'enable-and-default',
+      intent: attachIntent,
+    };
   }
 
   if (agent.state === 'active') return { kind: 'blocked-active', profile };
