@@ -295,4 +295,30 @@ test('在场指示器 · 14 条表现层契约', async (t) => {
       '文案行必须带随状态与语气变化的 key，否则 React 复用节点导致交叉淡入永不触发',
     );
   });
+
+  await t.test('18. 指示器必须有确定宽度（否则文案行塌成 0 宽）', () => {
+    const css = read('packages/ui/src/styles/conversation.css');
+    const rootBlock = /\.conv-presence \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
+    // 【真实缺陷回归】`.conv-presence` 若保持 shrink-to-fit，文案行的
+    //   `max-width: calc(100% - 96px)` 会与内容形成循环依赖：实测塌成头像宽 56px，
+    //   `56 - 96` 为负被钳成 0，状态文案完全不可见（Blink 实测 textWidth=0）。
+    assert.ok(
+      /\bwidth:\s*min\(420px/.test(rootBlock),
+      '根节点必须给确定宽度，否则文案行的百分比 max-width 没有参照',
+    );
+    const textBlock = /\.conv-presence__text \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
+    assert.ok(
+      !/max-width:\s*min\(420px,\s*calc\(100% - 96px\)\)/.test(textBlock),
+      '文案行不得再自引用父级的百分比宽度（循环依赖的根源）',
+    );
+  });
+
+  await t.test('19. 层级必须高于 onboarding 卡片（否则文案被卡片盖住）', () => {
+    const css = read('packages/ui/src/styles/conversation.css');
+    const rootBlock = /\.conv-presence \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
+    const zIndex = Number(/z-index:\s*(\d+)/.exec(rootBlock)?.[1] ?? 0);
+    const scrim = Number(/\.conv-dock-scrim \{[\s\S]*?z-index:\s*(\d+)/.exec(css)?.[1] ?? 10);
+    // 真实缺陷回归：z-index 9 时 onboarding 卡片把文案行压住，截图里只看得见头像
+    assert.ok(zIndex > scrim, `指示器 z-index(${zIndex}) 必须高于底部遮罩(${scrim})`);
+  });
 });

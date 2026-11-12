@@ -114,7 +114,40 @@ app.whenReady().then(async () => {
 
   win.webContents.debugger.detach();
 
-  // ---------- 4. 长目标不溢出、头像零位移 ----------
+  // ---------- 4. 状态文案必须真实可见且不被截断 ----------
+  // 【真实缺陷回归】文案行曾因父级 shrink-to-fit + 百分比 max-width 的循环依赖
+  //   塌成 0 宽，状态文案完全不可见；而 CSS 字符串断言与 SSR 渲染都发现不了。
+  for (const [kind, inner] of [
+    ['thinking', '<span class="conv-presence__verb">正在思考</span>'],
+    ['tool', '<span class="conv-presence__verb">正在读</span><span class="conv-presence__target">core/gateway.ts</span>'],
+    ['writing', '<span class="conv-presence__verb">努力工作中</span><span class="conv-presence__bars"><i></i><i></i><i></i></span>'],
+  ]) {
+    await run(`document.getElementById('pod').innerHTML = ${JSON.stringify(presenceHtml(kind, inner))}; true`);
+    const m = await run(`(() => {
+      const text = document.querySelector('.conv-presence__text');
+      const tr = text.getBoundingClientRect();
+      const verb = text.querySelector('.conv-presence__verb');
+      const vr = verb.getBoundingClientRect();
+      return { textW: Math.round(tr.width), textH: Math.round(tr.height), verbW: Math.round(vr.width) };
+    })()`);
+    record(`[${kind}] 状态文案可见且未塌成 0 宽`, m.textW > 0 && m.verbW > 0,
+      `textWidth=${m.textW} verbWidth=${m.verbW}`);
+  }
+
+  // 文案不得被上层元素遮挡（onboarding 卡片曾盖住它）
+  const occluded = await run(`(() => {
+    const el = document.querySelector('.conv-presence');
+    const text = el.querySelector('.conv-presence__text');
+    const tr = text.getBoundingClientRect();
+    const prev = el.style.pointerEvents;
+    el.style.pointerEvents = 'auto';
+    const hit = document.elementFromPoint(Math.round(tr.left + 20), Math.round(tr.top + tr.height / 2));
+    el.style.pointerEvents = prev;
+    return hit ? (hit.className || hit.tagName).toString() : 'none';
+  })()`);
+  record('文案不被上层元素遮挡', /conv-presence/.test(occluded), `hit=${occluded}`);
+
+  // ---------- 5. 长目标不溢出、头像零位移 ----------
   const longTarget = 'packages/' + 'x'.repeat(80) + '/very-long-file-name.ts';
   await run(`document.getElementById('pod').innerHTML = ${JSON.stringify(
     presenceHtml('tool', `<span class="conv-presence__verb">正在读</span><span class="conv-presence__target">${longTarget}</span>`)
