@@ -28,6 +28,39 @@
 /** 实体活动三态 */
 export type ActivityState = 'running' | 'unread' | 'read';
 
+/** 完成瞬态跃迁标记：用于列表行在刚完成时播放一次收敛动画 */
+export type ActivityTransition = 'none' | 'just-completed';
+
+/** 实体活动状态的静态规格描述 */
+export interface ActivityStatusSpec {
+  readonly state: ActivityState;
+  readonly priority: number;
+  readonly isTransient: boolean;
+  readonly rendersIndicator: boolean;
+}
+
+/** 三态规格权威查找表（优先级严格为 running > unread > read） */
+export const ACTIVITY_STATUS_TABLE: Readonly<Record<ActivityState, ActivityStatusSpec>> = Object.freeze({
+  running: Object.freeze({
+    state: 'running',
+    priority: 2,
+    isTransient: true,
+    rendersIndicator: true,
+  }),
+  unread: Object.freeze({
+    state: 'unread',
+    priority: 1,
+    isTransient: false,
+    rendersIndicator: true,
+  }),
+  read: Object.freeze({
+    state: 'read',
+    priority: 0,
+    isTransient: false,
+    rendersIndicator: false,
+  }),
+});
+
 /** 实体域：会话 / 专职 Bot / 群聊房间，各自独立一整套集合 */
 export type ActivityDomain = 'session' | 'bot' | 'group';
 
@@ -152,12 +185,135 @@ export function applyEnteredRead(unread: Set<string>, entityId: string): void {
 export function settleTurnTermination(params: {
   runningSessionIds: Set<string>;
   runningBotNames: Set<string>;
+  runningGroupRoomIds?: Set<string>;
   sessionId?: string | null;
   botName?: string | null;
+  groupRoomId?: string | null;
 }): void {
-  const { runningSessionIds, runningBotNames, sessionId, botName } = params;
+  const {
+    runningSessionIds,
+    runningBotNames,
+    runningGroupRoomIds,
+    sessionId,
+    botName,
+    groupRoomId,
+  } = params;
   if (sessionId) runningSessionIds.delete(sessionId);
   if (botName) runningBotNames.delete(botName);
+  if (runningGroupRoomIds && groupRoomId) runningGroupRoomIds.delete(groupRoomId);
+}
+
+interface TransitionEntry {
+  token: number;
+  targetState: 'unread' | 'read';
+  expiresAt: number;
+}
+
+export interface ActivityTransitionResult {
+  transition: ActivityTransition;
+  transitionToken?: number;
+}
+
+/**
+ * 列表项完成瞬态跃迁追踪器 (ActivityTransitionTracker)
+ *
+ * 【设计意图 (Why)】
+ *   当实体从 `running` 正常结束并收敛为 `unread` 或 `read` 时，UI 列表行需要在短暂窗口期（默认 360ms）
+ *   内触发一次性的完成跃迁动画（`just-completed`），同时用单调递增 `transitionToken` 区分相邻两次完成。
+ *   将时间窗口与状态一致性判定下沉为零 timer 的纯逻辑类，方便核心状态机与跨端渲染共用。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   1. 若仅靠布尔标记触发动画，当用户在同一实体连续发起新回合或点进实体使其从 `unread` 变成 `read` 时，
+ *      残留标记会导致状态错配时误播或重播动画。
+ *   2. 直接在 Core 中绑定 `window.setTimeout` 会导致跨端测试不可确定且泄漏句柄，必须由调用方按
+ *      `nextExpiryDelayMs(nowMs)` 自行驱动刷新。
+ *
+ * 【约束与规则 (Rules)】
+ *   - 零 DOM / 零 React / 零全局 timer 绑定，完全依赖显式传入的 `nowMs`；
+ *   - 按 `${domain}::${entityId}` 隔离存储，严禁跨域串扰；
+ *   - 当 `entry.targetState !== currentState` 或 `nowMs >= entry.expiresAt` 时必须清理失效条目并返回 `none`。
+ */
+export class ActivityTransitionTracker {
+  private readonly windowMs: number;
+  private readonly entries = new Map<string, TransitionEntry>();
+  private nextToken = 1;
+
+  constructor(options?: { windowMs?: number }) {
+    const rawWindow = options?.windowMs;
+    this.windowMs =
+      typeof rawWindow === 'number' && Number.isFinite(rawWindow) && rawWindow >= 0
+        ? rawWindow
+        : 360;
+  }
+
+  private static makeKey(domain: ActivityDomain, entityId: string): string {
+    return `${domain}::${entityId}`;
+  }
+
+  public recordCompleted(
+    domain: ActivityDomain,
+    entityId: string,
+    targetState: 'unread' | 'read',
+    nowMs: number
+  ): number {
+    if (!entityId) return 0;
+    const token = this.nextToken++;
+    this.entries.set(ActivityTransitionTracker.makeKey(domain, entityId), {
+      token,
+      targetState,
+      expiresAt: nowMs + this.windowMs,
+    });
+    return token;
+  }
+
+  public clear(domain: ActivityDomain, entityId: string): void {
+    if (!entityId) return;
+    this.entries.delete(ActivityTransitionTracker.makeKey(domain, entityId));
+  }
+
+  public clearAll(): void {
+    this.entries.clear();
+  }
+
+  public resolveTransition(
+    domain: ActivityDomain,
+    entityId: string,
+    currentState: ActivityState,
+    nowMs: number
+  ): ActivityTransitionResult {
+    if (!entityId || currentState === 'running') {
+      return { transition: 'none' };
+    }
+    const key = ActivityTransitionTracker.makeKey(domain, entityId);
+    const entry = this.entries.get(key);
+    if (!entry) {
+      return { transition: 'none' };
+    }
+    if (nowMs >= entry.expiresAt || entry.targetState !== currentState) {
+      this.entries.delete(key);
+      return { transition: 'none' };
+    }
+    return {
+      transition: 'just-completed',
+      transitionToken: entry.token,
+    };
+  }
+
+  public nextExpiryDelayMs(nowMs: number): number | null {
+    let minRemaining: number | null = null;
+    for (const [key, entry] of this.entries) {
+      if (nowMs >= entry.expiresAt) {
+        this.entries.delete(key);
+        continue;
+      }
+      const remaining = entry.expiresAt - nowMs;
+      if (minRemaining === null || remaining < minRemaining) {
+        minRemaining = remaining;
+      }
+    }
+    if (minRemaining === null) return null;
+    return Math.max(1, minRemaining);
+  }
 }
 
 /**
