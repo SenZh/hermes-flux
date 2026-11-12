@@ -7,12 +7,14 @@ import {
   canSendDraft,
   clampComposerHeight,
   planEnqueue,
+  planEnterAction,
   planQueueAction,
   queuedAfterAction,
+  resolveComposerPhase,
   shouldShowQueueButton,
 } from '../../dist/renderer/queueControl.mjs';
 
-test('输入区高度：44 起、220 顶、回删可收回', async (t) => {
+test('输入区高度：66 起、220 顶、回删可收回', async (t) => {
   await t.test('单行落在下界', () => {
     assert.equal(clampComposerHeight(22), COMPOSER_MIN_HEIGHT);
     assert.equal(clampComposerHeight(0), COMPOSER_MIN_HEIGHT);
@@ -46,7 +48,7 @@ test('入队决策：空草稿跳过，两种失败给不同原因', async (t) =
     const noGateway = planEnqueue({ text: 'hi', hasGateway: false, hasLiveSession: true });
     const noSession = planEnqueue({ text: 'hi', hasGateway: true, hasLiveSession: false });
     assert.deepEqual(noGateway, { kind: 'fail', reasonKey: 'chat.gatewayNotConnected' });
-    assert.deepEqual(noSession, { kind: 'fail', reasonKey: 'dock.busyEnterBlocked' });
+    assert.deepEqual(noSession, { kind: 'fail', reasonKey: 'dock.queueNoLive' });
     assert.notDeepEqual(noGateway, noSession, '两种失败不能共用一条文案');
   });
 
@@ -73,6 +75,32 @@ test('入队回执：没有 admission_id 就是没排上队', async (t) => {
     assert.deepEqual(applyEnqueueReceipt({}, '内容'), { kind: 'failed', reasonKey: 'dock.queueFailed' });
     assert.deepEqual(applyEnqueueReceipt(null, '内容'), { kind: 'failed', reasonKey: 'dock.queueFailed' });
     assert.deepEqual(applyEnqueueReceipt(undefined, '内容'), { kind: 'failed', reasonKey: 'dock.queueFailed' });
+  });
+});
+
+test('输入舱相位与回车分派：渲染与按键必须读同一份真值', async (t) => {
+  await t.test('相位只由本会话活跃回合决定', () => {
+    assert.equal(resolveComposerPhase({ activeTurn: false }), 'idle');
+    assert.equal(resolveComposerPhase({ activeTurn: true }), 'running');
+  });
+
+  await t.test('空闲态回车一律提交，含空草稿', () => {
+    assert.deepEqual(planEnterAction({ phase: 'idle', text: '你好', attachmentCount: 0 }), { kind: 'submit' });
+    assert.deepEqual(planEnterAction({ phase: 'idle', text: '', attachmentCount: 0 }), { kind: 'submit' });
+  });
+
+  await t.test('运行态回车入队，绝不返回阻断提示', () => {
+    // 【规则】历史缺陷：运行态回车弹「当前回合仍在生成中」，用户无从下手；
+    //   停止是主按钮职责，回车只负责把草稿交给队列。
+    assert.deepEqual(planEnterAction({ phase: 'running', text: '排队内容', attachmentCount: 0 }), { kind: 'enqueue' });
+  });
+
+  await t.test('运行态空草稿静默跳过，不算失败', () => {
+    assert.deepEqual(planEnterAction({ phase: 'running', text: '   ', attachmentCount: 0 }), { kind: 'ignore' });
+  });
+
+  await t.test('附件也算草稿', () => {
+    assert.deepEqual(planEnterAction({ phase: 'running', text: '', attachmentCount: 1 }), { kind: 'enqueue' });
   });
 });
 

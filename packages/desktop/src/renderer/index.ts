@@ -211,8 +211,10 @@ import {
   canSendDraft,
   clampComposerHeight,
   planEnqueue,
+  planEnterAction,
   planQueueAction,
   queuedAfterAction,
+  resolveComposerPhase,
   shouldShowQueueButton,
 } from './queueControl.js';
 
@@ -3336,7 +3338,7 @@ async function prefetchSlashCatalog(): Promise<void> {
     const pushCmd = (name: string, desc: string) => {
       if (!name) return;
       const normalized = name.startsWith('/') ? name : `/${name}`;
-      items.push({ name: normalized, description: desc });
+      items.push({ name: normalized, description: localizeSlashDescription(normalized, desc) });
     };
     for (const pair of cat.pairs || []) {
       if (pair[0]) pushCmd(pair[0], pair[1] || '');
@@ -3347,7 +3349,8 @@ async function prefetchSlashCatalog(): Promise<void> {
       }
     }
     for (const skillName of Object.keys(cat.skills || {})) {
-      if (skillName) items.push({ name: skillName.startsWith('/') ? skillName : `/${skillName}`, description: 'Skill', isSkill: true });
+      // 【规则】技能条目的说明走字典，不得裸写英文 'Skill' 混进中文界面。
+      if (skillName) items.push({ name: skillName.startsWith('/') ? skillName : `/${skillName}`, description: t('slash.skillKind'), isSkill: true });
     }
     const seen = new Set<string>();
     slashCatalogSnapshot = items.filter((it) => (seen.has(it.name) ? false : (seen.add(it.name), true)));
@@ -3377,7 +3380,7 @@ function requestSlashCompletion(query: string): void {
         const replaceFrom = typeof res.replace_from === 'number' ? res.replace_from : undefined;
         resolved = (res.items || []).map((it) => ({
           name: it.text,
-          description: it.meta || it.display || '',
+          description: localizeSlashDescription(it.text, it.meta || it.display || ''),
           isSkill: it.kind === 'skill',
           replaceFrom: it.kind ? replaceFrom : undefined,
         }));
@@ -3390,10 +3393,33 @@ function requestSlashCompletion(query: string): void {
     const base = resolved && resolved.length > 0
       ? resolved
       : slashCatalogSnapshot.filter((c) => c.name.toLowerCase().includes(query.toLowerCase()));
-    state.slashItems = base.slice(0, 12);
+    // 【规则】不得截断：complete.slash 是网关按前缀过滤的权威通道，条数由网关决定。
+    //   历史实现写死 slice(0, 12)，`/s` 这类宽前缀下第 13 条起永远不可见，用户会以为命令不存在。
+    //   浮层列表本身有 max-height + overflow-y，超长由滚动承担，不靠丢数据换高度。
+    state.slashItems = base;
     state.slashPopperOpen = state.slashItems.length > 0;
     render();
   }, 120);
+}
+
+/**
+ * 斜杠命令说明的本地化。
+ *
+ * 【设计意图 (Why)】
+ *   `complete.slash` 的 `meta` 是网关英文原文（`Start a new session (fresh session ID + history)`），
+ *   直接上屏等于把 CLI 帮助文本塞进中文界面。命令名是技术标识必须保留原文，
+ *   但说明是自然语言，必须跟随界面语言。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 字典只覆盖已确认存在的命令；未收录的命令回退网关原文，绝不编造说明；
+ *   2. 命令名（`/compress`）永不翻译，只翻译它后面那句说明。
+ */
+function localizeSlashDescription(name: string, fallback: string): string {
+  const bare = name.replace(/^\//, '');
+  const key = `slash.${bare}` as Parameters<typeof t>[0];
+  const translated = t(key);
+  // t() 对缺失键会原样返回键名，据此判定是否命中字典。
+  return translated === key ? fallback : translated;
 }
 
 function inputTokenSnapshot(): { fullText: string } {
@@ -5433,7 +5459,8 @@ async function enqueueDraft(): Promise<void> {
   }
   const liveId = await ensureLiveSessionId();
   if (!liveId) {
-    setTimedDockNotice(t('dock.busyEnterBlocked'));
+    // 【规则】入队失败的原因是通道缺失，不是"回合进行中"：复用 busyEnterBlocked 会把用户引向停止按钮。
+    setTimedDockNotice(t('dock.queueNoLive'));
     render();
     return;
   }
@@ -9225,7 +9252,7 @@ function bindEvents(): void {
   const inputEl = document.getElementById('dock-prompt-input') as HTMLTextAreaElement;
   let isComposing = false;
 
-  // 输入区高度：44px 起步，按 scrollHeight 增长，触顶 220px 后转内部滚动。
+  // 输入区高度：66px 起步，按 scrollHeight 增长，触顶 220px 后转内部滚动。
   // 【规则】先把 height 归 auto 再量 scrollHeight，回删时高度才能同步收回；
   //   高度不做过渡，避免高频输入时把排版抖动放大成跳行。边界值定义在 queueControl.ts。
   const syncComposerHeight = () => {
@@ -9246,15 +9273,18 @@ function bindEvents(): void {
 
   const handleSend = (source: 'button' | 'enter') => {
     if (!inputEl) return;
-    if (state.isStreaming) {
-      // 运行中主按钮已经是停止，回车不承担中断职责。
-      if (source === 'enter') {
-        setTimedDockNotice(t('dock.busyEnterBlocked'));
-        render();
-      }
-      return;
-    }
-    submitDraft();
+    // 【规则】相位与回车动作都走纯决策层，渲染与按键读同一份输入：
+    //   历史上渲染读 isStreamingActiveForCurrentSession()、按键读 state.isStreaming，
+    //   切换会话后两者分歧，界面明明是发送按钮，回车却弹「回合仍在生成中」。
+    //   运行态下发送按钮并不存在（主按钮是停止），入队按钮有自己的 onclick，
+    //   因此这里只需把 idle 交给 submitDraft、把 running 交给 enqueueDraft。
+    const action = planEnterAction({
+      phase: resolveComposerPhase({ activeTurn: isStreamingActiveForCurrentSession() }),
+      text: inputEl.value,
+      attachmentCount: state.attachments.length,
+    });
+    if (action.kind === 'submit') submitDraft();
+    if (action.kind === 'enqueue') void enqueueDraft();
   };
 
   // 空内容时发送禁用；网关未连接时模板已写死 disabled + data-locked，这里不得擅自解锁。
@@ -9325,7 +9355,6 @@ function bindEvents(): void {
         if (mentionMatch) {
           const query = mentionMatch[1].toLowerCase();
           const agentItems: MentionReferenceOption[] = [];
-          const isBotChat = state.activeFocus.type === 'bot';
           const isGroupChat = state.activeFocus.type === 'group';
 
           if (isGroupChat) {
@@ -9340,8 +9369,13 @@ function bindEvents(): void {
                 agentItems.push({ type: 'agent', name: member, detail: t('mention.groupMember') });
               }
             }
-          } else if (!isBotChat) {
+          } else {
+            // 【规则】专职 Bot 主工位同样要列 @ 候选：该会话的发路由 planSendRoute 判定为 mention-btw，
+            //   浮层不给任何 Bot 就等于把「旁路外援」这条唯一通道藏起来。
+            //   只是主工位不应把「自己」列为候选 —— 自指既无意义，也会让 btw 路由指向本 Bot。
+            const selfName = state.activeFocus.type === 'bot' ? state.activeFocus.botName : null;
             for (const p of state.profiles) {
+              if (selfName && (p.name === selfName || p.displayName === selfName)) continue;
               agentItems.push({ type: 'agent', name: p.displayName || p.name, detail: p.name });
             }
           }

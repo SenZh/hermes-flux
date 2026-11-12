@@ -76,14 +76,32 @@ test('Composer dock - 输入舱语义与几何', async (t) => {
     assert.ok(block.includes('animation: composer-stop-breath'), '停止方块带呼吸动效');
   });
 
-  await t.test('5. 输入区 44px 起步，触顶 220px 后内部滚动', () => {
+  await t.test('5. 输入区 66px 起步，触顶 220px 后内部滚动', () => {
     const editor = blockOf('.composer-dock__textarea');
-    assert.ok(editor.includes('min-height: 44px'), '单行高度必须从 44px 起步');
+    assert.ok(editor.includes('min-height: 66px'), '默认高度必须从 66px 起步（两行正文）');
     assert.ok(editor.includes('max-height: 220px'), '上限必须是 220px');
     assert.ok(editor.includes('overflow-y: auto'), '触顶后交给内部滚动');
     assert.ok(editor.includes('resize: none'), '禁止浏览器原生拖拽手柄');
     assert.ok(editor.includes('font-size: var(--chat-text-markdown)'), '字号跟随设置档位');
     assert.ok(!editor.includes('transition'), '高度不得做过渡');
+  });
+
+  await t.test('5b. 浮层描边与输入舱同源：一律 --border，不得抬到 --border-strong', () => {
+    // 【规则】浮层与输入舱必须共用同一条发丝线。--border-strong 在浅色皮肤上是
+    //   偏黑的灰（ayu-light #8C8C8A），弹框会浮出一圈比输入框更重的边框，视觉断裂。
+    const shell = blockOf('.input-card-box.composer-dock');
+    assert.ok(shell.includes('border: 1px solid var(--border)'), '输入舱用 --border');
+
+    for (const selector of [
+      '.composer-popper',
+      '.model-dropdown-menu',
+      '.model-cascade',
+      '.composer-approval-menu',
+    ]) {
+      const rule = blockOf(selector);
+      assert.ok(rule.includes('border: 1px solid var(--border)'), `${selector} 必须与输入舱同一条发丝线`);
+      assert.ok(!rule.includes('var(--border-strong)'), `${selector} 不得使用 --border-strong`);
+    }
   });
 
   await t.test('6. 附件删除键：视觉 16px 圆盘，桌面命中区 28px，且禁止抬到 44px', () => {

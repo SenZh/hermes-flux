@@ -26,7 +26,7 @@
 | 外壳圆角 | `var(--radius-window)` = 12px | 与对话区代码块同源 |
 | 外壳描边 | `1px solid var(--border)` | 唯一一条语义发丝线 |
 | 外壳投影 | `none` | 输入面靠内陷层次，不靠阴影浮起 |
-| 输入区高度 | `44px → 220px` | 单行 22px 行高 + 上下内距 11px |
+| 输入区高度 | `66px → 220px` | 默认两行正文 44px + 上下内距 22px |
 | 命中区 | `28px` | 发送 / 停止 / 附件 / 审批共用 |
 | 控件圆角 | `6px` | 图标按钮与模型触发控件一致 |
 | 按钮列宽 | `28px` | 运行态为两枚上下排列，列高 58px |
@@ -35,7 +35,7 @@
 ### 输入区自动增高契约
 
 ```
-height = min(max(scrollHeight, 44), 220)
+height = min(max(scrollHeight, 66), 220)
 ```
 
 1. 每次测量前先把 `height` 归 `auto`，否则回删时 `scrollHeight` 不会变小，高度会卡在 220px。
@@ -64,6 +64,8 @@ resolveComposerPrimaryAction(phase) // idle -> send, running -> stop
 | `running` | 红色实心方块 | `session.interrupt`（`interruptTurn`） |
 
 运行中有草稿时，发送图标会作为「加入待发送队列」入口叠在停止上方。该状态依赖网关 `pending_rows` 同步，见第六节。
+
+回车在运行态一律入队，不弹阻断提示：停止是主按钮的职责，回车不承担中断。空草稿静默跳过，不算失败。相位判定与渲染同源，都取「本会话是否有活跃回合」，不读 `state.isStreaming` —— 后者只反映最近一次写入，切换会话后不跟着变。
 
 ### 3.2 审批三态
 
@@ -142,6 +144,9 @@ resolveComposerPrimaryAction(phase) // idle -> send, running -> stop
 1. 命令名与文件名使用主前景色（深色白字、浅色黑字），路径与描述退到 `--muted-foreground`。
 2. 字体走 `--font-sans`，不使用等宽。
 3. 回车提示使用矢量 return 图标，不用字符符号。
+4. 斜杠命令条数由网关 `complete.slash` 决定，客户端不得截断；超长由列表 `max-height` + `overflow-y` 承担。
+5. 命令名保留原文（技术标识），说明走 i18n 字典 `slash.<command>`，未收录的命令回退网关原文，不编造。
+6. `@` 候选在三种会话下都必须可用：群聊取房间成员并置顶 `all`；普通会话取全部 Bot；专职 Bot 主工位取其他 Bot 并排除自身（自指会把 `mention-btw` 路由指向本 Bot）。
 
 ### 5.4 附件轨
 
@@ -196,9 +201,22 @@ resolveComposerPrimaryAction(phase) // idle -> send, running -> stop
 1. 外壳使用 `--input`、1px 发丝边、12px 圆角、零投影、740px 限宽。
 2. 聚焦态不描边、不叠环。
 3. 发送 / 停止共用 28px 命中区，无边框无底色；禁用只降 `--faint`。
-4. 输入区 `min-height: 44px`、`max-height: 220px`、无高度过渡。
+4. 输入区 `min-height: 66px`、`max-height: 220px`、无高度过渡。
 5. 附件轨位于外壳之前，收起按钮已移除。
 6. 模型触发控件包含名称、分隔符与思考等级。
 7. 空闲只渲染发送，运行只渲染停止，停止按钮不含可见中文。
 8. 审批三态渲染完整，且只有一个当前项。
 9. 纯函数：主按钮相位、审批别名归一、思考等级五档文案。
+10. 浮层描边与输入舱同源（一律 `--border`，不得抬到 `--border-strong`）。
+
+`packages/desktop/__tests__/unit/queue-control.test.mjs` 覆盖：
+
+1. 输入区高度 66 起、220 顶、非有限值回落。
+2. 入队三态：空草稿跳过、无网关与无实时通道给不同原因、正常草稿带 trim 文本。
+3. 回车分派：空闲一律提交；运行态有草稿入队、空草稿静默；附件也算草稿。
+
+`scripts/verify/verify-dock-three-fixes.mjs` 在真实渲染产物上取证：
+
+1. Bot 主工位 `@` 列出其他 Bot 且排除自己，群聊仍按房间成员。
+2. 斜杠列表不再截断到 12 条，超长由列表滚动承担。
+3. 界面为发送按钮时回车不弹「回合仍在生成中」。

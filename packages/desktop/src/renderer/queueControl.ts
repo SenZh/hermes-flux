@@ -13,7 +13,7 @@
  */
 
 /** 输入区高度边界，与 `conversation.css` 的 min-height / max-height 必须一致。 */
-export const COMPOSER_MIN_HEIGHT = 44;
+export const COMPOSER_MIN_HEIGHT = 66;
 export const COMPOSER_MAX_HEIGHT = 220;
 
 /**
@@ -48,7 +48,7 @@ export function planEnqueue(input: {
   const text = input.text.trim();
   if (!text) return { kind: 'skip' };
   if (!input.hasGateway) return { kind: 'fail', reasonKey: 'chat.gatewayNotConnected' };
-  if (!input.hasLiveSession) return { kind: 'fail', reasonKey: 'dock.busyEnterBlocked' };
+  if (!input.hasLiveSession) return { kind: 'fail', reasonKey: 'dock.queueNoLive' };
   return { kind: 'submit', text };
 }
 
@@ -118,4 +118,42 @@ export function shouldShowQueueButton(input: { text: string; attachmentCount: nu
 /** 空闲态发送是否可用。 */
 export function canSendDraft(input: { text: string; attachmentCount: number }): boolean {
   return input.text.trim().length > 0 || input.attachmentCount > 0;
+}
+
+/**
+ * 主按钮相位。
+ *
+ * 【设计意图 (Why)】
+ *   `state.isStreaming` 与「本会话是否有活跃回合」是两个真值：前者只反映最近一次写入，
+ *   切换会话后不会跟着变。渲染曾用后者、回车判定用前者，于是出现
+ *   「界面是发送按钮，回车却弹回合进行中」的错位。
+ *   把相位收成一个纯函数，渲染与按键读同一份输入，这类分歧在类型上就无法再写出来。
+ */
+export function resolveComposerPhase(input: {
+  /** 本会话是否有活跃回合（isStreamingActiveForCurrentSession 的结果） */
+  activeTurn: boolean;
+}): 'idle' | 'running' {
+  return input.activeTurn ? 'running' : 'idle';
+}
+
+/** 回车在给定相位下该做什么。 */
+export type EnterAction =
+  | { kind: 'submit' }
+  | { kind: 'enqueue' }
+  | { kind: 'ignore' };
+
+/**
+ * 回车分派。
+ *
+ * 【规则】运行态回车必须入队而不是弹阻断提示：停止是主按钮的职责，回车不承担中断。
+ *   空草稿时不入队也不报错（跳过不是失败）。
+ */
+export function planEnterAction(input: {
+  phase: 'idle' | 'running';
+  text: string;
+  attachmentCount: number;
+}): EnterAction {
+  const hasDraft = input.text.trim().length > 0 || input.attachmentCount > 0;
+  if (input.phase === 'idle') return { kind: 'submit' };
+  return hasDraft ? { kind: 'enqueue' } : { kind: 'ignore' };
 }

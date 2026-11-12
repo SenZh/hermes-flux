@@ -225,7 +225,7 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
     const dockCss = fs.readFileSync(new URL('../../src/styles/conversation.css', import.meta.url), 'utf8');
     const textareaRule = /\.composer-dock__textarea\s*\{([\s\S]*?)\}/.exec(dockCss);
     assert.ok(textareaRule, '必须定义 .composer-dock__textarea');
-    assert.match(textareaRule[1], /min-height:\s*44px/, '单行高度必须从 44px 起步');
+    assert.match(textareaRule[1], /min-height:\s*66px/, '默认高度必须从 66px 起步（两行正文）');
     assert.match(textareaRule[1], /max-height:\s*220px/, '上限必须是 220px');
     assert.match(textareaRule[1], /overflow-y:\s*auto/, '触顶后交给内部滚动');
   });

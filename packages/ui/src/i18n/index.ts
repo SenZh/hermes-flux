@@ -189,6 +189,7 @@ export const zhDict = {
   'dock.queueSubmit': '加入待发送队列',
   'dock.queueFailed': '加入队列失败',
   'dock.queueActionFailed': '队列操作失败',
+  'dock.queueNoLive': '会话通道未激活，无法加入队列，请稍后重试',
   'dock.busyEnterBlocked': '当前回合仍在生成中，可点击停止按钮中断',
 
   // Input Dock & Expansion
@@ -394,6 +395,21 @@ export const zhDict = {
   'dock.attachTooltip': '附加文件 (支持多选、拖拽与剪贴板)',
   'dock.slashHeader': '斜杠命令与技能',
   'dock.mentionHeader': '智能引用与专家分身',
+
+  // Slash command descriptions (key = `slash.<command>`); unknown commands fall back to gateway text
+  'slash.new': '开启全新会话（新的会话 ID 与历史）',
+  'slash.reset': '开启全新会话（/new 的别名）',
+  'slash.save': '导出当前对话',
+  'slash.retry': '重发上一条消息',
+  'slash.undo': '回退 N 个用户回合并重新提示（默认 1）',
+  'slash.title': '设置当前会话标题',
+  'slash.branch': '从当前会话分叉新分支',
+  'slash.fork': '从当前会话分叉新分支（/branch 的别名）',
+  'slash.compress': '压缩对话上下文',
+  'slash.compact': '压缩对话上下文（/compress 的别名）',
+  'slash.rollback': '列出或恢复文件系统检查点',
+  'slash.stop': '终止所有后台进程',
+  'slash.skillKind': '技能',
   'dock.cmdClear': '清空会话屏幕',
   'dock.cmdModel': '切换当前模型',
   'dock.cmdCompact': '压缩上下文历史',
@@ -821,6 +837,7 @@ export const enDict: Record<I18nKey, string> = {
   'dock.queueSubmit': 'Add to pending queue',
   'dock.queueFailed': 'Failed to add to the queue',
   'dock.queueActionFailed': 'Queue action failed',
+  'dock.queueNoLive': 'Session channel inactive, cannot queue. Try again shortly.',
   'dock.busyEnterBlocked': 'The current turn is still running. Use the stop button to interrupt it.',
 
   // Input Dock & Expansion
@@ -1022,6 +1039,20 @@ export const enDict: Record<I18nKey, string> = {
   'dock.attachTooltip': 'Attach files (supports multi-select, drag & drop, paste)',
   'dock.slashHeader': 'Slash Commands & Skills',
   'dock.mentionHeader': 'Smart Mentions & Specialists',
+
+  'slash.new': 'Start a new session (fresh session ID + history)',
+  'slash.reset': 'Start a new session (alias for /new)',
+  'slash.save': 'Export the current conversation',
+  'slash.retry': 'Retry the last message',
+  'slash.undo': 'Back up N user turns and re-prompt (default 1)',
+  'slash.title': 'Set a title for the current session',
+  'slash.branch': 'Branch the current session',
+  'slash.fork': 'Branch the current session (alias for /branch)',
+  'slash.compress': 'Compress conversation context',
+  'slash.compact': 'Compress conversation context (alias for /compress)',
+  'slash.rollback': 'List or restore filesystem checkpoints',
+  'slash.stop': 'Kill all running background processes',
+  'slash.skillKind': 'Skill',
   'dock.cmdClear': 'Clear conversation screen',
   'dock.cmdModel': 'Switch active model',
   'dock.cmdCompact': 'Compact context history',

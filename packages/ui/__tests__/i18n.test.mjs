@@ -31,6 +31,7 @@ test('i18n standard dictionary parity and placeholder interpolation', async (t) 
       'dock.queueSubmit',
       'dock.queueFailed',
       'dock.queueActionFailed',
+      'dock.queueNoLive',
       'dock.busyEnterBlocked',
     ];
     for (const key of dockKeys) {
@@ -42,6 +43,23 @@ test('i18n standard dictionary parity and placeholder interpolation', async (t) 
     // 审批三态文案必须三档互不相同，否则用户看不出切换了哪一档
     const labels = [zhDict['dock.approvalManual'], zhDict['dock.approvalSmart'], zhDict['dock.approvalOff']];
     assert.equal(new Set(labels).size, 3, '审批三态的中文文案必须互不相同');
+  });
+
+  await t.test('斜杠命令说明必须跟随界面语言，命令名保持原文', () => {
+    // 【规则】命令名是技术标识（/compress），说明是自然语言。
+    //   历史上说明直接取网关英文原文，中文界面里出现整句英文 CLI 帮助文本。
+    const commands = ['new', 'reset', 'save', 'retry', 'undo', 'title', 'branch', 'fork', 'compress', 'compact', 'rollback', 'stop'];
+    for (const name of commands) {
+      const key = `slash.${name}`;
+      assert.ok(key in zhDict, `zhDict 缺少 ${key}`);
+      assert.ok(key in enDict, `enDict 缺少 ${key}`);
+      assert.ok(!/[\u4e00-\u9fa5]/.test(zhDict[key]) === false, `${key} 的中文说明必须是中文`);
+      assert.ok(!/[A-Za-z]{4,}/.test(zhDict[key].replace(/\/[a-z]+/g, '')), `${key} 的中文说明不得残留英文句子`);
+    }
+    // 中英说明必须不同，否则等于没本地化
+    for (const name of commands) {
+      assert.notEqual(zhDict[`slash.${name}`], enDict[`slash.${name}`], `slash.${name} 的中英说明不得相同`);
+    }
   });
 
   await t.test('t() function must resolve keys and format parameters', () => {
