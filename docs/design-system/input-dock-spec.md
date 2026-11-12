@@ -152,15 +152,44 @@ resolveComposerPrimaryAction(phase) // idle -> send, running -> stop
 
 ---
 
-## 六、未落地与后续
+## 八、Token 对比度矩阵
+
+`node scripts/design-audit/contrast-matrix.mjs` 从 `skins.ts` 直接算出下表；`--check` 在任一对跌破阈值时以非零退出。
+
+口径按用途分开：正文文字按 AA 4.5:1，非文本图形（图标、状态点、停止方块）按 AA 3.0:1。混用一个阈值会产出假失败。
+
+| 前景 on 背景 | 口径 | 黑曜琥珀 | 极简冷灰 | 经典暖白 | Ayu 晨曦 | 赛博冷翠 |
+|---|---|---|---|---|---|---|
+| `--foreground on --panel` | 正文 4.5 | 14.73 | 17.74 | 13.48 | 12.51 | 17.34 |
+| `--foreground on --input` | 正文 4.5 | 15.15 | 16.83 | 15.80 | 14.65 | 17.34 |
+| `--foreground on --popover` | 正文 4.5 | 13.98 | 17.74 | 15.80 | 14.65 | 15.26 |
+| `--secondary-foreground on --panel` | 正文 4.5 | 7.04 | 7.56 | 5.45 | 6.68 | 13.01 |
+| `--secondary-foreground on --input` | 正文 4.5 | 7.24 | 7.17 | 6.39 | 7.83 | 13.01 |
+| `--muted-foreground on --panel` | 正文 4.5 | 5.86 | 5.62 | 4.63 | 4.99 | 10.48 |
+| `--muted-foreground on --input` | 正文 4.5 | 6.03 | 5.33 | 5.43 | 5.85 | 10.48 |
+| `--muted-foreground on --popover` | 正文 4.5 | 5.56 | 5.62 | 5.43 | 5.85 | 9.22 |
+| `--destructive on --input` | 图形 3.0 | 4.89 | 4.58 | 4.83 | 3.26 | 4.85 |
+| `--success on --input` | 图形 3.0 | 7.25 | 5.20 | 5.48 | 5.48 | 7.20 |
+
+这张表抓出过两个真实皮肤洞，都已修：
+
+1. `warm-paper` 的 `--card-active` 原本与 `--popover` 同为 `#FFFFFF`，选中行底色对比度 1.00:1 完全消失。改为 `#E3E1DA`（1.31:1），并靠内描边与勾选表达选中。
+2. 三套浅色皮肤的 `--success` 原本是 `#10B981` / `#5FB978`，作为 11px 文字压白底只有 2.41~2.54:1。改为 `#047857`（5.20~5.48:1）。
+
+由此新增两条门禁：
+
+- `theme/border-token-as-color`：`color:` 属性禁止引用 `--border*`（它是半透明描边色，五套皮肤实测 1.57~3.37:1）。
+- 本矩阵的 `--check` 模式，建议接入 CI。
+
+## 九、未落地与后续
 
 1. **运行中入队的服务端同步。** 客户端已具备完整链路：运行中有草稿时发送图标作为「加入待发送队列」入口（`prompt.submit` 的 `queued: true`），成功后按 `admission_id` 追加展示行；三动作分别走 `prompt.cancel` / `prompt.steer_queued`，均封装在 core `InteractiveService`。**尚未落地**的是网关 `pending_rows` 快照的订阅：目前队列只有本端刚提交的条目，刷新或换端后不会从服务端恢复，跨端取消也不会同步。补齐点：握手帧 `session_authority` 建立后订阅 `pending` 快照并写入 `state.queuedMessages`。
 2. **设置页模型选择器。** `ModelOptionRow` 已复用同一套名称与图标解析，视觉不在本规范范围。
-3. **移动端。** 28px 命中区在触屏断点下由 `styles.css` 抬到 44px，属于既有约定，本规范不改。
+3. **移动端。** 28px 命中区在触屏断点下由 `styles.css` 抬到 44px；附件删除键是唯一豁免项（缩略图只有 56px，44px 会盖住 61.7% 面积，点图预览就会误删）。
 
 ---
 
-## 七、验证
+## 十、验证
 
 `packages/ui/__tests__/composer-dock.test.mjs` 覆盖：
 

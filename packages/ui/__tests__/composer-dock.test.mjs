@@ -115,6 +115,22 @@ test('Composer dock - 输入舱语义与几何', async (t) => {
     assert.ok(!sep.includes('var(--border-strong)'), '分隔符禁止复用描边色');
     assert.ok(!sep.includes('var(--faint)'), '分隔符禁止用 faint（ayu-light 仅 2.01:1）');
   });
+
+  await t.test('8. 选中态不得只靠单一底色：warm-paper 的 card-active 曾与 popover 同为白', () => {
+    // 【规则】warm-paper 皮肤已把 --card-active 从 #FFFFFF 修正为 #E3E1DA（对白 1.31:1）。
+    //   这里守住「选中底色必须与浮层底色可区分」这个不变量，防止皮肤再次塌成同色。
+    const skinsSrc = fs.readFileSync(path.join(repoRoot, 'packages/ui/src/tokens/skins.ts'), 'utf8');
+    const warm = /"warm-paper":\s*\{[\s\S]*?\n  \}/.exec(skinsSrc);
+    assert.ok(warm, '必须存在 warm-paper 皮肤定义');
+    const cardActive = /"--card-active":\s*"([^"]+)"/.exec(warm[0]);
+    const popover = /"--popover":\s*"([^"]+)"/.exec(warm[0]);
+    assert.ok(cardActive && popover, 'warm-paper 必须定义 --card-active 与 --popover');
+    assert.notEqual(
+      cardActive[1].toUpperCase(),
+      popover[1].toUpperCase(),
+      'warm-paper 的选中底色不得与浮层底色相同，否则选中行在视觉上完全消失',
+    );
+  });
 });
 
 test('Composer dock - 渲染产物与状态机', async (t) => {

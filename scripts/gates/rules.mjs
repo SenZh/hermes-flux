@@ -706,6 +706,49 @@ const rawMonospaceRules = {
 };
 
 /**
+ * 探针 ⑤：theme/border-token-as-color
+ *
+ * 【设计意图 (Why)】
+ *   `--border*` 系列在 skins.ts 里的 sources 全部指向 `--border-medium` / `--border-subtle`
+ *   / `--border-strong`，语义上永远是描边。它们被拿来当 `color:` 时，实际拿到的是
+ *   半透明线条色：实测五套皮肤对比度 1.57~3.37:1，全部不达 AA 4.5:1，
+ *   用户看到的是"文字几乎消失"，而换肤门禁只查硬编码色相，根本拦不住这种语义误用。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 判定口径精确到「`color:` 属性引用 `--border*`」：`border-color:` 合法，不拦；
+ *   2. 与既有规则同构（正则 + 去注释行视图），不引入 AST 依赖，保持秒级执行；
+ *   3. 存量违规由债务基线冻结，只拦新增。
+ */
+const borderTokenAsColorRules = {
+  id: 'theme-border-as-color',
+  gate: 'Gate 4',
+  title: '描边色语义（theme/border-token-as-color）',
+  check(file, ctx) {
+    if (!isSkinSurface(file) || file.includes('/tokens/')) return [];
+    if (!ctx.warnings) ctx.warnings = [];
+
+    ctx.codeLines.forEach((line, i) => {
+      // 只匹配独立的 color 属性，排除 border-color / background-color / caret-color 等
+      const m = /(?:^|[;{\s"'])color\s*:\s*([^;`"'>]*)/.exec(line);
+      if (!m) return;
+      if (!/var\(\s*--border(?:-subtle|-strong)?\s*[,)]/.test(m[1])) return;
+      if (hasInlineAllowance(ctx.rawLines, i, 'theme')) return;
+      ctx.warnings.push({
+        file,
+        line: i + 1,
+        ruleId: 'theme/border-token-as-color',
+        message:
+          `[theme/border-token-as-color] :${i + 1} ` +
+          '--border* 是描边色，不能用于文字/图标前景（五套皮肤实测 1.57~3.37:1，全部不达 AA）；' +
+          '文字请用 --foreground / --secondary-foreground / --muted-foreground',
+      });
+    });
+
+    return [];
+  },
+};
+
+/**
  * 探针 ④：typo/no-literal-font-size
  * 设计意图 (Why):
  *   收敛散落字号（如 9.5px、10.5px、11.5px），强制组件使用设计系统 8 档节奏层变量（--fs-*）。
@@ -1452,6 +1495,7 @@ export const RULES = [
   templateExportRules,
   inlineHexRules,
   rawMonospaceRules,
+  borderTokenAsColorRules,
   literalFontSizeRules,
   ghostTokenRules,
   i18nRules,
