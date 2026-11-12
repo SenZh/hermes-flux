@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   deriveEndpointId,
   diffEndpointAcrossProfiles,
+  draftForBindingAttach,
   draftFromEndpoint,
   isValidBaseUrl,
   normalizeBaseUrl,
@@ -312,4 +313,25 @@ test('draftFromEndpoint：GET 不回明文，草稿密钥必须是 keep', () => 
   const draft = draftFromEndpoint(row);
   assert.deepEqual(draft.apiKey, { kind: 'keep' });
   assert.equal(draft.id, 'gw');
+});
+
+test('draftForBindingAttach：勾选空头像时带密钥，并把废弃的声明模型换成运行时目录里的', () => {
+  const [row] = normalizeCustomEndpoints({
+    endpoints: [{ id: 'cpa', base_url: 'https://ai.codepower.cloud/v1', model: 'deepseek-v4.1-flash', models: ['deepseek-v4.1-flash'] }],
+  });
+  const draft = draftForBindingAttach(row, ['cpa/gemini-3.8-flash'], '  sk-live  ');
+  assert.equal(draft.model, 'cpa/gemini-3.8-flash', '声明模型不在运行时目录时必须换到真实可选的那个');
+  assert.deepEqual(draft.apiKey, { kind: 'set', value: 'sk-live' }, '密钥只在本次保存里写入，不能留空白');
+  assert.equal(draft.id, 'cpa');
+  assert.equal(draft.baseUrl, 'https://ai.codepower.cloud/v1', '端点定义仍从原始行还原');
+});
+
+test('draftForBindingAttach：声明模型仍可用时尊重它，没人授权我们换模型', () => {
+  const [row] = normalizeCustomEndpoints({
+    endpoints: [{ id: 'fn', base_url: 'http://172.23.0.1:3425/v1', model: 'group/deepseek-v4.1-flash' }],
+  });
+  assert.equal(
+    draftForBindingAttach(row, ['group/deepseek-v4.1-flash', 'group/mimo-v2.6-pro'], 'k').model,
+    'group/deepseek-v4.1-flash',
+  );
 });

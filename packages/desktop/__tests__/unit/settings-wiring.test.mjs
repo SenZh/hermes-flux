@@ -155,7 +155,22 @@ test('勾选未配置的自定义端点：先从其它成员复制密钥，复�
     block.includes('settingsEndpointProfiles[targetId]'),
     '复制来源必须是配置集合：按 model.options 的在用集合会漏掉未生效成员',
   );
-  assert.ok(block.includes('draftFromEndpoint(row)'), '端点定义仍从原始行还原，不能只复制密钥');
+  assert.ok(
+    block.includes('draftForBindingAttach(row, view.models, key)'),
+    '端点定义、密钥与"运行时目录里的默认模型"必须由同一个纯函数拼装',
+  );
+  assert.ok(
+    block.includes('makeDefault: plan.makeDefault'),
+    '是否改默认模型必须消费 core 的计划，壳层不得再自己写死 false',
+  );
+  assert.ok(
+    block.includes('if (plan.makeDefault && outcome.currentIsDefault === false)'),
+    '只有本次要求改默认模型时才校验结论，且必须报失败，不能留下"有勾无环"',
+  );
+  assert.ok(
+    block.includes('settings.providerToggleNotDefault'),
+    '校验失败必须给出可读原因，不能静默返回',
+  );
 });
 
 test('Esc 关闭必须让位给输入法组合态', () => {

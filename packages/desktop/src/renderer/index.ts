@@ -200,7 +200,7 @@ import {
   planBindingToggle,
   planProviderRemoval,
   normalizeEndpointId,
-  draftFromEndpoint,
+  draftForBindingAttach,
 } from '@hermes-flux/core';
 
 import { parseTranscriptRows } from './transcriptRows.js';
@@ -7430,7 +7430,9 @@ function createSettingsActions(): SettingsActions {
      * 【规则】判定全部交给 core 的 planBindingToggle，壳层只执行与回显：
      *   正在使用的 Agent 不允许取消（用户已确认的策略：先改模型再移除）；
      *   自定义端点新增必须补密钥（网关不回明文）；订阅只能引导去登录。
-     * 【规则】写入时 `makeDefault` 恒为 false：勾选是建立配置关系，不是改主模型。
+     * 【规则】勾选一个空头像就是"让这个 Bot 默认用它"：`makeDefault` 为 true，
+     *   模型取运行时目录里真实存在的那个（`resolveBindingDefaultModel`）。
+     *   早期写成 `makeDefault: false`，于是点完只有勾、没有绿环，用户以为点击没生效。
      */
     onToggleProviderAgent: async (providerId, profile, nextChecked, apiKey) => {
       const controller = getProviderAdminController();
@@ -7497,10 +7499,18 @@ function createSettingsActions(): SettingsActions {
             }
             key = copied.key;
           }
-          const draft = { ...draftFromEndpoint(row), apiKey: { kind: 'set' as const, value: key } };
-          const outcome = await controller.save(profile, draft, { fanOutTo: [], makeDefault: false });
+          // 点空头像 = 让这个 Bot 默认使用这套提供商：声明模型已不在运行时目录时切到目录首项，
+          // 否则主模型会指向一个网关根本选不到的 id。
+          const draft = draftForBindingAttach(row, view.models, key);
+          const outcome = await controller.save(profile, draft, { fanOutTo: [], makeDefault: plan.makeDefault });
           if (!outcome.currentOk) {
             return { ok: false, message: outcome.current.message || t('settings.providerToggleFailed') };
+          }
+          // 网关接受写入但没把端点标成 current 时，不能报成功：界面会留下"有勾无环"，
+          // 正是用户报的"点了没生效"。
+          if (plan.makeDefault && outcome.currentIsDefault === false) {
+            await reloadProviderCatalog();
+            return { ok: false, message: t('settings.providerToggleNotDefault') };
           }
           // 等回读完成再清 pending：否则用户会看到"点了没反应"的旧勾选态。
           await reloadProviderCatalog();

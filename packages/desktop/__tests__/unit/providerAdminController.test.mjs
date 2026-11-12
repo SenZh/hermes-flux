@@ -22,7 +22,7 @@ function makeDeps(overrides = {}) {
     async saveEndpoint(profile, payload) {
       calls.push(['saveEndpoint', profile, payload]);
       if (overrides.failOn?.includes(profile)) throw new Error(`HTTP 400: ${profile} failed`);
-      return { endpoints: [], id: payload.id };
+      return overrides.saveResponse ?? { endpoints: [], id: payload.id };
     },
     async probeEndpoint(payload) {
       calls.push(['probeEndpoint', payload]);
@@ -100,6 +100,43 @@ test('save：当前 Bot 的 make_default 跟随用户选择，扇出一律 false
   assert.equal(saves[1][2].discover_models, true);
   assert.equal(saves[1][2].api_mode, '');
   assert.equal(saves[1][2].base_url, 'https://llm.internal/v1');
+});
+
+test('save：网关写入成功但没把端点标成 current 时，必须如实报告而不是报成功', async () => {
+  const endpointRow = {
+    id: 'internal-gateway',
+    name: 'Internal Gateway',
+    baseUrl: 'https://llm.internal/v1',
+    model: 'm1',
+    models: ['m1'],
+    apiMode: '',
+    discoverModels: true,
+    hasApiKey: false,
+    isCurrent: false,
+    source: 'providers',
+  };
+  const ignored = makeDeps({ saveResponse: { id: 'internal-gateway', endpoints: [endpointRow] } });
+  const notDefault = await ignored.controller.save('default', draft, { fanOutTo: [], makeDefault: true });
+  assert.equal(notDefault.currentOk, true);
+  assert.equal(notDefault.currentIsDefault, false, '网关忽略了 make_default 时必须留下可观测结论');
+
+  const applied = makeDeps({ saveResponse: { id: 'internal-gateway', endpoints: [{ ...endpointRow, isCurrent: true }] } });
+  const isDefault = await applied.controller.save('default', draft, { fanOutTo: [], makeDefault: true });
+  assert.equal(isDefault.currentIsDefault, true);
+
+  const missing = makeDeps();
+  const unknown = await missing.controller.save('default', draft, { fanOutTo: [], makeDefault: true });
+  assert.equal(unknown.currentIsDefault, undefined, '响应里没有该端点行时无法判定，不能伪造结论');
+
+  const prefixed = makeDeps({
+    saveResponse: { id: 'internal-gateway', endpoints: [{ ...endpointRow, id: 'custom:internal-gateway', isCurrent: false }] },
+  });
+  const normalized = await prefixed.controller.save('default', draft, { fanOutTo: [], makeDefault: true });
+  assert.equal(
+    normalized.currentIsDefault,
+    false,
+    '网关把 id 回成 custom: 前缀时仍必须命中同一端点，否则默认模型校验会静默失效',
+  );
 });
 
 test('save：当前 Bot 失败时必须停止，不得把草稿扩散到其他 Bot', async () => {

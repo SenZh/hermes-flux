@@ -249,6 +249,100 @@ test('mergeProviderViews：模型列表取各 profile 里更全的那份', () =>
   assert.deepEqual(fn.models, ['m1', 'm2', 'm3'], '页面若只剩一个模型，"使用"就点不出别的选择');
 });
 
+test('mergeProviderViews：运行时目录优先于端点清单的声明目录', () => {
+  const views = mergeProviderViews({
+    roster,
+    options: [
+      options('default', [row('cpa', ['cpa/gemini-3.8-flash'], true)]),
+      options('aura', []),
+      options('codeboy', []),
+    ],
+    subscriptions: [],
+    endpoints: [
+      { id: 'cpa', name: 'cpa', baseUrl: 'https://ai.codepower.cloud/v1', models: ['deepseek-v4.1-flash'], hasApiKey: true },
+    ],
+  });
+  const cpa = views.find((view) => view.id === 'cpa');
+  assert.deepEqual(
+    cpa.models,
+    ['cpa/gemini-3.8-flash'],
+    '端点清单会保留上游已下架的旧模型；弹框必须展示网关现算的可用目录',
+  );
+});
+
+test('mergeProviderViews：运行时目录完全缺失时退回端点声明模型', () => {
+  const views = mergeProviderViews({
+    roster,
+    options: [],
+    subscriptions: [],
+    endpoints: [
+      { id: 'cpa', name: 'cpa', baseUrl: 'https://ai.codepower.cloud/v1', models: ['deepseek-v4.1-flash'], hasApiKey: true },
+    ],
+  });
+  assert.deepEqual(views[0].models, ['deepseek-v4.1-flash'], '没有任何运行时信息时声明值仍是唯一线索');
+});
+
+test('mergeProviderViews：运行时目录为空数组时仍要退回端点声明模型', () => {
+  const views = mergeProviderViews({
+    roster,
+    options: [{
+      profile: 'default',
+      displayName: 'default',
+      rows: [{ slug: 'cpa', models: [], modelCount: 0, isCurrent: true, userDefined: true }],
+    }],
+    subscriptions: [],
+    endpoints: [
+      { id: 'cpa', name: 'cpa', baseUrl: 'https://ai.codepower.cloud/v1', models: ['declared-only'], hasApiKey: true },
+    ],
+  });
+  assert.deepEqual(
+    views[0].models,
+    ['declared-only'],
+    '网关返回了 provider 行但模型数组为空时，声明目录是唯一线索，不能被空数组覆盖',
+  );
+});
+
+test('mergeProviderViews：当前模型从顶层 model 回落到 Agent 槽位', () => {
+  const views = mergeProviderViews({
+    roster,
+    options: [{
+      profile: 'default',
+      displayName: 'default',
+      currentModel: 'm2',
+      // 网关的 provider 行不带 current_model；只有顶层的 model 描述当前选择。
+      rows: [{ slug: 'fn', models: ['m1', 'm2'], modelCount: 2, isCurrent: true, userDefined: true }],
+    }],
+    subscriptions: [],
+    endpoints: [],
+  });
+  const slot = views[0].agents.find((agent) => agent.profile === 'default');
+  assert.equal(slot.state, 'active');
+  assert.equal(slot.detail, 'm2', 'active 槽位必须说出在用哪个模型，否则弹框无法标"当前模型"');
+});
+
+test('mergeProviderViews：provider 行自带 current_model 时优先于顶层 model', () => {
+  const views = mergeProviderViews({
+    roster,
+    options: [{
+      profile: 'default',
+      displayName: 'default',
+      currentModel: 'top-model',
+      rows: [{
+        slug: 'fn',
+        models: ['top-model', 'row-model'],
+        modelCount: 2,
+        isCurrent: true,
+        userDefined: true,
+        currentModel: 'row-model',
+      }],
+    }],
+    subscriptions: [],
+    endpoints: [],
+  });
+  const slot = views[0].agents.find((agent) => agent.profile === 'default');
+  assert.equal(slot.detail, 'row-model', 'provider 行是更精确的来源，不能被顶层同名槽位盖掉');
+});
+
 test('mergeProviderViews：空输入返回空数组，不编造提供商', () => {
   assert.deepEqual(
     mergeProviderViews({ roster: [], options: [], subscriptions: [], endpoints: [] }),
@@ -292,6 +386,22 @@ test('summarizeModelOptions：缺 providers 数组时返回空行而不是抛错
       currentModel: undefined,
     },
   ]);
+});
+
+test('summarizeModelOptions：顶层 model 就是该 profile 的当前模型', () => {
+  assert.equal(
+    summarizeModelOptions('default', 'default', {
+      providers: [{ slug: 'fn', models: ['a'], is_current: true }],
+      provider: 'fn',
+      model: 'a',
+    }).currentModel,
+    'a',
+  );
+  assert.equal(
+    summarizeModelOptions('default', 'default', { providers: [], model: '   ' }).currentModel,
+    undefined,
+    '空白模型名不得变成一个"当前模型"',
+  );
 });
 
 test('summarizeModelOptions：models 必须是字符串数组，混进对象就整段丢弃', () => {

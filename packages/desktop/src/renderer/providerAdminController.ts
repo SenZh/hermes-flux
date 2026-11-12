@@ -63,6 +63,13 @@ export interface SaveEndpointOutcome {
   id: string;
   /** 当前 Bot 的保存结果。 */
   current: FanOutResult;
+  /**
+   * 保存后端点是否真的成为该 Bot 的主模型。
+   * 【为什么需要】网关可能写入了端点却拒绝/忽略 `make_default`；`currentOk` 只代表
+   *   写请求没抛错。缺这个字段时界面会报成功，用户看到的仍是"有勾无环"。
+   *   网关响应没带回该端点行时为 `undefined`（无法判定，不伪造结论）。
+   */
+  currentIsDefault?: boolean;
   fanOut: FanOutResult[];
   message?: string;
 }
@@ -235,7 +242,11 @@ export function createProviderAdminController(deps: ProviderAdminControllerDeps)
           toEndpointPayload({ ...draft, id: endpointId }, { id: endpointId, makeDefault: options.makeDefault }),
         );
         savedId = saved.id || endpointId;
-        savedRow = saved.endpoints.find((row) => row.id === savedId);
+        // 【规则】id 必须归一化：网关可能把 `fn` 回成 `custom:fn`，直接比字符串会让
+        //   `savedRow` 恒为空，`currentIsDefault` 退化成 undefined，默认模型校验静默失效。
+        savedRow = saved.endpoints.find(
+          (row) => normalizeEndpointId(row.id) === normalizeEndpointId(savedId),
+        );
       } catch (error) {
         return {
           currentOk: false,
@@ -275,6 +286,7 @@ export function createProviderAdminController(deps: ProviderAdminControllerDeps)
         overall: failed ? 'partial' : 'success',
         id: savedId,
         current: { profile, displayName: display(profile), ok: true },
+        currentIsDefault: savedRow ? savedRow.isCurrent : undefined,
         fanOut: results,
       };
     });

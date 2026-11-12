@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import {
   planBindingToggle,
   planProviderRemoval,
+  resolveBindingDefaultModel,
 } from '../../dist/models/providerViews.js';
 
 function view(overrides = {}) {
@@ -27,12 +28,25 @@ function view(overrides = {}) {
   };
 }
 
-test('勾选一个未配置的自定义端点：要写定义，因此必须补密钥', () => {
+test('勾选一个未配置的自定义端点：写定义并把它设为该 Agent 的默认模型，因此必须补密钥', () => {
   assert.deepEqual(planBindingToggle(view(), 'aura', true), {
     kind: 'attach',
     profile: 'aura',
     requiresApiKey: true,
+    makeDefault: true,
   });
+});
+
+test('勾选时落哪个模型：声明值还在运行时目录就保留，否则退到目录首项', () => {
+  assert.equal(resolveBindingDefaultModel('m2', ['m1', 'm2']), 'm2', '声明模型可用时必须尊重它');
+  assert.equal(
+    resolveBindingDefaultModel('deepseek-v4.1-flash', ['cpa/gemini-3.8-flash']),
+    'cpa/gemini-3.8-flash',
+    '声明模型已不在运行时目录时必须换到真实可选的模型',
+  );
+  assert.equal(resolveBindingDefaultModel('', ['m1']), 'm1', '声明为空时取目录首项');
+  assert.equal(resolveBindingDefaultModel('m9', []), 'm9', '目录为空时保留声明值，由网关给出拒绝原因');
+  assert.equal(resolveBindingDefaultModel('  ', []), '', '空声明不得被拼成空白 id');
 });
 
 test('勾选一个未配置的订阅：客户端无法复制登录态，只能引导去该 Agent 登录', () => {

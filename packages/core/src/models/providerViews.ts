@@ -72,9 +72,14 @@ export interface ProviderView {
   /** 网关给的原始 id（自定义端点已去掉 `custom:` 前缀）。 */
   id: string;
   name: string;
-  /** 该提供商的模型 id 列表。切换主模型必须点名一个具体模型，空列表即表示不可切换。 */
+  /**
+   * 该提供商的可用模型 id 列表（切换主模型必须点名一个具体模型，空列表即表示不可切换）。
+   *
+   * 【权威来源】运行时目录（`model.options`）优先，端点清单的声明目录只作兜底：
+   *   端点换过上游时声明目录会保留旧模型，展示它会让用户点到一个选不到的 id。
+   */
   models: string[];
-  /** 一行副标题：自定义显示端点地址，订阅显示套餐与凭据来源。 */
+  /** 一行副标题数据：自定义是端点地址，订阅是套餐与凭据来源。UI 决定展示哪一部分。 */
   detail: string;
   availability: ProviderAvailability;
   /** 长度恒等于 roster 长度。 */
@@ -95,6 +100,14 @@ export interface ProviderAgentRef {
 export interface ProfileModelOption {
   profile: string;
   displayName: string;
+  /**
+   * 该 profile 当前主模型 id（`model.options` 顶层 `model`）。
+   *
+   * 【为什么必须留在这里】网关只在顶层给出"这一份目录的当前模型"，provider 行内没有
+   * `current_model` 字段。读不到它，`active` 槽位就只能说"在用"却说不出在用哪个模型，
+   * 模型弹框里的"当前模型"标记也会整片消失。
+   */
+  currentModel?: string;
   /** 该 profile 已配置的 provider slug → 详情。 */
   rows: Array<{
     slug: string;
@@ -104,7 +117,7 @@ export interface ProfileModelOption {
     isCurrent: boolean;
     userDefined: boolean;
     apiUrl?: string;
-    /** 网关记录的当前主模型 id，与 `isCurrent` 同时为真。 */
+    /** 网关记录的当前主模型 id，与 `isCurrent` 同时为真（部分网关版本不返回）。 */
     currentModel?: string;
   }>;
   /** 读取失败时的原始原因。 */
@@ -158,7 +171,12 @@ export function summarizeModelOptions(
       currentModel: asString(row.current_model) || undefined,
     });
   }
-  return { profile, displayName, rows };
+  return {
+    profile,
+    displayName,
+    currentModel: asString(root?.model) || undefined,
+    rows,
+  };
 }
 
 /** 订阅与自定义的归一化输入。二者都在 profile 作用域下读取。 */
@@ -338,8 +356,13 @@ export function mergeProviderViews(input: ProviderSourceInput): ProviderView[] {
         : stateForProfile(option, id);
       // `active` 的 detail 必须是正在使用的模型：模型选择器靠它标「当前模型」。
       // 缺失时用户只能看到"使用中"却不知道是哪个模型，等于把主模型信息丢了。
+      // 【规则】先读 provider 行的 `current_model`，网关不返回时回落到该 profile 的顶层
+      //   `model`——`is_current` 与顶层 `model` 描述的是同一个选择。
+      const activeRow = state === 'active'
+        ? option?.rows.find((row) => normalizeEndpointId(row.slug) === id)
+        : undefined;
       const currentModel = state === 'active'
-        ? option?.rows.find((row) => normalizeEndpointId(row.slug) === id)?.currentModel
+        ? activeRow?.currentModel || option?.currentModel
         : undefined;
       return bindingFor(ref, state, currentModel);
     });
@@ -366,7 +389,18 @@ export function mergeProviderViews(input: ProviderSourceInput): ProviderView[] {
       kind,
       id,
       name: endpoint?.name || id,
-      models: endpoint ? [...endpoint.models] : seeded ? [...seeded.models] : [],
+      /**
+       * 【规则】运行时目录优先，端点清单只是兜底。
+       *   端点清单的 `models` 是 config.yaml 里声明过的静态目录，端点改过上游或换了代理后
+       *   会保留旧模型（实测 cpa 声明 `deepseek-v4.1-flash`，运行时只有 `cpa/gemini-3.8-flash`），
+       *   直接展示会让用户去点一个根本选不到的模型。`model.options` 是网关现算的可用目录，
+       *   只有它完全缺失（该端点没在任何 profile 生效）时才退回声明值。
+       */
+      models: seeded && seeded.models.length > 0
+        ? [...seeded.models]
+        : endpoint
+          ? [...endpoint.models]
+          : [],
       // 端点列表没拉到时用 options 里的 api_url 兜底，副标题不留空。
       detail: endpoint?.baseUrl || seeded?.apiUrl || '',
       availability: resolveAvailability(agents, endpoint ? endpoint.hasApiKey : seeded !== undefined),
@@ -474,7 +508,7 @@ export function profilesWithProvider(view: ProviderView): string[] {
  *   3. 未知 profile 返回 `unknown-profile`，由调用方提示重读，不静默忽略。
  */
 export type BindingTogglePlan =
-  | { kind: 'attach'; profile: string; requiresApiKey: boolean }
+  | { kind: 'attach'; profile: string; requiresApiKey: boolean; makeDefault: true }
   | { kind: 'login-required'; profile: string }
   | { kind: 'detach'; profile: string }
   | { kind: 'logout-subscription'; profile: string }
@@ -482,6 +516,28 @@ export type BindingTogglePlan =
   | { kind: 'blocked-error'; profile: string; message: string }
   | { kind: 'noop'; profile: string }
   | { kind: 'unknown-profile'; profile: string };
+
+/**
+ * 勾选一个未配置的 Agent 时该落到哪个模型。
+ *
+ * 【设计意图 (Why)】
+ *   勾选同时要回答"用哪个模型"，否则只能建立配置关系、主模型纹丝不动，用户点完看到
+ *   没有绿环，会认为点击失灵。默认模型优先取端点自己声明的 `model`，但它可能已经不在
+ *   运行时目录里（端点换过上游/代理），此时必须退到运行时目录的第一个，绝不把主模型
+ *   指向一个选不到的 id。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 纯函数：只做集合判定，不猜别名、不规范化大小写（模型 id 区分大小写）；
+ *   2. 目录为空时原样返回声明值，由网关做最终校验并给出真实拒绝原因；
+ *   3. 声明值为空时直接取目录第一个。
+ */
+export function resolveBindingDefaultModel(declared: string, models: readonly string[]): string {
+  const wanted = declared.trim();
+  const catalog = models.map((model) => model.trim()).filter(Boolean);
+  if (catalog.length === 0) return wanted;
+  if (wanted && catalog.includes(wanted)) return wanted;
+  return catalog[0];
+}
 
 export function planBindingToggle(
   view: ProviderView,
@@ -499,7 +555,9 @@ export function planBindingToggle(
     // 订阅没有可写的端点记录：它的绑定由该 profile 上的 OAuth 登录态决定，
     // 客户端没有任何接口能把"登录态"复制到另一个 Agent。所以只能引导去登录。
     if (view.kind === 'subscription') return { kind: 'login-required', profile };
-    return { kind: 'attach', profile, requiresApiKey: true };
+    // 【用户已确认的语义】点一个空头像 = "让这个 Bot 用这套提供商"，不是单纯写一条配置。
+    //   只写配置不改主模型时，绿环不会亮，用户会认为点击没生效。
+    return { kind: 'attach', profile, requiresApiKey: true, makeDefault: true };
   }
 
   if (agent.state === 'active') return { kind: 'blocked-active', profile };

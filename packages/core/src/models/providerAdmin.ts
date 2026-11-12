@@ -22,6 +22,8 @@
  *   4. 任何"数量"字段只做展示，不参与判定；判定一律用原始的 id / url。
  */
 
+import { resolveBindingDefaultModel } from './providerViews.js';
+
 /** 端点传输协议。`''` = 运行时按 URL 自动检测，这是 UI 唯一会提交的值。 */
 export type CustomEndpointApiMode = '' | 'anthropic_messages' | 'chat_completions' | 'codex_responses';
 
@@ -267,6 +269,33 @@ export function toEndpointPayload(
   // `keep` 不写字段，网关按"保留原密钥"处理；`clear` 显式写空串。
   if (draft.apiKey.kind === 'clear') payload.api_key = '';
   return payload;
+}
+
+/**
+ * 从端点行还原"勾选某个 Agent"要提交的草稿。
+ *
+ * 【设计意图 (Why)】
+ *   勾选空头像的语义是"让这个 Bot 默认用它"，所以草稿必须同时带三件事：端点定义、
+ *   一把可写密钥、以及一个**运行时真实存在**的默认模型。把三步拼装收在这里，
+ *   壳层不再各写一遍，单测也能直接钉住"废弃声明模型会被替换"这条关键分支。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 用 `resolveBindingDefaultModel` 选模型：声明值失效时退到运行时目录首项；
+ *      这里的目录是跨 profile 的并集（`ProviderView.models`），因为目标 profile 此刻还
+ *      没有该 provider 行；网关会做最终校验，拒绝时由 `currentOk` / `currentIsDefault` 兜底；
+ *   2. 密钥只在内存里中转，绝不落盘到本地存储；
+ *   3. 纯函数，不做网络与校验；非法输入交给 `validateDraft`。
+ */
+export function draftForBindingAttach(
+  row: CustomEndpointRow,
+  models: readonly string[],
+  apiKey: string,
+): CustomEndpointDraft {
+  return {
+    ...draftFromEndpoint(row),
+    model: resolveBindingDefaultModel(row.model, models),
+    apiKey: { kind: 'set', value: apiKey.trim() },
+  };
 }
 
 /** 从 `POST .../validate` 的原始响应构建探测结果。 */
