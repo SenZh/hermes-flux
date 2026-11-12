@@ -18,6 +18,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { ConversationStage } from './ConversationStage.js';
 import { ConversationMessageList } from './ConversationMessageList.js';
 import { PromptNavigatorRail } from './PromptNavigatorRail.js';
+import { AgentPresence, type AgentPresenceSnapshot } from '../AgentPresence.js';
 import type { ConversationActions, ConversationSnapshot } from './types.js';
 import type { PromptNavigatorActions, PromptNavigatorSnapshot } from '../../lib/promptNavigator.js';
 
@@ -75,6 +76,38 @@ export function mountPromptNavigator(
 
   const update = (): void => {
     root.render(<PromptNavigatorRail snapshot={getSnapshot()} actions={actions} />);
+  };
+
+  update();
+  return {
+    update,
+    unmount: () => root.unmount(),
+  };
+}
+
+/**
+ * 在场指示器挂载：只接管悬浮层，pod / 滚动容器 / 输入舱仍由宿主模板提供。
+ *
+ * 【设计意图 (Why)】
+ *   指示器必须与标题栏、左轨、消息列表同构：宿主只推快照，组件内部的眨眼时钟、
+ *   文字交叉淡入等状态不会因为宿主每帧 `render()` 被重建。流式期间宿主每帧都在重绘，
+ *   若把指示器塞进模板字符串，眨眼节拍会被每帧重置成「永远睁眼」。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   挂进 `#conversation-stream` 会在 `activeStream.innerHTML = renderConversationCanvas(...)`
+ *   时连宿主一起销毁，指示器从此不再出现（与 `mountPromptNavigator` 同一条血泪教训）。
+ *
+ * 【约束与规则 (Rules)】同一 host 只允许一个 root；宿主要求已连接。
+ */
+export function mountAgentPresence(
+  host: HTMLElement,
+  getSnapshot: () => AgentPresenceSnapshot
+): ConversationMount {
+  if (!host.isConnected) throw new Error('Agent presence host must be connected before mounting');
+  const root: Root = createRoot(host);
+
+  const update = (): void => {
+    root.render(<AgentPresence snapshot={getSnapshot()} />);
   };
 
   update();

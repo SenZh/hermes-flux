@@ -104,13 +104,26 @@ export function renderGroupCollageAvatar(
  * 【防范的历史坑】早期只用 7 种形状，但 7 种里 5 种都落到同一个 rect 兜底分支，
  *   实测 3 个 Bot 全部渲染成同一块橙色方块，微轨完全无法辨认（真实截图取证）。
  * 【约束与规则】形状 × 色调二维组合，色调只取皮肤语义槽，禁止硬编码色值。
+ *
+ * 【shape 参数（第 5 位，默认 'rounded'）】
+ *   在场指示器（AgentPresence）的头像槽位是 56px 正圆，需要圆形裁切；其余消费者
+ *   （左轨、标题栏、群聊拼图、任务弹窗）保持 8px 圆角方形。默认值必须为 'rounded'，
+ *   否则既有调用点会集体改变外观。三角形分支不参与圆角计算——它本身就是三角形，
+ *   圆形裁切会把三个尖角削掉，反而失去辨识度。
  */
-export function renderBotAvatar(name: string, displayName?: string, avatarUrl?: string, size = 36): string {
+export function renderBotAvatar(
+  name: string,
+  displayName?: string,
+  avatarUrl?: string,
+  size = 36,
+  shape: 'rounded' | 'circle' = 'rounded',
+): string {
+  const radiusPx = shape === 'circle' ? '50%' : '8px';
   if (avatarUrl) {
     return `<img src="${escapeHtml(avatarUrl)}" style="
       width: ${size}px;
       height: ${size}px;
-      border-radius: 8px;
+      border-radius: ${radiusPx};
       object-fit: cover;
       flex-shrink: 0;
       border: 1px solid var(--border-subtle);
@@ -151,7 +164,7 @@ export function renderBotAvatar(name: string, displayName?: string, avatarUrl?: 
 
   return `
     <svg width="${size}" height="${size}" viewBox="0 0 36 36" fill="none" style="flex-shrink: 0; display: block;">
-      <rect width="36" height="36" rx="8" fill="var(--panel)" />
+      <rect width="36" height="36" rx="${shape === 'circle' ? 18 : 8}" fill="var(--panel)" />
       ${body}
       <circle cx="14" cy="17" r="1.8" fill="${BOT_PUPIL_BLACK}" />
       <circle cx="22" cy="17" r="1.8" fill="${BOT_PUPIL_BLACK}" />

@@ -92,7 +92,6 @@ export interface InputDockProps {
   disabled?: boolean;
   modelMenuOpen?: boolean;
   notice?: string;
-  activityStatus?: string;
   attachments?: InputAttachmentItem[];
   queuedMessages?: InputQueuedItem[];
   slashPopperOpen?: boolean;
@@ -221,7 +220,6 @@ export function renderInputDock(props: InputDockProps): string {
   const isStreaming = Boolean(props.isStreaming);
   const modelMenuOpen = Boolean(props.modelMenuOpen);
   const notice = (props.notice || '').trim();
-  const activityStatus = (props.activityStatus || '').trim();
 
   // Model display label
   // 【规则】统一走 core 派生：目录命中优先，未命中按 ID 派生；绝不把裸 ID 直接显示给用户
@@ -231,42 +229,6 @@ export function renderInputDock(props: InputDockProps): string {
   // 这里用 suppressBadge 让渲染层直接返回空串，省掉一次额外的 vendorId 预判。
   const modelIcon = props.selectedModel
     ? renderModelVendorIcon(props.selectedModel, props.currentProvider ?? '', { size: 16, suppressBadge: true })
-    : '';
-
-  const activityPillHtml = activityStatus
-    ? `
-      <div class="agent-activity-pill" style="
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        background: var(--bg-backdrop);
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
-        border: 1px solid var(--border-medium);
-        border-radius: 9999px;
-        padding: 3px 12px;
-        font-size: 11px;
-        color: var(--text-main);
-        margin-bottom: 8px;
-        pointer-events: auto;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25), var(--specular-line);
-        user-select: none;
-        animation: flux-fade-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-      ">
-        <span class="activity-status-dot" style="
-          width: 6px;
-          height: 6px;
-          border-radius: 50%;
-          background: #10B981;
-          box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
-          display: inline-block;
-          animation: flux-pulse 2s infinite ease-in-out;
-        "></span>
-        <span style="font-weight: 500; letter-spacing: -0.01em;">${escapeHtml(modelLabel)}</span>
-        <span style="color: var(--text-muted); opacity: 0.5;">·</span>
-        <span style="color: var(--text-secondary); font-family: var(--font-mono, monospace); font-size: 10.5px;">${escapeHtml(activityStatus)}</span>
-      </div>
-    `
     : '';
 
   const rollbackBarHtml = renderRollbackNoticeBar(props.rollbackBanner);
@@ -302,8 +264,6 @@ export function renderInputDock(props: InputDockProps): string {
       pointer-events: none;
       z-index: 40;
     ">
-      ${activityPillHtml}
-
       <!-- Queue Tray (if any queued messages) -->
       ${renderQueueTray(props.queuedMessages)}
 
@@ -1159,7 +1119,6 @@ export interface RenderInputDockSnapshot {
   disabled: boolean;
   modelMenuOpen: boolean;
   notice: string;
-  activityStatus?: string;
   modelCount: number;
   modelSearchQuery: string;
   recentModelsHash: string;
@@ -1199,7 +1158,6 @@ export function hasDockSnapshotChanged(
     last.disabled !== curr.disabled ||
     last.modelMenuOpen !== curr.modelMenuOpen ||
     last.notice !== curr.notice ||
-    last.activityStatus !== curr.activityStatus ||
     last.modelCount !== curr.modelCount ||
     last.modelCatalogHash !== curr.modelCatalogHash ||
     last.modelSearchQuery !== curr.modelSearchQuery ||

@@ -2408,4 +2408,397 @@ details[open] > summary > .tool-row__expand {
   box-shadow: inset 2px 0 0 0 var(--primary-border);
 }
 
+/* ==========================================================================
+   Agent 在场指示器（Presence Indicator）
+   设计依据：docs/changes/2026-11-12_agent-presence-indicator/design.md
+   约束：
+     1. 绝对定位悬浮层，不占流、不改 padding-top、不参与任何高度计算；
+     2. 动效节拍分两档（见下方「节拍说明」），不假装全部同相位；
+     3. 无内联 style，颜色与尺寸全部走 Token；
+     4. 群聊只有最左说话者挂完整形变语言，其余成员仅统一极轻呼吸（D4a 裁定）。
 
+   【节拍说明（务必先读，别被「主时钟」这个词误导）】
+     `--presence-beat: 2400ms` 是**思考态**的主时钟：thinking 的形变、环旋转、光晕脉冲
+     三者共用它，视觉上是一个东西在呼吸（D6 裁定的「一个焦点」正是指这个）。
+     快节奏状态（tool 800ms / writing 900ms）以**形变**为唯一节拍源：
+     此时环与光晕仍按 2400ms 慢呼吸，读作「手在快动、呼吸仍稳」，而不是两个同频竞争焦点。
+     idle 是 2600ms 的极慢呼吸（睡着但活着）。改任何一个时长前先想清楚它属于哪一档。
+   ========================================================================== */
+
+.conv-presence {
+  --presence-beat: 2400ms;
+  --presence-size: 56px;
+  --presence-gap: 12px;
+
+  position: absolute;
+  /* 与 .conv-stream 的 --conv-gutter-top 同值，构成同一条垂直节奏线 */
+  top: var(--conv-gutter-top, 24px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--presence-gap);
+  pointer-events: none;
+}
+
+/* 椭圆径向遮罩：承担对比度职责（无壳裸文字必须靠它压在滚动内容之上） */
+.conv-presence::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: calc(100% + 150px);
+  height: calc(100% + 30px);
+  border-radius: var(--radius-pill);
+  z-index: -1;
+  background: radial-gradient(ellipse 56% 120% at 50% 40%, var(--panel) 48%, transparent 100%);
+}
+
+.conv-presence__avatars {
+  display: flex;
+  align-items: center;
+  height: var(--presence-size);
+}
+
+.conv-presence__avatar {
+  position: relative;
+  width: var(--presence-size);
+  height: var(--presence-size);
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+}
+
+/* 叠层：负 margin + 描边。描边不是装饰，没有它相邻头像边界会糊成一片 */
+.conv-presence__avatar + .conv-presence__avatar {
+  margin-left: -15px;
+}
+
+.conv-presence__avatar .conv-presence__face {
+  width: var(--presence-size);
+  height: var(--presence-size);
+  border-radius: 50%;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: var(--card);
+  border: 2px solid var(--panel);
+  position: relative;
+  z-index: 1;
+  transform-origin: 50% 78%;
+  box-sizing: border-box;
+}
+
+.conv-presence[data-mode="group"] .conv-presence__avatar[data-speaker="true"] .conv-presence__face {
+  border-color: var(--foreground);
+}
+
+/* z-index 从左到右递减：说话者置最左，天然压在最上层，不需要额外提层规则 */
+.conv-presence__avatar[data-lead="true"] { z-index: 5; }
+.conv-presence__avatar[data-lead="false"]:nth-child(2) { z-index: 4; }
+.conv-presence__avatar[data-lead="false"]:nth-child(3) { z-index: 3; }
+.conv-presence__avatar[data-lead="false"]:nth-child(4) { z-index: 2; }
+.conv-presence__avatar[data-lead="false"]:nth-child(5) { z-index: 1; }
+
+.conv-presence__avatar--more {
+  font-family: var(--conv-font-mono);
+  /* 【规则】本区块禁止引用 --fs-* 固定字阶：用户调字号时只有正文变、其余不变会脱节 */
+  font-size: var(--conv-meta-size);
+  color: var(--secondary-foreground);
+  background: var(--card);
+  border: 2px solid var(--panel);
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+
+.conv-presence__halo {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 92px;
+  height: 92px;
+  margin: -46px 0 0 -46px;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--foreground) 24%, transparent) 0%, transparent 70%);
+  animation: convPresenceHalo var(--presence-beat) ease-in-out infinite;
+  pointer-events: none;
+}
+
+.conv-presence__ring {
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  padding: 1.5px;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    transparent 186deg,
+    var(--foreground) 292deg,
+    transparent 356deg
+  );
+  -webkit-mask: linear-gradient(black 0 0) content-box, linear-gradient(black 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(black 0 0) content-box, linear-gradient(black 0 0);
+  mask-composite: exclude;
+  animation: convPresenceSpin var(--presence-beat) linear infinite;
+  pointer-events: none;
+}
+
+/* 终态：环停止、光晕消失、眼睛不眨 */
+.conv-presence[data-presence="failed"] .conv-presence__ring {
+  animation: none;
+  background: conic-gradient(from 0deg, var(--destructive) 0deg, transparent 360deg);
+}
+.conv-presence[data-presence="failed"] .conv-presence__halo { display: none; }
+.conv-presence[data-presence="interrupted"] .conv-presence__ring {
+  animation: none;
+  background: repeating-conic-gradient(
+    from 0deg,
+    color-mix(in srgb, var(--muted-foreground) 75%, transparent) 0deg 11deg,
+    transparent 11deg 25deg
+  );
+}
+.conv-presence[data-presence="interrupted"] .conv-presence__halo { display: none; }
+
+/* idle：头像常驻但弱化，光晕压到 40% */
+.conv-presence[data-presence="idle"] .conv-presence__face { opacity: 0.78; }
+.conv-presence[data-presence="idle"] .conv-presence__halo { opacity: 0.4; }
+.conv-presence[data-presence="idle"] .conv-presence__ring { display: none; }
+
+/* 形变语言：按状态分化（不同状态用不同的动法，才是「生动」的来源） */
+.conv-presence[data-presence="idle"] .conv-presence__face {
+  animation: convPresenceBreathe 2600ms ease-in-out infinite;
+}
+.conv-presence[data-presence="thinking"] .conv-presence__face {
+  animation: convPresenceTilt var(--presence-beat) ease-in-out infinite;
+}
+.conv-presence[data-presence="tool"] .conv-presence__face {
+  animation: convPresenceLabor 800ms ease-in-out infinite;
+}
+.conv-presence[data-presence="writing"] .conv-presence__face {
+  animation: convPresenceType 900ms ease-in-out infinite;
+}
+.conv-presence[data-presence="delegating"] .conv-presence__face {
+  animation: convPresenceLook 1800ms ease-in-out infinite;
+}
+.conv-presence[data-presence="failed"] .conv-presence__face { opacity: 0.75; }
+.conv-presence[data-presence="interrupted"] .conv-presence__face { opacity: 0.6; }
+
+/* 群聊：非说话者只挂统一极轻呼吸（同相位，不构成独立焦点）
+   【规则】必须排除终态：failed / interrupted 下全员静止，非说话者若继续呼吸
+   会与「停住了」的语义直接矛盾。 */
+.conv-presence[data-mode="group"]:not([data-presence="failed"]):not([data-presence="interrupted"]) .conv-presence__avatar[data-lead="false"] .conv-presence__face {
+  animation: convPresenceAmbient 2600ms ease-in-out infinite;
+}
+
+/* 眨眼：作用于 SVG 眼组，由 React 写 data-blink 驱动（不用 CSS infinite，避免等距节拍器） */
+.conv-presence__face svg .conv-presence__eyes,
+.conv-presence__face .conv-presence__eyes {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 140ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.conv-presence__face[data-blink="true"] .conv-presence__eyes {
+  transform: scaleY(0.08);
+}
+
+/*
+ * 文案行。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   1. `text-overflow: ellipsis` 对 flex 容器本身无效——它只作用于块容器的行盒。
+ *      而 flex 子项默认 `min-width: auto` 不会收缩到内容以下，长路径会把行宽顶爆，
+ *      再叠加 `justify-content: center` + `overflow: hidden` 就是**两端同时硬裁**：
+ *      用户既看不到动词开头，也看不到文件名结尾（文件名正是本组件最有用的信息）。
+ *   2. `gap: 6px` 落在 4px/8px 网格外，是设计系统硬指标违规。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 容器用 `justify-content: safe center`：不溢出时居中，溢出时退回 start，
+ *      保证左侧动词永远可见；
+ *   2. 可收缩的只有 target（`flex: 0 1 auto; min-width: 0`），动词与前缀不可收缩；
+ *   3. 间距取 8px，回到 4px 网格。
+ */
+.conv-presence__text {
+  display: flex;
+  align-items: center;
+  justify-content: safe center;
+  gap: 8px;
+  font-family: var(--conv-font-sans);
+  font-size: var(--conv-meta-size);
+  line-height: 16px;
+  color: var(--foreground);
+  max-width: min(420px, calc(100% - 96px));
+  white-space: nowrap;
+  overflow: hidden;
+  text-shadow: 0 1px 3px color-mix(in srgb, var(--background) 92%, transparent);
+  animation: convPresenceTextIn 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.conv-presence__prefix {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+}
+.conv-presence__sep { flex: 0 0 auto; color: var(--faint); }
+.conv-presence__verb { flex: 0 0 auto; color: var(--foreground); }
+
+.conv-presence__target {
+  /* 唯一可收缩项：路径/命令超宽时让它在自己身上出省略号，而不是把整行裁掉两端 */
+  flex: 0 1 auto;
+  min-width: 0;
+  font-family: var(--conv-font-mono);
+  font-size: var(--conv-meta-size);
+  color: var(--secondary-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* idle：文案行高度归零但节点常驻——卸载节点会让容器瞬间塌 28px，在对话区顶部弹跳一次 */
+.conv-presence__text[data-empty="true"] {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  animation: none;
+}
+
+/* 【规则】gap 必须一起过渡：只塌文案高度会让 12px 间隙留在原地，
+   idle 总高变成 68px 而不是设计要求的 56px（真实浏览器实测发现）。 */
+.conv-presence:has(> .conv-presence__text[data-empty="true"]) {
+  gap: 0;
+}
+
+.conv-presence {
+  transition: gap 200ms ease;
+}
+
+.conv-presence__text {
+  max-height: 40px;
+  transition: max-height 200ms ease, opacity 200ms ease;
+}
+
+/* thinking 态文字高光：文字被「点亮」= 内部在运转 */
+.conv-presence[data-presence="thinking"] .conv-presence__verb {
+  background: linear-gradient(
+    90deg,
+    var(--muted-foreground) 0%,
+    var(--foreground) 40%,
+    var(--muted-foreground) 86%
+  );
+  background-size: 230% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: convPresenceShimmer 2200ms linear infinite;
+}
+
+/* writing 态打字波：与头像 scaleY 同周期，读作「打一下就压一下」 */
+.conv-presence__bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 11px;
+}
+
+.conv-presence__bars > i {
+  width: 2px;
+  /* 【性能 (Rules)】固定轨道高度 + scaleY 动画。逐帧改 height 会触发 layout + paint，
+     而这组竖条是 900ms 常驻 infinite，属于渲染热路径的高开销项。 */
+  height: 11px;
+  border-radius: 1px;
+  background: var(--foreground);
+  transform-origin: bottom center;
+  animation: convPresenceWave 900ms ease-in-out infinite;
+}
+
+.conv-presence__bars > i:nth-child(2) { animation-delay: 120ms; }
+.conv-presence__bars > i:nth-child(3) { animation-delay: 240ms; }
+
+@keyframes convPresenceSpin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes convPresenceHalo {
+  0%, 100% { opacity: 0.38; transform: scale(0.92); }
+  50% { opacity: 0.76; transform: scale(1.06); }
+}
+
+@keyframes convPresenceBreathe {
+  0%, 100% { transform: scale(1.04, 0.97); }
+  50% { transform: scale(0.97, 1.04); }
+}
+
+@keyframes convPresenceTilt {
+  0%, 100% { transform: rotate(-2.5deg) scaleY(1); }
+  50% { transform: rotate(2.5deg) scaleY(1.015); }
+}
+
+@keyframes convPresenceLabor {
+  0%, 100% { transform: scale(1) rotate(0deg); }
+  50% { transform: scale(1.035) rotate(-1.2deg); }
+}
+
+@keyframes convPresenceType {
+  0%, 100% { transform: scaleY(1) scaleX(1); }
+  45% { transform: scaleY(0.97) scaleX(1.02); }
+}
+
+@keyframes convPresenceLook {
+  0%, 100% { transform: rotate(-3deg) translateX(-1px); }
+  50% { transform: rotate(3deg) translateX(1px); }
+}
+
+@keyframes convPresenceAmbient {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.015); }
+}
+
+@keyframes convPresenceShimmer {
+  from { background-position: 180% 0; }
+  to { background-position: -80% 0; }
+}
+
+@keyframes convPresenceWave {
+  0%, 100% { transform: scaleY(0.36); opacity: 0.45; }
+  50% { transform: scaleY(1); opacity: 1; }
+}
+
+@keyframes convPresenceTextIn {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 页面隐藏即停：宿主在 visibilitychange 写 data-app-hidden
+   【必须 !important (Rules)】状态形变规则的特异性是 (0,3,0)（如
+   `.conv-presence[data-presence="thinking"] .conv-presence__face`），群聊 ambient 更高达 (0,5,0)。
+   本选择器只有 (0,2,1)，不加 !important 会被压制——实测表现为「窗口隐藏后形变照常无限运行」。
+   另一重陷阱：状态规则用的是 `animation` shorthand，它会隐式把 animation-play-state 重置回
+   running，长写 `paused` 同源下输给 shorthand。!important 同时解掉这两层。 */
+html[data-app-hidden="true"] .conv-presence,
+html[data-app-hidden="true"] .conv-presence *,
+html[data-app-hidden="true"] .conv-presence *::before,
+html[data-app-hidden="true"] .conv-presence *::after {
+  animation-play-state: paused !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* 【必须 !important (Rules)】媒体查询不贡献特异性。状态形变 (0,3,0)、群聊 ambient (0,5,0)
+     都高于这里的 (0,2,0)，不加 !important 时 reduced-motion 只停掉了环/光晕/打字波这类
+     低特异性动画，而**最耗合成器、最影响前庭舒适度的头像形变反而继续跑**。
+     这不是纸面防线失效，是实测缺陷（样式审查 P0-1）。 */
+  .conv-presence .conv-presence__ring,
+  .conv-presence .conv-presence__halo,
+  .conv-presence .conv-presence__verb,
+  .conv-presence .conv-presence__bars > i,
+  .conv-presence .conv-presence__text,
+  .conv-presence .conv-presence__face,
+  .conv-presence[data-presence] .conv-presence__face,
+  .conv-presence[data-mode="group"] .conv-presence__avatar[data-lead="false"] .conv-presence__face {
+    animation: none !important;
+  }
+  .conv-presence .conv-presence__face[data-blink="true"] .conv-presence__eyes {
+    transform: none !important;
+  }
+}

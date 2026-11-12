@@ -17,6 +17,7 @@
  */
 
 import * as React from 'react';
+import { classifyToolName } from '@hermes-flux/core';
 import { t } from '../../i18n/index.js';
 import { extractToolTarget } from '../../lib/text.js';
 import { hasToolOutput, normalizeToolOutput } from '../../lib/toolOutput.js';
@@ -34,36 +35,39 @@ interface ToolPresentation {
 
 /**
  * 工具名 → 展示分类。
- * 写操作匹配必须排在通用 file 之前，否则 write_file 会被误判成只读。
+ *
+ * 【设计意图 (Why)】判定本身已下沉到 `core` 的 `classifyToolName`（单一真值源），
+ *   本函数只把「类别」映射成「标签文案 + 展示形态」。这样同一次工具调用在
+ *   轨迹胶囊与在场指示器上永远得到同一个类别，不会出现「这里写读取、那里写搜索」。
+ *
+ * 【防范的历史坑 (Pitfall)】本函数曾自带一套 `includes` 链，与在场指示器各判一次，
+ *   实测 14 个真实工具名里 4 个不一致（`skill_run` / `write_skill` /
+ *   `search_read_index` / `delegate_task`）。
+ *
+ * 【约束与规则 (Rules)】本函数禁止再写关键字判定，只允许查表映射。
  */
 export function classifyTool(name: string): ToolPresentation {
-  const raw = (name || '').toLowerCase();
-  if (raw.includes('shell') || raw.includes('bash') || raw.includes('cmd') || raw.includes('terminal')) {
-    return { kind: 'command', label: t('tool.shell'), readOnly: false };
+  const { kind, readOnly } = classifyToolName(name);
+  switch (kind) {
+    case 'command':
+      return { kind: 'command', label: t('tool.shell'), readOnly };
+    case 'skill':
+      return { kind: 'skill', label: t('tool.generic'), readOnly };
+    case 'write':
+      return { kind: 'write', label: t('tool.write'), readOnly };
+    case 'edit':
+      return { kind: 'edit', label: t('tool.edit'), readOnly };
+    case 'read':
+      return { kind: 'read', label: t('tool.read'), readOnly };
+    case 'search':
+      return { kind: 'search', label: t('tool.search'), readOnly };
+    case 'agent':
+      return { kind: 'agent', label: t('tool.agent'), readOnly };
+    case 'browser':
+      return { kind: 'browser', label: 'Browser', readOnly };
+    default:
+      return { kind: 'other', label: name || t('tool.generic'), readOnly };
   }
-  if (raw.includes('skill')) {
-    return { kind: 'skill', label: t('tool.generic'), readOnly: false };
-  }
-  if (raw.includes('write')) return { kind: 'write', label: t('tool.write'), readOnly: false };
-  if (raw.includes('edit') || raw.includes('patch')) {
-    return { kind: 'edit', label: t('tool.edit'), readOnly: false };
-  }
-  if (raw.includes('read') || raw.includes('cat')) {
-    return { kind: 'read', label: t('tool.read'), readOnly: true };
-  }
-  if (raw.includes('grep') || raw.includes('search')) {
-    return { kind: 'search', label: t('tool.search'), readOnly: false };
-  }
-  if (raw.includes('glob') || raw.includes('find')) {
-    return { kind: 'search', label: t('tool.find'), readOnly: false };
-  }
-  if (raw.includes('subagent') || raw.includes('agent')) {
-    return { kind: 'agent', label: t('tool.agent'), readOnly: false };
-  }
-  if (raw.includes('browser') || raw.includes('playwright') || raw.includes('navigate')) {
-    return { kind: 'browser', label: 'Browser', readOnly: false };
-  }
-  return { kind: 'other', label: name || t('tool.generic'), readOnly: false };
 }
 
 /**

@@ -267,6 +267,9 @@ export function renderMiddlePod(props: MiddlePodProps): string {
         ${renderConversationCanvas(props)}
       </div>
 
+      <!-- Agent 在场指示器 Host（React 岛，常驻 pod 层，绝不进滚动流） -->
+      <div id="react-conv-presence-host"></div>
+
       <!-- Prompt Navigator Rail Host (React 岛，常驻，绝不进滚动流) -->
       <div id="react-prompt-navigator-host"></div>
 

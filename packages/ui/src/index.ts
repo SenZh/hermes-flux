@@ -69,6 +69,12 @@ export * from './components-react/conversation/index.js';
 export { renderLeftRailHtml, type LeftRailHtmlSnapshot } from './components-react/leftRailStaticRender.js';
 export { renderBotAvatar, escapeHtml } from './utils/botAvatar.js';
 export { mountStatusBar, mountTitlebar, mountLeftRail, type StatusBarSnapshot, type TitlebarSnapshot, type LeftRailSnapshot, type LeftRailActions } from './components-react/mount-shell-components.js';
+export {
+  AgentPresence,
+  type AgentPresenceSnapshot,
+  type AgentPresenceIdentitySolo,
+  type AgentPresenceIdentityGroup,
+} from './components-react/AgentPresence.js';
 export * from './components-react/settings/index.js';
 export { getStatusBarSnapshot, getTitlebarSnapshot } from './components-react/mount-shell-components.js';
 export * from './motion/index.js';

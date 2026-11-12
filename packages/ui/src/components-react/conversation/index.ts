@@ -11,4 +11,10 @@ export { TurnGroup, groupTurns } from './TurnGroup.js';
 export { selectVisibleMessages } from './visibility.js';
 export { useStreamFollow, STREAM_FOLLOW_THRESHOLD_PX } from './useStreamFollow.js';
 export { PromptNavigatorRail, type PromptNavigatorRailProps } from './PromptNavigatorRail.js';
-export { mountConversation, mountMessageList, mountPromptNavigator, type ConversationMount } from './mount.js';
+export { mountConversation, mountMessageList, mountPromptNavigator, mountAgentPresence, type ConversationMount } from './mount.js';
+export {
+  AgentPresence,
+  type AgentPresenceSnapshot,
+  type AgentPresenceIdentitySolo,
+  type AgentPresenceIdentityGroup,
+} from '../AgentPresence.js';
