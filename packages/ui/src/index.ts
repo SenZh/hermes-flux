@@ -20,6 +20,7 @@ export {
   type LeftRailProfile,
   type LeftRailActiveFocus,
   type ActivityState as LeftRailActivityState,
+  type ActivityTransition,
 } from './components-react/leftRailModel.js';
 export * from './components/MiddlePod/MiddlePod.js';
 export { mountFileTypeSprite, renderFileTypeIcon, resolveFileTypeIcon } from './lib/fileTypeIcons.js';

@@ -6,6 +6,7 @@ import { Badge } from './primitives/Badge.js';
 import { Button } from './primitives/Button.js';
 import { Input } from './primitives/Input.js';
 import { Skeleton } from './primitives/Skeleton.js';
+import { ActivityIndicator, type ActivityEntityKind } from './primitives/ActivityIndicator.js';
 import { renderBotAvatar, renderGroupCollageAvatar } from '../utils/botAvatar.js';
 import {
   formatLeftRailTime,
@@ -14,6 +15,7 @@ import {
   isGroupFocused,
   isSessionFocused,
   toSnippet,
+  type ActivityTransition,
   type LeftRailGroupRoom,
   type LeftRailModel,
   type LeftRailProfile,
@@ -59,22 +61,6 @@ function Avatar({ profile, size }: { profile: Pick<LeftRailProfile, 'name' | 'di
  */
 function CollageAvatar({ members, profiles, size }: { members: string[]; profiles: LeftRailProfile[]; size: number }): React.ReactElement {
   return <span aria-hidden="true" className="inline-flex shrink-0" dangerouslySetInnerHTML={{ __html: renderGroupCollageAvatar(members, profiles, size) }} />;
-}
-
-/**
- * 活动指示点：running 呼吸点 / unread 翡翠点 / read 不渲染。
- * 设计意图 (Why)：会话行已去掉头像，指示器改为钉在时间列左侧的独立圆点，位置稳定不随标题长度漂移。
- * 约束与规则 (Rules)：class 语义与探针/测试约定一致（activity-pulse-indicator / activity-unread-badge），不得改名。
- */
-function ActivityDot({ state }: { state?: LeftRailSession['activityState'] }): React.ReactElement | null {
-  // 运行中指示点由 styles.css 定义的 fluxActivityPulse 关键帧提供微光呼吸动效
-  if (state === 'running') {
-    return <span className="activity-pulse-indicator size-2 shrink-0 rounded-full bg-primary ring-2 ring-primary/20" title={t('rail.activityRunning')} data-status="running" />;
-  }
-  if (state === 'unread') {
-    return <span className="activity-unread-badge size-1.5 shrink-0 rounded-full bg-success ring-2 ring-success/20" title={t('rail.activityUnread')} data-status="unread" />;
-  }
-  return null;
 }
 
 /**
@@ -124,8 +110,13 @@ const AgentStationItem = React.memo(function AgentStationItem({
     onContextMenu={onContextMenu}
   >
     <Avatar profile={agent} size={36} />
-    {agent.activityState === 'running' && <span className="activity-pulse-indicator absolute -right-0.5 -top-0.5 size-2 rounded-full bg-primary ring-2 ring-primary/20" title={t('rail.activityRunning')} data-status="running" />}
-    {agent.activityState === 'unread' && <span className="activity-unread-badge absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-success ring-2 ring-success/20" title={t('rail.activityUnread')} data-status="unread" />}
+    <ActivityIndicator
+      state={agent.activityState}
+      transition={agent.activityTransition}
+      transitionToken={agent.activityTransitionToken}
+      placement="corner"
+      entityKind="bot"
+    />
   </Button>;
 }, (prev, next) => prev.agent === next.agent && prev.active === next.active);
 
@@ -148,6 +139,9 @@ export interface RailEntityRowProps {
   timestamp?: number;
   timeFallback?: string;
   activityState?: LeftRailSession['activityState'];
+  activityTransition?: ActivityTransition;
+  activityTransitionToken?: number;
+  entityKind?: ActivityEntityKind;
   titleAttr?: string;
   /**
    * 骨架占位行。
@@ -173,6 +167,9 @@ export function RailEntityRow({
   timestamp,
   timeFallback,
   activityState,
+  activityTransition,
+  activityTransitionToken,
+  entityKind,
   titleAttr,
   loading = false,
   skeletonSlot = 'session',
@@ -197,11 +194,17 @@ export function RailEntityRow({
         <Skeleton className="h-5 w-2/3 rounded-pill" />
         <Skeleton className="h-4 w-1/2 rounded-pill" />
       </span>
-      : <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+      : <span className="flux-rail-entity-col flex min-w-0 flex-1 flex-col gap-1.5">
         <span className="flex min-w-0 items-center justify-between gap-2">
           <span className="truncate text-body font-medium leading-snug text-foreground">{title}</span>
           <span className="ml-auto flex shrink-0 items-center gap-1.5">
-            <ActivityDot state={activityState} />
+            <ActivityIndicator
+              state={activityState}
+              transition={activityTransition}
+              transitionToken={activityTransitionToken}
+              placement="inline"
+              entityKind={entityKind}
+            />
             <RowTime timestamp={timestamp} fallback={timeFallback} />
           </span>
         </span>
@@ -233,6 +236,9 @@ const SessionRow = React.memo(function SessionRow({ session, active, compact, on
     timestamp={session.timestamp}
     timeFallback={session.time}
     activityState={session.activityState}
+    activityTransition={session.activityTransition}
+    activityTransitionToken={session.activityTransitionToken}
+    entityKind="session"
     onClick={onSelect}
     onContextMenu={(event) => { event.preventDefault(); onMenu(event.clientX, event.clientY); }}
     dataAttributes={{
@@ -272,6 +278,9 @@ const GroupRow = React.memo(function GroupRow({ group, profiles, active, editing
     subtitle={subtitle}
     timestamp={group.updatedAt || group.createdAt}
     activityState={group.activityState}
+    activityTransition={group.activityTransition}
+    activityTransitionToken={group.activityTransitionToken}
+    entityKind="group"
     onClick={onSelect}
     onContextMenu={(event) => { event.preventDefault(); onMenu(event.clientX, event.clientY); }}
     dataAttributes={{
@@ -395,8 +404,13 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
       <div className="flex w-full flex-col items-center gap-1.5 border-t border-border-subtle pt-2">
         <Button id="rail-station-groups-btn" variant="ghost" size="icon" className="relative size-[38px] rounded-panel text-secondary-foreground hover:bg-card-hover hover:text-foreground transition-colors" title={t('rail.groups')} onClick={() => props.onSetTab('groups')}>
           <Users size={16} />
-          {model.hasRunningGroup && <span className="activity-pulse-indicator absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-primary" data-status="running" />}
-          {!model.hasRunningGroup && model.hasUnreadGroup && <span className="activity-unread-badge absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-success" data-status="unread" />}
+          <ActivityIndicator
+            state={model.groupOverviewActivity.state}
+            transition={model.groupOverviewActivity.transition}
+            transitionToken={model.groupOverviewActivity.transitionToken}
+            placement="corner"
+            entityKind="group"
+          />
         </Button>
         <Button id="rail-station-projects-btn" variant="ghost" size="icon" className="size-[38px] rounded-panel text-secondary-foreground hover:bg-card-hover hover:text-foreground transition-colors" title={t('rail.projects')} onClick={() => props.onSetTab('projects')}>
           <Folder size={16} />
@@ -439,6 +453,9 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
             timestamp={profile.timestamp}
             timeFallback={profile.lastTime}
             activityState={profile.activityState}
+            activityTransition={profile.activityTransition}
+            activityTransitionToken={profile.activityTransitionToken}
+            entityKind="bot"
             titleAttr={t('rail.enterBotChat', { name: profile.displayName || profile.name })}
             onClick={() => props.onSelectBot(profile.name)}
             onContextMenu={(event) => openBotMenu(event, profile.name)}

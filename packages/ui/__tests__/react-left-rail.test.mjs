@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { LeftRail } from '../dist/components-react/LeftRail.js';
+import { ActivityIndicator } from '../dist/index.js';
 import { buildLeftRailModel, formatLeftRailTime, toSnippet, isAgentScopeActive } from '../dist/components-react/leftRailModel.js';
 import { assertCollapsedRailGeometry } from './helpers/rail-geometry.mjs';
 
@@ -219,18 +220,29 @@ test('左轨组件：会话行形态与关键交互契约', async (t) => {
     assert.ok(row.includes('truncate'), '副标题必须单行截断');
   });
 
-  await t.test('三态指示器按状态互斥渲染，已读零指示器', () => {
+  await t.test('三态指示器按状态互斥渲染，已读零指示器，且会话行在任何状态均零 <svg>', () => {
     const running = render({ sessions: [{ id: 's-1', title: '跑', timestamp: NOW, activityState: 'running' }] });
     assert.ok(running.includes('activity-pulse-indicator'));
+    assert.ok(running.includes('flux-cloud-indicator--running'));
+    assert.equal((running.match(/class="flux-cloud-dot"/g) || []).length, 24);
+    assert.ok(running.includes('执行中'));
     assert.equal(running.includes('activity-unread-badge'), false);
+    const runningRow = running.slice(running.indexOf('data-id="s-1"'), running.indexOf('</button>', running.indexOf('data-id="s-1"')));
+    assert.equal(runningRow.includes('<svg'), false, 'SessionRow 运行态云朵点阵必须零 SVG');
 
     const unread = render({ sessions: [{ id: 's-1', title: '未读', timestamp: NOW, activityState: 'unread' }] });
     assert.ok(unread.includes('activity-unread-badge'));
+    assert.ok(unread.includes('flux-cloud-indicator--unread'));
+    assert.equal((unread.match(/class="flux-cloud-dot"/g) || []).length, 24);
+    assert.ok(unread.includes('已完成'));
     assert.equal(unread.includes('activity-pulse-indicator'), false);
+    const unreadRow = unread.slice(unread.indexOf('data-id="s-1"'), unread.indexOf('</button>', unread.indexOf('data-id="s-1"')));
+    assert.equal(unreadRow.includes('<svg'), false, 'SessionRow 未读态云朵点阵必须零 SVG');
 
     const read = render({ sessions: [{ id: 's-1', title: '已读', timestamp: NOW, activityState: 'read' }] });
     assert.equal(read.includes('activity-pulse-indicator'), false);
     assert.equal(read.includes('activity-unread-badge'), false);
+    assert.equal(read.includes('flux-cloud-indicator'), false);
   });
 
   await t.test('主工位卡只吃 profile 快照，绝不被普通会话池覆盖', () => {
@@ -388,4 +400,177 @@ test('isAgentScopeActive: 微轨 Agent 作用域活跃判定（覆盖 bot/sessio
     focus: { type: 'bot', botName: 'aura' },
     selectedAgentName: 'aura',
   }), false, '无关 Agent 必须保持未激活');
+});
+
+test('buildLeftRailModel: groupOverviewActivity 优先级与瞬态跃迁聚合（running > unread > read）', () => {
+  const mRunning = model({
+    groups: [
+      { roomId: 'r-unread', name: '未读群', members: ['default'], activityState: 'unread', activityTransition: 'just-completed', activityTransitionToken: 9 },
+      { roomId: 'r-run', name: '运行群', members: ['default'], activityState: 'running' },
+    ],
+  });
+  assert.deepEqual(mRunning.groupOverviewActivity, { state: 'running', transition: 'none' });
+  assert.equal(mRunning.hasRunningGroup, true);
+  assert.equal(mRunning.hasUnreadGroup, false);
+
+  const mUnreadLatest = model({
+    groups: [
+      { roomId: 'r-old', name: '旧未读', members: ['default'], activityState: 'unread' },
+      { roomId: 'r-new-1', name: '先完成', members: ['default'], activityState: 'unread', activityTransition: 'just-completed', activityTransitionToken: 3 },
+      { roomId: 'r-new-2', name: '后完成', members: ['default'], activityState: 'unread', activityTransition: 'just-completed', activityTransitionToken: 8 },
+    ],
+  });
+  assert.deepEqual(mUnreadLatest.groupOverviewActivity, { state: 'unread', transition: 'just-completed', transitionToken: 8 });
+  assert.equal(mUnreadLatest.hasRunningGroup, false);
+  assert.equal(mUnreadLatest.hasUnreadGroup, true);
+
+  const mUnreadStatic = model({
+    groups: [
+      { roomId: 'r-old', name: '旧未读', members: ['default'], activityState: 'unread' },
+      { roomId: 'r-read', name: '已读', members: ['default'], activityState: 'read', activityTransition: 'just-completed', activityTransitionToken: 12 },
+    ],
+  });
+  assert.deepEqual(mUnreadStatic.groupOverviewActivity, { state: 'unread', transition: 'none' });
+
+  const mReadSettle = model({
+    groups: [
+      { roomId: 'r-read-1', name: '已读收敛1', members: ['default'], activityState: 'read', activityTransition: 'just-completed', activityTransitionToken: 4 },
+      { roomId: 'r-read-2', name: '已读收敛2', members: ['default'], activityState: 'read', activityTransition: 'just-completed', activityTransitionToken: 11 },
+    ],
+  });
+  assert.deepEqual(mReadSettle.groupOverviewActivity, { state: 'read', transition: 'just-completed', transitionToken: 11 });
+
+  const mPlainRead = model({
+    groups: [{ roomId: 'r-plain', name: '普通已读', members: ['default'], activityState: 'read' }],
+  });
+  assert.deepEqual(mPlainRead.groupOverviewActivity, { state: 'read', transition: 'none' });
+  assert.equal(mPlainRead.hasRunningGroup, false);
+  assert.equal(mPlainRead.hasUnreadGroup, false);
+
+  const mScoped = model({
+    activeFocus: { type: 'bot', botName: 'arch-wang' },
+    profileName: 'arch-wang',
+    groups: [
+      { roomId: 'r-other', name: '无关运行群', members: ['fe-zhang'], activityState: 'running' },
+      { roomId: 'r-wang', name: '老王已读群', members: ['arch-wang'], activityState: 'read' },
+    ],
+  });
+  assert.deepEqual(mScoped.groupOverviewActivity, { state: 'read', transition: 'none' });
+});
+
+test('ActivityIndicator 统一原语：placement、entityKind、24 颗云朵点阵与静态 read 零节点', () => {
+  const cornerRunning = renderToStaticMarkup(React.createElement(ActivityIndicator, {
+    state: 'running',
+    placement: 'corner',
+  }));
+  assert.ok(cornerRunning.includes('activity-pulse-indicator'));
+  assert.ok(cornerRunning.includes('flux-activity-dot--running'));
+  assert.ok(cornerRunning.includes('data-status="running"'));
+  assert.ok(cornerRunning.includes('data-placement="corner"'));
+  assert.ok(cornerRunning.includes('right-0 top-0'));
+  assert.ok(cornerRunning.includes('ring-2 ring-sidebar'));
+  assert.ok(cornerRunning.includes('role="status"'));
+  assert.ok(cornerRunning.includes('aria-live="off"'));
+  assert.equal(cornerRunning.includes('flux-cloud-canvas'), false);
+  assert.equal(cornerRunning.includes('bg-success'), false);
+  assert.equal(cornerRunning.includes('<svg'), false);
+
+  const cornerUnread = renderToStaticMarkup(React.createElement(ActivityIndicator, {
+    state: 'unread',
+    placement: 'corner',
+  }));
+  assert.ok(cornerUnread.includes('activity-unread-badge'));
+  assert.ok(cornerUnread.includes('flux-activity-dot--unread'));
+  assert.equal(cornerUnread.includes('flux-cloud-canvas'), false);
+  assert.equal(cornerUnread.includes('bg-success'), false);
+
+  const inlineRunningSession = renderToStaticMarkup(React.createElement(ActivityIndicator, {
+    state: 'running',
+    placement: 'inline',
+    entityKind: 'session',
+  }));
+  assert.ok(inlineRunningSession.includes('activity-pulse-indicator'));
+  assert.ok(inlineRunningSession.includes('flux-cloud-indicator--running'));
+  assert.ok(inlineRunningSession.includes('flux-cloud-canvas'));
+  assert.ok(inlineRunningSession.includes('flux-cloud-fog'));
+  assert.equal((inlineRunningSession.match(/class="flux-cloud-dot"/g) || []).length, 24);
+  assert.ok(inlineRunningSession.includes('执行中'));
+  assert.equal(inlineRunningSession.includes('<svg'), false);
+
+  const inlineRunningBot = renderToStaticMarkup(React.createElement(ActivityIndicator, {
+    state: 'running',
+    placement: 'inline',
+    entityKind: 'bot',
+  }));
+  assert.ok(inlineRunningBot.includes('思考中'));
+  assert.equal((inlineRunningBot.match(/class="flux-cloud-dot"/g) || []).length, 24);
+
+  const inlineRunningGroup = renderToStaticMarkup(React.createElement(ActivityIndicator, {
+    state: 'running',
+    placement: 'inline',
+    entityKind: 'group',
+  }));
+  assert.ok(inlineRunningGroup.includes('协作中'));
+  assert.equal((inlineRunningGroup.match(/class="flux-cloud-dot"/g) || []).length, 24);
+
+  const inlineUnreadStatic = renderToStaticMarkup(React.createElement(ActivityIndicator, {
+    state: 'unread',
+    placement: 'inline',
+  }));
+  assert.ok(inlineUnreadStatic.includes('activity-unread-badge'));
+  assert.ok(inlineUnreadStatic.includes('flux-cloud-indicator--unread'));
+  assert.ok(inlineUnreadStatic.includes('data-transition="none"'));
+  assert.ok(inlineUnreadStatic.includes('data-placement="inline"'));
+  assert.equal((inlineUnreadStatic.match(/class="flux-cloud-dot"/g) || []).length, 24);
+  assert.equal((inlineUnreadStatic.match(/data-on="1"/g) || []).length, 7);
+  assert.equal((inlineUnreadStatic.match(/data-on="0"/g) || []).length, 17);
+  assert.ok(inlineUnreadStatic.includes('已完成'));
+  assert.equal(inlineUnreadStatic.includes('flux-cloud-ripple'), false);
+  assert.equal(inlineUnreadStatic.includes('ring-sidebar'), false);
+  assert.equal(inlineUnreadStatic.includes('<svg'), false);
+
+  const inlineUnreadJustCompleted = renderToStaticMarkup(React.createElement(ActivityIndicator, {
+    state: 'unread',
+    transition: 'just-completed',
+    transitionToken: 7,
+    placement: 'inline',
+  }));
+  assert.ok(inlineUnreadJustCompleted.includes('data-transition="just-completed"'));
+  assert.ok(inlineUnreadJustCompleted.includes('activity-unread-badge'));
+  assert.ok(inlineUnreadJustCompleted.includes('flux-cloud-ripple'));
+  assert.ok(inlineUnreadJustCompleted.includes('已完成'));
+
+  assert.equal(renderToStaticMarkup(React.createElement(ActivityIndicator, { state: 'read' })), '');
+  assert.equal(renderToStaticMarkup(React.createElement(ActivityIndicator, { state: undefined })), '');
+
+  const readSettleCorner = renderToStaticMarkup(React.createElement(ActivityIndicator, {
+    state: 'read',
+    transition: 'just-completed',
+    transitionToken: 15,
+    placement: 'corner',
+  }));
+  assert.ok(readSettleCorner.includes('activity-settle-fade'));
+  assert.ok(readSettleCorner.includes('flux-activity-dot--settle'));
+  assert.ok(readSettleCorner.includes('data-status="read"'));
+  assert.ok(readSettleCorner.includes('data-transition="just-completed"'));
+  assert.ok(readSettleCorner.includes('data-placement="corner"'));
+  assert.ok(readSettleCorner.includes('aria-hidden="true"'));
+  assert.equal(readSettleCorner.includes('activity-pulse-indicator'), false);
+  assert.equal(readSettleCorner.includes('activity-unread-badge'), false);
+
+  const readSettleInline = renderToStaticMarkup(React.createElement(ActivityIndicator, {
+    state: 'read',
+    transition: 'just-completed',
+    transitionToken: 16,
+    placement: 'inline',
+  }));
+  assert.ok(readSettleInline.includes('activity-settle-fade'));
+  assert.ok(readSettleInline.includes('flux-cloud-settle'));
+  assert.equal((readSettleInline.match(/class="flux-cloud-settle-dot"/g) || []).length, 7);
+  assert.ok(readSettleInline.includes('data-status="read"'));
+  assert.ok(readSettleInline.includes('data-transition="just-completed"'));
+  assert.ok(readSettleInline.includes('data-placement="inline"'));
+  assert.ok(readSettleInline.includes('aria-hidden="true"'));
+  assert.equal(readSettleInline.includes('activity-pulse-indicator'), false);
+  assert.equal(readSettleInline.includes('activity-unread-badge'), false);
 });

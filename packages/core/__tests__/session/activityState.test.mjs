@@ -13,6 +13,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  ACTIVITY_STATUS_TABLE,
+  ActivityTransitionTracker,
   resolveActivityState,
   resolveActivityMap,
   applyTurnStarted,
@@ -83,7 +85,7 @@ test('apply* 状态迁移 - 回合生命周期', async (t) => {
     const unread = new Set(['s1']);
     applyTurnStarted(running, unread, 's1');
     assert.equal(running.has('s1'), true);
-    assert.equal(unread.has('s1'), false, '用户刚发起新回合，旧绿点必须当场消失（禁止 running+unread 并存）');
+    assert.equal(unread.has('s1'), false, '用户刚发起新回合，旧未读标记必须当场消失（禁止 running+unread 并存）');
   });
 
   await t.test('2. 回合完成且用户不在该实体：退出 running 并置未读', () => {
@@ -91,7 +93,7 @@ test('apply* 状态迁移 - 回合生命周期', async (t) => {
     const unread = new Set();
     applyTurnCompleted(running, unread, 's1', false);
     assert.equal(running.has('s1'), false);
-    assert.equal(unread.has('s1'), true, '后台跑完、用户没看着，必须亮绿点');
+    assert.equal(unread.has('s1'), true, '后台跑完、用户没看着，必须标记未读');
   });
 
   await t.test('3. 回合完成且用户正看着：退出 running 且不置未读', () => {
@@ -99,7 +101,7 @@ test('apply* 状态迁移 - 回合生命周期', async (t) => {
     const unread = new Set();
     applyTurnCompleted(running, unread, 's1', true);
     assert.equal(running.has('s1'), false);
-    assert.equal(unread.has('s1'), false, '用户正看着结果，不需要绿点提醒');
+    assert.equal(unread.has('s1'), false, '用户正看着结果，不需要未读提醒');
   });
 
   await t.test('4. 回合完成且原先已未读、用户正看着：必须清掉旧的未读', () => {
@@ -303,5 +305,166 @@ test('reconcileAuthoritativeActivity - 网关权威状态对账自愈（P0 级�
     });
     assert.equal(changed, false);
     assert.equal(running.size, 1);
+  });
+});
+
+test('ACTIVITY_STATUS_TABLE - 三态规格表完整性与优先级序', () => {
+  assert.deepEqual(ACTIVITY_STATUS_TABLE.running, {
+    state: 'running',
+    priority: 2,
+    isTransient: true,
+    rendersIndicator: true,
+  });
+  assert.deepEqual(ACTIVITY_STATUS_TABLE.unread, {
+    state: 'unread',
+    priority: 1,
+    isTransient: false,
+    rendersIndicator: true,
+  });
+  assert.deepEqual(ACTIVITY_STATUS_TABLE.read, {
+    state: 'read',
+    priority: 0,
+    isTransient: false,
+    rendersIndicator: false,
+  });
+  assert.ok(ACTIVITY_STATUS_TABLE.running.priority > ACTIVITY_STATUS_TABLE.unread.priority);
+  assert.ok(ACTIVITY_STATUS_TABLE.unread.priority > ACTIVITY_STATUS_TABLE.read.priority);
+  assert.equal(Object.isFrozen(ACTIVITY_STATUS_TABLE), true);
+  assert.equal(Object.isFrozen(ACTIVITY_STATUS_TABLE.running), true);
+});
+
+test('settleTurnTermination - 群聊域清理与幂等独立性', async (t) => {
+  await t.test('指定 runningGroupRoomIds 与 groupRoomId 时幂等移除，不波及其他房间且不置未读', () => {
+    const runningSessions = new Set(['s1']);
+    const runningBots = new Set(['bot1']);
+    const runningGroups = new Set(['room-a', 'room-b']);
+    const unreadGroups = new Set();
+
+    const params = {
+      runningSessionIds: runningSessions,
+      runningBotNames: runningBots,
+      runningGroupRoomIds: runningGroups,
+      sessionId: null,
+      botName: null,
+      groupRoomId: 'room-a',
+    };
+
+    settleTurnTermination(params);
+    settleTurnTermination(params);
+
+    assert.deepEqual([...runningGroups], ['room-b'], '同域其余运行中群聊必须保留');
+    assert.deepEqual([...runningSessions], ['s1'], 'sessionId 为 null 时不得影响会话域');
+    assert.deepEqual([...runningBots], ['bot1'], 'botName 为 null 时不得影响 Bot 域');
+    assert.equal(unreadGroups.size, 0, '异常终止绝不得写入未读集合');
+  });
+
+  await t.test('groupRoomId 为空时不改变 runningGroupRoomIds', () => {
+    const runningGroups = new Set(['room-a']);
+    settleTurnTermination({
+      runningSessionIds: new Set(),
+      runningBotNames: new Set(),
+      runningGroupRoomIds: runningGroups,
+      groupRoomId: '',
+    });
+    assert.deepEqual([...runningGroups], ['room-a']);
+  });
+});
+
+test('ActivityTransitionTracker - 完成瞬态跃迁窗口与防误播', async (t) => {
+  await t.test('窗口期内返回 just-completed 与单调递增 token，到达 expiresAt 后返回 none 并清理', () => {
+    const tracker = new ActivityTransitionTracker({ windowMs: 360 });
+    const t1 = tracker.recordCompleted('session', 's1', 'unread', 1000);
+    const t2 = tracker.recordCompleted('session', 's2', 'read', 1050);
+
+    assert.equal(t1, 1);
+    assert.equal(t2, 2);
+    assert.ok(t2 > t1, 'token 必须严格单调递增');
+
+    assert.deepEqual(tracker.resolveTransition('session', 's1', 'unread', 1000), {
+      transition: 'just-completed',
+      transitionToken: 1,
+    });
+    assert.deepEqual(tracker.resolveTransition('session', 's1', 'unread', 1359), {
+      transition: 'just-completed',
+      transitionToken: 1,
+    });
+    assert.equal(tracker.nextExpiryDelayMs(1359), 1, '窗口末边界剩余 1ms 仍应活跃');
+
+    assert.deepEqual(tracker.resolveTransition('session', 's1', 'unread', 1360), {
+      transition: 'none',
+    }, 'nowMs === expiresAt 必须判定过期并退出跃迁');
+    assert.equal(tracker.nextExpiryDelayMs(1360), 50, 's1 清理后仅剩 s2 的 50ms');
+    assert.equal(tracker.nextExpiryDelayMs(1410), null, '全部到期后必须清理并返回 null');
+  });
+
+  await t.test('空 entityId 返回 0 且不写入', () => {
+    const tracker = new ActivityTransitionTracker();
+    assert.equal(tracker.recordCompleted('bot', '', 'unread', 500), 0);
+    assert.deepEqual(tracker.resolveTransition('bot', '', 'unread', 500), { transition: 'none' });
+    assert.equal(tracker.nextExpiryDelayMs(500), null);
+  });
+
+  await t.test('状态由 unread 切为 read 后，必须拒绝并清理跃迁记录（防错配误播）', () => {
+    const tracker = new ActivityTransitionTracker({ windowMs: 360 });
+    tracker.recordCompleted('group', 'room-1', 'unread', 1000);
+
+    assert.deepEqual(tracker.resolveTransition('group', 'room-1', 'read', 1100), {
+      transition: 'none',
+    });
+    assert.equal(tracker.nextExpiryDelayMs(1100), null, '错配条目必须当场删除');
+    assert.deepEqual(tracker.resolveTransition('group', 'room-1', 'unread', 1120), {
+      transition: 'none',
+    }, '已清理的错配记录不得在状态回退时复活');
+  });
+
+  await t.test('currentState 为 running 时返回 none', () => {
+    const tracker = new ActivityTransitionTracker({ windowMs: 360 });
+    tracker.recordCompleted('bot', 'architect', 'read', 1000);
+    assert.deepEqual(tracker.resolveTransition('bot', 'architect', 'running', 1050), {
+      transition: 'none',
+    });
+  });
+
+  await t.test('startTurn / clear / clearAll 与三域独立隔离', () => {
+    const tracker = new ActivityTransitionTracker({ windowMs: 360 });
+    const sessionToken = tracker.recordCompleted('session', 'shared-id', 'unread', 1000);
+    const botToken = tracker.recordCompleted('bot', 'shared-id', 'unread', 1000);
+    const groupToken = tracker.recordCompleted('group', 'shared-id', 'read', 1000);
+
+    assert.notEqual(sessionToken, botToken);
+    assert.notEqual(botToken, groupToken);
+
+    tracker.clear('session', 'shared-id');
+    assert.deepEqual(tracker.resolveTransition('session', 'shared-id', 'unread', 1100), {
+      transition: 'none',
+    });
+    assert.equal(
+      tracker.resolveTransition('bot', 'shared-id', 'unread', 1100).transition,
+      'just-completed',
+      '清理 session 不得波及同 id 的 bot 域'
+    );
+    assert.equal(
+      tracker.resolveTransition('group', 'shared-id', 'read', 1100).transition,
+      'just-completed',
+      '清理 session 不得波及同 id 的 group 域'
+    );
+
+    tracker.clearAll();
+    assert.equal(tracker.nextExpiryDelayMs(1100), null);
+    assert.deepEqual(tracker.resolveTransition('bot', 'shared-id', 'unread', 1100), {
+      transition: 'none',
+    });
+  });
+
+  await t.test('同一实体二次完成会覆盖旧 token 与旧过期时间', () => {
+    const tracker = new ActivityTransitionTracker({ windowMs: 360 });
+    const first = tracker.recordCompleted('session', 's1', 'unread', 1000);
+    const second = tracker.recordCompleted('session', 's1', 'read', 1200);
+    assert.ok(second > first);
+
+    assert.deepEqual(tracker.resolveTransition('session', 's1', 'read', 1500), {
+      transition: 'just-completed',
+      transitionToken: second,
+    });
   });
 });

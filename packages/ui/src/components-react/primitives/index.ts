@@ -9,3 +9,4 @@ export * from './ListRow.js';
 export * from './Toolbar.js';
 export * from './Stat.js';
 export * from './Skeleton.js';
+export * from './ActivityIndicator.js';

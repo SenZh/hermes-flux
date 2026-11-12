@@ -20,6 +20,8 @@ import {
   applyTurnCompleted,
   applyTurnFailed,
   applyEnteredRead,
+  settleTurnTermination,
+  ActivityTransitionTracker,
   SessionHandleRegistry,
   defaultSessionHandleRegistry,
 } from '../../../core/dist/index.js';
@@ -182,5 +184,116 @@ test('Session Activity Lifecycle & Handle Normalization Invariants', async (t) =
       'running',
       '变异杀伤力证明：若不修复，会话将永久停留在 running 脉冲动效中！'
     );
+  });
+
+  await t.test('6. 源码守卫：renderer/index.ts 已接入 GroupLogPollerManager、ActivityTransitionTracker、decorateRailProjects，且已彻底移除单槽定时器和 lastCount = -1 缺陷', () => {
+    assert.match(
+      rendererSource,
+      /\bGroupLogPollerManager\b/,
+      '必须接入 Core 层 GroupLogPollerManager 管理群聊多房间并发轮询'
+    );
+    assert.match(
+      rendererSource,
+      /\bActivityTransitionTracker\b/,
+      '必须接入 Core 层 ActivityTransitionTracker 追踪完成瞬态跃迁'
+    );
+    assert.match(
+      rendererSource,
+      /function decorateRailProjects\(/,
+      '必须实现 decorateRailProjects 将三态与跃迁投影至项目子会话'
+    );
+    assert.match(
+      rendererSource,
+      /dataset\.pageHidden/,
+      '必须在 init() 中同步 pageHidden 属性节流后台休眠动画'
+    );
+    assert.doesNotMatch(
+      rendererSource,
+      /\bactiveGroupPollerTimer\b/,
+      '禁止保留老的单槽位全局群聊定时器 activeGroupPollerTimer'
+    );
+    assert.doesNotMatch(
+      rendererSource,
+      /\blastCount\s*=\s*-1\b/,
+      '禁止保留会误把用户消息判为助手回复的 lastCount = -1 缺陷'
+    );
+    assert.doesNotMatch(
+      rendererSource,
+      /\btimedOutGroupRoomId\b/,
+      '单聊流式看门狗超时绝不可按焦点误杀后台正常运行中的群聊轮询'
+    );
+  });
+
+  await t.test('7. 真实 ActivityTransitionTracker 行为：完成跃迁窗口期、切入已读即时撤销与相邻完成 token 递增', () => {
+    const tracker = new ActivityTransitionTracker({ windowMs: 360 });
+    const runningIds = new Set();
+    const unreadIds = new Set();
+    const sessionId = 'sess-transition-1';
+
+    applyTurnStarted(runningIds, unreadIds, sessionId);
+    const t0 = 10_000;
+    applyTurnCompleted(runningIds, unreadIds, sessionId, false);
+    const firstToken = tracker.recordCompleted('session', sessionId, 'unread', t0);
+
+    const stateDuringWindow = resolveActivityState(sessionId, { runningIds, unreadIds });
+    assert.equal(stateDuringWindow, 'unread', '后台完成后状态应收敛为 unread');
+
+    const activeTransition = tracker.resolveTransition('session', sessionId, stateDuringWindow, t0 + 120);
+    assert.equal(activeTransition.transition, 'just-completed', '窗口期内必须返回 just-completed');
+    assert.equal(activeTransition.transitionToken, firstToken, '窗口期内应透传对应 token');
+    assert.equal(tracker.nextExpiryDelayMs(t0 + 120), 240, '剩余窗口延时应准确返回 240ms');
+
+    const expiredTransition = tracker.resolveTransition('session', sessionId, stateDuringWindow, t0 + 360);
+    assert.equal(expiredTransition.transition, 'none', '到达窗口期上限后必须自动过期为 none');
+    assert.equal(tracker.nextExpiryDelayMs(t0 + 360), null, '无活跃跃迁条目时调度延时必须为 null');
+
+    applyTurnStarted(runningIds, unreadIds, sessionId);
+    tracker.clear('session', sessionId);
+    applyTurnCompleted(runningIds, unreadIds, sessionId, false);
+    const secondToken = tracker.recordCompleted('session', sessionId, 'unread', t0 + 500);
+    assert.ok(secondToken > firstToken, '相邻两次完成的 transitionToken 必须严格递增');
+
+    applyEnteredRead(unreadIds, sessionId);
+    tracker.clear('session', sessionId);
+    const stateAfterRead = resolveActivityState(sessionId, { runningIds, unreadIds });
+    assert.equal(stateAfterRead, 'read', '用户切入查看后状态应立即转为 read');
+    assert.equal(
+      tracker.resolveTransition('session', sessionId, stateAfterRead, t0 + 520).transition,
+      'none',
+      '切入已读后即使原窗口未满也绝不得残留 just-completed'
+    );
+  });
+
+  await t.test('8. 群聊域终止清理：settleTurnTermination 精准退出指定群聊 running 且绝不误杀并发房间或其他域', () => {
+    const runningSessionIds = new Set(['sess-active']);
+    const runningBotNames = new Set(['architect']);
+    const runningGroupRoomIds = new Set(['room-a', 'room-b']);
+    const unreadGroupRoomIds = new Set();
+
+    settleTurnTermination({
+      runningSessionIds,
+      runningBotNames,
+      runningGroupRoomIds,
+      groupRoomId: 'room-a',
+    });
+
+    assert.equal(runningGroupRoomIds.has('room-a'), false, '被终止的 room-a 必须退出 running');
+    assert.equal(unreadGroupRoomIds.has('room-a'), false, '异常终止的 room-a 绝不得进入 unread');
+    assert.equal(
+      resolveActivityState('room-a', { runningIds: runningGroupRoomIds, unreadIds: unreadGroupRoomIds }),
+      'read',
+      '被终止的 room-a 求值必须为 read'
+    );
+    assert.equal(runningGroupRoomIds.has('room-b'), true, '并发运行的 room-b 绝不可被误杀');
+    assert.equal(runningSessionIds.has('sess-active'), true, '会话域运行态绝不可被误杀');
+    assert.equal(runningBotNames.has('architect'), true, 'Bot 域运行态绝不可被误杀');
+
+    settleTurnTermination({
+      runningSessionIds,
+      runningBotNames,
+      runningGroupRoomIds,
+      groupRoomId: 'room-a',
+    });
+    assert.equal(runningGroupRoomIds.has('room-b'), true, '重复调用 settleTurnTermination 必须幂等');
   });
 });

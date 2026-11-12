@@ -198,6 +198,10 @@ export const zhDict = {
   // Status Indicators
   'rail.activityRunning': '正在生成回答...',
   'rail.activityUnread': '有新回答未读',
+  'rail.activityStatusRunning': '执行中',
+  'rail.activityStatusThinking': '思考中',
+  'rail.activityStatusCollaborating': '协作中',
+  'rail.activityStatusDone': '已完成',
   'rail.resizeHandleTitle': '拖拽调整左侧栏宽度',
 
   // Tool Packages
@@ -1007,6 +1011,10 @@ export const enDict: Record<I18nKey, string> = {
   // Status Indicators
   'rail.activityRunning': 'Generating response...',
   'rail.activityUnread': 'Unread response',
+  'rail.activityStatusRunning': 'Running',
+  'rail.activityStatusThinking': 'Thinking',
+  'rail.activityStatusCollaborating': 'Active',
+  'rail.activityStatusDone': 'Done',
   'rail.resizeHandleTitle': 'Drag to resize the left rail',
 
   // Tool Packages
