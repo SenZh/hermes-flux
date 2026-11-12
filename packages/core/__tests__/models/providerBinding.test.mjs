@@ -28,12 +28,31 @@ function view(overrides = {}) {
   };
 }
 
-test('勾选一个未配置的自定义端点：写定义并把它设为该 Agent 的默认模型，因此必须补密钥', () => {
+test('勾选一个未配置的自定义端点且缺意图时：先要求二次确认，不猜默认意图', () => {
   assert.deepEqual(planBindingToggle(view(), 'aura', true), {
+    kind: 'confirm-attach',
+    profile: 'aura',
+    requiresApiKey: true,
+  });
+});
+
+test('勾选一个未配置的自定义端点并明确仅启用：写定义但不改默认模型', () => {
+  assert.deepEqual(planBindingToggle(view(), 'aura', true, 'enable-only'), {
+    kind: 'attach',
+    profile: 'aura',
+    requiresApiKey: true,
+    makeDefault: false,
+    intent: 'enable-only',
+  });
+});
+
+test('勾选一个未配置的自定义端点并明确启用并设为默认：写定义且切换默认模型', () => {
+  assert.deepEqual(planBindingToggle(view(), 'aura', true, 'enable-and-default'), {
     kind: 'attach',
     profile: 'aura',
     requiresApiKey: true,
     makeDefault: true,
+    intent: 'enable-and-default',
   });
 });
 
@@ -49,9 +68,17 @@ test('勾选时落哪个模型：声明值还在运行时目录就保留，否�
   assert.equal(resolveBindingDefaultModel('  ', []), '', '空声明不得被拼成空白 id');
 });
 
-test('勾选一个未配置的订阅：客户端无法复制登录态，只能引导去该 Agent 登录', () => {
+test('勾选一个未配置的订阅：客户端无法复制登录态，只能引导去该 Agent 登录（即使传了意图）', () => {
   const sub = view({ kind: 'subscription', key: 'subscription:xai-oauth', id: 'xai-oauth' });
   assert.deepEqual(planBindingToggle(sub, 'aura', true), {
+    kind: 'login-required',
+    profile: 'aura',
+  });
+  assert.deepEqual(planBindingToggle(sub, 'aura', true, 'enable-only'), {
+    kind: 'login-required',
+    profile: 'aura',
+  });
+  assert.deepEqual(planBindingToggle(sub, 'aura', true, 'enable-and-default'), {
     kind: 'login-required',
     profile: 'aura',
   });

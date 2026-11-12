@@ -7,6 +7,8 @@ export {
   resolveSettingsSection,
   type SettingsActions,
   type SettingsActionResult,
+  type ToggleProviderAgentOptions,
+  type ToggleProviderAgentResult,
   type SettingsIconName,
   type SettingsLoadable,
   type SettingsSectionDef,

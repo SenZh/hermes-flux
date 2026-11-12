@@ -171,6 +171,23 @@ test('勾选未配置的自定义端点：先从其它成员复制密钥，复�
     block.includes('settings.providerToggleNotDefault'),
     '校验失败必须给出可读原因，不能静默返回',
   );
+
+  const toggleBlock = source.slice(
+    source.indexOf('onToggleProviderAgent:'),
+    source.indexOf('onNotify:', source.indexOf('onToggleProviderAgent:')),
+  );
+  assert.ok(
+    toggleBlock.includes("case 'confirm-attach':") && toggleBlock.includes('confirmRequired: true'),
+    '缺意图调用必须命中 confirm-attach 且返回 confirmRequired: true，绝不直接落盘',
+  );
+  assert.ok(
+    toggleBlock.includes('planBindingToggle(view, profile, nextChecked, options?.attachIntent)'),
+    '壳层必须把调用方意图透传给 core 的 planBindingToggle',
+  );
+  assert.ok(
+    source.includes('inFlightProviderBindings'),
+    '壳层必须维护在途合流映射防止并发重入',
+  );
 });
 
 test('Esc 关闭必须让位给输入法组合态', () => {

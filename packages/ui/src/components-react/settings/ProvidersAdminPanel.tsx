@@ -4,12 +4,19 @@ import {
   deriveEndpointId,
   draftFromEndpoint,
   emptyEndpointDraft,
+  isAttachFlowBusy,
+  openAttachFlow,
+  planBindingToggle,
+  reconcileAttachFlow,
+  reduceAttachFlow,
   truncateProfileLabel,
   normalizeEndpointId,
+  type BindingAttachIntent,
   type CustomEndpointDraft,
   type CustomEndpointRow,
   type EndpointProbe,
   type OauthProviderRow,
+  type ProviderAttachFlow,
   type ProviderView,
 } from '@hermes-flux/core';
 import { t } from '../../i18n/index.js';
@@ -21,7 +28,12 @@ import { ModelPickerDialog, ModelPickerField } from './ModelPicker.js';
 import { SegmentedControl } from './SegmentedControl.js';
 import { SettingField } from './SettingRow.js';
 import { SettingsSectionHeading } from './SettingsSectionHeading.js';
-import type { SettingsActions, SettingsBotRow, SettingsSnapshot } from './settingsModel.js';
+import type {
+  SettingsActions,
+  SettingsBotRow,
+  SettingsSnapshot,
+  ToggleProviderAgentResult,
+} from './settingsModel.js';
 
 const EMPTY_FORM: CustomEndpointDraft = emptyEndpointDraft();
 
@@ -78,31 +90,41 @@ function AvailabilityDot({ availability }: { availability: ProviderView['availab
  *   3. 网格曾经放在标题与动作按钮之间，动作按钮占用宽度不同，同一份名单会在
  *      自定义端点行排出 4 列、订阅行排出 5 列；网格现在必须横跨整行，列数才稳定。
  *   4. 正在使用的 Agent 被取消勾选，会让它的主模型指向不存在的 provider。
+ *   5. 过去点击未启用自定义端点头像同时写配置并强切默认模型，只想挂备选提供商时被迫改主模型；
+ *      现在必须由行内确认条显式选择「仅启用」或「启用并设为默认」。
  *
  * 【约束与规则 (Rules)】
  *   1. `active` 的格子锁定：取消必须先切模型（用户已确认的策略）；
  *   2. `error` 的格子锁定并显示原始原因，绝不渲染成“未配置”；
- *   3. 自定义端点勾选未配置的 Agent 时，先尝试复用其它成员的密钥，失败才就地补密钥；
- *      勾选同时把它设为该 Agent 的默认模型（绿环），否则用户点完看不出任何变化；
+ *   3. 点击未配置自定义端点由 `planBindingToggle` 判定为 `confirm-attach`，只展开行内确认条而不写任何配置；
+ *      确认后先尝试复用其它成员的密钥，失败才原地切换为 `needs-key` 补密钥（此时隐藏两个意图按钮）；
  *   4. 订阅没有可写的绑定记录，格子只读；
  *   5. 名称最多 10 个显示单位（完整 5 汉字 / 10 半角）；截断态为 9 单位内容 + `…`（汉字通常落 4 字），完整名称留在 title 与 aria-label；
  *   6. 名称字号消费 `--ui-text-caption`（11px × 用户字号档位），不写死 px；
  *   7. 无头像一律 `BotIcon` 兜底，严禁退回首字母；
  *   8. 成员增多时只换行，不横向滚动、不压缩头像。
  */
-function AgentBindingGrid({
+export function AgentBindingGrid({
   view,
   bots,
   busy,
+  attachFlow,
   onToggle,
+  onRequestAttach,
+  onConfirmAttach,
+  onEditAttachKey,
+  onCancelAttach,
 }: {
   view: ProviderView;
   bots: readonly SettingsBotRow[];
   busy: boolean;
-  onToggle: (profile: string, nextChecked: boolean, apiKey?: string) => Promise<{ ok: boolean; message?: string; needsKey?: boolean }>;
+  attachFlow: ProviderAttachFlow | null;
+  onToggle: (profile: string, nextChecked: boolean, apiKey?: string) => Promise<ToggleProviderAgentResult>;
+  onRequestAttach: (profile: string) => void;
+  onConfirmAttach: (intent: BindingAttachIntent, apiKey?: string) => void;
+  onEditAttachKey: (draftKey: string) => void;
+  onCancelAttach: () => void;
 }): React.ReactElement {
-  const [keyFor, setKeyFor] = React.useState('');
-  const [keyValue, setKeyValue] = React.useState('');
   const [pendingProfile, setPendingProfile] = React.useState('');
   const [error, setError] = React.useState('');
 
@@ -113,35 +135,7 @@ function AgentBindingGrid({
     setPendingProfile('');
     if (!result.ok) {
       setError(result.message || '');
-      return;
     }
-    setKeyFor('');
-    setKeyValue('');
-  };
-
-  /**
-   * 勾选未配置的自定义端点。
-   *
-   * 【设计意图 (Why)】壳层会先尝试从其它成员复制密钥；只有确实没有可复用来源时
-   *   （`needsKey`）才把输入框打开。过去一勾选就要求重输密钥，用户刚取消再勾回来
-   *   也要重打一遍，属明显多余。
-   */
-  const attach = async (profile: string): Promise<void> => {
-    setPendingProfile(profile);
-    setError('');
-    const result = await onToggle(profile, true);
-    setPendingProfile('');
-    if (result.ok) {
-      setKeyFor('');
-      setKeyValue('');
-      return;
-    }
-    if (result.needsKey) {
-      setKeyFor(profile);
-      setKeyValue('');
-      return;
-    }
-    setError(result.message || '');
   };
 
   const change = (agent: ProviderView['agents'][number], nextChecked: boolean): void => {
@@ -149,12 +143,26 @@ function AgentBindingGrid({
       void run(agent.profile, false);
       return;
     }
-    if (view.kind === 'custom') {
-      void attach(agent.profile);
+    // 判定唯一来自 core：不在此处私自判断 absent && custom。
+    const plan = planBindingToggle(view, agent.profile, true);
+    if (plan.kind === 'confirm-attach') {
+      onRequestAttach(agent.profile);
       return;
     }
     void run(agent.profile, true);
   };
+
+  const attachBusy = attachFlow ? isAttachFlowBusy(attachFlow) : false;
+  const targetBotName = attachFlow
+    ? bots.find((bot) => bot.profile === attachFlow.profile)?.displayName
+      || view.agents.find((agent) => agent.profile === attachFlow.profile)?.displayName
+      || attachFlow.profile
+    : '';
+  const intentLabel = attachFlow && attachFlow.phase !== 'choosing'
+    ? attachFlow.intent === 'enable-only'
+      ? t('settings.providerAttachEnableOnly')
+      : t('settings.providerAttachEnableAndDefault')
+    : '';
 
   return (
     <div className="mt-2 flex flex-col gap-2">
@@ -177,7 +185,8 @@ function AgentBindingGrid({
           const locked = agent.state === 'active' || agent.state === 'error';
           // 订阅是账号级来源：登录一次默认对所有 Agent 生效，没有按 Agent 可写的绑定，因此只读。
           const subscription = view.kind === 'subscription';
-          const disabled = busy || locked || subscription || pendingProfile === agent.profile;
+          const isAttachTargetBusy = attachBusy && attachFlow?.profile === agent.profile;
+          const disabled = busy || locked || subscription || pendingProfile === agent.profile || isAttachTargetBusy;
           const statusText =
             agent.state === 'active'
               ? t('settings.providerBindingActive')
@@ -186,7 +195,7 @@ function AgentBindingGrid({
                 : subscription
                   ? t('settings.providerBindingSubscriptionAll')
                   : '';
-          const dimmed = busy || pendingProfile === agent.profile;
+          const dimmed = busy || pendingProfile === agent.profile || isAttachTargetBusy;
           const label = statusText
             ? `${agent.displayName} · ${view.name} · ${statusText}`
             : `${agent.displayName} · ${view.name}`;
@@ -264,31 +273,101 @@ function AgentBindingGrid({
           </p>
         ))}
 
-      {keyFor ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-panel border border-border-subtle bg-panel px-2 py-2">
-          <span className="text-caption text-muted-foreground">
-            {t('settings.providerBindingNeedsKey', {
-              profile: view.agents.find((agent) => agent.profile === keyFor)?.displayName || keyFor,
-            })}
-          </span>
-          <Input
-            type="password"
-            autoComplete="off"
-            value={keyValue}
-            onChange={(event) => setKeyValue(event.target.value)}
-            className="h-7 w-56 font-code text-caption"
-          />
-          <Button
-            size="sm"
-            type="button"
-            disabled={!keyValue.trim() || busy}
-            onClick={() => { void run(keyFor, true, keyValue); }}
-          >
-            {t('settings.customEndpointSave')}
-          </Button>
-          <Button variant="ghost" size="sm" type="button" onClick={() => { setKeyFor(''); setKeyValue(''); }}>
-            {t('settings.cancel')}
-          </Button>
+      {attachFlow ? (
+        <div
+          className="flex flex-col gap-2 rounded-panel border border-border-subtle bg-panel px-3 py-2"
+          data-attach-phase={attachFlow.phase}
+          data-attach-profile={attachFlow.profile}
+        >
+          {attachFlow.phase === 'needs-key' ? (
+            <>
+              <div className="flex flex-col gap-1">
+                <span className="text-body font-medium text-foreground">
+                  {t('settings.providerAttachNeedsKey', { provider: view.name, bot: targetBotName })}
+                </span>
+                <span className="text-caption text-muted-foreground">
+                  {t('settings.providerAttachNeedsKeyIntent', { intent: intentLabel })}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  type="password"
+                  autoComplete="off"
+                  value={attachFlow.draftKey}
+                  onChange={(event) => onEditAttachKey(event.target.value)}
+                  className="h-7 w-56 font-code text-caption"
+                />
+                <Button
+                  size="sm"
+                  type="button"
+                  disabled={!attachFlow.draftKey.trim() || busy || attachBusy}
+                  onClick={() => onConfirmAttach(attachFlow.intent, attachFlow.draftKey)}
+                >
+                  {t('settings.providerAttachSaveAndEnable')}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  type="button"
+                  disabled={busy || attachBusy}
+                  onClick={onCancelAttach}
+                >
+                  {t('settings.cancel')}
+                </Button>
+              </div>
+              {attachFlow.error ? (
+                <p className="text-caption text-destructive" role="alert">
+                  {attachFlow.error}
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <div className="flex flex-col gap-1">
+                <span className="text-body font-medium text-foreground">
+                  {t('settings.providerAttachTitle', { provider: view.name, bot: targetBotName })}
+                </span>
+                <span className="text-caption text-muted-foreground">
+                  {attachFlow.phase === 'submitting'
+                    ? t('settings.providerAttachNeedsKeyIntent', { intent: intentLabel })
+                    : t('settings.providerAttachChooseHint')}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  disabled={busy || attachBusy}
+                  onClick={() => onConfirmAttach('enable-only')}
+                >
+                  {t('settings.providerAttachEnableOnly')}
+                </Button>
+                <Button
+                  size="sm"
+                  type="button"
+                  disabled={busy || attachBusy}
+                  onClick={() => onConfirmAttach('enable-and-default')}
+                >
+                  {t('settings.providerAttachEnableAndDefault')}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  type="button"
+                  disabled={busy || attachBusy}
+                  onClick={onCancelAttach}
+                >
+                  {t('settings.cancel')}
+                </Button>
+              </div>
+              {attachFlow.phase === 'choosing' && attachFlow.error ? (
+                <p className="text-caption text-destructive" role="alert">
+                  {attachFlow.error}
+                </p>
+              ) : null}
+            </>
+          )}
         </div>
       ) : null}
 
@@ -316,7 +395,12 @@ function ProviderRow({
   bots,
   scopedProfile,
   currentAgentName,
+  attachFlow,
   onToggleAgent,
+  onRequestAttach,
+  onConfirmAttach,
+  onEditAttachKey,
+  onCancelAttach,
   onActivateModel,
   onEdit,
   onDelete,
@@ -331,7 +415,12 @@ function ProviderRow({
   scopedProfile: string;
   /** 「设为当前模型」作用到哪一个 Agent——必须写在按钮上，不能靠隐式作用域。 */
   currentAgentName: string;
-  onToggleAgent: (profile: string, nextChecked: boolean, apiKey?: string) => Promise<{ ok: boolean; message?: string; needsKey?: boolean }>;
+  attachFlow: ProviderAttachFlow | null;
+  onToggleAgent: (profile: string, nextChecked: boolean, apiKey?: string) => Promise<ToggleProviderAgentResult>;
+  onRequestAttach: (profile: string) => void;
+  onConfirmAttach: (intent: BindingAttachIntent, apiKey?: string) => void;
+  onEditAttachKey: (draftKey: string) => void;
+  onCancelAttach: () => void;
   /**
    * 在弹框里点一个模型后落到网关。
    * 【规则】高价模型第一次调用只返回 `confirmRequired`，弹框不关；
@@ -428,7 +517,12 @@ function ProviderRow({
         view={view}
         bots={bots}
         busy={busy || pending}
+        attachFlow={attachFlow}
         onToggle={onToggleAgent}
+        onRequestAttach={onRequestAttach}
+        onConfirmAttach={onConfirmAttach}
+        onEditAttachKey={onEditAttachKey}
+        onCancelAttach={onCancelAttach}
       />
 
       {view.manualHint ? (
@@ -1151,8 +1245,41 @@ export function ProvidersAdminPanel({
   const [editing, setEditing] = React.useState<CustomEndpointRow | null>(null);
   const [query, setQuery] = React.useState('');
   const [modelPendingId, setModelPendingId] = React.useState('');
+  const [attachFlow, setAttachFlow] = React.useState<ProviderAttachFlow | null>(null);
+  const attachToken = React.useRef(0);
   const [deleteState, runDelete] = useRowAction();
   const [logoutState, runLogout] = useRowAction();
+
+  // 宿主漏字段时不能让整棵设置树崩掉：设置页是全屏对话框，崩了等于什么都点不了。
+  const bots = snapshot.bots ?? [];
+  const failures = snapshot.providerFailures ?? [];
+  const views = snapshot.providerViews.status === 'ready' ? snapshot.providerViews.data : undefined;
+  const activeFlow = reconcileAttachFlow(attachFlow, views);
+
+  const submitAttach = (intent: BindingAttachIntent, apiKey?: string): void => {
+    if (!activeFlow || isAttachFlowBusy(activeFlow)) return;
+    const targetView = views?.find((item) => item.key === activeFlow.providerKey);
+    const providerName = targetView?.name || activeFlow.providerId;
+    const botName = bots.find((bot) => bot.profile === activeFlow.profile)?.displayName || activeFlow.profile;
+    const targetProfile = activeFlow.profile;
+    const targetProviderId = activeFlow.providerId;
+    const token = ++attachToken.current;
+    setAttachFlow((prev) => (prev ? reduceAttachFlow(prev, { type: 'choose', intent, token }) : null));
+    void actions
+      .onToggleProviderAgent(targetProviderId, targetProfile, true, apiKey, { attachIntent: intent })
+      .then((result) => {
+        setAttachFlow((prev) => (prev ? reduceAttachFlow(prev, { type: 'settle', token, outcome: result }) : null));
+        if (result.ok && intent === 'enable-only') {
+          actions.onNotify(t('settings.providerAttachEnableOnlyDone', { provider: providerName, bot: botName }));
+        }
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : t('settings.providerToggleFailed');
+        setAttachFlow((prev) =>
+          prev ? reduceAttachFlow(prev, { type: 'settle', token, outcome: { ok: false, message } }) : null,
+        );
+      });
+  };
 
   /**
    * 在弹框里点一个模型。
@@ -1170,9 +1297,6 @@ export function ProvidersAdminPanel({
     return result;
   };
 
-  // 宿主漏字段时不能让整棵设置树崩掉：设置页是全屏对话框，崩了等于什么都点不了。
-  const bots = snapshot.bots ?? [];
-  const failures = snapshot.providerFailures ?? [];
   const scoped = snapshot.scopedProfile || snapshot.gateway.profileName || 'default';
   const scopedDisplayName = bots.find((bot) => bot.profile === scoped)?.displayName || scoped;
   const needle = query.trim().toLowerCase();
@@ -1244,10 +1368,12 @@ export function ProvidersAdminPanel({
             return (
               <div className="flex flex-col">
                 {visible.map((view) => {
+                  const rowAttachFlow = activeFlow?.providerKey === view.key ? activeFlow : null;
                   const pending =
                     modelPendingId === view.id ||
                     (deleteState.pending && deleteState.id === view.id) ||
-                    (logoutState.pending && logoutState.id === view.id);
+                    (logoutState.pending && logoutState.id === view.id) ||
+                    (rowAttachFlow ? isAttachFlowBusy(rowAttachFlow) : false);
                   const error =
                     deleteState.id === view.id
                       ? deleteState.error
@@ -1264,8 +1390,16 @@ export function ProvidersAdminPanel({
                       bots={bots}
                       scopedProfile={scoped}
                       currentAgentName={scopedDisplayName}
+                      attachFlow={rowAttachFlow}
                       onToggleAgent={(profile, nextChecked, apiKey) =>
                         actions.onToggleProviderAgent(view.id, profile, nextChecked, apiKey)}
+                      onRequestAttach={(profile) =>
+                        setAttachFlow(openAttachFlow({ providerKey: view.key, providerId: view.id, profile }))}
+                      onConfirmAttach={submitAttach}
+                      onEditAttachKey={(draftKey) =>
+                        setAttachFlow((prev) => (prev ? reduceAttachFlow(prev, { type: 'edit-key', draftKey }) : null))}
+                      onCancelAttach={() =>
+                        setAttachFlow((prev) => (prev ? reduceAttachFlow(prev, { type: 'cancel' }) : null))}
                       onActivateModel={(model, confirmExpensive) =>
                         activateModel(view, model, confirmExpensive)}
                       onEdit={() => openEdit(view)}

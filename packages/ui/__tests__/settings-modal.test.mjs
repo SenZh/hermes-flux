@@ -4,7 +4,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { SettingsModal } from '../dist/components-react/settings/SettingsModal.js';
 import { FanOutMemberList } from '../dist/components-react/settings/FanOutMemberList.js';
-import { describeDetail } from '../dist/components-react/settings/ProvidersAdminPanel.js';
+import { AgentBindingGrid, describeDetail } from '../dist/components-react/settings/ProvidersAdminPanel.js';
 import { ModelOptionRow, ModelPickerDialog, ModelPickerField, resolveModelPick } from '../dist/components-react/settings/ModelPicker.js';
 import { renderModelVendorIcon } from '../dist/lib/vendorIcon.js';
 import {
@@ -604,13 +604,111 @@ test('行内不再有笼统的「使用」：模型列表按需展开，动作�
     providerViews: { status: 'ready', data: [providerView()] },
   }));
   assert.equal(html.includes('>设为当前模型<'), false, '不得再有不说作用于哪个 Agent 的「使用」');
-  assert.equal(html.includes('设为默认'), false, '用户明确问过"设为默认什么意思"，这个词不能再出现');
+  assert.equal(html.includes('>设为默认<'), false, '不得再有笼统的「设为默认」动作按钮');
   assert.ok(html.includes(t('settings.providerModelsExpand')), '模型列表要有明确入口');
   assert.ok(html.includes('aria-haspopup="dialog"'), '入口必须打开弹框，不再在行内直接展开');
   assert.equal(html.includes('data-model-id='), false, '模型列表默认折叠，不能把所有模型铺在行里');
   assert.ok(html.includes(t('settings.providerEdit')), '编辑入口必须存在');
   assert.ok(html.includes(t('settings.providerDelete')), '删除入口必须存在');
   assert.equal(html.includes(t('settings.refresh')), false, '常驻刷新按钮已删除：动作后自动重拉，失败态有重试');
+  assert.equal(t('settings.providerBindingHint').includes('勾选即'), false, '绑定提示不得再声称勾选即设为默认');
+  assert.ok(
+    t('settings.providerBindingHint').includes(t('settings.providerAttachEnableOnly')),
+    '绑定提示必须说明存在仅启用与启用并设为默认两种选择',
+  );
+});
+
+test('AgentBindingGrid：行内确认条三种相严格分流（needs-key 隐藏意图按钮，submitting 全禁用）', () => {
+  setLocale('zh-CN');
+  const view = providerView({
+    agents: [
+      { profile: 'default', displayName: 'default', state: 'active' },
+      { profile: 'aura', displayName: 'aura', state: 'absent' },
+    ],
+  });
+  const baseProps = {
+    view,
+    bots: [
+      { profile: 'default', displayName: 'default' },
+      { profile: 'aura', displayName: 'aura' },
+    ],
+    busy: false,
+    onToggle: async () => ({ ok: true }),
+    onRequestAttach() {},
+    onConfirmAttach() {},
+    onEditAttachKey() {},
+    onCancelAttach() {},
+  };
+
+  // 1. choosing：有两个意图按钮，无 password 输入
+  const choosingHtml = renderToStaticMarkup(
+    React.createElement(AgentBindingGrid, {
+      ...baseProps,
+      attachFlow: {
+        phase: 'choosing',
+        providerKey: view.key,
+        providerId: view.id,
+        profile: 'aura',
+      },
+    }),
+  );
+  assert.ok(choosingHtml.includes(t('settings.providerAttachTitle', { provider: view.name, bot: 'aura' })));
+  assert.ok(choosingHtml.includes(`>${t('settings.providerAttachEnableOnly')}</button>`), 'choosing 必须渲染仅启用按钮');
+  assert.ok(choosingHtml.includes(`>${t('settings.providerAttachEnableAndDefault')}</button>`), 'choosing 必须渲染启用并设为默认按钮');
+  assert.equal(choosingHtml.includes('type="password"'), false, 'choosing 不得渲染密码输入框');
+
+  // 2. needs-key：有 password 输入框，严禁渲染两个意图按钮
+  const needsKeyHtml = renderToStaticMarkup(
+    React.createElement(AgentBindingGrid, {
+      ...baseProps,
+      attachFlow: {
+        phase: 'needs-key',
+        providerKey: view.key,
+        providerId: view.id,
+        profile: 'aura',
+        intent: 'enable-only',
+        token: 1,
+        draftKey: '',
+      },
+    }),
+  );
+  assert.ok(needsKeyHtml.includes('type="password"'), 'needs-key 必须渲染密码输入框');
+  assert.ok(needsKeyHtml.includes(`>${t('settings.providerAttachSaveAndEnable')}</button>`), 'needs-key 必须有唯一提交出口');
+  assert.ok(
+    needsKeyHtml.includes(t('settings.providerAttachNeedsKeyIntent', { intent: t('settings.providerAttachEnableOnly') })),
+    'needs-key 必须写明当前将执行的意图',
+  );
+  assert.equal(
+    needsKeyHtml.includes(`>${t('settings.providerAttachEnableOnly')}</button>`),
+    false,
+    'needs-key 阶段严禁同时渲染「仅启用」意图按钮',
+  );
+  assert.equal(
+    needsKeyHtml.includes(`>${t('settings.providerAttachEnableAndDefault')}</button>`),
+    false,
+    'needs-key 阶段严禁同时渲染「启用并设为默认」意图按钮',
+  );
+
+  // 3. submitting：确认条内所有按钮必须 disabled
+  const submittingHtml = renderToStaticMarkup(
+    React.createElement(AgentBindingGrid, {
+      ...baseProps,
+      attachFlow: {
+        phase: 'submitting',
+        providerKey: view.key,
+        providerId: view.id,
+        profile: 'aura',
+        intent: 'enable-and-default',
+        token: 2,
+      },
+    }),
+  );
+  const attachSection = submittingHtml.slice(submittingHtml.indexOf('data-attach-phase="submitting"'));
+  const buttons = [...attachSection.matchAll(/<button[^>]*>/g)].map((match) => match[0]);
+  assert.ok(buttons.length >= 2, 'submitting 阶段必须有按钮占位');
+  for (const tag of buttons) {
+    assert.ok(/\sdisabled(=|>|\s)/.test(tag), `submitting 阶段按钮必须全部禁用: ${tag}`);
+  }
 });
 
 test('没有模型的提供商：模型区说明为空，且不存在可点的空列表', () => {

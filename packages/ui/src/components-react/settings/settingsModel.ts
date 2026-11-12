@@ -30,6 +30,7 @@ import type {
   EndpointProbe,
   CustomEndpointDraft,
   ProviderView,
+  BindingAttachIntent,
 } from '@hermes-flux/core';
 
 export type { McpServerRow, SkillRow };
@@ -183,6 +184,16 @@ export interface SettingsActionResult {
   needsKey?: boolean;
 }
 
+/** 绑定未配置自定义端点时的附加意图参数。 */
+export interface ToggleProviderAgentOptions {
+  attachIntent?: BindingAttachIntent;
+}
+
+/** 绑定操作返回结构：缺意图时壳层返回 `confirmRequired: true` 且不写入任何配置。 */
+export interface ToggleProviderAgentResult extends SettingsActionResult {
+  confirmRequired?: boolean;
+}
+
 /** 设置弹窗的全部副作用出口。壳层实现，组件只调用。 */
 export interface SettingsActions {
   onClose: () => void;
@@ -224,7 +235,8 @@ export interface SettingsActions {
     profile: string,
     nextChecked: boolean,
     apiKey?: string,
-  ) => Promise<SettingsActionResult>;
+    options?: ToggleProviderAgentOptions,
+  ) => Promise<ToggleProviderAgentResult>;
   /**
    * 把某个 Agent 的主模型切到这个提供商。
    * 【规则】必须带具体模型：一个提供商下有多个模型，主模型槽位只能放一个。
