@@ -744,7 +744,7 @@ if (presenceHost && presenceHost !== agentPresenceHost) {
 
 ## 十、明确不做（防止范围膨胀）
 
-- 不做点击跳转检查舱（D5 未定）。
+- 不做点击跳转检查舱（D5 已裁定：纯只读）。组件保持零回调、零交互，`pointer-events: none` 不得移除——移除后它会拦截会话流的滚动与选择。
 - 不做审批请求的在场表达。
 - 不改 `renderGroupCollageAvatar`（左轨与标题栏继续用 2×2 拼图）。
 - 不动 `StatusBar`、`Titlebar`。
