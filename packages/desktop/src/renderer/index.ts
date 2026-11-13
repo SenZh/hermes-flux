@@ -236,6 +236,7 @@ import {
 import { parseTranscriptRows } from './transcriptRows.js';
 import { createInputCompletion } from './completion/inputCompletion.js';
 import { createBotActivityStore } from './persistence/botActivityStore.js';
+import { createSessionDraftStore } from './persistence/sessionDrafts.js';
 import { isStringArray, safeParseJson, resolveDurableOrderKey } from './persistence/persistedJson.js';
 import { DesktopCacheStore } from './cache/DesktopCacheStore.js';
 import { loadProviderCatalog } from './providerCatalog.js';
@@ -1194,36 +1195,16 @@ let activeStreamingLiveId: string | null = null;
  *   因此把"发起方"记录在回合上，与焦点解耦。
  */
 let activeStreamingBotName: string | null = null;
-const sessionDraftMap = new Map<string, string>();
-const SESSION_DRAFT_STORAGE_KEY = 'hermes_flux_session_drafts';
-
-// 冷启动从本地存储恢复未发送的会话草稿，防止切走或重启丢失用户正在编辑的提问
-try {
-  const rawDrafts = typeof localStorage !== 'undefined' ? localStorage.getItem(SESSION_DRAFT_STORAGE_KEY) : null;
-  if (rawDrafts) {
-    const parsed = JSON.parse(rawDrafts);
-    if (parsed && typeof parsed === 'object') {
-      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-        if (typeof v === 'string' && v.trim()) {
-          sessionDraftMap.set(k, v);
-        }
-      }
-    }
-  }
-// gate-degrade: 本地草稿恢复失败时回落到空草稿，属于可选加速
-} catch {}
-
-function persistDraftsToStorage(): void {
-  try {
-    if (typeof localStorage === 'undefined') return;
-    const obj: Record<string, string> = {};
-    for (const [k, v] of sessionDraftMap.entries()) {
-      if (v.trim()) obj[k] = v;
-    }
-    localStorage.setItem(SESSION_DRAFT_STORAGE_KEY, JSON.stringify(obj));
-  // gate-degrade: 本地草稿存盘失败属于降级场景，不阻断主流程
-  } catch {}
-}
+/**
+ * 会话草稿持久化。
+ *
+ * 【设计意图 (Why)】草稿的写入点分散在新建/切换/删除/发送成功等多处，
+ *   原先每处都要「改 Map + 手动落盘」两步，漏掉第二步不会有任何报错，只会丢草稿。
+ *   现在整簇搬到 persistence/sessionDrafts.ts，落盘合并进写操作，从结构上消除该失误面。
+ */
+const sessionDrafts = createSessionDraftStore({
+  onPersistError: (err) => console.warn('[Flux] session draft persist failed:', err),
+});
 const unreadSessionIds = new Set<string>();
 const unreadGroupRoomIds = new Set<string>();
 const unreadBotNames = new Set<string>();
@@ -4387,8 +4368,7 @@ async function createNewSession(options?: { profile?: string; projectId?: string
   // Preserve draft for current session before creating new
   const currentInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
   if (state.activeSessionId && currentInput) {
-    sessionDraftMap.set(state.activeSessionId, currentInput.value);
-    persistDraftsToStorage();
+    sessionDrafts.set(state.activeSessionId, currentInput.value);
   }
 
   try {
@@ -4510,8 +4490,7 @@ async function deleteSession(id: string): Promise<void> {
     state.pendingSessionIds = state.pendingSessionIds.filter((pid) => pid !== id);
     sessionMessagesCache.delete(id);
     forgetOlderCursorState(id);
-    sessionDraftMap.delete(id);
-    persistDraftsToStorage();
+    sessionDrafts.delete(id);
     unreadSessionIds.delete(id);
     activeRunningSessionIds.delete(id);
     activityTransitionTracker.clear('session', id);
@@ -4562,8 +4541,7 @@ async function deleteSession(id: string): Promise<void> {
       state.pendingSessionIds = state.pendingSessionIds.filter((pid) => pid !== id);
       sessionMessagesCache.delete(id);
       forgetOlderCursorState(id);
-      sessionDraftMap.delete(id);
-      persistDraftsToStorage();
+      sessionDrafts.delete(id);
       unreadSessionIds.delete(id);
       activeRunningSessionIds.delete(id);
       activityTransitionTracker.clear('session', id);
@@ -4750,8 +4728,7 @@ async function selectSession(id: string, options?: { preserveFocus?: boolean; bo
   const currentInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
   if (state.activeSessionId && state.activeSessionId !== id) {
     if (currentInput) {
-      sessionDraftMap.set(state.activeSessionId, currentInput.value);
-      persistDraftsToStorage();
+      sessionDrafts.set(state.activeSessionId, currentInput.value);
     }
     if (state.rollbackArmed && state.rollbackArmed.sessionId === state.activeSessionId) {
       disarmRollbackOnLeave();
@@ -4789,8 +4766,8 @@ async function selectSession(id: string, options?: { preserveFocus?: boolean; bo
     const currentVal = restoredInput.value;
     // 【非破坏性草稿恢复 (Non-Destructive Draft Restoration)】
     // 若用户在网络加载期间已在输入框敲入文字，绝对禁止用空草稿冲刷抹除实时输入！
-    if (!currentVal.trim() && sessionDraftMap.has(id)) {
-      restoredInput.value = sessionDraftMap.get(id) || '';
+    if (!currentVal.trim() && sessionDrafts.has(id)) {
+      restoredInput.value = sessionDrafts.get(id) || '';
     }
   }
 
@@ -5346,8 +5323,7 @@ async function sendMessage(text: string): Promise<void> {
   }
 
   if (state.activeSessionId) {
-    sessionDraftMap.delete(state.activeSessionId);
-    persistDraftsToStorage();
+    sessionDrafts.delete(state.activeSessionId);
   }
 
   const userMsgId = `usr-${Date.now()}`;

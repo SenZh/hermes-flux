@@ -223,12 +223,26 @@ test('Cache Integration - 6. 生产源码接线守卫（接线级证伪，若删
     );
   });
 
-  await t.test('6.4 sessionDraftMap 的持久化存盘与清理必须在新建、切换、删除与发送各处全量覆盖', () => {
-    const persistDraftCalls = countMatches(/persistDraftsToStorage\(/g);
-    assert.ok(
-      persistDraftCalls >= 4,
-      `persistDraftsToStorage 调用点必须 >= 4（包含新建/切换/删除/发送成功清空），实得 ${persistDraftCalls}`
-    );
+  await t.test('6.4 草稿必须在新建、切换、删除与发送成功各处全量覆盖（按抽象而非按函数名断言）', () => {
+    /**
+     * 【为什么改口径】草稿持久化已整簇抽到 persistence/sessionDrafts.ts：
+     * 落盘合并进 set/delete，宿主不再有 persistDraftsToStorage 这个函数。
+     * 若继续断言"某个函数被调用 >= 4 次"，测试就锁死了实现形态，
+     * 拆分一发生就假红——而它真正要保护的是"各处都覆盖到了草稿"。
+     * 因此改为断言宿主的草稿写操作分布：
+     *   set 覆盖 新建/切换/发送成功，delete 覆盖 删除会话/发送成功清空。
+     */
+    const setCalls = countMatches(/sessionDrafts\.set\(/g);
+    const deleteCalls = countMatches(/sessionDrafts\.delete\(/g);
+    assert.ok(setCalls >= 2, `草稿写入必须覆盖「切走前保存」与「发送成功后回写」，实得 ${setCalls}`);
+    assert.ok(deleteCalls >= 3, `草稿清理必须覆盖删除会话与发送成功清空，实得 ${deleteCalls}`);
+
+    /**
+     * 且宿主不得再自己碰存储：一旦又出现裸 localStorage 写草稿键，
+     * 说明有人绕过了 store，"忘了落盘"的失误面就重新打开了。
+     */
+    const rawDraftStorage = countMatches(/localStorage\.setItem\(\s*['"]hermes_flux_session_drafts/g);
+    assert.equal(rawDraftStorage, 0, '宿主不得绕过 store 直接写草稿存储键');
   });
 
   await t.test('6.5 restoreCacheToState 必须并发恢复会话索引、智能体索引与头像资产', () => {
