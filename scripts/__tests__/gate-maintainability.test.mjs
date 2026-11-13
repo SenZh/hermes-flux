@@ -50,13 +50,16 @@ test('size · 超过上限一行即阻断，且报出可执行的拆分指令', 
   assert.equal(found[0].line, FILE_LINE_LIMIT + 1);
 });
 
-test('size · 已登记的存量文件在登记值内放行，涨过登记值即阻断', () => {
+test('size · 已登记的存量文件在登记值内放行，涨过登记值即阻断', async () => {
+  const { KNOWN_OVERSIZE } = await import('../gates/rules/maintainability.mjs');
   const file = 'packages/desktop/src/renderer/index.ts';
-  // 登记 max 是 12071；构造刚好等于登记值的文件必须放行
-  const atLimit = checkFile(fileLineLimitRules, file, lines(12071));
-  assert.deepEqual(atLimit, [], '等于登记值必须放行');
+  const registered = KNOWN_OVERSIZE[file].max;
 
-  const grown = checkFile(fileLineLimitRules, file, lines(12072));
+  // 等于登记值必须放行（边界闭合）
+  const atLimit = checkFile(fileLineLimitRules, file, lines(registered));
+  assert.deepEqual(atLimit, [], `等于登记值 ${registered} 必须放行`);
+
+  const grown = checkFile(fileLineLimitRules, file, lines(registered + 1));
   assert.equal(grown.length, 1);
   assert.equal(grown[0].ruleId, 'size/oversize-grown');
   assert.match(grown[0].message, /只允许继续拆分/);

@@ -42,6 +42,7 @@
     "typecheck": "tsc --build packages/core/tsconfig.json packages/ui/tsconfig.json && tsc --project packages/desktop/tsconfig.json --noEmit && tsc --project packages/mobile/tsconfig.json --noEmit",
     "gates": "node scripts/gates/run.mjs",
     "gates:changed": "node scripts/gates/run.mjs --changed",
+    "gates:targets": "node scripts/gates/census-targets.mjs",
     "gates:strict": "node scripts/gates/run.mjs --strict",
     "gates:json": "node scripts/gates/run.mjs --json",
     "gates:freeze": "node scripts/gates/run.mjs --update-baseline",
@@ -55,7 +56,7 @@
     "contract:doc:check": "node scripts/contract/doc.mjs --check",
     "probe:gateway": "node scripts/contract/probe.mjs",
     "probe:drift": "node scripts/contract/probe.mjs --check",
-    "verify": "npm run gates && npm run contract:verify && npm run contract:coverage && npm run contract:doc:check && npm run typecheck && npm test && npm run verify:formal",
+    "verify": "npm run gates && npm run gates:targets && npm run gates:allow && npm run contract:verify && npm run contract:coverage && npm run contract:doc:check && npm run typecheck && npm test && npm run verify:formal",
     "verify:display-kind": "node scripts/verify/display-kind-check.mjs",
     "prepare": "node -e \"try { require('child_process').execSync('git config core.hooksPath .githooks'); } catch {}\""
   },

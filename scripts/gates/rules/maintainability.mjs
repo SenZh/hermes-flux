@@ -44,13 +44,13 @@ export const FILE_LINE_LIMIT = 1500;
  * `generated: true` 是构建产物（由生成器写出），人工拆分无意义。
  */
 export const KNOWN_OVERSIZE = {
-  'packages/desktop/src/renderer/index.ts': { max: 12071 },
+  'packages/desktop/src/renderer/index.ts': { max: 11949 },
   'packages/core/src/rpc/contracts/gateway-contract.generated.ts': { max: 7515, generated: true },
   'packages/ui/src/i18n/index.ts': { max: 1907 },
   'packages/ui/src/components-react/settings/ProvidersAdminPanel.tsx': { max: 1523 },
   'scripts/verify/control-flux.mjs': { max: 1701 },
-  'packages/core/src/rpc/client.ts': { max: 1200 },
-  'packages/core/src/rpc/types.ts': { max: 1100 },
+  'packages/core/src/rpc/client.ts': { max: 1035 },
+  'packages/core/src/rpc/types.ts': { max: 998 },
   'packages/ui/src/components/InspectionPod/InspectionPod.ts': { max: 979 },
   'scripts/contract/probe.mjs': { max: 966 },
   'packages/ui/src/components/InputDock/InputDock.ts': { max: 956 },

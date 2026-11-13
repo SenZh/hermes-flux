@@ -234,11 +234,10 @@ import {
 } from '@hermes-flux/core';
 
 import { parseTranscriptRows } from './transcriptRows.js';
+import { createInputCompletion } from './completion/inputCompletion.js';
 import { DesktopCacheStore } from './cache/DesktopCacheStore.js';
 import { loadProviderCatalog } from './providerCatalog.js';
-import { localizeSlashDescription, toSlashOptions } from './slashCatalog.js';
-import { mergeMentionCandidates, parseMentionToken } from './mentionToken.js';
-import { buildAliasSet, filterDesktopCommands, normalizeCommandName } from './slashVisibility.js';
+import { parseMentionToken } from './mentionToken.js';
 import {
   applyEnqueueReceipt,
   canSendDraft,
@@ -3588,171 +3587,50 @@ function hasRemainingParentLineage(sessionId: string): boolean {
 /** core 交互区领域服务单例（截断/分支/目录的唯一 wire 载荷构造入口） */
 const interactiveService = new InteractiveService();
 
-/** commands.catalog 预取的目录快照（本地降级检索源，complete.slash 不可用时兜底） */
-let slashCatalogSnapshot: SlashCommandOption[] = [];
-/** 网关 desktop 分级标记（键为归一命令名），决定桌面端是否展示 */
-let slashDesktopMarks = new Map<string, string | null | undefined>();
-/** 网关 canon 推导出的别名集合，别名不在补全列表重复出现 */
-let slashAliasSet = new Set<string>();
-let slashCatalogLoaded = false;
-let slashDebounce: ReturnType<typeof setTimeout> | undefined;
-let pathDebounce: ReturnType<typeof setTimeout> | undefined;
-// 序列号守卫：丢弃迟到的补全响应，防止旧结果覆盖新输入（竞态）
-let slashSeq = 0;
-let pathSeq = 0;
-
-/** 解析当前活跃会话的工作目录，作为 complete.path 的 cwd 边界 */
-function resolveActiveCwd(): string {
-  const sess = state.sessions.find((s) => s.id === state.activeSessionId);
-  if (sess?.cwd) return sess.cwd;
-  const proj = state.projects.find((p) => p.id === sess?.projectId || (sess?.projectName && p.name === sess.projectName));
-  return proj?.path || '';
-}
-
-/** 将文件补全项与 Agent 项合并进 mention popper（Agent 在上、文件在下） */
-function mergeMentionFiles(
-  fileItems: MentionReferenceOption[],
-  query: string,
-  filesFromGateway: boolean,
-  agentItems: MentionReferenceOption[] = state.mentionItems.filter((m) => m.type === 'agent'),
-): void {
-  // 【规则】网关返回的文件项是权威结果，不再二次过滤 —— 历史上这里用 includes 再筛一遍，
-  //   把网关已经模糊命中的 `src/opt/a.ts` 又按字面 `opt` 筛掉，表现为「路径搜不到」。
-  state.mentionItems = mergeMentionCandidates({ agentItems, fileItems, query, filesFromGateway });
-  state.mentionPopperOpen = state.mentionItems.length > 0;
-  render();
-}
-
-async function prefetchSlashCatalog(): Promise<void> {
-  if (!gatewayClient) return;
-  try {
-    const cat = await interactiveService.getCommandsCatalog(rpcCaller, state.activeSessionId || undefined, state.profileName || undefined);
-    const items: SlashCommandOption[] = [];
-    // 【规则】desktop 是分级标记，不是描述。历史上 `meta?.desktop || ''` 把 `hidden`/`terminal`
-    //   当文案用，既污染说明又丢掉了分级信息，TUI 专属命令因此全部涌进 GUI 弹框。
-    const desktopMarks = new Map<string, string | null | undefined>();
-    const descByCommand = new Map<string, string>();
-    for (const pair of cat.pairs || []) {
-      if (!pair[0]) continue;
-      descByCommand.set(normalizeCommandName(pair[0]), pair[1] || '');
-    }
-    for (const [name, meta] of Object.entries(cat.commands || {})) {
-      const bare = normalizeCommandName(name);
-      desktopMarks.set(bare, meta?.desktop);
-    }
-    const pushCmd = (name: string, desc: string) => {
-      if (!name) return;
-      const normalized = name.startsWith('/') ? name : `/${name}`;
-      items.push({ name: normalized, description: localizeSlashDescription(normalized, desc, t) });
-    };
-    for (const pair of cat.pairs || []) {
-      if (pair[0]) pushCmd(pair[0], pair[1] || '');
-    }
-    for (const [name, meta] of Object.entries(cat.commands || {})) {
-      // 说明取 pairs 的原文；desktop 只作分级，绝不回落到说明文字。
-      pushCmd(name, descByCommand.get(normalizeCommandName(name)) || '');
-      void meta;
-    }
-    for (const skillName of Object.keys(cat.skills || {})) {
-      // 【规则】技能条目的说明走字典，不得裸写英文 'Skill' 混进中文界面。
-      if (skillName) items.push({ name: skillName.startsWith('/') ? skillName : `/${skillName}`, description: t('slash.skillKind'), isSkill: true });
-    }
-    // 别名折叠与桌面可见性都在快照上做一遍：降级通道与实时通道必须同源，
-    // 否则断网时弹框会多出实时通道没有的条目。
-    slashAliasSet = buildAliasSet(cat.canon);
-    slashDesktopMarks = desktopMarks;
-    const seen = new Set<string>();
-    slashCatalogSnapshot = filterDesktopCommands({
-      items: items.filter((it) => (seen.has(it.name) ? false : (seen.add(it.name), true))),
-      desktopMarks,
-      aliases: slashAliasSet,
-    });
-    slashCatalogLoaded = true;
-  } catch {
-    // gate-degrade: 目录预取失败属可选加速，回退到按键时实时补全，不阻断输入
-    slashCatalogLoaded = false;
-  }
-}
-
-/** 斜杠补全：优先 complete.slash（携带 replace_from），失败降级目录快照本地过滤 */
-function requestSlashCompletion(query: string): void {
-  if (slashDebounce) clearTimeout(slashDebounce);
-  const token = inputTokenSnapshot();
-  slashDebounce = setTimeout(async () => {
-    const mySeq = ++slashSeq;
-    let resolved: SlashCommandOption[] | null = null;
-    if (gatewayClient) {
-      try {
-        const res = await interactiveService.getSlashCompletions(
-          rpcCaller,
-          token.fullText,
-          state.activeSessionId || undefined,
-          state.profileName || undefined
-        );
-        if (mySeq !== slashSeq) return;
-        const replaceFrom = typeof res.replace_from === 'number' ? res.replace_from : undefined;
-        resolved = toSlashOptions(res.items || [], replaceFrom, t);
-      } catch {
-        // gate-degrade: complete.slash 失败降级到目录快照
-        resolved = null;
-      }
-    }
-    if (mySeq !== slashSeq) return;
-    // 【规则】`resolved !== null` 就代表请求成功，哪怕过滤后为空 —— 用 `length > 0` 判定
-    //   会把「全部被隐藏」误判成「请求失败」，回退到快照后隐藏静默失效。
-    const base = resolved !== null
-      ? filterDesktopCommands({ items: resolved, desktopMarks: slashDesktopMarks, aliases: slashAliasSet })
-      : slashCatalogSnapshot.filter((c) => c.name.toLowerCase().includes(query.toLowerCase()));
-    // 【规则】不得截断：complete.slash 是网关按前缀过滤的权威通道，条数由网关决定。
-    //   历史实现写死 slice(0, 12)，`/s` 这类宽前缀下第 13 条起永远不可见，用户会以为命令不存在。
-    //   浮层列表本身有 max-height + overflow-y，超长由滚动承担，不靠丢数据换高度。
-    state.slashItems = base;
-    state.slashPopperOpen = state.slashItems.length > 0;
-    render();
-  }, 120);
-}
-
-function inputTokenSnapshot(): { fullText: string } {
-  const el = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
-  return { fullText: el ? el.value : '' };
-}
-
-/** 文件补全：complete.path 按当前 cwd + 光标 token 检索，失败降级最近打开文件 */
-function requestPathCompletion(word: string, agentItems?: MentionReferenceOption[]): void {
-  if (pathDebounce) clearTimeout(pathDebounce);
-  pathDebounce = setTimeout(async () => {
-    const mySeq = ++pathSeq;
-    let fileItems: MentionReferenceOption[] = [];
-    // 【规则】只有网关真的返回过结果才标记为权威，降级路径必须走本地模糊匹配。
-    let fromGateway = false;
-    if (gatewayClient) {
-      try {
-        const cwd = resolveActiveCwd();
-        const res = await interactiveService.getPathCompletions(
-          rpcCaller,
-          word,
-          cwd || undefined,
-          state.activeSessionId || undefined,
-          state.profileName || undefined
-        );
-        if (mySeq !== pathSeq) return;
-        fileItems = (res.items || []).map((it) => ({
-          type: 'file' as const,
-          name: it.text,
-          detail: it.meta || '',
-        }));
-        fromGateway = true;
-      } catch {
-        // gate-degrade: complete.path 失败降级到已打开文件列表
-        fileItems = state.openFiles.map((f) => ({ type: 'file' as const, name: f.path, detail: t('mention.recentFile') }));
-      }
-    } else {
-      fileItems = state.openFiles.map((f) => ({ type: 'file' as const, name: f.path, detail: t('mention.recentFile') }));
-    }
-    if (mySeq !== pathSeq) return;
-    mergeMentionFiles(fileItems, word, fromGateway, agentItems);
-  }, 120);
-}
+/**
+ * 输入补全领域（斜杠命令 + 文件 mention）。
+ *
+ * 【设计意图 (Why)】该领域的状态全部写入点都在自己内部，因此整簇搬到
+ * completion/inputCompletion.ts，宿主只注入「当前会话上下文」与「重绘」两个能力。
+ * 这里以 getter 注入而非传值，保证 domain 每次读到的都是最新焦点，不会持有过期快照。
+ */
+const inputCompletion = createInputCompletion(
+  {
+    activeSessionId: () => state.activeSessionId,
+    profileName: () => state.profileName,
+    activeCwd: () => {
+      const sess = state.sessions.find((s) => s.id === state.activeSessionId);
+      if (sess?.cwd) return sess.cwd;
+      const proj = state.projects.find(
+        (p) => p.id === sess?.projectId || (sess?.projectName && p.name === sess.projectName),
+      );
+      return proj?.path || '';
+    },
+    openFiles: () => state.openFiles,
+    agentMentionItems: () => state.mentionItems.filter((m) => m.type === 'agent'),
+    inputText: () => {
+      // 补全层只要"整段输入"，这里读取真实输入框；不存在时视为空串。
+      const el = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
+      return el ? el.value : '';
+    },
+    setMentionItems: (items) => {
+      state.mentionItems = items;
+    },
+    setMentionPopperOpen: (open) => {
+      state.mentionPopperOpen = open;
+    },
+    setSlashItems: (items) => {
+      state.slashItems = items;
+    },
+    setSlashPopperOpen: (open) => {
+      state.slashPopperOpen = open;
+    },
+    render: () => render(),
+    isGatewayReady: () => Boolean(gatewayClient),
+    rpcCaller: () => rpcCaller,
+  },
+  interactiveService,
+);
 
 /**
  * 解析网关原始消息行为视图模型。
@@ -6563,7 +6441,7 @@ async function connect(targetUrl?: string): Promise<void> {
 
         if (isConnected) {
           startProfileAutoRefresh();
-          Promise.allSettled([fetchProfiles().then(() => Promise.allSettled([fetchSessions(), fetchGroupRooms(), prefetchSlashCatalog()])), fetchModelOptions(), fetchProjects()]);
+          Promise.allSettled([fetchProfiles().then(() => Promise.allSettled([fetchSessions(), fetchGroupRooms(), inputCompletion.prefetchSlashCatalog()])), fetchModelOptions(), fetchProjects()]);
         }
       }
     });
@@ -6574,7 +6452,7 @@ async function connect(targetUrl?: string): Promise<void> {
       state.gatewayConnecting = false;
       render();
       startProfileAutoRefresh();
-      Promise.allSettled([fetchProfiles().then(() => Promise.allSettled([fetchSessions(), fetchGroupRooms(), prefetchSlashCatalog()])), fetchModelOptions(), fetchProjects()]);
+      Promise.allSettled([fetchProfiles().then(() => Promise.allSettled([fetchSessions(), fetchGroupRooms(), inputCompletion.prefetchSlashCatalog()])), fetchModelOptions(), fetchProjects()]);
     }
   } catch (err: any) {
     console.error('[Flux Connect] Connection failed:', err);
@@ -10530,7 +10408,7 @@ function bindEvents(): void {
         const slashMatch = /(?:^|\s)\/([a-zA-Z0-9_-]*)$/.exec(textBeforeCursor);
         if (slashMatch) {
           state.mentionPopperOpen = false;
-          requestSlashCompletion(slashMatch[1]);
+          inputCompletion.requestSlashCompletion(slashMatch[1]);
           return;
         } else if (state.slashPopperOpen) {
           state.slashPopperOpen = false;
@@ -10578,7 +10456,7 @@ function bindEvents(): void {
           state.mentionPopperOpen = filteredAgents.length > 0;
           state.slashPopperOpen = false;
           render();
-          requestPathCompletion(query, agentItems);
+          inputCompletion.requestPathCompletion(query, agentItems);
           return;
         } else if (state.mentionPopperOpen) {
           state.mentionPopperOpen = false;

@@ -6,9 +6,9 @@ name: Quality Gates
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'dev/**', 'feat/**']
   pull_request:
-    branches: [main]
+    branches: [main, 'dev/**']
 
 concurrency:
   group: gates-${{ github.workflow }}-${{ github.ref }}
@@ -55,6 +55,13 @@ jobs:
           done
           node -e "require.resolve('@hermes-flux/core'); require.resolve('@hermes-flux/ui'); console.log('workspace links ok')"
 
+      # 测试目标必须由 Node 自己枚举，不能用 shell 展开的 glob。
+      # 历史坑：bash 默认关闭 globstar 时 `**` 退化为 `*`，只能命中一层子目录，
+      #   packages/ui/__tests__ 根级 30 个文件在 ubuntu 上静默不跑，而退出码仍为 0。
+      #   现在 npm test 走 scripts/gates/census-check.mjs，它会断言文件数与用例数下限。
+      - name: Verify test census (glob 与执行量自证)
+        run: node scripts/gates/census-targets.mjs
+
 
       - name: Gate 0/4 · 静态门禁（架构 / 换肤 / i18n / 性能）
         run: node scripts/gates/run.mjs
@@ -75,6 +82,20 @@ jobs:
 
       - name: Gate 2c · Agent 编排一致性
         run: npm run gates:config
+
+      - name: Gate 2d · 豁免敞口预算（行内豁免只降不升）
+        run: npm run gates:allow
+
+      - name: Gate 3 · 形式化不变量（fast-check）
+        run: npm run verify:formal
+        # 状态机类缺陷靠普通单例测不出来：只有随机并发交错才能暴露
+        # 「拉取在途写入被误删」「墓碑被迟滞快照复活」这类问题。
+
+      - name: Gate 0b/0c/0d · 网关契约一致性与文档同步
+        run: |
+          npm run contract:verify
+          npm run contract:coverage
+          npm run contract:doc:check
 
       - name: Gate 5 · 全量构建
         run: npm run build
