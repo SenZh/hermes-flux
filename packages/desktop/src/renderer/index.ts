@@ -1655,10 +1655,18 @@ function syncStreamBottomInset(): void {
   const stream = document.getElementById('conversation-stream');
   if (!pod || !dock || !stream) return;
   /**
-   * 安全线 = 输入舱顶边到 pod 底边的整段 + 32px 呼吸位。
+   * 安全线 = 输入舱顶边到 pod 底边的整段 + 呼吸位。
    * 16px 在字体放大或输入舱带通知栈时余量不足，末行会贴到输入舱边上。
+   *
+   * 【呼吸位必须随指示器布局取值 (Rules)】`dock` 变体把在场指示器绝对定位在输入舱上沿
+   *   （`bottom: calc(100% + 8px)`），28px 头像向上侵占 36px。沿用 32px 呼吸位会让会话
+   *   最后一行压进指示器 4px——那条取值是按旧 20px 头像（8 + 20 = 28px）定的，头像放大后
+   *   被静默击穿，且 dock 文案没有字形阴影，叠字没有任何隔离。
+   *   这里按变体取 40px（间距 8 + 头像 28 + 呼吸 4，全落 4px 网格）；
+   *   `stage` 变体悬浮在对话区顶部，底部不需要为它多留空间。
    */
-  const baseInset = Math.round(pod.getBoundingClientRect().bottom - dock.getBoundingClientRect().top) + 32;
+  const presenceReserve = state.presenceLayout === 'dock' ? 40 : 32;
+  const baseInset = Math.round(pod.getBoundingClientRect().bottom - dock.getBoundingClientRect().top) + presenceReserve;
   const distance = stream.scrollHeight - stream.scrollTop - stream.clientHeight;
   if (distance <= STICK_TO_BOTTOM_THRESHOLD_PX) {
     const virtualWindow = document.querySelector<HTMLElement>('.conv-virtual-window');

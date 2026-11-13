@@ -366,7 +366,24 @@ test('在场指示器 · 14 条表现层契约', async (t) => {
     const dockBlock = /\.conv-presence\[data-layout="dock"\] \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
     assert.ok(dockBlock, '必须存在 dock 布局变体');
     assert.ok(/max-width:\s*740px/.test(dockBlock), 'dock 变体必须与输入舱同宽（740px）');
-    assert.ok(/--presence-size:\s*20px/.test(dockBlock), 'dock 变体头像必须收到 20px');
+    const dockSizeCss = /--presence-size:\s*(\d+)px/.exec(dockBlock)?.[1] ?? '';
+    assert.equal(dockSizeCss, '28', 'dock 变体头像必须收到 28px');
+    /*
+     * 【两侧真值同源 (Rules)】组件侧的 `PRESENCE_DOCK_AVATAR_SIZE`（真实资产内联尺寸）
+     *   与 CSS 的 `--presence-size`（容器几何）是同一真值。若两条断言各自钉死一个数字，
+     *   「改了一边、忘了另一边」会被 `width: 100% !important` 兜住而全绿通过——
+     *   视觉暂时无缺陷，但契约已经脱钩，注释在说谎且下一次改动会踩坑。
+     *   这里直接把两侧取值拉出来比对，让脱钩在测试里当场变红。
+     */
+    const dockSizeTs =
+      /const PRESENCE_DOCK_AVATAR_SIZE = (\d+);/.exec(
+        read('packages/ui/src/components-react/AgentPresence.tsx'),
+      )?.[1] ?? '';
+    assert.equal(
+      dockSizeTs,
+      dockSizeCss,
+      '组件常量 PRESENCE_DOCK_AVATAR_SIZE 必须与 CSS 的 --presence-size 同值',
+    );
     assert.ok(
       /justify-content:\s*flex-start/.test(dockBlock),
       'dock 变体必须左对齐：头像外沿要贴输入舱左边缘',
@@ -420,9 +437,9 @@ test('在场指示器 · 14 条表现层契约', async (t) => {
     /*
      * 【真实图片资产防裁切 (Rules)】自定义头像（带有 avatar 图片 URL）会由 `renderBotAvatar`
      *   渲染为带有内联样式的 `<img>`。在 dock 变体下：
-     *   1. 组件输出的 `<img>` 内联尺寸必须根据 layout 切换为 20px（stage 为 56px）；
+     *   1. 组件输出的 `<img>` 内联尺寸必须根据 layout 切换为 28px（stage 为 56px）；
      *   2. CSS 的 `.conv-presence__face > img` 必须带 `!important` 覆盖内联样式，
-     *      防止 56px 大图塞进 20px 容器被裁成局部一个角（真实用户截图缺陷）。
+     *      防止 56px 大图塞进 28px 容器被裁成局部一个角（真实用户截图缺陷）。
      */
     const dockCustomImgHtml = renderToStaticMarkup(
       React.createElement(AgentPresence, {
@@ -434,8 +451,9 @@ test('在场指示器 · 14 条表现层契约', async (t) => {
       }),
     );
     assert.ok(
-      dockCustomImgHtml.includes('width: 20px') && dockCustomImgHtml.includes('height: 20px'),
-      'dock 模式下自定义头像 <img> 内联样式必须输出 20px，不得输出 56px',
+      dockCustomImgHtml.includes(`width: ${dockSizeCss}px`) &&
+        dockCustomImgHtml.includes(`height: ${dockSizeCss}px`),
+      `dock 模式下自定义头像 <img> 内联样式必须输出 ${dockSizeCss}px，不得输出 56px`,
     );
 
     const stageCustomImgHtml = renderToStaticMarkup(
@@ -450,6 +468,35 @@ test('在场指示器 · 14 条表现层契约', async (t) => {
     assert.ok(
       stageCustomImgHtml.includes('width: 56px') && stageCustomImgHtml.includes('height: 56px'),
       'stage 模式下自定义头像 <img> 内联样式必须输出 56px',
+    );
+
+    /*
+     * 【群聊 + dock 组合路径 (Rules)】群聊成员与单聊共用同一个 `avatarSize` 实参，
+     *   但历史用例全部走 stage：若有人把群聊分支改回 `PRESENCE_AVATAR_SIZE`，
+     *   没有任何断言会变红，群聊 dock 头像会悄悄回到 56px 并撑爆 28px 容器。
+     *   这里渲染一次群聊 dock，核对每个槽位的下发尺寸。
+     */
+    const dockGroupHtml = renderToStaticMarkup(
+      React.createElement(AgentPresence, {
+        snapshot: {
+          presence: { kind: 'idle' },
+          identity: {
+            kind: 'group',
+            members: ['虫虫', '卷卷'],
+            speaker: '虫虫',
+            profiles: [{ name: '虫虫' }, { name: '卷卷' }],
+          },
+          layout: 'dock',
+        },
+      }),
+    );
+    const dockGroupSizeMarks = [
+      ...dockGroupHtml.matchAll(new RegExp(`width="${dockSizeCss}"`, 'g')),
+    ];
+    assert.equal(dockGroupSizeMarks.length, 2, '群聊 dock 的每个头像槽位都必须按 28px 下发');
+    assert.ok(
+      !dockGroupHtml.includes('width="56"') && !dockGroupHtml.includes('width: 56px'),
+      '群聊 dock 不得回落到 stage 的 56px 尺寸',
     );
 
     const imgRule = /\.conv-presence__face > img \{([\s\S]*?)\}/.exec(css)?.[1] ?? '';

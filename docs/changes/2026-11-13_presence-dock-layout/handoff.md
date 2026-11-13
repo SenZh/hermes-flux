@@ -14,7 +14,7 @@
 ├───────────────────────────────────┬────────────────────────────────────┤
 │           Stage 布局 (默认)        │           Dock 布局 (新方案)        │
 │  - 位置: .flux-middle-pod 顶部居中 │  - 位置: .input-dock 顶部左对齐贴边 │
-│  - 头像: 56px 大图腾/大图片        │  - 头像: 20px 微型原生适配 (1px 边框)│
+│  - 头像: 56px 大图腾/大图片        │  - 头像: 28px 微型原生适配 (1px 边框)│
 │  - 文案: 13px 双层阴影压在对话流   │  - 文案: 11px caption 整数档，无阴影│
 │  - 特色: 92px 呼吸光晕 + 旋转外环   │  - 特色: 去光晕、去阴影、零脏边     │
 └───────────────────────────────────┴────────────────────────────────────┘
@@ -35,8 +35,8 @@
 
 | 文件路径 | 核心行号/函数 | 职责与修改要点 |
 |---|---|---|
-| `packages/ui/src/components-react/AgentPresence.tsx` | `AgentPresence()`<br>`buildFaceHtml()` | **尺寸下发与 DOM 契约**：根据 `layout === 'dock' ? 20 : 56` 下发 `avatarSize`；绑定 `data-layout`、`data-idle-quip`、`data-idle-turn`，文案行带 `aria-hidden`。 |
-| `packages/ui/src/styles/conversation.css` | `3320-3330`<br>`3582-3640` | **样式与缩放防御**：`.conv-presence__face > svg, img` 强制带 `!important` 覆盖内联样式；dock 下重设 `--presence-size: 20px`、`max-width: 740px`、`justify-content: flex-start`、`border-width: 1px`；隐藏 halo 与 text-shadow。 |
+| `packages/ui/src/components-react/AgentPresence.tsx` | `AgentPresence()`<br>`buildFaceHtml()` | **尺寸下发与 DOM 契约**：根据 `layout === 'dock' ? PRESENCE_DOCK_AVATAR_SIZE(28) : 56` 下发 `avatarSize`；绑定 `data-layout`、`data-idle-quip`、`data-idle-turn`，文案行带 `aria-hidden`。 |
+| `packages/ui/src/styles/conversation.css` | `3320-3330`<br>`3582-3640` | **样式与缩放防御**：`.conv-presence__face > svg, img` 强制带 `!important` 覆盖内联样式；dock 下重设 `--presence-size: 28px`、`max-width: 740px`、`justify-content: flex-start`、`border-width: 1px`；隐藏 halo 与 text-shadow。 |
 | `packages/ui/src/components-react/conversation/idleQuipScheduler.ts` | `createIdleQuipScheduler()` | **可测的纯定时器调度器**：9s 推进 tick、420ms 侧头、页面隐藏停表、回到前台不补播、stop 清空复位。 |
 | `packages/ui/src/components-react/conversation/usePresenceTicker.ts` | `useIdleQuipTicker()` | **React Hook 桥**：将调度器与组件生命周期和 `visibilitychange` 事件对齐。 |
 | `packages/core/src/agent/agentPresence.ts` | `pickIdleQuipIndex()`<br>`IDLE_COPRIME_STEPS` | **确定性轮播算法**：FNV-1a 派生起点，配合欧几里得互质步长，保证一个周期（8 拍）遍历所有短句且无随机跳动。 |

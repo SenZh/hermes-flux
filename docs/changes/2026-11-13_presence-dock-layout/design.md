@@ -24,12 +24,12 @@
 |---|---|---|
 | 容器宽 | `100%`，`max-width: 740px`，`margin: 0 auto` | 必须与 `.input-card-box.composer-dock` 完全一致 |
 | 水平位置 | `justify-content: flex-start` | 头像槽位左沿对齐输入舱左边框（实测 `alignDelta = 0`） |
-| 头像 | `--presence-size: 20px` | SVG/img 由 `.conv-presence__face > svg` 等比缩放 |
+| 头像 | `--presence-size: 28px` | SVG/img 由 `.conv-presence__face > svg` 等比缩放；组件侧 `PRESENCE_DOCK_AVATAR_SIZE` 必须同值 |
 | 间距 | 头像 ↔ 文案 `8px` | 4px 网格 |
 | 文案 | `var(--fs-caption, 11px)` + `line-height: 16px` | 必须锁整数档：`calc(var(--conv-meta-size) - 1px)` 在字号小/大档会得到 10.7px / 13.6px，违反 7 档整数阶梯 |
 | 与输入舱纵向间距 | `8px` | 宿主 `bottom: calc(100% + 8px)` |
 | 环 / 重叠 | `inset: -2px` / `margin-left: -8px` | 4px 网格 |
-| 光晕 | **不挂**（`display: none`） | 32px 光晕在 20px 头像上只剩一团脏雾；且输入舱上沿是打字视线锚点，再叠常驻脉冲会构成第三重动效焦点 |
+| 光晕 | **不挂**（`display: none`） | 92px 光晕压在 28px 头像上只剩一团脏雾；且输入舱上沿是打字视线锚点，再叠常驻脉冲会构成第三重动效焦点 |
 | 字形阴影 | **关闭** | dock 不压消息，`--background` 暗晕会变成一圈脏边（浅色皮肤尤甚） |
 
 **不占流（硬约束）**：宿主 `.presence-host--dock` 在 `.input-dock-container` 内绝对定位，**不参与 flex 布局**。任何“用 margin 让出空间”的写法都会把输入舱顶起来，而输入舱高度会随 placeholder 换行、附件轨、队列变化——一旦占流就是持续上下跳。
@@ -50,7 +50,7 @@
 4. **空闲动作**：`.conv-presence__avatar[data-idle-turn="true"]` 播放 `convPresenceIdleTurn`（420ms，一次性）。
    - 挂 **avatar** 而不是 face：face 已被 `convPresenceBreathe`（2600ms infinite）占用，同元素第二条 `animation` 会覆盖前者；
    - 不允许空闲态再挂无限动画（单一焦点不变量）；`prefers-reduced-motion` 白名单必须包含 `.conv-presence__avatar`。
-5. **退场契约废弃**：`data-empty` / `:has()` 的“高度归零”规则已删除——空闲态高度恒为 84px（stage）/ 20px（dock），不再弹跳。
+5. **退场契约废弃**：`data-empty` / `:has()` 的“高度归零”规则已删除——空闲态高度恒为 84px（stage）/ 28px（dock），不再弹跳。
 6. **无障碍**：空闲轮播行带 `aria-hidden="true"`。`role="status"` 隐含 polite live region，每 9s 换句会让读屏永久性每 9 秒播报一遍整行；空闲短句是氛围文案，必须对辅助技术静音。
 7. **群聊 seed 用排序后的成员表**：`orderGroupMembers` 会把说话者提到最左，直接拿它做 seed 会导致说话者一换、眨眼节拍与轮播起点被无谓重置。
 
@@ -82,7 +82,7 @@ npm run verify:presence:dock
 脚本伺服 `packages/desktop/dist/renderer/`，需先 `npm run build`。四个场景 + 设置切换闭环，六条断言全为 Binding（任一为 false 即退出码 1）。
 
 - 真实应用壳实测（Electron/Blink，加载构建产物）：
-  - `dock`：presence `740 × 20`，头像槽位左沿 == 输入舱左边框（`alignDelta = 0`），`gapToDock = 8px`，文案 11px caption 档；
+  - `dock`：presence `740 × 28`，头像槽位左沿 == 输入舱左边框（`alignDelta = 0`），`gapToDock = 8px`，文案 11px caption 档；
   - `stage`：保持 `420 × 84`、`top = 67`，头像 56px 零位移；
   - 指示器背后 `::before` 的 `content` 与 `backgroundImage` 均为 `none`（无遮罩面）。
   - 量测口径：`alignDelta` 量 avatar 槽位而非 face —— face 上挂 `convPresenceTilt` 旋转形变，`getBoundingClientRect()` 会膨胀到 21px 并左移 1px。
@@ -95,5 +95,5 @@ npm run verify:presence:dock
 
 ## 六、后续可调项
 
-- 头像 20px / 文案 12px 是首版取值；若要更轻可降到 16px + 11px（需同步环与光晕）。
+- 头像 28px / 文案 11px 为现行取值（2026-11-13 由 20px 上调：20px 在 740px 输入舱旁读作一枚状态圆点而非一张脸，用户裁定「再大一点点」）。文字行按用户裁定**保留**，不做静默退场；空闲氛围句照旧每 9s 轮播。若还要更轻，下限建议 24px（需同步环与光晕）。
 - 空闲文案池目前 8 条，扩充只需追加 `presence.idle.N` 与 `IDLE_QUIP_KEYS`（两侧必须同时改，单测 `pickIdleQuipIndex` 会守住遍历性）。

@@ -41,6 +41,20 @@ import { useIdleQuipTicker, usePresenceTicker } from './conversation/usePresence
 
 /** 头像槽位边长（px）：单聊与群聊同尺寸，缩了就变成「小图标堆」而不是在场感 */
 const PRESENCE_AVATAR_SIZE = 56;
+/**
+ * dock 变体的头像边长（px）。
+ *
+ * 【设计意图 (Why)】输入舱上沿是打字视线的锚点，头像必须先被「看见」才读得出在场感：
+ *   20px 在 740px 宽的输入舱旁边读作一枚状态圆点而不是一张脸，用户已裁定再大一点点。
+ *   28px 是 4px 网格上的下一个可用台阶（24px 与 20px 的视觉差几乎不可辨），
+ *   同时仍远小于 stage 的 56px 大图腾，保持「微型态」的层级差。
+ *
+ * 【约束与规则 (Rules)】本常量与 conversation.css 的
+ *   `.conv-presence[data-layout="dock"] { --presence-size: 28px }` 是同一真值，
+ *   改一处必须同步另一处：组件侧只管真实图片的内联尺寸，CSS 侧管容器几何，
+ *   任一侧脱钩都会让 `<img>` 与容器不同步（见下方 `!important` 兜底注释）。
+ */
+const PRESENCE_DOCK_AVATAR_SIZE = 28;
 /** 群聊最多展示的槽位数；超出时最后一位替换为 +N 计数块 */
 const PRESENCE_MAX_AVATARS = 4;
 /** 工具目标单行展示上限：超出以省略号收尾 */
@@ -406,7 +420,7 @@ export function AgentPresence(props: { snapshot: AgentPresenceSnapshot }): React
   );
 
   const slots: PresenceSlot[] = [];
-  const avatarSize = layout === 'dock' ? 20 : PRESENCE_AVATAR_SIZE;
+  const avatarSize = layout === 'dock' ? PRESENCE_DOCK_AVATAR_SIZE : PRESENCE_AVATAR_SIZE;
 
   if (!isGroup) {
     /**

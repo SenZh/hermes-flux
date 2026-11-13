@@ -3315,7 +3315,7 @@ details[open] > summary > .tool-row__expand {
  *
  * 【为什么必须 !important (Rules)】`renderBotAvatar` 对真实图片资产输出了带内联样式的
  *   `style="width: 56px; height: 56px; border: 1px ..."`（特异性 1000）。
- *   类选择器若不加 `!important` 就会被内联压死，导致 56px 大图塞进 20px 容器，
+ *   类选择器若不加 `!important` 就会被内联压死，导致 56px 大图塞进 28px 容器，
  *   被 `overflow: hidden` 裁成只剩局部一个角（真实用户缺陷）。
  *   这里强制 100% 覆盖内联宽高并清掉内联边框，由外层 `.conv-presence__face` 统管边框。
  */
@@ -3582,11 +3582,11 @@ details[open] > summary > .tool-row__expand {
    【几何 (Rules)】
      1. 与输入舱同宽同位：`width: 100%`、`max-width: 740px`、`margin: 0 auto`，
         头像外沿 = 输入舱左边框，用户裁定的对齐线就是这条；
-     2. 单行横排：头像 20px、间距 8px、文案跟随 `--conv-meta-size` 减 1px；
+     2. 单行横排：头像 28px、间距 8px、文案跟随 `--conv-meta-size` 减 1px；
      3. 只读、零交互：`pointer-events: none`（宿主层负责，见 `#react-conv-presence-host`）。
    ========================================================================== */
 .conv-presence[data-layout="dock"] {
-  --presence-size: 20px;
+  --presence-size: 28px;
   --presence-gap: 8px;
 
   position: static;
@@ -3603,7 +3603,8 @@ details[open] > summary > .tool-row__expand {
   margin: 0 auto;
 }
 
-/* dock 20px 头像边框收紧至 1px：原 2px 边框占去 4px，内容区只剩 16px */
+/* dock 头像边框收紧至 1px：原 2px 边框占去 4px，28px 内容区只剩 24px；
+   1px 下内容区 26px，脸的比例才撑得住而外沿仍是一条细线 */
 .conv-presence[data-layout="dock"] .conv-presence__face {
   border-width: 1px;
 }
@@ -3634,15 +3635,14 @@ details[open] > summary > .tool-row__expand {
 /*
  * dock 变体不挂光晕。
  *
- * 【为什么 (Rules)】stage 的 92px 光晕是给 56px 头像做的柔光；缩到 20px 头像后，
- *   32px 光晕在输入区只剩一团脏雾。更关键的是：输入舱上沿是打字视线的锚点，
+ * 【为什么 (Rules)】stage 的 92px 光晕是给 56px 头像做的柔光；压在 28px 头像上只剩一团脏雾。更关键的是：输入舱上沿是打字视线的锚点，
  *   这里再叠一层常驻脉冲会构成第三重动效焦点（呼吸 2600ms + 换句 9s + 侧头 420ms 已足够）。
  */
 .conv-presence[data-layout="dock"] .conv-presence__halo {
   display: none;
 }
 
-/* 小头像的外环必须等比收：沿用 stage 的 -5px 会把 20px 头像裹成一颗球
+/* 小头像的外环必须等比收：沿用 stage 的 -5px 会把 28px 头像裹成一颗球
    【网格 (Rules)】环 inset 取 -2px、重叠 -8px，全部落在 4px 网格。 */
 .conv-presence[data-layout="dock"] .conv-presence__ring {
   inset: -2px;
@@ -3653,8 +3653,11 @@ details[open] > summary > .tool-row__expand {
   margin-left: -8px;
 }
 
+/* 【与 face 同源 (Rules)】dock 下 face 的边框已收到 1px，`+N` 计数块若仍留 2px，
+   28px 圆里内容区只剩 24px，三位数字就会贴边——两者必须同一个边宽。 */
 .conv-presence[data-layout="dock"] .conv-presence__avatar--more {
   font-size: var(--fs-caption, 11px);
+  border-width: 1px;
 }
 
 /*
