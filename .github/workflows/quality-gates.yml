@@ -86,6 +86,11 @@ jobs:
       - name: Gate 2d · 豁免敞口预算（行内豁免只降不升）
         run: npm run gates:allow
 
+      # 门禁自证：证明每个门禁在被违反时确实会红。
+      # 与 gates:mutation 互补——后者验证测试的杀伤力，这里验证门禁的杀伤力。
+      - name: Gate 2e · 门禁自证套件（门禁本身具备杀伤力）
+        run: npm run gates:self-proof
+
       - name: Gate 3a · 不变量映射表（id 唯一、测试含 fc.assert、Markdown 与 JSON 一致）
         run: npm run gates:invariants
 
