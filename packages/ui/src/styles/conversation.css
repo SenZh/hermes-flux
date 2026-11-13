@@ -3263,18 +3263,30 @@ details[open] > summary > .tool-row__expand {
   max-width: 100%;
 }
 
-/* 椭圆径向遮罩：承担对比度职责（无壳裸文字必须靠它压在滚动内容之上） */
+/*
+ * 椭圆径向遮罩：承担对比度职责（无壳裸文字必须靠它压在滚动内容之上）。
+ *
+ * 【体量 (Rules)】它是「可读性垫层」，不是「背景板」。
+ *   容器宽 420px、有文案时高 84px，旧值 `+150px / +30px` 展开成 570×114px，
+ *   底缘压到 123px——会话流第一条消息有一整行落在实心垫层里被吃掉。
+ *   现收紧到 `+64px / +8px`（484×92px）：横向仍比文案上限多出 32px/侧呼吸，
+ *   纵向只比头像+文案多 4px/侧。
+ * 【边缘 (Rules)】径向半径必须让盒边界落在渐变的透明端，而不是停在实心段：
+ *   旧值垂直 120% 半径超出盒高，盒顶落在「完全不透明」区间内，渐变被盒子裁成硬切边，
+ *   浅色主题下就是一块清晰的胶囊白板（Blink 实测）。现取 50% × 50%：盒子的四条边
+ *   正好落在径向 100%（完全透明）处，边缘柔和到看不出形状。
+ */
 .conv-presence::before {
   content: "";
   position: absolute;
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: calc(100% + 150px);
-  height: calc(100% + 30px);
+  width: calc(100% + 64px);
+  height: calc(100% + 8px);
   border-radius: var(--radius-pill);
   z-index: -1;
-  background: radial-gradient(ellipse 56% 120% at 50% 40%, var(--panel) 48%, transparent 100%);
+  background: radial-gradient(ellipse 50% 50% at 50% 50%, var(--panel) 52%, transparent 100%);
 }
 
 .conv-presence__avatars {

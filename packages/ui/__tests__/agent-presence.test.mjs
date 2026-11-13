@@ -313,12 +313,26 @@ test('在场指示器 · 14 条表现层契约', async (t) => {
     );
   });
 
-  await t.test('19. 层级必须高于 onboarding 卡片（否则文案被卡片盖住）', () => {
+  await t.test('20. 对比度遮罩：体量上限与柔边（防止回涨成背景板）', () => {
     const css = read('packages/ui/src/styles/conversation.css');
-    const rootBlock = /\.conv-presence \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
-    const zIndex = Number(/z-index:\s*(\d+)/.exec(rootBlock)?.[1] ?? 0);
-    const scrim = Number(/\.conv-dock-scrim \{[\s\S]*?z-index:\s*(\d+)/.exec(css)?.[1] ?? 10);
-    // 真实缺陷回归：z-index 9 时 onboarding 卡片把文案行压住，截图里只看得见头像
-    assert.ok(zIndex > scrim, `指示器 z-index(${zIndex}) 必须高于底部遮罩(${scrim})`);
+    const block = /\.conv-presence::before \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
+    assert.ok(block, '必须存在 .conv-presence::before 对比度遮罩');
+    // 【真实缺陷回归】旧值 `+150px / +30px` 在容器宽 420px、高 84px 时展开成 570×114px，
+    //   底缘压到 123px——会话流首条消息有一整行落在实心垫层里被吃掉，用户看到的就是
+    //   「对话框顶部有一块很大的背景挡住内容」。体量设上限，防止再次回涨。
+    const extraW = Number(/width:\s*calc\(100%\s*\+\s*(\d+)px\)/.exec(block)?.[1] ?? NaN);
+    const extraH = Number(/height:\s*calc\(100%\s*\+\s*(\d+)px\)/.exec(block)?.[1] ?? NaN);
+    assert.ok(Number.isFinite(extraW), '遮罩宽度必须写成 calc(100% + Npx) 形式');
+    assert.ok(Number.isFinite(extraH), '遮罩高度必须写成 calc(100% + Npx) 形式');
+    assert.ok(extraW <= 64, `遮罩横向外扩 ${extraW}px 超限：不得超过 64px（每侧 32px 呼吸即可）`);
+    assert.ok(extraH <= 8, `遮罩纵向外扩 ${extraH}px 超限：不得超过 8px`);
+    // 【硬边回归】径向半径必须让盒边界落在渐变过渡段：垂直 120% 时盒顶处于「完全不透明」
+    //   区间，渐变被盒子裁成硬切边，浅色主题下就是一块清晰的胶囊白板（Blink 实测截图）。
+    const radius = /ellipse\s+(\d+)%\s+(\d+)%/.exec(block);
+    assert.ok(radius, '遮罩必须使用椭圆径向渐变');
+    assert.ok(
+      Number(radius[2]) <= 50,
+      `径向垂直半径 ${radius[2]}% 超限：必须 ≤ 50%，否则边缘被裁成硬切边`,
+    );
   });
 });
