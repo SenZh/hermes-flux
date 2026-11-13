@@ -42,7 +42,6 @@ export function renderLeftRailHtml(snapshot: LeftRailHtmlSnapshot): string {
     onOpenGroupMenu: noop,
     onSearchChange: noop,
     onNewChat: noop,
-    onSetTab: noop,
     onToggleSessions: noop,
     onToggleGroups: noop,
     onStartGroupRename: noop,

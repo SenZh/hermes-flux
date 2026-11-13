@@ -18,8 +18,6 @@ function renderRail(props = {}) {
     profileName: props.profileName || 'default',
     profiles: props.profiles || [],
     groups: props.groups || [],
-    projects: props.projects || [],
-    activeRailTab: props.activeRailTab || 'chats',
     searchQuery: props.searchQuery || '',
     error: props.error,
     collapsed: Boolean(props.collapsed),
@@ -66,7 +64,7 @@ test('Station Rail Dual Architecture & State Invariants (React)', async (t) => {
     assert.ok(zhang.includes('activity-unread-badge'), '未读 Agent 必须含绿点');
     assert.equal(zhang.includes('activity-pulse-indicator'), false, '未读态严禁展示脉冲');
 
-    const li = between(html, 'data-station-profile="qa-li"', 'rail-station-groups-btn');
+    const li = between(html, 'data-station-profile="qa-li"', 'flux-context-drawer');
     assert.equal(li.includes('activity-pulse-indicator'), false, '已读 Agent 严禁脉冲');
     assert.equal(li.includes('activity-unread-badge'), false, '已读 Agent 严禁绿点');
   });
@@ -143,7 +141,7 @@ test('Station Rail Dual Architecture & State Invariants (React)', async (t) => {
       activeFocus: { type: 'bot', botName: 'only-read' },
       profileName: 'only-read',
     });
-    const station = between(html, 'data-station-profile="only-read"', 'rail-station-groups-btn');
+    const station = between(html, 'data-station-profile="only-read"', 'flux-context-drawer');
     assert.equal(station.includes('activity-pulse-indicator'), false);
     assert.equal(station.includes('activity-unread-badge'), false);
   });

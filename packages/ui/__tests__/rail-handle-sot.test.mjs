@@ -44,11 +44,13 @@ test('React 左把手禁止自带宽度/偏移类，且必须 right-0 完整落�
 });
 
 test('滚动容器必须让出把手带（命中竞态守卫：全局滚动条 6px 与把手全量重叠会劫走滑块拖拽）', () => {
-  for (const id of ['session-list-container', 'rail-projects-deck']) {
+  for (const id of ['session-list-container']) {
     const line = leftRail.split('\n').find((l) => l.includes(id));
     assert.ok(line, `${id} 必须存在`);
     assert.ok(line.includes('mr-[var(--geo-resize-handle)]'), `${id} 必须 mr-[var(--geo-resize-handle)]，把滚动条移出把手命中带`);
   }
+  // 项目甲板随微轨项目入口一并移除，其滚动容器不得残留（残留会重新引入把手命中竞态面）。
+  assert.equal(leftRail.includes('rail-projects-deck'), false, '项目甲板滚动容器必须随入口一并删除');
 });
 
 test('模板右把手禁止内联宽度/负偏移/背景，必须 left-0 避开 overflow 裁剪', () => {

@@ -43,7 +43,6 @@ export interface LeftRailProject {
   id: string;
   name: string;
   path?: string;
-  sessions?: LeftRailSession[];
 }
 
 export interface LeftRailProfile {
@@ -64,5 +63,3 @@ export type LeftRailActiveFocus =
   | { type: 'bot'; botName: string }
   | { type: 'session'; sessionId: string }
   | { type: 'group'; roomId: string };
-
-export type LeftRailTab = 'chats' | 'projects' | 'groups';

@@ -151,7 +151,6 @@ test('session-list-status-animation: 亮蓝色云朵 A 点阵、头像简洁角�
     st.gatewayLatencyMs = 18;
     st.profilesPhase = 'ready';
     st.sessionsPhase = 'ready';
-    st.activeRailTab = 'chats';
     st.profileName = 'arch-wang';
     st.activeFocus = { type: 'bot', botName: 'arch-wang' };
     st.activeSessionId = 's-read';
@@ -170,9 +169,8 @@ test('session-list-status-animation: 亮蓝色云朵 A 点阵、头像简洁角�
       { roomId: 'g-read', name: '已读历史群', members: ['default', 'arch-wang'], lastMessage: '结论已确认', updatedAt: ${now - 300000} }
     ];
     st.projects = [
-      { id: 'proj-flux', name: 'hermes-flux', path: 'D:/ws/hermes-aura', sessions: [] }
+      { id: 'proj-flux', name: 'hermes-flux', path: 'D:/ws/hermes-aura' }
     ];
-    window.__fluxActivity.syncProjects();
 
     window.__fluxActivity.startTurn('session', 's-running');
     window.__fluxActivity.startTurn('session', 's-unread-hist');
@@ -202,8 +200,6 @@ test('session-list-status-animation: 亮蓝色云朵 A 点阵、头像简洁角�
     const stationBotUnread = document.querySelector('#flux-station-rail [data-station-profile="fe-zhang"] .activity-unread-badge');
     const groupRowRun = document.querySelector('.rail-group-item[data-room-id="g-running"] .activity-pulse-indicator');
     const groupRowRead = document.querySelector('.rail-group-item[data-room-id="g-read"]');
-    const groupStationBtn = document.getElementById('rail-station-groups-btn');
-    const groupStationRun = groupStationBtn ? groupStationBtn.querySelector('.activity-pulse-indicator') : null;
 
     const firstCloudDot = sessRunDots[0] || null;
     const firstDoneDot = sessHistOnDots[0] || null;
@@ -219,14 +215,12 @@ test('session-list-status-animation: 亮蓝色云朵 A 点阵、头像简洁角�
 
     const botBtnRect = stationBotRunBtn ? stationBotRunBtn.getBoundingClientRect() : null;
     const botDotRect = stationBotRun ? stationBotRun.getBoundingClientRect() : null;
-    const grpBtnRect = groupStationBtn ? groupStationBtn.getBoundingClientRect() : null;
-    const grpDotRect = groupStationRun ? groupStationRun.getBoundingClientRect() : null;
     const timeEl = sessRow ? sessRow.querySelector('time') : null;
     const timeRight = timeEl ? timeEl.getBoundingClientRect().right : 0;
     const rowRight = sessRow ? sessRow.getBoundingClientRect().right : 0;
 
     return {
-      hasAllRunning: Boolean(sessRun && botCardRun && stationBotRun && groupRowRun && groupStationRun),
+      hasAllRunning: Boolean(sessRun && botCardRun && stationBotRun && groupRowRun),
       hasUnread: Boolean(sessHistUnread && stationBotUnread),
       readHasZeroDots: Boolean(
         sessRead && !sessRead.querySelector('.activity-pulse-indicator, .activity-unread-badge, .activity-settle-fade')
@@ -248,7 +242,6 @@ test('session-list-status-animation: 亮蓝色云朵 A 点阵、头像简洁角�
       histUnreadTransition: sessHistUnread ? sessHistUnread.getAttribute('data-transition') : null,
       histUnreadDoneDotAnim: csDoneDot ? csDoneDot.animationName : null,
       botCornerInside: Boolean(botBtnRect && botDotRect && botDotRect.right <= botBtnRect.right + 1 && botDotRect.top >= botBtnRect.top - 1),
-      grpCornerInside: Boolean(grpBtnRect && grpDotRect && grpDotRect.right <= grpBtnRect.right + 1 && grpDotRect.top >= grpBtnRect.top - 1),
       timeRightGap: Math.round(rowRight - timeRight),
       runningText: sessRun ? sessRun.textContent : '',
       unreadText: sessHistUnread ? sessHistUnread.textContent : '',
@@ -257,7 +250,7 @@ test('session-list-status-animation: 亮蓝色云朵 A 点阵、头像简洁角�
     };
   })()`);
 
-  assert.equal(lightMetrics.hasAllRunning, true, '三类列表、微轨 Bot 与群聊总按钮必须全部渲染 running 指示器');
+  assert.equal(lightMetrics.hasAllRunning, true, '三类列表与微轨 Bot 必须全部渲染 running 指示器');
   assert.equal(lightMetrics.hasUnread, true, '历史未读必须渲染已完成指示器');
   assert.equal(lightMetrics.readHasZeroDots, true, '静态已读会话与群聊必须零特殊状态节点');
   assert.equal(lightMetrics.cloudDotCount, 24, '云朵 A 必须精确渲染 24 颗微粒');
@@ -270,7 +263,6 @@ test('session-list-status-animation: 亮蓝色云朵 A 点阵、头像简洁角�
   assert.equal(lightMetrics.histUnreadTransition, 'none', '超过窗口的历史未读必须回落 none');
   assert.equal(lightMetrics.histUnreadDoneDotAnim, 'none', '历史未读不得重播聚拢动画');
   assert.equal(lightMetrics.botCornerInside, true, '微轨 Bot 角标必须落在按钮边界内');
-  assert.equal(lightMetrics.grpCornerInside, true, '微轨群聊角标必须落在按钮边界内');
   assert.ok(lightMetrics.timeRightGap <= 16, `时间必须紧贴行右缘，当前差 ${lightMetrics.timeRightGap}px`);
   assert.equal(lightMetrics.runningText, '执行中');
   assert.equal(lightMetrics.botText, '思考中');
@@ -331,11 +323,10 @@ test('session-list-status-animation: 亮蓝色云朵 A 点阵、头像简洁角�
     const sBadge = document.querySelector('.session-item[data-id="s-running"] .activity-unread-badge');
     const bCorner = document.querySelector('#flux-station-rail [data-station-profile="arch-wang"] .activity-unread-badge');
     const gBadge = document.querySelector('.rail-group-item[data-room-id="g-running"] .activity-unread-badge');
-    const gOverview = document.querySelector('#rail-station-groups-btn .activity-unread-badge');
     const onDot = sBadge ? sBadge.querySelector('.flux-cloud-dot[data-on="1"]') : null;
     const ripple = sBadge ? sBadge.querySelector('.flux-cloud-ripple') : null;
     return {
-      allJustCompleted: [sBadge, bCorner, gBadge, gOverview].every((el) => el && el.getAttribute('data-transition') === 'just-completed'),
+      allJustCompleted: [sBadge, bCorner, gBadge].every((el) => el && el.getAttribute('data-transition') === 'just-completed'),
       checkDotAnimation: onDot ? getComputedStyle(onDot).animationName : null,
       rippleAnimation: ripple ? getComputedStyle(ripple).animationName : null,
     };
@@ -386,12 +377,12 @@ test('session-list-status-animation: 亮蓝色云朵 A 点阵、头像简洁角�
   await evaluate(`(() => {
     window.__fluxActivity.enterRead('session', 's-running');
     window.__fluxActivity.startTurn('session', 's-running');
-    window.__fluxState.activeRailTab = 'projects';
-    window.__fluxRender();
   })()`);
-  const projRunning = await evaluate(`(() => {
-    const el = document.querySelector('#rail-projects-deck .session-item[data-id="s-running"] .activity-pulse-indicator .flux-cloud-dot');
+  const railRunning = await evaluate(`(() => {
+    const el = document.querySelector('#session-list-container .session-item[data-id="s-running"] .activity-pulse-indicator .flux-cloud-dot');
     return Boolean(el);
   })()`);
-  assert.equal(projRunning, true, '项目甲板内归属会话必须实时透传云朵三态状态动画');
+  assert.equal(railRunning, true, '会话甲板内的会话必须实时透传云朵三态状态动画');
+  const projectsDeckGone = await evaluate(`(() => document.getElementById('rail-projects-deck') === null)()`);
+  assert.equal(projectsDeckGone, true, '项目甲板已随微轨项目入口移除，任何状态切换都不得把它渲染回来');
 });

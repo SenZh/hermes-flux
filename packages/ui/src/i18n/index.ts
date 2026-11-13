@@ -43,12 +43,6 @@ export const zhDict = {
   'rail.defaultAssistant': 'Default 助理',
   'rail.enterBotChat': '进入 {name} 的专属对话',
   'rail.showMore': '展示更多 (还有 {count} 条)',
-  'rail.projects': '工程项目矩阵 (Projects)',
-  'rail.projectsEmpty': '暂无工程项目',
-  'rail.projectsEmptySub': '连接网关后可在工作区创建或关联本地工程项目',
-  'rail.projectNoSessions': '该项目暂无关联会话',
-  'rail.tabChats': '会话',
-  'rail.tabProjects': '项目',
 
   // Context Menu Actions
   'ctx.rename': '重命名',
@@ -886,12 +880,6 @@ export const enDict: Record<I18nKey, string> = {
   'rail.defaultAssistant': 'Default Assistant',
   'rail.enterBotChat': 'Open chat with {name}',
   'rail.showMore': 'Show more ({count} remaining)',
-  'rail.projects': 'Projects',
-  'rail.projectsEmpty': 'No Projects Available',
-  'rail.projectsEmptySub': 'Connect to gateway to create or link local projects',
-  'rail.projectNoSessions': 'No sessions associated with this project',
-  'rail.tabChats': 'Chats',
-  'rail.tabProjects': 'Projects',
 
   // Context Menu Actions
   'ctx.rename': 'Rename',

@@ -25,7 +25,7 @@ const CONSUMPTION = {
   ActivityIndicator: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx'] },
   Button: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/settings/LoadBoundary.tsx', 'components-react/settings/ProvidersAdminPanel.tsx', 'components-react/settings/ModelPicker.tsx', 'components-react/gallery/Gallery.tsx'] },
   Input: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/settings/ProvidersAdminPanel.tsx', 'components-react/settings/ModelPicker.tsx'] },
-  Badge: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/gallery/Gallery.tsx'] },
+  Badge: { state: 'consumed', consumers: ['components-react/settings/SettingsModal.tsx', 'components-react/gallery/Gallery.tsx'] },
   Dialog: { state: 'pending', target: 'SettingsModal / Modal 族迁移 PR（波③）' },
   Menu: { state: 'consumed', consumers: ['components-react/settings/ModelPicker.tsx'] },
   Switch: { state: 'pending', target: 'SettingsModal 布尔开关迁移 PR（波③）' },

@@ -11,17 +11,16 @@ export {
   isSessionFocused,
   isGroupFocused,
   isBotFocused,
-  type LeftRailTab,
   type LeftRailModel,
   type LeftRailModelInput,
   type LeftRailSession,
   type LeftRailGroupRoom,
-  type LeftRailProject,
   type LeftRailProfile,
   type LeftRailActiveFocus,
   type ActivityState as LeftRailActivityState,
   type ActivityTransition,
 } from './components-react/leftRailModel.js';
+export type { LeftRailProject } from './components/LeftRail/types.js';
 export * from './components/MiddlePod/MiddlePod.js';
 export { mountFileTypeSprite, renderFileTypeIcon, resolveFileTypeIcon } from './lib/fileTypeIcons.js';
 export { warmUpHighlighting, isHighlightReady } from './lib/highlight.js';

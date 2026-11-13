@@ -42,8 +42,6 @@ function model(overrides = {}) {
     profileName: 'default',
     profiles: PROFILES,
     groups: GROUPS,
-    projects: [],
-    activeRailTab: 'chats',
     searchQuery: '',
     ...overrides,
   });
@@ -65,7 +63,6 @@ function render(overrides = {}, propOverrides = {}) {
     onOpenGroupMenu: noop,
     onSearchChange: noop,
     onNewChat: noop,
-    onSetTab: noop,
     onToggleSessions: noop,
     onToggleGroups: noop,
     onStartGroupRename: noop,
@@ -287,19 +284,13 @@ test('左轨组件：会话行形态与关键交互契约', async (t) => {
     assert.ok(!render().includes('rail-group-inline-rename-wrap'), '非编辑态不得渲染重命名表单');
   });
 
-  await t.test('项目甲板独立于会话甲板，两者互斥渲染', () => {
-    const chats = render();
-    assert.ok(chats.includes('rail-sessions-nested-list'));
-    assert.equal(chats.includes('rail-projects-deck'), false);
-
-    const projects = render({
-      activeRailTab: 'projects',
-      projects: [{ id: 'p1', name: '电商微服务工程', sessions: [{ id: 's-p', title: '项目内会话', timestamp: NOW }] }],
-    });
-    assert.ok(projects.includes('rail-projects-deck'));
-    assert.ok(projects.includes('电商微服务工程'));
-    assert.ok(projects.includes('项目内会话'));
-    assert.equal(projects.includes('rail-sessions-nested-list'), false);
+  await t.test('抽屉只保留会话/群聊甲板：项目甲板与微轨底部导航已整体拔除', () => {
+    const markup = render();
+    assert.ok(markup.includes('rail-sessions-nested-list'));
+    assert.ok(markup.includes('session-list-container'), '会话甲板必须常驻渲染');
+    assert.equal(markup.includes('rail-projects-deck'), false, '项目甲板已随入口一并移除，禁止残留死层');
+    assert.equal(markup.includes('rail-station-groups-btn'), false, '微轨群聊入口已拔除');
+    assert.equal(markup.includes('rail-station-projects-btn'), false, '微轨项目入口已拔除');
   });
 });
 
@@ -341,13 +332,13 @@ test('primitives 消费守卫：左轨必须真实使用 shadcn 基座而非继�
     'utf8',
   ));
 
-  await t.test('导入并消费 Button / Input / Badge 三个 primitives', () => {
+  await t.test('导入并消费 Button / Input 两个 primitives', () => {
     assert.ok(/from '\.\/primitives\/Button\.js'/.test(source), '必须导入 Button primitive');
     assert.ok(/from '\.\/primitives\/Input\.js'/.test(source), '必须导入 Input primitive');
-    assert.ok(/from '\.\/primitives\/Badge\.js'/.test(source), '必须导入 Badge primitive');
     assert.ok(/<Button[\s>]/.test(source), '必须真实渲染 Button');
     assert.ok(/<Input[\s>]/.test(source), '必须真实渲染 Input');
-    assert.ok(/<Badge[\s>]/.test(source), '必须真实渲染 Badge');
+    // Badge 此前只服务于已删除的项目卡片计数，现无任何使用点，禁止为凑断言留死导入。
+    assert.equal(/from '\.\/primitives\/Badge\.js'/.test(source), false, '无使用点时不得保留 Badge 死导入');
   });
 
   await t.test('不再自定义裸 <button>（仅会话行、归档行、群聊主体、手风琴标题复用原生按钮语义）', () => {
@@ -403,60 +394,21 @@ test('isAgentScopeActive: 微轨 Agent 作用域活跃判定（覆盖 bot/sessio
   }), false, '无关 Agent 必须保持未激活');
 });
 
-test('buildLeftRailModel: groupOverviewActivity 优先级与瞬态跃迁聚合（running > unread > read）', () => {
-  const mRunning = model({
+test('buildLeftRailModel: 微轨底部导航移除后，模型不得再派生群聊汇总态', () => {
+  const built = model({
     groups: [
-      { roomId: 'r-unread', name: '未读群', members: ['default'], activityState: 'unread', activityTransition: 'just-completed', activityTransitionToken: 9 },
       { roomId: 'r-run', name: '运行群', members: ['default'], activityState: 'running' },
+      { roomId: 'r-unread', name: '未读群', members: ['default'], activityState: 'unread', activityTransition: 'just-completed', activityTransitionToken: 9 },
     ],
   });
-  assert.deepEqual(mRunning.groupOverviewActivity, { state: 'running', transition: 'none' });
-  assert.equal(mRunning.hasRunningGroup, true);
-  assert.equal(mRunning.hasUnreadGroup, false);
-
-  const mUnreadLatest = model({
-    groups: [
-      { roomId: 'r-old', name: '旧未读', members: ['default'], activityState: 'unread' },
-      { roomId: 'r-new-1', name: '先完成', members: ['default'], activityState: 'unread', activityTransition: 'just-completed', activityTransitionToken: 3 },
-      { roomId: 'r-new-2', name: '后完成', members: ['default'], activityState: 'unread', activityTransition: 'just-completed', activityTransitionToken: 8 },
-    ],
-  });
-  assert.deepEqual(mUnreadLatest.groupOverviewActivity, { state: 'unread', transition: 'just-completed', transitionToken: 8 });
-  assert.equal(mUnreadLatest.hasRunningGroup, false);
-  assert.equal(mUnreadLatest.hasUnreadGroup, true);
-
-  const mUnreadStatic = model({
-    groups: [
-      { roomId: 'r-old', name: '旧未读', members: ['default'], activityState: 'unread' },
-      { roomId: 'r-read', name: '已读', members: ['default'], activityState: 'read', activityTransition: 'just-completed', activityTransitionToken: 12 },
-    ],
-  });
-  assert.deepEqual(mUnreadStatic.groupOverviewActivity, { state: 'unread', transition: 'none' });
-
-  const mReadSettle = model({
-    groups: [
-      { roomId: 'r-read-1', name: '已读收敛1', members: ['default'], activityState: 'read', activityTransition: 'just-completed', activityTransitionToken: 4 },
-      { roomId: 'r-read-2', name: '已读收敛2', members: ['default'], activityState: 'read', activityTransition: 'just-completed', activityTransitionToken: 11 },
-    ],
-  });
-  assert.deepEqual(mReadSettle.groupOverviewActivity, { state: 'read', transition: 'just-completed', transitionToken: 11 });
-
-  const mPlainRead = model({
-    groups: [{ roomId: 'r-plain', name: '普通已读', members: ['default'], activityState: 'read' }],
-  });
-  assert.deepEqual(mPlainRead.groupOverviewActivity, { state: 'read', transition: 'none' });
-  assert.equal(mPlainRead.hasRunningGroup, false);
-  assert.equal(mPlainRead.hasUnreadGroup, false);
-
-  const mScoped = model({
-    activeFocus: { type: 'bot', botName: 'arch-wang' },
-    profileName: 'arch-wang',
-    groups: [
-      { roomId: 'r-other', name: '无关运行群', members: ['fe-zhang'], activityState: 'running' },
-      { roomId: 'r-wang', name: '老王已读群', members: ['arch-wang'], activityState: 'read' },
-    ],
-  });
-  assert.deepEqual(mScoped.groupOverviewActivity, { state: 'read', transition: 'none' });
+  assert.equal('groupOverviewActivity' in built, false, '群聊汇总聚合随入口一并移除，禁止留死字段');
+  assert.equal('hasRunningGroup' in built, false);
+  assert.equal('hasUnreadGroup' in built, false);
+  assert.equal('visibleProjects' in built, false, '项目甲板模型随入口一并移除');
+  assert.equal('showProjectsDeck' in built, false);
+  assert.equal('showChatDeck' in built, false);
+  // 群聊本身仍必须按 Agent 作用域与搜索过滤正常派生，只是不再聚合到微轨。
+  assert.equal(built.visibleGroups.length, 2);
 });
 
 test('左轨活动指示器变体：设置里的选择必须真的透传到会话行与群聊行', () => {
@@ -490,8 +442,6 @@ test('静态渲染快照同样携带变体，避免服务端/测试链路恒为�
     profileName: 'default',
     profiles: PROFILES,
     groups: [],
-    projects: [],
-    activeRailTab: 'chats',
     searchQuery: '',
     collapsed: false,
     activityVariant: 'orbit',

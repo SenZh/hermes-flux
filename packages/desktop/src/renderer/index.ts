@@ -38,12 +38,11 @@ import {
   escapeHtml,
   MessageViewModel,
   InspectorTab,
-  type LeftRailProject,
   type LeftRailGroupRoom,
   type LeftRailActiveFocus,
-  type LeftRailTab,
   type LeftRailSession,
   type LeftRailProfile,
+  type LeftRailProject,
   renderNewTaskModal,
   renderContextMenu,
   type ContextMenuProps,
@@ -600,7 +599,6 @@ declare global {
       completeTurn: (domain: ActivityDomain, entityId: string, isFocused: boolean) => void;
       failTurn: (domain: ActivityDomain, entityId: string) => void;
       enterRead: (domain: ActivityDomain, entityId: string) => void;
-      syncProjects: () => void;
     };
     __fluxSelectSession?: (id: string, options?: { preserveFocus?: boolean; botName?: string }) => Promise<void>;
     __fluxLoadOlderMessages?: () => Promise<void>;
@@ -616,7 +614,6 @@ declare global {
 interface AppState {
   platform: 'windows' | 'macos' | 'linux' | 'ios' | 'android' | 'web';
   theme: 'obsidian-gold' | 'suet-jade' | 'jade-white' | 'warm-paper' | 'ayu-light' | 'cyber-matrix';
-  activeRailTab: 'chats' | 'projects' | 'groups';
   lang: 'zh' | 'en';
   isMaximized: boolean;
   leftRailCollapsed: boolean;
@@ -1037,7 +1034,6 @@ const state: AppState = {
     const savedTheme = localStorage.getItem('hermes_flux_theme') || localStorage.getItem('hermes_aura_theme');
     return resolveSkinId(savedTheme);
   })(),
-  activeRailTab: 'chats',
   lang: (localStorage.getItem('hermes_flux_lang') || localStorage.getItem('hermes_aura_lang') as any) || 'zh',
   isMaximized: false,
   leftRailCollapsed: typeof window !== 'undefined' && window.innerWidth <= 768,
@@ -1314,10 +1310,6 @@ window.__fluxActivity = {
       : unreadGroupRoomIds;
     applyEnteredRead(unread, entityId);
     activityTransitionTracker.clear(domain, entityId);
-    render();
-  },
-  syncProjects: () => {
-    syncProjectSessions();
     render();
   },
 };
@@ -2257,10 +2249,7 @@ async function fetchSessions(): Promise<void> {
     }
   }
 
-  // 4. 同步刷新工程项目的关联会话与智能体最新对话副标题
-  if (state.projects.length > 0) {
-    syncProjectSessions();
-  }
+  // 4. 同步智能体最新对话副标题
   syncProfileLastMessages();
   void enrichVisibleSessionPreviews();
 
@@ -2348,29 +2337,14 @@ async function fetchProjects(): Promise<void> {
       id: s.projectId,
       name: s.name,
       path: s.primaryPath,
-      sessions: [],
     }));
 
-    syncProjectSessions();
     render();
   } catch (e) {
     // Failure Is Not Empty: 网络或网关故障时绝不可将 state.projects 抹杀为空数组伪装成没有项目
     console.warn('[Flux] fetchProjects failed:', e);
     // 保留上一次已拉取到的项目列表或提示错误，严禁静默覆盖为权威空
     render();
-  }
-}
-
-/** 会话与项目归属动态映射：委派 core 纯函数进行多维度路径与标识映射 */
-/** 项目成员关系版本：syncProjectSessions 原地改 proj.sessions，数组引用不变，必须靠版本号驱动快照失效。 */
-let projectsVersion = 0;
-
-function syncProjectSessions(): void {
-  projectsVersion += 1;
-  for (const proj of state.projects) {
-    proj.sessions = state.sessions.filter((s: NormalizedSession) =>
-      doesSessionBelongToProject(s, proj)
-    );
   }
 }
 
@@ -2767,16 +2741,13 @@ async function fetchModelOptions(options: { clearNotice?: boolean } = {}): Promi
 /** 服务端改了 Bot 显示名后，把旧会话上的 botDisplayName 一并收敛，避免左轨归属匹配失配。 */
 function syncSessionBotDisplayNames(profiles: AgentProfile[]): void {
   const byName = new Map(profiles.map((p) => [p.name.toLowerCase(), p]));
-  let changed = false;
   for (const s of state.sessions) {
     if (!s.botName) continue;
     const profile = byName.get(s.botName.toLowerCase());
     if (profile && s.botDisplayName !== profile.displayName) {
       s.botDisplayName = profile.displayName;
-      changed = true;
     }
   }
-  if (changed) syncProjectSessions();
 }
 
 async function fetchProfiles(options: { refresh?: boolean } = {}): Promise<void> {
@@ -4457,7 +4428,6 @@ async function loadMessagesInner(sessionId: string, targetBotName?: string): Pro
           changed = true;
         }
         if (changed) {
-          syncProjectSessions();
           render();
         }
       }
@@ -6842,11 +6812,6 @@ function createLeftRailActions(): LeftRailActions {
     },
     onSearchChange: (value: string) => { state.sessionSearchQuery = value; render(); },
     onNewChat: (kind: 'session' | 'group') => { cancelColdStartFocus(); void fetchProjects(); state.newTaskModalTab = kind === 'group' ? 'group' : 'solo'; state.isNewTaskModalOpen = true; render(); },
-    onSetTab: (tab: LeftRailTab) => {
-      state.activeRailTab = state.activeRailTab === tab ? 'chats' : tab;
-      if (state.activeRailTab === 'projects') void fetchProjects();
-      render();
-    },
     onToggleSessions: () => { state.isSessionsGroupExpanded = !state.isSessionsGroupExpanded; render(); },
     onToggleGroups: () => { state.isGroupsGroupExpanded = !state.isGroupsGroupExpanded; render(); },
     onStartGroupRename: (roomId: string) => { state.editingGroupRoomId = roomId; render(); },
@@ -6910,29 +6875,17 @@ interface RailDecorCacheEntry<T> { stamp: string; value: T }
 const railSessionDecorCache = new WeakMap<LeftRailSession, RailDecorCacheEntry<LeftRailSession>>();
 const railGroupDecorCache = new WeakMap<LeftRailGroupRoom, RailDecorCacheEntry<LeftRailGroupRoom>>();
 const railProfileDecorCache = new WeakMap<LeftRailProfile, RailDecorCacheEntry<LeftRailProfile>>();
-const railProjectDecorCache = new WeakMap<LeftRailProject, {
-  sourceSessions: LeftRailSession[] | undefined;
-  decoratedSessions: LeftRailSession[];
-  value: LeftRailProject;
-}>();
 let lastDecoratedSessions: LeftRailSession[] = [];
 let lastDecoratedGroups: LeftRailGroupRoom[] = [];
 let lastDecoratedProfiles: LeftRailProfile[] = [];
-let lastProjectsSourceRef: LeftRailProject[] | null = null;
-let lastProjectsVersionSnapshot = -1;
-let lastDecoratedSessionsForProjects: readonly LeftRailSession[] | null = null;
-let lastDecoratedProjects: LeftRailProject[] = [];
 
 interface LeftRailSnapshotInputs {
   sessions: LeftRailSession[];
   groups: LeftRailGroupRoom[];
   profiles: LeftRailProfile[];
-  projects: LeftRailProject[];
-  projectsVersion: number;
   activeSessionId: string;
   activeFocus: LeftRailActiveFocus;
   profileName: string;
-  activeRailTab: LeftRailTab;
   searchQuery: string;
   isSessionsGroupExpanded: boolean;
   isGroupsGroupExpanded: boolean;
@@ -6950,12 +6903,9 @@ function sameLeftRailInputs(prev: LeftRailSnapshotInputs, next: LeftRailSnapshot
   return prev.sessions === next.sessions
     && prev.groups === next.groups
     && prev.profiles === next.profiles
-    && prev.projects === next.projects
-    && prev.projectsVersion === next.projectsVersion
     && prev.activeSessionId === next.activeSessionId
     && prev.activeFocus === next.activeFocus
     && prev.profileName === next.profileName
-    && prev.activeRailTab === next.activeRailTab
     && prev.searchQuery === next.searchQuery
     && prev.isSessionsGroupExpanded === next.isSessionsGroupExpanded
     && prev.isGroupsGroupExpanded === next.isGroupsGroupExpanded
@@ -7085,55 +7035,6 @@ function decorateRailProfiles(nowMs: number): LeftRailProfile[] {
   return lastDecoratedProfiles;
 }
 
-function decorateRailProjects(decoratedSessions: readonly LeftRailSession[]): LeftRailProject[] {
-  if (
-    lastProjectsSourceRef === state.projects
-    && lastProjectsVersionSnapshot === projectsVersion
-    && lastDecoratedSessionsForProjects === decoratedSessions
-  ) {
-    return lastDecoratedProjects;
-  }
-
-  const decoratedById = new Map<string, LeftRailSession>();
-  for (const s of decoratedSessions) {
-    decoratedById.set(s.id, s);
-  }
-
-  const next = state.projects.map((proj) => {
-    const rawSessions = proj.sessions;
-    const mappedSessions = (rawSessions || []).map((s) => decoratedById.get(s.id) ?? s);
-    const cached = railProjectDecorCache.get(proj);
-    if (
-      cached
-      && cached.sourceSessions === rawSessions
-      && cached.value.id === proj.id
-      && cached.value.name === proj.name
-      && cached.value.path === proj.path
-      && cached.decoratedSessions.length === mappedSessions.length
-      && cached.decoratedSessions.every((item, idx) => item === mappedSessions[idx])
-    ) {
-      return cached.value;
-    }
-    const stableSessions = cached ? stableArray(mappedSessions, cached.decoratedSessions) : mappedSessions;
-    const value: LeftRailProject = {
-      ...proj,
-      sessions: stableSessions,
-    };
-    railProjectDecorCache.set(proj, {
-      sourceSessions: rawSessions,
-      decoratedSessions: stableSessions,
-      value,
-    });
-    return value;
-  });
-
-  lastProjectsSourceRef = state.projects;
-  lastProjectsVersionSnapshot = projectsVersion;
-  lastDecoratedSessionsForProjects = decoratedSessions;
-  lastDecoratedProjects = stableArray(next, lastDecoratedProjects);
-  return lastDecoratedProjects;
-}
-
 function getTitlebarSnapshot(): TitlebarSnapshot {
   return createTitlebarSnapshot({
     platform: state.platform,
@@ -7174,17 +7075,13 @@ function getLeftRailSnapshot(): LeftRailSnapshot {
   const sessions = decorateRailSessions(nowMs);
   const groups = decorateRailGroups(nowMs);
   const profiles = decorateRailProfiles(nowMs);
-  const projects = decorateRailProjects(sessions);
   const inputs: LeftRailSnapshotInputs = {
     sessions,
     groups,
     profiles,
-    projects,
-    projectsVersion,
     activeSessionId: state.activeSessionId,
     activeFocus: state.activeFocus,
     profileName: state.profileName,
-    activeRailTab: state.activeRailTab,
     searchQuery: state.sessionSearchQuery,
     isSessionsGroupExpanded: state.isSessionsGroupExpanded !== false,
     isGroupsGroupExpanded: state.isGroupsGroupExpanded !== false,
@@ -7207,8 +7104,6 @@ function getLeftRailSnapshot(): LeftRailSnapshot {
       profileName: state.profileName,
       profiles,
       groups,
-      projects,
-      activeRailTab: state.activeRailTab,
       searchQuery: state.sessionSearchQuery,
       isSessionsGroupExpanded: state.isSessionsGroupExpanded,
       isGroupsGroupExpanded: state.isGroupsGroupExpanded,

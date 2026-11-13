@@ -1,8 +1,7 @@
 import * as React from 'react';
-import { Folder, Layers, Plus, Search, Users } from 'lucide-react';
+import { Layers, Plus, Search, Users } from 'lucide-react';
 import { t } from '../i18n/index.js';
 import { useMotionPresence } from '../motion/index.js';
-import { Badge } from './primitives/Badge.js';
 import { Button } from './primitives/Button.js';
 import { Input } from './primitives/Input.js';
 import { Skeleton } from './primitives/Skeleton.js';
@@ -20,9 +19,7 @@ import {
   type LeftRailGroupRoom,
   type LeftRailModel,
   type LeftRailProfile,
-  type LeftRailProject,
   type LeftRailSession,
-  type LeftRailTab,
 } from './leftRailModel.js';
 
 export interface LeftRailProps {
@@ -43,7 +40,6 @@ export interface LeftRailProps {
   onSearchChange: (value: string) => void;
   /** PR-3d：新建入口按甲板分型，会话 header 传 session、群聊 header 传 group。 */
   onNewChat: (kind: 'session' | 'group') => void;
-  onSetTab: (tab: LeftRailTab) => void;
   onToggleSessions: () => void;
   onToggleGroups: () => void;
   onStartGroupRename: (roomId: string) => void;
@@ -324,28 +320,6 @@ function RenameGroup({ initialName, roomId, onConfirm, onCancel }: {
   </form>;
 }
 
-function ProjectCard({ project, focus, activityVariant, onSelectSession, onSessionMenu }: {
-  project: LeftRailProject;
-  focus: LeftRailModel['currentFocus'];
-  activityVariant?: ActivityIndicatorVariant;
-  onSelectSession: (session: LeftRailSession) => void;
-  onSessionMenu: (session: LeftRailSession, x: number, y: number) => void;
-}): React.ReactElement {
-  const sessions = project.sessions || [];
-  return <details id={`rail-proj-${project.id}`} className="project-accordion-unit overflow-hidden rounded-panel border border-border-subtle bg-card" data-project-id={project.id}>
-    <summary className="project-accordion-trigger flex cursor-pointer items-center gap-2 p-2 text-body font-semibold text-foreground">
-      <Folder size={14} className="shrink-0 text-muted-foreground" />
-      <span className="truncate">{project.name}</span>
-      <Badge variant="secondary" className="ml-auto">{sessions.length}</Badge>
-    </summary>
-    <div className="project-accordion-nested flex flex-col gap-0.5 px-2 pb-2">
-      {sessions.length > 0
-        ? sessions.map((session) => <SessionRow key={session.id} session={session} compact activityVariant={activityVariant} active={isSessionFocused(focus, session.id)} onSelect={() => onSelectSession(session)} onMenu={(x, y) => onSessionMenu(session, x, y)} />)
-        : <p className="py-2 text-center text-aux text-muted-foreground">{t('rail.projectNoSessions')}</p>}
-    </div>
-  </details>;
-}
-
 /**
  * 左轨（微轨 + 上下文抽屉）。
  * 【设计意图】只呈现壳层给出的快照，所有状态变更经回调返回；抽屉内容严格按当前 Agent 隔离。
@@ -392,7 +366,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
   >
     <div id="flux-station-rail" className="flex shrink-0 flex-col items-center gap-2 border-r border-border-subtle bg-sidebar py-2.5" style={{ width: microRailWidth }} aria-busy={profilesLoading}>
       {profilesLoading ? <>
-        {/* 与真实结构同形：首卡在滚动区外，其余在 flex-1 滚动区内，底部导航按钮才不会上移。 */}
+        {/* 与真实结构同形：首卡在滚动区外，其余在 flex-1 滚动区内，骨架不得让布局跳动。 */}
         <Skeleton slot="agent" className={STATION_SKELETON_CLASS} />
         <div className="station-agents-scroll flex min-h-0 w-full flex-1 flex-col items-center gap-2 overflow-y-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <Skeleton slot="agent" className={STATION_SKELETON_CLASS} />
@@ -417,25 +391,12 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
           />)}
         </div>
       </>}
-      <div className="flex w-full flex-col items-center gap-1.5 border-t border-border-subtle pt-2">
-        <Button id="rail-station-groups-btn" variant="ghost" size="icon" className="relative size-[38px] rounded-panel text-secondary-foreground hover:bg-card-hover hover:text-foreground transition-colors" title={t('rail.groups')} onClick={() => props.onSetTab('groups')}>
-          <Users size={16} />
-          <ActivityIndicator
-            state={model.groupOverviewActivity.state}
-            transition={model.groupOverviewActivity.transition}
-            transitionToken={model.groupOverviewActivity.transitionToken}
-            placement="corner"
-            entityKind="group"
-            variant={props.activityVariant}
-          />
-        </Button>
-        <Button id="rail-station-projects-btn" variant="ghost" size="icon" className="size-[38px] rounded-panel text-secondary-foreground hover:bg-card-hover hover:text-foreground transition-colors" title={t('rail.projects')} onClick={() => props.onSetTab('projects')}>
-          <Folder size={16} />
-        </Button>
-        {/* PR-3d 用户定案：微轨底部"新建会话 +"与"‹ 折叠"两按钮删除。
-            新建入口收编到会话/群聊 header 右侧 +；折叠入口保留顶栏 PanelLeft 与 Ctrl+B，
-            二者本就是这个状态的第二、第三个重复实现（renderer 5539 的旧 DOM 死绑定同步清除）。 */}
-      </div>
+      {/* 微轨底部导航区整体拔除（用户 2026-11-13 定案）。
+          PR-3d 曾删掉"新建会话 +"与"‹ 折叠"；本次再删群聊 Users 与工程项目 Folder 两个入口。
+          依据：群聊/会话本就并列渲染在同一抽屉里，群聊入口只做"切回聊天甲板"的复位动作，
+          是同一状态的第二实现；项目甲板暂无可用数据源，留着只有空态。
+          入口收编去向：群聊 ➔ 抽屉内"群聊"分节；折叠 ➔ 顶栏 PanelLeft 与 Ctrl+B。
+          群聊 running/unread 汇总信号随按钮一并移除，抽屉内群聊行仍各自保留角标。 */}
     </div>
 
     {drawerPresence.isMounted && <div
@@ -484,7 +445,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
           />}
       </div>
 
-      {model.showChatDeck && <div className="session-scroll-area min-h-0 flex-1 overflow-y-auto px-1.5 pb-3 mr-[var(--geo-resize-handle)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" id="session-list-container">
+      <div className="session-scroll-area min-h-0 flex-1 overflow-y-auto px-1.5 pb-3 mr-[var(--geo-resize-handle)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" id="session-list-container">
         {model.error && <div id="session-list-error" role="alert" className="m-1 rounded-card border border-border-strong bg-panel p-2 text-aux text-foreground">{model.error}</div>}
 
         {model.visibleGroups.length > 0 && <section className="mb-2">
@@ -565,25 +526,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
             />)}
           </div>
         </section>}
-      </div>}
-
-      {model.showProjectsDeck && <div id="rail-projects-deck" className="flex flex-1 flex-col gap-1.5 overflow-y-auto px-2 py-1.5 mr-[var(--geo-resize-handle)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <div className="px-1.5 pb-1 text-overline font-bold uppercase tracking-wide text-muted-foreground">{t('rail.projects')}</div>
-        {model.visibleProjects.length > 0
-          ? model.visibleProjects.map((project) => <ProjectCard
-            key={project.id}
-            project={project}
-            focus={focus}
-            activityVariant={props.activityVariant}
-            onSelectSession={(session) => props.onSelectSession(session.id, session.botName)}
-            onSessionMenu={(session, x, y) => props.onOpenSessionMenu(session.id, session.title, x, y)}
-          />)
-          : <div className="flex flex-col items-center gap-1 px-3 py-8 text-center">
-            <Folder size={24} className="text-muted-foreground" />
-            <span className="text-body text-muted-foreground">{t('rail.projectsEmpty')}</span>
-            <span className="text-caption text-faint">{t('rail.projectsEmptySub')}</span>
-          </div>}
-      </div>}
+      </div>
 
     </div>}
 

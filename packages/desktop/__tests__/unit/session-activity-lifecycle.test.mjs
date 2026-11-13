@@ -186,7 +186,7 @@ test('Session Activity Lifecycle & Handle Normalization Invariants', async (t) =
     );
   });
 
-  await t.test('6. 源码守卫：renderer/index.ts 已接入 GroupLogPollerManager、ActivityTransitionTracker、decorateRailProjects，且已彻底移除单槽定时器和 lastCount = -1 缺陷', () => {
+  await t.test('6. 源码守卫：renderer/index.ts 已接入 GroupLogPollerManager、ActivityTransitionTracker，且已彻底移除单槽定时器和 lastCount = -1 缺陷', () => {
     assert.match(
       rendererSource,
       /\bGroupLogPollerManager\b/,
@@ -197,10 +197,11 @@ test('Session Activity Lifecycle & Handle Normalization Invariants', async (t) =
       /\bActivityTransitionTracker\b/,
       '必须接入 Core 层 ActivityTransitionTracker 追踪完成瞬态跃迁'
     );
-    assert.match(
+    // 项目甲板随微轨项目入口一并移除，其装饰管道与项目侧会话映射必须同步删除（保留即成死代码与误导入点）。
+    assert.doesNotMatch(
       rendererSource,
-      /function decorateRailProjects\(/,
-      '必须实现 decorateRailProjects 将三态与跃迁投影至项目子会话'
+      /decorateRailProjects|railProjectDecorCache|projectsVersion|syncProjectSessions|syncProjects/,
+      '项目甲板装饰管道与 proj.sessions 映射必须随入口一并删除，禁止留死代码'
     );
     assert.match(
       rendererSource,

@@ -3,7 +3,7 @@
  *
  * 这些断言原先是针对字符串模板的 substring 检查，迁到 React 后改为对真实渲染结果断言，
  * 断言对象仍是"用户能看到什么"：微轨常驻、Agent 入口契约、三态互斥、上下文隔离、
- * 项目甲板与会话甲板互斥、群聊行内重命名。React 组件内部结构变化不应让它们变红。
+ * 抽屉内群聊/会话分节、群聊行内重命名。React 组件内部结构变化不应让它们变红。
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -30,8 +30,6 @@ function renderRail(overrides = {}) {
     profiles: PROFILES,
     sessions: [],
     groups: [],
-    projects: [],
-    activeRailTab: 'chats',
     searchQuery: '',
     ...overrides,
   };
@@ -49,7 +47,6 @@ function renderRail(overrides = {}) {
     onOpenGroupMenu: noop,
     onSearchChange: noop,
     onNewChat: noop,
-    onSetTab: noop,
     onToggleSessions: noop,
     onToggleGroups: noop,
     onStartGroupRename: noop,
@@ -196,19 +193,16 @@ test('会话、群聊与 Bot 的排序与摘要契约', async (t) => {
   });
 });
 
-test('项目甲板、群聊重命名与失败提示', async (t) => {
-  await t.test('项目甲板渲染项目名、嵌套会话与空态', () => {
+test('群聊重命名与失败提示', async (t) => {
+  await t.test('微轨底部导航入口已整体拔除，抽屉内群聊/会话分节仍在', () => {
     const markup = renderRail({
-      activeRailTab: 'projects',
-      projects: [
-        { id: 'proj-shop', name: '商城系统', path: 'D:/shop', sessions: [{ id: 's-shop', title: '修复支付超时', timestamp: NOW }] },
-        { id: 'proj-empty', name: '空项目', sessions: [] },
-      ],
+      groups: [{ roomId: 'g-1', name: '协同群', members: ['default'], updatedAt: NOW }],
     });
-    assert.ok(markup.includes('rail-projects-deck'));
-    assert.ok(markup.includes('商城系统'));
-    assert.ok(markup.includes('修复支付超时'));
-    assert.ok(markup.includes('该项目暂无关联会话'), '空项目必须给出明确空态');
+    assert.equal(markup.includes('rail-station-groups-btn'), false, '微轨群聊入口必须拔除');
+    assert.equal(markup.includes('rail-station-projects-btn'), false, '微轨项目入口必须拔除');
+    assert.equal(markup.includes('rail-projects-deck'), false, '项目甲板必须一并移除');
+    assert.ok(markup.includes('rail-groups-accordion-trigger'), '群聊入口收编到抽屉分节标题');
+    assert.ok(markup.includes('rail-sessions-accordion-trigger'), '会话分节标题必须常驻');
   });
 
   await t.test('编辑态渲染行内重命名输入与确认/取消，非编辑态不渲染', () => {
@@ -412,48 +406,7 @@ test('全挂点统一三态与完成瞬态跃迁契约（微轨/主工位卡/会
     assert.equal(gRead.includes('flux-activity-dot'), false);
     assert.equal(gRead.includes('flux-cloud-indicator'), false);
 
-    const groupOverviewBtn = between(markup, 'id="rail-station-groups-btn"', '</button>');
-    assert.ok(groupOverviewBtn.includes('flux-activity-dot--running'));
-    assert.ok(groupOverviewBtn.includes('data-status="running"'));
-    assert.ok(groupOverviewBtn.includes('data-placement="corner"'));
-    assert.equal(groupOverviewBtn.includes('flux-cloud-canvas'), false, '微轨群聊总按钮保持简洁角标');
-    assert.equal(groupOverviewBtn.includes('activity-unread-badge'), false, 'running 优先于 unread');
-  });
-
-  await t.test('项目面板 ProjectCard 内嵌套会话完整呈现三态与 just-completed 跃迁', () => {
-    const markup = renderRail({
-      activeRailTab: 'projects',
-      projects: [
-        {
-          id: 'proj-alpha',
-          name: '核心工程',
-          sessions: [
-            { id: 'ps-run', title: '构建中', timestamp: NOW, activityState: 'running' },
-            { id: 'ps-unread-new', title: '刚完成', timestamp: NOW - 100, activityState: 'unread', activityTransition: 'just-completed', activityTransitionToken: 5 },
-            { id: 'ps-unread-old', title: '历史未读', timestamp: NOW - 200, activityState: 'unread' },
-            { id: 'ps-read', title: '已读项', timestamp: NOW - 300, activityState: 'read' },
-          ],
-        },
-      ],
-    });
-
-    const psRun = between(markup, 'data-id="ps-run"', '</button>');
-    assert.ok(psRun.includes('flux-cloud-indicator--running'));
-    assert.equal(countMatches(psRun, /class="flux-cloud-dot"/g), 24);
-    assert.ok(psRun.includes('执行中'));
-    assert.equal(psRun.includes('activity-unread-badge'), false);
-
-    const psUnreadNew = between(markup, 'data-id="ps-unread-new"', '</button>');
-    assert.ok(psUnreadNew.includes('flux-cloud-indicator--unread'));
-    assert.ok(psUnreadNew.includes('data-transition="just-completed"'));
-    assert.ok(psUnreadNew.includes('已完成'));
-
-    const psUnreadOld = between(markup, 'data-id="ps-unread-old"', '</button>');
-    assert.ok(psUnreadOld.includes('data-transition="none"'));
-
-    const psRead = between(markup, 'data-id="ps-read"', '</button>');
-    assert.equal(psRead.includes('flux-activity-dot'), false);
-    assert.equal(psRead.includes('flux-cloud-indicator'), false);
+    assert.equal(markup.includes('rail-station-groups-btn'), false, '微轨群聊汇总按钮已拔除，角标聚合不得残留死层');
   });
 
   await t.test('read 瞬态窗口仅在 just-completed 时渲染 .activity-settle-fade 且绝不带脉冲/未读类', () => {
@@ -474,7 +427,6 @@ test('全挂点统一三态与完成瞬态跃迁契约（微轨/主工位卡/会
 
     for (const chunk of [
       between(markup, 'data-station-profile="default"', '</button>'),
-      between(markup, 'id="rail-station-groups-btn"', '</button>'),
     ]) {
       assert.ok(chunk.includes('activity-settle-fade'), 'corner just-completed read 必须渲染收敛淡出元素');
       assert.ok(chunk.includes('flux-activity-dot--settle'));
@@ -507,33 +459,23 @@ test('全挂点统一三态与完成瞬态跃迁契约（微轨/主工位卡/会
     assert.equal(plainRow.includes('flux-cloud-indicator'), false);
   });
 
-  await t.test('变异检验：微轨群聊汇总严格遵循 running > unread > read 及最新 token 优先', () => {
+  await t.test('变异检验：微轨已无群聊汇总入口，任何输入都不得再渲染该按钮', () => {
     const unreadMarkup = renderRail({
       groups: [
         { roomId: 'g-old', name: '旧未读', members: ['default'], updatedAt: NOW - 500, activityState: 'unread' },
         { roomId: 'g-new', name: '刚完成', members: ['default'], updatedAt: NOW - 100, activityState: 'unread', activityTransition: 'just-completed', activityTransitionToken: 42 },
       ],
     });
-    const btnUnread = between(unreadMarkup, 'id="rail-station-groups-btn"', '</button>');
-    assert.ok(btnUnread.includes('flux-activity-dot--unread'));
-    assert.ok(btnUnread.includes('data-status="unread"'));
-    assert.ok(btnUnread.includes('data-transition="just-completed"'));
-    assert.equal(btnUnread.includes('activity-pulse-indicator'), false);
-
-    const plainUnreadMarkup = renderRail({
-      groups: [
-        { roomId: 'g-old', name: '旧未读', members: ['default'], updatedAt: NOW, activityState: 'unread' },
-      ],
-    });
-    const btnPlainUnread = between(plainUnreadMarkup, 'id="rail-station-groups-btn"', '</button>');
-    assert.ok(btnPlainUnread.includes('data-transition="none"'));
+    assert.equal(unreadMarkup.includes('rail-station-groups-btn'), false);
 
     const readMarkup = renderRail({
       groups: [
         { roomId: 'g-read', name: '纯已读', members: ['default'], updatedAt: NOW, activityState: 'read' },
       ],
     });
-    const btnRead = between(readMarkup, 'id="rail-station-groups-btn"', '</button>');
-    assert.equal(btnRead.includes('flux-activity-dot'), false);
+    assert.equal(readMarkup.includes('rail-station-groups-btn'), false);
+    // 群聊行本体仍在，只是不再上浮到微轨。
+    assert.ok(readMarkup.includes('rail-group-item'), '群聊行必须仍在抽屉内渲染');
+    assert.ok(readMarkup.includes('data-room-id="g-read"'), '群聊行点击契约不得随入口消失');
   });
 });

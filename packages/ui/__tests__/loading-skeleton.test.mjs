@@ -36,8 +36,6 @@ function rail(overrides = {}) {
     profileName: 'default',
     profiles: [],
     groups: [],
-    projects: [],
-    activeRailTab: 'chats',
     searchQuery: '',
     ...overrides,
   });
@@ -53,7 +51,6 @@ function rail(overrides = {}) {
     onOpenGroupMenu: noop,
     onSearchChange: noop,
     onNewChat: noop,
-    onSetTab: noop,
     onToggleSessions: noop,
     onToggleGroups: noop,
     onStartGroupRename: noop,

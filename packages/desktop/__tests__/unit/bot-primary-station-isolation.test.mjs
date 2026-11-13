@@ -20,8 +20,6 @@ function renderLeftRail(props = {}) {
     profileName: props.profileName || 'default',
     profiles: props.profiles || [],
     groups: props.groups || [],
-    projects: props.projects || [],
-    activeRailTab: props.activeRailTab || 'chats',
     searchQuery: props.searchQuery || '',
     error: props.error,
     collapsed: Boolean(props.collapsed),

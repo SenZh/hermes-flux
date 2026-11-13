@@ -21,8 +21,6 @@ function renderLeftRail(props = {}) {
       profileName: props.profileName || 'default',
       profiles: props.profiles || [],
       groups: props.groups || [],
-      projects: props.projects || [],
-      activeRailTab: props.activeRailTab || 'chats',
       searchQuery: props.searchQuery || '',
       isSessionsGroupExpanded: props.isSessionsGroupExpanded,
       isGroupsGroupExpanded: props.isGroupsGroupExpanded,
@@ -39,7 +37,6 @@ function renderLeftRail(props = {}) {
     onOpenGroupMenu: noop,
     onSearchChange: noop,
     onNewChat: noop,
-    onSetTab: noop,
     onToggleSessions: noop,
     onToggleGroups: noop,
     onStartGroupRename: noop,
@@ -292,41 +289,25 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
     assert.ok(!titlebarWithoutProject.includes('session-workspace-badge'), '未关联项目时严禁渲染 Workspace 徽章');
   });
 
-  await t.test('7. 项目抽屉中联动挂载归属会话树', () => {
+  await t.test('7. 项目甲板入口拔除后，左轨不再渲染项目卡片层（防死层复活）', () => {
     const railHtml = renderLeftRail({
       collapsed: false,
       activeSessionId: 'sess-shop-1',
       profileName: 'default',
-      gatewayOnline: true,
-      gatewayLatencyMs: 15,
-      activeRailTab: 'projects',
-      sessions: [],
-      projects: [
+      sessions: [
         {
-          id: 'proj-shop',
-          name: '商城系统',
-          path: 'D:/shop',
-          sessions: [
-            {
-              id: 'sess-shop-1',
-              title: '修复支付订单超时',
-              time: '15:30',
-              model: 'gpt-4o',
-            },
-          ],
-        },
-        {
-          id: 'proj-empty',
-          name: '空项目',
-          sessions: [],
+          id: 'sess-shop-1',
+          title: '修复支付订单超时',
+          preview: '归属项目的会话',
+          timestamp: Date.now(),
         },
       ],
     });
 
-    assert.ok(railHtml.includes('rail-projects-deck'), '必须包含项目看板卡片层');
-    assert.ok(railHtml.includes('商城系统'), '必须渲染项目名称');
-    assert.ok(railHtml.includes('修复支付订单超时'), '项目展开抽屉中必须挂载归属该项目的会话');
-    assert.ok(railHtml.includes('该项目暂无关联会话'), '无会话项目必须提示空态');
+    assert.equal(railHtml.includes('rail-projects-deck'), false, '项目甲板层必须整体消失');
+    assert.equal(railHtml.includes('project-accordion-unit'), false, '项目手风琴单元不得残留');
+    // 归属项目的会话仍必须作为普通会话出现在会话甲板里，功能不因入口消失而丢失。
+    assert.ok(railHtml.includes('修复支付订单超时'), '会话本体不得因项目甲板移除而消失');
   });
 
   await t.test('8. 右键上下文菜单分流测试 (Bot / Group / Session 三态全覆盖)', () => {
