@@ -318,6 +318,7 @@ export async function runFeature(featureId) {
     featureId === 'first-paint-skeleton'
       || featureId === 'prompt-navigator-rail'
       || featureId === 'provider-bot-binding'
+      || featureId === 'activity-indicator-preference'
       ? { htmlPath: '/packages/desktop/dist/renderer/index.html' }
       : {}
   );
@@ -1298,8 +1299,134 @@ export async function runFeature(featureId) {
       fs.writeFileSync(path.join(featureArtifactsDir, 'evidence.json'), JSON.stringify(evidence, null, 2));
       console.log(`  ✔ 提供商头像绑定验证成功！证据已落盘: ${screenshot}`);
       return true;
+    } else if (featureId === 'activity-indicator-preference') {
+      const openAppearance = async () => {
+        await session.waitFor('Boolean(document.getElementById("btn-open-settings"))', 15000, 'titlebar settings button');
+        await session.click('#btn-open-settings');
+        await session.waitFor('document.querySelector("[data-testid=settings-dialog]") !== null', 10000, 'settings dialog');
+        await session.click('[data-settings-section=appearance]');
+        await session.waitFor('document.querySelector("[data-settings-section=appearance][aria-current=page]") !== null', 8000, 'appearance active');
+        await session.waitFor('document.querySelectorAll("[data-activity-variant]").length === 6', 8000, 'six variant cards');
+      };
+
+      console.log('  1. 打开设置 › 外观：六张变体卡必须各自运行真实动效...');
+      await openAppearance();
+      const cards = await session.evaluate(`(() => {
+        const list = Array.from(document.querySelectorAll('[data-activity-variant]'));
+        return list.map((card) => {
+          const variant = card.getAttribute('data-activity-variant');
+          const preview = card.querySelector('[data-activity-preview]');
+          const animated = preview ? Array.from(preview.querySelectorAll('*')).filter((el) => {
+            const name = getComputedStyle(el).animationName;
+            return name && name !== 'none';
+          }).length : 0;
+          return {
+            variant,
+            checked: card.getAttribute('aria-checked'),
+            previewStatus: preview && preview.querySelector('[data-status]') ? preview.querySelector('[data-status]').getAttribute('data-status') : null,
+            variantClass: Boolean(preview && preview.querySelector('.flux-variant-' + variant)),
+            animatedNodes: animated,
+            width: Math.round(card.getBoundingClientRect().width),
+          };
+        });
+      })()`);
+      console.log('     · 卡片统计:', JSON.stringify(cards));
+      const expectedVariants = ['cloud', 'gyro', 'orbit', 'synapse', 'spring', 'matrix'];
+      if (JSON.stringify(cards.map((card) => card.variant)) !== JSON.stringify(expectedVariants)) {
+        throw new Error(`六张卡顺序必须与真值表一致，实测 ${cards.map((card) => card.variant).join(',')}`);
+      }
+      for (const card of cards) {
+        if (card.previewStatus !== 'running') throw new Error(`${card.variant} 预览必须是运行态，实测 ${card.previewStatus}`);
+        if (!card.variantClass) throw new Error(`${card.variant} 预览缺少自身变体类名`);
+        if (card.animatedNodes < 1) throw new Error(`${card.variant} 预览没有任何动画在跑（等于静态截图）`);
+        if (card.width < 200) throw new Error(`${card.variant} 卡片被压窄（${card.width}px），两列网格失效`);
+      }
+      if (cards.filter((card) => card.checked === 'true').length !== 1) throw new Error('变体选中态必须互斥');
+
+      console.log('  2. 点击「轨道」：必须立即生效并落盘...');
+      await session.click('[data-activity-variant=orbit]');
+      await session.waitFor('document.querySelector("[data-activity-variant=orbit]").getAttribute("aria-checked") === "true"', 5000, 'orbit checked');
+      const applied = await session.evaluate(`(() => ({
+        stored: localStorage.getItem('hermes_flux_activity_variant'),
+        checked: Array.from(document.querySelectorAll('[data-activity-variant][aria-checked=true]')).map((el) => el.getAttribute('data-activity-variant')),
+      }))()`);
+      if (applied.stored !== 'orbit') throw new Error(`偏好必须落盘为 orbit，实测 ${applied.stored}`);
+      if (JSON.stringify(applied.checked) !== '["orbit"]') throw new Error(`选中态必须唯一切到 orbit，实测 ${JSON.stringify(applied.checked)}`);
+
+      console.log('  3. 切到 English：卡片名称与描述不得被截断...');
+      const switched = await session.evaluate(`(() => {
+        const btn = Array.from(document.querySelectorAll('.flux-settings button')).find((b) => b.textContent.trim() === 'English');
+        if (!btn) return false;
+        btn.click();
+        return true;
+      })()`);
+      if (!switched) throw new Error('外观页必须能切到 English');
+      await session.waitFor('document.body.textContent.includes("Activity indicator")', 5000, 'english appearance panel');
+      const clipping = await session.evaluate(`(() => Array.from(document.querySelectorAll('[data-activity-variant] [class*="truncate"]')).map((el) => ({
+        text: el.textContent.trim(),
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth,
+        clipped: el.scrollWidth > el.clientWidth + 1,
+      })))()`);
+      const clipped = clipping.filter((row) => row.clipped);
+      console.log('     · 文本宽度:', JSON.stringify(clipping));
+      if (clipped.length > 0) throw new Error(`英文文案被截断：${JSON.stringify(clipped)}`);
+
+      console.log('  4. 减少动态效果：六套动效必须停止...');
+      await session.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+      const reduced = await session.evaluate(`(() => {
+        const animated = Array.from(document.querySelectorAll('[data-activity-preview] *')).filter((el) => getComputedStyle(el).animationName !== 'none');
+        return { total: animated.length, offenders: animated.slice(0, 5).map((el) => String(el.className)) };
+      })()`);
+      await session.sendCommand('Emulation.setEmulatedMedia', { features: [] });
+      console.log('     · reduce 后仍动画的节点:', JSON.stringify(reduced));
+      if (reduced.total > 0) throw new Error(`减少动态效果下不得继续动画：${JSON.stringify(reduced.offenders)}`);
+
+      console.log('  5. 页面隐藏：六套动效必须暂停而不是空转...');
+      const hidden = await session.evaluate(`(() => {
+        document.documentElement.dataset.pageHidden = 'true';
+        const animated = Array.from(document.querySelectorAll('[data-activity-preview] *')).filter((el) => getComputedStyle(el).animationName !== 'none');
+        const notPaused = animated.filter((el) => getComputedStyle(el).animationPlayState !== 'paused').map((el) => String(el.className));
+        document.documentElement.dataset.pageHidden = 'false';
+        return { total: animated.length, notPaused };
+      })()`);
+      console.log('     · 隐藏态统计:', JSON.stringify(hidden));
+      if (hidden.total === 0) throw new Error('预览里必须存在真实动画节点，否则隐藏暂停无从谈起');
+      if (hidden.notPaused.length > 0) throw new Error(`页面隐藏时动效必须暂停：${JSON.stringify(hidden.notPaused.slice(0, 5))}`);
+
+      const screenshot = path.join(featureArtifactsDir, 'screenshot.png');
+      await session.screenshot(screenshot);
+
+      console.log('  6. 刷新页面：偏好必须跨会话恢复...');
+      await session.sendCommand('Page.reload', { ignoreCache: false });
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await openAppearance();
+      const restored = await session.evaluate(`(() => ({
+        stored: localStorage.getItem('hermes_flux_activity_variant'),
+        checked: Array.from(document.querySelectorAll('[data-activity-variant][aria-checked=true]')).map((el) => el.getAttribute('data-activity-variant')),
+      }))()`);
+      if (restored.stored !== 'orbit' || JSON.stringify(restored.checked) !== '["orbit"]') {
+        throw new Error(`刷新后必须仍选中 orbit，实测 ${JSON.stringify(restored)}`);
+      }
+
+      const evidence = {
+        featureId,
+        timestamp: new Date().toISOString(),
+        durationMs: Date.now() - startTime,
+        status: 'PASSED',
+        cards,
+        applied,
+        clipping,
+        reduced,
+        hidden,
+        restored,
+        screenshot,
+      };
+      fs.writeFileSync(path.join(featureArtifactsDir, 'evidence.json'), JSON.stringify(evidence, null, 2));
+      console.log(`  ✔ 活动指示器变体验证成功！证据已落盘: ${screenshot}`);
+      return true;
     } else {
-      throw new Error(`Unknown feature ID: ${featureId}. Supported features: bot-primary-chat, session-management, group-room, input-dock-controls, interactive-chat-stage, clean-light-theme, prompt-navigator-rail, provider-bot-binding`);
+      throw new Error(`Unknown feature ID: ${featureId}. Supported features: bot-primary-chat, session-management, group-room, input-dock-controls, interactive-chat-stage, clean-light-theme, prompt-navigator-rail, provider-bot-binding, activity-indicator-preference`);
     }
   } finally {
     await session.cleanup();
