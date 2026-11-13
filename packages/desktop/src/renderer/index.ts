@@ -82,6 +82,10 @@ import {
   loadFontPreferences,
   saveFontPreferences,
   applyFontPreferences,
+  loadActivityIndicatorVariant,
+  saveActivityIndicatorVariant,
+  resolveActivityIndicatorVariant,
+  type ActivityIndicatorVariant,
   setLocale,
   collectTouchedFiles,
   messageKeyForVerdict,
@@ -1000,6 +1004,8 @@ const profileService = new ProfileService();
 const groupRoomStore = new GroupRoomStore();
 
 let fontPreferences: FontPreferences = loadFontPreferences();
+/** 左轨活动指示器动效变体；用户在外观设置里选择，随 render() 推进左轨快照。 */
+let activityIndicatorVariant: ActivityIndicatorVariant = loadActivityIndicatorVariant();
 
 const state: AppState = {
   platform: detectInitialPlatform(),
@@ -6874,6 +6880,7 @@ interface LeftRailSnapshotInputs {
   editingGroupRoomId?: string;
   profilesPhase: DataPhase;
   sessionsPhase: DataPhase;
+  activityVariant: ActivityIndicatorVariant;
 }
 let lastLeftRailSnapshot: LeftRailSnapshot | null = null;
 let lastLeftRailInputs: LeftRailSnapshotInputs | null = null;
@@ -6895,6 +6902,7 @@ function sameLeftRailInputs(prev: LeftRailSnapshotInputs, next: LeftRailSnapshot
     && prev.collapsed === next.collapsed
     && prev.profilesPhase === next.profilesPhase
     && prev.sessionsPhase === next.sessionsPhase
+    && prev.activityVariant === next.activityVariant
     && prev.editingGroupRoomId === next.editingGroupRoomId;
 }
 
@@ -7124,6 +7132,7 @@ function getLeftRailSnapshot(): LeftRailSnapshot {
     editingGroupRoomId: state.editingGroupRoomId,
     profilesPhase: state.profilesPhase,
     sessionsPhase: state.sessionsPhase,
+    activityVariant: activityIndicatorVariant,
   };
   if (lastLeftRailSnapshot && lastLeftRailInputs && sameLeftRailInputs(lastLeftRailInputs, inputs)) {
     return lastLeftRailSnapshot;
@@ -7150,6 +7159,7 @@ function getLeftRailSnapshot(): LeftRailSnapshot {
     searchQuery: state.sessionSearchQuery,
     editingGroupRoomId: state.editingGroupRoomId,
     groupAvatars: profiles,
+    activityVariant: activityIndicatorVariant,
   };
   return lastLeftRailSnapshot;
 }
@@ -7965,6 +7975,7 @@ function getSettingsSnapshot(): SettingsSnapshot {
     theme: state.theme,
     locale: state.lang === 'en' ? 'en' : 'zh',
     fontPrefs: fontPreferences,
+    activityVariant: activityIndicatorVariant,
     // 提供商的旧 providers 域已并入统一表 providerViews，快照不再单列 providers。
     profiles: state.settingsProfiles,
     bots: botRoster(),
@@ -8052,6 +8063,11 @@ function createSettingsActions(): SettingsActions {
       fontPreferences = prefs;
       saveFontPreferences(prefs);
       applyFontPreferences(prefs);
+      render();
+    },
+    onActivityVariantChange: (variant) => {
+      activityIndicatorVariant = resolveActivityIndicatorVariant(variant);
+      saveActivityIndicatorVariant(activityIndicatorVariant);
       render();
     },
     onRefreshProfiles: () => { void getSettingsController().loadProfiles(); },

@@ -21,6 +21,7 @@
 
 import type { I18nKey } from '../../i18n/index.js';
 import type { FontPreferences } from '../../tokens/fontPreferences.js';
+import type { ActivityIndicatorVariant } from '../../tokens/activityIndicator.js';
 import type { SkinId } from '../../tokens/skins.js';
 import type {
   McpServerRow,
@@ -118,6 +119,8 @@ export interface SettingsSnapshot {
   theme: SkinId;
   locale: 'zh' | 'en';
   fontPrefs: FontPreferences;
+  /** 左轨活动指示器动效变体（设置页卡片即真实预览，点击立即生效）。 */
+  activityVariant: ActivityIndicatorVariant;
   profiles: SettingsLoadable<SettingsProfileRow[]>;
   mcp: SettingsLoadable<McpServerRow[]>;
   skills: SettingsLoadable<SkillRow[]>;
@@ -201,6 +204,8 @@ export interface SettingsActions {
   onThemeChange: (id: SkinId) => void;
   onLocaleChange: (locale: 'zh' | 'en') => void;
   onFontPrefsChange: (prefs: FontPreferences) => void;
+  /** 切换左轨活动指示器动效变体；壳层负责持久化并向左轨推新快照。 */
+  onActivityVariantChange: (variant: ActivityIndicatorVariant) => void;
   onRefreshProfiles: () => void;
   onOpenAgent: (name: string) => void;
   onRefreshExtensions: () => void;

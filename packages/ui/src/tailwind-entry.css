@@ -188,6 +188,48 @@
   gap: 12px 8px;
 }
 
+/**
+ * 活动指示器变体预览（设置 - 外观）。
+ *
+ * 设计意图(Why)：六套动效要在设置页并排比较，而左轨原尺寸只有 19×14px，
+ *   直接放进去看不出粒子与环的差别。这里只放大、不改结构，卡片里跑的就是真实组件，
+ *   用户看到的效果与选中后左轨里的完全一致。
+ *
+ * 防范的历史坑(Pitfall)：不能用 `transform: scale` 放大 canvas——transform 不参与 flex 布局，
+ *   视觉宽度溢出后会和右侧状态词重叠；`zoom` 参与布局，间距才是真实的。
+ *
+ * 约束与规则(Rules)：固定宽度给六张卡一个共同起点，禁止改 auto（不同变体的视觉宽度不同，
+ *   文字起点会一行一个样）；只调尺寸，不覆盖任何动画或颜色。
+ */
+@utility activity-variant-preview {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 48px;
+
+  /*
+   * 六套动效的承载容器尺寸不同（cloud 19×14、matrix 19×15、其余 14×14），
+   * 必须逐个列出：只放大 cloud 会让另外五张卡仍是原尺寸，「并排比较」就失真了。
+   */
+  & .flux-cloud-canvas,
+  & .flux-motif-gyro,
+  & .flux-motif-orbit,
+  & .flux-motif-synapse,
+  & .flux-motif-spring,
+  & .flux-motif-matrix {
+    zoom: 2;
+  }
+
+  /*
+   * 运行态状态词在预览里必须隐藏：它与右侧的变体名并排时会被读成「执行中 流云」，
+   * 而这里要比较的只有动效本体；真实状态词在左轨里原样保留。
+   */
+  & .flux-cloud-label {
+    display: none;
+  }
+}
+
 /*
  * 语义阴影三档（@utility）。
  *

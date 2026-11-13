@@ -22,6 +22,35 @@ const source = fs.readFileSync(RENDERER, 'utf8');
 const controller = fs.readFileSync(CONTROLLER, 'utf8');
 const settingsUi = fs.readFileSync(SETTINGS_UI, 'utf8');
 
+test('左轨活动指示器变体必须可配置、持久化，并真的推进左轨快照', () => {
+  assert.ok(settingsUi.includes('data-activity-variant'), '外观页必须提供变体选择卡');
+  assert.ok(settingsUi.includes('<ActivityIndicator'), '变体卡必须内嵌真实指示器组件做动态预览');
+  assert.ok(
+    settingsUi.includes('onActivityVariantChange(variant)'),
+    '卡片点击必须把自身变体传出去；写死常数会让「点陀螺得流云」',
+  );
+
+  const actionStart = source.indexOf('onActivityVariantChange:');
+  assert.ok(actionStart !== -1, '必须存在 onActivityVariantChange 动作');
+  const actionBlock = source.slice(actionStart, source.indexOf('onRefreshProfiles:', actionStart));
+  assert.ok(actionBlock.includes('saveActivityIndicatorVariant(activityIndicatorVariant)'), '必须把用户选中的变体落盘，不得写死');
+  assert.ok(actionBlock.includes('resolveActivityIndicatorVariant'), '写入前必须收敛为白名单值');
+  assert.ok(actionBlock.includes('render()'), '切换后必须触发重渲染，左轨才能立刻换动效');
+
+  const railStart = source.indexOf('function getLeftRailSnapshot');
+  const railBlock = source.slice(railStart, source.indexOf('let reactMessageList', railStart));
+  assert.equal(
+    (railBlock.match(/activityVariant: activityIndicatorVariant/g) || []).length,
+    2,
+    '左轨快照与缓存比较输入各必须携带一次变体',
+  );
+  // 只有字段、没有比较器时，切换变体会命中旧快照而不重推，左轨永远停在旧动效。
+  assert.ok(
+    source.includes('prev.activityVariant === next.activityVariant'),
+    'sameLeftRailInputs 必须比较变体，否则换变体后左轨不会刷新',
+  );
+});
+
 test('设置页必须由 React 岛接管，禁止再走字符串模板', () => {
   assert.equal(source.includes('renderSettingsModal'), false, '旧字符串模板渲染函数必须彻底移除');
   assert.equal(source.includes('settingsTab'), false, '旧 settingsTab 状态必须收敛为 settingsSection');

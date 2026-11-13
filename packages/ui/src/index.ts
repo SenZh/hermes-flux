@@ -46,6 +46,15 @@ export {
   DEFAULT_FONT_PREFERENCES,
   type FontPreferences,
 } from './tokens/fontPreferences.js';
+export {
+  ACTIVITY_INDICATOR_VARIANTS,
+  DEFAULT_ACTIVITY_INDICATOR_VARIANT,
+  ACTIVITY_INDICATOR_STORAGE_KEY,
+  resolveActivityIndicatorVariant,
+  loadActivityIndicatorVariant,
+  saveActivityIndicatorVariant,
+  type ActivityIndicatorVariant,
+} from './tokens/activityIndicator.js';
 export * from './components/InputDock/InputDock.js';
 export * from './components/InspectionPod/InspectionPod.js';
 export * from './components/StatusBar/StatusBar.js';

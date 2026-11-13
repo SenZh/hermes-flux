@@ -12,6 +12,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { LeftRail } from '../dist/components-react/LeftRail.js';
 import { ActivityIndicator } from '../dist/index.js';
+import { renderLeftRailHtml } from '../dist/components-react/leftRailStaticRender.js';
 import { buildLeftRailModel, formatLeftRailTime, toSnippet, isAgentScopeActive } from '../dist/components-react/leftRailModel.js';
 import { assertCollapsedRailGeometry } from './helpers/rail-geometry.mjs';
 
@@ -456,6 +457,49 @@ test('buildLeftRailModel: groupOverviewActivity 优先级与瞬态跃迁聚合�
     ],
   });
   assert.deepEqual(mScoped.groupOverviewActivity, { state: 'read', transition: 'none' });
+});
+
+test('左轨活动指示器变体：设置里的选择必须真的透传到会话行与群聊行', () => {
+  const runningSessions = [{ id: 's-run', title: '运行中的会话', timestamp: NOW, activityState: 'running' }];
+  const matrix = render({ sessions: runningSessions }, { activityVariant: 'matrix' });
+  assert.ok(matrix.includes('flux-variant-matrix'), '会话运行态必须使用设置里的变体');
+  assert.ok(matrix.includes('data-variant="matrix"'));
+  assert.equal(matrix.includes('data-variant="cloud"'), false, '设置变体后不得残留默认变体');
+
+  const fallback = render({ sessions: runningSessions });
+  assert.ok(fallback.includes('data-variant="cloud"'), '未传变体时回落到默认值');
+
+  const runningGroups = [{ roomId: 'r-run', name: '并行群聊', members: ['default'], activityState: 'running' }];
+  const gyro = render({ sessions: [], groups: runningGroups }, { activityVariant: 'gyro' });
+  assert.ok(gyro.includes('data-variant="gyro"'), '群聊运行态必须同样跟随设置');
+
+  // 微轨（corner）只有蓝点，不随变体改形态；但 data-variant 不能继续谎报 cloud。
+  const stationRunning = [
+    { name: 'default', displayName: 'Default 助理', isDefault: true, activityState: 'running', timestamp: NOW },
+  ];
+  const station = render({ sessions: [], profiles: stationRunning }, { activityVariant: 'spring' });
+  const stationBadge = station.slice(station.indexOf('data-station-profile'), station.indexOf('</button>', station.indexOf('data-station-profile')));
+  assert.ok(stationBadge.includes('data-variant="spring"'), '微轨角标必须透传设置变体');
+});
+
+test('静态渲染快照同样携带变体，避免服务端/测试链路恒为默认值', () => {
+  const snapshot = {
+    activeSessionId: 's-run',
+    activeFocus: { type: 'bot', botName: 'default' },
+    sessions: [{ id: 's-run', title: '运行中', timestamp: NOW, activityState: 'running' }],
+    profileName: 'default',
+    profiles: PROFILES,
+    groups: [],
+    projects: [],
+    activeRailTab: 'chats',
+    searchQuery: '',
+    collapsed: false,
+    activityVariant: 'orbit',
+  };
+  const html = renderLeftRailHtml(snapshot);
+  assert.ok(html.includes('data-variant="orbit"'), '静态渲染必须透传快照里的变体');
+  const fallback = renderLeftRailHtml({ ...snapshot, activityVariant: undefined });
+  assert.ok(fallback.includes('data-variant="cloud"'), '快照缺省时必须回落默认变体');
 });
 
 test('ActivityIndicator 统一原语：placement、entityKind、24 颗云朵点阵与静态 read 零节点', () => {

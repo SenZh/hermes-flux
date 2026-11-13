@@ -11,11 +11,14 @@ import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { LeftRail, type LeftRailProps } from './LeftRail.js';
 import { buildLeftRailModel, type LeftRailModelInput } from './leftRailModel.js';
+import type { ActivityIndicatorVariant } from '../tokens/activityIndicator.js';
 
 /** 快照输入：壳层需要提供的原始数据 + 少量交互态。 */
 export interface LeftRailHtmlSnapshot extends LeftRailModelInput {
   collapsed: boolean;
   editingGroupRoomId?: string;
+  /** 活动指示器变体；缺省时组件回落到 cloud，与客户端挂载的默认值一致。 */
+  activityVariant?: ActivityIndicatorVariant;
 }
 
 /**
@@ -30,6 +33,7 @@ export function renderLeftRailHtml(snapshot: LeftRailHtmlSnapshot): string {
     searchQuery: snapshot.searchQuery,
     editingGroupRoomId: snapshot.editingGroupRoomId,
     groupAvatars: snapshot.profiles,
+    activityVariant: snapshot.activityVariant,
     onSelectSession: noop,
     onSelectBot: noop,
     onSelectGroup: noop,

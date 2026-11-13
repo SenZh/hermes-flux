@@ -36,6 +36,7 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Interactive chat stage](./interactive-chat-stage.md) covers action bars (copy/fork/rollback), attachment trays, and slash command poppers.
 - [Clean light theme](./clean-light-theme.md) covers Ayu Light / Warm Paper / Jade White publication typography, tone tokens, and sunken surfaces.
 - [Prompt navigator rail](./prompt-navigator-rail.md) covers the right-edge tick rail, hit-band width adaptation, and the floating 8-row prompt panel without an ordinal column.
+- [Activity indicator preference](./activity-indicator-preference.md) covers the six activity-indicator variants in Settings › Appearance: live previews, apply-and-persist, reduced-motion and hidden-page behavior.
 
 ## Feature File vs. Registered Runner ID Mapping (Naming Debt)
 
@@ -53,4 +54,5 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 | `interactive-chat-stage.md` | `interactive-chat-stage` | — | 名称一致 |
 | `clean-light-theme.md` | `clean-light-theme` | `warm-paper-theme`, `ayu-light-theme` | runner 内部针对同一用例支持浅色皮肤别名多路映射 |
 | `prompt-navigator-rail.md` | `prompt-navigator-rail` | 无 | 名称一致（驱动真实 renderer，非 E2E harness） |
+| `activity-indicator-preference.md` | `activity-indicator-preference` | — | 名称一致（驱动真实 renderer，非 E2E harness） |
 
