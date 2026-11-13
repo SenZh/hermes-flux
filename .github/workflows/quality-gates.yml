@@ -110,6 +110,11 @@ jobs:
           npm run contract:coverage
           npm run contract:doc:check
 
+      # 性能基准必须独占 CPU。放在其它作业之后串行执行，避免与测试并发争抢
+      # （实测并发下同一份代码稳定慢约 3 倍：串行 15ms → 并发 41~44ms）。
+      - name: Gate 4e · 长会话性能预算（独占 CPU）
+        run: npm run test:perf
+
       - name: Gate 5 · 全量构建
         run: npm run build
 

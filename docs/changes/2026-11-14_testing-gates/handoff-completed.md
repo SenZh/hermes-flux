@@ -42,9 +42,22 @@ L1 执行量自证    census-targets + census-check                    证明真
 L2 单元与集成    npm test（census 包裹）                          行为正确性
 L3 不变量        verify:formal + invariant-map --check            性质恒成立
 L4 覆盖率        coverage:new（sourcemap 反解 + 增量判定）          执行完整性
-L5 有效性        gates:mutation + gates:self-proof                杀伤力（双向）
+L5 有效性        gates:mutation / self-proof / fake-tests         三层杀伤力（见下）
 L6 真实渲染      CDP（未纳入 CI，见第五节风险）
 ```
+
+### L5 的三层杀伤力，各管一件事
+
+| 命令 | 问的问题 | 手法 |
+|---|---|---|
+| `gates:mutation` | 改坏**被测逻辑**，测试会红吗 | 变异 scanner/rules 实现 |
+| `gates:self-proof` | 污染**门禁判定条件**，门禁会红吗 | 制造空 glob / 假 exit / 超限文件 |
+| `gates:fake-tests` | 删掉**生产实现**，测试会红吗 | 变异 dist 产物并断言失败原因对得上 |
+
+只做其中任一层都会留下盲区：
+第一层不知道测试有没有真的连到生产代码；
+第二层不知道门禁在被违反时是不是真的会红；
+第三层不知道测试是不是在自证。
 
 ### 每层的实证入口
 
@@ -56,6 +69,7 @@ L6 真实渲染      CDP（未纳入 CI，见第五节风险）
 | L3 | `npm run gates:invariants` | 35 条不变量，测试真实存在且含 `fc.assert` |
 | L4 | `npm run coverage:new` | 新增可执行行必须 executed |
 | L5 | `npm run gates:self-proof` | **12 个场景全部判定正确** |
+| L5 | `npm run gates:fake-tests` | **5 条变异全部被杀死，原因逐条命中** |
 | L6 | （人工） | 见第五节 |
 
 ---
@@ -198,6 +212,22 @@ npm run invariants:render
 8. **源码守卫测试不要锁死函数名**。草稿持久化抽出后，
    `persistDraftsToStorage() >= 4` 的守卫立刻假红——它保护的是"各处都覆盖到草稿"，
    应该断言 `sessionDrafts.set/delete` 的分布，而不是某个内部函数被调几次。
+
+9. **性能基准的"平均值"测的是机器有多忙，不是组件有多快**。
+   同一份代码：单独运行 p95 = 13.8ms（20 次采样 0 次越界），
+   在 `npm run verify` 链里 23~25.4ms（多次随机越界）。
+   平均值把 GC 时间摊进每一步，样本落在噪声量级上，断言就变成抽奖。
+   现在改为「每步取最小值 → 10 步中位数」+「单次硬上限」双判据：
+   前者对真实退化敏感（退化会让最小值一起变慢）、不被 GC 尖峰污染，
+   后者抓"最小值好看但出现一次 200ms 停顿"。
+   敏感性已实证：注入 14ms 延迟（约 50% 退化）会被精确拦截。
+
+10. **证伪器的 `expect` 必须校准到真实断言文案**。第一次跑 3/5 被判"原因不匹配"，
+    实际是测试确实红了、但报的是另一条断言（我的 expect 猜错了文案）。
+    另一条更值得注意：把 `resolved !== null` 直接抹掉会变成**语法错误**，
+    exit != 0 但原因不是断言——证伪器正确地把它判为"无效"，
+    改用语义等价替换 `resolved.length > 0` 后才算有效杀害。
+    这正是"不能只看 exit code"的价值。
 
 ---
 

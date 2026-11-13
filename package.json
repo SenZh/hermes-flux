@@ -37,7 +37,7 @@
     "test:cdp": "node --test --test-concurrency=1 packages/desktop/__tests__/cdp/advanced-systems-cdp.test.mjs packages/desktop/__tests__/cdp/e2e-acceptance-cdp.test.mjs packages/desktop/__tests__/cdp/interactive-stage-cdp.test.mjs packages/desktop/__tests__/cdp/conversation-perf-cdp.test.mjs packages/desktop/__tests__/cdp/conversation-virtual-scroll-cdp.test.mjs packages/desktop/__tests__/cdp/rail-handle-symmetry-cdp.test.mjs packages/desktop/__tests__/cdp/rail-cockpit-form-cdp.test.mjs packages/desktop/__tests__/cdp/settings-center-cdp.test.mjs packages/desktop/__tests__/cdp/older-pagination-cdp.test.mjs packages/desktop/__tests__/cdp/session-list-status-animation-cdp.test.mjs",
     "test:perf:cdp": "node --test packages/desktop/__tests__/cdp/conversation-perf-cdp.test.mjs",
     "test:e2e:left-rail": "node --test packages/desktop/__tests__/e2e/left-rail-live-cdp.test.mjs",
-    "test:perf": "node scripts/gates/perf-benchmark.mjs",
+    "test:perf": "node scripts/gates/perf-standalone.mjs",
     "lint": "echo 'Checking monorepo lint...'",
     "typecheck": "tsc --build packages/core/tsconfig.json packages/ui/tsconfig.json && tsc --project packages/desktop/tsconfig.json --noEmit && tsc --project packages/mobile/tsconfig.json --noEmit",
     "gates": "node scripts/gates/run.mjs",
@@ -61,7 +61,7 @@
     "contract:doc:check": "node scripts/contract/doc.mjs --check",
     "probe:gateway": "node scripts/contract/probe.mjs",
     "probe:drift": "node scripts/contract/probe.mjs --check",
-    "verify": "npm run gates && npm run gates:targets && npm run gates:self-proof && npm run gates:allow && npm run gates:invariants && npm run contract:verify && npm run contract:coverage && npm run contract:doc:check && npm run typecheck && npm test && npm run verify:formal",
+    "verify": "npm run gates && npm run gates:targets && npm run gates:self-proof && npm run gates:fake-tests && npm run gates:allow && npm run gates:invariants && npm run contract:verify && npm run contract:coverage && npm run contract:doc:check && npm run typecheck && npm test && npm run verify:formal && npm run test:perf",
     "verify:display-kind": "node scripts/verify/display-kind-check.mjs",
     "prepare": "node -e \"try { require('child_process').execSync('git config core.hooksPath .githooks'); } catch {}\""
   },
