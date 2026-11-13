@@ -49,6 +49,19 @@
 | **verify-formal-invariants** | [`.opencode/skills/verify-formal-invariants/`](.opencode/skills/verify-formal-invariants/) | 基于 `fast-check` 的形式化安全不变量检验器，在随机并发交错中证明核心数学定理 |
 | **verify-cache-invariants** | [`.opencode/skills/verify-cache-invariants/`](.opencode/skills/verify-cache-invariants/) | 客户端缓存子系统的形式化安全不变量验证，在随机操作交错中证明定理 22~26 |
 
+### 4. 本地私密运行时配置（不入库，Agent 按需读取）
+
+真实网关地址、账号、口令一律只存放在仓库根目录的 **`.env`**（已被 `.gitignore` 的 `.env` / `.env.*` 双重忽略，`git ls-files` 永不可见）。变量名与语义见**已入库**的 [`.env.example`](.env.example)。
+
+**Rules（违反即安全事故）**：
+1. Agent 需要连真实网关时，**读取 `.env`，但严禁把其值输出到对话、日志、测试夹具、文档、提交信息或 `git commit -m`**；
+2. 严禁把真实值写入任何被 git 跟踪的文件（`AGENTS.md`、`docs/**`、`scripts/**`、`*.test.mjs` 一律只写变量名）；
+3. 加载方式统一走 Node 原生 `--env-file`，不额外引入 `dotenv`：
+   - 契约探针：`node --env-file=.env scripts/contract/probe.mjs`（等价 `npm run probe:gateway`，但后者不自动加载 `.env`）
+   - 真实网关 E2E / CDP：`node --env-file=.env --test packages/desktop/__tests__/e2e/*.test.mjs`
+4. 两套变量名并存，语义不同，不可混写：`HERMES_GATEWAY_{URL,USER,PASSWORD}` 供 `scripts/contract/*`；`FLUX_GATEWAY_{URL,USER,PASS}` 供 `packages/desktop/__tests__/e2e/*`（注意后者是 `PASS` 而非 `PASSWORD`）；
+5. `.env` 缺失或变量为空时，脚本必须显式跳过并给出可见提示（Failure Is Not Empty），严禁静默降级为假数据继续跑。
+
 ---
 
 ## 一、系统架构分层与核心领域模型 (Architecture & Domain Models)
