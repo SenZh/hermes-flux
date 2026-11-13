@@ -41,6 +41,9 @@ const PAIRS = [
   ['--muted-foreground', '--popover', 'text'],
   ['--destructive', '--input', 'graphic'],
   ['--success', '--input', 'graphic'],
+  ['--warning', '--input', 'graphic'],
+  ['--warning', '--card', 'graphic'],
+  ['--primary-foreground', '--primary', 'text'],
 ];
 
 const AA_TEXT = 4.5;

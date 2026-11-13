@@ -236,7 +236,7 @@
   --jade-pulse: #047857;
   --success-glow: rgba(16, 185, 129, 0.25);
   --jade-glow: rgba(16, 185, 129, 0.25);
-  --warning: #F59E0B;
+  --warning: #B45309;
   --destructive: #DC2626;
   --danger-color: #DC2626;
   --border: rgba(0, 0, 0, 0.10);
@@ -320,7 +320,7 @@
   --jade-pulse: #047857;
   --success-glow: rgba(16, 185, 129, 0.40);
   --jade-glow: rgba(16, 185, 129, 0.40);
-  --warning: #F59E0B;
+  --warning: #B45309;
   --destructive: #DC2626;
   --danger-color: #DC2626;
   --border: rgba(31, 35, 40, 0.14);
@@ -404,7 +404,7 @@
   --jade-pulse: #047857;
   --success-glow: rgba(95, 185, 120, 0.40);
   --jade-glow: rgba(95, 185, 120, 0.40);
-  --warning: #F59E0B;
+  --warning: #B45309;
   --destructive: #E6656A;
   --danger-color: #E6656A;
   --border: #D8D8D6;
