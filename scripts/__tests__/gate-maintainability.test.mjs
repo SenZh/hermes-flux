@@ -139,6 +139,16 @@ test('test-integrity · 豁免注释计入本文件警告计数，但文档块�
   assert.equal(real.warnings.length, 1, '豁免条数必须每次运行都可见');
   assert.match(real.warnings[0].message, /1 条行内豁免/);
 
+  /**
+   * 【含数字的标签必须同样被识别】`i18n` 里含数字 18。
+   * 历史缺陷：allow-budget 的正则字符类写成 `[a-z-]`，把数字排除在外，
+   * 于是 gate-i18n-allow 永远不被计入，敞口统计静默漏项。
+   * 这里用含数字的标签做正向覆盖。
+   */
+  const withDigit = ctxOf('// gate-i18n-allow: 开发者诊断日志\nconst b = 1;\n');
+  testIntegrityRules.check('packages/desktop/src/renderer/index.ts', withDigit);
+  assert.equal(withDigit.warnings.length, 1, '含数字的标签必须被识别');
+
   // 文档块里的写法示例
   const doc = ctxOf('/**\n * 用法：写 `gate-theme-allow: 理由`\n */\n');
   assert.deepEqual(testIntegrityRules.check('scripts/gates/lib/scanner.mjs', doc), []);

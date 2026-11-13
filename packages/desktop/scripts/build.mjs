@@ -190,6 +190,19 @@ async function buildAll() {
     sourcemap: true,
   });
 
+  // Bot 主工位活动持久化同样从 index.ts 整簇抽出；它依赖 core 的纯函数，
+  // 必须声明 external，否则会把 core 的实现打进产物导致两份状态。
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/persistence/botActivityStore.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/persistence/botActivityStore.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+
   // 输入补全领域从 index.ts 整簇抽出后，同样需要独立产物供行为测试直接导入。
   // 【约束与规则 (Rules)】它依赖 @hermes-flux/ui 与 core，必须单独 build 并声明 external，
   //   塞进上面那组会把 React 的 CJS 依赖打进 ESM，Node 直接 import 会炸。

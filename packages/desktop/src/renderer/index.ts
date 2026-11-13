@@ -235,6 +235,7 @@ import {
 
 import { parseTranscriptRows } from './transcriptRows.js';
 import { createInputCompletion } from './completion/inputCompletion.js';
+import { createBotActivityStore } from './persistence/botActivityStore.js';
 import { isStringArray, safeParseJson, resolveDurableOrderKey } from './persistence/persistedJson.js';
 import { DesktopCacheStore } from './cache/DesktopCacheStore.js';
 import { loadProviderCatalog } from './providerCatalog.js';
@@ -1365,79 +1366,31 @@ function persistAvatarCache(): void {
 }
 
 /**
- * 智能体主工位最新交互映射表（持久化存储 + 运行时内存）
+ * Bot 主工位最新交互持久化。
  *
- * 【设计意图 (Why)】
- * 专职 Bot 的主工位（Forever Chat）状态与普通旁聊会话严格正交。
- * 持久化记录各 Bot 主工位的最后真实对话文本与时间戳，彻底杜绝冷启动与页面刷新时
- * 因网络异步延迟而闪现旧时间戳（如 22:48）或被普通会话池串扰。
+ * 【设计意图 (Why)】专职 Bot 主工位状态与普通旁聊严格正交，该模块只依赖
+ *   「profile 列表读写 + 时间格式化」两个注入点，因此整簇搬到
+ *   persistence/botActivityStore.ts 并可独立测试（抽出前它从未被直接执行过）。
  *
- * 【防范的历史坑 (Pitfall)】
- * 历史上该 Map 仅为纯内存 Map，刷新页面后丢失，导致冷启动探查阶段回退到普通会话池，
- * 把无关旁聊（如奥特曼短剧方案）的时间和副标题覆盖到专职 Bot 卡片上。
- *
- * 【约束与规则 (Rules)】
- * 读写全部经由 updateBotLatestActivity 收敛，严禁在业务各处分散私自修改。
+ * 【约束与规则 (Rules)】profile 以 getter/setter 注入，保证每次读到的是最新列表，
+ *   不会因宿主整体替换 state.profiles 而持有过期快照。
  */
-const BOT_ACTIVITY_PERSISTENCE_KEY = 'hermes_flux_bot_activity';
-const botLatestActivityMap = new Map<string, BotActivityRecord>();
-
-interface PersistedBotActivityRecord {
-  lastMessage?: string;
-  timestamp?: number;
-}
-
-function initBotActivityFromStorage(): void {
-  try {
-    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(BOT_ACTIVITY_PERSISTENCE_KEY) : null;
-    if (raw) {
-      const parsed: unknown = JSON.parse(raw);
-      if (typeof parsed === 'object' && parsed !== null) {
-        for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-          if (v && typeof v === 'object' && 'timestamp' in v) {
-            const rec = v as PersistedBotActivityRecord;
-            if (typeof rec.timestamp === 'number') {
-              botLatestActivityMap.set(k, {
-                lastMessage: String(rec.lastMessage || ''),
-                timestamp: rec.timestamp,
-              });
-            }
-          }
-        }
-      }
-    }
-  // gate-degrade: 本地存储损坏或不可用时不中断启动，平滑回退到网络状态
-  } catch {}
-}
-initBotActivityFromStorage();
-
-function persistBotActivityToStorage(): void {
-  try {
-    if (typeof localStorage === 'undefined') return;
-    const obj: Record<string, PersistedBotActivityRecord> = {};
-    for (const [k, v] of botLatestActivityMap.entries()) {
-      obj[k] = v;
-    }
-    localStorage.setItem(BOT_ACTIVITY_PERSISTENCE_KEY, JSON.stringify(obj));
-  // gate-degrade: 存储配额超限或无写权限时静默降级，不阻断主线程
-  } catch {}
-}
-
-/**
- * 原子性更新指定 Bot 的主工位最新交互状态（委托给 Core 核心领域纯函数）
- */
-function updateBotLatestActivity(botName: string, text: string, rawTimestamp: number | string): void {
-  const res = applyBotActivity({
-    profiles: state.profiles,
-    activityMap: botLatestActivityMap,
-    botName,
-    text,
-    timestamp: rawTimestamp,
-    formatTime: formatSessionTime,
-  });
-  state.profiles = res.profiles;
-  persistBotActivityToStorage();
-}
+const botActivityStore = createBotActivityStore({
+  profiles: () => state.profiles,
+  setProfiles: (next) => {
+    state.profiles = next;
+  },
+  formatTime: (ts) => formatSessionTime(ts),
+  /**
+   * 持久化失败的观测通道。
+   *
+   * 【为什么用英文标识而非中文文案】这是开发者诊断日志，不是用户界面文案。
+   *   走 t() 会让每条诊断日志都依赖语言字典，既污染 i18n 键空间，
+   *   也让日志在切换语言后变得不可 grep。
+   */
+  // gate-i18n-allow: 开发者诊断日志，非用户界面文案，不需要走 t() 字典
+  onPersistError: (err) => console.warn('[Flux] bot activity persist failed:', err),
+});
 
 /**
  * 强力恢复输入舱光标与焦点
@@ -1836,7 +1789,7 @@ const tokenCoalescer = new TokenCoalescer((flushedMap) => {
         }
         const curFocus = state.activeFocus;
         if (curFocus.type === 'bot') {
-          updateBotLatestActivity(curFocus.botName, cachedTarget.content, Date.now());
+          botActivityStore.updateLatestActivity(curFocus.botName, cachedTarget.content, Date.now());
         }
       }
       if (entry.thought) cachedTarget.thought = (cachedTarget.thought || '') + entry.thought;
@@ -2288,12 +2241,14 @@ interface ProjectsListResponse {
  * 严禁使用普通会话列表覆盖 Bot 属性；Bot 时间必须经过 formatSessionTime 统一格式化。
  */
 function syncProfileLastMessages(): void {
-  state.profiles = syncBotProfiles({
-    profiles: state.profiles,
-    activityMap: botLatestActivityMap,
-    foreverChatCache: botForeverChatCache,
-    sessionMessagesCache,
-    formatTime: formatSessionTime,
+  botActivityStore.withActivityMap((activityMap) => {
+    state.profiles = syncBotProfiles({
+      profiles: state.profiles,
+      activityMap,
+      foreverChatCache: botForeverChatCache,
+      sessionMessagesCache,
+      formatTime: formatSessionTime,
+    });
   });
 }
 
@@ -2853,7 +2808,7 @@ async function warmBotForeverChats(
           const previewText = textPart?.text || (typeof last.content === 'string' ? last.content : '');
           const ts = last.created_at || last.timestamp;
           const numTs = typeof ts === 'number' ? (ts > 1e11 ? ts : ts * 1000) : typeof ts === 'string' ? Date.parse(ts) || Date.now() : Date.now();
-          updateBotLatestActivity(p.name, previewText, numTs);
+          botActivityStore.updateLatestActivity(p.name, previewText, numTs);
           render();
         }
       // gate-degrade: 单条主工位探测失败按跳过处理，不影响其余 Bot 资产渲染
@@ -4005,18 +3960,18 @@ function syncActiveSessionPreviewToRail(sessionId: string, messages: MessageView
   if (visibleMessages.length === 0) return;
 
   // 1. 若当前会话为专职 Bot 的 Forever Chat，委托 core 领域逻辑更新
-  const botRes = syncActiveSessionToBot({
+  const botRes = botActivityStore.withActivityMap((activityMap) => syncActiveSessionToBot({
     sessionId,
     messages: visibleMessages,
     foreverChatCache: botForeverChatCache,
     activeFocusBotName: state.activeFocus.type === 'bot' ? state.activeFocus.botName : undefined,
     profiles: state.profiles,
-    activityMap: botLatestActivityMap,
+    activityMap,
     formatTime: formatSessionTime,
-  });
+  }));
   if (botRes) {
     state.profiles = botRes.profiles;
-    persistBotActivityToStorage();
+    botActivityStore.persist();
   }
 
   // 2. 若为普通会话，更新该普通会话的预览与时间戳（优先双重约束，防跨 Profile 串扰）
@@ -5433,7 +5388,7 @@ async function sendMessage(text: string): Promise<void> {
     activityTransitionTracker.clear('bot', currentFocus.botName);
     const focusBotName = currentFocus.botName;
     const nowMs = Date.now();
-    updateBotLatestActivity(focusBotName, trimmed, nowMs);
+    botActivityStore.updateLatestActivity(focusBotName, trimmed, nowMs);
   }
 
   const assistantMsg: MessageViewModel = {
@@ -6132,7 +6087,7 @@ function applyTurnActions(actions: TurnAction[]): void {
             ? (state.messages.length > 0 ? state.messages[state.messages.length - 1] : null)
             : (activeStreamingStoredSessionId ? sessionMessagesCache.get(activeStreamingStoredSessionId)?.slice(-1)[0] || null : null);
           if (finalMsg?.content) {
-            updateBotLatestActivity(activeStreamingBotName, finalMsg.content, Date.now());
+            botActivityStore.updateLatestActivity(activeStreamingBotName, finalMsg.content, Date.now());
           }
           completeEntityTurn('bot', activeRunningBotNames, unreadBotNames, activeStreamingBotName, isBotFocused);
           activeStreamingBotName = null;

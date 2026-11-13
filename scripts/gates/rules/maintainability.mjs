@@ -44,7 +44,7 @@ export const FILE_LINE_LIMIT = 1500;
  * `generated: true` 是构建产物（由生成器写出），人工拆分无意义。
  */
 export const KNOWN_OVERSIZE = {
-  'packages/desktop/src/renderer/index.ts': { max: 11926 },
+  'packages/desktop/src/renderer/index.ts': { max: 11881 },
   'packages/core/src/rpc/contracts/gateway-contract.generated.ts': { max: 7515, generated: true },
   'packages/ui/src/i18n/index.ts': { max: 1907 },
   'packages/ui/src/components-react/settings/ProvidersAdminPanel.tsx': { max: 1523 },
@@ -202,9 +202,9 @@ export const testIntegrityRules = {
     let allowCount = 0;
     for (let i = 0; i < ctx.rawLines.length; i += 1) {
       const line = ctx.rawLines[i];
-      if (!/gate-[a-z-]+-allow\s*:/.test(line)) continue;
+      if (!/gate-[a-z0-9-]+-allow\s*:/.test(line)) continue;
       if (/^\s*\*/.test(line)) continue;
-      if (/gate-[a-z-]+-allow\s*:/.test(ctx.codeLines[i] ?? '')) continue;
+      if (/gate-[a-z0-9-]+-allow\s*:/.test(ctx.codeLines[i] ?? '')) continue;
       allowCount += 1;
     }
     if (allowCount > 0 && ctx.warnings) {

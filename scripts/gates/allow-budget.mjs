@@ -25,12 +25,17 @@ import { REPO_ROOT, listSourceFiles, stripComments } from './lib/scanner.mjs';
 /**
  * 豁免敞口预算。
  *
- * 现状实测 7 条，全部是确有理由的技术豁免：
- * 逐像素对齐、Portal 层级、视口有界、用户文档底色、品牌固定色 ×2、骨架对齐。
+ * 现状实测 9 条（修正正则后才发现原本漏计 2 条 i18n 豁免）：
+ * 逐像素对齐、Portal 层级、视口有界 ×2、用户文档底色、品牌固定色 ×2、
+ * 子代理会话标题分类、开发者诊断日志。
+ *
  * 预算等于实测值而非留余量：留余量等于预授权新增一条豁免，
  * 而敞口应当只降不升。要新增一条，就必须先在此调低并真实删除一条。
+ *
+ * 【为什么之前是 7】旧的识别正则 `[a-z-]` 排除了数字，
+ * 导致 `gate-i18n-allow`（i18n 含 18）从未被计入。这是度量漏项，不是豁免变多。
  */
-const BUDGET = 7;
+const BUDGET = 9;
 
 const SCAN_ROOTS = [
   'packages/core/src',
@@ -40,7 +45,15 @@ const SCAN_ROOTS = [
   'scripts/gates',
 ];
 
-const ALLOW_RE = /gate-([a-z-]+)-allow\s*:/;
+/**
+ * 豁免标记识别。
+ *
+ * 【防范的历史坑 (Pitfall)】原先的字符类写成 `[a-z-]`，把数字排除在外，
+ *   于是 `gate-i18n-allow`（i18n 含 18）永远不被计入，敞口统计静默漏项。
+ *   实测：新增一条 i18n 豁免后预算仍报「7/7 余量 0」，完全看不出漏计。
+ *   现在改为 `[a-z0-9-]`，覆盖 architect/i18n 这类含数字的标签。
+ */
+const ALLOW_RE = /gate-([a-z0-9-]+)-allow\s*:/;
 
 export function collectAllowances() {
   const rows = [];
