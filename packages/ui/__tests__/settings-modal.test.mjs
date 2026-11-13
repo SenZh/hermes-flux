@@ -562,9 +562,18 @@ test('BOT 横幅互斥：确认态存在时不得同时渲染错误横幅（避�
 test('Agent 状态位置：外观分区渲染两个选项，选中态与快照一致', () => {
   setLocale('zh-CN');
   const stageHtml = render({ section: 'appearance', presenceLayout: 'stage' });
-  assert.ok(stageHtml.includes(t('settings.presenceTitle')), '必须渲染「Agent 状态」段');
-  assert.ok(stageHtml.includes(t('settings.presenceLayoutStage')), '必须渲染「对话区顶部」选项');
-  assert.ok(stageHtml.includes(t('settings.presenceLayoutDock')), '必须渲染「输入框上方」选项');
+
+  /**
+   * 【为什么这里写死中文字面量而不是调 t()】
+   * 组件与测试同时调 t() 会形成循环自证：某个 key 从字典里丢失时，两边会
+   * 一起退化成同一个 key 字面量（`settings.presenceTitle`），断言仍然通过，
+   * 于是「文案丢了」这种用户立刻能看见的缺陷在全绿里藏住。
+   * 硬编码期望值让测试独立于字典，字典缺 key 时这里必然红。
+   */
+  assert.ok(stageHtml.includes('Agent 状态'), '必须渲染「Agent 状态」段（字典缺失时这里会红）');
+  assert.ok(stageHtml.includes('对话区顶部'), '必须渲染「对话区顶部」选项');
+  assert.ok(stageHtml.includes('输入框上方'), '必须渲染「输入框上方」选项');
+
   // 【变异杀伤力】把 snapshot.presenceLayout 改成 dock 后，选中态必须跟着换，
   //   否则「切换不生效」这类缺陷会全绿通过。
   const dockHtml = render({ section: 'appearance', presenceLayout: 'dock' });
@@ -572,20 +581,36 @@ test('Agent 状态位置：外观分区渲染两个选项，选中态与快照�
     const match = new RegExp(`aria-pressed="(true|false)"[^>]*>${label}`).exec(html);
     return match?.[1] ?? null;
   };
-  assert.equal(pressedOf(stageHtml, t('settings.presenceLayoutStage')), 'true', 'stage 快照下必须选中对话区顶部');
-  assert.equal(pressedOf(stageHtml, t('settings.presenceLayoutDock')), 'false');
-  assert.equal(pressedOf(dockHtml, t('settings.presenceLayoutDock')), 'true', 'dock 快照下必须选中输入框上方');
-  assert.equal(pressedOf(dockHtml, t('settings.presenceLayoutStage')), 'false');
+  assert.equal(pressedOf(stageHtml, '对话区顶部'), 'true', 'stage 快照下必须选中对话区顶部');
+  assert.equal(pressedOf(stageHtml, '输入框上方'), 'false');
+  assert.equal(pressedOf(dockHtml, '输入框上方'), 'true', 'dock 快照下必须选中输入框上方');
+  assert.equal(pressedOf(dockHtml, '对话区顶部'), 'false');
 });
 
 test('语言切换是真实生效的：同一份快照在两种 locale 下文案不同', () => {
+  setLocale('zh-CN');
   const zh = render({ locale: 'zh', section: 'about' });
   setLocale('en-US');
   const en = render({ locale: 'en', section: 'about' });
   setLocale('zh-CN');
-  assert.notEqual(zh, en);
-  assert.ok(zh.includes(t('settings.title')));
-  assert.ok(en.includes('Settings'));
+
+  assert.notEqual(zh, en, '两种语言必须产出不同文本');
+  /**
+   * 【规则】两侧都用硬编码锚点，不用 t()。
+   * 中文侧断言"关于"，英文侧断言 "About"——任一语言字典缺 key 都会立刻红。
+   */
+  assert.ok(zh.includes('关于'), '中文界面必须显示「关于」');
+  assert.ok(en.includes('About'), '英文界面必须显示 "About"');
+  assert.equal(
+    zh.includes('settings.about'),
+    false,
+    '中文界面不得出现未翻译的 key 字面量（这是字典缺 key 的直接症状）',
+  );
+  assert.equal(
+    en.includes('settings.about'),
+    false,
+    '英文界面不得出现未翻译的 key 字面量',
+  );
 });
 
 test('设置域注册表：未知 section 回落到第一个域，检索按当前语言过滤', () => {

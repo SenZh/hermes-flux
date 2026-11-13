@@ -235,6 +235,7 @@ import {
 
 import { parseTranscriptRows } from './transcriptRows.js';
 import { createInputCompletion } from './completion/inputCompletion.js';
+import { isStringArray, safeParseJson, resolveDurableOrderKey } from './persistence/persistedJson.js';
 import { DesktopCacheStore } from './cache/DesktopCacheStore.js';
 import { loadProviderCatalog } from './providerCatalog.js';
 import { parseMentionToken } from './mentionToken.js';
@@ -366,10 +367,8 @@ function toMessageViewModel(row: CachedMessageRow): MessageViewModel {
  * 下次启动会与真实行号对不上，产生重复消息。
  */
 function toCachedMessage(view: MessageViewModel, ref: CacheChannelRef): CachedMessageRow | null {
-  const orderKey = typeof view.rowId === 'number' && Number.isFinite(view.rowId) && view.rowId > 0
-    ? view.rowId
-    : Number.parseInt(view.id.replace(/^row-/, ''), 10);
-  if (!Number.isFinite(orderKey) || orderKey <= 0) return null;
+  const orderKey = resolveDurableOrderKey(view);
+  if (orderKey === null) return null;
 
   return {
     profile: ref.profile,
@@ -988,28 +987,6 @@ document.addEventListener('click', (event) => {
  *   - 当 window.hermesDesktop 存在时，首屏保持桌面推导，后续由 desktopApi.getSystemInfo() 确认；
  *   - 当 window.hermesDesktop 不存在且处于小屏时，自动推导为移动端（android / ios）。
  */
-function isStringArray(val: unknown): val is string[] {
-  return Array.isArray(val) && val.every((item) => typeof item === 'string');
-}
-
-function safeParseJson<T>(
-  raw: string | null,
-  fallback: T,
-  validate?: (val: unknown) => val is T
-): T {
-  if (!raw) return fallback;
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (validate) {
-      return validate(parsed) ? parsed : fallback;
-    }
-    return parsed as T;
-  // gate-degrade: JSON 解析异常时回落到默认值，避免启动受阻
-  } catch {
-    return fallback;
-  }
-}
-
 function detectInitialPlatform(): 'windows' | 'macos' | 'linux' | 'ios' | 'android' | 'web' {
   if (typeof navigator !== 'undefined') {
     const ua = navigator.userAgent.toLowerCase();

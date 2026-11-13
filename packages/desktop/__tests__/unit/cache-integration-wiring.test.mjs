@@ -88,22 +88,25 @@ test('Cache Integration - 1. 正向路径：具有合法 rowId 的消息转换�
   assert.equal(opened.rows[0].toolCalls?.[0]?.toolId, 'tc-1');
 });
 
-test('Cache Integration - 2. 边界极值：临时主键 (usr-/ast-) 绝不落盘', () => {
-  // 生产转换逻辑必须过滤 orderKey <= 0 或非有限数字
-  const filterDurableOrderKey = (view) => {
-    const orderKey = typeof view.rowId === 'number' && Number.isFinite(view.rowId) && view.rowId > 0
-      ? view.rowId
-      : Number.parseInt(String(view.id).replace(/^row-/, ''), 10);
-    if (!Number.isFinite(orderKey) || orderKey <= 0) return null;
-    return orderKey;
-  };
+test('Cache Integration - 2. 边界极值：临时主键 (usr-/ast-) 绝不落盘（验证生产实现）', async () => {
+  const { resolveDurableOrderKey } = await import('../../dist/renderer/persistence/persistedJson.mjs');
 
-  assert.equal(filterDurableOrderKey({ id: 'usr-173000000', role: 'user' }), null, '临时 usr- id 不得产生合法 orderKey');
-  assert.equal(filterDurableOrderKey({ id: 'ast-173000000', role: 'assistant' }), null, '临时 ast- id 不得产生合法 orderKey');
-  assert.equal(filterDurableOrderKey({ id: 'ast-173', rowId: 0 }), null, 'rowId 为 0 必须拒绝');
-  assert.equal(filterDurableOrderKey({ id: 'ast-173', rowId: -5 }), null, '负数 rowId 必须拒绝');
-  assert.equal(filterDurableOrderKey({ id: 'ast-173', rowId: 205 }), 205, '合法权威 rowId 必须被采纳');
-  assert.equal(filterDurableOrderKey({ id: 'row-300' }), 300, 'row- 前缀合法数字必须被采纳');
+  /**
+   * 【为什么改成调用生产实现】
+   * 原测试在测试内重写了一份 filterDurableOrderKey，断言的是副本。
+   * 生产实现（toCachedMessage 里的 orderKey 计算）改成任何样子测试都不会红，
+   * 于是「临时主键绝不落盘」这条保护实际上从未被验证。
+   * 现在该逻辑已抽成 resolveDurableOrderKey，测试直接打它。
+   */
+  assert.equal(resolveDurableOrderKey({ id: 'usr-173000000' }), null, '临时 usr- id 不得产生合法 orderKey');
+  assert.equal(resolveDurableOrderKey({ id: 'ast-173000000' }), null, '临时 ast- id 不得产生合法 orderKey');
+  assert.equal(resolveDurableOrderKey({ id: 'ast-173', rowId: 0 }), null, 'rowId 为 0 必须拒绝');
+  assert.equal(resolveDurableOrderKey({ id: 'ast-173', rowId: -5 }), null, '负数 rowId 必须拒绝');
+  assert.equal(resolveDurableOrderKey({ id: 'ast-173', rowId: 205 }), 205, '合法权威 rowId 必须被采纳');
+  assert.equal(resolveDurableOrderKey({ id: 'row-300' }), 300, 'row- 前缀合法数字必须被采纳');
+  assert.equal(resolveDurableOrderKey({ id: 'row-0' }), null, 'row-0 不是合法行号');
+  assert.equal(resolveDurableOrderKey({ id: 'row-abc' }), null, 'row- 前缀非数字必须拒绝');
+  assert.equal(resolveDurableOrderKey({}), null, '完全没有 id 或 rowId 时必须拒绝');
 });
 
 test('Cache Integration - 3. 边界极值：survivor_row_id_map 安全转换防御', () => {
@@ -136,21 +139,8 @@ test('Cache Integration - 3. 边界极值：survivor_row_id_map 安全转换防�
   assert.equal(parseSurvivorMap(undefined), null);
 });
 
-test('Cache Integration - 4. 负向容错：safeParseJson 带类型守卫的防御', () => {
-  const isStringArray = (val) => Array.isArray(val) && val.every((item) => typeof item === 'string');
-
-  const safeParseJson = (raw, fallback, validate) => {
-    if (!raw) return fallback;
-    try {
-      const parsed = JSON.parse(raw);
-      if (validate) {
-        return validate(parsed) ? parsed : fallback;
-      }
-      return parsed;
-    } catch {
-      return fallback;
-    }
-  };
+test('Cache Integration - 4a. 负向容错：safeParseJson 的类型守卫必须真正生效（验证生产实现）', async () => {
+  const { safeParseJson, isStringArray } = await import('../../dist/renderer/persistence/persistedJson.mjs');
 
   // 正常解析
   assert.deepEqual(safeParseJson('["model-a", "model-b"]', [], isStringArray), ['model-a', 'model-b']);
@@ -158,10 +148,28 @@ test('Cache Integration - 4. 负向容错：safeParseJson 带类型守卫的防�
   // 非法 JSON 语法
   assert.deepEqual(safeParseJson('{ malformed', ['fallback'], isStringArray), ['fallback']);
 
-  // 合规 JSON 但类型不匹配（非数组或数组中含非字符串）
-  assert.deepEqual(safeParseJson('{"foo": 1}', [], isStringArray), [], '对象不符合 string[] 守卫，必须回落 fallback');
-  assert.deepEqual(safeParseJson('[1, 2, 3]', [], isStringArray), [], '数字数组不符合 string[] 守卫，必须回落 fallback');
-  assert.deepEqual(safeParseJson('["a", 123]', [], isStringArray), [], '混杂数组必须回落 fallback');
+  // 合规 JSON 但类型不匹配：对象 / 数字数组 / 混杂数组都必须回落
+  assert.deepEqual(safeParseJson('{"foo": 1}', [], isStringArray), [], '对象不符合 string[] 守卫');
+  assert.deepEqual(safeParseJson('[1, 2, 3]', [], isStringArray), [], '数字数组不符合 string[] 守卫');
+  assert.deepEqual(safeParseJson('["a", 123]', [], isStringArray), [], '混杂数组必须回落');
+});
+
+test('Cache Integration - 4b. 守卫被移除后必须能测出来（证伪性检查）', async () => {
+  const { safeParseJson, isStringArray } = await import('../../dist/renderer/persistence/persistedJson.mjs');
+
+  /**
+   * 【为什么要有这条】
+   * 原测试在测试内重写了一份 safeParseJson 再断言副本，生产实现根本没被调用。
+   * 实测：删掉生产代码里的 validate 调用后原测试仍 12/12 全绿。
+   *
+   * 这里直接对照两种调用方式的结果差异：带守卫与不带守卫必须给出不同答案。
+   * 若生产实现忽略了 validate 参数，两者会相等，本断言立刻变红。
+   */
+  const withGuard = safeParseJson('{"foo": 1}', [], isStringArray);
+  const withoutGuard = safeParseJson('{"foo": 1}', []);
+  assert.deepEqual(withGuard, [], '带守卫时必须回落');
+  assert.deepEqual(withoutGuard, { foo: 1 }, '不带守卫时必须原样返回（证明守卫是它起的唯一作用）');
+  assert.notDeepEqual(withGuard, withoutGuard, '守卫必须真实改变结果，否则它只是装饰');
 });
 
 test('Cache Integration - 5. 时序与清理：会话删除与截断对缓存的物理驱逐', async () => {
