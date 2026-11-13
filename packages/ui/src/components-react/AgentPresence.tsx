@@ -211,12 +211,12 @@ function wrapBlinkEyes(avatarHtml: string): string {
 }
 
 /** 单个头像槽位的安全 HTML（真实资产优先，缺失时回退确定性图腾，形状恒为圆形） */
-function buildFaceHtml(profile: PresenceProfile): string {
+function buildFaceHtml(profile: PresenceProfile, size = PRESENCE_AVATAR_SIZE): string {
   const avatarHtml = renderBotAvatar(
     profile.name,
     profile.displayName,
     profile.avatar,
-    PRESENCE_AVATAR_SIZE,
+    size,
     'circle',
   );
   return wrapBlinkEyes(avatarHtml);
@@ -406,6 +406,7 @@ export function AgentPresence(props: { snapshot: AgentPresenceSnapshot }): React
   );
 
   const slots: PresenceSlot[] = [];
+  const avatarSize = layout === 'dock' ? 20 : PRESENCE_AVATAR_SIZE;
 
   if (!isGroup) {
     /**
@@ -422,11 +423,14 @@ export function AgentPresence(props: { snapshot: AgentPresenceSnapshot }): React
       key: soloName,
       isSpeaker: true,
       isLead: true,
-      faceHtml: buildFaceHtml({
-        name: soloName,
-        displayName: soloDisplayName,
-        avatar: soloAvatar,
-      }),
+      faceHtml: buildFaceHtml(
+        {
+          name: soloName,
+          displayName: soloDisplayName,
+          avatar: soloAvatar,
+        },
+        avatarSize,
+      ),
       moreLabel: null,
     });
   } else {
@@ -438,7 +442,7 @@ export function AgentPresence(props: { snapshot: AgentPresenceSnapshot }): React
         key: `member-${member}-${index}`,
         isSpeaker: speakerKnown && index === 0 && member === identity.speaker,
         isLead: index === 0,
-        faceHtml: buildFaceHtml(resolveProfile(member, profiles)),
+        faceHtml: buildFaceHtml(resolveProfile(member, profiles), avatarSize),
         moreLabel: null,
       });
     });

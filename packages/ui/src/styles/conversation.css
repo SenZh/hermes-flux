@@ -3313,15 +3313,21 @@ details[open] > summary > .tool-row__expand {
 /*
  * 头像内容随容器缩放。
  *
- * 【为什么必须有 (Rules)】`renderBotAvatar` 输出的 SVG / `<img>` 都是按生成尺寸写死宽高的
- *   （stage 为 56px）。dock 变体把槽位收到 20px 后，不缩放就会被 `overflow: hidden`
- *   裁成一张脸的中段。这里统一按容器等比缩放，资产侧不需要感知布局。
+ * 【为什么必须 !important (Rules)】`renderBotAvatar` 对真实图片资产输出了带内联样式的
+ *   `style="width: 56px; height: 56px; border: 1px ..."`（特异性 1000）。
+ *   类选择器若不加 `!important` 就会被内联压死，导致 56px 大图塞进 20px 容器，
+ *   被 `overflow: hidden` 裁成只剩局部一个角（真实用户缺陷）。
+ *   这里强制 100% 覆盖内联宽高并清掉内联边框，由外层 `.conv-presence__face` 统管边框。
  */
 .conv-presence__face > svg,
 .conv-presence__face > img {
   display: block;
-  width: 100%;
-  height: 100%;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  object-fit: cover !important;
+  border: none !important;
 }
 
 .conv-presence[data-mode="group"] .conv-presence__avatar[data-speaker="true"] .conv-presence__face {
@@ -3595,6 +3601,11 @@ details[open] > summary > .tool-row__expand {
   max-width: 740px;
   min-height: var(--presence-size);
   margin: 0 auto;
+}
+
+/* dock 20px 头像边框收紧至 1px：原 2px 边框占去 4px，内容区只剩 16px */
+.conv-presence[data-layout="dock"] .conv-presence__face {
+  border-width: 1px;
 }
 
 /*

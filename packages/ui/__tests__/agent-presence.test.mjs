@@ -416,6 +416,47 @@ test('在场指示器 · 14 条表现层契约', async (t) => {
       'dock 文案字号不得用 calc 相减（会得到 10.7px 这类小数字号，违反整数阶梯）',
     );
     assert.ok(/font-size:\s*var\(--fs-caption/.test(dockTextBlock), 'dock 文案必须锁 caption 档');
+
+    /*
+     * 【真实图片资产防裁切 (Rules)】自定义头像（带有 avatar 图片 URL）会由 `renderBotAvatar`
+     *   渲染为带有内联样式的 `<img>`。在 dock 变体下：
+     *   1. 组件输出的 `<img>` 内联尺寸必须根据 layout 切换为 20px（stage 为 56px）；
+     *   2. CSS 的 `.conv-presence__face > img` 必须带 `!important` 覆盖内联样式，
+     *      防止 56px 大图塞进 20px 容器被裁成局部一个角（真实用户截图缺陷）。
+     */
+    const dockCustomImgHtml = renderToStaticMarkup(
+      React.createElement(AgentPresence, {
+        snapshot: {
+          presence: { kind: 'idle' },
+          identity: { kind: 'solo', name: 'cat', avatar: 'https://example.com/cat.png' },
+          layout: 'dock',
+        },
+      }),
+    );
+    assert.ok(
+      dockCustomImgHtml.includes('width: 20px') && dockCustomImgHtml.includes('height: 20px'),
+      'dock 模式下自定义头像 <img> 内联样式必须输出 20px，不得输出 56px',
+    );
+
+    const stageCustomImgHtml = renderToStaticMarkup(
+      React.createElement(AgentPresence, {
+        snapshot: {
+          presence: { kind: 'idle' },
+          identity: { kind: 'solo', name: 'cat', avatar: 'https://example.com/cat.png' },
+          layout: 'stage',
+        },
+      }),
+    );
+    assert.ok(
+      stageCustomImgHtml.includes('width: 56px') && stageCustomImgHtml.includes('height: 56px'),
+      'stage 模式下自定义头像 <img> 内联样式必须输出 56px',
+    );
+
+    const imgRule = /\.conv-presence__face > img \{([\s\S]*?)\}/.exec(css)?.[1] ?? '';
+    assert.ok(
+      /width:\s*100%\s*!important/.test(imgRule) && /height:\s*100%\s*!important/.test(imgRule),
+      'CSS .conv-presence__face > img 必须带 !important 保证能压过 HTML 内联 style',
+    );
   });
 
   await t.test('22. 实景探针骨架必须与组件契约同构（防止证据静默漂移）', () => {
