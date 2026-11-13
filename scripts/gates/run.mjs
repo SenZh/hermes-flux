@@ -44,11 +44,16 @@ const BASELINE_PATH = path.join(REPO_ROOT, 'scripts/gates/.baseline.json');
  * 关键：必须把 `scripts/gates` 自身也纳入扫描域。
  * 历史坑：门禁引擎曾完全不在扫描域内，导致「门禁代码自己写 as any、
  * 自己写死色值」无人拦截，这是典型的监管盲区。
+ *
+ * 【防范的历史坑 (Pitfall)】曾经漏掉 `packages/mobile/src`，该包实有 15 处
+ * `: any` 却全程不受审：门禁报「零违规」只是因为压根没扫它。
+ * 扫描域漏包比规则写错更危险——后者会报出来，前者永远安静。
  */
 const SCAN_ROOTS = [
   'packages/core/src',
   'packages/ui/src',
   'packages/desktop/src',
+  'packages/mobile/src',
   'scripts/gates',
 ];
 

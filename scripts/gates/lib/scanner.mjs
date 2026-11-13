@@ -482,6 +482,23 @@ export function shortHash(text) {
   return crypto.createHash('sha1').update(text, 'utf8').digest('hex').slice(0, 12);
 }
 
+/**
+ * 字符偏移换算成 1-based 行号。
+ *
+ * 设计意图 (Why)：多条规则需要在「全文区间」上定位后又报出精确行号
+ * （跨行 cn(...) 类名、模板字符串内联样式、兜底值漂移等）。
+ * 这不是某个规则私有的能力，放在 scanner 里让所有规则共用同一份实现，
+ * 避免各写一份换行计数、边界差一而互相漂移。
+ *
+ * 约束与规则 (Rules)：输入必须是原文（已剥离注释的视图同样适用，
+ * 因为剥离过程保留了全部换行位置）。
+ */
+export function lineAt(text, offset) {
+  let line = 1;
+  for (let k = 0; k < offset && k < text.length; k += 1) if (text[k] === '\n') line += 1;
+  return line;
+}
+
 /** 把 JS 正则安全地用于逐行扫描，返回所有匹配 */
 export function matchAll(line, regex) {
   const re = new RegExp(regex.source, regex.flags.includes('g') ? regex.flags : `${regex.flags}g`);
