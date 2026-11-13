@@ -60,6 +60,61 @@ export function ConversationMessageList({ snapshot }: { snapshot: ConversationSn
   const virtualHeight = snapshot.virtualHeightPx && snapshot.virtualHeightPx > 0 ? snapshot.virtualHeightPx : 0;
   const offset = snapshot.contentOffsetPx && snapshot.contentOffsetPx > 0 ? snapshot.contentOffsetPx : 0;
 
+  /**
+   * 末尾窗口的真实高度。
+   *
+   * 【设计意图 (Why)】窗口覆盖末尾时容器底边必须与末条内容严格重合。虚拟全高若取
+   *   「总条数 × 平均行高」，窗口外历史与窗口内行高的差异会累积成上千像素偏差：
+   *   估算偏大时滚到底是整屏空白，偏小时末条内容压到输入舱下方。窗口自己就是最权威的
+   *   尺子，量它即可，不必再猜。
+   * 【防范的历史坑 (Pitfall)】工具执行组是原生 <details>，展开与收起由浏览器改布局，
+   *   既不经过 React state，也不通知宿主；只在快照推送时算一次，高度会永久停在旧值。
+   * 【约束与规则 (Rules)】
+   *   1. 只在末尾窗口启用；窗口不在末尾时仍用宿主的全量估算，否则滚动条到不了会话开头；
+   *   2. 实测高度直接写视口 style，不进 React state。流式期间正文直写 DOM 就是为了绕开
+   *      整列表重渲染，每帧 setState 会把这份优化彻底抵消；
+   *   3. 锚点绑定窗口首条消息 id：切会话与窗口搬迁后旧高度对新窗口没有意义。
+   */
+  const virtualWindowRef = React.useRef<HTMLDivElement | null>(null);
+  const viewportRef = React.useRef<HTMLDivElement | null>(null);
+  const measuredRef = React.useRef<{ anchor: string | undefined; height: number }>({ anchor: undefined, height: 0 });
+  const windowAnchorId = snapshot.messages[0]?.id;
+  const windowed = virtualHeight > 0;
+  React.useEffect(() => {
+    const element = windowed ? virtualWindowRef.current : null;
+    if (!element || typeof ResizeObserver === 'undefined') {
+      measuredRef.current = { anchor: windowAnchorId, height: 0 };
+      return;
+    }
+    const anchor = windowAnchorId;
+    const apply = (height: number): void => {
+      const next = Math.round(height);
+      measuredRef.current = { anchor, height: next };
+      const viewport = viewportRef.current;
+      if (!viewport || !snapshot.virtualWindowAtTail) return;
+      viewport.style.height = `${Math.round(offset + next)}px`;
+    };
+    apply(element.getBoundingClientRect().height);
+    const observer = new ResizeObserver((entries) => {
+      const borderBox = entries[0]?.borderBoxSize?.[0]?.blockSize;
+      apply(borderBox ?? entries[0]?.contentRect.height ?? element.getBoundingClientRect().height);
+    });
+    observer.observe(element, { box: 'border-box' });
+    return () => observer.disconnect();
+  }, [windowed, windowAnchorId]);
+  /**
+   * 【每次提交后重放实测值 (Rules)】React 会用自己的 props 值写回 height（窗口搬迁时是估算值），
+   *   而观察器只在高度变化时回调，不会再把实测值补回来。渲染后统一重放一次，保证实测值优先。
+   */
+  React.useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !windowed) return;
+    const measured = measuredRef.current;
+    if (measured.anchor !== windowAnchorId || measured.height <= 0) return;
+    if (!snapshot.virtualWindowAtTail) return;
+    viewport.style.height = `${Math.round(offset + measured.height)}px`;
+  });
+
   // 【空态与骨架 (Rules)】生产桌面端挂的是本组件（mountMessageList），不是 ConversationStage。
   //   只在「本帧一条消息都没有」时出空态或骨架；窗口内恰好全是 hidden 行时不能插空态，
   //   否则长会话滑到那一段会在列表中部弹出一张「开始新的对话」插页。
@@ -100,11 +155,12 @@ export function ConversationMessageList({ snapshot }: { snapshot: ConversationSn
    * 【虚拟高度定位 (Rules)】长会话下窗口只挂载一段，必须把这段内容绝对定位到它在
    *   全量历史中的真实纵向位置，同时把外层撑到"总条数 × 平均行高"。
    *   这样 scrollHeight 恒定、滚动条比例稳定，且滚到任意位置都能看到对应内容而不是空白。
+   *   末尾窗口改用「起点偏移 + 实测窗口高度」，与末条内容严格重合。
    */
   if (virtualHeight > 0) {
     return (
-      <div className="conv-virtual-viewport" style={{ height: `${virtualHeight}px` }}>
-        <div className="conv-virtual-window" style={{ top: `${offset}px` }}>
+      <div className="conv-virtual-viewport" ref={viewportRef} style={{ height: `${virtualHeight}px` }}>
+        <div className="conv-virtual-window" ref={virtualWindowRef} style={{ top: `${offset}px` }}>
           {content}
         </div>
       </div>

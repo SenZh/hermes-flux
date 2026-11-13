@@ -587,6 +587,14 @@ declare global {
     /** E2E / CDP 对账触发器：全量刷新并对账会话列表 */
     __fluxFetchSessions?: () => Promise<void>;
     __fluxRender?: () => void;
+    /** CDP 只读探针：读者回溯标记与布局漂移窗口，用于断言折叠未污染手势状态 */
+    __fluxScrollState?: () => {
+      readerScrolledSessionId: string;
+      layoutDriftUntil: number;
+      messageWindowStart: number;
+      messageWindowEnd: number;
+      now: number;
+    };
     __fluxActivity?: {
       startTurn: (domain: ActivityDomain, entityId: string) => void;
       completeTurn: (domain: ActivityDomain, entityId: string, isFocused: boolean) => void;
@@ -1165,6 +1173,20 @@ window.__fluxFetchSessions = fetchSessions;
 /** CDP 验证钩子：与 __fluxState/__fluxConnect 同一调试面。verify-hermes-flux harness 已声明依赖 window.__fluxRender；
  *  禁止业务代码调用，仅测试驱动"注入快照 → 重绘 → 出图"取证链路使用。 */
 window.__fluxRender = render;
+/**
+ * CDP 验证钩子：读者回溯标记与布局漂移窗口。
+ *
+ * 【设计意图 (Why)】折叠原生 `<details>` 会让浏览器把 scrollTop 钳小并派发 scroll，
+ *   与读者向上回溯同形。该事件是否被正确豁免，只能从内部标记观察，DOM 几何看不出来。
+ * 【约束与规则 (Rules)】只读，禁止业务代码调用。
+ */
+window.__fluxScrollState = () => ({
+  readerScrolledSessionId,
+  layoutDriftUntil: Math.round(layoutDriftUntil),
+  messageWindowStart,
+  messageWindowEnd,
+  now: Math.round(performance.now()),
+});
 
 let gatewayClient: HermesGatewayClient | null = null;
 let currentTicket: string | undefined = undefined;
@@ -3057,6 +3079,19 @@ function ensureMessageWindow(total: number): void {
     settledLayoutSignature = '';
     initialBottomSettling = false;
     streamScrollCooldown = false;
+    /**
+     * 【窗口几何状态随会话清零 (Rules)】`observedWindowHeight` 若带着上个会话的高度，
+     *   切到更矮会话时首次高度变化会被误判成「变矮」，进而登记布局漂移、吞掉切换后
+     *   真实的上滚手势。
+     */
+    observedWindowHeight = 0;
+    layoutDriftUntil = 0;
+    /**
+     * 【底部留白必须随会话重置 (Rules)】`#conversation-stream` 跨会话复用，追加的留白若无条件
+     *   带进下一个会话，`scrollStreamToContentBottom` 会按它把末条顶到离视口底数千像素处。
+     *   注释一直写着「切换会话时重置为基准值」，此前没有任何一行实现它。
+     */
+    document.getElementById('conversation-stream')?.style.removeProperty('--conv-gutter-bottom');
     /** 切会话必须无条件推一次快照：窗口起点、行高、虚拟高度全部换了口径。 */
     sessionSwitchPending = true;
     /** 前 8 帧不判断收敛：此时 DOM 还是上一个会话的内容，容易误判"已经贴住"。 */
@@ -3184,6 +3219,7 @@ function scheduleVirtualHeightSync(attempt = 0): void {
   requestAnimationFrame(() => {
     const locked = lockAverageRowHeight();
     syncCanvasVirtualHeight();
+    observeVirtualWindowGeometry();
     if (locked) {
       // 行高锁定会改变占位高度与画布虚拟高度，必须重渲染让占位块用上新值。
       canvasStructureDirty = true;
@@ -7309,6 +7345,93 @@ function syncCanvasVirtualHeight(): void {
   if (canvas.style.minHeight) canvas.style.minHeight = '';
 }
 
+/**
+ * 末尾窗口几何观察器。
+ *
+ * 【设计意图 (Why)】工具执行组是原生 `<details>`，展开与收起由浏览器改布局，既不经过
+ *   React state，也不产生宿主 `render()`。组件内已按实测高度收敛虚拟全高，但滚动位置
+ *   必须由宿主跟着改：容器变高时把视口推到新的内容底，变矮时拉回内容底而不是停在半空。
+ *
+ * 【防范的历史坑 (Pitfall)】容器变矮时浏览器会把 `scrollTop` 钳到新的最大值并派发 scroll，
+ *   与读者向上回溯同形。若不登记布局漂移窗口，`readerScrolledSessionId` 会被永久置位，
+ *   该会话从此再也不会自动贴底。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 只在窗口覆盖末尾时接管滚动位置；窗口在中间时内容底不是会话底；
+ *   2. 变高只在读者原本贴底时跟随，回溯中的读者不打扰；
+ *   3. 观察器只读高度，不写 DOM。虚拟全高由表现层按实测值收敛，宿主只负责滚动位置，
+ *      两者分工见 `ConversationSnapshot.virtualWindowAtTail`。
+ */
+let virtualWindowObserver: ResizeObserver | null = null;
+let virtualWindowObserved: HTMLElement | null = null;
+let observedWindowHeight = 0;
+/** 布局漂移窗口：容器变矮引起 scrollTop 被钳制时，由此期间的 scroll 事件不算读者手势。 */
+let layoutDriftUntil = 0;
+
+function observeVirtualWindowGeometry(attempt = 0): void {
+  if (typeof ResizeObserver === 'undefined') return;
+  const windowEl = document.querySelector<HTMLElement>('.conv-virtual-window');
+  if (!windowEl) {
+    virtualWindowObserver?.disconnect();
+    virtualWindowObserved = null;
+    observedWindowHeight = 0;
+    /**
+     * 【提交后重试 (Rules)】首次窗口化那一帧 React 还没提交，节点不存在；只挂一次会永久失联，
+     *   折叠与展开就再也没有人通知宿主。最多重试 8 帧，与行高锁定同一节奏。
+     */
+    if (attempt < 8) requestAnimationFrame(() => observeVirtualWindowGeometry(attempt + 1));
+    return;
+  }
+  if (!virtualWindowObserver) {
+    virtualWindowObserver = new ResizeObserver((entries) => {
+      const height = entries[0]?.borderBoxSize?.[0]?.blockSize
+        ?? entries[0]?.contentRect.height
+        ?? 0;
+      const previousHeight = observedWindowHeight;
+      const shrank = previousHeight > 0 && height < previousHeight - 1;
+      observedWindowHeight = height;
+      /**
+       * 【只豁免变矮 (Rules)】只有容器变矮时浏览器才会把 scrollTop 钳到新的最大值，
+       *   派生出与读者向上回溯同形的 scroll 事件。变高不改 scrollTop，无需豁免；
+       *   若无条件登记，流式期间窗口每个 token 都在长高，豁免窗口永不失效，
+       *   读者真实的向上回溯会被永久吞掉，后续补齐又会把人拽回底部。
+       */
+      if (shrank) layoutDriftUntil = performance.now() + 200;
+      if (messageWindowEnd < state.messages.length) return;
+      const stream = document.getElementById('conversation-stream');
+      if (!stream) return;
+      /**
+       * 【用变矮前的位置判定 (Rules)】容器变矮的瞬间浏览器已经把 scrollTop 钳小了，
+       *   此刻再量 distanceToBottom 会被钳制结果误导。这里按高度差反推变矮前的
+       *   scrollHeight，还原读者变矮前是否贴底。
+       */
+      const heightDelta = previousHeight > 0 ? previousHeight - height : 0;
+      const distanceBefore = stream.scrollHeight + heightDelta - stream.scrollTop - stream.clientHeight;
+      const wasNearBottom = distanceBefore <= STICK_TO_BOTTOM_THRESHOLD_PX;
+      const align = (): void => {
+        requestAnimationFrame(() => {
+          const target = document.getElementById('conversation-stream');
+          if (!target) return;
+          scrollStreamToContentBottom(target, parseFloat(getComputedStyle(target).paddingBottom) || 0);
+        });
+      };
+      /**
+       * 【跟随必须以变矮前贴底为前提 (Rules)】窗口变矮还有一个非读者来源：工具执行结束时
+       *   `ToolCapsule` 会把 `<details>` 的 open 自动收回。读者若正在末尾窗口内向上回看，
+       *   无条件对齐会把人拽回底部。只有变矮前就在底部附近才跟随。
+       */
+      if (!wasNearBottom) return;
+      align();
+    });
+  }
+  if (virtualWindowObserved !== windowEl) {
+    virtualWindowObserver.disconnect();
+    virtualWindowObserver.observe(windowEl);
+    virtualWindowObserved = windowEl;
+    observedWindowHeight = 0;
+  }
+}
+
 /** 计算窗口内容在虚拟坐标中的纵向偏移。 */
 function computeContentOffsetPx(): number {
   if (messageWindowStart <= 0) return 0;
@@ -7366,6 +7489,11 @@ function buildConversationSnapshot(): ConversationSnapshot {
     profileName: state.profileName,
     contentOffsetPx: computeContentOffsetPx(),
     virtualHeightPx: computeVirtualHeightPx(),
+    /**
+     * 末尾窗口由组件按实测高度收敛虚拟全高，宿主只需声明窗口是否覆盖末尾。
+     * 见 `ConversationSnapshot.virtualWindowAtTail` 与 `ConversationMessageList` 的实测分支。
+     */
+    virtualWindowAtTail: messageWindowEnd >= state.messages.length,
     knownFiles: resolveSessionKnownFiles(),
     locale: state.lang,
     messages: windowedMessages.map((m) => {
@@ -10493,7 +10621,7 @@ function bindEvents(): void {
        * 【控制权移交 (Rules)】读者的任意真实滚动都意味着"我要自己控制视口"：
        *   立即解除首屏落定；其中向上回溯额外记录该会话，此后同类补齐不再把读者拽回底部。
        */
-      if (!isProgrammatic && Math.abs(streamEl.scrollTop - previousTop) > 4) {
+      if (!isProgrammatic && performance.now() > layoutDriftUntil && Math.abs(streamEl.scrollTop - previousTop) > 4) {
         initialBottomSettling = false;
         if (streamEl.scrollTop < previousTop - 4) {
           readerScrolledSessionId = state.activeSessionId;
