@@ -254,19 +254,14 @@ export function mountAgentPresence(
   pointer-events: none;
 }
 
-/* 椭圆径向遮罩：承担对比度职责（无壳裸文字必须靠它压在滚动内容之上） */
-.conv-presence::before {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: calc(100% + 150px);
-  height: calc(100% + 30px);
-  border-radius: var(--radius-pill);
-  z-index: -1;
-  background: radial-gradient(ellipse 56% 120% at 50% 40%, var(--panel) 48%, transparent 100%);
-}
+/*
+ * 【对比度垫层已移除】历史上这里是 `.conv-presence::before` 椭圆径向 `--panel` 遮罩
+ * （`+150px / +30px`，570×114px）。它只能按容器宽度铺开，无法贴合真实文案宽度，
+ * 在真实对话区里始终是「比头像 + 文案多出一大圈的背景」，压住会话流首条消息；
+ * 且垂直 120% 的径向半径超出盒高，盒顶落在实心段被裁成硬切边。
+ * 2026-11-13 用户裁定：不需要这块背景，最小化（先收敛到 484×92，再整块删除）。
+ * 现在可读性由 `.conv-presence__text` 的双层字形阴影承担；禁止回加任何伪元素背景层。
+ */
 
 .conv-presence__avatars {
   display: flex;

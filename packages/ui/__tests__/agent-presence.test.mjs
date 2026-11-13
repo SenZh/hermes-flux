@@ -313,26 +313,27 @@ test('在场指示器 · 14 条表现层契约', async (t) => {
     );
   });
 
-  await t.test('20. 对比度遮罩：体量上限与柔边（防止回涨成背景板）', () => {
+  await t.test('20. 指示器背后禁止任何面：无遮罩层，可读性只靠字形阴影', () => {
     const css = read('packages/ui/src/styles/conversation.css');
-    const block = /\.conv-presence::before \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
-    assert.ok(block, '必须存在 .conv-presence::before 对比度遮罩');
-    // 【真实缺陷回归】旧值 `+150px / +30px` 在容器宽 420px、高 84px 时展开成 570×114px，
-    //   底缘压到 123px——会话流首条消息有一整行落在实心垫层里被吃掉，用户看到的就是
-    //   「对话框顶部有一块很大的背景挡住内容」。体量设上限，防止再次回涨。
-    const extraW = Number(/width:\s*calc\(100%\s*\+\s*(\d+)px\)/.exec(block)?.[1] ?? NaN);
-    const extraH = Number(/height:\s*calc\(100%\s*\+\s*(\d+)px\)/.exec(block)?.[1] ?? NaN);
-    assert.ok(Number.isFinite(extraW), '遮罩宽度必须写成 calc(100% + Npx) 形式');
-    assert.ok(Number.isFinite(extraH), '遮罩高度必须写成 calc(100% + Npx) 形式');
-    assert.ok(extraW <= 64, `遮罩横向外扩 ${extraW}px 超限：不得超过 64px（每侧 32px 呼吸即可）`);
-    assert.ok(extraH <= 8, `遮罩纵向外扩 ${extraH}px 超限：不得超过 8px`);
-    // 【硬边回归】径向半径必须让盒边界落在渐变过渡段：垂直 120% 时盒顶处于「完全不透明」
-    //   区间，渐变被盒子裁成硬切边，浅色主题下就是一块清晰的胶囊白板（Blink 实测截图）。
-    const radius = /ellipse\s+(\d+)%\s+(\d+)%/.exec(block);
-    assert.ok(radius, '遮罩必须使用椭圆径向渐变');
+    // 【真实缺陷回归】`.conv-presence::before` 曾是一块按容器宽度（`min(420px, 100% - 96px)`）
+    //   铺开的椭圆径向 `--panel` 遮罩。它无法贴合真实文案宽度（常见文案只有 50~200px），
+    //   在真实对话区里始终是「比头像 + 文案多出一大圈的背景」，压住会话流首条消息。
+    //   用户已裁定不需要这块背景（最小化），整块删除；正反两个伪元素都不许回加。
     assert.ok(
-      Number(radius[2]) <= 50,
-      `径向垂直半径 ${radius[2]}% 超限：必须 ≤ 50%，否则边缘被裁成硬切边`,
+      !/\.conv-presence::before\s*\{/.test(css),
+      '禁止回加 .conv-presence::before 背景层：任何按容器铺开的面都会比真实文案宽',
     );
+    assert.ok(!/\.conv-presence::after\s*\{/.test(css), '禁止用 ::after 变相回加背景层');
+
+    // 遮罩删除后，可读性必须由字形阴影承担：阴影只跟随字形，不产生任何面。
+    const textBlock = /\.conv-presence__text \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
+    assert.ok(textBlock, '.conv-presence__text 规则必须存在');
+    const shadowDecl = /text-shadow:\s*([\s\S]*?);/.exec(textBlock)?.[1] ?? '';
+    assert.ok(shadowDecl, '文案必须有 text-shadow，否则无面遮挡时压在滚动内容上不可读');
+    assert.ok(
+      (shadowDecl.match(/color-mix/g) || []).length >= 2,
+      '遮罩移除后必须有两层字形阴影（近层收边 + 远层背景色晕）兜住可读性',
+    );
+    assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(shadowDecl), '字形阴影禁止裸十六进制色值');
   });
 });
