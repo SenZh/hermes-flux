@@ -3970,3 +3970,433 @@ html[data-app-hidden="true"] .conv-presence *::after {
     opacity: 0.85;
   }
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+   六套会话指示器变体（gyro / orbit / synapse / spring / matrix）纯合成层动效
+   所有变体零 <svg>、零硬编码色值，纯蓝调 + 白色，支持页面隐藏暂停与减弱动效降级
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* 1. gyro（方案 4 · 陀螺仪三轴谐振环） */
+.flux-motif-gyro {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.flux-gyro-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-pill, 9999px);
+  border: 1.2px solid transparent;
+  pointer-events: none;
+}
+
+.flux-gyro-ring--a {
+  border-top-color: var(--flux-activity-blue);
+  border-left-color: var(--flux-activity-blue-soft);
+  /* gate-perf-allow: 陀螺仪谐振环仅作用于活跃执行态，纯 GPU 合成层 3D 旋转动画且页面隐藏时暂停 */
+  animation: fluxGyroOrbitA 1.6s linear infinite;
+}
+
+.flux-gyro-ring--b {
+  border-top-color: var(--flux-activity-blue);
+  border-right-color: var(--flux-activity-blue-soft);
+  /* gate-perf-allow: 陀螺仪谐振环仅作用于活跃执行态，纯 GPU 合成层 3D 旋转动画且页面隐藏时暂停 */
+  animation: fluxGyroOrbitB 1.6s linear infinite;
+}
+
+@keyframes fluxGyroOrbitA {
+  0%   { transform: rotateZ(35deg) rotateX(62deg) rotateZ(0deg); }
+  100% { transform: rotateZ(35deg) rotateX(62deg) rotateZ(360deg); }
+}
+
+@keyframes fluxGyroOrbitB {
+  0%   { transform: rotateZ(-35deg) rotateX(62deg) rotateZ(360deg); }
+  100% { transform: rotateZ(-35deg) rotateX(62deg) rotateZ(0deg); }
+}
+
+.flux-gyro-core {
+  width: 3px;
+  height: 3px;
+  border-radius: var(--radius-pill, 9999px);
+  background: var(--primary);
+  /* gate-perf-allow: 中心光子呼吸仅作用于活跃执行态，纯 GPU transform 动画且页面隐藏时暂停 */
+  animation: fluxGyroCorePulse 1.2s ease-in-out infinite;
+}
+
+@keyframes fluxGyroCorePulse {
+  0%, 100% { opacity: 0.45; transform: scale(0.8); }
+  50%      { opacity: 1; transform: scale(1.2); }
+}
+
+.flux-motif-gyro--done {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.flux-gyro-done-ring {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-pill, 9999px);
+  border: 1.25px solid var(--flux-activity-blue-done);
+  background: var(--flux-activity-blue-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flux-gyro-tick {
+  width: 5.5px;
+  height: 3.2px;
+  border-left: 1.5px solid var(--flux-activity-blue-done);
+  border-bottom: 1.5px solid var(--flux-activity-blue-done);
+  transform: rotate(-45deg) translate(0.4px, -0.4px);
+}
+
+.flux-cloud-indicator--unread[data-transition="just-completed"] .flux-gyro-done-ring {
+  animation: fluxGyroFlatten 420ms var(--ease-spring) 1 both;
+}
+
+@keyframes fluxGyroFlatten {
+  0%   { transform: rotateX(60deg) scale(0.75); opacity: 0.2; }
+  100% { transform: rotateX(0deg) scale(1); opacity: 1; }
+}
+
+/* 2. orbit（方案 5 · 双星引力伴行轨道） */
+.flux-motif-orbit {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.flux-orbit-track {
+  position: absolute;
+  inset: 1px;
+  border-radius: var(--radius-pill, 9999px);
+  border: 1px dashed var(--flux-activity-blue-soft);
+  /* gate-perf-allow: 虚线星轨自转仅作用于活跃执行态，页面隐藏时自动暂停 */
+  animation: fluxOrbitTrackSpin 4.5s linear infinite;
+}
+
+@keyframes fluxOrbitTrackSpin {
+  to { transform: rotate(360deg); }
+}
+
+.flux-orbit-arm {
+  position: absolute;
+  inset: 0;
+}
+
+.flux-orbit-arm--a {
+  /* gate-perf-allow: 伴星绕行仅作用于活跃执行态，页面隐藏时自动暂停 */
+  animation: fluxOrbitArmCW 1.3s cubic-bezier(0.45, 0.15, 0.55, 0.85) infinite;
+}
+
+.flux-orbit-arm--b {
+  /* gate-perf-allow: 伴星反向绕行仅作用于活跃执行态，页面隐藏时自动暂停 */
+  animation: fluxOrbitArmCCW 1.95s linear infinite;
+}
+
+@keyframes fluxOrbitArmCW { to { transform: rotate(360deg); } }
+@keyframes fluxOrbitArmCCW { to { transform: rotate(-360deg); } }
+
+.flux-orbit-sat-a {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 3px;
+  height: 3px;
+  margin-left: -1.5px;
+  border-radius: var(--radius-pill, 9999px);
+  background: var(--primary);
+}
+
+.flux-orbit-sat-b {
+  position: absolute;
+  right: 1px;
+  top: 50%;
+  width: 2.2px;
+  height: 2.2px;
+  margin-top: -1.1px;
+  border-radius: var(--radius-pill, 9999px);
+  background: var(--flux-activity-blue);
+  opacity: 0.8;
+}
+
+.flux-orbit-sun {
+  width: 3px;
+  height: 3px;
+  border-radius: var(--radius-pill, 9999px);
+  background: var(--primary);
+  /* gate-perf-allow: 中心恒星脉动仅作用于活跃执行态，页面隐藏时自动暂停 */
+  animation: fluxGyroCorePulse 1.5s ease-in-out infinite;
+}
+
+.flux-motif-orbit--done {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.flux-orbit-star {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--flux-activity-blue-done);
+  transform: rotate(45deg);
+  position: relative;
+}
+
+.flux-orbit-star::after {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border-radius: 1px;
+  background: var(--card);
+}
+
+.flux-cloud-indicator--unread[data-transition="just-completed"] .flux-orbit-star {
+  animation: fluxOrbitStarLock 400ms var(--ease-spring) 1 both;
+}
+
+@keyframes fluxOrbitStarLock {
+  0%   { transform: rotate(-45deg) scale(0.35); opacity: 0; }
+  100% { transform: rotate(45deg) scale(1); opacity: 1; }
+}
+
+/* 3. synapse（方案 6 · 4×4 神经突触变形阵） */
+.flux-motif-synapse {
+  display: inline-grid;
+  grid-template-columns: repeat(4, 2.5px);
+  gap: 1.2px;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.flux-synapse-cell {
+  display: block;
+  width: 2.5px;
+  height: 2.5px;
+  border-radius: var(--radius-pill, 9999px);
+  background: var(--flux-activity-blue);
+  opacity: 0.18;
+  transform: scale(0.75);
+}
+
+.flux-cloud-indicator--running .flux-synapse-cell {
+  /* gate-perf-allow: 突触微粒放电仅作用于活跃执行态，页面隐藏时自动暂停 */
+  animation: fluxSynapseWave 1.4s cubic-bezier(0.25, 1, 0.5, 1) infinite;
+  animation-delay: var(--d, 0ms);
+}
+
+@keyframes fluxSynapseWave {
+  0%, 100% { opacity: 0.18; transform: scale(0.75); }
+  25%      { opacity: 1;    transform: scale(1.22); }
+  55%      { opacity: 0.35; transform: scale(0.9); }
+}
+
+.flux-motif-synapse--done .flux-synapse-cell {
+  background: var(--flux-activity-blue-done);
+}
+
+.flux-motif-synapse--done .flux-synapse-cell[data-on="1"] {
+  opacity: 0.98;
+  transform: scale(1.1);
+  box-shadow: 0 0 0 0.5px var(--flux-activity-blue-done);
+}
+
+.flux-motif-synapse--done .flux-synapse-cell[data-on="0"] {
+  opacity: 0.12;
+  transform: scale(0.7);
+}
+
+.flux-cloud-indicator--unread[data-transition="just-completed"] .flux-motif-synapse--done .flux-synapse-cell[data-on="1"] {
+  animation: fluxSynapseLight 360ms var(--ease-spring) calc(var(--step, 0) * 45ms) 1 both;
+}
+
+@keyframes fluxSynapseLight {
+  0%   { opacity: 0.15; transform: scale(0.5); }
+  100% { opacity: 0.98; transform: scale(1.1); }
+}
+
+/* 4. spring（方案 7 · 机械游丝双弧追逐） */
+.flux-motif-spring {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.flux-spring-arc {
+  position: absolute;
+  border-radius: var(--radius-pill, 9999px);
+  border: 1.35px solid transparent;
+}
+
+.flux-spring-arc--outer {
+  inset: 0.5px;
+  border-top-color: var(--flux-activity-blue);
+  border-right-color: var(--flux-activity-blue-soft);
+  /* gate-perf-allow: 机械游丝外弧仅作用于活跃执行态，页面隐藏时自动暂停 */
+  animation: fluxSpringFastSlow 1.3s cubic-bezier(0.72, 0.08, 0.28, 0.92) infinite;
+}
+
+.flux-spring-arc--inner {
+  inset: 3.5px;
+  border-bottom-color: var(--flux-activity-blue);
+  /* gate-perf-allow: 机械游丝内弧仅作用于活跃执行态，页面隐藏时自动暂停 */
+  animation: fluxSpringFastSlow 1.3s cubic-bezier(0.72, 0.08, 0.28, 0.92) -0.45s infinite reverse;
+}
+
+@keyframes fluxSpringFastSlow {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.flux-spring-dot {
+  width: 2.2px;
+  height: 2.2px;
+  border-radius: var(--radius-pill, 9999px);
+  background: var(--primary);
+}
+
+.flux-motif-spring--done {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.flux-spring-done-ring {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-pill, 9999px);
+  border: 1.3px solid var(--flux-activity-blue-done);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flux-spring-tick {
+  width: 5.5px;
+  height: 3.2px;
+  border-left: 1.5px solid var(--flux-activity-blue-done);
+  border-bottom: 1.5px solid var(--flux-activity-blue-done);
+  transform: rotate(-45deg) translate(0.4px, -0.4px);
+}
+
+.flux-cloud-indicator--unread[data-transition="just-completed"] .flux-spring-done-ring {
+  animation: fluxGyroFlatten 360ms var(--ease-spring) 1 both;
+}
+
+/* 5. matrix（方案 M · 3D 旋涡流形点阵） */
+.flux-motif-matrix {
+  position: relative;
+  width: 19px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.flux-matrix-dot {
+  position: absolute;
+  display: block;
+  width: 2.2px;
+  height: 2.2px;
+  border-radius: var(--radius-pill, 9999px);
+  background: var(--flux-activity-blue);
+  opacity: 0.2;
+}
+
+.flux-cloud-indicator--running .flux-matrix-dot {
+  /* gate-perf-allow: 旋涡点阵仅作用于活跃执行态，纯 GPU 合成层动画且页面隐藏时暂停 */
+  animation: fluxMatrixSpiral 2.4s ease-in-out var(--d, 0ms) infinite alternate;
+}
+
+@keyframes fluxMatrixSpiral {
+  0%   { opacity: 0.2; transform: scale(0.75); }
+  50%  { opacity: 0.95; transform: scale(1.2); }
+  100% { opacity: 0.35; transform: scale(0.85); }
+}
+
+.flux-motif-matrix--done .flux-matrix-dot {
+  background: var(--flux-activity-blue-done);
+}
+
+.flux-motif-matrix--done .flux-matrix-dot[data-on="1"] {
+  opacity: 0.96;
+}
+
+.flux-motif-matrix--done .flux-matrix-dot[data-on="0"] {
+  opacity: 0.14;
+}
+
+.flux-cloud-indicator--unread[data-transition="just-completed"] .flux-motif-matrix--done .flux-matrix-dot[data-on="1"] {
+  animation: fluxMatrixArrive 560ms var(--ease-spring) calc(var(--step, 0) * 35ms) 1 both;
+}
+
+@keyframes fluxMatrixArrive {
+  0%   { opacity: 0.3; transform: translate3d(var(--from-x, 0px), var(--from-y, 0px), 0) scale(0.8); }
+  100% { opacity: 0.96; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+/* 全变体页面隐藏节能与无障碍降级统一挂接 */
+:root[data-page-hidden="true"] .flux-gyro-ring--a,
+:root[data-page-hidden="true"] .flux-gyro-ring--b,
+:root[data-page-hidden="true"] .flux-gyro-core,
+:root[data-page-hidden="true"] .flux-orbit-track,
+:root[data-page-hidden="true"] .flux-orbit-arm--a,
+:root[data-page-hidden="true"] .flux-orbit-arm--b,
+:root[data-page-hidden="true"] .flux-orbit-sun,
+:root[data-page-hidden="true"] .flux-synapse-cell,
+:root[data-page-hidden="true"] .flux-spring-arc--outer,
+:root[data-page-hidden="true"] .flux-spring-arc--inner,
+:root[data-page-hidden="true"] .flux-matrix-dot {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flux-gyro-ring--a,
+  .flux-gyro-ring--b,
+  .flux-gyro-core,
+  .flux-orbit-track,
+  .flux-orbit-arm--a,
+  .flux-orbit-arm--b,
+  .flux-orbit-sun,
+  .flux-synapse-cell,
+  .flux-spring-arc--outer,
+  .flux-spring-arc--inner,
+  .flux-matrix-dot,
+  .flux-gyro-done-ring,
+  .flux-orbit-star,
+  .flux-motif-synapse--done .flux-synapse-cell[data-on="1"],
+  .flux-spring-done-ring,
+  .flux-motif-matrix--done .flux-matrix-dot[data-on="1"] {
+    animation: none;
+  }
+}

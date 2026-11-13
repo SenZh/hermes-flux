@@ -7,17 +7,26 @@ export type ActivityIndicatorPlacement = 'inline' | 'corner';
 
 export type ActivityEntityKind = 'session' | 'bot' | 'group';
 
+export type ActivityIndicatorVariant =
+  | 'cloud'
+  | 'gyro'
+  | 'orbit'
+  | 'synapse'
+  | 'spring'
+  | 'matrix';
+
 export interface ActivityIndicatorProps {
   state?: ActivityState;
   transition?: ActivityTransition;
   transitionToken?: number;
   placement?: ActivityIndicatorPlacement;
   entityKind?: ActivityEntityKind;
+  variant?: ActivityIndicatorVariant;
   className?: string;
   title?: string;
 }
 
-type CloudCssVars = React.CSSProperties & Record<`--${string}`, string | number>;
+type CustomCssVars = React.CSSProperties & Record<`--${string}`, string | number>;
 
 interface CloudANodeSpec {
   readonly x: number;
@@ -111,6 +120,39 @@ const CLOUD_A_NODES: readonly CloudANode[] = buildCloudANodes([
 
 const CLOUD_CORE_NODES = CLOUD_A_NODES.filter((node) => node.on);
 
+/** 4×4 神经突触点阵 (方案 6) */
+const SYNAPSE_CELLS = Array.from({ length: 16 }, (_, index) => {
+  const r = Math.floor(index / 4);
+  const c = index % 4;
+  const isCheck = (r === 3 && c === 1) || (r === 3 && c === 0) || (r === 2 && c === 1) || (r === 1 && c === 2) || (r === 0 && c === 3);
+  const step = (r === 3 && c === 1) ? 0 : (r === 3 && c === 0) ? 1 : (r === 2 && c === 1) ? 2 : (r === 1 && c === 2) ? 3 : (r === 0 && c === 3) ? 4 : undefined;
+  return { r, c, on: isCheck, step, delayMs: (r + c) * 90 };
+});
+
+/** 3D 旋涡流形点阵 (方案 M) 16 颗粒子 */
+const MATRIX_NODES = Array.from({ length: 16 }, (_, i) => {
+  const baseR = 1.8 + Math.sqrt(i) * 1.45;
+  const theta = i * 2.39996;
+  const x = 9.5 + Math.cos(theta) * baseR;
+  const y = 7.5 + Math.sin(theta) * (baseR * 0.72);
+  const checkX = [3.0, 4.8, 6.8, 9.0, 11.2, 13.4, 15.6][i] ?? x;
+  const checkY = [8.8, 10.6, 12.4, 10.0, 7.6, 5.2, 2.8][i] ?? y;
+  const on = i < 7;
+  return {
+    x,
+    y,
+    on,
+    step: on ? i : undefined,
+    fromX: `${(x - checkX).toFixed(2)}px`,
+    fromY: `${(y - checkY).toFixed(2)}px`,
+    targetLeftPct: `${((checkX / 19) * 100).toFixed(2)}%`,
+    targetTopPct: `${((checkY / 15) * 100).toFixed(2)}%`,
+    leftPct: `${((x / 19) * 100).toFixed(2)}%`,
+    topPct: `${((y / 15) * 100).toFixed(2)}%`,
+    delayMs: i * 80,
+  };
+});
+
 const RUNNING_STATUS_KEY_BY_KIND: Readonly<Record<ActivityEntityKind, I18nKey>> = {
   session: 'rail.activityStatusRunning',
   bot: 'rail.activityStatusThinking',
@@ -141,6 +183,7 @@ export function ActivityIndicator({
   transitionToken,
   placement = 'inline',
   entityKind = 'session',
+  variant = 'cloud',
   className,
   title,
 }: ActivityIndicatorProps): React.ReactElement | null {
@@ -159,6 +202,7 @@ export function ActivityIndicator({
             data-status="read"
             data-transition="just-completed"
             data-placement="corner"
+            data-variant={variant}
           />
         );
       }
@@ -167,14 +211,15 @@ export function ActivityIndicator({
         <span
           key={`settle-${transitionToken ?? 0}`}
           aria-hidden="true"
-          className={cn('activity-settle-fade flux-cloud-settle', className)}
+          className={cn('activity-settle-fade flux-cloud-settle', `flux-variant-${variant}`, className)}
           data-status="read"
           data-transition="just-completed"
           data-placement="inline"
+          data-variant={variant}
         >
           <span className="flux-cloud-canvas">
             {CLOUD_CORE_NODES.map((node, index) => {
-              const dotStyle: CloudCssVars = {
+              const dotStyle: CustomCssVars = {
                 left: node.leftPct,
                 top: node.topPct,
                 width: `${node.size}px`,
@@ -208,6 +253,7 @@ export function ActivityIndicator({
           )}
           data-status="running"
           data-placement="corner"
+          data-variant={variant}
           title={resolvedLabel}
           aria-label={resolvedLabel}
           role="status"
@@ -227,6 +273,7 @@ export function ActivityIndicator({
         data-status="unread"
         data-transition={effectiveTransition}
         data-placement="corner"
+        data-variant={variant}
         title={resolvedLabel}
         aria-label={resolvedLabel}
         role="status"
@@ -235,25 +282,122 @@ export function ActivityIndicator({
     );
   }
 
-  if (isRunning) {
-    const statusWord = t(RUNNING_STATUS_KEY_BY_KIND[entityKind]);
-    return (
-      <span
-        className={cn(
-          'activity-pulse-indicator flux-cloud-indicator flux-cloud-indicator--running inline-flex items-center gap-1 shrink-0 pointer-events-none',
-          className,
-        )}
-        data-status="running"
-        data-placement="inline"
-        title={resolvedLabel}
-        aria-label={resolvedLabel}
-        role="status"
-        aria-live="off"
-      >
+  const renderMotifContent = (running: boolean) => {
+    if (variant === 'gyro') {
+      if (running) {
+        return (
+          <span className="flux-motif-gyro" aria-hidden="true">
+            <span className="flux-gyro-ring flux-gyro-ring--a"><i /><i /></span>
+            <span className="flux-gyro-ring flux-gyro-ring--b"><i /><i /></span>
+            <i className="flux-gyro-core" />
+          </span>
+        );
+      }
+      return (
+        <span className="flux-motif-gyro flux-motif-gyro--done" aria-hidden="true">
+          <span className="flux-gyro-done-ring"><i className="flux-gyro-tick" /></span>
+        </span>
+      );
+    }
+
+    if (variant === 'orbit') {
+      if (running) {
+        return (
+          <span className="flux-motif-orbit" aria-hidden="true">
+            <span className="flux-orbit-track" />
+            <span className="flux-orbit-arm flux-orbit-arm--a"><i className="flux-orbit-sat-a" /></span>
+            <span className="flux-orbit-arm flux-orbit-arm--b"><i className="flux-orbit-sat-b" /></span>
+            <i className="flux-orbit-sun" />
+          </span>
+        );
+      }
+      return (
+        <span className="flux-motif-orbit flux-motif-orbit--done" aria-hidden="true">
+          <span className="flux-orbit-star" />
+        </span>
+      );
+    }
+
+    if (variant === 'synapse') {
+      return (
+        <span className={cn('flux-motif-synapse', !running && 'flux-motif-synapse--done')} aria-hidden="true">
+          {SYNAPSE_CELLS.map((c, i) => (
+            <i
+              key={i}
+              className="flux-synapse-cell"
+              data-on={!running && c.on ? '1' : '0'}
+              style={{
+                '--d': `${c.delayMs}ms`,
+                '--step': c.step ?? 0,
+              } as CustomCssVars}
+            />
+          ))}
+        </span>
+      );
+    }
+
+    if (variant === 'spring') {
+      if (running) {
+        return (
+          <span className="flux-motif-spring" aria-hidden="true">
+            <span className="flux-spring-arc flux-spring-arc--outer" />
+            <span className="flux-spring-arc flux-spring-arc--inner" />
+            <i className="flux-spring-dot" />
+          </span>
+        );
+      }
+      return (
+        <span className="flux-motif-spring flux-motif-spring--done" aria-hidden="true">
+          <span className="flux-spring-done-ring"><i className="flux-spring-tick" /></span>
+        </span>
+      );
+    }
+
+    if (variant === 'matrix') {
+      if (running) {
+        return (
+          <span className="flux-motif-matrix" aria-hidden="true">
+            {MATRIX_NODES.map((m, i) => (
+              <i
+                key={i}
+                className="flux-matrix-dot"
+                style={{
+                  left: m.leftPct,
+                  top: m.topPct,
+                  '--d': `${m.delayMs}ms`,
+                } as CustomCssVars}
+              />
+            ))}
+          </span>
+        );
+      }
+      return (
+        <span className="flux-motif-matrix flux-motif-matrix--done" aria-hidden="true">
+          {MATRIX_NODES.map((m, i) => (
+            <i
+              key={i}
+              className="flux-matrix-dot"
+              data-on={m.on ? '1' : '0'}
+              style={{
+                left: m.on ? m.targetLeftPct : m.leftPct,
+                top: m.on ? m.targetTopPct : m.topPct,
+                '--from-x': m.on ? m.fromX : '0px',
+                '--from-y': m.on ? m.fromY : '0px',
+                '--step': m.step ?? 0,
+              } as CustomCssVars}
+            />
+          ))}
+        </span>
+      );
+    }
+
+    // Default 'cloud' (方案 A · 积雨流云点阵)
+    if (running) {
+      return (
         <span aria-hidden="true" className="flux-cloud-canvas">
           <span className="flux-cloud-fog" />
           {CLOUD_A_NODES.map((node, index) => {
-            const dotStyle: CloudCssVars = {
+            const dotStyle: CustomCssVars = {
               left: node.leftPct,
               top: node.topPct,
               width: `${node.size}px`,
@@ -267,34 +411,14 @@ export function ActivityIndicator({
             return <i key={index} className="flux-cloud-dot" style={dotStyle} />;
           })}
         </span>
-        <span className="flux-cloud-label flux-cloud-label--running">{statusWord}</span>
-      </span>
-    );
-  }
+      );
+    }
 
-  const unreadKey = effectiveTransition === 'just-completed'
-    ? `unread-${transitionToken ?? 0}`
-    : 'unread-static';
-
-  return (
-    <span
-      key={unreadKey}
-      className={cn(
-        'activity-unread-badge flux-cloud-indicator flux-cloud-indicator--unread inline-flex items-center gap-1 shrink-0 pointer-events-none',
-        className,
-      )}
-      data-status="unread"
-      data-transition={effectiveTransition}
-      data-placement="inline"
-      title={resolvedLabel}
-      aria-label={resolvedLabel}
-      role="status"
-      aria-live="off"
-    >
+    return (
       <span aria-hidden="true" className="flux-cloud-canvas">
         {effectiveTransition === 'just-completed' && <span className="flux-cloud-ripple" />}
         {CLOUD_A_NODES.map((node, index) => {
-          const dotStyle: CloudCssVars = {
+          const dotStyle: CustomCssVars = {
             left: node.on ? node.targetLeftPct : node.leftPct,
             top: node.on ? node.targetTopPct : node.topPct,
             width: `${node.size}px`,
@@ -315,6 +439,54 @@ export function ActivityIndicator({
           );
         })}
       </span>
+    );
+  };
+
+  if (isRunning) {
+    const statusWord = t(RUNNING_STATUS_KEY_BY_KIND[entityKind]);
+    return (
+      <span
+        className={cn(
+          'activity-pulse-indicator flux-cloud-indicator flux-cloud-indicator--running inline-flex items-center gap-1 shrink-0 pointer-events-none',
+          `flux-variant-${variant}`,
+          className,
+        )}
+        data-status="running"
+        data-placement="inline"
+        data-variant={variant}
+        title={resolvedLabel}
+        aria-label={resolvedLabel}
+        role="status"
+        aria-live="off"
+      >
+        {renderMotifContent(true)}
+        <span className="flux-cloud-label flux-cloud-label--running">{statusWord}</span>
+      </span>
+    );
+  }
+
+  const unreadKey = effectiveTransition === 'just-completed'
+    ? `unread-${transitionToken ?? 0}`
+    : 'unread-static';
+
+  return (
+    <span
+      key={unreadKey}
+      className={cn(
+        'activity-unread-badge flux-cloud-indicator flux-cloud-indicator--unread inline-flex items-center gap-1 shrink-0 pointer-events-none',
+        `flux-variant-${variant}`,
+        className,
+      )}
+      data-status="unread"
+      data-transition={effectiveTransition}
+      data-placement="inline"
+      data-variant={variant}
+      title={resolvedLabel}
+      aria-label={resolvedLabel}
+      role="status"
+      aria-live="off"
+    >
+      {renderMotifContent(false)}
       <span className="flux-cloud-label flux-cloud-label--done">{t('rail.activityStatusDone')}</span>
     </span>
   );
