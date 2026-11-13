@@ -16,6 +16,34 @@ import { setLocale, t } from '../dist/i18n/index.js';
 
 const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/u;
 
+const emptyBotManagement = () => ({
+  status: { status: 'idle', activeBotId: 'default' },
+  roster: [],
+  activeBotId: 'default',
+  activeDetail: undefined,
+  availableModels: [],
+  activeDraft: undefined,
+  wizard: {
+    open: false,
+    draft: {
+      mode: 'blank',
+      name: '',
+      displayName: '',
+      description: '',
+      model: '',
+      provider: '',
+      cloneFrom: '',
+      cloneChannels: false,
+      mirrorCredentials: false,
+    },
+    busy: false,
+  },
+  exitPrompt: null,
+  errorBanner: undefined,
+  highlightBotId: undefined,
+  isBusy: false,
+});
+
 function snapshot(overrides = {}) {
   return {
     isOpen: true,
@@ -27,6 +55,7 @@ function snapshot(overrides = {}) {
     providers: { status: 'idle' },
     profiles: { status: 'idle' },
     bots: [],
+    botManagement: emptyBotManagement(),
     scopedProfile: 'default',
     providerAdminView: 'bot',
     customEndpoints: { status: 'idle' },
@@ -61,6 +90,20 @@ const noopActions = {
   onDisconnectProvider: async () => ({ ok: true }),
   onRefreshProfiles() {},
   onOpenAgent() {},
+  onBotDraftChange() {},
+  onSelectBotSettle() {},
+  onSaveBotConfig: async () => ({ ok: true }),
+  onResetBotDraft() {},
+  onOpenBotWizard() {},
+  onCloseBotWizard() {},
+  onBotWizardDraftChange() {},
+  onSubmitCreateBot: async () => ({ ok: false }),
+  onRetryBotList() {},
+  onDismissBotError() {},
+  onDismissBotConfirm() {},
+  onConfirmBotExit() {},
+  onCancelBotExit() {},
+  onRegisterBotDirtyGuard() {},
   onRefreshExtensions() {},
   onReloadSkills: async () => ({ ok: true }),
   onTestGateway() {},
@@ -161,16 +204,357 @@ test('扩展页分别渲染 MCP 运行态与技能清单', () => {
   assert.ok(html.includes(t('settings.mcpToolCount', { count: 7 })));
 });
 
-test('数字员工页只读展示真实档案，并提供打开编辑器入口', () => {
+/** 构造 BOT 面板详情：能力清单显式标为非权威，避免测试把"没返回"当成"空配置"。 */
+function botDetail(overrides = {}) {
+  return {
+    id: 'default',
+    displayName: 'Hermes',
+    description: '默认助手',
+    model: '',
+    provider: '',
+    soul: '',
+    avatar: undefined,
+    isDefault: true,
+    skills: { authoritative: false, rows: [] },
+    toolsets: { authoritative: false, rows: [] },
+    mcpServers: { authoritative: false, rows: [] },
+    ...overrides,
+  };
+}
+
+function botManagement(overrides = {}) {
+  return {
+    ...emptyBotManagement(),
+    ...overrides,
+  };
+}
+
+test('BOT 页渲染 5 槽位选择器与基础身份字段，不再出现旧的只读员工列表', () => {
   setLocale('zh-CN');
   const html = render({
     section: 'agents',
-    profiles: { status: 'ready', data: [{ name: 'default', displayName: 'Hermes', isDefault: true }] },
+    botManagement: botManagement({
+      status: { status: 'idle', activeBotId: 'arch' },
+      activeBotId: 'arch',
+      roster: [
+        { id: 'default', displayName: 'Hermes', model: '', isDefault: true, hasDraft: false },
+        { id: 'arch', displayName: '架构老王', model: '', isDefault: false, hasDraft: false },
+      ],
+      activeDetail: botDetail({ id: 'arch', displayName: '架构老王', description: '负责架构评审', isDefault: false }),
+    }),
   });
-  assert.ok(html.includes('Hermes'));
-  assert.ok(html.includes(t('settings.agentDefault')));
-  assert.ok(html.includes(t('settings.agentNoModel')));
-  assert.ok(html.includes(t('settings.agentOpen')));
+  assert.ok(html.includes('data-bot-carousel="true"'), '必须有头像滑动选择器');
+  assert.equal((html.match(/data-bot-slot=/g) || []).length, 5, '槽位固定 5 个，不随数量增删');
+  assert.equal(
+    (html.match(/data-bot-id="default"/g) || []).length,
+    1,
+    'N=2 时按实际数量平铺，禁止重复克隆同一个 BOT',
+  );
+  assert.equal((html.match(/data-bot-id="arch"/g) || []).length, 1);
+  assert.ok(html.includes('id="bot-id"'), 'BOT ID 只读展示');
+  assert.ok(html.includes('id="bot-display-name"'), '显示名称可编辑');
+  assert.ok(html.includes('id="bot-description"'), '职能描述可编辑');
+  assert.ok(html.includes(t('bot.copyId')), 'ID 必须提供复制入口');
+  assert.ok(html.includes(t('bot.saveBtn')));
+  assert.ok(html.includes(t('bot.resetBtn')));
+  assert.equal(html.includes(t('settings.agentOpen')), false, '旧的只读列表入口必须删除');
+});
+
+test('BOT 页：有草稿时保存与重置可点，无草稿时禁用；保存中锁输入', () => {
+  setLocale('zh-CN');
+  const detail = botDetail({ id: 'arch', displayName: '架构老王', description: '负责架构评审', isDefault: false });
+  const base = {
+    section: 'agents',
+    botManagement: botManagement({
+      status: { status: 'idle', activeBotId: 'arch' },
+      activeBotId: 'arch',
+      roster: [{ id: 'arch', displayName: '架构老王', model: '', isDefault: false, hasDraft: true }],
+      activeDetail: detail,
+    }),
+  };
+
+  const clean = render(base);
+  const buttonTag = (html, label) => {
+    const at = html.indexOf(`>${label}</button>`);
+    assert.ok(at > 0, `缺少按钮 ${label}`);
+    return html.slice(html.lastIndexOf('<button', at), at);
+  };
+  const isDisabled = (tag) => /\sdisabled(=|>|\s)/.test(tag);
+  assert.equal(isDisabled(buttonTag(clean, t('bot.saveBtn'))), true, '无草稿时保存必须禁用');
+
+  const draft = {
+    displayName: '首席架构',
+    description: '负责架构评审',
+    model: '',
+    provider: '',
+    isDefault: false,
+    soul: '',
+    avatar: { kind: 'unchanged' },
+    disabledSkills: [],
+    enabledToolsets: [],
+    enabledMcpServers: [],
+  };
+  const dirty = render({
+    ...base,
+    botManagement: botManagement({
+      ...base.botManagement,
+      activeDraft: draft,
+    }),
+  });
+  assert.equal(isDisabled(buttonTag(dirty, t('bot.saveBtn'))), false, '有草稿时保存必须可点');
+  assert.ok(dirty.includes('value="首席架构"'), '输入框必须回显草稿值');
+
+  const saving = render({
+    ...base,
+    botManagement: botManagement({
+      ...base.botManagement,
+      status: { status: 'saving', activeBotId: 'arch' },
+      isBusy: true,
+      activeDraft: draft,
+    }),
+  });
+  assert.ok(saving.includes(t('bot.saving')), '保存中必须显示进度文案');
+  assert.equal(/<input[^>]*id="bot-display-name"[^>]*disabled/.test(saving), true, '保存中显示名必须只读');
+});
+
+test('BOT 页空态与错误态显式分流：空态给创建引导，错误态给真实原因与重试', () => {
+  setLocale('zh-CN');
+  const empty = render({
+    section: 'agents',
+    botManagement: botManagement({
+      status: { status: 'empty_list' },
+      activeBotId: '',
+      roster: [],
+      activeDetail: undefined,
+    }),
+  });
+  assert.ok(empty.includes(t('bot.emptyRoster')));
+  assert.ok(empty.includes(t('bot.createFirst')));
+  assert.ok(empty.includes('disabled'), '向导尚未接承时创建按钮必须禁用，禁止假可用');
+  assert.equal(empty.includes('data-bot-carousel="true"'), false, '空花名册不得渲染选择器');
+
+  const failed = render({
+    section: 'agents',
+    botManagement: botManagement({
+      status: { status: 'list_error', message: 'socket closed' },
+      activeBotId: '',
+      roster: [],
+      activeDetail: undefined,
+    }),
+  });
+  assert.ok(failed.includes(t('bot.loadFailedTitle')));
+  assert.ok(failed.includes('socket closed'), '失败必须带原始原因（Failure Is Not Empty）');
+  assert.ok(failed.includes(t('bot.retry')));
+  assert.equal(failed.includes(t('bot.emptyRoster')), false, '错误态不得伪装成空态');
+});
+
+test('BOT 模型绑定：按 Provider 分组，当前模型离线时置顶保留，不静默清空', () => {
+  setLocale('zh-CN');
+  const draft = {
+    displayName: '架构老王',
+    description: '负责架构评审',
+    model: 'legacy/retired-model',
+    provider: 'legacy',
+    isDefault: false,
+    soul: '',
+    avatar: { kind: 'unchanged' },
+    disabledSkills: [],
+    enabledToolsets: [],
+    enabledMcpServers: [],
+  };
+  const html = render({
+    section: 'agents',
+    botManagement: botManagement({
+      status: { status: 'idle', activeBotId: 'arch' },
+      activeBotId: 'arch',
+      roster: [{ id: 'arch', displayName: '架构老王', model: draft.model, isDefault: false, hasDraft: true }],
+      activeDetail: botDetail({ id: 'arch', displayName: '架构老王', model: draft.model, provider: 'legacy', isDefault: false }),
+      activeDraft: draft,
+      availableModels: [
+        { id: 'claude-opus-4.8', name: 'Claude Opus 4.8', provider: 'anthropic', providerName: 'Anthropic' },
+        { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', provider: 'anthropic', providerName: 'Anthropic' },
+        { id: 'gpt-5.6', name: 'GPT-5.6', provider: 'openai', providerName: 'OpenAI' },
+      ],
+    }),
+  });
+  assert.ok(html.includes('id="bot-model"'), '必须有模型下拉');
+  assert.equal((html.match(/<optgroup/g) || []).length, 2, '必须按 Provider 分组');
+  assert.ok(html.includes(t('bot.modelOffline', { model: 'legacy/retired-model' })), '离线模型必须置顶并标注');
+  assert.ok(
+    html.includes('value="legacy/retired-model" selected') || html.includes('selected="" value="legacy/retired-model"'),
+    '离线模型必须保持选中，不能静默清空',
+  );
+  assert.ok(html.includes('Claude Opus 4.8'));
+});
+
+test('BOT SOUL：等宽编辑器、字节计数、超 64KB 提示与变量/模板胶囊', () => {
+  setLocale('zh-CN');
+  const soul = 'x'.repeat(70_000);
+  const draft = {
+    displayName: '架构老王',
+    description: '',
+    model: '',
+    provider: '',
+    isDefault: false,
+    soul,
+    avatar: { kind: 'unchanged' },
+    disabledSkills: [],
+    enabledToolsets: [],
+    enabledMcpServers: [],
+  };
+  const html = render({
+    section: 'agents',
+    botManagement: botManagement({
+      status: { status: 'idle', activeBotId: 'arch' },
+      activeBotId: 'arch',
+      roster: [{ id: 'arch', displayName: '架构老王', model: '', isDefault: false, hasDraft: true }],
+      activeDetail: botDetail({ id: 'arch', displayName: '架构老王', isDefault: false }),
+      activeDraft: draft,
+    }),
+  });
+  assert.ok(html.includes('id="bot-soul"'), '必须有 SOUL 编辑器');
+  assert.ok(html.includes(t('bot.soulCount', { bytes: 70_000 })), '必须给出真实字节数');
+  assert.ok(html.includes(t('bot.soulLengthWarn')), '超过 64KB 必须有醒目提示');
+  assert.ok(html.includes(t('bot.soulInsertUserName')));
+  assert.ok(html.includes(t('bot.soulInsertWorkspace')));
+  assert.ok(html.includes(t('bot.soulTemplateArchitect')));
+  assert.ok(html.includes(t('bot.soulTemplateReviewer')));
+});
+
+test('BOT 能力矩阵：逐项开关、非权威清单只读、MCP 未知不画红灯、长期记忆无编辑入口', () => {
+  setLocale('zh-CN');
+  const draft = {
+    displayName: '架构老王',
+    description: '',
+    model: '',
+    provider: '',
+    isDefault: false,
+    soul: '',
+    avatar: { kind: 'unchanged' },
+    disabledSkills: ['dogfood'],
+    enabledToolsets: ['web'],
+    enabledMcpServers: ['github-mcp'],
+  };
+  const html = render({
+    section: 'agents',
+    botManagement: botManagement({
+      status: { status: 'idle', activeBotId: 'arch' },
+      activeBotId: 'arch',
+      roster: [{ id: 'arch', displayName: '架构老王', model: '', isDefault: false, hasDraft: true }],
+      activeDetail: botDetail({
+        id: 'arch',
+        displayName: '架构老王',
+        isDefault: false,
+        toolsets: {
+          authoritative: true,
+          rows: [
+            { id: 'web', label: '联网检索', enabled: true, description: 'web_search', toolCount: 2 },
+            { id: 'browser', label: '浏览器', enabled: false, description: 'navigate', toolCount: 4 },
+          ],
+        },
+        skills: {
+          authoritative: true,
+          rows: [
+            { id: 'codebase-inspection', label: 'codebase-inspection', enabled: true },
+            { id: 'dogfood', label: 'dogfood', enabled: false },
+          ],
+        },
+        mcpServers: {
+          authoritative: true,
+          rows: [
+            { id: 'github-mcp', label: 'github-mcp', enabled: true, transport: 'stdio', toolCount: 9, online: true },
+            { id: 'playwright', label: 'playwright', enabled: true, transport: 'http', online: undefined },
+          ],
+        },
+      }),
+      activeDraft: draft,
+    }),
+  });
+  assert.equal((html.match(/data-bot-capability=/g) || []).length, 6, '三类清单都必须逐项渲染开关');
+  assert.ok(html.includes('data-bot-capability="web"'));
+  assert.ok(html.includes('data-bot-capability="dogfood"'));
+  assert.ok(html.includes(t('bot.mcpOnline')), '已连接 MCP 必须显示在线');
+  assert.ok(html.includes(t('bot.mcpUnknown')), '探活没有结论时必须显示状态未知');
+  assert.equal(html.includes(t('bot.mcpOffline')), false, '未知状态不得被画成离线红灯');
+  assert.ok(html.includes(t('bot.memoryTitle')));
+  assert.ok(html.includes(t('bot.memoryNotice')));
+  assert.equal(html.includes('id="bot-memory"'), false, '长期记忆不得提供编辑入口');
+
+  const readonly = render({
+    section: 'agents',
+    botManagement: botManagement({
+      status: { status: 'idle', activeBotId: 'arch' },
+      activeBotId: 'arch',
+      roster: [{ id: 'arch', displayName: '架构老王', model: '', isDefault: false, hasDraft: false }],
+      activeDetail: botDetail({ id: 'arch', displayName: '架构老王', isDefault: false }),
+    }),
+  });
+  assert.ok(readonly.includes(t('bot.capabilityReadonly')), '非权威清单必须提示只读');
+});
+
+test('BOT 确认横幅：网关要求二次确认时保留草稿并给出「仍然保存」', () => {
+  setLocale('zh-CN');
+  const draft = {
+    displayName: '架构老王',
+    description: '',
+    model: 'expensive/model',
+    provider: 'p',
+    isDefault: false,
+    soul: '',
+    avatar: { kind: 'unchanged' },
+    disabledSkills: [],
+    enabledToolsets: [],
+    enabledMcpServers: [],
+  };
+  const html = render({
+    section: 'agents',
+    botManagement: botManagement({
+      status: { status: 'idle', activeBotId: 'arch' },
+      activeBotId: 'arch',
+      roster: [{ id: 'arch', displayName: '架构老王', model: draft.model, isDefault: false, hasDraft: true }],
+      activeDetail: botDetail({ id: 'arch', displayName: '架构老王', model: draft.model, provider: 'p', isDefault: false }),
+      activeDraft: draft,
+      confirmPending: { message: '该模型单价较高，需要确认' },
+    }),
+  });
+  assert.ok(html.includes('data-bot-confirm="true"'));
+  assert.ok(html.includes('该模型单价较高，需要确认'), '必须原样透出网关原文');
+  assert.ok(html.includes(t('bot.confirmSave')));
+  assert.ok(html.includes(t('bot.confirmDismiss')));
+  assert.ok(
+    /data-bot-confirm="true"[^>]*role="status"|role="status"[^>]*data-bot-confirm="true"/.test(html),
+    '确认横幅必须是礼貌播报，不能与错误横幅抢 alert',
+  );
+});
+
+test('BOT 横幅互斥：确认态存在时不得同时渲染错误横幅（避免双次打断式播报）', () => {
+  setLocale('zh-CN');
+  const draft = {
+    displayName: '架构老王',
+    description: '',
+    model: 'expensive/model',
+    provider: 'p',
+    isDefault: false,
+    soul: '',
+    avatar: { kind: 'unchanged' },
+    disabledSkills: [],
+    enabledToolsets: [],
+    enabledMcpServers: [],
+  };
+  const html = render({
+    section: 'agents',
+    botManagement: botManagement({
+      status: { status: 'idle', activeBotId: 'arch' },
+      activeBotId: 'arch',
+      roster: [{ id: 'arch', displayName: '架构老王', model: draft.model, isDefault: false, hasDraft: true }],
+      activeDetail: botDetail({ id: 'arch', displayName: '架构老王', model: draft.model, provider: 'p', isDefault: false }),
+      activeDraft: draft,
+      errorBanner: 'gateway 500',
+      confirmPending: { message: '需确认' },
+    }),
+  });
+  assert.ok(html.includes('data-bot-confirm="true"'));
+  assert.equal(html.includes('gateway 500'), false, '错误横幅与确认横幅不得同时出现');
 });
 
 test('语言切换是真实生效的：同一份快照在两种 locale 下文案不同', () => {

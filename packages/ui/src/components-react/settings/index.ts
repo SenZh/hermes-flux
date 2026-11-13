@@ -1,4 +1,5 @@
 export { SettingsModal } from './SettingsModal.js';
+export { BotManagerView } from './BotManagerView.js';
 export { mountSettingsModal } from './mount.js';
 export { ProvidersAdminPanel } from './ProvidersAdminPanel.js';
 export {

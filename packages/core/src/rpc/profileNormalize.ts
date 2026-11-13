@@ -66,7 +66,13 @@ export function normalizeAgentProfile(item: unknown): AgentProfile {
     description: typeof obj.description === 'string' ? obj.description : '',
     avatar: rawAvatar,
     model: typeof obj.model === 'string' ? obj.model : '',
-    isDefault: Boolean(obj.is_default || name === 'default'),
+    // 【设计意图】BOT 面板的"设为默认"写入 ui_meta['hermes-bots'].is_default；
+    //   归一化必须能读回同一个键，否则用户保存后徽章永远不出现（写读口径分裂）。
+    // 【规则】显式 false 可以取消内置 default 的隐含默认，保证「唯一默认」可转移。
+    isDefault:
+      metaBots?.is_default === true ||
+      Boolean(obj.is_default) ||
+      (name === 'default' && metaBots?.is_default !== false),
     hasAvatar: obj.has_avatar === true,
     uiMeta,
     last_session: lastSession,

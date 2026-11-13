@@ -76,4 +76,34 @@ test('normalizeAgentProfile - ID与显示名称解耦及别名归一化测试', 
     assert.equal(p2.name, 'default');
     assert.equal(p2.displayName, 'Hermes');
   });
+
+  /**
+   * `isDefault` 的三条分支必须逐条锁定：
+   *   BOT 面板的「设为默认」写的是 `ui_meta['hermes-bots'].is_default`，
+   *   归一化读不回同一个键，就会出现"保存成功但徽章永远不出现"的写读口径分裂。
+   */
+  await t.test('7. isDefault：ui_meta 显式 true 时置默认（写读同一键）', () => {
+    const profile = normalizeAgentProfile({
+      name: 'arch-wang',
+      is_default: false,
+      ui_meta: { 'hermes-bots': { is_default: true } },
+    });
+    assert.equal(profile.isDefault, true, '保存到 ui_meta 的默认标记必须能读回');
+  });
+
+  await t.test('8. isDefault：内置 default 可用显式 false 取消隐含默认（唯一性可转移）', () => {
+    const profile = normalizeAgentProfile({
+      name: 'default',
+      ui_meta: { 'hermes-bots': { is_default: false } },
+    });
+    assert.equal(profile.isDefault, false, '显式 false 必须能取消内置 default 的隐含默认');
+  });
+
+  await t.test('9. isDefault：内置 default 缺少该键时仍保持默认', () => {
+    const profile = normalizeAgentProfile({ name: 'default', ui_meta: { 'hermes-bots': {} } });
+    assert.equal(profile.isDefault, true, '没有显式 false 时内置 default 必须仍是默认');
+
+    const noMeta = normalizeAgentProfile({ name: 'default' });
+    assert.equal(noMeta.isDefault, true);
+  });
 });

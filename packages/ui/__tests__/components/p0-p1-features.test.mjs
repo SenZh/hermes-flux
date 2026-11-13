@@ -9,6 +9,7 @@ import { renderNewTaskModal } from '../../dist/components/TaskModal/NewTaskModal
 import { renderInputDock } from '../../dist/components/InputDock/InputDock.js';
 import { renderTitlebar } from '../../dist/components/Titlebar/Titlebar.js';
 import { renderContextMenu } from '../../dist/components/ContextMenu/ContextMenu.js';
+import { BotManagerView } from '../../dist/components-react/settings/BotManagerView.js';
 
 /** 左轨 React 岛的测试渲染入口，语义与旧 renderLeftRail(props) 一一对应。 */
 function renderLeftRail(props = {}) {
@@ -48,7 +49,6 @@ function renderLeftRail(props = {}) {
     onResizeStart: noop,
   }));
 }
-import { renderAgentProfileEditorModal } from '../../dist/components/Bot/AgentProfileEditorModal.js';
 import { renderMessages } from '../helpers/renderMessages.mjs';
 
 test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', async (t) => {
@@ -372,35 +372,63 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
     assert.ok(!sessionMenu.includes('data-action="bot-chat"'), '会话菜单严禁包含进入工位');
   });
 
-  await t.test('9. AgentProfileEditorModal 通用智能体档案编辑面板组件渲染与字段完备性', () => {
-    // 9.1 关闭状态下返回空
-    const closedHtml = renderAgentProfileEditorModal({ isOpen: false });
-    assert.equal(closedHtml, '', '关闭时严禁渲染 DOM');
-
-    // 9.2 打开状态下渲染全功能表单字段
-    const modalHtml = renderAgentProfileEditorModal({
-      isOpen: true,
-      profile: {
-        name: 'default',
-        displayName: '赫尔墨斯',
-        description: '核心通用全能架构助手',
-        model: 'deepseek-chat',
-        systemPrompt: '你是 Hermes 首席架构专家。',
-        isDefault: true,
+  await t.test('9. BOT 面板取代旧内联编辑器：选择器、基础身份与保存/重置闭环', () => {
+    // 【设计意图】旧 AgentProfileEditorModal 已删除，编辑入口收敛到设置中心 BOT 分区。
+    //   本断言保留"编辑面板字段完备性"的原意，但改为对新 BotManagerView 的真实 SSR 产物下断言。
+    const detail = {
+      id: 'default',
+      displayName: '赫尔墨斯',
+      description: '核心通用全能架构助手',
+      model: 'deepseek-chat',
+      provider: 'custom',
+      soul: '',
+      avatar: undefined,
+      isDefault: true,
+      skills: { authoritative: false, rows: [] },
+      toolsets: { authoritative: false, rows: [] },
+      mcpServers: { authoritative: false, rows: [] },
+    };
+    const snapshot = {
+      botManagement: {
+        status: { status: 'idle', activeBotId: 'default' },
+        roster: [
+          { id: 'default', displayName: '赫尔墨斯', model: 'deepseek-chat', isDefault: true, hasDraft: false },
+          { id: 'arch', displayName: '架构老王', model: '', isDefault: false, hasDraft: false },
+        ],
+        activeBotId: 'default',
+        activeDetail: detail,
+        availableModels: [],
+        activeDraft: undefined,
+        isBusy: false,
+        wizard: {
+          open: false,
+          draft: {
+            mode: 'blank', name: '', displayName: '', description: '', model: '', provider: '',
+            cloneFrom: '', cloneChannels: false, mirrorCredentials: false,
+          },
+          busy: false,
+        },
+        exitPrompt: null,
+        errorBanner: undefined,
+        highlightBotId: undefined,
       },
-      availableModels: ['deepseek-chat', 'claude-3-5-sonnet'],
-    });
+    };
+    const actions = new Proxy({}, { get: () => () => {} });
+    const html = renderToStaticMarkup(React.createElement(BotManagerView, { snapshot, actions }));
 
-    assert.ok(modalHtml.includes('agent-profile-editor-modal'), '必须包含模态框主体');
-    assert.ok(modalHtml.includes('赫尔墨斯'), '必须包含当前智能体显示名称');
-    assert.ok(modalHtml.includes('default'), '必须包含只读 ID 标识');
-    assert.ok(modalHtml.includes('agent-editor-desc'), '必须包含描述文本域');
-    assert.ok(modalHtml.includes('agent-editor-model-select'), '必须包含模型选择下拉框');
-    assert.ok(modalHtml.includes('claude-3-5-sonnet'), '必须渲染可选模型清单');
-    assert.ok(modalHtml.includes('agent-skill-checkbox'), '必须包含技能开关');
-    assert.ok(modalHtml.includes('agent-editor-prompt'), '必须包含人设提示词配置文本域');
-    assert.ok(modalHtml.includes('btn-save-agent-editor'), '必须包含保存更改按钮');
-    assert.ok(modalHtml.includes('btn-cancel-agent-editor'), '必须包含取消按钮');
+    assert.ok(html.includes('data-bot-carousel="true"'), '必须渲染 5 槽位头像选择器');
+    assert.equal((html.match(/data-bot-slot=/g) || []).length, 5, '槽位必须固定 5 个');
+    assert.ok(html.includes('id="bot-id"'), '必须包含只读 ID');
+    assert.ok(html.includes('value="赫尔墨斯"'), '必须包含当前显示名称');
+    assert.ok(html.includes('id="bot-description"'), '必须包含职能描述文本域');
+    assert.ok(html.includes('恢复默认头像'), '必须包含恢复默认头像入口');
+    assert.ok(html.includes('保存配置'), '必须包含保存配置按钮');
+    assert.ok(html.includes('重置'), '必须包含重置按钮');
+    assert.equal(
+      fs.existsSync(new URL('../../dist/components/Bot/AgentProfileEditorModal.js', import.meta.url)),
+      false,
+      '旧内联编辑器产物必须彻底删除',
+    );
   });
 
   await t.test('10. 左轨双轨架构：微轨头像常驻与抽屉第一行大卡片三态与最新对话副标题联动', () => {

@@ -27,6 +27,7 @@ import {
   buildSkillRows,
   normalizeAgentProfile,
   type McpServerRow,
+  type ProfileUiMeta,
   type ProviderDirectoryRow,
   type SkillRow,
 } from '@hermes-flux/core';
@@ -44,6 +45,12 @@ export interface SettingsProfileRow {
   model?: string;
   description?: string;
   isDefault?: boolean;
+  /** 网关已回传的头像（data URL）；BOT 选择器与详情头像共用同一份真值。 */
+  avatar?: string;
+  /** 网关是否声明已上传头像资产；缺头像时用于区分"未上传"与"读取缺口"。 */
+  hasAvatar?: boolean;
+  /** 网关原样透传的 ui_meta；保存显示名/默认标记时必须基于它合并，不能整块覆盖。 */
+  uiMeta?: ProfileUiMeta;
 }
 
 export type SettingsSectionId = 'appearance' | 'providers' | 'agents' | 'extensions' | 'connection' | 'about';
@@ -170,6 +177,11 @@ export function createSettingsController(deps: SettingsControllerDeps): Settings
           model: profile.model || undefined,
           description: profile.description || undefined,
           isDefault: profile.isDefault === true,
+          // BOT 选择器与详情共用同一份身份字段；缺头像时保留 undefined，交由确定性图腾兜底。
+          avatar: profile.avatar || undefined,
+          hasAvatar: profile.hasAvatar === true,
+          // ui_meta 必须原样透传：保存显示名/默认标记要基于它合并，整块重建会丢掉群聊房间等其它键。
+          uiMeta: profile.uiMeta,
         })),
       });
     } catch (error) {

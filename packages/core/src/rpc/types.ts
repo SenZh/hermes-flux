@@ -374,17 +374,53 @@ export interface ProfilesListResult {
 }
 
 export interface ProfilesDescribeParams {
+  profile?: string;
   name: string;
 }
 
+/**
+ * `profiles.describe` 的真实契约（网关 0.22.5 探针，见 docs/gateway/profiles.md）。
+ * 【规则】`skills` / `toolsets` / `mcp_servers` 必须保留 enabled 等原始字段：
+ *   压成 string[] 会让设置页无法表达"哪些能力被关掉"，保存时只能写空数组覆盖用户配置。
+ */
 export interface ProfilesDescribeResult {
-  profile?: AgentProfileDetail;
   name?: string;
   description?: string;
   soul?: string;
-  toolsets?: Array<{ name: string }>;
-  mcp_servers?: unknown[];
+  model?: ProfilesDescribeModelPin | string;
+  skills?: ProfilesCapabilityEntry[];
+  toolsets?: ProfilesToolsetEntry[];
+  toolsets_pinned?: boolean;
+  mcp_servers?: ProfilesMcpServerEntry[];
+  /** 旧路径兼容：部分网关把详情包在 profile 字段里。 */
+  profile?: unknown;
 }
+
+/** `describe.model` 是指向模型目录的 pin，不是模型名字符串。 */
+export interface ProfilesDescribeModelPin {
+  provider?: string;
+  default?: string;
+}
+
+export interface ProfilesCapabilityEntry {
+  name: string;
+  enabled?: boolean;
+}
+
+export interface ProfilesToolsetEntry {
+  name: string;
+  enabled?: boolean;
+  label?: string;
+  description?: string;
+  tool_count?: number;
+}
+
+export interface ProfilesMcpServerEntry {
+  name: string;
+  enabled?: boolean;
+  transport?: string;
+}
+
 
 /**
  * 契约依据：ProfilesCreateParams
@@ -394,10 +430,12 @@ export interface ProfilesDescribeResult {
  * 【防范的历史坑】曾传 `template` / `display_name`，两者都不是契约字段（4000）。
  */
 export interface ProfilesCreateParams {
+  profile?: string;
   name: string;
   description?: string;
   clone_from?: string;
   clone_all?: boolean;
+  clone_channels?: boolean;
   no_skills?: boolean;
   no_alias?: boolean;
   soul?: string;
@@ -408,8 +446,15 @@ export interface ProfilesCreateParams {
 }
 
 export interface ProfilesCreateResult {
+  ok?: boolean;
   name: string;
-  created: boolean;
+  path?: string;
+  soul_written?: boolean;
+  model_set?: boolean;
+  mirrored?: { env?: boolean; auth?: boolean | 'shared'; model_inherited?: boolean; voice?: boolean };
+  warnings?: string[];
+  /** 兼容早期网关字段。 */
+  created?: boolean;
 }
 
 /**
@@ -422,6 +467,7 @@ export interface ProfilesCreateResult {
  * 真实契约是 `ok/applied`，导致配置成功也返回 false。
  */
 export interface ProfilesConfigureParams {
+  profile?: string;
   name: string;
   soul?: string;
   description?: string;
@@ -430,12 +476,28 @@ export interface ProfilesConfigureParams {
   disabled_skills?: string[];
   enabled_toolsets?: string[];
   enabled_mcp_servers?: string[];
+  confirm_expensive_model?: boolean;
   ui_meta?: Record<string, unknown>;
+  ui_meta_expected_revisions?: Record<string, number>;
+}
+
+/** 每个配置域是否真正写入（网关只返回请求里携带的段）。 */
+export interface ProfilesConfigureApplied {
+  ui_meta?: boolean;
+  ui_meta_revisions?: Record<string, number>;
+  ui_meta_conflicts?: Record<string, unknown>;
+  soul?: boolean;
+  description?: boolean;
+  model?: boolean;
+  skills?: boolean;
+  toolsets?: boolean;
+  mcp_servers?: boolean;
 }
 
 export interface ProfilesConfigureResult {
   ok?: boolean;
-  applied?: string[];
+  /** 真实契约是分段结果对象；兼容早期网关的字符串数组。 */
+  applied?: ProfilesConfigureApplied | string[];
   confirm_required?: boolean;
   confirm_message?: string;
 }
@@ -462,6 +524,7 @@ export interface ProfilesGetAssetResult {
  * 【防范的历史坑】曾写 `key` + `base64`，网关 4000 Extra inputs are not permitted。
  */
 export interface ProfilesSetAssetParams {
+  profile?: string;
   name: string;
   asset: string;
   data: string;
@@ -472,7 +535,7 @@ export interface ProfilesSetAssetResult {
   ok?: boolean;
   asset?: string;
   size?: number;
-  removed?: boolean;
+  removed?: boolean | number | null;
   /** 兼容早期网关字段 */
   success?: boolean;
 }

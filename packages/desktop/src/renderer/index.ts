@@ -47,7 +47,6 @@ import {
   renderNewTaskModal,
   renderContextMenu,
   type ContextMenuProps,
-  renderAgentProfileEditorModal,
   renderConfirmModal,
   t,
   hasDockSnapshotChanged,
@@ -104,6 +103,7 @@ import { decideConversationPush } from './conversationPush.js';
 import { resolveColdStartFocus } from './coldStartFocus.js';
 import { buildGatewayWsUrl, createGatewayReconnectResolver } from './gatewayConnection.js';
 import { createSettingsController, resolveGatewayPassword } from './settingsController.js';
+import { createBotManagementController } from './botManagementController.js';
 import { createProviderAdminRest } from './providerAdminRest.js';
 import { createProviderAdminController, planDeleteTarget } from './providerAdminController.js';
 import {
@@ -166,7 +166,12 @@ import {
   buildMcpServerRows,
   buildSkillRows,
   normalizeAgentProfile,
+  formatModelDisplayName,
   type AgentProfile,
+  type BotDetailData,
+  type BotDraftState,
+  type BotManagementStatus,
+  projectBotRoster,
   type ProjectSummary,
   ProfileService,
   GroupRoomStore,
@@ -226,6 +231,7 @@ import {
   normalizeEndpointId,
   draftForBindingAttach,
   classifyAttachWrite,
+  type ProfilesConfigureParams,
 } from '@hermes-flux/core';
 
 import { parseTranscriptRows } from './transcriptRows.js';
@@ -649,8 +655,6 @@ interface AppState {
   /** PR-3d：新建弹窗初始甲板（会话 header 的 + 传 solo，群聊 header 的 + 传 group），入队即快照、出队不重推。 */
   newTaskModalTab: 'solo' | 'group';
   selectedNewTaskProjectId?: string;
-  isAgentEditorOpen: boolean;
-  editingAgentProfileName?: string;
   editingGroupRoomId?: string;
   /** Model menu visibility lives in state so a re-render cannot swallow it. */
   modelMenuOpen: boolean;
@@ -702,6 +706,16 @@ interface AppState {
   settingsSection: SettingsSectionId;
   /** 设置中心的网关数据快照：每个域各自持有加载态，禁止用一个 boolean 混住"没数据"与"加载失败"。 */
   settingsProfiles: SettingsLoadable<SettingsProfileRow[]>;
+  /** BOT 面板主状态机（core 判别联合）；空列表/失败/详情失败都是显式状态。 */
+  botManagementStatus: BotManagementStatus;
+  botManagementActiveBotId: string;
+  botManagementDetail?: BotDetailData;
+  /** 跨设置弹窗挂载存活的草稿池；key 是 BOT ID，关闭设置不丢未保存修改。 */
+  botDrafts: Record<string, BotDraftState>;
+  botManagementError?: string;
+  /** 网关要求二次确认的待办文案；只放纯数据，确认动作由闭包持有。 */
+  botManagementConfirm?: { message: string };
+  botManagementBusy: boolean;
   /** 提供商配置当前作用到的 Bot；空串表示跟随连接 profile。 */
   settingsScopedProfile: string;
   /** 统一提供商表（订阅 + 自定义，含每个 Agent 的生效状态）。 */
@@ -1038,8 +1052,6 @@ const state: AppState = {
   isMoreSessionsExpanded: false,
   isNewTaskModalOpen: false,
   newTaskModalTab: 'solo',
-  isAgentEditorOpen: false,
-  editingAgentProfileName: undefined,
   editingGroupRoomId: undefined,
   profileName: localStorage.getItem('hermes_flux_profile') || localStorage.getItem('hermes_aura_profile') || 'default',
   modelMenuOpen: false,
@@ -1066,6 +1078,13 @@ const state: AppState = {
   isSettingsOpen: false,
   settingsSection: 'appearance',
   settingsProfiles: { status: 'idle' },
+  botManagementStatus: { status: 'uninitialized' },
+  botManagementActiveBotId: '',
+  botManagementDetail: undefined,
+  botDrafts: {},
+  botManagementError: undefined,
+  botManagementConfirm: undefined,
+  botManagementBusy: false,
   settingsScopedProfile: '',
   settingsProviderViews: { status: 'idle' },
   settingsProviderFailures: [],
@@ -7957,16 +7976,252 @@ function getSettingsController(): ReturnType<typeof createSettingsController> {
   return settingsController;
 }
 
-function toSettingsProfileRows(profiles: AgentProfile[]): SettingsProfileRow[] {
-  return profiles.map((profile) => ({
-    name: profile.name,
-    displayName: profile.displayName || profile.name,
-    model: profile.model || undefined,
-    description: profile.description || undefined,
-    isDefault: profile.isDefault === true,
-  }));
+/* --------------------------------------------------------------------------
+ * BOT 配置中枢：宿主控制器（惰性单例）
+ * -------------------------------------------------------------------------- */
+
+let botManagementController: ReturnType<typeof createBotManagementController> | null = null;
+
+/**
+ * BOT 面板控制器（全进程单例）。
+ * 【约束】状态仍以 AppState 为唯一真源，控制器只经 getState/setState 读写；
+ *   所有网关调用都走 core 的 ProfileService，禁止在壳层手拼 RPC 参数。
+ */
+function getBotManagementController(): ReturnType<typeof createBotManagementController> {
+  if (botManagementController) return botManagementController;
+
+  botManagementController = createBotManagementController({
+    isConnected: () => Boolean(gatewayClient) && state.gatewayConnected,
+    // 花名册复用设置中心的 profiles.list 编排，避免两条数据通路各自持有加载态与令牌。
+    loadProfiles: () => getSettingsController().loadProfiles(),
+    getProfiles: () => state.settingsProfiles,
+    getState: () => ({
+      status: state.botManagementStatus,
+      activeBotId: state.botManagementActiveBotId,
+      activeDetail: state.botManagementDetail,
+      drafts: state.botDrafts,
+      errorBanner: state.botManagementError,
+      confirmPending: state.botManagementConfirm,
+      isBusy: state.botManagementBusy,
+    }),
+    setState: (patch) => {
+      if (patch.status !== undefined) state.botManagementStatus = patch.status;
+      if (patch.activeBotId !== undefined) state.botManagementActiveBotId = patch.activeBotId;
+      // 显式 undefined 代表"清空详情/横幅"，必须用 in 判断，不能用 !== undefined 吞掉清除动作。
+      if ('activeDetail' in patch) state.botManagementDetail = patch.activeDetail;
+      if (patch.drafts !== undefined) state.botDrafts = patch.drafts;
+      if ('errorBanner' in patch) state.botManagementError = patch.errorBanner;
+      if ('confirmPending' in patch) state.botManagementConfirm = patch.confirmPending;
+      if (patch.isBusy !== undefined) state.botManagementBusy = patch.isBusy;
+    },
+    describeBot: (botId, hint) => {
+      if (!gatewayClient) return Promise.reject(new Error(t('settings.notConnected')));
+      return profileService.describeBot(botId, gatewayClient, hint);
+    },
+    /**
+     * 全局技能目录：只在 describe 未返回 skills 时用于补全展示。
+     * 【规则】读取失败返回 null（界面保留非权威提示），绝不把失败当成空目录。
+     */
+    fetchSkillInventory: async (botId) => {
+      if (!gatewayClient) return null;
+      try {
+        const result = await gatewayClient.request<{ skills?: Record<string, string[]> | null }>(
+          'skills.manage',
+          { profile: botId, action: 'list' },
+        );
+        const groups = result?.skills;
+        if (!groups || typeof groups !== 'object') return null;
+        const names: string[] = [];
+        for (const value of Object.values(groups)) {
+          if (!Array.isArray(value)) continue;
+          for (const name of value) if (typeof name === 'string' && name) names.push(name);
+        }
+        return names;
+      // gate-degrade: 技能目录读取失败只影响非权威清单的补全展示，界面会显示"清单读取不完整"；不阻塞 BOT 详情，也不伪装成空目录。
+      } catch {
+        return null;
+      }
+    },
+    /**
+     * MCP 探活：失败返回 null，界面显示"状态未知"。
+     * 【契约】0.23.1 的运行时行用 `tools` 计工具数，`connected` 才是探活结论。
+     */
+    fetchMcpStatus: async (botId) => {
+      if (!gatewayClient) return null;
+      try {
+        const result = await gatewayClient.request<{
+          servers?: Array<{ name?: string; connected?: boolean; transport?: string; tools?: number }>;
+        }>('mcp.servers.status', { profile: botId });
+        if (!Array.isArray(result?.servers)) return null;
+        return result.servers
+          .filter((row) => typeof row?.name === 'string' && row.name)
+          .map((row) => ({
+            name: row.name as string,
+            connected: row.connected === true,
+            transport: typeof row.transport === 'string' ? row.transport : undefined,
+            toolCount: typeof row.tools === 'number' ? row.tools : undefined,
+          }));
+      // gate-degrade: 探活失败等价于"状态未知"（online 保持 undefined），界面不得画红灯；已有清单照常展示。
+      } catch {
+        return null;
+      }
+    },
+    configureBot: (params: ProfilesConfigureParams) => {
+      if (!gatewayClient) return Promise.reject(new Error(t('settings.notConnected')));
+      return profileService.configureBot(params, gatewayClient);
+    },
+    setAsset: (botId, dataUrl, clear) => {
+      if (!gatewayClient) return Promise.reject(new Error(t('settings.notConnected')));
+      return profileService.setAsset(botId, 'avatar', dataUrl, gatewayClient, { clear });
+    },
+    render: () => render(),
+    translate: (key) => t(key),
+    describeError: (error) => describeRpcError(error),
+    notify: (message) => showToast(message),
+    // 保存成功后刷左轨/花名册投影；fetchProfiles 自带 generation 令牌，不与控制器抢写。
+    onProfilesChanged: () => { void fetchProfiles(); },
+    /**
+     * 头像资产不在 profiles.list 的回显里（网关只给 has_avatar），保存成功后必须主动同步
+     * 内存缓存、花名册行与会话投影；否则左轨与选择器继续画旧头像，用户以为保存没生效。
+     */
+    onAvatarChanged: (botId, dataUrl) => {
+      const key = botId.toLowerCase();
+      if (dataUrl) profileAvatarCache.set(key, dataUrl);
+      else profileAvatarCache.delete(key);
+      const profile = state.profiles.find((item) => item.name === botId);
+      if (profile) {
+        profile.avatar = dataUrl;
+        profile.hasAvatar = Boolean(dataUrl);
+        if (profile.displayName) {
+          const named = profile.displayName.toLowerCase();
+          if (dataUrl) profileAvatarCache.set(named, dataUrl);
+          else profileAvatarCache.delete(named);
+        }
+      }
+      if (state.settingsProfiles.status === 'ready') {
+        state.settingsProfiles = {
+          status: 'ready',
+          data: state.settingsProfiles.data.map((row) =>
+            row.name === botId ? { ...row, avatar: dataUrl, hasAvatar: Boolean(dataUrl) } : row,
+          ),
+        };
+      }
+      for (const session of state.sessions) {
+        if (session.botName === botId) session.botAvatar = dataUrl;
+      }
+      persistAvatarCache();
+    },
+    // 160ms 静止防抖：测试可注入假定时器，生产沿用宿主 setTimeout。
+    schedule: (fn, ms) => {
+      const timer = setTimeout(fn, ms);
+      return () => clearTimeout(timer);
+    },
+  });
+  return botManagementController;
 }
 
+/**
+ * 打开设置中心的 BOT 面板并选中指定 BOT。
+ * 【设计意图】左轨右键"编辑资料"与设置页花名册的"编辑"共用同一入口，
+ *   避免出现两套打开逻辑（一套走弹窗、一套走面板）。
+ * 【规则】立即取详情，不等 160ms 防抖——这是用户的显式意图，不是滑动落点。
+ */
+function openBotSettings(botId: string): void {
+  state.isSettingsOpen = true;
+  state.settingsSection = 'agents';
+
+  // 先把目标写入 activeBotId：loadRoster 完成时会"保持仍在花名册中的 activeBotId"，
+  // 因此不需要在列表未就绪时抢跑 describe，避免花名册与详情各打一次 RPC。
+  state.botManagementActiveBotId = botId;
+  const status = state.botManagementStatus.status;
+  ensureSettingsSectionData('agents');
+  if (status !== 'uninitialized' && status !== 'fetching_list') {
+    getBotManagementController().selectBot(botId, { immediate: true });
+  }
+  render();
+}
+
+/**
+ * BOT 面板渲染快照。
+ * 【规则】只从 AppState 现算，不在这里发 RPC；草稿 hasDraft 必须来自草稿池，
+ *   不能用"字段是否非空"猜测（空字符串也是合法草稿值）。
+ */
+function getBotManagementSnapshot(): SettingsSnapshot['botManagement'] {
+  // 花名册投影走 core 的纯函数：hasDraft 由草稿池现算，且该函数有落盘测试。
+  const roster: SettingsSnapshot['botManagement']['roster'] =
+    state.settingsProfiles.status === 'ready'
+      ? projectBotRoster(
+          state.settingsProfiles.data.map((row) => ({
+            name: row.name,
+            displayName: row.displayName,
+            // 模型优先取设置域行，其次回落到全局 profiles 投影（两条来源都可能先到）。
+            model: row.model || state.profiles.find((item) => item.name === row.name)?.model || '',
+            avatar: row.avatar || state.profiles.find((item) => item.name === row.name)?.avatar || undefined,
+            isDefault: row.isDefault,
+          })),
+          state.botDrafts,
+        )
+      : [];
+
+  // 模型目录按 provider 顺序聚合；同一 provider 下重复模型只保留首个。
+  const availableModels: SettingsSnapshot['botManagement']['availableModels'] = [];
+  const seenModels = new Set<string>();
+  if (state.settingsProviderViews.status === 'ready') {
+    for (const view of state.settingsProviderViews.data) {
+      // 未配置/读取失败的 provider 不得进入下拉：选中也保存不了，等于给用户假选项。
+      // 当前模型若属于这类 provider，UI 会用"[离线/不可用]"占位保留，不会被静默清空。
+      if (view.availability !== 'active' && view.availability !== 'ready') continue;
+      for (const modelId of view.models) {
+        const key = `${view.id}\u0000${modelId}`;
+        if (seenModels.has(key)) continue;
+        seenModels.add(key);
+        availableModels.push({
+          id: modelId,
+          name: formatModelDisplayName(modelId, view.name),
+          provider: view.id,
+          providerName: view.name,
+        });
+      }
+    }
+  }
+
+  return {
+    status: state.botManagementStatus,
+    roster,
+    activeBotId: state.botManagementActiveBotId,
+    activeDetail: state.botManagementDetail,
+    availableModels,
+    // 草稿池整表不进快照：每个 render 都会 JSON.stringify 快照做指纹，
+    // SOUL（64KB）进草稿后整表序列化会拖慢长会话。UI 只需要当前 BOT 的草稿；
+    // 其它 BOT 的脏标记由 roster[].hasDraft 逐行表达，避免出现两份真值。
+    activeDraft: state.botManagementActiveBotId
+      ? state.botDrafts[state.botManagementActiveBotId]
+      : undefined,
+    // 本步不实现新建向导与离场弹窗：给受控组件的空默认，禁止用 undefined 让组件猜。
+    wizard: {
+      open: false,
+      draft: {
+        mode: 'blank',
+        name: '',
+        displayName: '',
+        description: '',
+        model: '',
+        provider: '',
+        cloneFrom: '',
+        cloneChannels: false,
+        mirrorCredentials: false,
+      },
+      busy: false,
+    },
+    exitPrompt: null,
+    errorBanner: state.botManagementError,
+    confirmPending: state.botManagementConfirm,
+    // 新建向导落地前没有"高亮新 BOT"的来源；显式 undefined 而非伪造一个 ID。
+    highlightBotId: undefined,
+    // 保存忙态独立于 status：UI 用它禁用保存按钮并锁输入，status 仍保持 idle/saving 语义。
+    isBusy: state.botManagementBusy,
+  };
+}
 
 function getSettingsSnapshot(): SettingsSnapshot {
   return {
@@ -7979,6 +8234,7 @@ function getSettingsSnapshot(): SettingsSnapshot {
     // 提供商的旧 providers 域已并入统一表 providerViews，快照不再单列 providers。
     profiles: state.settingsProfiles,
     bots: botRoster(),
+    botManagement: getBotManagementSnapshot(),
     scopedProfile: scopedProfileName(),
     providerViews: state.settingsProviderViews,
     providerFailures: state.settingsProviderFailures,
@@ -8011,6 +8267,17 @@ function getSettingsSnapshot(): SettingsSnapshot {
  *   都在 loadProviderCatalog 内并发完成，不需要再单独跑端点/订阅的两次装载。
  */
 function ensureSettingsSectionData(section: SettingsSectionId, force = false): void {
+  // BOT 面板的花名册由 bot controller 统一编排：这里绝不能再调 settingsController.ensureSection('agents')，
+  // 否则同一次进入面板会并发两次 profiles.list，两个令牌互相覆盖，列表可能闪回旧数据。
+  if (section === 'agents') {
+    getBotManagementController().ensureLoaded(force);
+    // 模型绑定下拉的唯一数据源是统一提供商表；进入 BOT 面板必须确保目录已装载，
+    // 否则首次进入只能看到空下拉（用户以为该 BOT 没有可选模型）。
+    if (force || state.settingsProviderViews.status === 'idle') {
+      void reloadProviderCatalog();
+    }
+    return;
+  }
   getSettingsController().ensureSection(section, force);
   if (section !== 'providers') return;
   // 花名册是 Agent 槽位的来源；空列表时补拉一次，已有数据不重复请求。
@@ -8070,7 +8337,8 @@ function createSettingsActions(): SettingsActions {
       saveActivityIndicatorVariant(activityIndicatorVariant);
       render();
     },
-    onRefreshProfiles: () => { void getSettingsController().loadProfiles(); },
+    // 设置页的"刷新"现在服务 BOT 面板：它会同时刷新花名册与当前详情。
+    onRefreshProfiles: () => { void getBotManagementController().loadRoster(true); },
     onScopeProfileChange: (profile) => {
       state.settingsScopedProfile = profile;
       render();
@@ -8393,11 +8661,33 @@ function createSettingsActions(): SettingsActions {
       }
     },
     onNotify: (message) => showToast(message),
+
+    /* ---- BOT 配置中枢（本步只实现基础信息与头像） ---- */
+    /** 草稿实时写入；脏净判定由 core 的 isBotDraftDirty 统一决定。 */
+    onBotDraftChange: (botId, patch) => getBotManagementController().updateDraft(botId, patch),
+    /** 选择器静止吸附后的详情请求；160ms 防抖与并发令牌在控制器内。 */
+    onSelectBotSettle: (botId) => getBotManagementController().selectBot(botId),
+    /** 原子保存当前草稿（profiles.configure + profiles.set_asset）。 */
+    onSaveBotConfig: (botId, options) => getBotManagementController().saveBot(botId, options),
+    /** 丢弃当前 BOT 的草稿，表单回到权威快照。 */
+    onResetBotDraft: (botId) => getBotManagementController().resetDraft(botId),
+    /** 新建向导本步不实现功能：显式空实现，绝不假装已打开或已提交。 */
+    onOpenBotWizard: () => {},
+    onCloseBotWizard: () => {},
+    onBotWizardDraftChange: () => {},
+    /** 向导未落地时提交必须显式失败，禁止静默返回成功。 */
+    onSubmitCreateBot: async () => ({ ok: false, message: t('bot.createFailed') }),
+    /** 花名册重试：忽略缓存并重新装载。 */
+    onRetryBotList: () => { void getBotManagementController().loadRoster(true); },
+    onDismissBotError: () => getBotManagementController().dismissError(),
+    onDismissBotConfirm: () => getBotManagementController().dismissConfirm(),
+    /** 离场守卫本步不实现：没有脏守卫注册，就不会弹确认框。 */
+    onConfirmBotExit: () => {},
+    onCancelBotExit: () => {},
+    onRegisterBotDirtyGuard: () => {},
+    /** 花名册行内"编辑"：打开 BOT 面板并立即选中目标。 */
     onOpenAgent: (name) => {
-      state.isSettingsOpen = false;
-      state.editingAgentProfileName = name;
-      state.isAgentEditorOpen = true;
-      render();
+      openBotSettings(name);
     },
     onRefreshExtensions: () => { void getSettingsController().loadExtensions(); },
     onReloadSkills: () => getSettingsController().reloadSkills(),
@@ -8811,12 +9101,6 @@ function render(): void {
 
       ${renderContextMenu(state.sessionContextMenu)}
 
-      ${renderAgentProfileEditorModal({
-        isOpen: state.isAgentEditorOpen,
-        profile: state.editingAgentProfileName ? state.profiles.find((p) => p.name === state.editingAgentProfileName) : undefined,
-        availableModels: state.availableModels,
-      })}
-
       ${renderConfirmModal(state.confirmModal ? {
         isOpen: true,
         title: state.confirmModal.title,
@@ -8986,23 +9270,6 @@ function render(): void {
       }
     } else if (nextTaskModalHtml) {
       root.insertAdjacentHTML('beforeend', nextTaskModalHtml);
-    }
-
-    // Agent Profile Editor Modal
-    const agentEditorRoot = document.getElementById('agent-profile-editor-backdrop');
-    const nextAgentEditorHtml = renderAgentProfileEditorModal({
-      isOpen: state.isAgentEditorOpen,
-      profile: state.editingAgentProfileName ? state.profiles.find((p) => p.name === state.editingAgentProfileName) : undefined,
-      availableModels: state.availableModels,
-    });
-    if (agentEditorRoot) {
-      if (nextAgentEditorHtml) {
-        agentEditorRoot.outerHTML = nextAgentEditorHtml;
-      } else {
-        agentEditorRoot.remove();
-      }
-    } else if (nextAgentEditorHtml) {
-      root.insertAdjacentHTML('beforeend', nextAgentEditorHtml);
     }
 
     // Confirm Modal
@@ -9580,69 +9847,6 @@ function bindEvents(): void {
   if (closeTaskModalBtn) closeTaskModalBtn.onclick = () => { state.isNewTaskModalOpen = false; render(); };
   if (cancelTaskModalBtn) cancelTaskModalBtn.onclick = () => { state.isNewTaskModalOpen = false; render(); };
 
-  // Agent Profile Editor Modal Events
-  const closeAgentEditorBtn = document.getElementById('btn-close-agent-editor');
-  const cancelAgentEditorBtn = document.getElementById('btn-cancel-agent-editor');
-  const agentEditorBackdrop = document.getElementById('agent-profile-editor-backdrop');
-  const saveAgentEditorBtn = document.getElementById('btn-save-agent-editor');
-
-  const closeAgentEditor = () => {
-    state.isAgentEditorOpen = false;
-    state.editingAgentProfileName = undefined;
-    render();
-  };
-
-  if (closeAgentEditorBtn) closeAgentEditorBtn.onclick = closeAgentEditor;
-  if (cancelAgentEditorBtn) cancelAgentEditorBtn.onclick = closeAgentEditor;
-  if (agentEditorBackdrop) {
-    agentEditorBackdrop.onclick = (e) => {
-      if (e.target === agentEditorBackdrop) closeAgentEditor();
-    };
-  }
-
-  if (saveAgentEditorBtn) {
-    saveAgentEditorBtn.onclick = async () => {
-      const targetName = state.editingAgentProfileName;
-      if (!targetName) return;
-      const targetProfile = state.profiles.find((p) => p.name === targetName);
-      if (!targetProfile) return;
-
-      const nameInput = document.getElementById('agent-editor-display-name') as HTMLInputElement | null;
-      const descInput = document.getElementById('agent-editor-desc') as HTMLTextAreaElement | null;
-      const modelSelect = document.getElementById('agent-editor-model-select') as HTMLSelectElement | null;
-      const promptInput = document.getElementById('agent-editor-prompt') as HTMLTextAreaElement | null;
-
-      const newDisplayName = nameInput?.value?.trim() || targetProfile.name;
-      const newDesc = descInput?.value?.trim() || '';
-      const newModel = modelSelect?.value?.trim() || '';
-      const newPrompt = promptInput?.value?.trim() || '';
-
-      // 1. 本地状态即刻响应更新
-      targetProfile.displayName = newDisplayName;
-      targetProfile.description = newDesc;
-      targetProfile.model = newModel;
-
-      // 2. 若底层网关在线，异步持久化至网关配置档
-      if (gatewayClient) {
-        void profileService.configureProfile(
-          targetProfile.name,
-          {
-            displayName: newDisplayName,
-            description: newDesc,
-            model: newModel || undefined,
-            soulContent: newPrompt || undefined,
-          },
-          gatewayClient
-        ).catch((err) => {
-          console.warn('[Flux] configureProfile failed:', err);
-        });
-      }
-
-      showToast(t('agent.saveSuccess'));
-      closeAgentEditor();
-    };
-  }
-
   // Confirm Modal Events
   const confirmModalOkBtn = document.getElementById('btn-confirm-modal-ok');
   const confirmModalCancelBtn = document.getElementById('btn-confirm-modal-cancel');
@@ -9769,27 +9973,8 @@ function bindEvents(): void {
       if (action === 'bot-chat') {
         void openBotChat(ctx.targetId);
       } else if (action === 'bot-edit') {
-        state.editingAgentProfileName = ctx.targetId;
-        state.isAgentEditorOpen = true;
-        render();
-
-        // 【关键修复点】：右键点击查看/编辑资料瞬间，立即强制向网关远端同步最新的 Profile 数据并重绘弹窗
-        if (gatewayClient) {
-          void (async () => {
-            try {
-              const freshProfiles = await gatewayClient.listProfiles();
-              if (Array.isArray(freshProfiles) && freshProfiles.length > 0) {
-                state.profiles = freshProfiles;
-                syncProfileLastMessages();
-                if (state.isAgentEditorOpen && state.editingAgentProfileName === ctx.targetId) {
-                  render();
-                }
-              }
-            } catch (err) {
-              console.warn('[Flux] Immediate fetch profile on open editor failed:', err);
-            }
-          })();
-        }
+        // 统一走设置中心 BOT 面板：旧内联编辑器已删除，禁止再开第二套编辑浮层。
+        openBotSettings(ctx.targetId);
       } else if (action === 'group-rename') {
         state.editingGroupRoomId = ctx.targetId;
         render();

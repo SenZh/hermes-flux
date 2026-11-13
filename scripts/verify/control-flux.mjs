@@ -319,6 +319,7 @@ export async function runFeature(featureId) {
       || featureId === 'prompt-navigator-rail'
       || featureId === 'provider-bot-binding'
       || featureId === 'activity-indicator-preference'
+      || featureId === 'bot-config-center'
       ? { htmlPath: '/packages/desktop/dist/renderer/index.html' }
       : {}
   );
@@ -1425,8 +1426,243 @@ export async function runFeature(featureId) {
       fs.writeFileSync(path.join(featureArtifactsDir, 'evidence.json'), JSON.stringify(evidence, null, 2));
       console.log(`  ✔ 活动指示器变体验证成功！证据已落盘: ${screenshot}`);
       return true;
+    } else if (featureId === 'bot-config-center') {
+      console.log('  1. 打开设置 › BOT：注入一份权威详情与模型目录（走真实渲染路径）...');
+      await session.waitFor('document.getElementById("flux-app-root")?.childElementCount > 0', 15000, 'renderer first paint');
+      await session.click('#btn-open-settings');
+      await session.waitFor('document.querySelector("[data-testid=settings-dialog]") !== null', 8000, 'settings dialog');
+      await session.click('[data-settings-section=agents]');
+
+      const injected = await session.evaluate(`(() => {
+        const s = window.__fluxState;
+        if (!s) return 'no-state';
+        s.settingsProfiles = { status: 'ready', data: [
+          { name: 'default', displayName: 'Hermes', model: 'fn/m1', isDefault: true, hasAvatar: false },
+          { name: 'arch', displayName: '架构老王', model: 'fn/m1', isDefault: false, hasAvatar: false },
+        ] };
+        s.botManagementStatus = { status: 'idle', activeBotId: 'arch' };
+        s.botManagementActiveBotId = 'arch';
+        s.botManagementDetail = {
+          id: 'arch', displayName: '架构老王', description: '负责架构评审',
+          model: 'fn/m1', provider: 'fn', soul: '你是一名架构师。', avatar: undefined, isDefault: false,
+          skills: { authoritative: true, rows: [
+            { id: 'codebase-inspection', label: 'codebase-inspection', enabled: true },
+            { id: 'dogfood', label: 'dogfood', enabled: false },
+          ] },
+          toolsets: { authoritative: true, rows: [
+            { id: 'web', label: 'Web Search', enabled: true, description: 'web_search', toolCount: 2 },
+            { id: 'browser', label: 'Browser', enabled: false, description: 'navigate', toolCount: 4 },
+          ] },
+          mcpServers: { authoritative: true, rows: [
+            { id: 'github-mcp', label: 'github-mcp', enabled: true, transport: 'stdio', toolCount: 9, online: true },
+            { id: 'playwright', label: 'playwright', enabled: true, transport: 'http', online: undefined },
+          ] },
+        };
+        s.botDrafts = {};
+        s.settingsProviderViews = { status: 'ready', data: [
+          { key: 'custom:fn', kind: 'custom', id: 'fn', name: 'Fn 网关', models: ['fn/m1', 'fn/m2'],
+            detail: 'http://127.0.0.1:9/v1', availability: 'ready', agents: [] },
+        ] };
+        window.__fluxRender();
+        return 'ok';
+      })()`);
+      if (String(injected) !== 'ok') throw new Error(`BOT 面板状态注入失败: ${injected}`);
+      await session.waitFor('document.querySelector("[data-bot-carousel]") !== null', 8000, 'bot carousel');
+      await session.waitFor('document.querySelectorAll("[data-bot-slot]").length === 5', 8000, 'five slots');
+
+      console.log('  2. 选择器与基础字段必须齐全，且当前模型回显...');
+      const layout = await session.evaluate(`(() => {
+        const panel = document.querySelector('[data-bot-carousel]');
+        const model = document.querySelector('#bot-model');
+        const slots = [...document.querySelectorAll('[data-bot-slot]')];
+        return {
+          slotCount: slots.length,
+          distinctTransforms: new Set(slots.map((n) => getComputedStyle(n).transform)).size,
+          panelHeight: panel ? Math.round(panel.getBoundingClientRect().height) : 0,
+          hasId: Boolean(document.querySelector('#bot-id')),
+          hasName: Boolean(document.querySelector('#bot-display-name')),
+          hasDescription: Boolean(document.querySelector('#bot-description')),
+          hasModel: Boolean(model),
+          modelValue: model ? model.value : '',
+          modelGroups: model ? model.querySelectorAll('optgroup').length : 0,
+          overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+        };
+      })()`);
+      if (layout.slotCount !== 5) throw new Error(`槽位必须固定 5 个，实测 ${layout.slotCount}`);
+      if (layout.distinctTransforms < 4) throw new Error(`槽位必须有近大远小位移，实测 ${layout.distinctTransforms} 种`);
+      if (layout.panelHeight !== 148) throw new Error(`滑动视口必须 148px，实测 ${layout.panelHeight}`);
+      if (!layout.hasId || !layout.hasName || !layout.hasDescription) throw new Error('基础身份字段缺失');
+      if (!layout.hasModel) throw new Error('缺少模型绑定下拉');
+      if (layout.modelValue !== 'fn/m1') throw new Error(`模型必须回显当前值，实测 ${layout.modelValue}`);
+      if (layout.modelGroups < 1) throw new Error('模型下拉必须按 Provider 分组');
+      if (layout.overflowX) throw new Error('页面出现横向溢出');
+
+      console.log('  3. 折叠区必须按 Grid 契约展开（点击后 0fr -> 1fr），且能力开关真实可点...');
+      const collapsed = await session.evaluate(`(() => {
+        const nodes = [...document.querySelectorAll('[data-bot-section]')];
+        return nodes.map((node) => {
+          const btn = node.querySelector('button[aria-expanded]');
+          const grid = node.querySelector('div.grid');
+          return {
+            id: node.getAttribute('data-bot-section'),
+            expanded: btn ? btn.getAttribute('aria-expanded') : null,
+            controls: btn ? btn.getAttribute('aria-controls') : null,
+            rowsBefore: grid ? getComputedStyle(grid).gridTemplateRows : '',
+          };
+        });
+      })()`);
+      console.log('     · 初始折叠态:', JSON.stringify(collapsed));
+      if (collapsed.length < 4) throw new Error(`能力矩阵折叠区缺失，实测 ${collapsed.length} 个`);
+      for (const section of collapsed) {
+        if (!section.controls) throw new Error(`${section.id} 折叠按钮必须声明 aria-controls`);
+        if (section.expanded === 'true') throw new Error(`${section.id} 必须默认收起（design §7.2）`);
+      }
+      // 逐个点开：Grid 契约必须是 0fr -> 1fr，且内容真实可交互。
+      for (const section of collapsed) {
+        await session.click(`[data-bot-section=${section.id}] > button[aria-expanded]`);
+      }
+      // 等展开过渡跑完（120ms）再测量，否则读到的是过渡起始帧。
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      const sections = await session.evaluate(`(() => {
+        const nodes = [...document.querySelectorAll('[data-bot-section]')];
+        return nodes.map((node) => {
+          const btn = node.querySelector('button[aria-expanded]');
+          const grid = node.querySelector('div.grid');
+          const inner = grid ? grid.firstElementChild : null;
+          return {
+            id: node.getAttribute('data-bot-section'),
+            expanded: btn ? btn.getAttribute('aria-expanded') : null,
+            rows: grid ? grid.querySelectorAll('[data-bot-capability]').length : 0,
+            gridRows: grid ? getComputedStyle(grid).gridTemplateRows : '',
+            visible: inner ? getComputedStyle(inner).visibility : '',
+          };
+        });
+      })()`);
+      console.log('     · 展开后:', JSON.stringify(sections));
+      for (const section of sections) {
+        if (section.expanded !== 'true') throw new Error(`${section.id} 点击后必须展开`);
+        if (section.gridRows === '0px' || section.gridRows === '') {
+          throw new Error(`${section.id} 的 grid-template-rows 必须脱离 0fr，实测 ${section.gridRows}`);
+        }
+        if (section.visible !== 'visible') throw new Error(`${section.id} 展开后内容必须可见`);
+      }
+      const soulSection = sections.find((s) => s.id === 'soul');
+      if (!soulSection) throw new Error('缺少 SOUL 抽屉');
+
+      console.log('  4. 点开一个能力开关：草稿必须落池且脏点出现，且不得直接写网关...');
+      const beforeToggle = await session.evaluate(
+        `JSON.stringify(Object.keys(window.__fluxState.botDrafts))`,
+      );
+      await session.click('[data-bot-capability=browser]');
+      await session.waitFor(
+        `Object.prototype.hasOwnProperty.call(window.__fluxState.botDrafts, 'arch')`,
+        5000,
+        'draft written',
+      );
+      const toggled = await session.evaluate(`(() => {
+        const draft = window.__fluxState.botDrafts.arch;
+        return {
+          enabledToolsets: draft ? draft.enabledToolsets : null,
+          disabledSkills: draft ? draft.disabledSkills : null,
+          saveDisabled: [...document.querySelectorAll('button')].some(
+            (b) => b.textContent.includes('保存配置') && b.disabled,
+          ),
+        };
+      })()`);
+      console.log('     · 草稿:', JSON.stringify(toggled), '· 前置:', beforeToggle);
+      if (!toggled.enabledToolsets || !toggled.enabledToolsets.includes('browser')) {
+        throw new Error(`开关必须写入草稿 enabledToolsets，实测 ${JSON.stringify(toggled.enabledToolsets)}`);
+      }
+      if (toggled.saveDisabled) throw new Error('有草稿时保存按钮不得禁用');
+
+      console.log('  5. 重置：草稿必须清空，开关回到权威快照...');
+      await session.evaluate(`(() => {
+        const btn = [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === '重置');
+        if (!btn) return false;
+        btn.click();
+        return true;
+      })()`);
+      await session.waitFor(
+        `Object.keys(window.__fluxState.botDrafts).length === 0`,
+        5000,
+        'draft cleared',
+      );
+
+      console.log('  6. MCP 未知态必须是「状态未知」，不得画成离线红灯...');
+      const mcp = await session.evaluate(`(() => {
+        const section = document.querySelector('[data-bot-section=mcp]');
+        const text = section ? section.textContent : '';
+        return {
+          unknown: text.includes('状态未知'),
+          offline: text.includes('未连接'),
+          online: text.includes('已连接'),
+          red: section
+            ? [...section.querySelectorAll('*')].some((el) => {
+                const color = getComputedStyle(el).color;
+                return /rgb\\(\\s*(2[0-9]{2}|1[5-9][0-9])\\s*,\\s*([0-9]|[1-6][0-9])\\s*,/.test(color);
+              })
+            : false,
+        };
+      })()`);
+      console.log('     · MCP 状态:', JSON.stringify(mcp));
+      if (!mcp.online) throw new Error('已连接的 MCP 必须显示在线');
+      if (!mcp.unknown) throw new Error('探活无结论时必须显示"状态未知"');
+      if (mcp.red) throw new Error('未知态不得使用红色（会被读成服务挂了）');
+
+      const screenshot = path.join(featureArtifactsDir, 'screenshot.png');
+      await session.screenshot(screenshot);
+
+      // 负向注入：这一条不可能是同源自证 —— 断言的是"错误态必须由状态机驱动渲染"，
+      // 若 UI 硬编码常量或忽略 status，注入 list_error 后仍会画出花名册与表单。
+      console.log('  7. 负向：注入 list_error 后必须画错误态，不得继续显示花名册与表单...');
+      const negative = await session.evaluate(`(() => {
+        const s = window.__fluxState;
+        s.botManagementStatus = { status: 'list_error', message: '网关连接已断开' };
+        s.botManagementDetail = undefined;
+        window.__fluxRender();
+        return 'ok';
+      })()`);
+      if (String(negative) !== 'ok') throw new Error(`负向注入失败: ${negative}`);
+      await session.waitFor(
+        `document.body.textContent.includes('网关连接已断开')`,
+        5000,
+        'list error surfaced',
+      );
+      const errorState = await session.evaluate(`(() => {
+        const dialog = document.querySelector('[data-testid=settings-dialog]');
+        const text = dialog ? dialog.textContent : '';
+        return {
+          rawMessage: text.includes('网关连接已断开'),
+          hasCarousel: Boolean(document.querySelector('[data-bot-carousel]')),
+          hasIdField: Boolean(document.querySelector('#bot-id')),
+          hasSaveButton: [...document.querySelectorAll('button')].some((b) => b.textContent.includes('保存配置')),
+          hasRetry: [...document.querySelectorAll('button')].some((b) => b.textContent.trim() === '重试'),
+        };
+      })()`);
+      console.log('     · 错误态:', JSON.stringify(errorState));
+      if (!errorState.rawMessage) throw new Error('错误态必须原样透出网关原因（Failure Is Not Empty）');
+      if (errorState.hasCarousel) throw new Error('错误态不得继续渲染花名册选择器');
+      if (errorState.hasIdField) throw new Error('错误态不得继续渲染详情表单');
+      if (errorState.hasSaveButton) throw new Error('错误态不得保留可点的保存按钮（假可用）');
+      if (!errorState.hasRetry) throw new Error('错误态必须给出重试入口');
+
+      const evidence = {
+        featureId,
+        timestamp: new Date().toISOString(),
+        durationMs: Date.now() - startTime,
+        status: 'PASSED',
+        layout,
+        sections,
+        toggled,
+        mcp,
+        errorState,
+        screenshot,
+      };
+      fs.writeFileSync(path.join(featureArtifactsDir, 'evidence.json'), JSON.stringify(evidence, null, 2));
+      console.log(`  ✔ BOT 配置中枢验证成功！证据已落盘: ${screenshot}`);
+      return true;
     } else {
-      throw new Error(`Unknown feature ID: ${featureId}. Supported features: bot-primary-chat, session-management, group-room, input-dock-controls, interactive-chat-stage, clean-light-theme, prompt-navigator-rail, provider-bot-binding, activity-indicator-preference`);
+      throw new Error(`Unknown feature ID: ${featureId}. Supported features: bot-primary-chat, session-management, group-room, input-dock-controls, interactive-chat-stage, clean-light-theme, prompt-navigator-rail, provider-bot-binding, activity-indicator-preference, bot-config-center`);
     }
   } finally {
     await session.cleanup();
