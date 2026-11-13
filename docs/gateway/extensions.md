@@ -5,9 +5,9 @@
 
 | 方法 | 入参（契约） | 出参（契约） | 调用点 | 真实探针 |
 | --- | --- | --- | --- | --- |
-| `mcp.servers.status` | `profile` | `servers` `checked_at` | `packages/desktop/src/renderer/settingsController.ts:197` | ✅ 0.21.6 |
-| `skills.manage` | `profile` `action` `query` `page` `page_size` | `skills` `results` `installed` `name` `items` `page` `total_pages` `total` `info` | `packages/desktop/src/renderer/settingsController.ts:198` | ✅ 0.21.6 |
-| `skills.reload` | `session_id` `profile` | `output` `result` | `packages/desktop/src/renderer/settingsController.ts:245` | ✅ 0.21.6 |
+| `mcp.servers.status` | `profile` | `servers` `checked_at` | `packages/desktop/src/renderer/index.ts:8262`<br>`packages/desktop/src/renderer/settingsController.ts:209` | ✅ 0.21.6 |
+| `skills.manage` | `profile` `action` `query` `page` `page_size` | `skills` `results` `installed` `name` `items` `page` `total_pages` `total` `info` | `packages/desktop/src/renderer/index.ts:8238`<br>`packages/desktop/src/renderer/settingsController.ts:210` | ✅ 0.21.6 |
+| `skills.reload` | `session_id` `profile` | `output` `result` | `packages/desktop/src/renderer/settingsController.ts:257` | ✅ 0.21.6 |
 
 ## 明细
 
@@ -18,7 +18,8 @@
 - 真实探针：已通过（网关 0.21.6，录制于 2026-11-08T13:18:53.038Z）
 - 备注：本机回环网关实测录制；主基线其余条目录制自 0.22.5
 - 调用点：
-  - `packages/desktop/src/renderer/settingsController.ts:197`
+  - `packages/desktop/src/renderer/index.ts:8262`
+  - `packages/desktop/src/renderer/settingsController.ts:209`
 
 ### `skills.manage`
 
@@ -27,7 +28,8 @@
 - 真实探针：已通过（网关 0.21.6，录制于 2026-11-08T13:18:53.038Z）
 - 备注：本机回环网关实测录制；主基线其余条目录制自 0.22.5
 - 调用点：
-  - `packages/desktop/src/renderer/settingsController.ts:198`
+  - `packages/desktop/src/renderer/index.ts:8238`
+  - `packages/desktop/src/renderer/settingsController.ts:210`
 
 ### `skills.reload`
 
@@ -36,5 +38,5 @@
 - 真实探针：已通过（网关 0.21.6，录制于 2026-11-08T13:18:53.038Z）
 - 备注：本机回环网关实测录制；主基线其余条目录制自 0.22.5
 - 调用点：
-  - `packages/desktop/src/renderer/settingsController.ts:245`
+  - `packages/desktop/src/renderer/settingsController.ts:257`
 

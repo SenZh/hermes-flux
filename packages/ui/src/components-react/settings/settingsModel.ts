@@ -32,6 +32,10 @@ import type {
   CustomEndpointDraft,
   ProviderView,
   BindingAttachIntent,
+  BotDetailData,
+  BotDraftState,
+  BotManagementStatus,
+  ProfileUiMeta,
 } from '@hermes-flux/core';
 
 export type { McpServerRow, SkillRow };
@@ -97,6 +101,10 @@ export interface SettingsProfileRow {
   model?: string;
   description?: string;
   isDefault?: boolean;
+  avatar?: string;
+  hasAvatar?: boolean;
+  /** 网关原样透传的 ui_meta；保存显示名/默认标记时要基于它合并，不能整块覆盖。 */
+  uiMeta?: ProfileUiMeta;
 }
 
 /** Bot 头像条的一行。`profile` 是网关的 profile 名，`avatar` 缺省时走确定性图腾。 */
@@ -104,6 +112,78 @@ export interface SettingsBotRow {
   profile: string;
   displayName: string;
   avatar?: string;
+}
+
+/** BOT 花名册的一行（快照派生；`hasDraft` 由壳层草稿池现算）。 */
+export interface BotRosterEntry {
+  id: string;
+  displayName: string;
+  model: string;
+  avatar?: string;
+  isDefault: boolean;
+  hasDraft: boolean;
+}
+
+/** 模型下拉的一行。`provider` 是网关 provider id，`providerName` 只用于分组标题。 */
+export interface BotModelOption {
+  id: string;
+  name: string;
+  provider: string;
+  providerName: string;
+}
+
+/** 新建/克隆向导的受控草稿。 */
+export interface BotWizardDraft {
+  mode: 'blank' | 'clone';
+  name: string;
+  displayName: string;
+  description: string;
+  model: string;
+  provider: string;
+  cloneFrom: string;
+  cloneChannels: boolean;
+  mirrorCredentials: boolean;
+}
+
+export interface BotWizardView {
+  open: boolean;
+  draft: BotWizardDraft;
+  busy: boolean;
+  error?: string;
+}
+
+/** 离场拦截的待执行目标（纯数据；真正的动作闭包由壳层持有）。 */
+export type BotExitTarget =
+  | { kind: 'close' }
+  | { kind: 'section'; section: SettingsSectionId };
+
+export interface BotManagementView {
+  /** 主状态机（来自 core 的判别联合）。 */
+  status: BotManagementStatus;
+  roster: BotRosterEntry[];
+  activeBotId: string;
+  activeDetail?: BotDetailData;
+  /** 按 Provider 分组的可选模型；当前模型离线时由 UI 追加离线项。 */
+  availableModels: BotModelOption[];
+  /**
+   * 当前 BOT 的草稿；缺省表示未修改，UI 从 activeDetail 派生初始值。
+   *
+   * 【为什么只给当前一份】快照每次 render 都要 JSON.stringify 做指纹；SOUL 最长 64KB，
+   *   整表草稿序列化会拖慢长会话。其它 BOT 是否脏由 `roster[].hasDraft` 逐行表达
+   *   （壳层从同一份草稿池现算），不再额外复制一份 dirtyBotIds。
+   */
+  activeDraft?: BotDraftState;
+  /** 壳层保存忙态；与状态机正交，用于禁用输入与保存按钮。 */
+  isBusy: boolean;
+  wizard: BotWizardView;
+  /** 非空时渲染宿主离场确认弹窗。 */
+  exitPrompt: { target: BotExitTarget } | null;
+  /** 失败横幅（配置错误 / 读取失败），绝不随表单一起清空。 */
+  errorBanner?: string;
+  /** 网关要求二次确认：网关一个字段都没写，提供"仍然保存"出路。 */
+  confirmPending?: { message: string };
+  /** 新建成功后需要平滑滚动并高亮的目标。 */
+  highlightBotId?: string;
 }
 
 /**
@@ -126,6 +206,8 @@ export interface SettingsSnapshot {
   skills: SettingsLoadable<SkillRow[]>;
   /** Bot 花名册（提供商行的 Agent 槽位来源），由 profiles 列表实时派生。 */
   bots: SettingsBotRow[];
+  /** BOT 配置中枢的完整视图（选择器、详情、草稿、向导、离场拦截）。 */
+  botManagement: BotManagementView;
   /** 提供商配置当前作用到的 Bot（删除/设为默认/登录都作用于它）；空串表示跟随连接 profile。 */
   scopedProfile: string;
   /** 统一提供商表：订阅与自定义混排，包含每个 Agent 的生效状态。 */
@@ -221,6 +303,38 @@ export interface SettingsActions {
   onPresenceLayoutChange: (layout: 'stage' | 'dock') => void;
   onRefreshProfiles: () => void;
   onOpenAgent: (name: string) => void;
+
+  /** 草稿实时写入（局部补丁；壳层负责与持久化快照深比较并清除空草稿）。 */
+  onBotDraftChange: (botId: string, patch: Partial<BotDraftState>) => void;
+  /** 选择器静止吸附后请求该 BOT 的完整详情（壳层做 160ms 防抖与令牌收敛）。 */
+  onSelectBotSettle: (botId: string) => void;
+  /** 原子保存当前草稿（profiles.configure + profiles.set_asset）。失败时草稿必须保留。 */
+  onSaveBotConfig: (
+    botId: string,
+    options?: { confirmExpensive?: boolean },
+  ) => Promise<SettingsActionResult>;
+  /** 清空当前 BOT 的未保存修改（草稿池与表单一起回到权威快照）。 */
+  onResetBotDraft: (botId: string) => void;
+  /** 打开新建/克隆向导。 */
+  onOpenBotWizard: (mode: 'blank' | 'clone') => void;
+  /** 关闭向导（不提交任何内容）。 */
+  onCloseBotWizard: () => void;
+  /** 向导表单补丁。 */
+  onBotWizardDraftChange: (patch: Partial<BotWizardDraft>) => void;
+  /** 提交新建/克隆。成功后壳层负责刷新花名册并定位新 BOT。 */
+  onSubmitCreateBot: () => Promise<SettingsActionResult>;
+  /** 重新拉取花名册（错误态重试 / 手动刷新）。 */
+  onRetryBotList: () => void;
+  /** 关闭失败横幅（不触碰草稿）。 */
+  onDismissBotError: () => void;
+  /** 关闭二次确认横幅（"暂不保存"），只清确认态，不动草稿。 */
+  onDismissBotConfirm: () => void;
+  /** 宿主离场确认：放弃修改 / 保留草稿并离开。 */
+  onConfirmBotExit: (choice: 'discard' | 'keep') => void;
+  /** 留在当前（取消离场）。 */
+  onCancelBotExit: () => void;
+  /** BOT 面板注册宿主级脏检查钩子；卸载时传 null 注销。 */
+  onRegisterBotDirtyGuard: (guard: (() => boolean) | null) => void;
   onRefreshExtensions: () => void;
   onReloadSkills: () => Promise<SettingsActionResult>;
   onTestGateway: (draft: GatewayDraft) => void;

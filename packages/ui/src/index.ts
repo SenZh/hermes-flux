@@ -67,7 +67,6 @@ export * from './components/Project/ProjectTreeViewer.js';
 export * from './components/TaskModal/NewTaskModal.js';
 export * from './components/Modal/ConfirmModal.js';
 export * from './components/ContextMenu/ContextMenu.js';
-export * from './components/Bot/AgentProfileEditorModal.js';
 export * from './utils/imagePreprocessor.js';
 export * from './components-react/primitives/index.js';
 export { StatusBar, type StatusBarProps } from './components-react/StatusBar.js';

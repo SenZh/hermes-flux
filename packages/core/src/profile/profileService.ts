@@ -40,6 +40,16 @@ import type {
   IRpcCaller,
 } from '../rpc/types.js';
 import { normalizeAgentProfile } from '../rpc/profileNormalize.js';
+import { parseBotDetail, type BotDetailData, type BotIdentityHint } from './botManagement.js';
+
+/** 旧编辑器兼容字段 + 新面板需要的配置域。 */
+export interface ProfileConfigurePatch extends Partial<AgentProfileDetail> {
+  provider?: string;
+  uiMeta?: Record<string, unknown>;
+  disabledSkills?: string[];
+  enabledToolsets?: string[];
+  enabledMcpServers?: string[];
+}
 
 export interface ForeverChatDescriptor {
   sessionId: string;
@@ -86,6 +96,9 @@ export class ProfileService {
 
   /**
    * 获取指定 Bot 的详细档案（System Prompt / Tools / 沙箱路径）
+   *
+   * 【保留原因】旧调用路径仍按 AgentProfileDetail 消费；新 BOT 面板一律走 `describeBot`，
+   *   两者共用同一份 `parseBotDetail` 解析，避免出现两套字段口径。
    */
   public async describeProfile(name: string, bridge: IRpcCaller): Promise<AgentProfileDetail> {
     if (!name || typeof name !== 'string') {
@@ -96,22 +109,76 @@ export class ProfileService {
       'profiles.describe',
       { name }
     );
-    // 官方 Gateway 直接扁平返回 { name, description, soul, model, toolsets, ... } 或嵌套在 profile 字段中
-    const profileDetail: AgentProfileDetail | null = res?.profile || (res?.name ? {
-      name: res.name,
-      displayName: res.name,
-      description: res.description,
-      soulContent: res.soul,
-      systemPrompt: res.soul,
-      tools: Array.isArray(res.toolsets)
-        ? res.toolsets.map((t) => t.name)
-        : [],
-    } : null);
+    const legacy = res?.profile && typeof res.profile === 'object'
+      ? (res.profile as Record<string, unknown>)
+      : null;
+    const legacyTools = Array.isArray(legacy?.tools)
+      ? legacy.tools.filter((tool): tool is string => typeof tool === 'string')
+      : [];
+    const profileDetail: AgentProfileDetail | null = legacy
+      ? {
+          name: typeof legacy.name === 'string' ? legacy.name : name,
+          displayName: typeof legacy.displayName === 'string' ? legacy.displayName : name,
+          description: typeof legacy.description === 'string' ? legacy.description : undefined,
+          soulContent: typeof legacy.systemPrompt === 'string' ? legacy.systemPrompt : undefined,
+          systemPrompt: typeof legacy.systemPrompt === 'string' ? legacy.systemPrompt : undefined,
+          tools: legacyTools,
+        }
+      : res?.name
+        ? {
+            name: res.name,
+            displayName: res.name,
+            description: res.description,
+            soulContent: res.soul,
+            systemPrompt: res.soul,
+            model: typeof res.model === 'string' ? res.model : res.model?.default,
+            tools: Array.isArray(res.toolsets)
+              ? res.toolsets.map((toolset) => toolset.name)
+              : [],
+          }
+        : null;
 
     if (!profileDetail) {
       throw new Error(`未找到 Bot 配置档: ${name}`);
     }
     return profileDetail;
+  }
+
+  /**
+   * 查询 BOT 面板需要的权威详情。
+   *
+   * 【设计意图】真实 `profiles.describe` 返回 `{ name, description, soul, model: {provider, default},
+   *   skills, toolsets, mcp_servers }`。能力清单必须带 enabled / label / tool_count，
+   *   否则界面无法表达"哪些能力被关掉"，保存时会把用户的真实配置覆盖成空数组。
+   *
+   * 【规则】响应里没有任何可识别字段时显式抛出"未找到"，不得伪装成空详情。
+   */
+  public async describeBot(
+    name: string,
+    bridge: IRpcCaller,
+    hint: Omit<BotIdentityHint, 'id'>,
+  ): Promise<BotDetailData> {
+    if (!name || typeof name !== 'string') {
+      throw new Error('Profile name is mandatory for describeBot');
+    }
+    const res = await bridge.request<ProfilesDescribeResult, ProfilesDescribeParams>(
+      'profiles.describe',
+      { name }
+    );
+    const hasPayload = Boolean(
+      res &&
+        (res.name ||
+          res.profile ||
+          res.description ||
+          res.soul ||
+          Array.isArray(res.skills) ||
+          Array.isArray(res.toolsets) ||
+          Array.isArray(res.mcp_servers)),
+    );
+    if (!hasPayload) {
+      throw new Error(`未找到 Bot 配置档: ${name}`);
+    }
+    return parseBotDetail(res, { ...hint, id: name });
   }
 
   /**
@@ -135,7 +202,7 @@ export class ProfileService {
   }
 
   /**
-   * 更新配置专职 Bot 属性
+   * 更新配置专职 Bot 属性（旧入口）。
    *
    * 【契约依据】ProfilesConfigureParams 是**扁平字段**（description / soul / model / ...），
    * 不存在整包 `patch`；结果字段是 `ok/applied`，不是 `success`。
@@ -145,14 +212,20 @@ export class ProfileService {
    */
   public async configureProfile(
     name: string,
-    patch: Partial<AgentProfileDetail>,
+    patch: ProfileConfigurePatch,
     bridge: IRpcCaller
   ): Promise<boolean> {
     const params: ProfilesConfigureParams = { name };
     if (patch.description !== undefined) params.description = patch.description;
     if (patch.soulContent !== undefined) params.soul = patch.soulContent;
     if (patch.model !== undefined) params.model = patch.model;
-    if (patch.displayName !== undefined) {
+    if (patch.provider !== undefined) params.provider = patch.provider;
+    if (patch.disabledSkills !== undefined) params.disabled_skills = patch.disabledSkills;
+    if (patch.enabledToolsets !== undefined) params.enabled_toolsets = patch.enabledToolsets;
+    if (patch.enabledMcpServers !== undefined) params.enabled_mcp_servers = patch.enabledMcpServers;
+    if (patch.uiMeta !== undefined) {
+      params.ui_meta = patch.uiMeta;
+    } else if (patch.displayName !== undefined) {
       params.ui_meta = {
         'hermes-bots': {
           title: patch.displayName,
@@ -160,15 +233,28 @@ export class ProfileService {
       };
     }
 
-    const res = await bridge.request<ProfilesConfigureResult, ProfilesConfigureParams>(
-      'profiles.configure',
-      params
-    );
+    const res = await this.configureBot(params, bridge);
     const ok = res?.ok === true;
     if (ok) {
       await this.listProfiles(bridge, true);
     }
     return ok;
+  }
+
+  /**
+   * 直接提交一份 `profiles.configure` 参数。
+   * 【设计意图】BOT 面板的保存需要一次写入多个配置域（身份、模型、灵魂、能力矩阵），
+   *   由 core 统一发起，避免壳层把 RPC 细节散落回 renderer。
+   */
+  public async configureBot(
+    params: ProfilesConfigureParams,
+    bridge: IRpcCaller
+  ): Promise<ProfilesConfigureResult> {
+    if (!params?.name) throw new Error('Bot profile name is mandatory for configureBot');
+    return bridge.request<ProfilesConfigureResult, ProfilesConfigureParams>(
+      'profiles.configure',
+      params
+    );
   }
 
   /**
@@ -204,19 +290,23 @@ export class ProfileService {
    *
    * 【契约依据】ProfilesSetAssetParams: { profile?, name, asset, data, clear? }
    * 【防范的历史坑】曾传 `key` 与 `base64`，网关直接 4000 Extra inputs are not permitted。
+   * 【恢复默认】清除自定义头像必须显式 `clear: true`；只传空 data 在部分网关版本上不会删除资产。
    */
   public async setAsset(
     name: string,
     asset: string,
     data: string,
-    bridge: IRpcCaller
+    bridge: IRpcCaller,
+    options?: { clear?: boolean },
   ): Promise<boolean> {
+    const params: ProfilesSetAssetParams = { name, asset, data };
+    if (options?.clear) params.clear = true;
     const res = await bridge.request<ProfilesSetAssetResult, ProfilesSetAssetParams>(
       'profiles.set_asset',
-      { name, asset, data }
+      params
     );
     // 契约：{ ok, asset, size, removed }；兼容早期网关的 success
-    return res.ok === true || res.success === true;
+    return res.ok === true || res.success === true || (options?.clear === true && res.removed != null);
   }
 
   /**

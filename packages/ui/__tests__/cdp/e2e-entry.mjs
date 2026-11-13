@@ -15,7 +15,6 @@ import { renderLeftRailHtml } from '../../dist/components-react/leftRailStaticRe
 import { renderMiddlePod } from '../../dist/components/MiddlePod/MiddlePod.js';
 import { renderInputDock } from '../../dist/components/InputDock/InputDock.js';
 import { renderContextMenu } from '../../dist/components/ContextMenu/ContextMenu.js';
-import { renderAgentProfileEditorModal } from '../../dist/components/Bot/AgentProfileEditorModal.js';
 import * as React from 'react';
 import { createRoot } from 'react-dom/client';
 import { ConversationMessageList } from '../../dist/components-react/conversation/index.js';
@@ -46,6 +45,5 @@ window.__e2e = {
   renderMiddlePod,
   renderInputDock,
   renderContextMenu,
-  renderAgentProfileEditorModal,
   mountMessages,
 };

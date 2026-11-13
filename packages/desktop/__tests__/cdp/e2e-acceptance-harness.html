@@ -83,7 +83,6 @@
       renderMiddlePod,
       renderInputDock,
       renderContextMenu,
-      renderAgentProfileEditorModal,
     } = window.__e2e;
 
     /** 旧模板签名兼容：把 isBotsGroupExpanded 映射到 React 模型的 isGroupsGroupExpanded */
@@ -115,8 +114,6 @@
       isBotsGroupExpanded: true,
       editingGroupRoomId: null,
       contextMenu: null,
-      isAgentEditorOpen: false,
-      editingAgentProfileName: null,
       messages: [
         {
           id: 'usr-1',
@@ -192,11 +189,6 @@
             })}
           </div>
           ${renderContextMenu(this.contextMenu)}
-          ${renderAgentProfileEditorModal({
-            isOpen: this.isAgentEditorOpen,
-            profile: this.profiles.find(p => p.name === this.editingAgentProfileName),
-            availableModels: ['gpt-4o', 'deepseek-chat']
-          })}
         `;
         root.innerHTML = html;
         // 消息行由 React 真实挂载到宿主锚点（renderMiddlePod 只输出骨架）
@@ -414,23 +406,8 @@
       },
 
       openAgentEditor(targetId) {
-        this.editingAgentProfileName = targetId;
-        this.isAgentEditorOpen = true;
-        this.lastActions.push(`editor_opened_local:${targetId}`);
-        this.render();
-
-        // 模拟真实网关远端异步拉取最新数据 (0ms~50ms 延迟)
-        setTimeout(() => {
-          const bot = this.profiles.find(p => p.name === targetId);
-          if (bot) {
-            bot.displayName = '大总管 (远端最新)';
-            bot.description = '网关远端实时最新配置';
-          }
-          this.lastActions.push(`editor_refreshed_remote:${targetId}`);
-          if (this.isAgentEditorOpen) {
-            this.render();
-          }
-        }, 50);
+        // BOT 编辑已迁移到设置中心 BotManagerView（React 岛）；harness 不再渲染旧内联浮层。
+        this.lastActions.push(`bot_settings_requested:${targetId}`);
       },
 
       openBotChat(botProfile) {

@@ -12,6 +12,7 @@ import { ActivityIndicator } from '../primitives/ActivityIndicator.js';
 import { SegmentedControl } from './SegmentedControl.js';
 import { LoadBoundary } from './LoadBoundary.js';
 import { ProvidersAdminPanel } from './ProvidersAdminPanel.js';
+import { BotManagerView } from './BotManagerView.js';
 import {
   SETTINGS_SECTIONS,
   filterSettingsSections,
@@ -269,51 +270,6 @@ function ProvidersPanel({
   return <ProvidersAdminPanel snapshot={snapshot} actions={actions} />;
 }
 
-function AgentsPanel({
-  snapshot,
-  actions,
-}: {
-  snapshot: SettingsSnapshot;
-  actions: SettingsActions;
-}): React.ReactElement {
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-caption text-muted-foreground">{t('settings.agentsHint')}</p>
-        <Button variant="outline" size="sm" type="button" disabled={snapshot.busy} onClick={actions.onRefreshProfiles}>
-          <RefreshCw size={12} />
-          {t('settings.refresh')}
-        </Button>
-      </div>
-      <LoadBoundary state={snapshot.profiles} onRetry={actions.onRefreshProfiles} emptyLabel={t('settings.agentsEmpty')}>
-        {(rows) => (
-          <div className="flex flex-col">
-            {rows.map((row) => (
-              <div
-                key={row.name}
-                className="flex items-center justify-between gap-4 border-b border-border-subtle py-3 last:border-b-0"
-              >
-                <div className="flex min-w-0 flex-col">
-                  <span className="flex items-center gap-2">
-                    <span className="truncate text-body text-foreground">{row.displayName}</span>
-                    {row.isDefault ? <Badge variant="outline">{t('settings.agentDefault')}</Badge> : null}
-                  </span>
-                  <span className="truncate text-caption text-muted-foreground">
-                    {row.model ? row.model : t('settings.agentNoModel')}
-                  </span>
-                </div>
-                <Button variant="outline" size="sm" type="button" onClick={() => actions.onOpenAgent(row.name)}>
-                  {t('settings.agentOpen')}
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-      </LoadBoundary>
-    </div>
-  );
-}
-
 function ExtensionsPanel({
   snapshot,
   actions,
@@ -524,7 +480,7 @@ function renderPanel(
     case 'providers':
       return <ProvidersPanel snapshot={snapshot} actions={actions} />;
     case 'agents':
-      return <AgentsPanel snapshot={snapshot} actions={actions} />;
+      return <BotManagerView snapshot={snapshot} actions={actions} />;
     case 'extensions':
       return <ExtensionsPanel snapshot={snapshot} actions={actions} />;
     case 'connection':
@@ -668,7 +624,9 @@ export function SettingsModal({
             <h3 className="text-title text-foreground">{t(active.titleKey)}</h3>
             <p className="mt-0.5 text-caption text-muted-foreground">{t(active.descKey)}</p>
           </header>
-          <div className="flex-1 overflow-y-auto px-6 py-4">{renderPanel(snapshot.section, snapshot, actions)}</div>
+          <div className={snapshot.section === 'agents' ? 'flex-1 min-h-0' : 'flex-1 overflow-y-auto px-6 py-4'}>
+            {renderPanel(snapshot.section, snapshot, actions)}
+          </div>
         </section>
       </div>
     </div>
