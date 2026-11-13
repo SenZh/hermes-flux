@@ -36,8 +36,25 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
+      # 安装口径必须与 package-lock.json 严格一致，禁止 `npm install` 的隐式改写。
+      # 历史坑：曾写 `npm install || npm install --legacy-peer-deps`，而包内
+      #   `workspace:*` 会让两条分支同时报 EUNSUPPORTEDPROTOCOL，CI 在第 4 步必挂；
+      #   兜底分支对同一根因无效，是典型的"假兜底"。
+      # 约束：workspace 内部依赖统一用 `*`（npm 会解析成 file link），
+      #   任何 `workspace:` 协议都会让 npm 直接失败。
       - name: Install dependencies
-        run: npm install --ignore-scripts || npm install --legacy-peer-deps
+        run: npm ci --ignore-scripts
+
+      # 依赖装不上时后续门禁全是空跑，必须显式证明 workspace 链接已建立。
+      # 注意：只校验链接实体存在，不 require.resolve——mobile 包没有 main 字段，
+      #   也没有任何包依赖它，用 require 判定会假红。
+      - name: Verify workspace links
+        run: |
+          for p in core ui desktop mobile; do
+            test -d "node_modules/@hermes-flux/$p" || { echo "missing workspace link: $p"; exit 1; }
+          done
+          node -e "require.resolve('@hermes-flux/core'); require.resolve('@hermes-flux/ui'); console.log('workspace links ok')"
+
 
       - name: Gate 0/4 · 静态门禁（架构 / 换肤 / i18n / 性能）
         run: node scripts/gates/run.mjs
@@ -74,6 +91,6 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-      - run: npm install --ignore-scripts || npm install --legacy-peer-deps
+      - run: npm ci --ignore-scripts
       - name: 全量严格扫描（预期失败，用于量化剩余债务）
         run: node scripts/gates/run.mjs --strict
