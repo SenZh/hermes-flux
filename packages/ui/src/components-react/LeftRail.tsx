@@ -6,7 +6,8 @@ import { Badge } from './primitives/Badge.js';
 import { Button } from './primitives/Button.js';
 import { Input } from './primitives/Input.js';
 import { Skeleton } from './primitives/Skeleton.js';
-import { ActivityIndicator, type ActivityEntityKind, type ActivityIndicatorVariant } from './primitives/ActivityIndicator.js';
+import { ActivityIndicator, type ActivityEntityKind } from './primitives/ActivityIndicator.js';
+import type { ActivityIndicatorVariant } from '../tokens/activityIndicator.js';
 import { renderBotAvatar, renderGroupCollageAvatar } from '../utils/botAvatar.js';
 import {
   formatLeftRailTime,
@@ -93,11 +94,13 @@ const STATION_SKELETON_CLASS = 'size-[42px] shrink-0 rounded-panel';
 const AgentStationItem = React.memo(function AgentStationItem({
   agent,
   active,
+  activityVariant,
   onClick,
   onContextMenu,
 }: {
   agent: LeftRailProfile;
   active: boolean;
+  activityVariant?: ActivityIndicatorVariant;
   onClick: () => void;
   onContextMenu: (event: React.MouseEvent) => void;
 }): React.ReactElement {
@@ -118,9 +121,10 @@ const AgentStationItem = React.memo(function AgentStationItem({
       transitionToken={agent.activityTransitionToken}
       placement="corner"
       entityKind="bot"
+      variant={activityVariant}
     />
   </Button>;
-}, (prev, next) => prev.agent === next.agent && prev.active === next.active);
+}, (prev, next) => prev.agent === next.agent && prev.active === next.active && prev.activityVariant === next.activityVariant);
 
 /**
  * 左侧实体行通用组件 (RailEntityRow)。
@@ -398,6 +402,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
         <AgentStationItem
           agent={model.defaultAgent}
           active={isAgentActive(model.defaultAgent.name)}
+          activityVariant={props.activityVariant}
           onClick={() => props.onSelectBot('default')}
           onContextMenu={(event) => openBotMenu(event, 'default')}
         />
@@ -406,6 +411,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
             key={agent.name}
             agent={agent}
             active={isAgentActive(agent.name)}
+            activityVariant={props.activityVariant}
             onClick={() => props.onSelectBot(agent.name)}
             onContextMenu={(event) => openBotMenu(event, agent.name)}
           />)}
@@ -420,6 +426,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
             transitionToken={model.groupOverviewActivity.transitionToken}
             placement="corner"
             entityKind="group"
+            variant={props.activityVariant}
           />
         </Button>
         <Button id="rail-station-projects-btn" variant="ghost" size="icon" className="size-[38px] rounded-panel text-secondary-foreground hover:bg-card-hover hover:text-foreground transition-colors" title={t('rail.projects')} onClick={() => props.onSetTab('projects')}>

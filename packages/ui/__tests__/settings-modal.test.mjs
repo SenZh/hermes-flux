@@ -23,6 +23,7 @@ function snapshot(overrides = {}) {
     theme: 'obsidian-gold',
     locale: 'zh',
     fontPrefs: { uiFont: 'geist-sans', monoFont: 'jetbrains-mono', sizeScale: 'medium' },
+    activityVariant: 'cloud',
     providers: { status: 'idle' },
     profiles: { status: 'idle' },
     bots: [],
@@ -54,6 +55,7 @@ const noopActions = {
   onThemeChange() {},
   onLocaleChange() {},
   onFontPrefsChange() {},
+  onActivityVariantChange() {},
   onRefreshProviders() {},
   onSaveProviderKey: async () => ({ ok: true }),
   onDisconnectProvider: async () => ({ ok: true }),
@@ -104,9 +106,35 @@ test('外观页渲染真实皮肤真值表：五张皮肤卡，激活态互斥',
   const active = html.match(/aria-checked="true" data-theme-option="([^"]+)"/);
   assert.ok(active, '必须恰好有一个皮肤被标记为选中');
   assert.equal(active[1], 'ayu-light');
-  assert.equal((html.match(/aria-checked="true"/g) || []).length, 1, '皮肤选中态必须互斥');
+  assert.equal((html.match(/aria-checked="true" data-theme-option=/g) || []).length, 1, '皮肤选中态必须互斥');
+  assert.equal((html.match(/aria-checked="false" data-theme-option=/g) || []).length, 4, '其余四张皮肤卡必须明确未选中');
   assert.ok(html.includes('id="settings-ui-font"'));
   assert.ok(html.includes('id="settings-mono-font"'));
+});
+
+test('外观页的活动指示器：六张变体卡互斥选中，且每张卡内渲染真实运行态动效', () => {
+  setLocale('zh-CN');
+  const html = render({ section: 'appearance', activityVariant: 'matrix' });
+  const expected = ['cloud', 'gyro', 'orbit', 'synapse', 'spring', 'matrix'];
+  for (const variant of expected) {
+    assert.ok(html.includes(`data-activity-variant="${variant}"`), `缺少变体卡 ${variant}`);
+    assert.ok(html.includes(`data-activity-preview="${variant}"`), `变体卡 ${variant} 必须内嵌真实预览`);
+  }
+  // 顺序必须与真值表一致：只有 includes 时把列表反转也照样全绿。
+  const positions = expected.map((variant) => html.indexOf(`data-activity-variant="${variant}"`));
+  for (let index = 1; index < positions.length; index += 1) {
+    assert.ok(positions[index] > positions[index - 1], `变体卡顺序必须与真值表一致，${expected[index]} 位置错误`);
+  }
+  assert.equal((html.match(/aria-checked="true" data-activity-variant=/g) || []).length, 1, '变体选中态必须互斥');
+  assert.ok(html.includes('aria-checked="true" data-activity-variant="matrix"'), '选中态必须来自快照而不是默认值');
+  // 预览必须是真实组件：运行态标记与变体类名都要出现在卡片里，不能是静态占位图。
+  assert.equal((html.match(/data-status="running"/g) || []).length, 6, '六张卡必须各自渲染运行态指示器');
+  assert.ok(html.includes('flux-variant-synapse'));
+  for (const variant of expected) {
+    const start = html.indexOf(`data-activity-variant="${variant}"`);
+    const card = html.slice(start, html.indexOf('</button>', start));
+    assert.equal(card.includes('<svg'), false, `变体卡 ${variant} 沿用纯 HTML/CSS 约束，不得引入 SVG`);
+  }
 });
 
 

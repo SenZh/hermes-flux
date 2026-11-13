@@ -22,7 +22,7 @@ const PRIMITIVES_DIR = path.join(UI_SRC, 'components-react/primitives');
  * 【约束】consumed 至少一项；pending 的每项必须写清消费它的后续 PR，禁止"以后再说"。
  */
 const CONSUMPTION = {
-  ActivityIndicator: { state: 'consumed', consumers: ['components-react/LeftRail.tsx'] },
+  ActivityIndicator: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx'] },
   Button: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/settings/LoadBoundary.tsx', 'components-react/settings/ProvidersAdminPanel.tsx', 'components-react/settings/ModelPicker.tsx', 'components-react/gallery/Gallery.tsx'] },
   Input: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/settings/ProvidersAdminPanel.tsx', 'components-react/settings/ModelPicker.tsx'] },
   Badge: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/gallery/Gallery.tsx'] },

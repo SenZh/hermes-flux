@@ -2,18 +2,11 @@ import * as React from 'react';
 import { t, type I18nKey } from '../../i18n/index.js';
 import { cn } from '../../lib/utils.js';
 import type { ActivityState, ActivityTransition } from '../../components/LeftRail/types.js';
+import type { ActivityIndicatorVariant } from '../../tokens/activityIndicator.js';
 
 export type ActivityIndicatorPlacement = 'inline' | 'corner';
 
 export type ActivityEntityKind = 'session' | 'bot' | 'group';
-
-export type ActivityIndicatorVariant =
-  | 'cloud'
-  | 'gyro'
-  | 'orbit'
-  | 'synapse'
-  | 'spring'
-  | 'matrix';
 
 export interface ActivityIndicatorProps {
   state?: ActivityState;

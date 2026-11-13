@@ -4381,6 +4381,20 @@ html[data-app-hidden="true"] .conv-presence *::after {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /*
+   * 【为什么这里要重复写父选择器】running 态的动画声明在 `.flux-cloud-indicator--running .flux-synapse-cell`
+   *   这类双类选择器上（specificity 0,2,0）；只写单类名（0,1,0）的 `animation: none` 优先级更低，
+   *   媒体查询里写了也压不住，减弱动效实际不生效（实测 synapse/matrix 两套仍继续放电）。
+   *   降级规则必须与运行规则同权重，否则「看起来有降级、实际没降级」。
+   * 【为什么补 opacity】流云在减弱动效下被抬到 0.85 以保留可辨识度；突触/旋涡若停在 0.18~0.2
+   *   的基础态，19×14px 下几乎看不见，同一开关下三种变体可见度不同档。
+   */
+  .flux-cloud-indicator--running .flux-synapse-cell,
+  .flux-cloud-indicator--running .flux-matrix-dot {
+    animation: none;
+    opacity: 0.85;
+  }
+
   .flux-gyro-ring--a,
   .flux-gyro-ring--b,
   .flux-gyro-core,

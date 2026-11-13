@@ -4,9 +4,11 @@ import { t } from '../../i18n/index.js';
 import type { I18nKey } from '../../i18n/index.js';
 import { SKINS, SKIN_ALIASES, type SkinId } from '../../tokens/skins.js';
 import { getUiFontSelectOptions, MONO_FONT_OPTIONS } from '../../tokens/fonts.js';
+import { ACTIVITY_INDICATOR_VARIANTS, type ActivityIndicatorVariant } from '../../tokens/activityIndicator.js';
 import { Button } from '../primitives/Button.js';
 import { Input } from '../primitives/Input.js';
 import { Badge } from '../primitives/Badge.js';
+import { ActivityIndicator } from '../primitives/ActivityIndicator.js';
 import { SegmentedControl } from './SegmentedControl.js';
 import { LoadBoundary } from './LoadBoundary.js';
 import { ProvidersAdminPanel } from './ProvidersAdminPanel.js';
@@ -41,6 +43,20 @@ const THEME_LABEL_KEY: Record<(typeof THEME_ORDER)[number], I18nKey> = {
   'warm-paper': 'common.theme.warmPaperLabel',
   'ayu-light': 'common.theme.ayuLightLabel',
   'cyber-matrix': 'common.theme.cyberMatrixLabel',
+};
+
+/**
+ * 活动指示器变体的文案真值（顺序由 tokens/activityIndicator 的 ACTIVITY_INDICATOR_VARIANTS 决定）。
+ * 【规则】一张表同时覆盖名称与描述，缺任何一项都会渲染出键字面量；
+ *   两张并列的表一旦少改一张，画面上就会出现「名称正确、描述是 key」的不对称缺陷。
+ */
+const ACTIVITY_VARIANT_TEXT: Record<ActivityIndicatorVariant, { label: I18nKey; hint: I18nKey }> = {
+  cloud: { label: 'settings.activityCloud', hint: 'settings.activityCloudHint' },
+  gyro: { label: 'settings.activityGyro', hint: 'settings.activityGyroHint' },
+  orbit: { label: 'settings.activityOrbit', hint: 'settings.activityOrbitHint' },
+  synapse: { label: 'settings.activitySynapse', hint: 'settings.activitySynapseHint' },
+  spring: { label: 'settings.activitySpring', hint: 'settings.activitySpringHint' },
+  matrix: { label: 'settings.activityMatrix', hint: 'settings.activityMatrixHint' },
 };
 
 /**
@@ -118,6 +134,38 @@ function AppearancePanel({
                   <span className="text-micro text-muted-foreground">
                     {skin.variant === 'dark' ? t('settings.themeDark') : t('settings.themeLight')}
                   </span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section>
+        <h3 className="mb-1 text-section font-medium text-foreground">{t('settings.activityTitle')}</h3>
+        <p className="mb-3 text-caption text-muted-foreground">{t('settings.activityHint')}</p>
+        <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label={t('settings.activityTitle')}>
+          {ACTIVITY_INDICATOR_VARIANTS.map((variant) => {
+            const active = snapshot.activityVariant === variant;
+            return (
+              <button
+                key={variant}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                data-activity-variant={variant}
+                onClick={() => actions.onActivityVariantChange(variant)}
+                className={`flex items-center gap-3 rounded-panel border px-3 py-2.5 text-left transition-colors ${
+                  active ? 'border-primary bg-primary-subtle' : 'border-border-subtle bg-transparent hover:bg-card-hover'
+                }`}
+              >
+                {/* 预览即真实组件：卡片里的动效就是左轨运行态，用户不必先选中再回左轨确认。 */}
+                <span className="activity-variant-preview" aria-hidden="true" data-activity-preview={variant}>
+                  <ActivityIndicator state="running" placement="inline" entityKind="session" variant={variant} />
+                </span>
+                <span className="flex min-w-0 flex-col">
+                  <span className="truncate text-body text-foreground">{t(ACTIVITY_VARIANT_TEXT[variant].label)}</span>
+                  <span className="truncate text-micro text-muted-foreground">{t(ACTIVITY_VARIANT_TEXT[variant].hint)}</span>
                 </span>
               </button>
             );
