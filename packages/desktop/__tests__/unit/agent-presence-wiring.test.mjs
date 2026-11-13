@@ -222,4 +222,48 @@ test('在场指示器宿主接线守卫', async (t) => {
     assert.ok(body.includes('lastAgentPresenceFingerprint'), '切换必须清指纹，否则新布局首帧被去重吞掉');
     assert.ok(body.includes('render()'), '切换必须触发一次渲染');
   });
+
+  await t.test('14. 未连接网关时不得渲染在场指示器（首屏会压住 onboarding 卡片）', () => {
+    const src = read(RENDERER);
+    const fnStart = src.indexOf('function ensureAgentPresenceHost');
+    assert.ok(fnStart >= 0, '必须存在 host 定位函数');
+    const body = src.slice(fnStart, src.indexOf('\nfunction ', fnStart + 10));
+    /*
+     * 【真实缺陷回归】未连接网关的首屏只有 onboarding 卡片，而 stage 指示器悬浮在
+     *   对话区顶部：真实 Blink 实测卡片顶边 107px、指示器底边 160px，文案压在卡片标题上。
+     *   没有连接就没有「在场者」，因此必须整段早退，而不是渲染一条假状态。
+     */
+    assert.ok(
+      /if \(!state\.gatewayConnected\) \{/.test(body),
+      '连接态守卫必须是函数开头的早退分支（不是分支内的条件渲染）',
+    );
+    assert.ok(body.includes('presenceMountHandle?.unmount()'), '未连接必须卸载 React root，不能只隐藏');
+    assert.ok(body.includes('agentPresenceHost?.remove()'), '未连接必须移除 host 节点，否则残留在 pod 里');
+    assert.ok(body.includes('ensurePresenceTicker(\'idle\')'), '未连接必须把节拍器停到 idle，禁止空转');
+    /*
+     * 【六处状态必须一起清 (Rules)】只卸载 DOM 是不够的：宿主引用、待渲染快照、
+     *   指纹任一残留，重连后都会走「引用相同 → 直接 return」或「指纹相同 → 去重」，
+     *   指示器静默不出现。三处引用一并断言。
+     */
+    assert.ok(body.includes('agentPresenceHost = null'), '必须清宿主引用（否则重连后引用比对误判已挂载）');
+    assert.ok(body.includes('pendingPresenceSnapshot = null'), '必须清待渲染快照');
+    assert.ok(body.includes("lastAgentPresenceFingerprint = ''"), '必须清指纹（否则重连首帧被去重吞掉）');
+
+    /*
+     * 【守卫必须用 ensure 的返回值 (Rules)】MiddlePod 模板里有一个同 id 的静态空宿主；
+     *   `syncAgentPresenceHost` 若在 ensure 之后再 `getElementById` 取一次，未连接时
+     *   ensure 返回的 null 会被那个空 div 覆盖，守卫等于没写。这条断言锁死单次取值。
+     */
+    const syncStart = src.indexOf('function syncAgentPresenceHost');
+    assert.ok(syncStart >= 0, '必须存在 syncAgentPresenceHost');
+    const syncBody = src.slice(syncStart, src.indexOf('\nfunction ', syncStart + 10));
+    assert.ok(
+      syncBody.includes('const presenceHost = ensureAgentPresenceHost(state.presenceLayout)'),
+      'syncAgentPresenceHost 必须直接使用 ensure 的返回值',
+    );
+    assert.ok(
+      !syncBody.includes("document.getElementById('react-conv-presence-host')"),
+      '禁止在 ensure 之后再次 getElementById：模板静态空宿主会让未连接守卫失效',
+    );
+  });
 });

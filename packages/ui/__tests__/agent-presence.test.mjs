@@ -322,7 +322,7 @@ test('在场指示器 · 14 条表现层契约', async (t) => {
     );
   });
 
-  await t.test('20. 指示器背后禁止任何面：无遮罩层，可读性只靠字形阴影', () => {
+  await t.test('20. 指示器背后禁止铺开的面：底板只允许贴合真实文案宽度', () => {
     const css = read('packages/ui/src/styles/conversation.css');
     // 【真实缺陷回归】`.conv-presence::before` 曾是一块按容器宽度（`min(420px, 100% - 96px)`）
     //   铺开的椭圆径向 `--panel` 遮罩。它无法贴合真实文案宽度（常见文案只有 50~200px），
@@ -334,16 +334,51 @@ test('在场指示器 · 14 条表现层契约', async (t) => {
     );
     assert.ok(!/\.conv-presence::after\s*\{/.test(css), '禁止用 ::after 变相回加背景层');
 
-    // 遮罩删除后，可读性必须由字形阴影承担：阴影只跟随字形，不产生任何面。
+    /*
+     * 【可读性契约 (Rules)】遮罩删除后，隔离改由 `.conv-presence__text` 自带的
+     *   shrink-to-fit 胶囊承担：该元素是 flex 子项，宽度由「动词 + 目标」决定，
+     *   永远不会像旧遮罩那样比文案宽。底板接棒后，原来的字形阴影必须撤掉——
+     *   背景色晕叠在卡片边缘是脏影，不是可读性。
+     */
     const textBlock = /\.conv-presence__text \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
     assert.ok(textBlock, '.conv-presence__text 规则必须存在');
-    const shadowDecl = /text-shadow:\s*([\s\S]*?);/.exec(textBlock)?.[1] ?? '';
-    assert.ok(shadowDecl, '文案必须有 text-shadow，否则无面遮挡时压在滚动内容上不可读');
     assert.ok(
-      (shadowDecl.match(/color-mix/g) || []).length >= 2,
-      '遮罩移除后必须有两层字形阴影（近层收边 + 远层背景色晕）兜住可读性',
+      /background:\s*var\(--card\)/.test(textBlock),
+      '可读性必须由文案行自带的胶囊底板承担（裸字压在滚动内容上会与消息互相穿透）',
     );
-    assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(shadowDecl), '字形阴影禁止裸十六进制色值');
+    assert.ok(
+      /border-radius:\s*var\(--radius-pill/.test(textBlock),
+      '胶囊圆角必须走 --radius-pill',
+    );
+    assert.ok(!/text-shadow/.test(textBlock), '底板已承担隔离，字形阴影必须撤掉');
+    assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(textBlock), '胶囊禁止裸十六进制色值');
+    assert.ok(
+      /box-sizing:\s*border-box/.test(textBlock),
+      '胶囊必须 border-box：仓库没有全局 box-sizing，否则 padding 会把 max-width: 100% 顶破',
+    );
+
+    /*
+     * 【入场动画终态 (Rules)】探针用 `getAnimations().finish()` 驱动到终态再量像素：
+     *   终态若被改成 `opacity < 1`，文字在真实运行到 160ms 后就会消失，而底板上只是「变淡」。
+     *   这里锁死终态不透明，并禁止在文案行上声明 opacity（隐藏必须走动画或 display）。
+     */
+    const textInKeyframes = /@keyframes convPresenceTextIn \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
+    assert.ok(textInKeyframes, '必须存在 convPresenceTextIn 入场动画');
+    assert.ok(
+      /to\s*\{[^}]*opacity:\s*1/.test(textInKeyframes),
+      '入场动画终态必须 opacity: 1（否则文案在 160ms 后消失）',
+    );
+    assert.ok(!/^\s*opacity:/m.test(textBlock), '文案行不得声明 opacity（会让终态与动画不一致）');
+
+    /*
+     * 【根节点禁令 (Rules)】`.conv-presence` 是 `width: min(420px, ...)`（dock 下 100%）的容器：
+     *   一旦它带上背景或圆角，就是历史上那块「比文案宽一圈」的椭圆遮罩原貌。
+     *   只禁 dock 变体块不够——基础根块才是最容易被人顺手加上的那个。
+     */
+    const baseRootBlock = /^\.conv-presence \{([\s\S]*?)\n\}/m.exec(css)?.[1] ?? '';
+    assert.ok(baseRootBlock, '必须存在基础 .conv-presence 规则');
+    assert.ok(!/background/.test(baseRootBlock), '基础根节点禁止任何背景面（会铺满 420px/740px）');
+    assert.ok(!/border-radius/.test(baseRootBlock), '基础根节点禁止圆角：有圆角即有面');
   });
 
   await t.test('21. dock 布局：与输入舱同宽同位、头像贴左边缘、不参与 flow', () => {
@@ -412,6 +447,53 @@ test('在场指示器 · 14 条表现层契约', async (t) => {
     assert.ok(
       css.includes('.conv-presence__avatar[data-idle-turn="true"]'),
       '空闲换句的侧头动作必须挂在 avatar 上（face 已被呼吸动画占用）',
+    );
+
+    /*
+     * 【底板契约 (Rules)】文案的胶囊底板必须挂在 `.conv-presence__text` 上：
+     *   它是 shrink-to-fit 的 flex 子项，宽度等于真实文案宽度；若有人把 background
+     *   挪到根 `.conv-presence`（`width: 100%` / `max-width: 740px`），底板就会铺满
+     *   整条输入舱宽度并压住会话流——这正是历史上被永久删除的椭圆遮罩缺陷。
+     *   下面两组断言互相咬合：基础行有胶囊，且根节点不得出现任何背景面。
+     */
+    const baseTextBlock = /^\.conv-presence__text \{([\s\S]*?)\n\}/m.exec(css)?.[1] ?? '';
+    assert.ok(baseTextBlock, '必须存在基础文案行规则');
+    assert.ok(
+      /background:\s*var\(--card\)/.test(baseTextBlock),
+      '胶囊底板必须挂在基础 `.conv-presence__text` 上，stage 与 dock 共用同一套表面',
+    );
+    assert.ok(
+      /border-radius:\s*var\(--radius-pill/.test(baseTextBlock),
+      '胶囊圆角必须走 --radius-pill',
+    );
+    assert.ok(
+      /border:\s*1px solid var\(--border\)/.test(baseTextBlock),
+      '胶囊描边必须 1px --border：--border-subtle 在卡片同色底上轮廓会消失',
+    );
+    assert.ok(/padding:\s*4px 12px/.test(baseTextBlock), '胶囊内距必须落 4px 网格');
+    assert.ok(
+      /box-shadow:\s*var\(--specular-line\)/.test(baseTextBlock),
+      '胶囊只允许顶部内受光，不得补投影',
+    );
+    assert.ok(
+      !/text-shadow/.test(baseTextBlock),
+      '胶囊已承担隔离，字形阴影必须撤掉（叠在卡片边缘会变成脏影）',
+    );
+    const dockTextBlocks = [
+      ...css.matchAll(/\.conv-presence\[data-layout="dock"\] \.conv-presence__text \{([\s\S]*?)\n\}/g),
+    ].map((m) => m[1]);
+    assert.ok(dockTextBlocks.length > 0, 'dock 文案必须有自己的字阶/内距规则');
+    assert.ok(
+      dockTextBlocks.some((block) => /padding:\s*4px 8px/.test(block)),
+      'dock 胶囊内距必须收紧到 4px 8px（caption 档与 28px 头像配平）',
+    );
+    assert.ok(
+      dockTextBlocks.every((block) => !/background/.test(block)),
+      'dock 变体不得重复声明胶囊底色（两套底板必然漂移）',
+    );
+    assert.ok(
+      !/background/.test(dockBlock),
+      'dock 根节点禁止挂任何背景面：width: 100% 的底板会铺满输入舱宽度并压住会话流',
     );
 
     // 【减动效 (Rules)】新增的 avatar 级旋转必须进 reduced-motion 白名单，

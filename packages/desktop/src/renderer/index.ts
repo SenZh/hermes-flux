@@ -7663,9 +7663,14 @@ function writePresenceLayout(layout: 'stage' | 'dock'): void {
  *   3. 无 host 时把节拍器停到 idle，避免每秒空转。
  */
 function syncAgentPresenceHost(): void {
-  ensureAgentPresenceHost(state.presenceLayout);
-  const presenceHost = document.getElementById('react-conv-presence-host');
-  if (presenceHost === agentPresenceHost && presenceHost?.isConnected) return;
+  /*
+   * 【必须用 ensure 的返回值 (Pitfall)】MiddlePod 模板里有一个同 id 的静态空宿主。
+   *   若这里改成 `document.getElementById(...)` 再取一次，未连接时 `ensureAgentPresenceHost`
+   *   返回的 null 会被那个空 div 覆盖，守卫形同不存在——首屏又会挂出一个假的在场指示器。
+   *   `ensure` 的返回值才是「本次有没有可用的宿主」的唯一真值。
+   */
+  const presenceHost = ensureAgentPresenceHost(state.presenceLayout);
+  if (presenceHost && presenceHost === agentPresenceHost && presenceHost.isConnected) return;
 
   // host 换了 / 被销毁了：旧 root 挂在脱离文档的节点上，必须先卸载（否则泄漏）
   presenceMountHandle?.unmount();
@@ -7709,6 +7714,28 @@ function syncAgentPresenceHost(): void {
  *   2. `stage` 回落位置固定为 `#conversation-stream` 之后，与 MiddlePod 模板一致。
  */
 function ensureAgentPresenceHost(layout: 'stage' | 'dock'): HTMLElement | null {
+  /*
+   * 【未连接不渲染 (Rules)】指示器回答的是「谁在当前会话里干活」：网关没连上时既没有会话、
+   *   也没有 Agent 在跑，此时渲染一条「在角落里等你派活」是假状态。更关键的是，未连接的
+   *   首屏只有 onboarding 卡片，而 stage 指示器悬浮在对话区顶部——真实 Blink 实测
+   *   卡片顶边 107px、指示器底边 160px，文案会直接压在卡片标题上（重叠 53px）。
+   *   dock 变体本来就会随输入舱一起消失，这里把两个变体收敛成同一条规则。
+   *
+   * 【必须卸载而不是隐藏 (Pitfall)】只加 `display: none` 会让节拍器与 React root 继续空转
+   *   （每秒一次无意义协调），且重连后指纹仍是旧值。这里显式 unmount + 移除节点 + 清指纹。
+   */
+  if (!state.gatewayConnected) {
+    presenceMountHandle?.unmount();
+    presenceMountHandle = null;
+    updateReactAgentPresence = null;
+    agentPresenceHost?.remove();
+    agentPresenceHost = null;
+    lastAgentPresenceFingerprint = '';
+    pendingPresenceSnapshot = null;
+    ensurePresenceTicker('idle');
+    return null;
+  }
+
   const pod = document.querySelector<HTMLElement>('.flux-middle-pod');
   const dock = document.querySelector<HTMLElement>('.input-dock-container');
   let host = document.getElementById('react-conv-presence-host');

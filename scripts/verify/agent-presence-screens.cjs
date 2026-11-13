@@ -86,6 +86,21 @@ const SCENES = [
 
 function injectScript(scene) {
   return `(() => {
+    /*
+     * 【未连接不渲染的证据 (Rules)】注入之前先数一遍真实应用已经画出来的指示器。
+     *   注意不能数 #react-conv-presence-host：那个空宿主是 MiddlePod 模板的静态占位，
+     *   恒存在；真正的判据是里面有没有 .conv-presence 子树。
+     *   本探针随后会手写注入指示器，注入后无法再分辨「真实应用有没有渲染」，
+     *   所以必须在清理/注入之前采样：未连接网关时应恒为 0。
+     */
+    const hostBeforeInjection = document.querySelectorAll('#react-conv-presence-host').length;
+    const presenceBeforeInjection = document.querySelectorAll('.conv-presence').length;
+    /*
+     * 连接态判据：dock 变体的输入舱只在网关连上时渲染。
+     *   探针若跑在一台已连真实网关的机器上，这里会 > 0 —— 「未连接不渲染」这条规则
+     *   在该环境下不可证伪，断言按条件跳过（见 evidence.assertions 注释）。
+     */
+    const dockBeforeInjection = document.querySelectorAll('.input-dock-container').length;
     document.querySelectorAll('.conv-presence, #react-conv-presence-host, .input-dock-container, #probe-underlay, #probe-style').forEach((n) => n.remove());
 
     const style = document.createElement('style');
@@ -135,18 +150,70 @@ function injectScript(scene) {
     const faceRect = el.querySelector('.conv-presence__face').getBoundingClientRect();
     const textEl = el.querySelector('.conv-presence__text');
     const textRect = textEl.getBoundingClientRect();
+    /*
+     * 【驱动到终态，而不是改写属性 (Rules)】隐藏窗口下 Chromium 会冻结动画时间线，
+     *   convPresenceTextIn（160ms，both）停在首帧 opacity 0：截图里头像在、文案完全消失。
+     *   早期做法是直接写 textEl.style.opacity = '1'——但那是「自己写值、自己量值」：
+     *   应用侧任何 opacity 回归都会被这行内联样式压掉，墨迹断言永远绿。
+     *   这里改为把已注册的动画 finish() 到终态：应用终态若真的是 0，墨迹会立刻掉 0 判红。
+     */
+    const frozenOpacity = getComputedStyle(textEl).opacity;
+    if (typeof textEl.getAnimations === 'function') {
+      for (const animation of textEl.getAnimations()) {
+        // 无限动画不能 finish（会抛 InvalidStateError）；本元素的入场动画是有限时长
+        try {
+          animation.finish();
+        } catch {
+          /* 忽略无法收尾的无限动画 */
+        }
+      }
+    }
     const dockBox = document.querySelector('.composer-dock')?.getBoundingClientRect() ?? null;
+    const cardBox = document.querySelector('.gateway-onboarding-card')?.getBoundingClientRect() ?? null;
     const beforeStyle = getComputedStyle(el, '::before');
     const faceStyle = getComputedStyle(el.querySelector('.conv-presence__face'));
     const textStyle = getComputedStyle(textEl);
+    /*
+     * 【墨迹采样必须只取内容盒 (Rules)】胶囊自身有 1px 描边 + 4px/8~12px 内距：
+     *   直接截整块矩形时，描边与圆角在 --card 底色上的色差会被算成「墨迹」，
+     *   实测把文案全部 visibility:hidden 后仍有 2.1%~4.1%，于是 2% 阈值恒绿。
+     *   内容盒（rect 内缩 border + padding）里只剩文字与打字波：隐藏时恒为 0，
+     *   可见时 17%~28%，阈值才有真实杀伤力。
+     */
+    const px = (value) => parseFloat(value) || 0;
+    const contentRect = {
+      x: Math.round(textRect.left + px(textStyle.borderLeftWidth) + px(textStyle.paddingLeft)),
+      y: Math.round(textRect.top + px(textStyle.borderTopWidth) + px(textStyle.paddingTop)),
+      width: Math.round(
+        textRect.width - px(textStyle.borderLeftWidth) - px(textStyle.borderRightWidth)
+          - px(textStyle.paddingLeft) - px(textStyle.paddingRight),
+      ),
+      height: Math.round(
+        textRect.height - px(textStyle.borderTopWidth) - px(textStyle.borderBottomWidth)
+          - px(textStyle.paddingTop) - px(textStyle.paddingBottom),
+      ),
+    };
 
     return {
       layout: el.getAttribute('data-layout'),
+      hostBeforeInjection,
+      presenceBeforeInjection,
+      dockBeforeInjection,
       presence: { top: Math.round(r.top), left: Math.round(r.left), width: Math.round(r.width), height: Math.round(r.height) },
+      /** 根节点自身必须完全透明：底板只能挂在文案行上，否则就是按容器铺开的旧遮罩 */
+      presenceBackground: getComputedStyle(el).backgroundColor,
+      onboarding: cardBox ? { top: Math.round(cardBox.top) } : null,
       avatar: { size: Math.round(avatarRect.width), left: Math.round(avatarRect.left) },
       face: { size: Math.round(faceRect.width), left: Math.round(faceRect.left) },
-      text: { left: Math.round(textRect.left), fontSize: textStyle.fontSize, lineHeight: textStyle.lineHeight,
-              textShadow: textStyle.textShadow === 'none' ? 'none' : 'present' },
+      text: { left: Math.round(textRect.left), width: Math.round(textRect.width),
+              rect: { x: Math.round(textRect.left), y: Math.round(textRect.top),
+                      width: Math.round(textRect.width), height: Math.round(textRect.height) },
+              contentRect,
+              fontSize: textStyle.fontSize, lineHeight: textStyle.lineHeight,
+              textShadow: textStyle.textShadow === 'none' ? 'none' : 'present',
+              background: textStyle.backgroundColor, borderRadius: textStyle.borderRadius,
+              padding: textStyle.padding, opacity: textStyle.opacity,
+              frozenOpacity },
       dock: dockBox ? { left: Math.round(dockBox.left), top: Math.round(dockBox.top), width: Math.round(dockBox.width) } : null,
       /** 头像槽位外沿与输入舱左边框的差值：0 表示逐像素对齐（用户裁定的对齐线） */
       alignDelta: dockBox ? Math.round(avatarRect.left - dockBox.left) : null,
@@ -158,6 +225,32 @@ function injectScript(scene) {
       faceAnimation: faceStyle.animationName,
     };
   })()`;
+}
+
+/**
+ * 统计一张文案行截图里的「墨迹」像素。
+ *
+ * 【为什么必须用像素 (Rules)】`computed opacity` 可以被探针自己写成 1 再断言等于 1，
+ *   是恒真的假测试；像素是唯一能证明「字真的被画到屏幕上」的证据。
+ *   以胶囊底色为基准，RGB 曼哈顿距离 > 60 记为墨迹（文字 / 描边 / 打字波都算）。
+ */
+function measureInk(image, backgroundCss) {
+  const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(backgroundCss || '');
+  const { width, height } = image.getSize();
+  const total = width * height;
+  if (!m || total === 0) return { ratio: 0, ink: 0, total };
+  const baseR = Number(m[1]);
+  const baseG = Number(m[2]);
+  const baseB = Number(m[3]);
+  const bitmap = image.toBitmap();
+  let ink = 0;
+  for (let i = 0; i + 3 < bitmap.length; i += 4) {
+    const b = bitmap[i];
+    const g = bitmap[i + 1];
+    const r = bitmap[i + 2];
+    if (Math.abs(r - baseR) + Math.abs(g - baseG) + Math.abs(b - baseB) > 60) ink += 1;
+  }
+  return { ratio: ink / total, ink, total };
 }
 
 app.disableHardwareAcceleration();
@@ -195,10 +288,51 @@ app.whenReady().then(async () => {
     await new Promise((resolve) => setTimeout(resolve, 700));
     const image = await win.webContents.capturePage();
     fs.writeFileSync(path.join(OUT, `${scene.label}.png`), image.toPNG());
+    /*
+     * 【文案可见性必须由像素证明 (Rules)】只断言 computed opacity 会被「先写 1 再读 1」
+     *   自证（本探针历史缺陷）。这里直接截取文案行的真实像素，统计与胶囊底色差异显著的
+     *   「墨迹」占比：文字没被画出来时该值恒为 0，任何 opacity/clip/z-index 缺陷都会掉到 0。
+     */
+    const textInkShot = await win.webContents.capturePage(geometry.text.contentRect);
+    fs.writeFileSync(path.join(OUT, `text-${scene.label}.png`), textInkShot.toPNG());
+    const textInk = measureInk(textInkShot, geometry.text.background);
+    geometry.text.inkRatio = Number(textInk.ratio.toFixed(4));
+    geometry.text.inkPixels = textInk.ink;
+    /*
+     * 【判据自检 (Rules)】隐藏文案子元素（保留胶囊底板）后再量一次同一个内容盒：
+     *   文字消失时墨迹必须归零，否则说明这条判据在量描边/背景而不是字。
+     *   上一版用整块矩形口径时正是这里露馅——隐藏字形后仍有 2.1%~4.1% 的「墨迹」。
+     */
+    await win.webContents.executeJavaScript(
+      `(() => {
+        const t = document.querySelector('.conv-presence__text');
+        if (t) t.querySelectorAll('*').forEach((n) => { n.style.visibility = 'hidden'; });
+        return true;
+      })()`,
+      true,
+    );
+    // 等一拍合成器：capturePage 抓的是已提交帧，设置样式后立即截图可能拿到旧帧
+    await new Promise((resolve) => setTimeout(resolve, 160));
+    const hiddenInk = measureInk(
+      await win.webContents.capturePage(geometry.text.contentRect),
+      geometry.text.background,
+    );
+    geometry.text.hiddenInkRatio = Number(hiddenInk.ratio.toFixed(4));
+    await win.webContents.executeJavaScript(
+      `(() => {
+        const t = document.querySelector('.conv-presence__text');
+        if (t) t.querySelectorAll('*').forEach((n) => { n.style.visibility = ''; });
+        return true;
+      })()`,
+      true,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 120));
     if (!firstScreenshot) firstScreenshot = image;
     report.push({ scene: scene.label, theme: scene.theme, kind: scene.kind, ...geometry });
     console.log(
       `${scene.label.padEnd(20)} layout=${geometry.layout} face=${geometry.face.size}px ` +
+        `text=${geometry.text.width}px plate=${geometry.text.background} ink=${(geometry.text.inkRatio * 100).toFixed(1)}% ` +
+        `presenceBottom=${geometry.presence.top + geometry.presence.height} cardTop=${geometry.onboarding?.top ?? '-'} ` +
         `alignDelta=${geometry.alignDelta} gapToDock=${geometry.gapToDock} mask=${geometry.maskContent}`,
     );
   }
@@ -254,6 +388,30 @@ app.whenReady().then(async () => {
     feature: FEATURE,
     url: `http://127.0.0.1:${port}/`,
     scenes: report,
+    /*
+     * 诊断量（不阻断门禁）。
+     *
+     * 【stage 与 onboarding 卡片的重叠 (Rules)】本探针会把指示器**强制注入**到未连接的首屏，
+     *   因此这里能量到 stage 底边与 onboarding 卡片顶边的重叠（实测卡片 107px / 指示器 160px，
+     *   重叠 53px）。真实应用已在 `ensureAgentPresenceHost()` 里加了「未连接不渲染」的早退分支，
+     *   所以这个重叠只可能出现在探针的注入场景——保留为诊断，用来验证守卫确实必要。
+     */
+    diagnostics: {
+      /** 探针机是否连上了真实网关（决定「未连接不渲染」这条断言是否适用） */
+      probeConnected: report.map((r) => ({
+        scene: r.scene,
+        connected: r.dockBeforeInjection > 0,
+        presenceRendered: r.presenceBeforeInjection,
+      })),
+      stageOnboardingOverlap: report
+        .filter((r) => r.layout === 'stage' && r.onboarding)
+        .map((r) => ({
+          scene: r.scene,
+          presenceBottom: r.presence.top + r.presence.height,
+          onboardingTop: r.onboarding.top,
+          overlapPx: r.presence.top + r.presence.height - r.onboarding.top,
+        })),
+    },
     settingsSwitch: switched,
     coldStartRestore: restored,
     assertions: {
@@ -267,6 +425,20 @@ app.whenReady().then(async () => {
       noMaskBehindIndicator: report.every((r) => r.maskContent === 'none' && r.maskBackground === 'none'),
       /** dock 文案不得带字形阴影（会变成脏边） */
       dockTextShadowOff: report.filter((r) => r.layout === 'dock').every((r) => r.text.textShadow === 'none'),
+      /** 文案必须自带局部底板：裸字压在会话流上会与消息互相穿透 */
+      textPlatePresent: report.every((r) => r.text.background !== 'rgba(0, 0, 0, 0)'),
+      /** 底板只能在文案行上：根节点必须完全透明（否则就是按容器铺开的旧遮罩） */
+      rootHasNoPlate: report.every((r) => r.presenceBackground === 'rgba(0, 0, 0, 0)'),
+      /** dock 底板的宽度必须由内容决定：文案 + 头像 + 8px 间距不得撑满整个指示器宽度 */
+      dockPlateFitsText: report
+        .filter((r) => r.layout === 'dock')
+        .every((r) => r.text.width + r.avatar.size + 8 <= r.presence.width),
+      /** 文字必须真的被画出来：内容盒内像素墨迹占比 > 2%（文字消失时恒为 0） */
+      textInkPixels: report.every((r) => r.text.inkRatio > 0.02),
+      /** 判据自检：隐藏文案子元素后同一内容盒的墨迹必须归零（否则量到的是 chrome 不是字） */
+      textInkCalibrated: report.every((r) => r.text.hiddenInkRatio < 0.005),
+      /** 入场动画终态必须不透明（探针用 getAnimations().finish() 驱动，不改写属性） */
+      textSettledOpacity: report.every((r) => Number(r.text.opacity) === 1),
       /** 设置切换写盘 */
       settingsPersists: switched.stored === 'dock',
       /** 冷启动恢复（历史 P0 回归） */
@@ -274,6 +446,26 @@ app.whenReady().then(async () => {
         restored.stored === 'dock' && restored.dockPressed === 'true' && restored.stagePressed === 'false',
     },
   };
+
+  /*
+   * 【未连接不渲染只能条件断言 (Rules)】探针若跑在已连真实网关的机器上（输入舱存在），
+   *   `disconnectedHidesPresence` 在该环境下不可证伪。此时整条移出 assertions 并在
+   *   diagnostics 标注 skipped——不能写成「恒 true」，否则证据里会变成一条永不失败的假绿。
+   */
+  const disconnectedScenes = report.filter((r) => r.dockBeforeInjection === 0);
+  if (disconnectedScenes.length > 0) {
+    evidence.assertions.disconnectedHidesPresence = disconnectedScenes.every(
+      (r) => r.presenceBeforeInjection === 0,
+    );
+  } else {
+    evidence.diagnostics.disconnectedHidesPresence = 'skipped：探针机已连真实网关（输入舱存在）';
+  }
+  /** 探针冻结帧与驱动终态的对照，仅作诊断（断言见 assertions.textSettledOpacity） */
+  evidence.diagnostics.textSettledOpacity = report.map((r) => ({
+    scene: r.scene,
+    settled: r.text.opacity,
+    frozen: r.text.frozenOpacity,
+  }));
 
   fs.writeFileSync(path.join(OUT, 'screenshot.png'), firstScreenshot.toPNG());
   fs.writeFileSync(path.join(OUT, 'evidence.json'), `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');

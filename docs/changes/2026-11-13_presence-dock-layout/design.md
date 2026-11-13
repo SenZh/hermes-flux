@@ -30,7 +30,8 @@
 | 与输入舱纵向间距 | `8px` | 宿主 `bottom: calc(100% + 8px)` |
 | 环 / 重叠 | `inset: -2px` / `margin-left: -8px` | 4px 网格 |
 | 光晕 | **不挂**（`display: none`） | 92px 光晕压在 28px 头像上只剩一团脏雾；且输入舱上沿是打字视线锚点，再叠常驻脉冲会构成第三重动效焦点 |
-| 字形阴影 | **关闭** | dock 不压消息，`--background` 暗晕会变成一圈脏边（浅色皮肤尤甚） |
+| 文案底板 | 基础 `.conv-presence__text` 的 **shrink-to-fit 胶囊**：`--card` 底色 + 1px `--border`（**不是 `--border-subtle`**：后者在 `--card` 同色底上轮廓会消失）+ `--radius-pill` + `--specular-line` 顶部内受光；dock 内距收紧 `4px 8px`（stage 为 `4px 12px`） | 底板宽度由「动词 + 目标」的真实宽度决定，**永不按 740px 容器铺开**；变体侧禁止重复声明 `background` |
+| 字形阴影 | **全局撤掉** | 隔离已由胶囊底板承担；`--background` 背景色晕叠在卡片边缘会变成一圈脏影（浅色皮肤尤甚） |
 
 **不占流（硬约束）**：宿主 `.presence-host--dock` 在 `.input-dock-container` 内绝对定位，**不参与 flex 布局**。任何“用 margin 让出空间”的写法都会把输入舱顶起来，而输入舱高度会随 placeholder 换行、附件轨、队列变化——一旦占流就是持续上下跳。
 
@@ -50,7 +51,7 @@
 4. **空闲动作**：`.conv-presence__avatar[data-idle-turn="true"]` 播放 `convPresenceIdleTurn`（420ms，一次性）。
    - 挂 **avatar** 而不是 face：face 已被 `convPresenceBreathe`（2600ms infinite）占用，同元素第二条 `animation` 会覆盖前者；
    - 不允许空闲态再挂无限动画（单一焦点不变量）；`prefers-reduced-motion` 白名单必须包含 `.conv-presence__avatar`。
-5. **退场契约废弃**：`data-empty` / `:has()` 的“高度归零”规则已删除——空闲态高度恒为 84px（stage）/ 28px（dock），不再弹跳。
+5. **退场契约废弃**：`data-empty` / `:has()` 的“高度归零”规则已删除——空闲态高度恒为 93~94px（stage：56 头像 + 12 间距 + 26 文案行，实测 93）/ 28px（dock），不再弹跳。
 6. **无障碍**：空闲轮播行带 `aria-hidden="true"`。`role="status"` 隐含 polite live region，每 9s 换句会让读屏永久性每 9 秒播报一遍整行；空闲短句是氛围文案，必须对辅助技术静音。
 7. **群聊 seed 用排序后的成员表**：`orderGroupMembers` 会把说话者提到最左，直接拿它做 seed 会导致说话者一换、眨眼节拍与轮播起点被无谓重置。
 
@@ -62,6 +63,8 @@
 - **输入舱三条变更路径收敛为单一出口**：断连移除 / `outerHTML` 整块替换 / 首次 `insertAdjacentHTML` 全部合进 `applyInputDockUpdate()`，调用之后紧跟唯一一次重校。
   - 历史缺陷：重校写进某一条分支，另外两条分支就会让指示器永久消失；三条分支各写一次又无法证明没有遗漏。收敛成单一出口后，「三条路径都在函数体内」与「重校在调用点之后且不在任何分支内」两条都可被源码守卫证伪。
 - **host 存活守卫**：`syncAgentPresence` 开头判 `!agentPresenceHost?.isConnected` 并就地重校，作为第二道自愈（兜住外部销毁）。
+- **未连接不渲染（2026-11-13 用户裁定）**：`ensureAgentPresenceHost()` 开头 `if (!state.gatewayConnected)` 直接卸载 root、移除 host、清指纹、停节拍器并返回 `null`。理由：没有连接就没有「在场者」，而 stage 指示器悬浮在对话区顶部，真实实测会压在 onboarding 卡片标题上（卡片顶边 107 / 指示器底边 160，重叠 53px）。
+  - **必须用 `ensure` 的返回值**：MiddlePod 模板里有一个同 `id` 的静态空宿主；`syncAgentPresenceHost` 若在 ensure 之后再 `getElementById` 取一次，未连接时返回的 `null` 会被那个空 div 覆盖，守卫等于没写（真实缺陷，已由 wiring 第 14 条锁死）。
 - 布局偏好：`localStorage['hermes_flux_presence_layout']`，缺省 `stage`。
   - **键名常量必须声明在 `const state` 之前**：`state` 初始化会调用 `readPresenceLayout()`，键名若声明在其后，打包成 `var` 后读到 `undefined`，`getItem(undefined)` 恒为 null → 用户选了 dock，重启后又跳回顶部（真实缺陷）。
   - 读写失败不静默：`console.warn`，日志用英文（i18n 门禁只允许面向用户的文案进字典）。
@@ -83,7 +86,7 @@ npm run verify:presence:dock
 
 - 真实应用壳实测（Electron/Blink，加载构建产物）：
   - `dock`：presence `740 × 28`，头像槽位左沿 == 输入舱左边框（`alignDelta = 0`），`gapToDock = 8px`，文案 11px caption 档；
-  - `stage`：保持 `420 × 84`、`top = 67`，头像 56px 零位移；
+  - `stage`：`420 × 93~94`（文案行 26px = 16 行高 + 4/4 内距 + 1/1 描边，实测总高 93）、`top = 67`，头像 56px 零位移；
   - 指示器背后 `::before` 的 `content` 与 `backgroundImage` 均为 `none`（无遮罩面）。
   - 量测口径：`alignDelta` 量 avatar 槽位而非 face —— face 上挂 `convPresenceTilt` 旋转形变，`getBoundingClientRect()` 会膨胀到 21px 并左移 1px。
 - 设置中心：外观分区渲染「Agent 状态 / 显示位置」，点击「输入框上方」后 `aria-pressed` 与 `localStorage` 同步为 `dock`；`reload()` 后仍为 `dock`（冷启动恢复）。

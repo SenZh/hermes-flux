@@ -15,8 +15,8 @@
 │           Stage 布局 (默认)        │           Dock 布局 (新方案)        │
 │  - 位置: .flux-middle-pod 顶部居中 │  - 位置: .input-dock 顶部左对齐贴边 │
 │  - 头像: 56px 大图腾/大图片        │  - 头像: 28px 微型原生适配 (1px 边框)│
-│  - 文案: 13px 双层阴影压在对话流   │  - 文案: 11px caption 整数档，无阴影│
-│  - 特色: 92px 呼吸光晕 + 旋转外环   │  - 特色: 去光晕、去阴影、零脏边     │
+│  - 文案: 13px + 同款胶囊底板      │  - 文案: 11px caption + 胶囊底板   │
+│  - 特色: 92px 呼吸光晕 + 旋转外环   │  - 特色: 去光晕、只留局部表面        │
 └───────────────────────────────────┴────────────────────────────────────┘
                                     │
                        共用数据源与统一状态机
@@ -36,7 +36,7 @@
 | 文件路径 | 核心行号/函数 | 职责与修改要点 |
 |---|---|---|
 | `packages/ui/src/components-react/AgentPresence.tsx` | `AgentPresence()`<br>`buildFaceHtml()` | **尺寸下发与 DOM 契约**：根据 `layout === 'dock' ? PRESENCE_DOCK_AVATAR_SIZE(28) : 56` 下发 `avatarSize`；绑定 `data-layout`、`data-idle-quip`、`data-idle-turn`，文案行带 `aria-hidden`。 |
-| `packages/ui/src/styles/conversation.css` | `3320-3330`<br>`3582-3640` | **样式与缩放防御**：`.conv-presence__face > svg, img` 强制带 `!important` 覆盖内联样式；dock 下重设 `--presence-size: 28px`、`max-width: 740px`、`justify-content: flex-start`、`border-width: 1px`；隐藏 halo 与 text-shadow。 |
+| `packages/ui/src/styles/conversation.css` | `3470-3510`<br>`3630-3660` | **样式与缩放防御**：基础 `.conv-presence__text` 携带 shrink-to-fit 胶囊底板（`--card` + 1px `--border` + `--radius-pill` + `--specular-line` 内受光，字形阴影已撤）；dock 下重设 `--presence-size: 28px`、`max-width: 740px`、`justify-content: flex-start`、`border-width: 1px`、胶囊内距 `4px 8px`；隐藏 halo。 |
 | `packages/ui/src/components-react/conversation/idleQuipScheduler.ts` | `createIdleQuipScheduler()` | **可测的纯定时器调度器**：9s 推进 tick、420ms 侧头、页面隐藏停表、回到前台不补播、stop 清空复位。 |
 | `packages/ui/src/components-react/conversation/usePresenceTicker.ts` | `useIdleQuipTicker()` | **React Hook 桥**：将调度器与组件生命周期和 `visibilitychange` 事件对齐。 |
 | `packages/core/src/agent/agentPresence.ts` | `pickIdleQuipIndex()`<br>`IDLE_COPRIME_STEPS` | **确定性轮播算法**：FNV-1a 派生起点，配合欧几里得互质步长，保证一个周期（8 拍）遍历所有短句且无随机跳动。 |
@@ -52,6 +52,8 @@
 2. **输入舱替换销毁宿主（生命周期陷阱）**：输入舱每次内容变化执行 `existingDock.outerHTML = nextDockHtml`，dock 变体的 host 作为其首子节点会连带被注销。重校逻辑必须紧跟在 `applyInputDockUpdate()` 之后，绝不能写在替换发生前。
 3. **常量声明顺序破坏冷启动**：TS 源码虽然类型推导通过，但打包成单一 IIFE 时常量若是 `var`，在 `state` 初始化之前读取会拿到 `undefined`，静默回退默认值。偏好常量必须物理声明在 `state` 之前。
 4. **无障碍 Live Region 噪音**：指示器根节点带 `role="status"`（隐含 `aria-live="polite"`）。空闲短句属于氛围文案，必须加 `aria-hidden="true"`，否则屏幕阅读器会每 9 秒强制播报整行。
+5. **底板只能挂在 `.conv-presence__text` 上（shrink-to-fit 铁律）**：该元素是 flex 子项，宽度恒等于真实文案宽度。若把 `background` 挪到 `.conv-presence` 根节点（`width: min(420px, …)` / dock 下 `100%`），底板就会铺满整条输入舱并压住会话流——这正是历史上被永久删除的 `.conv-presence::before` 椭圆遮罩缺陷的原貌。守卫分四层，任何一层都能单独抓住回归：①`agent-presence.test.mjs` 第 20 条断言基础根块 `.conv-presence` **不得出现 `background` / `border-radius`**，第 21 条断言 dock 变体块同样不得出现 `background`；②探针断言根节点 `backgroundColor` 全透明、且 dock 底板宽度满足 `text + avatar + 8 ≤ presence`（相对断言，不用魔数阈值）；③探针截取文案行**内容盒**像素（已裁掉 1px 描边与 4px 内距），要求墨迹占比 > 2%——整块矩形口径会把胶囊 chrome 自身算成墨迹（实测把字形全隐藏仍有 2.1%~4.1%），已弃用；④判据自检 `textInkCalibrated`：隐藏文案子元素后同一内容盒墨迹必须归零，证明这条判据量的确实是字。
+6. **未连接不得渲染（宿主守卫陷阱）**：`ensureAgentPresenceHost()` 开头必须 `if (!state.gatewayConnected)` 整段早退（unmount + 移除 host + 清指纹 + 停表）。**必须使用该函数的返回值**：MiddlePod 模板里有一个同 `id` 的静态空宿主，`syncAgentPresenceHost` 若在 ensure 之后又 `getElementById` 一次，未连接时返回的 `null` 会被空 div 覆盖，守卫形同不存在（真实缺陷，已修复并由 wiring 第 14 条锁死）。
 
 ---
 
@@ -66,7 +68,7 @@
 - **长空闲静默降级**：当用户超过 5 分钟未打字时，可把轮播间隔拉长至 30s~60s，或文案降为更低对比度（`--faint`），避免余光持续感知文字闪烁。
 
 ### 3. 断连态（无网关）表现收敛
-- 目前网关未连接时，输入舱被完整移除，dock 变体的指示器随之消失（而 stage 变体仍在）。可考虑在连接面板的顶端保留微型 dock 指示器，或在断连时统一优雅退场。
+- 断连态已收敛：`ensureAgentPresenceHost()` 在 `!state.gatewayConnected` 时整段早退（unmount + 移除 host + 清指纹 + 停表），stage 与 dock 都不再渲染。若未来要在连接面板顶端保留微型指示器，必须新开一条显式的「断连态表现」需求，并同步改掉 wiring 第 14 条守卫。
 
 ---
 

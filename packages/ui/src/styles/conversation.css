@@ -3269,10 +3269,18 @@ details[open] > summary > .tool-row__expand {
  * 无法贴合真实文案宽度：真实对话区里它始终是一块比头像 + 文案大一圈的面，压住会话流首条消息。
  * 现整块删除（用户决定：不需要这块背景，最小化）。
  *
- * 可读性改由 `.conv-presence__text` 的双层文字阴影承担——阴影只跟随字形，不产生任何面。
+ * 可读性改由 `.conv-presence__text` 自带的 shrink-to-fit 胶囊底板承担——底板宽度由内容
+ * 决定（不是容器宽度），因此永远不会像旧遮罩那样盖住它没有承载的内容。
  *
  * 【禁止回加 (Rules)】不要再引入任何 `::before` / `::after` 背景层来「垫高对比度」：
  *   任何按容器铺开的面都会比真实文案宽。若单靠阴影不够，应改文案色或减少叠层，而不是加面。
+ *
+ * 【唯一豁免：shrink-to-fit 胶囊 (Rules)】stage 与 dock 两个变体都允许在 `.conv-presence__text`
+ *   自身上挂胶囊底板（规则见下方「局部表面」注释，dock 只覆盖字阶与内距）：
+ *   该元素是 flex 子项，宽度恒等于「动词 + 目标」的真实宽度 + 内距，永远不会比内容宽。
+ *   判定标准只有一条——**底板宽度必须由内容决定，而不是由容器/`--presence-size` 决定**。
+ *   想包住「头像 + 文案」整组时必须新开 `width: fit-content` 的包裹层，
+ *   禁止把 `.conv-presence` 的 100% 宽度直接当底板（`agent-presence.test.mjs` 第 20/21 条已锁死）。
  */
 
 .conv-presence__avatars {
@@ -3475,13 +3483,26 @@ details[open] > summary > .tool-row__expand {
   white-space: nowrap;
   overflow: hidden;
   /*
-   * 【可读性 (Rules)】对比度遮罩移除后，文字压在滚动内容上的隔离全靠这两层字形阴影：
-   *   近层（1px 偏移）收紧字缘，远层（6px 无偏移）铺一圈背景色晕做出局部对比。
-   *   阴影只跟随字形，不产生任何面，因此永远不会像旧遮罩那样盖住下方内容。
+   * 【局部表面 (Rules)】文案行自带一层 shrink-to-fit 胶囊底板。
+   *   本元素是 flex 子项，宽度恒等于「动词 + 目标」的真实宽度，因此无论 stage 悬浮在
+   *   消息之上、还是 dock 贴在输入舱上沿，底板都不会像旧椭圆遮罩那样「比文案宽一圈
+   *   去压内容」——这条判定标准写在文件上方「唯一豁免」注释里。
+   *
+   * 【描边必须用 --border 而不是 --border-subtle (Rules)】stage 的底板会落在
+   *   onboarding 卡片（`--bg-card`，与 `--card` 同一真值）之上：`--border-subtle`
+   *   在白底/深底上都只有 ~1.1:1，胶囊进入卡片区域后轮廓直接消失，读作「药丸被切断」。
+   *   `--border`（深色 0.09 / 浅色 0.14）是能跨皮肤保住轮廓的最轻一档。
+   *   禁止改用 `--panel`：它与 `--card` 只差 1.05:1，比描边方案更糊。
+   *
+   * 【阴影必须撤掉 (Rules)】底板由 `--card` 承担隔离后，原先的两层字形阴影没有存在意义：
+   *   背景色晕叠在卡片边缘会变成一圈脏影（浅色皮肤尤甚），而可读性已经由面本身达成。
    */
-  text-shadow:
-    0 0 6px color-mix(in srgb, var(--background) 96%, transparent),
-    0 1px 2px color-mix(in srgb, var(--background) 88%, transparent);
+  box-sizing: border-box;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill, 9999px);
+  background: var(--card);
+  box-shadow: var(--specular-line);
   animation: convPresenceTextIn 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
@@ -3610,32 +3631,34 @@ details[open] > summary > .tool-row__expand {
 }
 
 /*
- * dock 字阶锁整数档。
+ * dock 字阶锁整数档 + 内距比 stage 更紧一档。
  *
  * 【为什么不能 `calc(meta - 1px)` (Rules)】`--chat-text-meta` 会随用户字号档位
  *   按 0.9 / 1 / 1.12 缩放（13 → 11.7 / 13 / 14.6），减 1px 后得到
  *   10.7 / 12 / 13.6 这类小数字号，直接违反「7 档整数阶梯」，且与 16px 行高的
  *   比值在小档掉到 1.18。这里改用固定的 caption 档（11px）+ 成对行高。
+ *
+ * 【内距为什么是 8px (Rules)】dock 的字号锁在 caption 档（11px），同样 4px 上下内距下，
+ *   左右 12px 会在 28px 头像旁显出「两头空」；收到 8px 后胶囊与头像的视觉重量才配平。
+ *   胶囊本体（底色/描边/圆角/内受光）由基础 `.conv-presence__text` 统一承担，
+ *   这里只覆盖字阶与内距——**禁止在变体里重复声明背景**，两套底板必然漂移。
  */
 .conv-presence[data-layout="dock"] .conv-presence__text {
   justify-content: flex-start;
   font-size: var(--fs-caption, 11px);
   line-height: 16px;
+  padding: 4px 8px;
 }
 
 .conv-presence[data-layout="dock"] .conv-presence__target {
   font-size: var(--fs-caption, 11px);
 }
 
-/* dock 直接压在输入舱上方、不与消息重叠：字形阴影在这里只会变成一圈脏边 */
-.conv-presence[data-layout="dock"] .conv-presence__text {
-  text-shadow: none;
-}
-
 /*
  * dock 变体不挂光晕。
  *
- * 【为什么 (Rules)】stage 的 92px 光晕是给 56px 头像做的柔光；压在 28px 头像上只剩一团脏雾。更关键的是：输入舱上沿是打字视线的锚点，
+ * 【为什么 (Rules)】stage 的 92px 光晕是给 56px 头像做的柔光；压在 28px 头像上只剩一团脏雾。
+ *   更关键的是：输入舱上沿是打字视线的锚点，
  *   这里再叠一层常驻脉冲会构成第三重动效焦点（呼吸 2600ms + 换句 9s + 侧头 420ms 已足够）。
  */
 .conv-presence[data-layout="dock"] .conv-presence__halo {
