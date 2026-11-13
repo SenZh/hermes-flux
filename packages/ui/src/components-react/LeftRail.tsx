@@ -6,7 +6,7 @@ import { Badge } from './primitives/Badge.js';
 import { Button } from './primitives/Button.js';
 import { Input } from './primitives/Input.js';
 import { Skeleton } from './primitives/Skeleton.js';
-import { ActivityIndicator, type ActivityEntityKind } from './primitives/ActivityIndicator.js';
+import { ActivityIndicator, type ActivityEntityKind, type ActivityIndicatorVariant } from './primitives/ActivityIndicator.js';
 import { renderBotAvatar, renderGroupCollageAvatar } from '../utils/botAvatar.js';
 import {
   formatLeftRailTime,
@@ -29,6 +29,8 @@ export interface LeftRailProps {
   collapsed: boolean;
   searchQuery: string;
   editingGroupRoomId?: string;
+  /** 左轨会话指示器动效变体（默认为 cloud 积雨流云点阵）。 */
+  activityVariant?: ActivityIndicatorVariant;
   /** 群聊拼图头像的成员资产来源；缺省时回退确定性字母块，不影响行可用性。 */
   groupAvatars?: LeftRailProfile[];
   onSelectSession: (sessionId: string, botName?: string) => void;
@@ -142,6 +144,7 @@ export interface RailEntityRowProps {
   activityTransition?: ActivityTransition;
   activityTransitionToken?: number;
   entityKind?: ActivityEntityKind;
+  activityVariant?: ActivityIndicatorVariant;
   titleAttr?: string;
   /**
    * 骨架占位行。
@@ -170,6 +173,7 @@ export function RailEntityRow({
   activityTransition,
   activityTransitionToken,
   entityKind,
+  activityVariant,
   titleAttr,
   loading = false,
   skeletonSlot = 'session',
@@ -204,6 +208,7 @@ export function RailEntityRow({
               transitionToken={activityTransitionToken}
               placement="inline"
               entityKind={entityKind}
+              variant={activityVariant}
             />
             <RowTime timestamp={timestamp} fallback={timeFallback} />
           </span>
@@ -219,10 +224,11 @@ export function RailEntityRow({
  * 会话行（消费统一的 RailEntityRow 组件）。
  * 普通会话不支持头像，样式完全作为全局统一基准。
  */
-const SessionRow = React.memo(function SessionRow({ session, active, compact, onSelect, onMenu }: {
+const SessionRow = React.memo(function SessionRow({ session, active, compact, activityVariant, onSelect, onMenu }: {
   session: LeftRailSession;
   active: boolean;
   compact?: boolean;
+  activityVariant?: ActivityIndicatorVariant;
   onSelect: () => void;
   onMenu: (x: number, y: number) => void;
 }): React.ReactElement {
@@ -239,6 +245,7 @@ const SessionRow = React.memo(function SessionRow({ session, active, compact, on
     activityTransition={session.activityTransition}
     activityTransitionToken={session.activityTransitionToken}
     entityKind="session"
+    activityVariant={activityVariant}
     onClick={onSelect}
     onContextMenu={(event) => { event.preventDefault(); onMenu(event.clientX, event.clientY); }}
     dataAttributes={{
@@ -247,17 +254,18 @@ const SessionRow = React.memo(function SessionRow({ session, active, compact, on
       'data-bot': session.botName || '',
     }}
   />;
-}, (prev, next) => prev.session === next.session && prev.active === next.active && prev.compact === next.compact);
+}, (prev, next) => prev.session === next.session && prev.active === next.active && prev.compact === next.compact && prev.activityVariant === next.activityVariant);
 
 /**
  * 群聊行（消费统一的 RailEntityRow 组件）。
  * 传入多人拼贴头像 CollageAvatar，其余尺寸排版与普通会话 100% 对齐。
  */
-const GroupRow = React.memo(function GroupRow({ group, profiles, active, editing, onSelect, onMenu, onConfirmRename, onCancelRename }: {
+const GroupRow = React.memo(function GroupRow({ group, profiles, active, editing, activityVariant, onSelect, onMenu, onConfirmRename, onCancelRename }: {
   group: LeftRailGroupRoom;
   profiles: LeftRailProfile[];
   active: boolean;
   editing: boolean;
+  activityVariant?: ActivityIndicatorVariant;
   onSelect: () => void;
   onMenu: (x: number, y: number) => void;
   onStartRename: () => void;
@@ -281,13 +289,14 @@ const GroupRow = React.memo(function GroupRow({ group, profiles, active, editing
     activityTransition={group.activityTransition}
     activityTransitionToken={group.activityTransitionToken}
     entityKind="group"
+    activityVariant={activityVariant}
     onClick={onSelect}
     onContextMenu={(event) => { event.preventDefault(); onMenu(event.clientX, event.clientY); }}
     dataAttributes={{
       'data-room-id': group.roomId,
     }}
   />;
-}, (prev, next) => prev.group === next.group && prev.profiles === next.profiles && prev.active === next.active && prev.editing === next.editing);
+}, (prev, next) => prev.group === next.group && prev.profiles === next.profiles && prev.active === next.active && prev.editing === next.editing && prev.activityVariant === next.activityVariant);
 
 function RenameGroup({ initialName, roomId, onConfirm, onCancel }: {
   initialName: string;
@@ -311,9 +320,10 @@ function RenameGroup({ initialName, roomId, onConfirm, onCancel }: {
   </form>;
 }
 
-function ProjectCard({ project, focus, onSelectSession, onSessionMenu }: {
+function ProjectCard({ project, focus, activityVariant, onSelectSession, onSessionMenu }: {
   project: LeftRailProject;
   focus: LeftRailModel['currentFocus'];
+  activityVariant?: ActivityIndicatorVariant;
   onSelectSession: (session: LeftRailSession) => void;
   onSessionMenu: (session: LeftRailSession, x: number, y: number) => void;
 }): React.ReactElement {
@@ -326,7 +336,7 @@ function ProjectCard({ project, focus, onSelectSession, onSessionMenu }: {
     </summary>
     <div className="project-accordion-nested flex flex-col gap-0.5 px-2 pb-2">
       {sessions.length > 0
-        ? sessions.map((session) => <SessionRow key={session.id} session={session} compact active={isSessionFocused(focus, session.id)} onSelect={() => onSelectSession(session)} onMenu={(x, y) => onSessionMenu(session, x, y)} />)
+        ? sessions.map((session) => <SessionRow key={session.id} session={session} compact activityVariant={activityVariant} active={isSessionFocused(focus, session.id)} onSelect={() => onSelectSession(session)} onMenu={(x, y) => onSessionMenu(session, x, y)} />)
         : <p className="py-2 text-center text-aux text-muted-foreground">{t('rail.projectNoSessions')}</p>}
     </div>
   </details>;
@@ -456,6 +466,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
             activityTransition={profile.activityTransition}
             activityTransitionToken={profile.activityTransitionToken}
             entityKind="bot"
+            activityVariant={props.activityVariant}
             titleAttr={t('rail.enterBotChat', { name: profile.displayName || profile.name })}
             onClick={() => props.onSelectBot(profile.name)}
             onContextMenu={(event) => openBotMenu(event, profile.name)}
@@ -488,6 +499,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
               profiles={props.groupAvatars || []}
               active={isGroupFocused(focus, group.roomId)}
               editing={props.editingGroupRoomId === group.roomId}
+              activityVariant={props.activityVariant}
               onSelect={() => props.onSelectGroup(group.roomId)}
               onMenu={(x, y) => props.onOpenGroupMenu(group.roomId, group.name, x, y)}
               onStartRename={() => props.onStartGroupRename(group.roomId)}
@@ -516,6 +528,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
                   key={session.id}
                   session={session}
                   active={isSessionFocused(focus, session.id)}
+                  activityVariant={props.activityVariant}
                   onSelect={() => props.onSelectSession(session.id, session.botName)}
                   onMenu={(x, y) => props.onOpenSessionMenu(session.id, session.title, x, y)}
                 />)
@@ -554,6 +567,7 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
             key={project.id}
             project={project}
             focus={focus}
+            activityVariant={props.activityVariant}
             onSelectSession={(session) => props.onSelectSession(session.id, session.botName)}
             onSessionMenu={(session, x, y) => props.onOpenSessionMenu(session.id, session.title, x, y)}
           />)

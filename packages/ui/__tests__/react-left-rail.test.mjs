@@ -573,4 +573,36 @@ test('ActivityIndicator 统一原语：placement、entityKind、24 颗云朵点�
   assert.ok(readSettleInline.includes('aria-hidden="true"'));
   assert.equal(readSettleInline.includes('activity-pulse-indicator'), false);
   assert.equal(readSettleInline.includes('activity-unread-badge'), false);
+
+  // 6 种 variant 完整落盘验证（cloud / gyro / orbit / synapse / spring / matrix 全部纯 HTML/CSS 零 SVG）
+  const variants = ['cloud', 'gyro', 'orbit', 'synapse', 'spring', 'matrix'];
+  for (const v of variants) {
+    const runMarkup = renderToStaticMarkup(React.createElement(ActivityIndicator, {
+      state: 'running',
+      variant: v,
+      placement: 'inline',
+    }));
+    assert.ok(runMarkup.includes('activity-pulse-indicator'));
+    assert.ok(runMarkup.includes(`data-variant="${v}"`));
+    assert.ok(runMarkup.includes(`flux-variant-${v}`));
+    assert.equal(runMarkup.includes('<svg'), false, `variant ${v} 在 running 态严禁含 <svg>`);
+
+    const unreadMarkup = renderToStaticMarkup(React.createElement(ActivityIndicator, {
+      state: 'unread',
+      variant: v,
+      placement: 'inline',
+      transition: 'just-completed',
+      transitionToken: 9,
+    }));
+    assert.ok(unreadMarkup.includes('activity-unread-badge'));
+    assert.ok(unreadMarkup.includes(`data-variant="${v}"`));
+    assert.equal(unreadMarkup.includes('<svg'), false, `variant ${v} 在 unread 态严禁含 <svg>`);
+
+    const readMarkup = renderToStaticMarkup(React.createElement(ActivityIndicator, {
+      state: 'read',
+      variant: v,
+      placement: 'inline',
+    }));
+    assert.equal(readMarkup, '', `variant ${v} 在静态 read 态必须返回空`);
+  }
 });
