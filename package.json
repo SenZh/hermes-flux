@@ -48,6 +48,9 @@
     "gates:freeze": "node scripts/gates/run.mjs --update-baseline",
     "gates:mutation": "node scripts/gates/mutation-check.mjs",
     "gates:allow": "node scripts/gates/allow-budget.mjs",
+    "gates:invariants": "node scripts/verify/invariant-map.mjs --check",
+    "invariants:render": "node scripts/verify/invariant-map.mjs --render",
+    "coverage:new": "node scripts/verify/new-code-coverage.mjs",
     "gates:config": "node scripts/gates/verify-config.mjs",
     "contract:sync": "node scripts/contract/sync.mjs",
     "contract:verify": "node scripts/contract/verify.mjs",
@@ -56,7 +59,7 @@
     "contract:doc:check": "node scripts/contract/doc.mjs --check",
     "probe:gateway": "node scripts/contract/probe.mjs",
     "probe:drift": "node scripts/contract/probe.mjs --check",
-    "verify": "npm run gates && npm run gates:targets && npm run gates:allow && npm run contract:verify && npm run contract:coverage && npm run contract:doc:check && npm run typecheck && npm test && npm run verify:formal",
+    "verify": "npm run gates && npm run gates:targets && npm run gates:allow && npm run gates:invariants && npm run contract:verify && npm run contract:coverage && npm run contract:doc:check && npm run typecheck && npm test && npm run verify:formal",
     "verify:display-kind": "node scripts/verify/display-kind-check.mjs",
     "prepare": "node -e \"try { require('child_process').execSync('git config core.hooksPath .githooks'); } catch {}\""
   },

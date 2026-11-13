@@ -81,6 +81,8 @@ function main() {
     ['Gate 1 · 全栈严格类型', NPM, ['run', 'typecheck']],
     ['Gate 2 · 单元与不变量测试', NPM, ['test']],
     ['Gate 2b · 形式化安全不变量检验 (7 大数学定理)', NPM, ['run', 'verify:formal']],
+    ['Gate 2c · 不变量映射表（Markdown 与 JSON 一致）', NPM, ['run', 'gates:invariants']],
+    ['Gate 2d · 豁免敞口预算', NPM, ['run', 'gates:allow']],
   ];
 
   const failures = [];

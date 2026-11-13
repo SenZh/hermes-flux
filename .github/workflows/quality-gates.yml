@@ -86,6 +86,9 @@ jobs:
       - name: Gate 2d · 豁免敞口预算（行内豁免只降不升）
         run: npm run gates:allow
 
+      - name: Gate 3a · 不变量映射表（id 唯一、测试含 fc.assert、Markdown 与 JSON 一致）
+        run: npm run gates:invariants
+
       - name: Gate 3 · 形式化不变量（fast-check）
         run: npm run verify:formal
         # 状态机类缺陷靠普通单例测不出来：只有随机并发交错才能暴露

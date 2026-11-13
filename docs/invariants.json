@@ -1,0 +1,291 @@
+{
+  "$schema": "./invariants.schema.json",
+  "note": "不变量映射表的单一真值源。Markdown 视图由 scripts/verify/invariant-map.mjs --render 生成，禁止手改 docs/invariants.md。",
+  "principles": [
+    "每条不变量必须有唯一 id（禁区间、禁'同上'），否则无法做差集。",
+    "每条必须给出被测源码锚点（source 路径），否则『新增逻辑减去已登记项』在数学上不可计算。",
+    "test 必须是单一文件路径，且文件内必须含 fc.assert。"
+  ],
+  "invariants": [
+    {
+      "id": "INV-CACHE-01",
+      "topic": "围栏不误删",
+      "source": "packages/core/src/cache/cacheMerge.ts",
+      "symbol": "mergeRemoteWindow#fence",
+      "test": "packages/core/__tests__/formal/cache-fence-formal.test.mjs",
+      "failure": "拉取在途写入被远端快照误删，用户刚发的消息消失"
+    },
+    {
+      "id": "INV-CACHE-02",
+      "topic": "上限不越界",
+      "source": "packages/core/src/cache/cacheMerge.ts",
+      "symbol": "evictToCap",
+      "test": "packages/core/__tests__/formal/cache-fence-formal.test.mjs",
+      "failure": "通道行数超过 messageCap，内存无界增长"
+    },
+    {
+      "id": "INV-CACHE-03",
+      "topic": "截断有界",
+      "source": "packages/core/src/cache/cacheMerge.ts",
+      "symbol": "applyTruncation",
+      "test": "packages/core/__tests__/formal/cache-fence-formal.test.mjs",
+      "failure": "截断后残留 orderKey > target 的幽灵行"
+    },
+    {
+      "id": "INV-CACHE-04",
+      "topic": "窗口合并幂等",
+      "source": "packages/core/src/cache/cacheMerge.ts",
+      "symbol": "mergeRemoteWindow#idempotent",
+      "test": "packages/core/__tests__/formal/cache-fence-formal.test.mjs",
+      "failure": "重复应用同一远端快照产生重复行"
+    },
+    {
+      "id": "INV-CACHE-05",
+      "topic": "pending 不可删",
+      "source": "packages/core/src/cache/cacheMerge.ts",
+      "symbol": "mergeRemoteWindow#pending-survives",
+      "test": "packages/core/__tests__/formal/cache-fence-formal.test.mjs",
+      "failure": "未确认的消息在窗口合并中被清掉"
+    },
+    {
+      "id": "INV-CACHE-06",
+      "topic": "在途展示序不撞号且强保序",
+      "source": "packages/core/src/cache/cacheMerge.ts",
+      "symbol": "mergeRemoteWindow#displaySeq",
+      "test": "packages/core/__tests__/formal/cache-fence-formal.test.mjs",
+      "failure": "拉取在途期间生成的 displaySeq 与远端冲突，界面错序"
+    },
+    {
+      "id": "INV-CACHE-07",
+      "topic": "appendRows 同键展示序不漂移",
+      "source": "packages/core/src/cache/cacheMerge.ts",
+      "symbol": "appendRows",
+      "test": "packages/core/__tests__/formal/cache-fence-formal.test.mjs",
+      "failure": "重复追加同一批消息时 displaySeq 重新计算，行跳动"
+    },
+    {
+      "id": "INV-CACHE-08",
+      "topic": "更早分片展示序精确切片",
+      "source": "packages/core/src/cache/cacheMerge.ts",
+      "symbol": "sortByDisplayAsc",
+      "test": "packages/core/__tests__/formal/cache-fence-formal.test.mjs",
+      "failure": "按 orderKey 翻页取 displaySeq 不连续，历史消息顺序错乱"
+    },
+    {
+      "id": "INV-SESSION-01",
+      "topic": "会话/代际变更必须丢弃写入",
+      "source": "packages/core/src/session/guardedRun.ts",
+      "symbol": "runGuarded",
+      "test": "packages/core/__tests__/formal/run-guard-formal.test.mjs",
+      "failure": "切换会话后旧写入污染新会话内容"
+    },
+    {
+      "id": "INV-SESSION-02",
+      "topic": "反复删除收敛且失败保留已成功剪枝",
+      "source": "packages/core/src/session/SessionLifecycleService.ts",
+      "symbol": "deleteSessions",
+      "test": "packages/core/__tests__/formal/session-lifecycle-formal.test.mjs",
+      "failure": "重复删除产生不同结果；部分失败时已成功的清理被回滚"
+    },
+    {
+      "id": "INV-SESSION-03",
+      "topic": "陈旧全量快照不得复活已删会话",
+      "source": "packages/core/src/session/SessionLifecycleService.ts",
+      "symbol": "deleteSessions#tombstone",
+      "test": "packages/core/__tests__/formal/session-lifecycle-formal.test.mjs",
+      "failure": "慢响应返回的旧快照把已删会话挂回界面（防复活墓碑失效）"
+    },
+    {
+      "id": "INV-SESSION-04",
+      "topic": "跨 Profile 去重强幂等",
+      "source": "packages/core/src/session/sessionMerge.ts",
+      "symbol": "dedupeSessions#idempotent",
+      "test": "packages/core/__tests__/formal/session-merge-formal.test.mjs",
+      "failure": "合并产生重复消息"
+    },
+    {
+      "id": "INV-SESSION-05",
+      "topic": "失败不可致空（Failure Is Not Empty）",
+      "source": "packages/core/src/session/sessionMerge.ts",
+      "symbol": "mergeSessions",
+      "test": "packages/core/__tests__/formal/session-merge-formal.test.mjs",
+      "failure": "网络失败时清空界面，用户看到空列表而不是旧数据"
+    },
+    {
+      "id": "INV-SESSION-06",
+      "topic": "去重结果时间全序降序单调",
+      "source": "packages/core/src/session/sessionMerge.ts",
+      "symbol": "dedupeSessions#ordering",
+      "test": "packages/core/__tests__/formal/session-merge-formal.test.mjs",
+      "failure": "会话列表时间倒序错乱"
+    },
+    {
+      "id": "INV-RAIL-01",
+      "topic": "三权分立互斥（Bot/Group/Session 正交隔离）",
+      "source": "packages/ui/src/components-react/leftRailModel.ts",
+      "symbol": "buildLeftRailModel#orthogonal",
+      "test": "packages/core/__tests__/formal/unified-session-list-formal.test.mjs",
+      "failure": "左轨同时出现同一会话的两种身份"
+    },
+    {
+      "id": "INV-RAIL-02",
+      "topic": "普通会话时间全序降序单调",
+      "source": "packages/ui/src/components-react/leftRailModel.ts",
+      "symbol": "buildLeftRailModel#ordering",
+      "test": "packages/core/__tests__/formal/unified-session-list-formal.test.mjs",
+      "failure": "左轨时间倒序错乱"
+    },
+    {
+      "id": "INV-RAIL-03",
+      "topic": "墓碑强制驱逐不可侵犯",
+      "source": "packages/ui/src/components-react/leftRailModel.ts",
+      "symbol": "buildLeftRailModel#tombstone",
+      "test": "packages/core/__tests__/formal/unified-session-list-formal.test.mjs",
+      "failure": "已归档项复活"
+    },
+    {
+      "id": "INV-RAIL-04",
+      "topic": "多源编排强幂等",
+      "source": "packages/ui/src/components-react/leftRailModel.ts",
+      "symbol": "buildLeftRailModel#idempotent",
+      "test": "packages/core/__tests__/formal/unified-session-list-formal.test.mjs",
+      "failure": "二次编排输出不恒等，界面每次刷新都变化"
+    },
+    {
+      "id": "INV-RAIL-05",
+      "topic": "全失败防御不可致空",
+      "source": "packages/ui/src/components-react/leftRailModel.ts",
+      "symbol": "buildLeftRailModel#failure-not-empty",
+      "test": "packages/core/__tests__/formal/unified-session-list-formal.test.mjs",
+      "failure": "网络失败时本地已有会话被抹除"
+    },
+    {
+      "id": "INV-STAGE-01",
+      "topic": "回滚乐观截断往返恒等",
+      "source": "packages/desktop/src/renderer/rollbackTransaction.ts",
+      "symbol": "applyOptimisticCut",
+      "test": "packages/core/__tests__/formal/interactive-stage-formal.test.mjs",
+      "failure": "截断后内容错乱，回滚无法还原原状"
+    },
+    {
+      "id": "INV-STAGE-02",
+      "topic": "截断锚点排他性与临时 id 零逃逸",
+      "source": "packages/desktop/src/renderer/rollbackTransaction.ts",
+      "symbol": "resolveRollbackTarget",
+      "test": "packages/core/__tests__/formal/interactive-stage-formal.test.mjs",
+      "failure": "回滚锚点错位；客户端临时 id 泄漏到服务端触发 4018"
+    },
+    {
+      "id": "INV-STAGE-03",
+      "topic": "流式工具状态机收敛",
+      "source": "packages/core/src/session/eventReducer.ts",
+      "symbol": "reduceEvent",
+      "test": "packages/core/__tests__/formal/interactive-stage-formal.test.mjs",
+      "failure": "工具卡状态不收敛，幽灵工具残留"
+    },
+    {
+      "id": "INV-STAGE-04",
+      "topic": "@ 路由排他性与 cleanText 不残留 token",
+      "source": "packages/desktop/src/renderer/mentionToken.ts",
+      "symbol": "parseMentionToken",
+      "test": "packages/core/__tests__/formal/interactive-stage-formal.test.mjs",
+      "failure": "通道类型错配；正文里残留 @token 原文"
+    },
+    {
+      "id": "INV-PAGE-01",
+      "topic": "分页游标单调不减且不越界",
+      "source": "packages/core/src/session/olderBatchMerge.ts",
+      "symbol": "planOlderPagination",
+      "test": "packages/core/__tests__/formal/older-pagination-formal.test.mjs",
+      "failure": "翻页重复加载或跳过消息"
+    },
+    {
+      "id": "INV-PAGE-02",
+      "topic": "父段不丢失且二次合并强幂等",
+      "source": "packages/core/src/session/olderBatchMerge.ts",
+      "symbol": "planOlderBatchPrependMergeDetailed",
+      "test": "packages/core/__tests__/formal/older-pagination-formal.test.mjs",
+      "failure": "向上翻页后父会话血缘行丢失；重复合并产生重复键"
+    },
+    {
+      "id": "INV-TIME-01",
+      "topic": "时间格式化确定性",
+      "source": "packages/ui/src/components-react/leftRailModel.ts",
+      "symbol": "formatLeftRailTime#deterministic",
+      "test": "packages/core/__tests__/formal/rail-time-format-formal.test.mjs",
+      "failure": "同一时间戳重复渲染出不同文案，界面抖动"
+    },
+    {
+      "id": "INV-TIME-02",
+      "topic": "时间分桶单调且非法输入安全降级",
+      "source": "packages/ui/src/components-react/leftRailModel.ts",
+      "symbol": "formatLeftRailTime#buckets",
+      "test": "packages/core/__tests__/formal/rail-time-format-formal.test.mjs",
+      "failure": "未来时刻落入昨前桶；非法时间戳抛错或复活旧值"
+    },
+    {
+      "id": "INV-BOT-01",
+      "topic": "领域绝对隔离（普通会话不得污染 Bot 卡片）",
+      "source": "packages/core/src/agent/agentPresence.ts",
+      "symbol": "syncActiveSessionToBot",
+      "test": "packages/core/__tests__/formal/bot-activity-formal.test.mjs",
+      "failure": "普通会话的活动覆盖专职 Bot 主工位卡片"
+    },
+    {
+      "id": "INV-BOT-02",
+      "topic": "时间戳归一化完备性",
+      "source": "packages/core/src/agent/agentPresence.ts",
+      "symbol": "normalizeTimestamp",
+      "test": "packages/core/__tests__/formal/bot-activity-formal.test.mjs",
+      "failure": "秒级/毫秒级/ISO 混用导致排序错乱"
+    },
+    {
+      "id": "INV-BOT-03",
+      "topic": "时间全序非递增单调性",
+      "source": "packages/core/src/agent/agentPresence.ts",
+      "symbol": "applyBotActivity",
+      "test": "packages/core/__tests__/formal/bot-activity-formal.test.mjs",
+      "failure": "Bot 列表顺序抖动"
+    },
+    {
+      "id": "INV-ATTACH-01",
+      "topic": "迟滞响应不串台（令牌不匹配的 settle 不改变字段）",
+      "source": "packages/core/src/models/providerAttachFlow.ts",
+      "symbol": "settleAttach",
+      "test": "packages/core/__tests__/formal/provider-attach-flow-formal.test.mjs",
+      "failure": "旧的确认结果写到新目标行上"
+    },
+    {
+      "id": "INV-ATTACH-02",
+      "topic": "提交中意图不可变",
+      "source": "packages/core/src/models/providerAttachFlow.ts",
+      "symbol": "beginAttach",
+      "test": "packages/core/__tests__/formal/provider-attach-flow-formal.test.mjs",
+      "failure": "提交过程中意图被改写，最终绑定了错误的 Agent"
+    },
+    {
+      "id": "INV-ATTACH-03",
+      "topic": "失败不丢用户输入",
+      "source": "packages/core/src/models/providerAttachFlow.ts",
+      "symbol": "failAttach",
+      "test": "packages/core/__tests__/formal/provider-attach-flow-formal.test.mjs",
+      "failure": "失败后密钥草稿被清空，用户要重新输入"
+    },
+    {
+      "id": "INV-ATTACH-04",
+      "topic": "取消恒生效且 busy 只由 submitting 决定",
+      "source": "packages/core/src/models/providerAttachFlow.ts",
+      "symbol": "cancelAttach",
+      "test": "packages/core/__tests__/formal/provider-attach-flow-formal.test.mjs",
+      "failure": "取消失效；或不该忙的时候锁死界面"
+    },
+    {
+      "id": "INV-ATTACH-05",
+      "topic": "目录收敛只挂仍为 absent 的同一格子",
+      "source": "packages/core/src/models/providerAttachFlow.ts",
+      "symbol": "reconcileAttach",
+      "test": "packages/core/__tests__/formal/provider-attach-flow-formal.test.mjs",
+      "failure": "用户刚打开的确认条瞬间消失"
+    }
+  ]
+}
