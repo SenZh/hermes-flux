@@ -74,12 +74,16 @@ function renderMessages(messages, options = {}) {
 }
 
 /**
- * 取三次同构渲染的中位数。
+ * 取同构渲染的中位数。
  * 【设计意图 (Why)】单次 SSR 测量会把 V8 首次优化、GC 尖峰与 CPU 调度抖动直接当成性能回归，
  *   同一提交在空闲机器 18ms、在跑过 typecheck 的 pre-commit 里 42ms，门禁会假红。
  *   中位数仍对真实退化敏感（每次都必须付出成本），但能滤掉一次性噪声。
+ * 【防范的历史坑 (Pitfall)】原先取 3 次中位数，实测同一份代码的 step 平均值在 6.8~14.3ms
+ *   之间游走（6 轮实测），仍会在 25ms 预算上随机假红；3 次样本的中间值本身就是一次
+ *   容易受相邻 GC 影响的观测。7 次后收敛到 6.2~7.9ms，且对 30% 级别的真实退化依然敏感。
+ * 【约束与规则 (Rules)】采样数不得低于 5；调低它等于让噪声决定门禁结论。
  */
-function measureMedianMs(run, rounds = 3) {
+function measureMedianMs(run, rounds = 7) {
   const samples = [];
   for (let index = 0; index < rounds; index++) {
     const startedAt = performance.now();
@@ -123,8 +127,16 @@ export async function runLongSessionPerfBenchmark() {
   // 2. 窗口化首屏挂载基准测试（Initial Window: 仅挂载最新 50 条）
   // 核心架构约束：严禁直接全量 render 5000 条 DOM！必须首屏只渲染最新 50 条！
   const initialWindowSlice = messages.slice(-50);
-  // 执行预热避免首调用 JIT 编译抖动
-  renderMessages(initialWindowSlice.slice(0, 5));
+  /**
+   * 预热规模必须与后续测量规模同量级。
+   *
+   * 【防范的历史坑 (Pitfall)】原先只预热 5 条，而首次真实测量是 200 条：
+   *   首个 step 因此额外承担整条 Markdown/React 渲染链的 JIT 编译成本（实测多出 10~20ms），
+   *   使 avg 在 6.8~40.4ms 之间随机越界 25ms 预算，同一份代码时红时绿。
+   *   这是测量偏差，不是性能回归；抬预算会掩盖真实退化。
+   * 【约束与规则 (Rules)】预热条数取与最重测量相等的 200 条，保证后续每步都跑在已优化代码上。
+   */
+  renderMessages(messages.slice(-200), { hasOlderMessages: true });
 
   let initialHtml = '';
   const windowMs = measureMedianMs(() => {
