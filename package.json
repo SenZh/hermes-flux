@@ -50,6 +50,7 @@
     "gates:allow": "node scripts/gates/allow-budget.mjs",
     "gates:invariants": "node scripts/verify/invariant-map.mjs --check",
     "gates:self-proof": "node scripts/verify/gate-self-proof.mjs",
+    "gates:fake-tests": "node scripts/verify/fake-test-killer.mjs",
     "invariants:render": "node scripts/verify/invariant-map.mjs --render",
     "coverage:new": "node scripts/verify/new-code-coverage.mjs",
     "gates:config": "node scripts/gates/verify-config.mjs",

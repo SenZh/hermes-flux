@@ -91,6 +91,11 @@ jobs:
       - name: Gate 2e · 门禁自证套件（门禁本身具备杀伤力）
         run: npm run gates:self-proof
 
+      # 假测试证伪：删掉五处生产实现，对应测试必须变红且原因对得上。
+      # 这是唯一能客观回答"这个测试有没有用"的手段。
+      - name: Gate 2f · 假测试证伪器（删生产代码必须变红）
+        run: npm run gates:fake-tests
+
       - name: Gate 3a · 不变量映射表（id 唯一、测试含 fc.assert、Markdown 与 JSON 一致）
         run: npm run gates:invariants
 

@@ -168,6 +168,20 @@ function main() {
    * 这样任一套件失败都能被定位到具体层，而不是混在一个命令里。
    * 需要一次跑全部时显式传 `all`。
    */
+  const known = new Set([...Object.keys(SUITES), 'all']);
+  const unknown = explicit.filter((a) => !known.has(a));
+  /**
+   * 【失败不可静默，也不可用抛栈失败】未登记的套件名（例如误传了空串或多余的
+   * 命令行参数）必须给出可读诊断并退出 1。抛栈会让人以为是 census 自己崩了，
+   * 而真实原因是调用方传错了参数。
+   */
+  if (unknown.length > 0) {
+    console.error(`${C.red}未知的套件名: ${unknown.map((u) => JSON.stringify(u)).join(', ')}${C.reset}`);
+    console.error(`${C.dim}  已登记: ${Object.keys(SUITES).join(', ')}（或 all 表示全部）${C.reset}`);
+    process.exitCode = 1;
+    return;
+  }
+
   const targets = explicit.length > 0
     ? (explicit.includes('all') ? Object.keys(SUITES) : explicit)
     : ['unit'];
