@@ -1,0 +1,2079 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BOT 选择与配置 (v6.0)</title>
+<style>
+  /* =============================================================
+     Token 真值严格取自 packages/ui/src/tokens/skins.ts
+     dark  = obsidian-gold（24 项逐字节一致）
+     light = jade-white（--panel/--input/--warning 已按真值对齐）
+     ============================================================= */
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --background: #0E0F13;
+    --card: #1B1C23;
+    --card-hover: #22242D;
+    --card-active: #292B37;
+    --popover: #1B1C23;
+    --sidebar: #131419;
+    --panel: #16171D;
+    --input: #131419;
+    --code: #0E0F13;
+    --backdrop: rgba(20, 21, 28, 0.90);
+    --secondary: #16171D;
+    --muted: #1B1C23;
+    --foreground: #E8E9EC;
+    --secondary-foreground: #9CA3AF;
+    --muted-foreground: #8E949E;
+    --faint: #3E4148;
+    --primary: #FFFFFF;
+    --primary-hover: #E5E7EB;
+    --primary-dim: #9CA3AF;
+    --primary-glow: rgba(255, 255, 255, 0.12);
+    --primary-subtle: rgba(255, 255, 255, 0.06);
+    --primary-border: rgba(255, 255, 255, 0.20);
+    --primary-foreground: #0E0F13;
+    --ring: rgba(255, 255, 255, 0.30);
+    --success: #10B981;
+    --success-glow: rgba(16, 185, 129, 0.20);
+    --warning: #F59E0B;
+    --destructive: #EF4444;
+    --border: rgba(255, 255, 255, 0.09);
+    --border-subtle: rgba(255, 255, 255, 0.06);
+    --border-strong: rgba(255, 255, 255, 0.16);
+    --shadow-window: 0 16px 40px rgba(0, 0, 0, 0.55);
+    --shadow-card: 0 2px 10px rgba(0, 0, 0, 0.25);
+    --shadow-dock: 0 16px 40px rgba(0, 0, 0, 0.55);
+  }
+
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --background: #F8F9FA;
+    --card: #FFFFFF;
+    --card-hover: #F1F3F6;
+    --card-active: #E5E7EB;
+    --popover: #FFFFFF;
+    --sidebar: #F1F3F6;
+    --panel: #FFFFFF;
+    --input: #F8F9FA;
+    --code: #F1F3F5;
+    --backdrop: rgba(248, 249, 250, 0.85);
+    --secondary: #F1F3F6;
+    --muted: #FFFFFF;
+    --foreground: #111827;
+    --secondary-foreground: #4B5563;
+    --muted-foreground: #616873;
+    --faint: #D1D5DB;
+    --primary: #0D7A5E;
+    --primary-hover: #0B6850;
+    --primary-dim: #095743;
+    --primary-glow: rgba(13, 122, 94, 0.14);
+    --primary-subtle: rgba(13, 122, 94, 0.08);
+    --primary-border: rgba(13, 122, 94, 0.25);
+    --primary-foreground: #FFFFFF;
+    --ring: #0D7A5E;
+    --success: #047857;
+    --success-glow: rgba(16, 185, 129, 0.25);
+    --warning: #F59E0B;
+    --destructive: #DC2626;
+    --border: rgba(0, 0, 0, 0.10);
+    --border-subtle: rgba(0, 0, 0, 0.06);
+    --border-strong: rgba(0, 0, 0, 0.20);
+    --shadow-window: 0 12px 36px rgba(0, 0, 0, 0.10);
+    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.05);
+    --shadow-dock: 0 8px 24px rgba(0, 0, 0, 0.08);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  /* 功能常量：遮罩恒为深底白字，不随皮肤变化，单独定义避免散落硬编码 */
+  :root {
+    --overlay-scrim: rgba(0, 0, 0, 0.55);
+    --overlay-ink: #FFFFFF;
+  }
+
+  html, body { background: var(--background); }
+
+  body {
+    color: var(--foreground);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 24px 16px 40px;
+    -webkit-font-smoothing: antialiased;
+    transition: background 0.2s ease, color 0.2s ease;
+  }
+
+  /* 控件统一继承字体，避免 UA 默认 Arial 混排 */
+  input, select, textarea, button {
+    font-family: inherit;
+    font-size: inherit;
+    color: inherit;
+  }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); }
+
+  .stage-box {
+    background: var(--card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: var(--shadow-window);
+    display: flex;
+    flex-direction: column;
+    max-width: 620px;
+    margin: 0 auto;
+    position: relative;
+  }
+
+  /* 顶栏 */
+  .stage-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--panel);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .stage-title { font-size: 14px; font-weight: 600; }
+
+  .btn-ghost {
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    color: var(--foreground);
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  .btn-ghost:hover { background: var(--card-hover); border-color: var(--border-strong); }
+  .btn-ghost:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+
+  .btn-primary {
+    background: var(--primary);
+    border: 1px solid var(--primary);
+    color: var(--primary-foreground);
+    height: 36px;
+    padding: 0 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease, opacity 0.15s ease;
+  }
+  .btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+  .btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+  .btn-primary[disabled] { opacity: 0.55; cursor: default; background: var(--primary); }
+
+  /* =============================================================
+     头像滑动区：一行 5 个
+     ============================================================= */
+  .carousel-viewport {
+    position: relative;
+    height: 148px;
+    background: var(--card);
+    overflow: hidden;
+    border-bottom: 1px solid var(--border-subtle);
+    cursor: grab;
+    touch-action: pan-y;
+  }
+  .carousel-viewport:active { cursor: grabbing; }
+
+  .carousel-stage {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .bot-slot {
+    position: absolute;
+    width: 76px;
+    height: 112px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    cursor: pointer;
+    will-change: transform, opacity;
+    transform-origin: center 38px;
+    background: none;
+    border: none;
+    padding: 0;
+  }
+  .bot-slot:focus-visible { outline: none; }
+  .bot-slot:focus-visible .avatar-wrap { box-shadow: 0 0 0 2px var(--ring); }
+
+  .avatar-wrap {
+    position: relative;
+    width: 76px;
+    height: 76px;
+    border-radius: 50%;
+  }
+
+  .avatar-circle {
+    width: 76px;
+    height: 76px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    /* 首字母走 --foreground，随皮肤自然翻转；不再硬编码 #fff */
+    color: var(--foreground);
+    font-size: 20px;
+    overflow: hidden;
+    border: 1px solid var(--border-strong);
+  }
+
+  .avatar-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+  /* 头像悬浮编辑遮罩 */
+  .avatar-edit-overlay {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: var(--overlay-scrim);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    opacity: 0;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+    z-index: 4;
+    color: var(--overlay-ink);
+    font-size: 10px;
+  }
+  .bot-slot.is-center:hover .avatar-edit-overlay,
+  .bot-slot.is-center:focus-visible .avatar-edit-overlay { opacity: 1; }
+
+  .dirty-dot {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--warning);
+    border: 1.5px solid var(--card);
+    display: none;
+    z-index: 6;
+  }
+  .dirty-dot.is-on { display: block; }
+
+  .default-badge {
+    position: absolute;
+    bottom: -2px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 10px;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: var(--primary);
+    color: var(--primary-foreground);
+    border: 1px solid var(--card);
+    white-space: nowrap;
+    display: none;
+  }
+  .default-badge.is-on { display: block; }
+
+  .bot-label {
+    margin-top: 10px;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    white-space: nowrap;
+    max-width: 96px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .bot-id-sub {
+    margin-top: 2px;
+    font-size: 10px;
+    color: var(--secondary-foreground);
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    max-width: 96px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .nav-btn {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 44px;
+    height: 44px;
+    background: transparent;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 10;
+    color: var(--foreground);
+  }
+  .nav-btn-inner {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--card);
+    border: 1px solid var(--border-strong);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    line-height: 1;
+  }
+  .nav-btn:hover .nav-btn-inner { background: var(--card-hover); border-color: var(--primary-border); }
+  .nav-btn:focus-visible { outline: none; }
+  .nav-btn:focus-visible .nav-btn-inner { box-shadow: 0 0 0 2px var(--ring); }
+  .nav-btn-prev { left: 4px; }
+  .nav-btn-next { right: 4px; }
+
+  /* 空态 / 错误态 */
+  .roster-state {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 32px 24px;
+    border-bottom: 1px solid var(--border-subtle);
+    text-align: center;
+  }
+  .roster-state.is-on { display: flex; }
+  .roster-state-icon { color: var(--muted-foreground); }
+  .roster-state-title { font-size: 13px; font-weight: 600; }
+  .roster-state-desc {
+    font-size: 12px;
+    color: var(--muted-foreground);
+    line-height: 1.6;
+    max-width: 360px;
+  }
+  .roster-state-desc code {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 11px;
+    background: var(--input);
+    border: 1px solid var(--border-subtle);
+    border-radius: 4px;
+    padding: 1px 4px;
+  }
+
+  /* 工具条：仅保留头像恢复入口 */
+  .toolbar-row {
+    padding: 8px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  /* 失败横幅 */
+  .error-banner {
+    display: none;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 12px 16px 0;
+    padding: 10px 12px;
+    background: var(--panel);
+    border: 1px solid var(--destructive);
+    border-radius: 6px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--foreground);
+  }
+  .error-banner.is-on { display: flex; }
+  .error-banner-icon { color: var(--destructive); flex-shrink: 0; margin-top: 1px; }
+  .error-banner-text { flex: 1; min-width: 0; word-break: break-word; }
+  .error-banner-close {
+    background: none;
+    border: none;
+    color: var(--muted-foreground);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0 2px;
+  }
+
+  /* 配置区 */
+  .config-deck {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    background: var(--card);
+  }
+  .config-deck.is-locked { opacity: 0.7; pointer-events: none; }
+
+  .section-card {
+    background: var(--panel);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .section-title { font-size: 12px; font-weight: 600; color: var(--muted-foreground); }
+
+  /* 一行一项 */
+  .field-row { display: flex; flex-direction: column; gap: 8px; }
+  .field-row.inline {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .field-label { font-size: 12px; font-weight: 500; color: var(--muted-foreground); }
+  .field-hint { font-size: 11px; line-height: 1.5; color: var(--muted-foreground); }
+  .field-hint.is-warn { color: var(--destructive); }
+
+  .field-input, .field-select {
+    width: 100%;
+    height: 32px;
+    background: var(--input);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    padding: 0 10px;
+    font-size: 13px;
+    color: var(--foreground);
+    outline: none;
+    transition: border-color 0.15s ease;
+  }
+  .field-input:focus, .field-select:focus { border-color: var(--primary); }
+  .field-input::placeholder { color: var(--muted-foreground); }
+  .field-input[readonly] {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 12px;
+    color: var(--secondary-foreground);
+    user-select: text;
+  }
+  .field-input.is-invalid { border-color: var(--destructive); }
+  .input-with-action { display: flex; gap: 8px; }
+
+  /* 开关 */
+  .switch {
+    position: relative;
+    width: 40px;
+    height: 22px;
+    border-radius: 999px;
+    background: var(--border-strong);
+    border: none;
+    cursor: pointer;
+    flex-shrink: 0;
+    padding: 0;
+    transition: background 0.18s ease;
+  }
+  .switch::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--card);
+    box-shadow: var(--shadow-card);
+    transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .switch.is-on { background: var(--primary); }
+  .switch.is-on::after { transform: translateX(18px); background: var(--primary-foreground); }
+  .switch:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+
+  /* 折叠面板 */
+  .accordion-group { display: flex; flex-direction: column; gap: 8px; }
+  .flux-collapse {
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    background: var(--panel);
+    overflow: hidden;
+  }
+  .accordion-header {
+    width: 100%;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    cursor: pointer;
+    background: transparent;
+    border: none;
+    text-align: left;
+    transition: background 0.15s ease;
+  }
+  .accordion-header:hover { background: var(--card-hover); }
+  .accordion-header:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--ring); }
+  .accordion-title { font-size: 13px; font-weight: 600; }
+  .accordion-arrow {
+    font-size: 10px;
+    color: var(--muted-foreground);
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .accordion-arrow.is-open { transform: rotate(180deg); }
+
+  .flux-collapse-grid {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 180ms cubic-bezier(0.16, 1, 0.3, 1);
+    background: var(--card);
+  }
+  .flux-collapse-grid.is-open {
+    grid-template-rows: 1fr;
+    border-top: 1px solid var(--border-subtle);
+  }
+  .flux-collapse-wrapper { min-height: 0; overflow: hidden; }
+  .accordion-inner-body {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .soul-editor {
+    width: 100%;
+    background: var(--code);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    padding: 12px;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--foreground);
+    min-height: 96px;
+    resize: vertical;
+    outline: none;
+  }
+  .soul-editor:focus { border-color: var(--primary); }
+
+  .pill-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pill {
+    height: 28px;
+    padding: 0 10px;
+    background: var(--panel);
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    font-size: 11px;
+    color: var(--muted-foreground);
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+  .pill:hover { color: var(--foreground); border-color: var(--primary-border); }
+  .pill:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+
+  .counter-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .counter { font-size: 11px; color: var(--muted-foreground); }
+
+  /* 能力条目：逐项一行 */
+  .item-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    background: var(--panel);
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+  }
+  .item-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .item-name { font-size: 12px; font-weight: 600; color: var(--foreground); }
+  .item-sub { font-size: 11px; color: var(--muted-foreground); }
+  .item-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--muted-foreground);
+    flex-shrink: 0;
+  }
+  .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+  }
+  .status-dot.is-off { background: var(--faint); }
+
+  .note-card {
+    padding: 12px;
+    background: var(--primary-subtle);
+    border-left: 2px solid var(--primary-border);
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--muted-foreground);
+    line-height: 1.6;
+  }
+
+  /* 底部操作栏 */
+  .stage-footer {
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-subtle);
+    background: var(--panel);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .footer-actions { display: flex; gap: 8px; }
+
+  /* 弹层 */
+  .modal-scrim {
+    position: absolute;
+    inset: 0;
+    background: var(--backdrop);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    z-index: 100;
+  }
+  .modal-scrim.is-on { display: flex; }
+
+  .modal-window {
+    width: 100%;
+    max-width: 420px;
+    background: var(--card);
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    box-shadow: var(--shadow-window);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .modal-head {
+    padding: 12px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .modal-body {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+  .modal-foot {
+    padding: 12px 16px;
+    background: var(--panel);
+    border-top: 1px solid var(--border-subtle);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .segmented {
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    background: var(--input);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+  }
+  .segmented button {
+    flex: 1;
+    height: 28px;
+    border: none;
+    background: transparent;
+    color: var(--muted-foreground);
+    font-size: 12px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .segmented button.is-active {
+    background: var(--card);
+    color: var(--foreground);
+    font-weight: 600;
+    box-shadow: var(--shadow-card);
+  }
+
+  .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--muted-foreground);
+    cursor: pointer;
+  }
+  .checkbox-row input { accent-color: var(--primary); }
+
+  /* Toast */
+  .toast-bar {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(24px);
+    background: var(--card);
+    border: 1px solid var(--border-strong);
+    color: var(--foreground);
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 12px;
+    box-shadow: var(--shadow-window);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.24s cubic-bezier(0.16, 1, 0.3, 1), transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+    z-index: 1000;
+    max-width: 90vw;
+  }
+  .toast-bar.is-on { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<div class="stage-box" id="stageBox">
+  <div class="stage-header">
+    <span class="stage-title">BOT 选择与配置</span>
+    <button class="btn-ghost" id="themeBtn" type="button">切换为浅色皮肤</button>
+  </div>
+
+  <!-- 头像滑动区 -->
+  <div class="carousel-viewport" id="viewport" role="tablist" aria-label="BOT 选择">
+    <button class="nav-btn nav-btn-prev" id="btnPrev" type="button" aria-label="上一个 BOT">
+      <span class="nav-btn-inner">‹</span>
+    </button>
+    <div class="carousel-stage" id="stage">
+      <button class="bot-slot" id="slot0" type="button" role="tab" aria-selected="false"></button>
+      <button class="bot-slot" id="slot1" type="button" role="tab" aria-selected="false"></button>
+      <button class="bot-slot" id="slot2" type="button" role="tab" aria-selected="false"></button>
+      <button class="bot-slot" id="slot3" type="button" role="tab" aria-selected="false"></button>
+      <button class="bot-slot" id="slot4" type="button" role="tab" aria-selected="false"></button>
+    </div>
+    <button class="nav-btn nav-btn-next" id="btnNext" type="button" aria-label="下一个 BOT">
+      <span class="nav-btn-inner">›</span>
+    </button>
+  </div>
+
+  <!-- 空态 -->
+  <div class="roster-state" id="rosterEmpty">
+    <svg class="roster-state-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/>
+    </svg>
+    <span class="roster-state-title">还没有 BOT</span>
+    <span class="roster-state-desc">创建第一个 BOT，为它指定角色与工具能力。</span>
+    <button class="btn-primary" id="btnCreateFirst" type="button">创建首个 BOT</button>
+  </div>
+
+  <!-- 错误态 -->
+  <div class="roster-state" id="rosterError">
+    <svg class="roster-state-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <circle cx="12" cy="12" r="9"/><path d="M12 8v4"/><path d="M12 16h.01"/>
+    </svg>
+    <span class="roster-state-title">读取 BOT 列表失败</span>
+    <span class="roster-state-desc" id="rosterErrorText">未知错误</span>
+    <button class="btn-ghost" id="btnRetry" type="button">重试</button>
+  </div>
+
+  <!-- 工具条 -->
+  <div class="toolbar-row" id="toolbarRow">
+    <button class="btn-ghost" id="btnResetAvatar" type="button" title="清除自定义头像">恢复默认头像</button>
+  </div>
+
+  <!-- 失败横幅 -->
+  <div class="error-banner" id="errorBanner" role="alert">
+    <svg class="error-banner-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="9"/><path d="M12 8v4"/><path d="M12 16h.01"/>
+    </svg>
+    <span class="error-banner-text" id="errorBannerText"></span>
+    <button class="error-banner-close" id="btnCloseError" type="button" aria-label="关闭错误提示">×</button>
+  </div>
+
+  <!-- 配置区 -->
+  <div class="config-deck" id="configDeck">
+    <div class="section-card">
+      <div class="section-title">基础信息</div>
+
+      <div class="field-row">
+        <label class="field-label" for="fieldId">BOT ID</label>
+        <div class="input-with-action">
+          <input class="field-input" id="fieldId" type="text" readonly />
+          <button class="btn-ghost" id="btnCopyId" type="button">复制</button>
+        </div>
+        <span class="field-hint">唯一标识，创建后不可修改。</span>
+      </div>
+
+      <div class="field-row">
+        <label class="field-label" for="fieldName">显示名称</label>
+        <input class="field-input" id="fieldName" type="text" />
+      </div>
+
+      <div class="field-row">
+        <label class="field-label" for="fieldModel">绑定模型</label>
+        <select class="field-select" id="fieldModel"></select>
+      </div>
+
+      <div class="field-row">
+        <label class="field-label" for="fieldDesc">职能描述</label>
+        <input class="field-input" id="fieldDesc" type="text" placeholder="这个 BOT 负责什么" />
+      </div>
+
+      <div class="field-row inline">
+        <div class="item-main">
+          <span class="item-name">设为工作区默认 BOT</span>
+          <span class="item-sub">新会话默认由它接待</span>
+        </div>
+        <button class="switch" id="switchDefault" type="button" role="switch" aria-checked="false" aria-label="设为工作区默认 BOT"></button>
+      </div>
+    </div>
+
+    <div class="accordion-group">
+      <!-- 角色设定 -->
+      <div class="flux-collapse">
+        <button class="accordion-header" type="button" aria-expanded="false">
+          <span class="accordion-title">角色设定（SOUL.md）</span>
+          <span class="accordion-arrow">▼</span>
+        </button>
+        <div class="flux-collapse-grid">
+          <div class="flux-collapse-wrapper">
+            <div class="accordion-inner-body">
+              <div class="pill-row">
+                <button class="pill" type="button" data-insert="{{user_name}}">插入用户名</button>
+                <button class="pill" type="button" data-insert="{{workspace_root}}">插入工作区路径</button>
+                <button class="pill" type="button" data-template="architect">架构师模板</button>
+                <button class="pill" type="button" data-template="reviewer">审查员模板</button>
+              </div>
+              <textarea class="soul-editor" id="fieldSoul" aria-label="角色设定"></textarea>
+              <div class="counter-row">
+                <span class="field-hint">描述角色边界、输出格式与禁止行为。</span>
+                <span class="counter" id="soulCount">0 / 64 KB</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Toolsets -->
+      <div class="flux-collapse">
+        <button class="accordion-header" type="button" aria-expanded="false">
+          <span class="accordion-title">工具能力（Toolsets）</span>
+          <span class="accordion-arrow">▼</span>
+        </button>
+        <div class="flux-collapse-grid">
+          <div class="flux-collapse-wrapper">
+            <div class="accordion-inner-body" id="toolsetList"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Skill -->
+      <div class="flux-collapse">
+        <button class="accordion-header" type="button" aria-expanded="false">
+          <span class="accordion-title">Skill</span>
+          <span class="accordion-arrow">▼</span>
+        </button>
+        <div class="flux-collapse-grid">
+          <div class="flux-collapse-wrapper">
+            <div class="accordion-inner-body" id="skillList"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MCP -->
+      <div class="flux-collapse">
+        <button class="accordion-header" type="button" aria-expanded="false">
+          <span class="accordion-title">MCP</span>
+          <span class="accordion-arrow">▼</span>
+        </button>
+        <div class="flux-collapse-grid">
+          <div class="flux-collapse-wrapper">
+            <div class="accordion-inner-body" id="mcpList"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 长期记忆 -->
+      <div class="flux-collapse">
+        <button class="accordion-header" type="button" aria-expanded="false">
+          <span class="accordion-title">长期记忆</span>
+          <span class="accordion-arrow">▼</span>
+        </button>
+        <div class="flux-collapse-grid">
+          <div class="flux-collapse-wrapper">
+            <div class="accordion-inner-body">
+              <div class="note-card">
+                这个 BOT 的记忆在它专属的主工位里自然沉淀，不与其他会话或群聊共享。此页只能查看状态，不能直接编辑记忆内容。
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stage-footer">
+    <button class="btn-ghost" id="btnOpenWizard" type="button">新建 / 克隆</button>
+    <div class="footer-actions">
+      <button class="btn-ghost" id="btnReset" type="button">重置</button>
+      <button class="btn-primary" id="btnSave" type="button">保存配置</button>
+    </div>
+  </div>
+
+  <!-- 新建 / 克隆向导 -->
+  <div class="modal-scrim" id="wizardScrim">
+    <div class="modal-window" role="dialog" aria-modal="true" aria-labelledby="wizardTitle">
+      <div class="modal-head">
+        <span id="wizardTitle">新建 BOT</span>
+        <button class="btn-ghost" id="btnWizardClose" type="button" style="height:26px;padding:0 8px;">关闭</button>
+      </div>
+      <div class="modal-body">
+        <div class="segmented" id="wizardMode">
+          <button type="button" data-mode="blank" class="is-active">空白创建</button>
+          <button type="button" data-mode="clone">从已有 BOT 克隆</button>
+        </div>
+
+        <div class="field-row" id="wizardCloneRow" style="display:none;">
+          <label class="field-label" for="wizardCloneFrom">克隆源</label>
+          <select class="field-select" id="wizardCloneFrom"></select>
+        </div>
+
+        <div class="field-row">
+          <label class="field-label" for="wizardId">BOT ID</label>
+          <input class="field-input" id="wizardId" type="text" placeholder="小写字母、数字与短横线，2-32 位" />
+          <span class="field-hint" id="wizardIdHint">例如 architect、qa-engineer。</span>
+        </div>
+
+        <div class="field-row">
+          <label class="field-label" for="wizardName">显示名称</label>
+          <input class="field-input" id="wizardName" type="text" placeholder="例如 数据分析师" />
+        </div>
+
+        <div class="field-row">
+          <label class="field-label" for="wizardModel">绑定模型</label>
+          <select class="field-select" id="wizardModel"></select>
+        </div>
+
+        <div id="wizardCloneOpts" style="display:none; flex-direction:column; gap:8px;">
+          <label class="checkbox-row">
+            <input type="checkbox" id="wizardCloneChannels" checked />
+            继承消息渠道
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="wizardMirrorCred" checked />
+            继承外部服务凭据
+          </label>
+        </div>
+
+        <div class="error-banner" id="wizardError" style="margin:0;" role="alert">
+          <svg class="error-banner-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="9"/><path d="M12 8v4"/><path d="M12 16h.01"/>
+          </svg>
+          <span class="error-banner-text" id="wizardErrorText"></span>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-ghost" id="btnWizardCancel" type="button">取消</button>
+        <button class="btn-primary" id="btnWizardCreate" type="button">创建</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 未保存离场确认 -->
+  <div class="modal-scrim" id="exitScrim">
+    <div class="modal-window" role="dialog" aria-modal="true" aria-labelledby="exitTitle" style="max-width:360px;">
+      <div class="modal-head"><span id="exitTitle">有未保存的修改</span></div>
+      <div class="modal-body">
+        <span class="field-hint" style="font-size:12px;">
+          当前 BOT 的配置已改动但未保存。离开会丢失这些改动。
+        </span>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-ghost" id="btnExitDiscard" type="button">放弃修改</button>
+        <button class="btn-primary" id="btnExitStay" type="button">留在当前</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast-bar" id="toast" role="status" aria-live="polite"></div>
+<input type="file" id="fileAvatarInput" accept="image/*" style="display:none;" />
+
+<script>
+(function () {
+  'use strict';
+
+  /* =========================================================
+     静态目录数据
+     ========================================================= */
+  const TOOLSETS = [
+    { id: 'web_search', name: '网页检索', desc: '检索网页并抓取正文' },
+    { id: 'code_review', name: '代码审查', desc: '静态检查与规范校验' },
+    { id: 'shell', name: '终端执行', desc: '执行命令行指令' },
+    { id: 'file_ops', name: '文件读写', desc: '读取与修改本地文件' },
+  ];
+
+  const SKILLS = [
+    { id: 'git-commit', name: 'git-commit', desc: '提交信息规范校验' },
+    { id: 'service-log-cli', name: 'service-log-cli', desc: '服务日志采集与检索' },
+  ];
+
+  const MCP_SERVERS = [
+    { id: 'github-official', name: 'github-official', transport: 'stdio', online: true },
+    { id: 'filesystem-local', name: 'filesystem-local', transport: 'stdio', online: false },
+  ];
+
+  /** 模型目录：provider 分组 + 离线标记 */
+  const MODELS = [
+    { id: 'claude-3-5-sonnet-20241022', provider: 'Anthropic', online: true },
+    { id: 'claude-3-haiku-20240307', provider: 'Anthropic', online: true },
+    { id: 'gpt-4o-2024-11-20', provider: 'OpenAI', online: true },
+    { id: 'gpt-4o-mini', provider: 'OpenAI', online: true },
+    { id: 'deepseek-coder-v2', provider: 'DeepSeek', online: true },
+    { id: 'o1-preview', provider: 'OpenAI', online: false },
+  ];
+
+  const ALL_TOOLSET_IDS = TOOLSETS.map((t) => t.id);
+  const ALL_SKILL_IDS = SKILLS.map((s) => s.id);
+  const ALL_MCP_IDS = MCP_SERVERS.map((m) => m.id);
+
+  /* =========================================================
+     数据层
+     ========================================================= */
+  let BOTS = [
+    {
+      id: 'architect', name: '架构师老王', color: '#6366f1', initial: '架',
+      model: 'claude-3-5-sonnet-20241022', desc: '负责系统架构设计与技术选型',
+      soul: '# 架构师老王\n- 坚持单向分层依赖\n- 拒绝类型逃逸与假测试',
+      avatar: null, isDefault: true,
+      disabledSkills: [], enabledToolsets: [...ALL_TOOLSET_IDS], enabledMcpServers: [...ALL_MCP_IDS],
+    },
+    {
+      id: 'frontend', name: '前端小张', color: '#ec4899', initial: '前',
+      model: 'gpt-4o-2024-11-20', desc: '负责界面实现与视觉规范',
+      soul: '# 前端小张\n- 遵循设计系统 Token\n- 交互响应保持流畅',
+      avatar: null, isDefault: false,
+      disabledSkills: [], enabledToolsets: ['web_search', 'file_ops', 'code_review'], enabledMcpServers: ['github-official'],
+    },
+    {
+      id: 'reviewer', name: '审计严公', color: '#f59e0b', initial: '审',
+      model: 'deepseek-coder-v2', desc: '负责代码审查与依赖漏洞排查',
+      soul: '# 审计严公\n- 逐行审查改动\n- 标注风险等级',
+      avatar: null, isDefault: false,
+      disabledSkills: ['service-log-cli'], enabledToolsets: ['code_review', 'file_ops'], enabledMcpServers: [],
+    },
+    {
+      id: 'devops', name: '运维阿强', color: '#10b981', initial: '运',
+      model: 'gpt-4o-2024-11-20', desc: '负责部署流水线与集群运维',
+      soul: '# 运维阿强\n- 保障发布链路稳定\n- 关注监控告警',
+      avatar: null, isDefault: false,
+      disabledSkills: [], enabledToolsets: ['shell', 'file_ops', 'web_search'], enabledMcpServers: ['github-official'],
+    },
+    {
+      id: 'general', name: '通用助手', color: '#8b5cf6', initial: '通',
+      model: 'claude-3-5-sonnet-20241022', desc: '负责日常问答与资料整理',
+      soul: '# 通用助手\n- 快速响应常见问题\n- 整理会议与工单',
+      avatar: null, isDefault: false,
+      disabledSkills: [], enabledToolsets: ['web_search'], enabledMcpServers: [],
+    },
+    {
+      id: 'analyst', name: '数仓老李', color: '#06b6d4', initial: '数',
+      model: 'deepseek-coder-v2', desc: '负责数据加工与指标计算',
+      soul: '# 数仓老李\n- 保证指标口径一致\n- 关注任务幂等',
+      avatar: null, isDefault: false,
+      disabledSkills: ['git-commit'], enabledToolsets: ['file_ops', 'shell'], enabledMcpServers: ['filesystem-local'],
+    },
+    {
+      id: 'security', name: '安全老九', color: '#ef4444', initial: '安',
+      model: 'o1-preview', desc: '负责鉴权加固与凭据保护',
+      soul: '# 安全老九\n- 审查权限边界\n- 保护敏感信息',
+      avatar: null, isDefault: false,
+      disabledSkills: [], enabledToolsets: ['code_review', 'shell'], enabledMcpServers: [],
+    },
+  ];
+
+  /** 草稿池：botId -> 完整可编辑快照（未保存的修改都在这里） */
+  const drafts = new Map();
+
+  /** 模拟一次保存失败，用于演示「报错不清空草稿」 */
+  let failNextSave = false;
+
+  /* =========================================================
+     DOM 引用
+     ========================================================= */
+  const $ = (id) => document.getElementById(id);
+
+  const stageBox = $('stageBox');
+  const viewport = $('viewport');
+  const stage = $('stage');
+  const slots = [$('slot0'), $('slot1'), $('slot2'), $('slot3'), $('slot4')];
+  const rosterEmpty = $('rosterEmpty');
+  const rosterError = $('rosterError');
+  const rosterErrorText = $('rosterErrorText');
+  const toolbarRow = $('toolbarRow');
+  const errorBanner = $('errorBanner');
+  const errorBannerText = $('errorBannerText');
+  const configDeck = $('configDeck');
+
+  const fieldId = $('fieldId');
+  const fieldName = $('fieldName');
+  const fieldModel = $('fieldModel');
+  const fieldDesc = $('fieldDesc');
+  const switchDefault = $('switchDefault');
+  const fieldSoul = $('fieldSoul');
+  const soulCount = $('soulCount');
+  const toolsetList = $('toolsetList');
+  const skillList = $('skillList');
+  const mcpList = $('mcpList');
+
+  const btnSave = $('btnSave');
+  const btnReset = $('btnReset');
+  const btnOpenWizard = $('btnOpenWizard');
+  const btnResetAvatar = $('btnResetAvatar');
+  const btnCopyId = $('btnCopyId');
+  const toast = $('toast');
+  const fileInput = $('fileAvatarInput');
+
+  const wizardScrim = $('wizardScrim');
+  const wizardMode = $('wizardMode');
+  const wizardCloneRow = $('wizardCloneRow');
+  const wizardCloneFrom = $('wizardCloneFrom');
+  const wizardId = $('wizardId');
+  const wizardIdHint = $('wizardIdHint');
+  const wizardName = $('wizardName');
+  const wizardModel = $('wizardModel');
+  const wizardCloneOpts = $('wizardCloneOpts');
+  const wizardCloneChannels = $('wizardCloneChannels');
+  const wizardMirrorCred = $('wizardMirrorCred');
+  const wizardError = $('wizardError');
+  const wizardErrorText = $('wizardErrorText');
+  const btnWizardCreate = $('btnWizardCreate');
+  const btnWizardClose = $('btnWizardClose');
+  const btnWizardCancel = $('btnWizardCancel');
+
+  const exitScrim = $('exitScrim');
+  const btnExitDiscard = $('btnExitDiscard');
+  const btnExitStay = $('btnExitStay');
+
+  /* =========================================================
+     状态
+     ========================================================= */
+  const INDICES = [0, 1, 2, 3, 4]; // 槽位序号，对应 rel = idx - 2
+  let STEP = 100;
+  let offset = 0;
+  let target = 0;
+  let rafId = null;
+  let dragging = false;
+  let dragStartX = 0;
+  let dragStartOffset = 0;
+  let suppressClick = false;
+  let activeId = '';
+  let pendingToast = null;
+  let wizardModeValue = 'blank';
+
+  const mod = (n, m) => ((n % m) + m) % m;
+
+  /* =========================================================
+     工具函数
+     ========================================================= */
+  function notify(msg) {
+    toast.textContent = msg;
+    toast.classList.add('is-on');
+    clearTimeout(notify._t);
+    notify._t = setTimeout(() => toast.classList.remove('is-on'), 2000);
+  }
+
+  function showError(msg) {
+    errorBannerText.textContent = msg;
+    errorBanner.classList.add('is-on');
+  }
+
+  function clearError() {
+    errorBanner.classList.remove('is-on');
+    errorBannerText.textContent = '';
+  }
+
+  function botById(id) {
+    return BOTS.find((b) => b.id === id) || null;
+  }
+
+  /** 从持久化数据生成一份可编辑快照 */
+  function snapshotOf(bot) {
+    return {
+      name: bot.name,
+      desc: bot.desc,
+      soul: bot.soul,
+      model: bot.model,
+      isDefault: bot.isDefault,
+      avatar: bot.avatar,
+      disabledSkills: [...bot.disabledSkills],
+      enabledToolsets: [...bot.enabledToolsets],
+      enabledMcpServers: [...bot.enabledMcpServers],
+    };
+  }
+
+  /** 当前正在编辑的快照（草稿优先） */
+  function workingOf(bot) {
+    return drafts.get(bot.id) || snapshotOf(bot);
+  }
+
+  function isDirty(bot) {
+    if (!bot) return false;
+    const d = drafts.get(bot.id);
+    if (!d) return false;
+    return JSON.stringify(d) !== JSON.stringify(snapshotOf(bot));
+  }
+
+  function anyDirty() {
+    for (const bot of BOTS) if (isDirty(bot)) return true;
+    return false;
+  }
+
+  /** 写入草稿（仅当与持久化状态不同才保留） */
+  function putDraft(bot, patch) {
+    const next = Object.assign({}, workingOf(bot), patch);
+    if (JSON.stringify(next) === JSON.stringify(snapshotOf(bot))) {
+      drafts.delete(bot.id);
+    } else {
+      drafts.set(bot.id, next);
+    }
+    refreshDirtyDots();
+  }
+
+  function refreshDirtyDots() {
+    slots.forEach((node) => {
+      const id = node.dataset.botId;
+      const dot = node.querySelector('.dirty-dot');
+      if (dot && id) dot.classList.toggle('is-on', Boolean(drafts.get(id)));
+    });
+  }
+
+  /* =========================================================
+     几何：一行 5 个，两端让开 44px 导航按钮
+     ========================================================= */
+  function measureStep() {
+    const width = viewport.clientWidth || 600;
+    // 最外侧槽位中心距边 ≥ 4(按钮左距)+44(按钮宽)+半个头像 ≈ 68px
+    STEP = Math.max(56, Math.min(width / 5, width / 4 - 68));
+  }
+
+  function metrics(rel) {
+    const abs = Math.abs(rel);
+    return {
+      scale: Math.max(0.5, 1 - abs * 0.24),
+      // 0.55 下限保证最外侧仍可辨识，避免出现 0.048 这种等于隐藏的值
+      opacity: Math.max(0.55, 1 - abs * 0.22),
+      z: Math.round(10 - abs * 3),
+    };
+  }
+
+  /* =========================================================
+     渲染：轮播
+     ========================================================= */
+  function renderCarousel() {
+    const n = BOTS.length;
+    const wrap = n >= 5;           // 只有 ≥5 个才启用环形
+    const center = Math.round(offset);
+
+    slots.forEach((node, i) => {
+      const rel = INDICES[i] - 2;
+      const rawIndex = center + rel;
+      const visible = wrap || (rawIndex >= 0 && rawIndex < n);
+
+      if (!visible) {
+        node.style.opacity = '0';
+        node.style.pointerEvents = 'none';
+        node.dataset.botId = '';
+        return;
+      }
+
+      const bot = BOTS[wrap ? mod(rawIndex, n) : rawIndex];
+      if (!bot) {
+        node.style.opacity = '0';
+        node.style.pointerEvents = 'none';
+        node.dataset.botId = '';
+        return;
+      }
+
+      const m = metrics(rel);
+      const isCenter = rel === 0;   // 固定槽位归属，任何时刻恰有一个中心
+      const dirty = Boolean(drafts.get(bot.id));
+      const isDefault = workingOf(bot).isDefault;
+      const avatar = workingOf(bot).avatar;
+
+      node.style.transform = `translate3d(${rel * STEP}px, 0, 0) scale(${m.scale})`;
+      node.style.opacity = String(m.opacity);
+      node.style.zIndex = String(m.z);
+      node.style.pointerEvents = 'auto';
+      node.classList.toggle('is-center', isCenter);
+      node.setAttribute('aria-selected', isCenter ? 'true' : 'false');
+      node.dataset.botId = bot.id;
+
+      const sig = [bot.id, isCenter, dirty, isDefault, avatar ? 'img' : 'txt'].join('|');
+      if (node.dataset.sig === sig) return;
+      node.dataset.sig = sig;
+
+      node.innerHTML = `
+        <span class="avatar-wrap">
+          <span class="avatar-circle" style="
+            border-width:${isCenter ? '2px' : '1px'};
+            border-color:${isCenter ? 'var(--primary)' : 'var(--border-strong)'};
+            background:${avatar ? 'transparent' : `color-mix(in srgb, ${bot.color} 26%, var(--panel))`};
+          ">
+            ${avatar
+              ? `<img class="avatar-img" src="${avatar}" alt="" />`
+              : bot.initial}
+          </span>
+          ${isCenter ? `<span class="avatar-edit-overlay" data-edit="1" title="更换头像">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round">
+              <path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>
+            </svg>
+            <span>更换头像</span>
+          </span>` : ''}
+          <span class="dirty-dot${dirty ? ' is-on' : ''}" aria-hidden="true"></span>
+          <span class="default-badge${isDefault ? ' is-on' : ''}">默认</span>
+        </span>
+        <span class="bot-label" style="color:${isCenter ? 'var(--foreground)' : 'var(--muted-foreground)'}">${bot.name}</span>
+        <span class="bot-id-sub">${bot.id}</span>
+      `;
+
+      const overlay = node.querySelector('[data-edit]');
+      if (overlay) {
+        overlay.addEventListener('mousedown', (e) => e.stopPropagation());
+        overlay.addEventListener('click', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          fileInput.click();
+        });
+      }
+    });
+
+    syncActiveBot();
+  }
+
+  /** 中心槽位变更时切换表单内容（草稿优先） */
+  function syncActiveBot() {
+    const n = BOTS.length;
+    if (!n) return;
+    const center = mod(Math.round(offset), n);
+    const bot = BOTS[center];
+    if (!bot || bot.id === activeId) return;
+
+    activeId = bot.id;
+    renderForm(bot);
+    renderCapabilities(bot);
+    clearError();
+  }
+
+  function renderForm(bot) {
+    const w = workingOf(bot);
+    fieldId.value = bot.id;
+    fieldName.value = w.name;
+    fieldDesc.value = w.desc;
+    fieldSoul.value = w.soul;
+    renderModelSelect(fieldModel, w.model);
+    switchDefault.classList.toggle('is-on', w.isDefault);
+    switchDefault.setAttribute('aria-checked', w.isDefault ? 'true' : 'false');
+    updateSoulCount();
+  }
+
+  function renderModelSelect(select, value) {
+    const known = MODELS.some((m) => m.id === value);
+    const groups = new Map();
+    MODELS.forEach((m) => {
+      if (!groups.has(m.provider)) groups.set(m.provider, []);
+      groups.get(m.provider).push(m);
+    });
+
+    let html = '';
+    // 当前值不在目录里：置顶一个显式选项，绝不静默清空
+    if (value && !known) {
+      html += `<option value="${value}" selected>[离线/不可用] ${value}</option>`;
+    }
+
+    groups.forEach((list, provider) => {
+      html += `<optgroup label="${provider}">`;
+      list.forEach((m) => {
+        const offline = m.online ? '' : ' [离线/不可用]';
+        const selected = m.id === value ? ' selected' : '';
+        html += `<option value="${m.id}"${selected}>${m.id}${offline}</option>`;
+      });
+      html += '</optgroup>';
+    });
+
+    select.innerHTML = html;
+    if (value) select.value = value;
+    else if (select.options.length) select.selectedIndex = 0;
+  }
+
+  function updateSoulCount() {
+    const bytes = new TextEncoder().encode(fieldSoul.value).length;
+    soulCount.textContent = `${bytes} / 64 KB`;
+    soulCount.classList.toggle('is-warn', bytes > 65536);
+    soulCount.style.color = bytes > 65536 ? 'var(--destructive)' : '';
+  }
+
+  /* =========================================================
+     渲染：能力矩阵（逐项一行，状态落到草稿）
+     ========================================================= */
+  function renderCapabilities(bot) {
+    const w = workingOf(bot);
+
+    toolsetList.innerHTML = TOOLSETS.map((t) => {
+      const on = w.enabledToolsets.includes(t.id);
+      return `<div class="item-row">
+        <div class="item-main">
+          <span class="item-name">${t.name}</span>
+          <span class="item-sub">${t.desc}</span>
+        </div>
+        <button class="switch${on ? ' is-on' : ''}" type="button" role="switch"
+          aria-checked="${on ? 'true' : 'false'}" aria-label="${t.name}"
+          data-cap="toolset" data-id="${t.id}"></button>
+      </div>`;
+    }).join('');
+
+    skillList.innerHTML = SKILLS.map((s) => {
+      const on = !w.disabledSkills.includes(s.id);
+      return `<div class="item-row">
+        <div class="item-main">
+          <span class="item-name">${s.name}</span>
+          <span class="item-sub">${s.desc}</span>
+        </div>
+        <button class="switch${on ? ' is-on' : ''}" type="button" role="switch"
+          aria-checked="${on ? 'true' : 'false'}" aria-label="${s.name}"
+          data-cap="skill" data-id="${s.id}"></button>
+      </div>`;
+    }).join('');
+
+    mcpList.innerHTML = MCP_SERVERS.map((m) => {
+      const on = w.enabledMcpServers.includes(m.id);
+      const live = on && m.online;
+      return `<div class="item-row">
+        <div class="item-main">
+          <span class="item-name">${m.name}</span>
+          <span class="item-sub">${m.transport}</span>
+        </div>
+        <span class="item-status">
+          <span class="status-dot${live ? '' : ' is-off'}"></span>
+          <span>${live ? '已连接' : (on ? '未连接' : '已停用')}</span>
+        </span>
+        <button class="switch${on ? ' is-on' : ''}" type="button" role="switch"
+          aria-checked="${on ? 'true' : 'false'}" aria-label="${m.name}"
+          data-cap="mcp" data-id="${m.id}"></button>
+      </div>`;
+    }).join('');
+  }
+
+  /* 能力开关点击：写草稿 + 重渲染该区块 */
+  function onCapabilityClick(btn) {
+    const bot = botById(activeId);
+    if (!bot) return;
+    const w = workingOf(bot);
+    const { cap, id } = btn.dataset;
+    const patch = {};
+
+    if (cap === 'toolset') {
+      const next = new Set(w.enabledToolsets);
+      next.has(id) ? next.delete(id) : next.add(id);
+      patch.enabledToolsets = [...next];
+    } else if (cap === 'skill') {
+      const next = new Set(w.disabledSkills);
+      next.has(id) ? next.delete(id) : next.add(id);
+      patch.disabledSkills = [...next];
+    } else if (cap === 'mcp') {
+      const next = new Set(w.enabledMcpServers);
+      next.has(id) ? next.delete(id) : next.add(id);
+      patch.enabledMcpServers = [...next];
+    }
+
+    putDraft(bot, patch);
+    renderCapabilities(bot);
+    renderCarousel();
+  }
+
+  /* =========================================================
+     动画循环
+     ========================================================= */
+  function loop() {
+    if (!dragging) {
+      const diff = target - offset;
+      if (Math.abs(diff) < 0.001) {
+        offset = target;
+        renderCarousel();
+        rafId = null;
+        if (pendingToast) {
+          notify(pendingToast);
+          pendingToast = null;
+        }
+        return;
+      }
+      offset += diff * 0.18;
+    }
+    renderCarousel();
+    rafId = requestAnimationFrame(loop);
+  }
+
+  function startLoop() {
+    if (!rafId) rafId = requestAnimationFrame(loop);
+  }
+
+  function clampTarget() {
+    const n = BOTS.length;
+    if (n >= 5) return;                 // 环形不限制
+    target = Math.max(0, Math.min(n - 1, target));
+  }
+
+  /* =========================================================
+     交互：滚轮 / 拖拽 / 键盘
+     ========================================================= */
+  let wheelAcc = 0;
+  let wheelLock = false;
+
+  viewport.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1;
+    const delta = (Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY) * unit;
+    wheelAcc += delta;
+
+    if (wheelLock) return;
+    if (Math.abs(wheelAcc) < 12) return;
+
+    target += wheelAcc > 0 ? 1 : -1;
+    wheelAcc = 0;                       // 消费后立即清零，避免残余符号在解锁时跳错方向
+    clampTarget();
+    startLoop();
+
+    wheelLock = true;
+    setTimeout(() => {
+      wheelLock = false;
+      wheelAcc = 0;                     // 解锁时再清一次
+    }, 130);
+  }, { passive: false });
+
+  viewport.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    dragging = true;
+    suppressClick = false;
+    dragStartX = e.clientX;
+    dragStartOffset = offset;
+    target = offset;
+    viewport.setPointerCapture?.(e.pointerId);
+    startLoop();
+  });
+
+  viewport.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - dragStartX;
+    if (Math.abs(dx) > 4) suppressClick = true;
+    offset = dragStartOffset - dx / STEP;
+    target = offset;
+  });
+
+  function endDrag() {
+    if (!dragging) return;
+    dragging = false;
+    target = Math.round(target);
+    clampTarget();
+    startLoop();
+  }
+
+  viewport.addEventListener('pointerup', endDrag);
+  viewport.addEventListener('pointercancel', endDrag);
+  window.addEventListener('blur', endDrag);
+
+  stageBox.addEventListener('keydown', (e) => {
+    const tag = e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+      if (e.key === 'Escape') {
+        e.target.blur();
+      }
+      return;
+    }
+    if (e.key === 'ArrowLeft') { target = Math.round(target) - 1; clampTarget(); startLoop(); }
+    if (e.key === 'ArrowRight') { target = Math.round(target) + 1; clampTarget(); startLoop(); }
+  });
+
+  $('btnPrev').addEventListener('click', () => {
+    target = Math.round(target) - 1;
+    clampTarget();
+    startLoop();
+  });
+  $('btnNext').addEventListener('click', () => {
+    target = Math.round(target) + 1;
+    clampTarget();
+    startLoop();
+  });
+
+  /* 点击槽位：切换中心 */
+  slots.forEach((node) => {
+    node.addEventListener('click', (e) => {
+      if (suppressClick) { suppressClick = false; return; }
+      const rel = INDICES[slots.indexOf(node)] - 2;
+      if (rel === 0) return;             // 已居中
+      if (e.target.closest('[data-edit]')) return;
+      target = Math.round(target) + rel;
+      clampTarget();
+      startLoop();
+    });
+  });
+
+  /* =========================================================
+     表单编辑 → 草稿
+     ========================================================= */
+  function bindField(el, key, transform) {
+    el.addEventListener('input', () => {
+      const bot = botById(activeId);
+      if (!bot) return;
+      putDraft(bot, { [key]: transform ? transform(el.value) : el.value });
+      renderCarousel();
+      if (key === 'soul') updateSoulCount();
+    });
+  }
+
+  bindField(fieldName, 'name');
+  bindField(fieldDesc, 'desc');
+  bindField(fieldSoul, 'soul');
+  fieldModel.addEventListener('change', () => {
+    const bot = botById(activeId);
+    if (!bot) return;
+    putDraft(bot, { model: fieldModel.value });
+    renderCarousel();
+  });
+
+  switchDefault.addEventListener('click', () => {
+    const bot = botById(activeId);
+    if (!bot) return;
+    const next = !switchDefault.classList.contains('is-on');
+    switchDefault.classList.toggle('is-on', next);
+    switchDefault.setAttribute('aria-checked', next ? 'true' : 'false');
+    putDraft(bot, { isDefault: next });
+    renderCarousel();
+  });
+
+  toolsetList.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-cap]');
+    if (btn) onCapabilityClick(btn);
+  });
+  skillList.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-cap]');
+    if (btn) onCapabilityClick(btn);
+  });
+  mcpList.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-cap]');
+    if (btn) onCapabilityClick(btn);
+  });
+
+  /* 变量插入：插到光标处 */
+  document.querySelectorAll('[data-insert]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const text = btn.dataset.insert;
+      const start = fieldSoul.selectionStart ?? fieldSoul.value.length;
+      const end = fieldSoul.selectionEnd ?? fieldSoul.value.length;
+      fieldSoul.value = fieldSoul.value.slice(0, start) + text + fieldSoul.value.slice(end);
+      fieldSoul.selectionStart = fieldSoul.selectionEnd = start + text.length;
+      fieldSoul.dispatchEvent(new Event('input'));
+      fieldSoul.focus();
+    });
+  });
+
+  document.querySelectorAll('[data-template]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const kind = btn.dataset.template;
+      const text = kind === 'architect'
+        ? '# 架构师\n- 坚持单向分层依赖\n- 输出可落地的方案与改动清单'
+        : '# 审查员\n- 逐行审查改动风险\n- 指出具体文件与行号';
+      fieldSoul.value = text;
+      fieldSoul.dispatchEvent(new Event('input'));
+    });
+  });
+
+  /* =========================================================
+     头像
+     ========================================================= */
+  btnResetAvatar.addEventListener('click', () => {
+    const bot = botById(activeId);
+    if (!bot) return;
+    if (!workingOf(bot).avatar) {
+      notify('当前已是默认头像');
+      return;
+    }
+    putDraft(bot, { avatar: null });
+    renderCarousel();
+    notify('头像已恢复默认（未保存）');
+  });
+
+  fileInput.addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    fileInput.value = '';
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      showError('请选择图片文件（PNG / JPG / WebP）。');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      showError('图片不能超过 2MB，当前 ' + (file.size / 1024 / 1024).toFixed(1) + 'MB。');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onerror = () => showError('读取图片失败，请重试。');
+    reader.onload = (ev) => {
+      const bot = botById(activeId);
+      if (!bot) return;
+      putDraft(bot, { avatar: String(ev.target.result) });
+      renderCarousel();
+      clearError();
+      notify('头像已更新（未保存）');
+    };
+    reader.readAsDataURL(file);
+  });
+
+  /* =========================================================
+     保存 / 重置
+     ========================================================= */
+  btnSave.addEventListener('click', () => {
+    const bot = botById(activeId);
+    if (!bot) return;
+
+    if (!isDirty(bot)) {
+      notify('没有需要保存的修改');
+      return;
+    }
+
+    btnSave.disabled = true;
+    btnSave.textContent = '保存中…';
+    configDeck.classList.add('is-locked');
+
+    // 模拟网关往返；failNextSave 用于演示失败路径
+    setTimeout(() => {
+      btnSave.disabled = false;
+      btnSave.textContent = '保存配置';
+      configDeck.classList.remove('is-locked');
+
+      if (failNextSave) {
+        failNextSave = false;
+        showError('保存失败：网关返回 4062（标识符冲突）。已保留你的全部修改，请修正后重试。');
+        return;
+      }
+
+      const w = workingOf(bot);
+      Object.assign(bot, {
+        name: w.name,
+        desc: w.desc,
+        soul: w.soul,
+        model: w.model,
+        isDefault: w.isDefault,
+        avatar: w.avatar,
+        disabledSkills: [...w.disabledSkills],
+        enabledToolsets: [...w.enabledToolsets],
+        enabledMcpServers: [...w.enabledMcpServers],
+      });
+
+      // 默认 BOT 互斥
+      if (w.isDefault) {
+        BOTS.forEach((b) => { if (b.id !== bot.id) b.isDefault = false; });
+      }
+
+      drafts.delete(bot.id);
+      clearError();
+      renderForm(bot);
+      renderCapabilities(bot);
+      renderCarousel();
+      notify(`已保存 ${bot.name} 的配置`);
+    }, 420);
+  });
+
+  btnReset.addEventListener('click', () => {
+    const bot = botById(activeId);
+    if (!bot) return;
+    if (!isDirty(bot)) {
+      notify('没有需要重置的修改');
+      return;
+    }
+    drafts.delete(bot.id);
+    renderForm(bot);
+    renderCapabilities(bot);
+    renderCarousel();
+    clearError();
+    notify('已重置未保存的修改');
+  });
+
+  /* =========================================================
+     未保存离场拦截
+     ========================================================= */
+  let pendingExit = null;
+
+  function guardExit(action) {
+    if (!anyDirty()) {
+      action();
+      return;
+    }
+    pendingExit = action;
+    exitScrim.classList.add('is-on');
+    btnExitStay.focus();
+  }
+
+  function closeExit() {
+    exitScrim.classList.remove('is-on');
+    pendingExit = null;
+  }
+
+  btnExitStay.addEventListener('click', closeExit);
+  btnExitDiscard.addEventListener('click', () => {
+    const action = pendingExit;
+    drafts.clear();
+    closeExit();
+    if (action) action();
+    else {
+      const bot = botById(activeId);
+      if (bot) {
+        renderForm(bot);
+        renderCapabilities(bot);
+        renderCarousel();
+      }
+      notify('已放弃未保存的修改');
+    }
+  });
+
+  window.addEventListener('beforeunload', (e) => {
+    if (anyDirty()) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (exitScrim.classList.contains('is-on')) { closeExit(); return; }
+    if (wizardScrim.classList.contains('is-on')) { closeWizard(); return; }
+    if (anyDirty()) {
+      e.preventDefault();
+      guardExit(() => {});
+    }
+  });
+
+  /* =========================================================
+     新建 / 克隆向导
+     ========================================================= */
+  function openWizard() {
+    wizardModeValue = 'blank';
+    wizardMode.querySelectorAll('button').forEach((b) => {
+      b.classList.toggle('is-active', b.dataset.mode === 'blank');
+    });
+    wizardCloneRow.style.display = 'none';
+    wizardCloneOpts.style.display = 'none';
+    wizardId.value = '';
+    wizardName.value = '';
+    wizardId.classList.remove('is-invalid');
+    wizardIdHint.textContent = '例如 architect、qa-engineer。';
+    wizardIdHint.classList.remove('is-warn');
+    wizardError.classList.remove('is-on');
+    renderModelSelect(wizardModel, MODELS[0].id);
+    wizardCloneFrom.innerHTML = BOTS.map((b) => `<option value="${b.id}">${b.name}（${b.id}）</option>`).join('');
+    wizardScrim.classList.add('is-on');
+    setTimeout(() => wizardId.focus(), 0);
+  }
+
+  function closeWizard() {
+    wizardScrim.classList.remove('is-on');
+  }
+
+  wizardMode.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-mode]');
+    if (!btn) return;
+    wizardModeValue = btn.dataset.mode;
+    wizardMode.querySelectorAll('button').forEach((b) => {
+      b.classList.toggle('is-active', b === btn);
+    });
+    const isClone = wizardModeValue === 'clone';
+    wizardCloneRow.style.display = isClone ? 'flex' : 'none';
+    wizardCloneOpts.style.display = isClone ? 'flex' : 'none';
+    if (isClone) {
+      const src = botById(wizardCloneFrom.value);
+      if (src) {
+        wizardName.value = `${src.name} 副本`;
+        renderModelSelect(wizardModel, src.model);
+      }
+    }
+  });
+
+  wizardCloneFrom.addEventListener('change', () => {
+    const src = botById(wizardCloneFrom.value);
+    if (!src) return;
+    wizardName.value = `${src.name} 副本`;
+    renderModelSelect(wizardModel, src.model);
+  });
+
+  wizardId.addEventListener('input', () => {
+    const v = wizardId.value.trim();
+    const ok = /^[a-z0-9-]{2,32}$/.test(v) && !BOTS.some((b) => b.id === v);
+    wizardId.classList.toggle('is-invalid', Boolean(v) && !ok);
+    if (!v) {
+      wizardIdHint.textContent = '例如 architect、qa-engineer。';
+      wizardIdHint.classList.remove('is-warn');
+      return;
+    }
+    if (!/^[a-z0-9-]{2,32}$/.test(v)) {
+      wizardIdHint.textContent = '只能用小写字母、数字与短横线，长度 2-32 位。';
+      wizardIdHint.classList.add('is-warn');
+    } else if (BOTS.some((b) => b.id === v)) {
+      wizardIdHint.textContent = '这个 ID 已被占用，换一个。';
+      wizardIdHint.classList.add('is-warn');
+    } else {
+      wizardIdHint.textContent = '可以使用。';
+      wizardIdHint.classList.remove('is-warn');
+    }
+  });
+
+  btnWizardCreate.addEventListener('click', () => {
+    const id = wizardId.value.trim();
+    const name = wizardName.value.trim();
+
+    let message = '';
+    if (!/^[a-z0-9-]{2,32}$/.test(id)) message = 'BOT ID 只能用小写字母、数字与短横线，长度 2-32 位。';
+    else if (BOTS.some((b) => b.id === id)) message = 'BOT ID 已被占用，请修改后重试。';
+    else if (!name) message = '请填写显示名称。';
+
+    if (message) {
+      wizardErrorText.textContent = message;
+      wizardError.classList.add('is-on');
+      return;
+    }
+
+    const model = wizardModel.value;
+    let base;
+
+    if (wizardModeValue === 'clone') {
+      const src = botById(wizardCloneFrom.value);
+      if (!src) {
+        wizardErrorText.textContent = '克隆源已不存在，请重新选择。';
+        wizardError.classList.add('is-on');
+        return;
+      }
+      base = {
+        id, name, color: src.color, initial: name.slice(0, 1),
+        model, desc: src.desc, soul: src.soul, avatar: null, isDefault: false,
+        disabledSkills: [...src.disabledSkills],
+        enabledToolsets: [...src.enabledToolsets],
+        enabledMcpServers: wizardCloneChannels.checked ? [...src.enabledMcpServers] : [],
+      };
+    } else {
+      base = {
+        id, name, color: '#6366f1', initial: name.slice(0, 1),
+        model, desc: '', soul: `# ${name}\n- 说明这个 BOT 的职责与边界`,
+        avatar: null, isDefault: false,
+        disabledSkills: [],
+        enabledToolsets: ['web_search'],
+        enabledMcpServers: [],
+      };
+    }
+
+    BOTS.push(base);
+    closeWizard();
+    renderCarousel();
+
+    // 平滑定位到新建项
+    target = BOTS.length - 1;
+    clampTarget();
+    pendingToast = `已创建 ${name}`;
+    startLoop();
+  });
+
+  btnOpenWizard.addEventListener('click', () => guardExit(openWizard));
+  btnWizardClose.addEventListener('click', closeWizard);
+  btnWizardCancel.addEventListener('click', closeWizard);
+  $('btnCreateFirst').addEventListener('click', openWizard);
+
+  /* =========================================================
+     其它
+     ========================================================= */
+  btnCopyId.addEventListener('click', () => {
+    const text = fieldId.value;
+    if (!text) return;
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(
+        () => notify(`已复制 ${text}`),
+        () => selectIdText(),
+      );
+    } else {
+      selectIdText();
+    }
+  });
+
+  function selectIdText() {
+    fieldId.focus();
+    fieldId.select();
+    notify('已选中 ID，按 Ctrl+C 复制');
+  }
+
+  errorBanner.querySelector('#btnCloseError').addEventListener('click', clearError);
+
+  $('btnRetry').addEventListener('click', () => {
+    rosterError.classList.remove('is-on');
+    renderCarousel();
+  });
+
+  document.querySelectorAll('.accordion-header').forEach((header) => {
+    header.addEventListener('click', () => {
+      const box = header.closest('.flux-collapse');
+      const grid = box.querySelector('.flux-collapse-grid');
+      const arrow = box.querySelector('.accordion-arrow');
+      const open = grid.classList.toggle('is-open');
+      arrow.classList.toggle('is-open', open);
+      header.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+  });
+
+  const themeBtn = $('themeBtn');
+  function syncThemeLabel() {
+    const dark = document.documentElement.dataset.theme === 'dark';
+    themeBtn.textContent = dark ? '切换为浅色皮肤' : '切换为暗色皮肤';
+  }
+  themeBtn.addEventListener('click', () => {
+    const root = document.documentElement;
+    root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+    syncThemeLabel();
+  });
+  syncThemeLabel();
+
+  window.addEventListener('resize', () => {
+    measureStep();
+    renderCarousel();
+  });
+
+  /* =========================================================
+     启动
+     ========================================================= */
+  measureStep();
+
+  if (!BOTS.length) {
+    rosterEmpty.classList.add('is-on');
+    viewport.style.display = 'none';
+    toolbarRow.style.display = 'none';
+    configDeck.style.display = 'none';
+    document.querySelector('.stage-footer').style.display = 'none';
+  } else {
+    renderCarousel();
+  }
+})();
+</script>
+
+</body>
+</html>
