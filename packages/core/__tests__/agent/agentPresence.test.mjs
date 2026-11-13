@@ -16,8 +16,10 @@ import {
   presenceTone,
   classifyPresenceTool,
   nextBlinkDelayMs,
+  pickIdleQuipIndex,
   BLINK_MIN_INTERVAL_MS,
   BLINK_MAX_INTERVAL_MS,
+  IDLE_QUIP_COUNT,
 } from '../../dist/agent/agentPresence.js';
 
 const NOW = 1_700_000_000_000;
@@ -251,5 +253,39 @@ test('nextBlinkDelayMs - 非等距、确定性、分布不退化', async (t) => 
       buckets.add(Math.floor((nextBlinkDelayMs(i) - BLINK_MIN_INTERVAL_MS) / 260));
     }
     assert.ok(buckets.size >= 8, `分桶仅 ${buckets.size} 个，分布退化`);
+  });
+});
+
+test('pickIdleQuipIndex - 空闲轮播的确定性、范围与遍历性', async (t) => {
+  await t.test('返回值恒落在 [0, IDLE_QUIP_COUNT) 且为整数', () => {
+    for (let tick = 0; tick < 200; tick += 1) {
+      const index = pickIdleQuipIndex(`session-${tick % 7}`, tick);
+      assert.ok(Number.isInteger(index), `${index} 必须是整数`);
+      assert.ok(index >= 0 && index < IDLE_QUIP_COUNT, `${index} 越界`);
+    }
+  });
+
+  await t.test('同一 seed + tick 恒等（禁止随机源，否则测试不可复现）', () => {
+    assert.equal(pickIdleQuipIndex('session-a', 3), pickIdleQuipIndex('session-a', 3));
+    assert.equal(pickIdleQuipIndex('', 0), pickIdleQuipIndex('', 0));
+  });
+
+  await t.test('连续 IDLE_QUIP_COUNT 拍走遍全部文案（不重复、不遗漏）', () => {
+    const seen = new Set();
+    for (let tick = 0; tick < IDLE_QUIP_COUNT; tick += 1) {
+      seen.add(pickIdleQuipIndex('group:小发王,审核官', tick));
+    }
+    assert.equal(seen.size, IDLE_QUIP_COUNT, '一个周期内必须遍历全部文案');
+  });
+
+  await t.test('不同身份不会锁死在同一句（避免所有会话读同一句话）', () => {
+    const firsts = new Set();
+    for (let i = 0; i < 50; i += 1) firsts.add(pickIdleQuipIndex(`session-${i}`, 0));
+    assert.ok(firsts.size >= 4, `50 个身份的起始文案仅 ${firsts.size} 种，分布退化`);
+  });
+
+  await t.test('非法 tick（负数 / NaN）按 0 处理，不产生越界或 NaN', () => {
+    assert.equal(pickIdleQuipIndex('s', -5), pickIdleQuipIndex('s', 0));
+    assert.equal(pickIdleQuipIndex('s', Number.NaN), pickIdleQuipIndex('s', 0));
   });
 });

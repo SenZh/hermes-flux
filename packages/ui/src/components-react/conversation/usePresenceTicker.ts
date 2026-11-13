@@ -24,10 +24,17 @@
  */
 
 import { useEffect, useState } from 'react';
-import { nextBlinkDelayMs } from '@hermes-flux/core';
+import { IDLE_QUIP_INTERVAL_MS, nextBlinkDelayMs } from '@hermes-flux/core';
+import {
+  createIdleQuipScheduler,
+  IDLE_QUIP_REST,
+  type IdleQuipState,
+} from './idleQuipScheduler.js';
 
 /** 闭眼持续时长（ms）：短促到不会被读成「卡住」 */
 const BLINK_CLOSED_MS = 140;
+/** 空闲换句时头像侧头的时长（ms）：与文案淡入同拍，读作「它想到了什么」 */
+const IDLE_TURN_MS = 420;
 
 /**
  * 眨眼时钟。
@@ -104,4 +111,63 @@ export function usePresenceTicker(active: boolean, seed: string): boolean {
   }, [active, seed]);
 
   return active && blinking;
+}
+
+/** 空闲轮播状态：`tick` 每换一句 +1；`turning` 在换句后的短窗口内为 true（驱动侧头动作） */
+export type { IdleQuipState } from './idleQuipScheduler.js';
+
+/**
+ * 空闲轮播节拍器。
+ *
+ * 【设计意图 (Why)】空闲态没有真实状态可播报，但完全静止的头像读起来像进程挂了。
+ *   这里按 `IDLE_QUIP_INTERVAL_MS`（9s）推进 `tick`，组件再用身份 seed 映射到具体短句；
+ *   换句的同一拍把 `turning` 置真 420ms，让头像「侧一下头」，文案与动作是一个东西。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   1. 不能用 CSS `animation: infinite` 表达换句：文案是数据驱动的，动画不能；
+ *      而且在空闲态再挂一条无限动画会构成第二个焦点（违反单一焦点不变量）。
+ *   2. 页面隐藏必须停表，否则后台窗口每 9s 醒一次 CPU。
+ *   3. 非空闲态必须把状态复位到 `IDLE_QUIP_REST`，否则从 running 落回 idle 时会
+ *      沿用上一次的 tick，第一句直接从中间开始。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. `active === false` 不创建任何定时器；
+ *   2. 卸载清理定时器与监听；
+ *   3. 无 `document`（SSR / 测试）时返回静止态，不抛错；
+ *   4. 定时器语义全部下沉到 `idleQuipScheduler`，本 hook 只做「React 生命周期 ↔ 调度器」的桥。
+ */
+export function useIdleQuipTicker(active: boolean): IdleQuipState {
+  const [state, setState] = useState<IdleQuipState>(IDLE_QUIP_REST);
+
+  useEffect(() => {
+    if (!active) {
+      // 值等价时不制造新对象，避免无意义重渲染
+      setState((prev) => (prev.tick === 0 && !prev.turning ? prev : IDLE_QUIP_REST));
+      return;
+    }
+    if (typeof document === 'undefined') return;
+
+    const scheduler = createIdleQuipScheduler({
+      onState: (next) => setState(next),
+      setTimer: (callback, delayMs) => setTimeout(callback, delayMs),
+      clearTimer: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+      isHidden: () => document.visibilityState === 'hidden',
+      intervalMs: IDLE_QUIP_INTERVAL_MS,
+      turnMs: IDLE_TURN_MS,
+    });
+
+    const onVisibilityChange = (): void => {
+      scheduler.visibilityChanged(document.visibilityState === 'hidden');
+    };
+
+    scheduler.start();
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      scheduler.stop();
+    };
+  }, [active]);
+
+  return active ? state : IDLE_QUIP_REST;
 }

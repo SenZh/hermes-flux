@@ -3310,6 +3310,20 @@ details[open] > summary > .tool-row__expand {
   box-sizing: border-box;
 }
 
+/*
+ * 头像内容随容器缩放。
+ *
+ * 【为什么必须有 (Rules)】`renderBotAvatar` 输出的 SVG / `<img>` 都是按生成尺寸写死宽高的
+ *   （stage 为 56px）。dock 变体把槽位收到 20px 后，不缩放就会被 `overflow: hidden`
+ *   裁成一张脸的中段。这里统一按容器等比缩放，资产侧不需要感知布局。
+ */
+.conv-presence__face > svg,
+.conv-presence__face > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .conv-presence[data-mode="group"] .conv-presence__avatar[data-speaker="true"] .conv-presence__face {
   border-color: var(--foreground);
 }
@@ -3484,26 +3498,35 @@ details[open] > summary > .tool-row__expand {
 }
 
 /* idle：文案行高度归零但节点常驻——卸载节点会让容器瞬间塌 28px，在对话区顶部弹跳一次 */
-.conv-presence__text[data-empty="true"] {
-  max-height: 0;
-  opacity: 0;
-  overflow: hidden;
-  animation: none;
+/*
+ * 空闲轮播文案。
+ *
+ * 【设计意图 (Why)】空闲态没有真实状态可播报，但完全静止的头像读起来像进程挂了。
+ *   这里把它降为二级色：文案每 9s 换一句（见 useIdleQuipTicker），说的是「我闲着，等你派活」。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 禁止再走「高度归零」的退场：用户已裁定空闲态常驻文案，高度塌陷会在对话区顶部
+ *      造成一次 28px 的布局弹跳；
+ *   2. 空闲文案不挂高光扫光（那是 thinking 的语言），只做 160ms 交叉淡入。
+ */
+.conv-presence__text[data-idle-quip="true"] .conv-presence__verb {
+  /*
+   * 【必须命中 verb (Rules)】空闲短句实际渲染在 `.conv-presence__verb` 里，而该元素自身
+   *   声明了 `color: var(--foreground)`——只在父级 `.conv-presence__text` 上写颜色会被子元素
+   *   自己的声明完全覆盖，弱化形同不存在（样式审查实测：idle 句子仍是前景高对比白）。
+   */
+  color: var(--muted-foreground);
 }
 
-/* 【规则】gap 必须一起过渡：只塌文案高度会让 12px 间隙留在原地，
-   idle 总高变成 68px 而不是设计要求的 56px（真实浏览器实测发现）。 */
-.conv-presence:has(> .conv-presence__text[data-empty="true"]) {
-  gap: 0;
-}
-
-.conv-presence {
-  transition: gap 200ms ease;
-}
-
-.conv-presence__text {
-  max-height: 40px;
-  transition: max-height 200ms ease, opacity 200ms ease;
+/*
+ * 空闲侧头动作：每换一句文案，头像侧一次头（420ms）。
+ *
+ * 【为什么挂在 `.conv-presence__avatar` 而不是 face】face 上已有 idle 呼吸
+ *   （`convPresenceBreathe`，2600ms infinite），两条 animation 写在同一元素上后者会覆盖前者；
+ *   分到父子两层则天然叠加，读作「呼吸中想到了什么」。
+ */
+.conv-presence__avatar[data-idle-turn="true"] {
+  animation: convPresenceIdleTurn 420ms ease-in-out;
 }
 
 /* thinking 态文字高光：文字被「点亮」= 内部在运转 */
@@ -3542,6 +3565,118 @@ details[open] > summary > .tool-row__expand {
 
 .conv-presence__bars > i:nth-child(2) { animation-delay: 120ms; }
 .conv-presence__bars > i:nth-child(3) { animation-delay: 240ms; }
+
+/* ==========================================================================
+   布局变体：输入舱上沿（dock）
+   --------------------------------------------------------------------------
+   【设计意图 (Why)】`stage` 变体悬浮在对话区顶部、压在消息上；`dock` 变体贴在
+   输入舱正上方，读作「这个输入框正由谁在待命」。两者共用同一状态机、同一文案、
+   同一动效语言，只有几何与字号不同——绝不复制第二套实现。
+
+   【几何 (Rules)】
+     1. 与输入舱同宽同位：`width: 100%`、`max-width: 740px`、`margin: 0 auto`，
+        头像外沿 = 输入舱左边框，用户裁定的对齐线就是这条；
+     2. 单行横排：头像 20px、间距 8px、文案跟随 `--conv-meta-size` 减 1px；
+     3. 只读、零交互：`pointer-events: none`（宿主层负责，见 `#react-conv-presence-host`）。
+   ========================================================================== */
+.conv-presence[data-layout="dock"] {
+  --presence-size: 20px;
+  --presence-gap: 8px;
+
+  position: static;
+  top: auto;
+  left: auto;
+  transform: none;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--presence-gap);
+  width: 100%;
+  max-width: 740px;
+  min-height: var(--presence-size);
+  margin: 0 auto;
+}
+
+/*
+ * dock 字阶锁整数档。
+ *
+ * 【为什么不能 `calc(meta - 1px)` (Rules)】`--chat-text-meta` 会随用户字号档位
+ *   按 0.9 / 1 / 1.12 缩放（13 → 11.7 / 13 / 14.6），减 1px 后得到
+ *   10.7 / 12 / 13.6 这类小数字号，直接违反「7 档整数阶梯」，且与 16px 行高的
+ *   比值在小档掉到 1.18。这里改用固定的 caption 档（11px）+ 成对行高。
+ */
+.conv-presence[data-layout="dock"] .conv-presence__text {
+  justify-content: flex-start;
+  font-size: var(--fs-caption, 11px);
+  line-height: 16px;
+}
+
+.conv-presence[data-layout="dock"] .conv-presence__target {
+  font-size: var(--fs-caption, 11px);
+}
+
+/* dock 直接压在输入舱上方、不与消息重叠：字形阴影在这里只会变成一圈脏边 */
+.conv-presence[data-layout="dock"] .conv-presence__text {
+  text-shadow: none;
+}
+
+/*
+ * dock 变体不挂光晕。
+ *
+ * 【为什么 (Rules)】stage 的 92px 光晕是给 56px 头像做的柔光；缩到 20px 头像后，
+ *   32px 光晕在输入区只剩一团脏雾。更关键的是：输入舱上沿是打字视线的锚点，
+ *   这里再叠一层常驻脉冲会构成第三重动效焦点（呼吸 2600ms + 换句 9s + 侧头 420ms 已足够）。
+ */
+.conv-presence[data-layout="dock"] .conv-presence__halo {
+  display: none;
+}
+
+/* 小头像的外环必须等比收：沿用 stage 的 -5px 会把 20px 头像裹成一颗球
+   【网格 (Rules)】环 inset 取 -2px、重叠 -8px，全部落在 4px 网格。 */
+.conv-presence[data-layout="dock"] .conv-presence__ring {
+  inset: -2px;
+  padding: 1px;
+}
+
+.conv-presence[data-layout="dock"] .conv-presence__avatar + .conv-presence__avatar {
+  margin-left: -8px;
+}
+
+.conv-presence[data-layout="dock"] .conv-presence__avatar--more {
+  font-size: var(--fs-caption, 11px);
+}
+
+/*
+ * 输入舱上沿的宿主层。
+ *
+ * 【定位 (Rules)】绝对定位在 `.input-dock-container` 之上（`bottom: calc(100% + 8px)`），
+ *   因此**不参与 flex 流**：输入舱高度变化（placeholder 换行、附件轨、队列）不会推动它，
+ *   它也不会把输入舱顶起来。任何「用 margin 让出空间」的写法都会让输入舱上下跳。
+ * 【宽度 (Rules)】宿主自身不留 gutter（避免复制 `.input-dock-container` 的 `padding: 0 24px`
+ *   这一条真值），内层用 `100% - 48px` 自己收边，容器 padding 改了也不会静默错位。
+ */
+#react-conv-presence-host.presence-host--dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  display: flex;
+  justify-content: center;
+  z-index: 1;
+  pointer-events: none;
+}
+
+#react-conv-presence-host.presence-host--dock > .conv-presence {
+  width: calc(100% - 48px);
+  max-width: 740px;
+}
+
+@keyframes convPresenceIdleTurn {
+  0% { transform: rotate(0deg); }
+  35% { transform: rotate(-3deg); }
+  70% { transform: rotate(2deg); }
+  100% { transform: rotate(0deg); }
+}
 
 @keyframes convPresenceSpin {
   to { transform: rotate(360deg); }
@@ -3621,6 +3756,12 @@ html[data-app-hidden="true"] .conv-presence *::after {
   .conv-presence .conv-presence__bars > i,
   .conv-presence .conv-presence__text,
   .conv-presence .conv-presence__face,
+  /*
+   * 【空闲侧头必须一起停 (Rules)】`data-idle-turn` 的 420ms 旋转挂在本层（avatar），
+   *   特异性 (0,2,0) 与状态形变同级；漏掉它时前庭敏感用户仍会看到头像旋转——
+   *   这与本文件历史 P0-1 是同一类缺陷（「最影响前庭舒适度的头像形变反而继续跑」）。
+   */
+  .conv-presence .conv-presence__avatar,
   .conv-presence[data-presence] .conv-presence__face,
   .conv-presence[data-mode="group"] .conv-presence__avatar[data-lead="false"] .conv-presence__face {
     animation: none !important;

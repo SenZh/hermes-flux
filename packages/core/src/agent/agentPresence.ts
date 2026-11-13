@@ -257,3 +257,56 @@ export function nextBlinkDelayMs(seed: string | number): number {
   const hash = fnv1a(String(seed));
   return BLINK_MIN_INTERVAL_MS + (hash % span);
 }
+
+/** 空闲轮播文案条数：对应 i18n 键 `presence.idle.0` … `presence.idle.{N-1}` */
+export const IDLE_QUIP_COUNT = 8;
+/** 空闲文案切换间隔（毫秒）：慢到不抢注意力，又能让人看到「它还活着」 */
+export const IDLE_QUIP_INTERVAL_MS = 9_000;
+
+/**
+ * 与 `IDLE_QUIP_COUNT` 互质的候选步长（1…COUNT-1）。
+ *
+ * 【为什么提到模块级 (Rules)】`pickIdleQuipIndex` 每次渲染都会调用一次；
+ *   在函数内每次新建数组并循环求 GCD 是纯浪费。常量表在模块初始化时算一次即可。
+ */
+const IDLE_COPRIME_STEPS: readonly number[] = (() => {
+  const steps: number[] = [];
+  for (let candidate = 1; candidate < IDLE_QUIP_COUNT; candidate += 1) {
+    if (greatestCommonDivisor(candidate, IDLE_QUIP_COUNT) === 1) steps.push(candidate);
+  }
+  return steps.length > 0 ? steps : [1];
+})();
+
+/** 欧几里得算法：判互质 */
+function greatestCommonDivisor(a: number, b: number): number {
+  let x = a;
+  let y = b;
+  while (y !== 0) {
+    const rest = x % y;
+    x = y;
+    y = rest;
+  }
+  return x;
+}
+
+/**
+ * 空闲轮播文案的下标。
+ *
+ * 【设计意图 (Why)】空闲态没有真实状态可播报，但一个完全静止的头像读起来像「进程挂了」。
+ *   给一组俏皮短句轮播，让在场感延续，同时明确告诉用户「它闲着，等你派活」。
+ *
+ * 【防范的历史坑 (Pitfall)】禁止用 `Math.random()`：同一身份每次重渲染都会跳文案，
+ *   而且测试无法复现。这里用身份 seed 派生出**起点**与**步长**，同一身份序列恒定，
+ *   不同身份序列不同（避免所有会话都在读同一句话）。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 纯函数：不读时钟、不读随机数；
+ *   2. 返回值恒落在 `[0, IDLE_QUIP_COUNT)`；
+ *   3. 步长必须与条数互质，保证 COUNT 次内遍历全部文案（不重复、不遗漏）。
+ */
+export function pickIdleQuipIndex(seed: string, tick: number): number {
+  const start = fnv1a(`${seed}:start`) % IDLE_QUIP_COUNT;
+  const step = IDLE_COPRIME_STEPS[fnv1a(`${seed}:step`) % IDLE_COPRIME_STEPS.length];
+  const safeTick = Number.isFinite(tick) && tick > 0 ? Math.floor(tick) : 0;
+  return (start + safeTick * step) % IDLE_QUIP_COUNT;
+}

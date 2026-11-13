@@ -219,6 +219,22 @@ function AppearancePanel({
       </section>
 
       <section>
+        <h3 className="mb-1 text-section font-medium text-foreground">{t('settings.presenceTitle')}</h3>
+        <p className="mb-2 text-caption text-muted-foreground">{t('settings.presenceHint')}</p>
+        <SettingRow label={t('settings.presenceLayout')}>
+          <SegmentedControl
+            ariaLabel={t('settings.presenceLayout')}
+            value={snapshot.presenceLayout}
+            onChange={(layout) => actions.onPresenceLayoutChange(layout)}
+            options={[
+              { value: 'stage', label: t('settings.presenceLayoutStage') },
+              { value: 'dock', label: t('settings.presenceLayoutDock') },
+            ]}
+          />
+        </SettingRow>
+      </section>
+
+      <section>
         <h3 className="mb-1 text-section font-medium text-foreground">{t('settings.languageTitle')}</h3>
         <p className="mb-2 text-caption text-muted-foreground">{t('settings.languageHint')}</p>
         <SettingRow label={t('settings.languageLabel')}>

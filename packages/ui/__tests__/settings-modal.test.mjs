@@ -45,6 +45,7 @@ function snapshot(overrides = {}) {
     appVersion: '0.1.0',
     platform: 'windows',
     busy: false,
+    presenceLayout: 'stage',
     ...overrides,
   };
 }
@@ -56,6 +57,7 @@ const noopActions = {
   onLocaleChange() {},
   onFontPrefsChange() {},
   onActivityVariantChange() {},
+  onPresenceLayoutChange() {},
   onRefreshProviders() {},
   onSaveProviderKey: async () => ({ ok: true }),
   onDisconnectProvider: async () => ({ ok: true }),
@@ -171,6 +173,25 @@ test('数字员工页只读展示真实档案，并提供打开编辑器入口',
   assert.ok(html.includes(t('settings.agentDefault')));
   assert.ok(html.includes(t('settings.agentNoModel')));
   assert.ok(html.includes(t('settings.agentOpen')));
+});
+
+test('Agent 状态位置：外观分区渲染两个选项，选中态与快照一致', () => {
+  setLocale('zh-CN');
+  const stageHtml = render({ section: 'appearance', presenceLayout: 'stage' });
+  assert.ok(stageHtml.includes(t('settings.presenceTitle')), '必须渲染「Agent 状态」段');
+  assert.ok(stageHtml.includes(t('settings.presenceLayoutStage')), '必须渲染「对话区顶部」选项');
+  assert.ok(stageHtml.includes(t('settings.presenceLayoutDock')), '必须渲染「输入框上方」选项');
+  // 【变异杀伤力】把 snapshot.presenceLayout 改成 dock 后，选中态必须跟着换，
+  //   否则「切换不生效」这类缺陷会全绿通过。
+  const dockHtml = render({ section: 'appearance', presenceLayout: 'dock' });
+  const pressedOf = (html, label) => {
+    const match = new RegExp(`aria-pressed="(true|false)"[^>]*>${label}`).exec(html);
+    return match?.[1] ?? null;
+  };
+  assert.equal(pressedOf(stageHtml, t('settings.presenceLayoutStage')), 'true', 'stage 快照下必须选中对话区顶部');
+  assert.equal(pressedOf(stageHtml, t('settings.presenceLayoutDock')), 'false');
+  assert.equal(pressedOf(dockHtml, t('settings.presenceLayoutDock')), 'true', 'dock 快照下必须选中输入框上方');
+  assert.equal(pressedOf(dockHtml, t('settings.presenceLayoutStage')), 'false');
 });
 
 test('语言切换是真实生效的：同一份快照在两种 locale 下文案不同', () => {

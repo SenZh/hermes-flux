@@ -28,10 +28,16 @@
  */
 
 import * as React from 'react';
-import { presenceTone, type AgentPresence, type PresenceToolKind } from '@hermes-flux/core';
-import { t } from '../i18n/index.js';
+import {
+  IDLE_QUIP_COUNT,
+  presenceTone,
+  pickIdleQuipIndex,
+  type AgentPresence,
+  type PresenceToolKind,
+} from '@hermes-flux/core';
+import { t, type I18nKey } from '../i18n/index.js';
 import { renderBotAvatar } from '../utils/botAvatar.js';
-import { usePresenceTicker } from './conversation/usePresenceTicker.js';
+import { useIdleQuipTicker, usePresenceTicker } from './conversation/usePresenceTicker.js';
 
 /** 头像槽位边长（px）：单聊与群聊同尺寸，缩了就变成「小图标堆」而不是在场感 */
 const PRESENCE_AVATAR_SIZE = 56;
@@ -41,6 +47,38 @@ const PRESENCE_MAX_AVATARS = 4;
 const TARGET_MAX_CHARS = 40;
 /** 失败原因展示上限 */
 const FAILURE_MESSAGE_MAX_CHARS = 60;
+
+/**
+ * 空闲轮播文案的键表（顺序必须与 core `IDLE_QUIP_COUNT` 对齐）。
+ *
+ * 【为什么写死成元组】(Rules) `t()` 的键类型是字面量联合，`presence.idle.${number}`
+ *   无法通过类型检查；写成 `as const` 元组既保住类型安全，又能在单测里逐条校验字典完整性。
+ */
+const IDLE_QUIP_KEYS = [
+  'presence.idle.0',
+  'presence.idle.1',
+  'presence.idle.2',
+  'presence.idle.3',
+  'presence.idle.4',
+  'presence.idle.5',
+  'presence.idle.6',
+  'presence.idle.7',
+] as const satisfies readonly I18nKey[];
+
+/**
+ * 键表长度必须等于 core 的条数常量。
+ *
+ * 【为什么必须有 (Rules)】`pickIdleQuipIndex` 的返回值域由 core 的 `IDLE_QUIP_COUNT` 决定，
+ *   而键表写在 ui 侧。两边一旦脱钩，`IDLE_QUIP_KEYS[index]` 会取到 `undefined`，
+ *   `t(undefined)` 静默返回 undefined，文案直接消失——编译器与现有单测都抓不到。
+ *   因此这里在模块加载期硬校验：宁可启动即失败，也不要静默少一句。
+ */
+const IDLE_QUIP_KEYS_LENGTH: typeof IDLE_QUIP_COUNT = IDLE_QUIP_KEYS.length;
+if (IDLE_QUIP_KEYS_LENGTH !== IDLE_QUIP_COUNT) {
+  throw new Error(
+    `[presence] IDLE_QUIP_KEYS has ${IDLE_QUIP_KEYS_LENGTH} entries but core IDLE_QUIP_COUNT is ${IDLE_QUIP_COUNT}`,
+  );
+}
 
 /**
  * 路径中的结构性噪音目录。
@@ -84,6 +122,16 @@ export interface AgentPresenceSnapshot {
   identity: AgentPresenceIdentitySolo | AgentPresenceIdentityGroup;
   /** 当前语言；纳入 memo 比较，切语言后必须重渲染（t() 本身不是响应式的） */
   locale?: string;
+  /**
+   * 布局变体。
+   *
+   * 【设计意图 (Why)】同一份状态真值要能落在两个位置：对话区顶部悬浮（`stage`）与
+   *   输入舱上沿（`dock`）。两套效果只在几何与字号上不同，状态、文案、动效全部共用，
+   *   因此这里是**表现变体**而不是第二套状态模型。
+   *
+   * 【约束与规则 (Rules)】缺省按 `stage` 处理：老宿主不传时行为必须与改造前完全一致。
+   */
+  layout?: 'stage' | 'dock';
 }
 
 /** 群聊成员的头像资产（真实资产优先，缺失时回退确定性图腾） */
@@ -186,6 +234,8 @@ interface PresenceTextModel {
   showTarget: boolean;
   /** 是否渲染打字波（仅 writing 态） */
   showBars: boolean;
+  /** 是否为空闲轮播文案（只影响弱化呈现，不影响布局） */
+  isIdleQuip: boolean;
 }
 
 /**
@@ -198,18 +248,24 @@ interface PresenceTextModel {
  *      以便目标走等宽字体与二级色，动词保持前景色；
  *   4. 失败原因先截断再交给 i18n（截断是表现层职责，不进字典）。
  */
-function buildTextModel(presence: AgentPresence, tone: 'fresh' | 'patient' | 'long'): PresenceTextModel {
+function buildTextModel(
+  presence: AgentPresence,
+  tone: 'fresh' | 'patient' | 'long',
+  idleQuip: string,
+): PresenceTextModel {
   const empty: PresenceTextModel = {
     verbBefore: '',
     verbAfter: '',
     target: '',
     showTarget: false,
     showBars: false,
+    isIdleQuip: false,
   };
 
   switch (presence.kind) {
     case 'idle':
-      return empty;
+      // 空闲态播报「它在闲着」的轮播短句：头像完全静止读起来像进程挂了
+      return { ...empty, verbBefore: idleQuip, isIdleQuip: true };
 
     case 'thinking':
       return { ...empty, verbBefore: t(`presence.thinking.${tone}`) };
@@ -319,13 +375,8 @@ interface PresenceSlot {
  */
 export function AgentPresence(props: { snapshot: AgentPresenceSnapshot }): React.ReactElement {
   const { presence, identity } = props.snapshot;
+  const layout = props.snapshot.layout ?? 'stage';
   const tone = presenceTone(presence);
-
-  // locale 必须进依赖：t() 读的是模块级当前语言，切语言时只有 props 变化能触发重渲染
-  const text = React.useMemo(
-    () => buildTextModel(presence, tone),
-    [presence, tone, props.snapshot.locale],
-  );
 
   const isTerminal = presence.kind === 'failed' || presence.kind === 'interrupted';
   const blinkable = !isTerminal;
@@ -336,10 +387,23 @@ export function AgentPresence(props: { snapshot: AgentPresenceSnapshot }): React
   // 说话者必须真实存在于成员列表才算已知，否则按未知降级（见 isSpeakerKnown 注释）
   const speakerKnown = isGroup && isSpeakerKnown(identity);
 
-  // 眨眼种子跟随身份：换会话/换群聊重新派生非等距节拍，同一身份内保持稳定
+  // 眨眼与空闲轮播共用同一身份种子：换会话/换群聊重新派生，同一身份内保持稳定
   // 【规则】用 identity.kind 收窄而非 isGroup 布尔量：TS 无法通过布尔量反推联合成员
-  const blinkSeed = identity.kind === 'group' ? orderedMembers.join(',') : identity.name;
-  const blinking = usePresenceTicker(blinkable, blinkSeed);
+  // 【规则】群聊 seed 必须用**排序后**的成员表：`orderedMembers` 会把说话者提到最左，
+  //   说话者一换 seed 就变，眨眼节拍与轮播起点被无谓重置（同一房间不该有这种抖动）。
+  const presenceSeed =
+    identity.kind === 'group'
+      ? [...identity.members].sort().join(',')
+      : identity.name;
+  const blinking = usePresenceTicker(blinkable, presenceSeed);
+  const idleQuip = useIdleQuipTicker(presence.kind === 'idle');
+  const idleQuipText = t(IDLE_QUIP_KEYS[pickIdleQuipIndex(presenceSeed, idleQuip.tick)]);
+
+  // locale 必须进依赖：t() 读的是模块级当前语言，切语言时只有 props 变化能触发重渲染
+  const text = React.useMemo(
+    () => buildTextModel(presence, tone, idleQuipText),
+    [presence, tone, props.snapshot.locale, idleQuipText],
+  );
 
   const slots: PresenceSlot[] = [];
 
@@ -403,6 +467,7 @@ export function AgentPresence(props: { snapshot: AgentPresenceSnapshot }): React
       data-presence={presence.kind}
       data-mode={isGroup ? 'group' : 'solo'}
       data-tone={tone}
+      data-layout={layout}
       role="status"
       aria-label={t('presence.aria')}
     >
@@ -417,6 +482,13 @@ export function AgentPresence(props: { snapshot: AgentPresenceSnapshot }): React
             }
             data-speaker={slot.isSpeaker ? 'true' : 'false'}
             data-lead={slot.isLead ? 'true' : 'false'}
+            /*
+             * 【空闲动作 (Rules)】idle 轮播换句的那一拍，头像侧一次头（420ms）。
+             *   不能挂 CSS `infinite`：空闲态常驻动画只允许「呼吸 + 眨眼」，
+             *   再挂一条无限循环就是第二焦点。这里由 tick 变化短暂置位，播完即归位。
+             *   CSS 动画只在属性 false→true 时重播，所以 hook 里必须精确复位。
+             */
+            data-idle-turn={slot.isLead && idleQuip.turning ? 'true' : 'false'}
           >
             {slot.moreLabel !== null ? (
               slot.moreLabel
@@ -445,13 +517,16 @@ export function AgentPresence(props: { snapshot: AgentPresenceSnapshot }): React
         无 key 时 React 会复用同一个 DOM 节点、只替换文本子节点，
         而 CSS 动画只在元素首次插入时播放一次——「换气」效果会完全失效，
         用户看到的是生硬跳字（比淡入更晃眼）。
-        【idle 退场 (Rules)】用 data-empty 驱动高度过渡，不卸载节点：
-        整节点卸载会让容器高度从 84px 瞬间塌到 56px，在对话区顶部造成一次布局弹跳。
+        【idle 轮播 (Rules)】空闲态也常驻文案（轮播短句），因此 key 必须带轮播序号，
+        否则换句时节点被复用、淡入不播，读作硬跳字。
+        【aria-hidden (Rules)】空闲轮播每 9s 换一句，若留在 `role="status"` 的 live region 里，
+        屏幕阅读器会永久性地每 9s 播报一遍整行。空闲短句是氛围文案，必须对辅助技术静音。
       */}
       <span
         className="conv-presence__text"
-        key={`${presence.kind}:${tone}`}
-        data-empty={presence.kind === 'idle' ? 'true' : 'false'}
+        key={`${presence.kind}:${tone}:${text.isIdleQuip ? idleQuip.tick : ''}`}
+        data-idle-quip={text.isIdleQuip ? 'true' : 'false'}
+        aria-hidden={text.isIdleQuip ? 'true' : undefined}
       >
           {speakerLabel !== null ? (
             <>

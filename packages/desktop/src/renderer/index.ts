@@ -700,6 +700,13 @@ interface AppState {
   password: string;
   isSettingsOpen: boolean;
   settingsSection: SettingsSectionId;
+  /**
+   * Agent 在场指示器的位置变体。
+   *
+   * 【设计意图 (Why)】同一份状态真值要能落在两个位置：对话区顶部悬浮（`stage`）与
+   *   输入舱上沿（`dock`）。这是**表现位置**，不是第二套状态模型。
+   * 【约束与规则】持久化在 localStorage，缺省 `stage`（改造前的行为）。 */
+  presenceLayout: 'stage' | 'dock';
   /** 设置中心的网关数据快照：每个域各自持有加载态，禁止用一个 boolean 混住"没数据"与"加载失败"。 */
   settingsProfiles: SettingsLoadable<SettingsProfileRow[]>;
   /** 提供商配置当前作用到的 Bot；空串表示跟随连接 profile。 */
@@ -1007,6 +1014,15 @@ let fontPreferences: FontPreferences = loadFontPreferences();
 /** 左轨活动指示器动效变体；用户在外观设置里选择，随 render() 推进左轨快照。 */
 let activityIndicatorVariant: ActivityIndicatorVariant = loadActivityIndicatorVariant();
 
+/**
+ * Agent 在场指示器布局偏好的持久化键。
+ *
+ * 【必须声明在 `state` 之前 (Rules)】`state` 的初始化会调用 `readPresenceLayout()`；
+ *   若本常量声明在其后，打包成 `var` 后初始化时读到 `undefined`，`getItem(undefined)`
+ *   恒为 null → 冷启动永远回落到 `stage`（真实缺陷：用户选了 dock，重启后又跳回顶部）。
+ */
+const PRESENCE_LAYOUT_STORAGE_KEY = 'hermes_flux_presence_layout';
+
 const state: AppState = {
   platform: detectInitialPlatform(),
   theme: (() => {
@@ -1065,6 +1081,7 @@ const state: AppState = {
   password: localStorage.getItem('hermes_flux_password') || localStorage.getItem('hermes_aura_password') || '',
   isSettingsOpen: false,
   settingsSection: 'appearance',
+  presenceLayout: readPresenceLayout(),
   settingsProfiles: { status: 'idle' },
   settingsScopedProfile: '',
   settingsProviderViews: { status: 'idle' },
@@ -7469,6 +7486,124 @@ function syncReactMessageList(force = false): void {
  * Agent 在场指示器：宿主快照、指纹去重与挂载
  * -------------------------------------------------------------------------- */
 
+/** 布局变体持久化键（与其它 `hermes_flux_*` 偏好同族；声明在 `state` 之前，见那里的注释） */
+
+/** 读取持久化的布局变体；缺省 `stage`（改造前行为），非法值一律回落 */
+function readPresenceLayout(): 'stage' | 'dock' {
+  try {
+    const raw = localStorage.getItem(PRESENCE_LAYOUT_STORAGE_KEY);
+    return raw === 'dock' ? 'dock' : 'stage';
+  } catch (error) {
+    // 【失败不可静默 (Rules)】只有 localStorage 不可用（隐私模式 / 沙箱）才走到这里，
+    //   必须留痕；其它异常（如声明顺序错误导致的 TDZ）不得被吞成「默认 stage」。
+    console.warn('[presence] failed to read layout preference; falling back to stage', error);
+    return 'stage';
+  }
+}
+
+/** 持久化布局变体（隐私模式 / 配额溢出时降级，但不静默：必须留痕） */
+function writePresenceLayout(layout: 'stage' | 'dock'): void {
+  try {
+    localStorage.setItem(PRESENCE_LAYOUT_STORAGE_KEY, layout);
+  } catch (error) {
+    // 【失败不可静默 (Rules)】落盘失败不回滚内存状态（本次会话内切换仍有效），
+    //   但必须留下可观测痕迹，禁止空 catch 把配额/隐私模式问题吞掉。
+    //   日志走英文：i18n 门禁只允许面向用户的文案进字典，诊断日志不进字典。
+    console.warn('[presence] failed to persist layout preference; session-only', error);
+  }
+}
+
+/**
+ * 校正 host 位置并按需重挂 React 岛。
+ *
+ * 【设计意图 (Why)】把「找 host → 引用比对 → 卸载/挂载 → 推首帧」收敛成单一出口，
+ *   供 `render()` 在**输入舱替换前后**各调用一次。两次调用是必须的：
+ *   替换前保证输入舱里有宿主，替换后把被 `outerHTML` 连带销毁的宿主补回来。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 幂等：host 引用未变时不卸载、不重挂、不白推；
+ *   2. host 脱离文档（`!isConnected`）时按「host 变了」处理，先卸载再重建，
+ *      否则 root 会挂在已销毁的节点上继续渲染（指示器永久消失且泄漏）；
+ *   3. 无 host 时把节拍器停到 idle，避免每秒空转。
+ */
+function syncAgentPresenceHost(): void {
+  ensureAgentPresenceHost(state.presenceLayout);
+  const presenceHost = document.getElementById('react-conv-presence-host');
+  if (presenceHost === agentPresenceHost && presenceHost?.isConnected) return;
+
+  // host 换了 / 被销毁了：旧 root 挂在脱离文档的节点上，必须先卸载（否则泄漏）
+  presenceMountHandle?.unmount();
+  presenceMountHandle = null;
+  updateReactAgentPresence = null;
+  agentPresenceHost = presenceHost;
+  lastAgentPresenceFingerprint = '';
+  if (presenceHost) {
+    // 先立群聊回合时钟再挂载：mount 内部会立刻读一次快照，锚点晚一步会让首帧语气档为 0
+    const initialDomain = resolvePresenceDomain();
+    ensureGroupTurnClock(initialDomain.groupRoomId, initialDomain.isRunning);
+    // 挂载前先算好首帧快照：mount 内部会同步调用一次 getSnapshot
+    pendingPresenceSnapshot = buildAgentPresenceSnapshot();
+    presenceMountHandle = mountAgentPresence(presenceHost, getAgentPresenceSnapshot);
+    updateReactAgentPresence = presenceMountHandle.update;
+    // 挂载时 mount 内部已渲染首帧：同步记录指纹，避免下一次 render 白推一遍
+    lastAgentPresenceFingerprint = agentPresenceFingerprint(pendingPresenceSnapshot);
+  } else {
+    // host 消失（如切到无对话区布局）：节拍器必须一起停，否则每秒空转
+    ensurePresenceTicker('idle');
+    pendingPresenceSnapshot = null;
+  }
+}
+
+/**
+ * 把在场指示器的 host 放到当前布局要求的位置。
+ *
+ * 【设计意图 (Why)】`stage` 变体悬浮在对话区顶部，host 属于 `.flux-middle-pod` 模板；
+ *   `dock` 变体贴在输入舱上方，host 必须是 `.input-dock-container` 的首个子元素——
+ *   只有这样才能靠 `bottom: calc(100% + 8px)` 精确贴住输入舱上沿，且不参与它的 flex 流。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   1. 输入舱内容变化时宿主会 `existingDock.outerHTML = nextDockHtml` 整块替换容器，
+ *      host 作为其子节点会被一并销毁。因此每次 render 都要重新校正位置并重建 host，
+ *      否则指示器会在一次模型切换后永久消失。
+ *   2. host 变化必须发生在 `syncAgentPresence` 之前：那里的 host 引用比对依赖
+ *      `getElementById` 拿到的新节点。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 只创建、不复制：同一时刻只允许存在一个 `#react-conv-presence-host`；
+ *   2. `stage` 回落位置固定为 `#conversation-stream` 之后，与 MiddlePod 模板一致。
+ */
+function ensureAgentPresenceHost(layout: 'stage' | 'dock'): HTMLElement | null {
+  const pod = document.querySelector<HTMLElement>('.flux-middle-pod');
+  const dock = document.querySelector<HTMLElement>('.input-dock-container');
+  let host = document.getElementById('react-conv-presence-host');
+
+  if (layout === 'dock') {
+    if (!dock) return host;
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'react-conv-presence-host';
+    }
+    host.classList.add('presence-host--dock');
+    if (host.parentElement !== dock || dock.firstElementChild !== host) {
+      dock.insertBefore(host, dock.firstElementChild);
+    }
+    return host;
+  }
+
+  host?.classList.remove('presence-host--dock');
+  if (!pod) return host;
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'react-conv-presence-host';
+  }
+  if (host.parentElement !== pod) {
+    const stream = pod.querySelector('#conversation-stream');
+    if (stream?.nextSibling) pod.insertBefore(host, stream.nextSibling);
+    else pod.appendChild(host);
+  }
+  return host;
+}
+
 /** 在场指示器挂载句柄；null 表示 host 尚未出现（首帧模板还没落地） */
 let updateReactAgentPresence: (() => void) | null = null;
 /** 当前挂载实例：全量重建换 host 时必须先 unmount，否则 React root 挂在脱离文档的节点上泄漏 */
@@ -7729,7 +7864,7 @@ function buildAgentPresenceSnapshot(): AgentPresenceSnapshot {
       }
     : { kind: 'solo', ...resolvePresenceSoloIdentity() };
 
-  return { presence, identity, locale: state.lang };
+  return { presence, identity, locale: state.lang, layout: state.presenceLayout };
 }
 
 /**
@@ -7762,7 +7897,15 @@ function agentPresenceFingerprint(snapshot: AgentPresenceSnapshot): string {
       ? `group:${identity.speaker ?? '-'}:${identity.members.length}:${identity.members.join(',')}:${identity.profiles.length}`
       : `solo:${identity.name}:${identity.displayName ?? ''}:${identity.avatar ?? ''}`;
 
-  return snapshotFingerprint({ kind: presence.kind, tone: presenceTone(presence), detail, identityKey, locale });
+  return snapshotFingerprint({
+    kind: presence.kind,
+    tone: presenceTone(presence),
+    detail,
+    identityKey,
+    locale,
+    // 布局切换必须触发一次重渲染：否则 host 换了位置、组件仍按旧变体渲染
+    layout: snapshot.layout ?? 'stage',
+  });
 }
 
 /**
@@ -7784,6 +7927,15 @@ function getAgentPresenceSnapshot(): AgentPresenceSnapshot {
  */
 function syncAgentPresence(): void {
   if (!updateReactAgentPresence) return;
+  /*
+   * 【宿主存活守卫 (Rules)】dock 变体的 host 会被输入舱的 `outerHTML` 替换连带销毁。
+   *   若这里不校验 `isConnected`，每秒节拍与工具事件会持续往脱离文档的 root 渲染，
+   *   表现为「指示器永久消失 + React root 泄漏」。销毁时按 host 消失处理并就地重挂。
+   */
+  if (!agentPresenceHost?.isConnected) {
+    syncAgentPresenceHost();
+    if (!updateReactAgentPresence) return;
+  }
   const domain = resolvePresenceDomain();
   ensureGroupTurnClock(domain.groupRoomId, domain.isRunning);
   // 【唯一快照 (Rules)】指纹与渲染必须共用同一份快照对象（见 pendingPresenceSnapshot 注释）
@@ -8002,6 +8154,7 @@ function getSettingsSnapshot(): SettingsSnapshot {
     appVersion: state.appVersion,
     platform: state.platform,
     busy: state.settingsBusy,
+    presenceLayout: state.presenceLayout,
   };
 }
 
@@ -8051,6 +8204,22 @@ function createSettingsActions(): SettingsActions {
       state.theme = resolveSkinId(theme);
       localStorage.setItem('hermes_flux_theme', state.theme);
       localStorage.setItem('hermes_aura_theme', state.theme);
+      render();
+    },
+    /**
+     * 切换 Agent 状态指示器的位置变体。
+     *
+     * 【设计意图 (Why)】两套效果并存，由用户在外观设置里选。切换只改表现位置：
+     *   状态机、文案、动效全部复用，因此这里只写偏好 + 重建 host 的落点。
+     * 【约束与规则】必须先写持久化再 render：render 内的 `ensureAgentPresenceHost`
+     *   读的是内存 state，落盘顺序不影响本次渲染，但顺序反了会在崩溃时丢失选择。
+     */
+    onPresenceLayoutChange: (layout) => {
+      state.presenceLayout = layout === 'dock' ? 'dock' : 'stage';
+      writePresenceLayout(state.presenceLayout);
+      // host 位置变化必须让 React 重挂：先清空引用，render 时会按 host 比对重新 mount
+      agentPresenceHost = null;
+      lastAgentPresenceFingerprint = '';
       render();
     },
     onLocaleChange: (locale) => {
@@ -8512,31 +8681,17 @@ function mountReactShellComponents(): void {
    *
    * 【约束与规则 (Rules)】同一 host 只挂一次；推送统一走 `syncAgentPresence`（指纹去重）。
    */
-  const presenceHost = document.getElementById('react-conv-presence-host');
-  if (presenceHost !== agentPresenceHost) {
-    // 全量重建换掉了 host：旧 root 挂在已脱离文档的节点上，必须先卸载再换新（否则泄漏）
-    presenceMountHandle?.unmount();
-    presenceMountHandle = null;
-    updateReactAgentPresence = null;
-    agentPresenceHost = presenceHost;
-    lastAgentPresenceFingerprint = '';
-    if (presenceHost) {
-      // 先立群聊回合时钟再挂载：mount 内部会立刻读一次快照，锚点晚一步会让首帧语气档为 0
-      const initialDomain = resolvePresenceDomain();
-      ensureGroupTurnClock(initialDomain.groupRoomId, initialDomain.isRunning);
-      // 挂载前先算好首帧快照：mount 内部会同步调用一次 getSnapshot
-      pendingPresenceSnapshot = buildAgentPresenceSnapshot();
-      presenceMountHandle = mountAgentPresence(presenceHost, getAgentPresenceSnapshot);
-      updateReactAgentPresence = presenceMountHandle.update;
-      // 挂载时 mount 内部已渲染首帧：同步记录指纹，避免下一次 render 白推一遍
-      lastAgentPresenceFingerprint = agentPresenceFingerprint(pendingPresenceSnapshot);
-    } else {
-      // host 消失（如切到无对话区布局）：节拍器必须一起停，否则每秒空转
-      ensurePresenceTicker('idle');
-      pendingPresenceSnapshot = null;
-    }
-  }
-  syncAgentPresence();
+  /*
+   * 【位置校正必须先于取 host (Rules)】`dock` 变体的 host 必须活在 `.input-dock-container`
+   * 内部才能贴住输入舱上沿；而输入舱每次内容变化都会整块 `outerHTML` 替换容器，
+   * 顺带销毁宿主。因此这里每帧校正一次位置（必要时重建 host），再由下方引用比对触发重挂。
+   *
+   * 【为什么抽成函数 (Pitfall)】本函数在 `render()` 的输入舱替换**之前**执行，
+   *   而输入舱替换会把 dock 变体的 host 连带销毁。若只在挂载段校正一次，
+   *   指示器会在每次模型/通知/附件变化后永久消失（host 已脱离文档、root 仍在渲染）。
+   *   因此输入舱更新块之后必须再调一次同一个函数（见 `render()` 里的第二次调用）。
+   */
+  syncAgentPresenceHost();
 
   /**
    * 提示词导航轨挂载与推送。
@@ -8952,19 +9107,37 @@ function render(): void {
         })
       : '';
 
-    if (existingDock) {
-      if (!state.gatewayConnected) {
-        existingDock.remove();
-        lastInputDockSnapshot = null;
-      } else if (dockChanged && nextDockHtml) {
-        existingDock.outerHTML = nextDockHtml;
+    /*
+     * 【单一出口 (Rules)】输入舱有三条变更路径（断连移除 / 整块替换 / 首次新建），
+     *   三条都必须走同一个函数，且**之后**统一做一次指示器宿主重校。
+     *   历史缺陷：把重校写进某一条分支里，另外两条分支就会让指示器永久消失；
+     *   写成「分支内各调一次」时守卫测试也无法区分是否漏了一条。
+     */
+    const applyInputDockUpdate = (): void => {
+      if (existingDock) {
+        if (!state.gatewayConnected) {
+          existingDock.remove();
+          lastInputDockSnapshot = null;
+        } else if (dockChanged && nextDockHtml) {
+          existingDock.outerHTML = nextDockHtml;
+          lastInputDockSnapshot = currentDockSnapshot;
+        }
+      } else if (nextDockHtml) {
+        const middlePod = root.querySelector('.flux-middle-pod');
+        if (middlePod) middlePod.insertAdjacentHTML('beforeend', nextDockHtml);
         lastInputDockSnapshot = currentDockSnapshot;
       }
-    } else if (nextDockHtml) {
-      const middlePod = root.querySelector('.flux-middle-pod');
-      if (middlePod) middlePod.insertAdjacentHTML('beforeend', nextDockHtml);
-      lastInputDockSnapshot = currentDockSnapshot;
-    }
+    };
+
+    applyInputDockUpdate();
+    /*
+     * 【必须在输入舱变更之后重校 (Pitfall)】dock 变体的 host 是 `.input-dock-container`
+     *   的首子节点，上述任一路径都可能把它连带销毁。挂载段在变更**之前**执行，
+     *   因此这里必须重新校正宿主并推送，否则 root 挂在脱离文档的节点上：
+     *   指示器永久消失，且 React root 泄漏。
+     */
+    syncAgentPresenceHost();
+    syncAgentPresence();
 
     // 设置中心由 React 岛自管子树（见 mountReactSettings），此处不再做任何 DOM 替换。
 

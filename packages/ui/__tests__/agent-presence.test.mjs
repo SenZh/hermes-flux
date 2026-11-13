@@ -51,14 +51,21 @@ function avatarAttrs(html) {
 }
 
 test('在场指示器 · 14 条表现层契约', async (t) => {
-  await t.test('1. idle：data-presence=idle、头像常驻、文案行高度归零但节点常驻', () => {
+  await t.test('1. idle：头像常驻、轮播文案常驻、不塌高度', () => {
     const html = render({ kind: 'idle' });
     assert.ok(html.includes('data-presence="idle"'), 'idle 必须写在 data-presence 上');
     assert.ok(html.includes('conv-presence__avatar'), 'idle 头像必须常驻，不能整条退场');
-    // 【规则】文案节点必须常驻并标 data-empty：整节点卸载会让容器高度从 84px
-    //   瞬间塌到 56px，在对话区顶部造成一次布局弹跳（样式审查 P1-3）。
-    assert.ok(html.includes('data-empty="true"'), 'idle 文案行必须以 data-empty 标记，不能卸载节点');
-    assert.ok(!html.includes('conv-presence__verb'), 'idle 不得渲染任何状态文案');
+    /*
+     * 【契约变更 (Rules)】用户裁定空闲态要「弱化头像 + 轮播短句」：
+     *   文案行必须常驻并标 `data-idle-quip`，不再走「高度归零」的退场；
+     *   任何「隐藏文案行」的实现都会让空闲态看起来像进程挂了。
+     */
+    assert.ok(html.includes('data-idle-quip="true"'), 'idle 文案行必须以 data-idle-quip 标记轮播态');
+    assert.ok(
+      html.includes('conv-presence__verb'),
+      'idle 必须渲染轮播短句（文案由 presence.idle.* 字典提供）',
+    );
+    assert.ok(!html.includes('data-empty'), '不得再回到「高度归零」的空态契约');
   });
 
   await t.test('2. thinking 时长分层：0s→fresh、9s→patient、31s→long', () => {
@@ -290,9 +297,11 @@ test('在场指示器 · 14 条表现层契约', async (t) => {
 
   await t.test('17. 交叉淡入必须靠 key 重挂（否则文本替换不重播动画）', () => {
     const src = read('packages/ui/src/components-react/AgentPresence.tsx');
+    // 【规则】key 必须同时携带状态、语气与空闲轮播序号：少任何一个都会让对应维度的
+    //   文案切换变成「复用节点 + 硬替换」，交叉淡入永不触发。
     assert.ok(
-      /key=\{`\$\{presence\.kind\}:\$\{tone\}`\}/.test(src),
-      '文案行必须带随状态与语气变化的 key，否则 React 复用节点导致交叉淡入永不触发',
+      /key=\{`\$\{presence\.kind\}:\$\{tone\}:\$\{text\.isIdleQuip \? idleQuip\.tick : ''\}`\}/.test(src),
+      '文案行 key 必须包含 presence.kind / tone / 空闲轮播序号',
     );
   });
 
@@ -335,5 +344,118 @@ test('在场指示器 · 14 条表现层契约', async (t) => {
       '遮罩移除后必须有两层字形阴影（近层收边 + 远层背景色晕）兜住可读性',
     );
     assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(shadowDecl), '字形阴影禁止裸十六进制色值');
+  });
+
+  await t.test('21. dock 布局：与输入舱同宽同位、头像贴左边缘、不参与 flow', () => {
+    const dockHtml = renderToStaticMarkup(
+      React.createElement(AgentPresence, {
+        snapshot: { presence: { kind: 'thinking', sinceMs: 0 }, identity: SOLO, layout: 'dock' },
+      }),
+    );
+    assert.ok(dockHtml.includes('data-layout="dock"'), 'layout=dock 必须写到 data-layout 上');
+
+    // 缺省必须是 stage：老宿主不传 layout 时行为不能漂移
+    const stageHtml = renderToStaticMarkup(
+      React.createElement(AgentPresence, {
+        snapshot: { presence: { kind: 'thinking', sinceMs: 0 }, identity: SOLO },
+      }),
+    );
+    assert.ok(stageHtml.includes('data-layout="stage"'), 'layout 缺省必须回落 stage');
+
+    const css = read('packages/ui/src/styles/conversation.css');
+    const dockBlock = /\.conv-presence\[data-layout="dock"\] \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
+    assert.ok(dockBlock, '必须存在 dock 布局变体');
+    assert.ok(/max-width:\s*740px/.test(dockBlock), 'dock 变体必须与输入舱同宽（740px）');
+    assert.ok(/--presence-size:\s*20px/.test(dockBlock), 'dock 变体头像必须收到 20px');
+    assert.ok(
+      /justify-content:\s*flex-start/.test(dockBlock),
+      'dock 变体必须左对齐：头像外沿要贴输入舱左边缘',
+    );
+    assert.ok(/position:\s*static/.test(dockBlock), 'dock 变体不得再绝对定位（位置由宿主决定）');
+
+    // 【不占流 (Rules)】宿主用 bottom: calc(100% + 8px) 贴在输入舱上沿；
+    //   任何 margin/padding 让位的写法都会把输入舱顶起来，输入舱高度一变就上下跳。
+    const hostBlock = /#react-conv-presence-host\.presence-host--dock \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
+    assert.ok(hostBlock, '必须存在 dock 宿主定位规则');
+    assert.ok(
+      /bottom:\s*calc\(100% \+ 8px\)/.test(hostBlock),
+      'dock 宿主必须绝对贴在输入舱上沿，禁止参与 flex 流',
+    );
+    assert.ok(/pointer-events:\s*none/.test(hostBlock), 'dock 宿主必须只读，不得拦截输入舱点击');
+    assert.ok(
+      !/padding:\s*0 24px/.test(hostBlock),
+      '宿主不得复制 .input-dock-container 的 gutter（双写真值会让对齐静默失效）',
+    );
+
+    // 空闲轮播的两个钩子必须在样式里落地，否则文案换了但头像不动
+    assert.ok(
+      css.includes('.conv-presence__text[data-idle-quip="true"] .conv-presence__verb'),
+      '空闲弱化必须命中 .conv-presence__verb（它自己声明了前景色，父级继承会被覆盖）',
+    );
+    assert.ok(
+      css.includes('.conv-presence__avatar[data-idle-turn="true"]'),
+      '空闲换句的侧头动作必须挂在 avatar 上（face 已被呼吸动画占用）',
+    );
+
+    // 【减动效 (Rules)】新增的 avatar 级旋转必须进 reduced-motion 白名单，
+    //   否则前庭敏感用户仍会看到头像旋转（本文件历史 P0-1 的同类缺陷）。
+    const reducedBlocks = [...css.matchAll(/@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/g)].map(
+      (m) => m[1],
+    );
+    const presenceBlock = reducedBlocks.find((block) => block.includes('.conv-presence')) ?? '';
+    assert.ok(
+      /\.conv-presence \.conv-presence__avatar[\s\S]{0,400}?animation:\s*none\s*!important/.test(presenceBlock),
+      'reduced-motion 白名单必须包含 .conv-presence__avatar',
+    );
+
+    // dock 字阶必须锁整数档，不得用 calc 相减产生小数字号
+    const dockTextBlock =
+      /\.conv-presence\[data-layout="dock"\] \.conv-presence__text \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
+    assert.ok(
+      !/calc\(/.test(dockTextBlock),
+      'dock 文案字号不得用 calc 相减（会得到 10.7px 这类小数字号，违反整数阶梯）',
+    );
+    assert.ok(/font-size:\s*var\(--fs-caption/.test(dockTextBlock), 'dock 文案必须锁 caption 档');
+  });
+
+  await t.test('22. 实景探针骨架必须与组件契约同构（防止证据静默漂移）', () => {
+    /*
+     * 【为什么 (Rules)】`scripts/verify/agent-presence-screens.cjs` 里的指示器骨架是手写的，
+     *   组件契约一改（新增/改名 data 属性或子节点类名）证据就会静默漂移，
+     *   而探针断言仍然全绿——那是「假证据」。这里锁住必须出现的契约面。
+     */
+    const probe = read('scripts/verify/agent-presence-screens.cjs');
+    for (const marker of [
+      'class="conv-presence"',
+      'data-presence=',
+      'data-mode=',
+      'data-tone=',
+      'data-layout=',
+      'conv-presence__avatars',
+      'conv-presence__avatar"',
+      'conv-presence__halo',
+      'conv-presence__ring',
+      'conv-presence__face',
+      'conv-presence__text',
+    ]) {
+      assert.ok(probe.includes(marker), `实景探针骨架缺少契约面：${marker}`);
+    }
+    // 空闲轮播的两个标记也必须出现在探针里，否则截出来的永远是「没有空闲态」的旧图
+    assert.ok(probe.includes('data-idle-turn='), '探针必须带 data-idle-turn');
+    assert.ok(probe.includes('data-idle-quip='), '探针必须带 data-idle-quip');
+    /*
+     * 【宿主契约也必须登记 (Rules)】探针手写了宿主定位，一旦 `ensureAgentPresenceHost`
+     *   改了宿主 id / 类名 / 插入位置，截图证据会静默偏离真实实现而断言仍绿。
+     */
+    assert.ok(probe.includes('react-conv-presence-host'), '探针必须复刻真实宿主 id');
+    assert.ok(probe.includes('presence-host--dock'), '探针必须复刻 dock 宿主类名');
+    assert.ok(
+      probe.includes('dock.insertBefore(host, dock.firstElementChild)'),
+      '探针必须复刻「host 插到输入舱首位」这一关键落点',
+    );
+    // 探针不得在注释里满足断言：剥注释后仍须包含骨架类名
+    const probeCode = probe.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
+    assert.ok(probeCode.includes('conv-presence__text'), '剥注释后骨架仍须包含文案行类名');
+    assert.ok(probeCode.includes('conv-presence__avatars'), '剥注释后骨架仍须包含头像容器类名');
   });
 });

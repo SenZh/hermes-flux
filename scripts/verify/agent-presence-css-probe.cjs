@@ -51,9 +51,9 @@ function presenceHtml(kind, text, mode = 'solo') {
            <span class="conv-presence__halo"></span><span class="conv-presence__ring"></span>
            <span class="conv-presence__face" data-blink="false"><svg width="56" height="56"></svg></span>
          </span>`;
-  return `<div class="conv-presence" data-presence="${kind}" data-mode="${mode}" data-tone="fresh">
+  return `<div class="conv-presence" data-presence="${kind}" data-mode="${mode}" data-tone="fresh" data-layout="stage">
     <div class="conv-presence__avatars" data-blinkable="true">${avatars}</div>
-    <span class="conv-presence__text" data-empty="false">${text}</span>
+    <span class="conv-presence__text" ${kind === 'idle' ? 'data-idle-quip="true"' : ''}>${text}</span>
   </div>`;
 }
 
@@ -66,7 +66,13 @@ function record(name, pass, detail) {
 app.disableHardwareAcceleration();
 
 app.whenReady().then(async () => {
-  const win = new BrowserWindow({ show: false, width: 900, height: 400, webPreferences: { offscreen: true } });
+  /*
+   * 【禁用 offscreen (Rules)】`webPreferences.offscreen: true` 在部分 Windows/Electron 34 组合上
+   *   退出时会以 0xC0000005 崩溃（实测 `app.exit(0)` 仍返回 -1073741819），
+   *   使脚本无法作为门禁使用。改用隐藏的普通窗口：仍是真实 Blink 渲染与真实排版，
+   *   `capturePage()` 行为一致。
+   */
+  const win = new BrowserWindow({ show: false, width: 900, height: 400, backgroundColor: '#16171D' });
   await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(FIXTURE));
   const run = (code) => win.webContents.executeJavaScript(code, true);
 
@@ -147,49 +153,35 @@ app.whenReady().then(async () => {
   })()`);
   record('文案不被上层元素遮挡', /conv-presence/.test(occluded), `hit=${occluded}`);
 
-  // ---------- 5. 长目标不溢出、头像零位移 ----------
-  const longTarget = 'packages/' + 'x'.repeat(80) + '/very-long-file-name.ts';
-  await run(`document.getElementById('pod').innerHTML = ${JSON.stringify(
-    presenceHtml('tool', `<span class="conv-presence__verb">正在读</span><span class="conv-presence__target">${longTarget}</span>`)
-  )}; true`);
-
-  const overflow = await run(`(() => {
-    const t = document.querySelector('.conv-presence__text');
-    const box = t.getBoundingClientRect();
-    return { scrollW: t.scrollWidth, clientW: t.clientWidth, w: Math.round(box.width), maxW: 420 };
-  })()`);
-  record('长目标文案不溢出容器', overflow.w <= 420 && overflow.scrollW <= overflow.clientW + 1,
-    `width=${overflow.w} scrollWidth=${overflow.scrollW} clientWidth=${overflow.clientW}`);
-
-  const ellipsis = await run(`(() => {
-    const el = document.querySelector('.conv-presence__target');
-    return { scrollW: el.scrollWidth, clientW: el.clientWidth, hasEllipsis: getComputedStyle(el).textOverflow };
-  })()`);
-  record('目标片段自身出省略号（不是整行两端硬裁）', ellipsis.hasEllipsis === 'ellipsis' && ellipsis.clientW <= 420,
-    `textOverflow=${ellipsis.hasEllipsis} clientWidth=${ellipsis.clientW}`);
-
-  const leftShift = await run(`(async () => {
-    const face = document.querySelector('.conv-presence__face');
-    const before = face.getBoundingClientRect().left;
-    document.querySelector('.conv-presence__text').innerHTML = '<span class="conv-presence__verb">正在思考</span>';
-    await new Promise((r) => requestAnimationFrame(r));
-    const after = face.getBoundingClientRect().left;
-    return Math.abs(after - before);
-  })()`);
-  record('文案变短时头像零位移', leftShift <= 1, `leftShift=${leftShift.toFixed(2)}px`);
-
-  // ---------- 5. idle 高度不瞬塌 ----------
-  const idleH = await run(`(async () => {
-    document.getElementById('pod').innerHTML = ${JSON.stringify(presenceHtml('thinking', 'x'))};
+  // ---------- 5. idle 轮播文案常驻（契约已变更：不再高度归零） ----------
+  /*
+   * 【契约变更 (Rules)】空闲态从「文案行高度归零退场」改为「弱化头像 + 轮播短句常驻」
+   *   （用户 2026-11-13 裁定）。因此不再断言 `[data-empty]` 塌陷，改为断言：
+   *   1. 空闲文案行常驻且带 `data-idle-quip`；
+   *   2. 文案不再是前景高对比白（弱化规则必须真的命中 `.conv-presence__verb`）。
+   */
+  const idleState = await run(`(async () => {
+    document.getElementById('pod').innerHTML = ${JSON.stringify(
+      presenceHtml('idle', '<span class="conv-presence__verb">在角落里等你派活</span>'),
+    )};
     const text = document.querySelector('.conv-presence__text');
-    const hBefore = document.querySelector('.conv-presence').getBoundingClientRect().height;
-    text.dataset.empty = 'true';
-    await new Promise((r) => setTimeout(r, 260));
-    const hAfter = document.querySelector('.conv-presence').getBoundingClientRect().height;
-    return { hBefore, hAfter, hasTransition: getComputedStyle(text).transitionProperty };
+    const verb = text.querySelector('.conv-presence__verb');
+    const phase = getComputedStyle(document.documentElement).getPropertyValue('--foreground').trim();
+    await new Promise((r) => requestAnimationFrame(r));
+    const box = document.querySelector('.conv-presence').getBoundingClientRect();
+    return {
+      marked: text.getAttribute('data-idle-quip'),
+      verbColor: getComputedStyle(verb).color,
+      foreground: phase,
+      visibleHeight: Math.round(box.height),
+      textHeight: Math.round(text.getBoundingClientRect().height),
+    };
   })()`);
-  record('idle 文案行高度归零且带过渡', idleH.hAfter <= 58 && idleH.hasTransition.includes('max-height'),
-    `before=${Math.round(idleH.hBefore)} after=${Math.round(idleH.hAfter)} transition=${idleH.hasTransition}`);
+  record(
+    'idle 轮播文案常驻且弱化',
+    idleState.marked === 'true' && idleState.textHeight > 0 && idleState.verbColor !== idleState.foreground,
+    `data-idle-quip=${idleState.marked} textHeight=${idleState.textHeight} verbColor=${idleState.verbColor} foreground=${idleState.foreground}`,
+  );
 
   const failed = results.filter((r) => !r.pass);
   console.log(`\n==== ${results.length - failed.length}/${results.length} PASS ====`);

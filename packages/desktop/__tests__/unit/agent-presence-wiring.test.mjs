@@ -116,4 +116,110 @@ test('在场指示器宿主接线守卫', async (t) => {
       'CSS 的 html[data-app-hidden="true"] 暂停规则需要宿主写入该属性，否则形变/环/光晕在后台继续跑',
     );
   });
+
+  await t.test('9. 布局偏好：键名必须声明在 state 之前（否则冷启动恒回 stage）', () => {
+    const src = read(RENDERER);
+    const keyDecl = src.indexOf("const PRESENCE_LAYOUT_STORAGE_KEY");
+    const stateDecl = src.indexOf('const state: AppState = {');
+    assert.ok(keyDecl >= 0, '必须存在布局偏好持久化键');
+    assert.ok(stateDecl >= 0, '必须存在 state 初始化');
+    /*
+     * 【真实缺陷回归】键名声明在 state 之后时，打包成 var 后 state 初始化读到 undefined，
+     *   `localStorage.getItem(undefined)` 恒为 null → 用户选了 dock，重启后又跳回顶部。
+     *   这条断言锁死声明顺序。
+     */
+    assert.ok(
+      keyDecl < stateDecl,
+      'PRESENCE_LAYOUT_STORAGE_KEY 必须声明在 state 初始化之前，否则冷启动读不到已保存的布局',
+    );
+    // 读取失败不得静默：只有 localStorage 不可用时才回落，且必须留痕
+    const readStart = src.indexOf('function readPresenceLayout');
+    const readBody = src.slice(readStart, src.indexOf('\n}', readStart));
+    assert.ok(readBody.includes('console.warn'), '读取失败必须留痕，禁止空 catch 吞掉');
+    assert.ok(readBody.includes("'dock'"), '必须识别 dock');
+    assert.ok(readBody.includes("'stage'"), '缺省必须回落 stage');
+  });
+
+  await t.test('10. host 定位：dock 必须插进输入舱首位，stage 必须回到 pod 的流之后', () => {
+    const src = read(RENDERER);
+    const fnStart = src.indexOf('function ensureAgentPresenceHost');
+    assert.ok(fnStart >= 0, '必须存在 host 定位函数');
+    const body = src.slice(fnStart, src.indexOf('\nfunction ', fnStart + 10));
+    assert.ok(
+      body.includes('dock.insertBefore(host, dock.firstElementChild)'),
+      'dock 变体必须把 host 插到 .input-dock-container 首位（否则贴不住输入舱上沿）',
+    );
+    assert.ok(body.includes('presence-host--dock'), 'dock 变体必须加 presence-host--dock 类');
+    assert.ok(
+      body.includes('classList.remove(\'presence-host--dock\')'),
+      '切回 stage 必须移除 dock 类，否则样式残留绝对定位',
+    );
+    assert.ok(body.includes('#conversation-stream'), 'stage 回落位置必须在对话流之后（放流内会被整块销毁）');
+  });
+
+  await t.test('11. 输入舱变更后必须重校宿主（三条路径同一出口）', () => {
+    const src = read(RENDERER);
+    /*
+     * 【真实缺陷回归】dock 变体的 host 是输入舱首子节点，断连移除 / outerHTML 替换 /
+     *   首次新建三条路径都会连带销毁它。重校若写进某一条分支，另外两条就会让指示器
+     *   永久消失；若三条分支各写一次，又无法证明没有遗漏。
+     *   契约因此收敛为：三条路径合进一个 `applyInputDockUpdate()`，
+     *   调用之后紧跟唯一一次 `syncAgentPresenceHost()`。
+     */
+    const fnStart = src.indexOf('const applyInputDockUpdate = (): void => {');
+    assert.ok(fnStart >= 0, '三条输入舱变更路径必须收敛到 applyInputDockUpdate');
+    const rawFnBody = src.slice(fnStart, src.indexOf('\n    };', fnStart));
+    // 剥注释：注释里也写了这三个调用名，不剥的话「把真实代码删掉只留注释」也能全绿
+    const fnBody = rawFnBody.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
+    assert.ok(fnBody.includes('existingDock.remove()'), '断连移除路径必须在同一出口内');
+    assert.ok(fnBody.includes('existingDock.outerHTML = nextDockHtml'), '整块替换路径必须在同一出口内');
+    assert.ok(fnBody.includes('insertAdjacentHTML'), '首次新建路径必须在同一出口内');
+
+    // 调用点必须紧跟在出口函数之后，且中间不得插入分支判断
+    const callAt = src.indexOf('    applyInputDockUpdate();');
+    assert.ok(callAt >= 0, '必须存在唯一调用点');
+    const afterCall = src.slice(callAt, callAt + 2000);
+    // 剥掉注释再比对，避免注释文字干扰（注释里也出现了这两个函数名）
+    const stripped = afterCall.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
+    assert.ok(
+      /^ {4}applyInputDockUpdate\(\);\s* {4}syncAgentPresenceHost\(\);\s* {4}syncAgentPresence\(\);/.test(stripped),
+      'applyInputDockUpdate() 之后必须紧跟 syncAgentPresenceHost() 与 syncAgentPresence()，中间不得有分支',
+    );
+
+    // 重校不得只出现在某条分支内部：分支块内不允许出现重校调用
+    const branchBody = /else if \(dockChanged && nextDockHtml\) \{([\s\S]*?)\n\s{6}\}/.exec(src)?.[1] ?? '';
+    assert.ok(branchBody.length > 0, '必须能定位到整块替换分支');
+    assert.ok(!branchBody.includes('syncAgentPresenceHost'), '重校禁止写进单个分支内（另外两条路径会被漏掉）');
+
+    assert.ok(
+      src.includes('agentPresenceHost?.isConnected'),
+      'syncAgentPresence 必须校验宿主存活，否则会往脱离文档的 root 持续渲染',
+    );
+  });
+
+  await t.test('12. 指纹必须真的带上快照里的布局值（不得写成常量）', () => {
+    const src = read(RENDERER);
+    const fnStart = src.indexOf('function agentPresenceFingerprint');
+    const body = src.slice(fnStart, src.indexOf('\nfunction ', fnStart + 10));
+    /*
+     * 【变异杀伤力】`layout: 'stage'`（常量）同样满足「函数体里出现 layout」，
+     *   但切到 dock 后指纹不变、组件永远按 stage 变体渲染。必须断言取值来自 snapshot。
+     */
+    assert.ok(
+      /layout:\s*snapshot\.layout\s*\?\?\s*'stage'/.test(body),
+      '指纹里的 layout 必须取自 snapshot.layout，禁止写死常量',
+    );
+    assert.ok(!/layout:\s*'stage'\s*[,}]/.test(body), '指纹不得把 layout 写成固定 stage');
+  });
+
+  await t.test('13. 设置动作必须写盘并清掉宿主引用（否则切换后不重挂）', () => {
+    const src = read(RENDERER);
+    const fnStart = src.indexOf('onPresenceLayoutChange:');
+    assert.ok(fnStart >= 0, '必须存在布局切换动作');
+    const body = src.slice(fnStart, src.indexOf('},', fnStart) + 2);
+    assert.ok(body.includes('writePresenceLayout'), '切换必须持久化，否则重启丢失');
+    assert.ok(body.includes('agentPresenceHost = null'), '切换必须清宿主引用，否则 host 换了也不重挂');
+    assert.ok(body.includes('lastAgentPresenceFingerprint'), '切换必须清指纹，否则新布局首帧被去重吞掉');
+    assert.ok(body.includes('render()'), '切换必须触发一次渲染');
+  });
 });

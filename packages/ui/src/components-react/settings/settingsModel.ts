@@ -165,6 +165,13 @@ export interface SettingsSnapshot {
   appVersion?: string;
   platform: string;
   busy: boolean;
+  /**
+   * Agent 状态指示器的位置变体。
+   *
+   * 【约束与规则】`stage` = 对话区顶部悬浮（历史行为），`dock` = 输入舱上沿。
+   *   外观面板据此渲染二选一控件；切换回调见 `SettingsActions.onPresenceLayoutChange`。
+   */
+  presenceLayout: 'stage' | 'dock';
 }
 
 /** 连接表单草稿：只存在于组件内部，提交时才回到壳层。 */
@@ -206,6 +213,12 @@ export interface SettingsActions {
   onFontPrefsChange: (prefs: FontPreferences) => void;
   /** 切换左轨活动指示器动效变体；壳层负责持久化并向左轨推新快照。 */
   onActivityVariantChange: (variant: ActivityIndicatorVariant) => void;
+  /**
+   * 切换 Agent 状态指示器的位置。
+   *
+   * 【规则】只改表现位置：状态机、文案与动效全部复用，禁止为另一套位置新增状态源。
+   */
+  onPresenceLayoutChange: (layout: 'stage' | 'dock') => void;
   onRefreshProfiles: () => void;
   onOpenAgent: (name: string) => void;
   onRefreshExtensions: () => void;
