@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import {
@@ -10,10 +10,10 @@ import {
 } from '../../dist/renderer/messageWindow.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const rendererSource = readFileSync(
-  path.resolve(__dirname, '../../src/renderer/index.ts'),
-  'utf8'
-);
+const msgLoadPath = path.resolve(__dirname, '../../src/renderer/services/messageLoadingService.ts');
+const rendererSource = existsSync(msgLoadPath)
+  ? readFileSync(msgLoadPath, 'utf8')
+  : readFileSync(path.resolve(__dirname, '../../src/renderer/index.ts'), 'utf8');
 
 test('hasLegacyUnorderedCacheRows: 正确识别缺少 displaySeq 的旧版毒缓存，空数组不误报', () => {
   assert.equal(hasLegacyUnorderedCacheRows([]), false, '空缓存不得误判为旧毒缓存');

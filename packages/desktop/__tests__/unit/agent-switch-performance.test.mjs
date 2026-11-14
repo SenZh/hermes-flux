@@ -21,7 +21,8 @@ const repoRoot = path.resolve(__dirname, '../../../..');
 
 const read = (relativePath) => readFileSync(path.join(repoRoot, relativePath), 'utf8');
 
-const rendererSource = read('packages/desktop/src/renderer/index.ts');
+const msgLoadSource = read('packages/desktop/src/renderer/services/messageLoadingService.ts');
+const rendererSource = read('packages/desktop/src/renderer/index.ts') + '\n' + msgLoadSource;
 const leftRailSnapshotSource = read('packages/desktop/src/renderer/leftrail/leftRailSnapshotManager.ts');
 const profileRefreshSource = read('packages/desktop/src/renderer/profileRefresh.ts');
 const messageListSource = read('packages/ui/src/components-react/conversation/ConversationMessageList.tsx');

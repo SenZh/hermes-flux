@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import {
@@ -22,10 +22,13 @@ import {
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const rendererSource = readFileSync(
-  path.resolve(__dirname, '../../src/renderer/index.ts'),
-  'utf8'
-);
+const sessionOpPath = path.resolve(__dirname, '../../src/renderer/services/sessionOperationService.ts');
+const messageLoadPath = path.resolve(__dirname, '../../src/renderer/services/messageLoadingService.ts');
+const rendererSource = [
+  readFileSync(path.resolve(__dirname, '../../src/renderer/index.ts'), 'utf8'),
+  existsSync(sessionOpPath) ? readFileSync(sessionOpPath, 'utf8') : '',
+  existsSync(messageLoadPath) ? readFileSync(messageLoadPath, 'utf8') : '',
+].join('\n');
 
 const countMatches = (re) => (rendererSource.match(re) || []).length;
 

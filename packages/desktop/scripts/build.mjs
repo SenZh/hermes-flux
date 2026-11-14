@@ -347,7 +347,31 @@ async function buildAll() {
     external: ['@hermes-flux/core', '@hermes-flux/ui'],
     sourcemap: true,
   });
-  console.log('  ✔ Transcript rows + slash catalog + desktop cache bridge + agent presence + prompt nav + cascade + viewport + leftrail + state + inspector + modal + inputDock modules compiled');
+
+  // 会话生命周期与设置切换服务：从 index.ts 抽出
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/services/sessionOperationService.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/services/sessionOperationService.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+
+  // 消息加载、历史分页漫游与副标题同步服务：从 index.ts 抽出
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/services/messageLoadingService.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/services/messageLoadingService.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+  console.log('  ✔ Transcript rows + slash catalog + desktop cache bridge + agent presence + prompt nav + cascade + viewport + leftrail + state + inspector + modal + inputDock + sessionOperation + messageLoading modules compiled');
 
   // 4. Copy static assets
   fs.copyFileSync(

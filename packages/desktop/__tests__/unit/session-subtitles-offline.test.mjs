@@ -11,12 +11,16 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { SessionListGeneration } from '../../../core/dist/index.js';
 
-const rendererSource = readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src/renderer/index.ts'), 'utf8');
+const sessionOpPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src/renderer/services/sessionOperationService.ts');
+const rendererSource = [
+  readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src/renderer/index.ts'), 'utf8'),
+  existsSync(sessionOpPath) ? readFileSync(sessionOpPath, 'utf8') : '',
+].join('\n');
 
 test('Session Subtitles & Generation Race Guard (Offline Invariants)', async (t) => {
   await t.test('1. 代际令牌 (Generation Token)：迟滞异步响应绝不能写入已切换的当前会话', async () => {

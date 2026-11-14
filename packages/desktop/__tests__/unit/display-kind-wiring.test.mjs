@@ -52,8 +52,10 @@ test('display_kind 宿主编排接线（精确字符串契约）', async (t) => 
   });
 
   await t.test('3. 翻页过滤不得删 hidden 行（行序守恒）', () => {
-    const start = rendererSource.indexOf('const payload = outcome.messages.filter((m) => {');
-    const block = rendererSource.slice(start, start + 400);
+    const msgLoadPath = path.resolve(__dirname, '../../src/renderer/services/messageLoadingService.ts');
+    const targetSrc = existsSync(msgLoadPath) ? readFileSync(msgLoadPath, 'utf8') : rendererSource;
+    const start = targetSrc.indexOf('const payload = outcome.messages.filter((m');
+    const block = targetSrc.slice(start, start + 400);
     assert.ok(block.length > 0, '必须能定位到翻页过滤区段');
     assert.ok(
       !block.includes("if (m.display_kind === 'hidden') return false;"),
@@ -66,8 +68,10 @@ test('display_kind 宿主编排接线（精确字符串契约）', async (t) => 
   });
 
   await t.test('4. 左侧栏预览与 Bot 反哺只取真实人类正文', () => {
-    const start = rendererSource.indexOf('function syncActiveSessionPreviewToRail');
-    const block = rendererSource.slice(start, start + 1600);
+    const msgLoadPath = path.resolve(__dirname, '../../src/renderer/services/messageLoadingService.ts');
+    const targetSrc = existsSync(msgLoadPath) ? readFileSync(msgLoadPath, 'utf8') : rendererSource;
+    const start = targetSrc.indexOf('syncActiveSessionPreviewToRail(sessionId: string');
+    const block = targetSrc.slice(start, start + 1600);
     assert.ok(
       block.includes("const visibleMessages = messages.filter((m) => (m.displayKind ?? 'user') === 'user');"),
       '预览必须只用可上屏的人类行，否则副标题会显示 [System:] 或后台回执'
@@ -79,8 +83,10 @@ test('display_kind 宿主编排接线（精确字符串契约）', async (t) => 
   });
 
   await t.test('5. 导出口径与视图一致：hidden 不导出，事件单独标注', () => {
-    const start = rendererSource.indexOf('async function exportMarkdown');
-    const block = rendererSource.slice(start, start + 900);
+    const sessionOpPath = path.resolve(__dirname, '../../src/renderer/services/sessionOperationService.ts');
+    const targetSrc = existsSync(sessionOpPath) ? readFileSync(sessionOpPath, 'utf8') : rendererSource;
+    const start = targetSrc.indexOf('exportMarkdown(');
+    const block = targetSrc.slice(start, start + 900);
     assert.ok(
       block.includes(".filter((m) => (m.displayKind ?? 'user') !== 'hidden')"),
       'hidden 行不得导出成 ### User'

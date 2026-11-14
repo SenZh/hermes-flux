@@ -252,6 +252,14 @@ import { createSessionDraftStore } from './persistence/sessionDrafts.js';
 import { isStringArray, safeParseJson, resolveDurableOrderKey } from './persistence/persistedJson.js';
 import { DesktopCacheStore } from './cache/DesktopCacheStore.js';
 import { loadProviderCatalog } from './providerCatalog.js';
+import {
+  type MessageLoadingService,
+  createMessageLoadingService,
+} from './services/messageLoadingService.js';
+import {
+  type SessionOperationService,
+  createSessionOperationService,
+} from './services/sessionOperationService.js';
 
 /** 头像绑定/解绑写操作的在途合流表：同键同签名复用 promise，异签名拒绝重入。 */
 const inFlightProviderBindings = new Map<string, { signature: string; promise: Promise<ToggleProviderAgentResult> }>();
@@ -1575,11 +1583,7 @@ function rpcErrorCode(error: unknown): number | null {
  * otherwise re-render the whole shell many times in a row.
  */
 function scheduleSessionsRefresh(delayMs = 180): void {
-  if (sessionsRefreshTimer) clearTimeout(sessionsRefreshTimer);
-  sessionsRefreshTimer = setTimeout(() => {
-    sessionsRefreshTimer = null;
-    void fetchSessions();
-  }, delayMs);
+  sessionOperationService.scheduleSessionsRefresh(delayMs);
 }
 
 /**
@@ -3113,53 +3117,154 @@ function releasePromptJump(seq: number): void {
   });
 }
 
-const sessionMessagesCache = new Map<string, MessageViewModel[]>();
-const sessionServerOffset = new Map<string, number>();
-/** 记录服务端实际确认过的原始行游标（不含本地覆盖行数抬升），用于高估回退基准。 */
-const sessionAuthoritativeOffset = new Map<string, number>();
-const sessionParentOffsetMap = new Map<string, number>();
-/**
- * 本地覆盖下界回退标记（每个 cursorKey 一次）。
- *
- * 【设计意图 (Why)】旧版本缓存可能混入父会话行，使「本地已覆盖行数」高估；
- *   若高估的游标越过服务端末尾，网关会返回 0 条并被误判为"已到最早"。
- *   首次撞空时退回保守游标重拉一次，宁可重叠也不丢历史。
- */
-const sessionOvershootRetry = new Set<string>();
-
-/** 会话游标失效时一并清理"高估回退"标记，避免下次打开会话永久失去本地下界。 */
-function forgetOlderCursorState(sessionId: string): void {
-  sessionServerOffset.delete(sessionId);
-  sessionAuthoritativeOffset.delete(sessionId);
-  const prefix = `${sessionId}:`;
-  for (const key of [...sessionOvershootRetry]) {
-    if (key.startsWith(prefix)) sessionOvershootRetry.delete(key);
+/** 独立的轻量全局浮层 Toast，绝不污染输入舱 */
+let toastTimer: ReturnType<typeof setTimeout> | null = null;
+function showToast(message: string, durationMs = 2200): void {
+  let toastEl = document.getElementById('flux-floating-toast');
+  if (!toastEl) {
+    toastEl = document.createElement('div');
+    toastEl.id = 'flux-floating-toast';
+    toastEl.style.cssText = `
+      position: fixed;
+      bottom: 96px;
+      left: 50%;
+      transform: translateX(-50%) translateY(10px);
+      background: var(--bg-card);
+      color: var(--text-main);
+      border: 1px solid var(--border-strong);
+      box-shadow: var(--shadow-window);
+      padding: 6px 14px;
+      border-radius: 9999px;
+      font-size: var(--fs-xs, 12px);
+      font-weight: 500;
+      z-index: 3000;
+      pointer-events: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      backdrop-filter: blur(16px);
+      transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      opacity: 0;
+    `;
+    document.body.appendChild(toastEl);
   }
+  toastEl.innerHTML = `<span style="color: var(--accent); font-weight: bold;">✓</span> <span>${escapeHtml(message)}</span>`;
+  toastEl.style.opacity = '1';
+  toastEl.style.transform = 'translateX(-50%) translateY(0)';
+
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    if (toastEl) {
+      toastEl.style.opacity = '0';
+      toastEl.style.transform = 'translateX(-50%) translateY(10px)';
+    }
+  }, durationMs);
 }
-/** 截断成功后的会话历史权威源标记：'server-priority' 时禁用“本地更长则保留”合并守卫 */
-const sessionHistoryTrust = new Map<string, 'server-priority'>();
-/**
- * 标记会话当前从旧版未带 displaySeq 持久化缓存临时恢复。
- *
- * 【设计意图 (Why)】断网期间必须保留旧缓存离线可读；仅在远端权威历史真正返回后
- *   再删旧重建，禁止将其错序历史当成权威基座固化进新版缓存。
- */
-const untrustedOrderCacheSessions = new Set<string>();
+
+const sessionMessagesCache = new Map<string, MessageViewModel[]>();
+let activeLoadMessagesGeneration = 0;
+
+const messageLoadingService = createMessageLoadingService({
+  getState: () => state,
+  getGatewayClient: () => gatewayClient,
+  render: () => render(),
+  sessionMessagesCache,
+  cacheService,
+  persistMessagesToCache: (channelRef, messages, fenceMax) => persistMessagesToCache(channelRef, messages, fenceMax ?? 0),
+  syncPromptNavigatorMeta: () => syncPromptNavigatorMeta(),
+  syncPromptNavigatorFromScroll: () => syncPromptNavigatorFromScroll(),
+  scrollStreamToBottom: (reason) => scrollStreamToBottom(reason ?? ''),
+  setPendingScrollToBottom: (val) => { pendingScrollToBottom = val; },
+  isStreamNearBottom: (el) => isStreamNearBottom(el),
+  captureStreamAnchor: () => captureStreamAnchor(),
+  applyStreamAnchor: (anchor, maintain) => applyStreamAnchor(anchor as StreamAnchor, maintain ?? false),
+  getMessageWindowStart: () => messageWindowStart,
+  setMessageWindowStart: (val) => { messageWindowStart = val; },
+  getMessageWindowEnd: () => messageWindowEnd,
+  setMessageWindowEnd: (val) => { messageWindowEnd = val; },
+  setMessageWindowUserExpanded: (val) => { messageWindowUserExpanded = val; },
+  setCanvasStructureDirty: (val) => { canvasStructureDirty = val; },
+  setSuppressPinBottomOnce: (val) => { suppressPinBottomOnce = val; },
+  isGroupConversationActive: (id) => isGroupConversationActive(id),
+  hostedRoomIds,
+  formatSessionTime,
+  formatTimestamp: (ts) => formatTimestamp(ts),
+  botActivityStore,
+  botForeverChatCache,
+  sessionPreviewCache,
+  persistSessionPreviewCache: () => persistSessionPreviewCache(),
+  getActiveStreamingStoredSessionId: () => activeStreamingStoredSessionId,
+  defaultSessionHandleRegistry,
+  activeRunningSessionIds,
+  activityTransitionTracker,
+  getGeneration: () => activeLoadMessagesGeneration,
+  onGenerationIncremented: (gen: number) => { activeLoadMessagesGeneration = gen; },
+  logSession,
+  logScroll,
+});
+
+const sessionServerOffset = messageLoadingService.sessionServerOffset;
+const sessionAuthoritativeOffset = messageLoadingService.sessionAuthoritativeOffset;
+const sessionParentOffsetMap = messageLoadingService.sessionParentOffsetMap;
+const sessionOvershootRetry = messageLoadingService.sessionOvershootRetry;
+const sessionHistoryTrust = messageLoadingService.sessionHistoryTrust;
+const untrustedOrderCacheSessions = messageLoadingService.untrustedOrderCacheSessions;
+
+function forgetOlderCursorState(sessionId: string): void {
+  messageLoadingService.forgetOlderCursorState(sessionId);
+}
 
 function syncUntrustedCacheOrderFlag(sessionId: string, rows: readonly CachedMessageRow[]): void {
-  if (hasLegacyUnorderedCacheRows(rows)) {
-    untrustedOrderCacheSessions.add(sessionId);
-  } else {
-    untrustedOrderCacheSessions.delete(sessionId);
-  }
+  messageLoadingService.syncUntrustedCacheOrderFlag(sessionId, rows);
 }
 
-/** 判定当前会话是否仍存在尚未耗尽的父会话血缘段。 */
 function hasRemainingParentLineage(sessionId: string): boolean {
-  if (!sessionId) return false;
-  const parents = resolveLineageChain(sessionId, state.sessions).slice(1);
-  return parents.some((id) => sessionServerOffset.get(`${sessionId}:${id}:exhausted`) !== 1);
+  return messageLoadingService.hasRemainingParentLineage(sessionId);
 }
+
+const sessionOperationService = createSessionOperationService({
+  getState: () => state,
+  getGatewayClient: () => gatewayClient,
+  getDesktopApi: () => desktopApi,
+  getCurrentTicket: () => currentTicket ?? null,
+  getEffectiveUrl: (url) => getEffectiveUrl(url ?? state.gatewayUrl),
+  render: () => render(),
+  t,
+  showToast,
+  setTimedDockNotice,
+  restoreComposerFocus: () => restoreComposerFocus(),
+  sessionDrafts,
+  sessionMessagesCache,
+  unreadSessionIds,
+  activeRunningSessionIds,
+  activityTransitionTracker,
+  sessionHandleRegistry: defaultSessionHandleRegistry,
+  cacheService,
+  persistSessionsToCache: (sessions) => persistSessionsToCache(sessions),
+  forgetOlderCursorState: (id) => messageLoadingService.forgetOlderCursorState(id),
+  sessionListGeneration,
+  getActiveStreamingStoredSessionId: () => activeStreamingStoredSessionId,
+  resetActiveStreamingState: () => {
+    tokenCoalescer.clear();
+    disarmTurnWatchdog();
+    activeStreamingMessageId = null;
+    activeStreamingStoredSessionId = null;
+    activeStreamingLiveId = null;
+    activeStreamingBotName = null;
+    state.isStreaming = false;
+  },
+  setPendingScrollToBottom: (val) => { pendingScrollToBottom = val; },
+  setLastMessagesSnapshot: (val) => { lastMessagesSnapshot = val as RenderMessagesSnapshot | null; },
+  loadMessages: (id, botName) => loadMessages(id, botName),
+  openBotChat: (botName) => openBotChat(botName),
+  ensureLiveSessionId: () => ensureLiveSessionId(),
+  fetchSessions: () => fetchSessions(),
+  incrementActiveLoadMessagesGeneration: () => {
+    const next = messageLoadingService.incrementGeneration();
+    activeLoadMessagesGeneration = next;
+    return next;
+  },
+});
 /** core 交互区领域服务单例（截断/分支/目录的唯一 wire 载荷构造入口） */
 const interactiveService = new InteractiveService();
 
@@ -3208,458 +3313,24 @@ const inputCompletion = createInputCompletion(
   interactiveService,
 );
 
-/**
- * 解析网关原始消息行为视图模型。
- * 【防范的历史坑 (Pitfall)】必须提取 row_id 为持久 rowId，回滚截断才有可信锚点；
- * 历史上此函数丢弃 row_id 导致回滚被迫用临时 id 触发 4018。
- * 作用域（是否 Bot/群聊）从当前焦点内联派生，避免跨调用残留过期标记。
- * 具体翻译逻辑在 transcriptRows.ts 的纯函数里，本函数只负责注入宿主作用域与时区格式化。
- */
 function parseRawMessages(list: any[]): MessageViewModel[] {
-  return parseTranscriptRows(list, {
-    scope: {
-      isGroupRoom: state.activeFocus.type === 'group',
-      isBotRoom: state.activeFocus.type === 'bot',
-    },
-    formatTimestamp,
-  });
+  return messageLoadingService.parseRawMessages(list);
 }
 
 async function loadOlderMessages(options?: { preserveViewportWindow?: boolean }): Promise<void> {
-  const sessionId = state.activeSessionId;
-  if (!sessionId || !gatewayClient) return;
-  if (state.isLoadingOlder) {
-    // 【熔断 (Rules)】后台标签页会节流渲染帧，上一轮可能在关闭加载态前被打断。
-    // 超过 20 秒仍是 true，视为陈旧锁，强制复位后继续拉取，避免永久卡在"正在加载更早历史"。
-    if (performance.now() - olderLoadingStartedAt > 20000) {
-      state.isLoadingOlder = false;
-      syncPromptNavigatorMeta();
-    } else {
-      return;
-    }
-  }
-
-  // 【AGENTS.md 三态隔离铁律】群聊研讨室严格走 groups.* 协议，绝对禁止打单会话 REST
-  if (hostedRoomIds.has(sessionId) || isGroupConversationActive(sessionId)) {
-    state.isLoadingOlder = false;
-    syncPromptNavigatorMeta();
-    return;
-  }
-
-  // 精准解析当前会话归属的 Profile（杜绝专职 Agent 漏传 profile 报 404 根因）
-  const resolvedProfile = state.sessions.find((s) => s.id === sessionId)?.botName
-    || (state.activeFocus.type === 'bot' ? state.activeFocus.botName : state.profileName)
-    || 'default';
-
-  const guard = { sessionId, generation: activeLoadMessagesGeneration };
-  const preserveViewportWindow = Boolean(options?.preserveViewportWindow);
-  const wasNearBottomBeforeLoad = isStreamNearBottom(document.getElementById('conversation-stream'));
-  state.isLoadingOlder = true;
-  olderLoadingStartedAt = performance.now();
-  // 提示词导航器即刻同步加载态，确保 0ms 触发动画而非等全量 render()。
-  syncPromptNavigatorMeta();
-  const startedAt = performance.now();
-  const anchor = captureStreamAnchor();
-  /** 任一页网络/协议失败：本轮不推进耗尽结论，保留"还有更早历史"的入口。 */
-  let fetchFailed = false;
-
-  /**
-   * 当前会话在本地列表中的最早持久行。
-   *
-   * 【设计意图 (Why)】批次命中这一行时，它的批内下标就是本地真实覆盖边界，
-   *   比「按 returned 累加」精确，能立刻收敛游标。
-   * 【约束与规则 (Rules)】父会话血缘行与无持久 rowId 的临时消息都不参与判定。
-   */
-  const sessionEarliestRowId = (): number | null => {
-    for (const m of state.messages) {
-      if (typeof m.rowId !== 'number' || m.rowId <= 0) continue;
-      if (m.sessionId && m.sessionId !== sessionId) continue;
-      return m.rowId;
-    }
-    return null;
-  };
-
-  // 完整血缘链条 [D, C, B, A]，环形自动熔断
-  const lineageChain = resolveLineageChain(sessionId, state.sessions);
-
-  try {
-    let batchAppended = false;
-
-    // 0. 本地持久化缓存优先（Cache-First）：若本地 IndexedDB 存有比当前更早的行，0ms 极速呈现，避免网络往返
-    // 【分桶口径 (Rules)】必须用本会话自己的最早行做上界；头部若是父会话血缘行，
-    //   用它的 rowId 会让读取区间落到本会话根本没缓存过的区段。
-    const oldestRowId = sessionEarliestRowId();
-    if (typeof oldestRowId === 'number' && oldestRowId > 1) {
-      try {
-        const cacheRef: CacheChannelRef = { profile: resolvedProfile, channel: 'session', channelId: sessionId };
-        const localOlderRows = await cacheService.readOlderRows(cacheRef, oldestRowId, 100);
-        if (localOlderRows.length > 0) {
-          const cachedBatch = sortByDisplayAsc(localOlderRows).map(toMessageViewModel);
-          const before = state.messages.length;
-          state.messages = planOlderBatchPrependMerge(cachedBatch, state.messages, { timelineSessionId: sessionId, fallbackSessionId: sessionId });
-          const added = state.messages.length - before;
-          if (added > 0) {
-            if (preserveViewportWindow) {
-              messageWindowStart = shiftWindowStartForPrepend(
-                messageWindowStart,
-                added,
-                state.messages.length,
-                MESSAGE_WINDOW_CAPACITY
-              );
-              if (!wasNearBottomBeforeLoad) {
-                messageWindowUserExpanded = true;
-              }
-            } else {
-              // 新批次插在列表头部，窗口对齐到本批末尾附近，末端由容量推导保持区间有界
-              messageWindowStart = computeOlderBatchWindowStart(added, localOlderRows.length < 100, MESSAGE_WINDOW_CAPACITY);
-              messageWindowUserExpanded = true;
-            }
-            messageWindowEnd = windowEndFor(messageWindowStart, state.messages.length, MESSAGE_WINDOW_CAPACITY, INITIAL_RENDER_WINDOW);
-            sessionMessagesCache.set(sessionId, state.messages);
-            state.hasOlderMessages = true;
-            batchAppended = true;
-          }
-        }
-      // gate-degrade: 本地缓存读取失败或未命中时平滑回退到远端 REST 拉取
-      } catch {}
-    }
-
-    // 单次调用最多推进的页数：防止"整页都是已缓存重复"时无净增死循环
-    let attempts = 0;
-    const MAX_PAGE_ATTEMPTS = 8;
-
-    for (const targetId of lineageChain) {
-      if (batchAppended || attempts >= MAX_PAGE_ATTEMPTS) break;
-
-      const cursorKey = `${sessionId}:${targetId}`;
-      if (sessionServerOffset.get(`${cursorKey}:exhausted`) === 1) continue;
-
-      while (attempts < MAX_PAGE_ATTEMPTS) {
-        attempts += 1;
-
-        const storedOffset = sessionParentOffsetMap.get(cursorKey)
-          ?? (targetId === sessionId ? (sessionServerOffset.get(sessionId) ?? 0) : 0);
-        /**
-         * 【游标对齐 (Rules)】请求起点必须抬到本地已覆盖行数。
-         * 首屏 REST 只回 100 行却合并保留了本地更长的历史时，游标会停在 100；
-         * 从 100 起每轮再加 500，很快就越过本地真实覆盖边界，中途整段历史再也拉不到。
-         */
-        const earliestLocalRowId = targetId === sessionId ? sessionEarliestRowId() : null;
-        const floorSuppressed = sessionOvershootRetry.has(cursorKey);
-        const { queryOffset } = planOlderPagination({
-          storedOffset,
-          localCoveredRows: targetId === sessionId && !floorSuppressed
-            ? countLocalCoveredRows(state.messages, sessionId)
-            : 0,
-          returned: 0,
-          batchRowIds: [],
-          earliestLocalRowId,
-        });
-
-        const guarded = await runGuarded(
-          guard,
-          () => ({ sessionId: state.activeSessionId, generation: activeLoadMessagesGeneration }),
-          () => undefined,
-          () => gatewayClient!.fetchSessionMessages(targetId, {
-            limit: OLDER_BATCH_PAGE_SIZE,
-            offset: queryOffset,
-            order: 'latest',
-            profile: resolvedProfile,
-            // 【根因修复】必须包含被上下文压缩归档的原始消息。
-            // 默认 include_compacted=false 只返回活动表，翻到压缩摘要节点就"到底"，
-            // 用户永远看不到更早的真实历史（这正是 10/17 之前拉不出来的原因）。
-            includeCompacted: true,
-          }),
-          logSession,
-        );
-        if (guarded.status === 'discarded') {
-          state.isLoadingOlder = false;
-          syncPromptNavigatorMeta();
-          return;
-        }
-        const outcome = guarded.value;
-
-        if (outcome.status !== 'success') {
-          // 【失败不等于到底 (Rules)】网络/协议失败只退出本轮，绝不把失败当成"已到最早"，
-          // 否则一次抖动就会永久黑掉全部更早历史（Failure Is Not Empty）。
-          fetchFailed = true;
-          break;
-        }
-        if (outcome.messages.length === 0) {
-          /**
-           * 【高估兜底 (Rules)】若本次起点是被本地覆盖下界抬起来的，且一页都拿不到，
-           * 说明下界可能高估（旧缓存混入过父会话行）。先退回服务端已知安全游标重拉一次，
-           * 宁可重叠也不把服务端仍有的一整段历史判成"已到最早"。
-           */
-          const zeroPlan = planOlderZeroMessagesAction({
-            isTargetSelf: targetId === sessionId,
-            floorSuppressed,
-            queryOffset,
-            safeFallbackOffset: sessionAuthoritativeOffset.get(sessionId) ?? 0,
-          });
-          if (zeroPlan.action === 'retry-fallback') {
-            sessionOvershootRetry.add(cursorKey);
-            // 回退必须同时清掉分页表里的旧值：读取顺序是 parentOffset ?? serverOffset，
-            // 只改后者会被前一轮写入的大游标完全遮蔽，回退永不生效。
-            sessionParentOffsetMap.delete(cursorKey);
-            sessionServerOffset.set(sessionId, zeroPlan.fallbackOffset);
-            continue;
-          }
-          // 该节点已见底，转向上一级血缘
-          sessionServerOffset.set(`${cursorKey}:exhausted`, 1);
-          break;
-        }
-
-        const returned = outcome.pagination?.returned ?? outcome.messages.length;
-
-        // 压缩摘要节点是纯机器交接文本，原始消息已随 include_compacted 一并返回。
-        // 【行序守恒 (Rules)】这里绝不能删 hidden 行：本地数组必须与服务端数组逐行对应，
-        // 删行会让 fork 切点与分页 offset 漂移。hidden 行一律交给 visibility 层过滤。
-        // 只保留「kind 缺失的存量行」前缀兜底，避免整块 [CONTEXT COMPACTION 措手无策。
-        const payload = outcome.messages.filter((m) => {
-          if (typeof m.display_kind === 'string' && m.display_kind.length > 0) return true;
-          const text = typeof m.content === 'string' ? m.content : '';
-          return !text.startsWith('[CONTEXT COMPACTION');
-        });
-        const batch = parseRawMessages(payload);
-
-        const before = state.messages.length;
-        const mergeResult = planOlderBatchPrependMergeDetailed(batch, state.messages, {
-          timelineSessionId: targetId,
-          fallbackSessionId: sessionId,
-        });
-        const added = mergeResult.merged.length - before;
-
-        if (shouldTreatOlderDropAsExhausted(added, batch.length, mergeResult.droppedCount)) {
-          /**
-           * 【边界异常 (Rules)】整批被「更早边界」丢掉，说明锚点口径与批次会话不一致。
-           * 此时绝不能推进游标：行没拿到、游标又前移，等于把这段历史永久丢失。
-           * 停在本段并显式留痕，交由上层血缘继续。
-           */
-          logSession.warn('older batch fully dropped by earlier-boundary filter', {
-            sessionId,
-            targetId,
-            queryOffset,
-            returned,
-            dropped: mergeResult.droppedCount,
-          });
-          sessionServerOffset.set(`${cursorKey}:exhausted`, 1);
-          break;
-        }
-
-        /**
-         * 【保守收敛 (Rules)】批次若命中本地最早行，只推进到该行的批次位置，
-         *   多拉一轮重叠也不跳过省下的行；推进上界严格不超过 `queryOffset + returned`。
-         */
-        const batchRowIds = outcome.messages
-          .map((m) => extractDurableRowId(m))
-          .filter((id): id is number => typeof id === 'number');
-        const cursorPlan = planOlderPagination({
-          storedOffset: queryOffset,
-          localCoveredRows: 0,
-          returned,
-          batchRowIds,
-          earliestLocalRowId: targetId === sessionId ? earliestLocalRowId : null,
-        });
-        sessionParentOffsetMap.set(cursorKey, cursorPlan.nextOffset);
-        if (targetId === sessionId) {
-          sessionServerOffset.set(sessionId, cursorPlan.nextOffset);
-          // 正常翻页推进后同步抬升服务端已确认游标，避免末尾整除时冗余回退重扫
-          sessionAuthoritativeOffset.set(
-            sessionId,
-            Math.max(sessionAuthoritativeOffset.get(sessionId) || 0, cursorPlan.nextOffset)
-          );
-        }
-
-        state.messages = mergeResult.merged;
-
-        if (added <= 0) {
-          // 整页都是本地缓存已有的行：游标已前进，继续拉下一页
-          if (returned < OLDER_BATCH_PAGE_SIZE) {
-            sessionServerOffset.set(`${cursorKey}:exhausted`, 1);
-            break;
-          }
-          continue;
-        }
-
-        if (preserveViewportWindow) {
-          messageWindowStart = shiftWindowStartForPrepend(
-            messageWindowStart,
-            added,
-            state.messages.length,
-            MESSAGE_WINDOW_CAPACITY,
-          );
-          if (!wasNearBottomBeforeLoad) {
-            messageWindowUserExpanded = true;
-          }
-        } else {
-          // 【挂载窗口预算 (Rules)】只把本轮新增的这批历史纳入挂载窗口，并保留少量上文做锚点缓冲；
-          // 但若已是最后一批且新增数装得下单个窗口容量，直接对齐到 0，避免把会话首问卡在窗口外。
-          messageWindowStart = computeOlderBatchWindowStart(
-            added,
-            returned < OLDER_BATCH_PAGE_SIZE,
-            MESSAGE_WINDOW_CAPACITY,
-          );
-          messageWindowUserExpanded = true;
-        }
-        messageWindowEnd = windowEndFor(messageWindowStart, state.messages.length, MESSAGE_WINDOW_CAPACITY, INITIAL_RENDER_WINDOW);
-        sessionMessagesCache.set(sessionId, state.messages);
-
-        // 缓存分桶纯洁性：只把当前会话自身的消息落盘，父会话历史只在内存合成；
-        // 超出本地缓存上限时只保留最新窗口，防止 evictToCap 按物理 orderKey 误删新消息。
-        if (targetId === sessionId) {
-          const ownMessages = state.messages.filter((m) => !m.sessionId || m.sessionId === sessionId);
-          persistMessagesToCache(
-            { profile: resolvedProfile, channel: 'session', channelId: sessionId },
-            ownMessages.slice(-MESSAGE_CACHE_LIMIT),
-            0,
-          );
-        }
-
-        if (returned < OLDER_BATCH_PAGE_SIZE) {
-          sessionServerOffset.set(`${cursorKey}:exhausted`, 1);
-        }
-        const remainingUnexhausted = lineageChain.some(
-          (id) => sessionServerOffset.get(`${sessionId}:${id}:exhausted`) !== 1,
-        );
-        state.hasOlderMessages = returned >= OLDER_BATCH_PAGE_SIZE || remainingUnexhausted;
-        batchAppended = true;
-        break;
-      }
-    }
-
-    if (batchAppended) {
-      if (preserveViewportWindow) {
-        // 挂载窗口的条数与 ID 可能完全不变（start 同幅后移），但虚拟高度与偏移已增大，必须强制更新窗口容器几何。
-        canvasStructureDirty = true;
-        if (!wasNearBottomBeforeLoad) {
-          suppressPinBottomOnce = true;
-        }
-      }
-      // 【状态收敛铁律】必须先同步关闭加载态再渲染：
-      // rAF 在窗口不可见/后台标签页会被节流甚至永不触发，曾导致 isLoadingOlder 永久为 true，
-      // 之后所有翻页请求在第一行守卫处被吞掉，界面永久卡在"正在加载更早历史"。
-      state.isLoadingOlder = false;
-      render();
-      syncPromptNavigatorMeta();
-      const reapplyAnchor = preserveViewportWindow && wasNearBottomBeforeLoad
-        ? (): void => applyStreamAnchor(anchor, true)
-        : (): void => applyStreamAnchor(anchor, false);
-      reapplyAnchor();
-      syncPromptNavigatorFromScroll();
-      requestAnimationFrame(() => {
-        reapplyAnchor();
-        syncPromptNavigatorFromScroll();
-        requestAnimationFrame(reapplyAnchor);
-      });
-      logScroll.debug('older batch prepended via element anchor', {
-        totalLoaded: state.messages.length,
-        ms: Math.round((performance.now() - startedAt) * 10) / 10,
-      });
-      return;
-    }
-  } catch (err) {
-    console.warn('[Flux] loadOlderMessages failed:', err);
-    // 【失败不等于到底 (Rules)】未受控异常同样不是「已到最早」，保留入口等下次重试。
-    fetchFailed = true;
-  }
-
-  // 仅当本轮未发生网络/协议失败且所有血缘节点均明确耗尽（非 MAX_PAGE_ATTEMPTS 追赶上限退出）时，
-  // 才可收敛关闭更早历史入口，绝不因 8 轮全命中本地缓存重叠而永久断尾。
-  const anyLineageRemaining = lineageChain.some(
-    (id) => sessionServerOffset.get(`${sessionId}:${id}:exhausted`) !== 1,
-  );
-  if (!shouldKeepOlderMessagesAfterLoop({ fetchFailed, anyLineageRemaining })) {
-    state.hasOlderMessages = false;
-  }
-  state.isLoadingOlder = false;
-  render();
-  syncPromptNavigatorMeta();
+  return messageLoadingService.loadOlderMessages(options);
 }
 
-/**
- * 将当前活动会话的最新真实消息与时间反哺给左侧栏对应的卡片实体（专职 Bot 或普通会话）
- *
- * 【设计意图 (Why)】
- * 无论是 0ms 内存秒开还是通过 REST 高速拉取完成，当前消息流中的最新一条消息
- * 均为该会话权威的历史真值。在此处触发反哺，可彻底保证无论何时切换会话、刷新页面
- * 或冷启动，左侧栏展示的副标题和时间与中间视口最新一条消息绝对 100% 强一致。
- *
- * 【防范的历史坑 (Pitfall)】
- * 1. 历史上 loadMessages 拉取到最新历史后从未回填给 Profile，导致 Bot 卡片一直停留在错误时间；
- * 2. 匹配会话时仅按裸 id 匹配，跨 Profile 同名 ID 时串扰改错其他 Profile 下的同名会话；
- * 3. 内存更新后未落盘，导致下次列表刷新被网关首句提问冲刷。
- *
- * 【约束与规则 (Rules)】
- * - 专职 Bot 与普通会话各归其位：仅当该 sessionId 属于 Bot 时更新 Bot，普通会话更新普通会话；
- * - 普通会话优先按 botName + sessionId 精准匹配；
- * - 更新同步写入 sessionPreviewCache 并持久化。
- */
 function syncActiveSessionPreviewToRail(sessionId: string, messages: MessageViewModel[], botName?: string): void {
-  if (!sessionId || messages.length === 0) return;
-
-  // 【口径 (Rules)】预览只取可上屏的行。display_kind='hidden' 与时间线事件都不是人类内容，
-  // 拿来当副标题会把 [System: ...] 或后台回执顶到左侧栏。
-  const visibleMessages = messages.filter((m) => (m.displayKind ?? 'user') === 'user');
-  if (visibleMessages.length === 0) return;
-
-  // 1. 若当前会话为专职 Bot 的 Forever Chat，委托 core 领域逻辑更新
-  const botRes = botActivityStore.withActivityMap((activityMap) => syncActiveSessionToBot({
-    sessionId,
-    messages: visibleMessages,
-    foreverChatCache: botForeverChatCache,
-    activeFocusBotName: state.activeFocus.type === 'bot' ? state.activeFocus.botName : undefined,
-    profiles: state.profiles,
-    activityMap,
-    formatTime: formatSessionTime,
-  }));
-  if (botRes) {
-    state.profiles = botRes.profiles;
-    botActivityStore.persist();
-  }
-
-  // 2. 若为普通会话，更新该普通会话的预览与时间戳（优先双重约束，防跨 Profile 串扰）
-  const sess = state.sessions.find((s) => s.id === sessionId && (!botName || s.botName === botName))
-    || state.sessions.find((s) => s.id === sessionId);
-  if (sess) {
-    const lastMsg = visibleMessages[visibleMessages.length - 1];
-    const lastText = (lastMsg.content || lastMsg.thought || '').slice(0, 100).replace(/\s+/g, ' ').trim();
-    const rawTs = lastMsg.rawTimestamp ?? Date.now();
-    if (lastText) {
-      sess.preview = lastText;
-      sess.timestamp = rawTs;
-      sess.time = formatSessionTime(rawTs);
-      sessionPreviewCache.set(sessionId, {
-        lastActive: rawTs,
-        text: lastText,
-        botName: sess.botName,
-      });
-      persistSessionPreviewCache();
-    }
-  }
+  messageLoadingService.syncActiveSessionPreviewToRail(sessionId, messages, botName);
 }
 
-/** 消息拉取代际计数器：彻底阻断切会话时迟滞慢响应串染当前视口与缓存的致命竞态 */
-let activeLoadMessagesGeneration = 0;
-
-/**
- * 会话历史加载入口：唯一负责 messagesPhase 进出的地方。
- *
- * 【设计意图 (Why)】宿主在"清空视口 → 历史落地"之间必须声明 loading，视图才用骨架占位；
- *   否则这段空窗会被渲染成"开始新的对话"，等于向用户断言会话是空的。
- * 【约束与规则 (Rules)】
- *   1. 命中内存缓存时直接视为 ready：没有空窗就不该闪一次骨架；
- *   2. finally 无条件收敛 ready（旧代际已被新会话接管时除外），任何分支都不得留下永久骨架。
- */
 async function loadMessages(sessionId: string, targetBotName?: string): Promise<void> {
   const cached = sessionId ? sessionMessagesCache.get(sessionId) : undefined;
   state.messagesPhase = cached && cached.length > 0 ? 'ready' : 'loading';
-  // loadMessagesInner 第一条语句就是 ++activeLoadMessagesGeneration，因此本次加载的代际可预知。
-  // 【防范的坑】用 activeSessionId 判定会漏掉"同一会话被第二次加载"：旧代际的 finally 会把
-  //   新代际的 loading 提前置 ready，骨架消失而视口仍空，闪一张"开始新的对话"。
   const expectedGeneration = activeLoadMessagesGeneration + 1;
   try {
-    await loadMessagesInner(sessionId, targetBotName);
+    await messageLoadingService.loadMessagesInner(sessionId, targetBotName);
   } finally {
     if (!sessionId || expectedGeneration === activeLoadMessagesGeneration) {
       state.messagesPhase = 'ready';
@@ -3669,310 +3340,7 @@ async function loadMessages(sessionId: string, targetBotName?: string): Promise<
 }
 
 async function loadMessagesInner(sessionId: string, targetBotName?: string): Promise<void> {
-  // 离线也允许打开会话：历史由持久化缓存提供，没有网关不该直接清空
-  if (!sessionId) {
-    state.messages = [];
-    state.hasOlderMessages = false;
-    render();
-    return;
-  }
-
-  const currentGen = ++activeLoadMessagesGeneration;
-  const loadStartedAt = performance.now();
-  state.activeSessionId = sessionId;
-
-  // 精准解析当前会话归属的 Profile（解决专职 Agent 会话请求缺 profile 报 404 根因）
-  const resolvedBotName = targetBotName
-    || state.sessions.find((s) => s.id === sessionId)?.botName
-    || (state.activeFocus.type === 'bot' ? state.activeFocus.botName : state.profileName)
-    || 'default';
-
-  // 1. Instant Cache Hit (0ms)
-  const cached = sessionMessagesCache.get(sessionId);
-  if (cached && cached.length > 0) {
-    state.messages = [...cached];
-    syncActiveSessionPreviewToRail(sessionId, state.messages, resolvedBotName);
-    state.hasOlderMessages = computeHasOlderMessages(
-      state.messages,
-      sessionServerOffset.get(sessionId),
-      INITIAL_WINDOW_PAGE_SIZE,
-      hasRemainingParentLineage(sessionId)
-    );
-    pendingScrollToBottom = true;
-    render();
-    scrollStreamToBottom('cache hit');
-    logSession.debug('session rendered from cache', {
-      sessionId,
-      mounted: state.messages.length,
-      ms: Math.round((performance.now() - loadStartedAt) * 10) / 10,
-    });
-  } else {
-    // Session has no cache: clear messages immediately so old session's messages don't persist
-    state.messages = [];
-    state.hasOlderMessages = false;
-    render();
-  }
-
-  // 2. If this session is currently actively streaming, DO NOT overwrite with stale REST history!
-  if (activeStreamingStoredSessionId === sessionId) {
-    logSession.info('session is actively streaming, preserving live state', { sessionId });
-    return;
-  }
-
-  // 2.5 持久化缓存命中（内存未命中时）：先把历史读出来，再拉最新
-  const cacheRef: CacheChannelRef = { profile: resolvedBotName, channel: 'session', channelId: sessionId };
-  let cacheFenceMax = 0;
-  if (!cached || cached.length === 0) {
-    try {
-      const opened = await cacheService.openChannel(cacheRef, MESSAGE_CACHE_LIMIT);
-      cacheFenceMax = opened.fenceMax;
-      const stillCurrent = currentGen === activeLoadMessagesGeneration && state.activeSessionId === sessionId;
-      if (opened.rows.length > 0 && stillCurrent && state.messages.length === 0) {
-        syncUntrustedCacheOrderFlag(sessionId, opened.rows);
-        state.messages = sortByDisplayAsc(opened.rows).map(toMessageViewModel);
-        sessionMessagesCache.set(sessionId, state.messages);
-        // 【游标口径 (Rules)】与首屏 REST 同源：都用本地可归属覆盖行数，避免两条路径分叉出两套下界。
-        sessionServerOffset.set(sessionId, Math.max(
-          sessionServerOffset.get(sessionId) || 0,
-          countLocalCoveredRows(state.messages, sessionId),
-        ));
-        state.hasOlderMessages = computeHasOlderMessages(
-          state.messages,
-          opened.rows.length,
-          INITIAL_WINDOW_PAGE_SIZE,
-          hasRemainingParentLineage(sessionId)
-        );
-        pendingScrollToBottom = true;
-        render();
-        scrollStreamToBottom('persistent cache hit');
-        logSession.info('session rendered from persistent cache', {
-          sessionId,
-          mounted: state.messages.length,
-          ms: Math.round((performance.now() - loadStartedAt) * 10) / 10,
-        });
-      }
-    // gate-degrade: 持久化缓存读取失败时直接走 REST，属可选加速失效
-    } catch {}
-  }
-
-  // 3. 无网关时到此为止：有缓存就已上屏，没有则保持空态（离线可读历史）
-  if (!gatewayClient) {
-    render();
-    return;
-  }
-
-  // 4. High-speed REST pagination: 50 items latest-first (<50ms vs 6500ms WS dump)
-  let fastLoaded = false;
-  try {
-    const outcome = await gatewayClient.fetchSessionMessages(sessionId, {
-      limit: INITIAL_WINDOW_PAGE_SIZE,
-      order: 'latest',
-      profile: resolvedBotName,
-      // 首屏与后续翻页必须同口径：包含被压缩归档的原始消息，否则 offset 基数错位
-      includeCompacted: true,
-    });
-
-    // 竞态守卫：若在网络异步等待期间用户已切到其他会话，坚决终止，绝对禁止污染当前视口与缓存！
-    if (currentGen !== activeLoadMessagesGeneration || state.activeSessionId !== sessionId) {
-      logSession.debug('discarded stale REST history due to session switch', { sessionId, currentGen });
-      return;
-    }
-
-    if (outcome.status === 'success' && outcome.messages.length > 0) {
-      const parsed = parseRawMessages(outcome.messages);
-      const existing = sessionMessagesCache.get(sessionId);
-      // 【防范丢数据核心不变量 (Failure Is Not Empty) 与 P0-1 防复活】
-      // 合并决策收敛到纯函数 planSessionLoadMerge：截断成功后首次加载以服务端为准（消费 server-priority），
-      // 否则保留本地未落盘尾部。消费后清除标记。
-      const serverPriority = takeServerPriority(sessionHistoryTrust, sessionId);
-      const replaceUntrustedCache = untrustedOrderCacheSessions.delete(sessionId);
-      if (replaceUntrustedCache) {
-        await cacheService.dropChannel(cacheRef);
-        if (currentGen !== activeLoadMessagesGeneration || state.activeSessionId !== sessionId) return;
-        cacheFenceMax = 0;
-        sessionServerOffset.delete(sessionId);
-      }
-      const merged = planSessionLoadMerge(parsed, existing, serverPriority || replaceUntrustedCache);
-      sessionMessagesCache.set(sessionId, merged);
-      persistMessagesToCache(cacheRef, merged, cacheFenceMax);
-      syncActiveSessionPreviewToRail(sessionId, merged, resolvedBotName);
-      const serverKnownCount = outcome.pagination?.returned ?? outcome.messages.length;
-      sessionAuthoritativeOffset.set(
-        sessionId,
-        Math.max(sessionAuthoritativeOffset.get(sessionId) || 0, serverKnownCount)
-      );
-      // 【分页游标权威性 (Rules)】offset 保持单调递增，绝不能把本地已有持久化缓存的更大游标倒退覆盖成 100；
-      // 【游标下界 (Rules)】本地合并保留的历史可能比本次 REST 返回更长，游标必须一并抬到本地覆盖行数，
-      // 否则下一轮向早翻页会从落差点起步，跳过一整段从未加载的真实历史。
-      const localCoveredRows = countLocalCoveredRows(merged, sessionId);
-      const currentKnown = Math.max(sessionServerOffset.get(sessionId) || 0, serverKnownCount, localCoveredRows);
-      sessionServerOffset.set(sessionId, currentKnown);
-      state.messages = merged;
-      state.hasOlderMessages = merged.length > serverKnownCount
-        ? true
-        : computeHasOlderMessages(merged, serverKnownCount, INITIAL_WINDOW_PAGE_SIZE, hasRemainingParentLineage(sessionId));
-      state.dockNotice = '';
-      pendingScrollToBottom = true;
-      render();
-      scrollStreamToBottom('fast rest loaded');
-      fastLoaded = true;
-
-      logSession.info('session loaded via high-speed REST', {
-        sessionId,
-        returned: outcome.messages.length,
-        mounted: parsed.length,
-        ms: Math.round((performance.now() - loadStartedAt) * 10) / 10,
-      });
-    }
-  } catch (err) {
-    logSession.debug('fast REST load failed, falling back to session.resume', { err });
-  }
-
-  // 3. Background asynchronous session.resume for live session activation & handle resolution
-  const resumePromise = (async () => {
-    const rpcStartedAt = performance.now();
-    try {
-      let res: any;
-      try {
-        res = await gatewayClient.call<any>('session.resume', {
-          session_id: sessionId,
-          profile: resolvedBotName,
-        });
-      } catch (firstErr: any) {
-        const firstMsg = describeRpcError(firstErr);
-        if (firstMsg.includes('Extra inputs')) {
-          res = await gatewayClient.call<any>('session.resume', { session_id: sessionId });
-        } else {
-          throw firstErr;
-        }
-      }
-
-      // 竞态守卫：核验代际与活跃会话 ID
-      if (currentGen !== activeLoadMessagesGeneration || state.activeSessionId !== sessionId) {
-        return;
-      }
-
-      const handles = readSessionHandles(res, sessionId);
-      if (handles) {
-        defaultSessionHandleRegistry.register(handles);
-        state.activeLiveSessionId = handles.liveId;
-      } else {
-        state.activeLiveSessionId = sessionId;
-      }
-
-      // 权威状态对账自愈（P0 修复）：以网关权威返回 res.running 与 res.inflight 为准，彻底根治幽灵 running 锁死
-      if (res && typeof res === 'object') {
-        const isGwRunning = Boolean(res.running);
-        const hasInflight = Boolean(res.inflight && res.inflight.streaming);
-        const reconciled = reconcileAuthoritativeActivity({
-          runningIds: activeRunningSessionIds,
-          entityId: sessionId,
-          isGatewayRunning: isGwRunning,
-          hasInflightStreaming: hasInflight,
-          currentStreamingId: activeStreamingStoredSessionId,
-        });
-        if (reconciled) {
-          activityTransitionTracker.clear('session', sessionId);
-          logSession.info('reconciled orphan running state via authoritative gateway status', { sessionId });
-          render();
-        }
-      }
-
-      // 同步提取 session.resume 返回的 cwd / project_id / project_name 元数据，丰富当前会话对象
-      const rawInfo = (res && typeof res === 'object' && res.info && typeof res.info === 'object' ? res.info : res) as Record<string, unknown>;
-      const resumedCwd = typeof rawInfo.cwd === 'string' ? rawInfo.cwd : typeof rawInfo.path === 'string' ? rawInfo.path : undefined;
-      const resumedProjId = typeof rawInfo.project_id === 'string' ? rawInfo.project_id : typeof rawInfo.projectId === 'string' ? rawInfo.projectId : undefined;
-      const resumedProjName = typeof rawInfo.project_name === 'string' ? rawInfo.project_name : typeof rawInfo.projectName === 'string' ? rawInfo.projectName : undefined;
-      
-      const currentActive = state.sessions.find((s) => s.id === sessionId && (!resolvedBotName || s.botName === resolvedBotName))
-        || state.sessions.find((s) => s.id === sessionId);
-      if (currentActive) {
-        let changed = false;
-        if (resumedCwd && !currentActive.cwd) {
-          currentActive.cwd = resumedCwd;
-          changed = true;
-        }
-        if (resumedProjId && !currentActive.projectId) {
-          currentActive.projectId = resumedProjId;
-          changed = true;
-        }
-        if (resumedProjName && !currentActive.projectName) {
-          currentActive.projectName = resumedProjName;
-          changed = true;
-        }
-        if (changed) {
-          render();
-        }
-      }
-
-      // If REST load did not succeed, fallback to mounting messages from WS result
-      if (!fastLoaded) {
-        const list = Array.isArray(res?.messages) ? res.messages : Array.isArray(res?.history) ? res.history : [];
-        if (list.length > 0) {
-          const parsed = parseRawMessages(list);
-          const existing = sessionMessagesCache.get(sessionId);
-          const wsServerPriority = takeServerPriority(sessionHistoryTrust, sessionId);
-          const replaceUntrustedCache = untrustedOrderCacheSessions.delete(sessionId);
-          if (replaceUntrustedCache) {
-            await cacheService.dropChannel(cacheRef);
-            if (currentGen !== activeLoadMessagesGeneration || state.activeSessionId !== sessionId) return;
-            cacheFenceMax = 0;
-            sessionServerOffset.delete(sessionId);
-          }
-          const merged = planSessionLoadMerge(parsed, existing, wsServerPriority || replaceUntrustedCache);
-          sessionMessagesCache.set(sessionId, merged);
-          persistMessagesToCache(cacheRef, merged, cacheFenceMax);
-          syncActiveSessionPreviewToRail(sessionId, merged, resolvedBotName);
-          state.messages = merged;
-          sessionAuthoritativeOffset.set(
-            sessionId,
-            Math.max(sessionAuthoritativeOffset.get(sessionId) || 0, parsed.length)
-          );
-          sessionServerOffset.set(sessionId, Math.max(
-            sessionServerOffset.get(sessionId) || 0,
-            merged.length,
-            countLocalCoveredRows(merged, sessionId),
-          ));
-          state.hasOlderMessages = computeHasOlderMessages(
-            merged,
-            merged.length,
-            INITIAL_WINDOW_PAGE_SIZE,
-            hasRemainingParentLineage(sessionId)
-          );
-          pendingScrollToBottom = true;
-          render();
-          scrollStreamToBottom('ws fallback loaded');
-        } else {
-          // Failure Is Not Empty: 当网关返回空消息时，绝对禁止把本地内存中已有的聊天记录抹杀为空白！
-          // 但截断成功后的 server-priority 标记必须在此消费，否则悬挂到下次正常加载被误用。
-          const existing = sessionMessagesCache.get(sessionId);
-          takeServerPriority(sessionHistoryTrust, sessionId);
-          if (existing && existing.length > 0) {
-            state.messages = [...existing];
-            render();
-          }
-        }
-      }
-
-      logSession.debug('background session.resume activated', {
-        sessionId,
-        liveId: state.activeLiveSessionId,
-        ms: Math.round((performance.now() - rpcStartedAt) * 10) / 10,
-      });
-    } catch (e) {
-      if (!fastLoaded && currentGen === activeLoadMessagesGeneration && state.activeSessionId === sessionId) {
-        console.warn('[Hermes Gateway] Failed to load messages via RPC fallback:', e);
-        const errText = describeRpcError(e);
-        state.messages = [];
-        state.dockNotice = `载入会话历史失败: ${errText}`;
-        render();
-      }
-    }
-  })();
-
-  if (!fastLoaded) {
-    await resumePromise;
-  }
+  return messageLoadingService.loadMessagesInner(sessionId, targetBotName);
 }
 
 /**
@@ -4012,582 +3380,59 @@ async function ensureLiveSessionId(): Promise<string> {
 }
 
 async function createNewSession(options?: { profile?: string; projectId?: string; title?: string }): Promise<void> {
-  if (!gatewayClient) {
-    setTimedDockNotice('未连接网关，无法新建会话');
-    render();
-    return;
-  }
-
-  const targetProfile = options?.profile || state.profileName || 'default';
-  const targetTitle = options?.title || t('chat.defaultTaskTitle');
-  const targetProjectId = options?.projectId;
-
-  let targetCwd: string | undefined;
-  if (targetProjectId) {
-    const proj = state.projects.find((p) => p.id === targetProjectId);
-    if (proj?.path) targetCwd = proj.path;
-  }
-
-  // Preserve draft for current session before creating new
-  const currentInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
-  if (state.activeSessionId && currentInput) {
-    sessionDrafts.set(state.activeSessionId, currentInput.value);
-  }
-
-  try {
-    const createPayload: Record<string, unknown> = {
-      title: targetTitle,
-      profile: targetProfile,
-    };
-    if (targetProjectId) createPayload.project_id = targetProjectId;
-    if (targetCwd) createPayload.cwd = targetCwd;
-
-    let res: Record<string, unknown> | null = null;
-    try {
-      res = await gatewayClient.call<Record<string, unknown>>('session.create', createPayload);
-    } catch (firstErr) {
-      if (isExtraInputsError(firstErr)) {
-        console.warn('[Flux] Gateway rejected extra params on session.create, retrying minimal');
-        res = await gatewayClient.call<Record<string, unknown>>('session.create', { title: targetTitle, profile: targetProfile });
-      } else {
-        throw firstErr;
-      }
-    }
-
-    const handles = readSessionHandles(res);
-    if (!handles) {
-      setTimedDockNotice('网关没有返回新会话的标识，无法开始对话');
-      render();
-      return;
-    }
-    defaultSessionHandleRegistry.register(handles);
-
-    // 切到新会话前解除旧会话挂起回滚（P0-2 防横幅泄漏与快照丢失），必须在改写 activeSessionId 之前
-    disarmRollbackOnLeave(state.activeSessionId);
-    state.profileName = targetProfile;
-    state.activeSessionId = handles.storedId;
-    state.activeLiveSessionId = handles.liveId;
-    state.activeFocus = { type: 'session', sessionId: handles.storedId };
-    state.messages = [];
-    sessionMessagesCache.set(handles.storedId, []);
-    state.dockNotice = '';
-    state.modelMenuOpen = false;
-
-    // Reset streaming indicators for the newly focused session
-    state.isStreaming = activeStreamingStoredSessionId === handles.storedId;
-
-    // session.list does not expose a brand-new session until its first turn is persisted
-    if (!state.pendingSessionIds.includes(handles.storedId)) {
-      state.pendingSessionIds = [handles.storedId, ...state.pendingSessionIds];
-    }
-    const matchingProfile = state.profiles.find((p) => p.name === targetProfile);
-    const newSessionEntry: NormalizedSession = {
-      ...toPendingSession(handles, targetTitle),
-      botName: targetProfile,
-      botDisplayName: matchingProfile?.displayName || targetProfile,
-      botAvatar: matchingProfile?.avatar || '',
-      projectId: targetProjectId,
-      cwd: targetCwd,
-    };
-    state.sessions = upsertSession(state.sessions, newSessionEntry);
-
-    pendingScrollToBottom = true;
-    render();
-
-    // Clear input for the new clean session
-    const newInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
-    if (newInput) {
-      newInput.value = '';
-      newInput.focus();
-    }
-
-    // Apply the model the user picked before the session existed.
-    if (state.selectedModel) {
-      await applyModelToLiveSession(state.selectedModel);
-    }
-  } catch (e) {
-    console.error('[Hermes Gateway] Create session failed:', e);
-    setTimedDockNotice(`新建会话失败: ${describeRpcError(e)}`);
-    render();
-  }
+  return sessionOperationService.createNewSession(options);
 }
 
 async function deleteSession(id: string): Promise<void> {
-  if (!gatewayClient || !id) return;
-  sessionListGeneration.invalidateForDelete();
-
-  const targetSession = state.sessions.find((s) => s.id === id);
-  const targetProfiles = new Set<string>();
-  if (targetSession?.botName) targetProfiles.add(targetSession.botName);
-  if (state.profileName) targetProfiles.add(state.profileName);
-  targetProfiles.add('default');
-  for (const p of state.profiles) {
-    if (p.name) targetProfiles.add(p.name);
-  }
-
-  try {
-    const lifecycle = new SessionLifecycleService({
-      rpc: gatewayClient,
-      platformBridge: desktopApi,
-      restFallback: async (path, options) => {
-        if (!desktopApi?.httpProxy) throw new Error('Desktop REST proxy is unavailable');
-        return await desktopApi.httpProxy({
-          baseUrl: getEffectiveUrl(state.gatewayUrl),
-          path,
-          method: options?.method,
-          ticket: currentTicket,
-          params: options?.params,
-          body: options?.body,
-        });
-      },
-      baseUrl: () => getEffectiveUrl(state.gatewayUrl),
-      ticket: () => currentTicket ?? '',
-    });
-    const outcome = await lifecycle.deleteSession(id, [...targetProfiles]);
-    for (const failedProfile of outcome.failedProfiles) {
-      console.warn('[Flux] Session deletion failed for profile:', failedProfile);
-    }
-    if (outcome.status === 'failed') throw new Error(`Delete failed for profiles: ${outcome.failedProfiles.join(', ')}`);
-
-    state.sessions = state.sessions.filter((s) => !outcome.pruneIds.includes(s.id));
-    state.pendingSessionIds = state.pendingSessionIds.filter((pid) => pid !== id);
-    sessionMessagesCache.delete(id);
-    forgetOlderCursorState(id);
-    sessionDrafts.delete(id);
-    unreadSessionIds.delete(id);
-    activeRunningSessionIds.delete(id);
-    activityTransitionTracker.clear('session', id);
-    defaultSessionHandleRegistry.unregister(id);
-
-    // 持久化缓存清理：清空该会话在 IndexedDB 中的消息通道并持久化最新索引
-    const deleteCacheRef: CacheChannelRef = {
-      profile: targetSession?.botName || state.profileName || 'default',
-      channel: 'session',
-      channelId: id,
-    };
-    void cacheService.dropChannel(deleteCacheRef).catch(() => undefined);
-    persistSessionsToCache(state.sessions);
-
-    // 如果被删除的会话正在流式运行，安全重置流式看门狗与标志，彻底杜绝输入框被全局 isStreaming 锁死
-    if (activeStreamingStoredSessionId === id) {
-      tokenCoalescer.clear();
-      disarmTurnWatchdog();
-      activeStreamingMessageId = null;
-      activeStreamingStoredSessionId = null;
-      activeStreamingLiveId = null;
-      activeStreamingBotName = null;
-      state.isStreaming = false;
-    }
-
-    if (state.activeSessionId === id) {
-      handleArmedOnDelete(id);
-      state.activeSessionId = state.sessions[0]?.id || '';
-      state.activeLiveSessionId = '';
-      if (state.activeSessionId) {
-        await selectSession(state.activeSessionId);
-      } else {
-        // 当删除最后一条会话导致会话池为空时，干净平滑回退至默认智能体工位，拉取并激活 Forever Chat 终身会话通道
-        const targetBot = state.profileName || 'default';
-        await openBotChat(targetBot);
-      }
-    } else {
-      render();
-    }
-
-    // 焦点重连保护：强力恢复输入舱光标与焦点，确保键盘可立即键入
-    restoreComposerFocus();
-  } catch (e: unknown) {
-    console.error('[Hermes Gateway] Delete session failed:', e);
-    const msg = describeRpcError(e);
-    if (rpcErrorCode(e) === RpcErrorCode.SessionMissing) {
-      state.sessions = state.sessions.filter((s) => s.id !== id);
-      state.pendingSessionIds = state.pendingSessionIds.filter((pid) => pid !== id);
-      sessionMessagesCache.delete(id);
-      forgetOlderCursorState(id);
-      sessionDrafts.delete(id);
-      unreadSessionIds.delete(id);
-      activeRunningSessionIds.delete(id);
-      activityTransitionTracker.clear('session', id);
-      if (activeStreamingStoredSessionId === id) {
-        tokenCoalescer.clear();
-        disarmTurnWatchdog();
-        activeStreamingMessageId = null;
-        activeStreamingStoredSessionId = null;
-        activeStreamingLiveId = null;
-        activeStreamingBotName = null;
-        state.isStreaming = false;
-      }
-      if (state.activeSessionId === id) {
-        handleArmedOnDelete(id);
-        state.activeSessionId = state.sessions[0]?.id || '';
-        state.activeLiveSessionId = '';
-        if (state.activeSessionId) {
-          await selectSession(state.activeSessionId);
-        } else {
-          const targetBot = state.profileName || 'default';
-          await openBotChat(targetBot);
-        }
-      } else {
-        render();
-      }
-      restoreComposerFocus();
-      return;
-    }
-    state.dockNotice = `删除会话失败: ${msg}`;
-    render();
-    restoreComposerFocus();
-  }
+  return sessionOperationService.deleteSession(id);
 }
 
 async function renameSession(id: string, currentTitle: string): Promise<void> {
-  const newTitle = prompt('重命名会话', currentTitle);
-  if (!newTitle || newTitle.trim() === '' || newTitle.trim() === currentTitle) return;
-  const trimmed = newTitle.trim();
-
-  try {
-    if (gatewayClient) {
-      await gatewayClient.call('session.title', { session_id: id, title: trimmed });
-    }
-    state.sessions = state.sessions.map((s) => (s.id === id ? { ...s, title: trimmed } : s));
-    render();
-  } catch (e) {
-    // Optimistically update locally even if server returns error
-    state.sessions = state.sessions.map((s) => (s.id === id ? { ...s, title: trimmed } : s));
-    render();
-  }
-}
-
-/** 独立的轻量全局浮层 Toast，绝不污染输入舱 */
-let toastTimer: ReturnType<typeof setTimeout> | null = null;
-function showToast(message: string, durationMs = 2200): void {
-  let toastEl = document.getElementById('flux-floating-toast');
-  if (!toastEl) {
-    toastEl = document.createElement('div');
-    toastEl.id = 'flux-floating-toast';
-    toastEl.style.cssText = `
-      position: fixed;
-      bottom: 96px;
-      left: 50%;
-      transform: translateX(-50%) translateY(10px);
-      background: var(--bg-card);
-      color: var(--text-main);
-      border: 1px solid var(--border-strong);
-      box-shadow: var(--shadow-window);
-      padding: 6px 14px;
-      border-radius: 9999px;
-      font-size: 12px;
-      font-weight: 500;
-      z-index: 3000;
-      pointer-events: none;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      backdrop-filter: blur(16px);
-      transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-      opacity: 0;
-    `;
-    document.body.appendChild(toastEl);
-  }
-  toastEl.innerHTML = `<span style="color: var(--accent); font-weight: bold;">✓</span> <span>${escapeHtml(message)}</span>`;
-  toastEl.style.opacity = '1';
-  toastEl.style.transform = 'translateX(-50%) translateY(0)';
-
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    if (toastEl) {
-      toastEl.style.opacity = '0';
-      toastEl.style.transform = 'translateX(-50%) translateY(10px)';
-    }
-  }, durationMs);
+  return sessionOperationService.renameSession(id, currentTitle);
 }
 
 async function copySessionId(id: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(id);
-    showToast(t('toast.copied'));
-  } catch {
-    showToast(id);
-  }
+  return sessionOperationService.copySessionId(id);
 }
 
 async function pinSession(id: string): Promise<void> {
-  const target = state.sessions.find((s) => s.id === id);
-  if (!target) return;
-  state.sessions = [target, ...state.sessions.filter((s) => s.id !== id)];
-  showToast(t('toast.pinned', { title: target.title }));
-  render();
+  return sessionOperationService.pinSession(id);
 }
 
 async function exportMarkdown(id: string): Promise<void> {
-  const activeTitle = state.sessions.find((s) => s.id === id)?.title || 'session';
-  const mdContent = state.messages
-    // 【规则】导出口径与视图一致：hidden 行不导出，时间线事件单独标注，
-    // 否则 [System: ...] 与后台回执会被导出成「### User」冒充用户发言。
-    .filter((m) => (m.displayKind ?? 'user') !== 'hidden')
-    .map((m) => {
-      const kind = m.displayKind ?? 'user';
-      const header = kind !== 'user'
-        ? `### Event (${kind})`
-        : m.role === 'user' ? '### User' : `### Assistant (${state.profileName || 'Agent'})`;
-      return `${header} - ${m.timestamp}\n\n${m.thought ? `> 思考链：\n> ${m.thought.replace(/\n/g, '\n> ')}\n\n` : ''}${m.content}\n`;
-    })
-    .join('\n---\n\n');
-
-  try {
-    await navigator.clipboard.writeText(mdContent);
-    showToast(t('toast.exported', { title: activeTitle }));
-  } catch {
-    showToast(t('toast.exportFailed'));
-  }
+  return sessionOperationService.exportMarkdown(id);
 }
 
 async function archiveSession(id: string): Promise<void> {
-  try {
-    if (gatewayClient) {
-      await gatewayClient.call('session.archive', { session_id: id });
-    }
-  } catch (archiveErr) {
-    // gate-degrade: 归档为乐观更新，RPC 失败时仍按用户意图切换本地状态，但必须留下证据
-    console.warn('[Flux] session.archive failed, applying optimistic local toggle:', archiveErr);
-  }
-  state.sessions = state.sessions.map((s) => (s.id === id ? { ...s, isArchived: !s.isArchived } : s));
-  state.dockNotice = `已更新会话归档状态`;
-  render();
+  return sessionOperationService.archiveSession(id);
 }
 
-/**
- * 删除会话时的挂起回滚处置（主路径与 4007 快速清理分支共用）。
- * 被删会话正是持有 armed 的会话：会话将消失，直接丢弃 armed，不往被删缓存回写；
- * 否则按离开语义处理（armed 属于别的会话时 planRollbackLeaveRestore 返回 null，仅丢弃）。
- */
 function handleArmedOnDelete(id: string): void {
-  if (state.rollbackArmed && state.rollbackArmed.sessionId === id) {
-    state.rollbackArmed = null;
-    return;
-  }
-  disarmRollbackOnLeave(id);
+  sessionOperationService.handleArmedOnDelete(id);
 }
 
-/**
- * 离开当前会话前解除挂起回滚：把被乐观裁撤的历史恢复到该会话缓存，防止横幅跨会话泄漏与快照污染。
- * outgoingSessionId 省略时用当前 activeSessionId。恢复决策收敛到纯函数 planRollbackLeaveRestore，
- * armed 不属于正在离开的会话时绝不把它的快照写进别的会话缓存。
- */
 function disarmRollbackOnLeave(outgoingSessionId?: string): void {
-  const armed = state.rollbackArmed;
-  if (!armed) return;
-  const plan = planRollbackLeaveRestore(armed, outgoingSessionId ?? state.activeSessionId);
-  state.rollbackArmed = null;
-  if (plan) {
-    sessionMessagesCache.set(plan.restoreSessionId, plan.restore);
-  }
+  sessionOperationService.disarmRollbackOnLeave(outgoingSessionId);
 }
 
 async function selectSession(id: string, options?: { preserveFocus?: boolean; botName?: string }): Promise<void> {
-  if (!id) return;
-  if (state.activeSessionId === id && state.activeLiveSessionId && state.messages.length > 0) return;
-
-  // Preserve draft & message snapshot for outgoing session
-  const currentInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
-  if (state.activeSessionId && state.activeSessionId !== id) {
-    if (currentInput) {
-      sessionDrafts.set(state.activeSessionId, currentInput.value);
-    }
-    if (state.rollbackArmed && state.rollbackArmed.sessionId === state.activeSessionId) {
-      disarmRollbackOnLeave();
-    } else if (state.messages.length > 0) {
-      sessionMessagesCache.set(state.activeSessionId, [...state.messages]);
-    }
-  }
-
-  state.activeSessionId = id;
-  state.activeLiveSessionId = ''; // must be re-resolved through session.resume
-  activeLoadMessagesGeneration += 1;
-  applyEnteredRead(unreadSessionIds, id);
-  activityTransitionTracker.clear('session', id);
-  state.modelMenuOpen = false;
-
-  // 严格更新互斥单焦点：仅当未要求保持焦点时，更新为普通会话焦点
-  if (!options?.preserveFocus) {
-    state.activeFocus = { type: 'session', sessionId: id };
-  }
-
-  // Sync isStreaming with the target session
-  state.isStreaming = activeStreamingStoredSessionId === id;
-
-  // Force reset messages snapshot to re-bind reactive DOM for streaming
-  lastMessagesSnapshot = null;
-
-  await loadMessages(id, options?.botName);
-
-  // 【竞态守卫 (Rules)】等待历史期间用户可能已经切走：迟到的会话绝对不得把草稿与焦点写进新会话的输入框。
-  if (state.activeSessionId !== id) return;
-
-  // Restore draft for incoming session without clobbering live typing
-  const restoredInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
-  if (restoredInput) {
-    const currentVal = restoredInput.value;
-    // 【非破坏性草稿恢复 (Non-Destructive Draft Restoration)】
-    // 若用户在网络加载期间已在输入框敲入文字，绝对禁止用空草稿冲刷抹除实时输入！
-    if (!currentVal.trim() && sessionDrafts.has(id)) {
-      restoredInput.value = sessionDrafts.get(id) || '';
-    }
-  }
-
-  // 【设计意图 (Why)】
-  // 会话切换完成（包含删除当前会话后自动移交至下一会话）后，必须立即恢复输入舱光标与焦点，
-  // 杜绝用户从列表切换进入会话后发现输入框无光标无法直接键入的痛点。
-  // 【防范的陷阱 (Pitfall)】
-  // 若未在此处主动聚焦，依赖外部可能丢失或时序未对齐的定时器，会导致输入框长期处于失焦脱敏态。
-  // 【约束与规则 (Rules)】
-  // 仅在当前会话未处于正在流式生成态时激活焦点。
-  if (!state.isStreaming) {
-    restoreComposerFocus();
-  }
+  return sessionOperationService.selectSession(id, options);
 }
 
-/**
- * Pushes the selected model onto the live session.
- *
- * Handles both plain model id and optional provider-specific configuration.
- */
 async function applyModelToLiveSession(model: string, provider?: string): Promise<void> {
-  if (!gatewayClient || !model) return;
-
-  const liveId = await ensureLiveSessionId();
-  if (!liveId) return;
-
-  try {
-    // 【网关契约约束】config.set 只接受 [profile, key, value, session_id, scope, confirm_expensive_model]
-    // 严禁附加顶层 provider 字段，否则会被客户端运行期守卫抛出 CONTRACT_VIOLATION，或被网关报 4000 Extra inputs
-    await gatewayClient.call('config.set', {
-      session_id: liveId,
-      key: 'model',
-      value: model,
-    });
-  } catch (e) {
-    state.dockNotice = `切换模型失败: ${describeRpcError(e)}`;
-    render();
-  }
+  return sessionOperationService.applyModelToLiveSession(model, provider);
 }
 
 async function switchModel(model: string, provider?: string): Promise<void> {
-  if (!model) return;
-
-  const previous = state.selectedModel;
-  state.selectedModel = model;
-  if (provider) state.currentProvider = provider;
-  state.modelMenuOpen = false;
-  state.dockNotice = '';
-
-  // Update recent models list (keep top 8, persist in localStorage)
-  state.recentModels = [model, ...state.recentModels.filter((m) => m !== model)].slice(0, 8);
-  localStorage.setItem('hermes_flux_recent_models', JSON.stringify(state.recentModels));
-  localStorage.setItem('hermes_aura_recent_models', JSON.stringify(state.recentModels));
-
-  render();
-
-  if (previous === model && !provider) return;
-
-  if (!gatewayClient || !state.activeSessionId) {
-    // No live conversation yet: the choice is applied right after session.create.
-    return;
-  }
-
-  // 【设计意图 (Why)】
-  // 群聊房间由网关 Group Chat Worker 调度各 Agent 自身绑定的模型，群聊本身不是 session 实体。
-  // 【防范的历史坑 (Pitfall)】
-  // 历史代码在群聊视口中调用 ensureLiveSessionId() -> session.resume，网关坚决抛出 4001 session not found。
-  // 【规则 (Rules)】
-  // 当处于群聊房间（activeFocus.type === 'group'）时，切换模型仅更新客户端选择器状态与近期偏好，禁止向不存在的 session 发送 config.set。
-  if (state.activeFocus.type === 'group') {
-    return;
-  }
-
-  const liveId = await ensureLiveSessionId();
-  if (!liveId) {
-    state.selectedModel = previous;
-    state.dockNotice = '无法切换到该模型：当前会话没有可用的实时通道，请重新进入会话';
-    render();
-    return;
-  }
-
-  try {
-    // 【网关契约约束】config.set 纯净传参，严禁注入未声明的 provider 字段
-    await gatewayClient.call('config.set', {
-      session_id: liveId,
-      key: 'model',
-      value: model,
-    });
-  } catch (e) {
-    state.selectedModel = previous;
-    state.dockNotice = `切换模型失败: ${describeRpcError(e)}`;
-    render();
-  }
+  return sessionOperationService.switchModel(model, provider);
 }
 
 async function switchReasoning(effort: AppState['reasoningLevel']): Promise<void> {
-  state.reasoningLevel = effort;
-  render();
-
-  if (!gatewayClient || !state.activeSessionId) return;
-  if (state.activeFocus.type === 'group') return;
-
-  const liveId = await ensureLiveSessionId();
-  if (!liveId) {
-    state.dockNotice = '无法设置思考深度：当前会话没有可用的实时通道';
-    render();
-    return;
-  }
-
-  // Map internal UI level to gateway values
-  const gatewayEffortMap: Record<string, string> = {
-    default: 'default',
-    none: 'off',
-    off: 'off',
-    low: 'low',
-    medium: 'high',
-    high: 'high',
-    max: 'max',
-  };
-
-  try {
-    await gatewayClient.call('config.set', {
-      session_id: liveId,
-      key: 'reasoning',
-      value: gatewayEffortMap[effort] || 'default',
-    });
-    state.dockNotice = '';
-  } catch (e) {
-    state.dockNotice = `设置思考深度失败: ${describeRpcError(e)}`;
-  }
-  render();
+  return sessionOperationService.switchReasoning(effort);
 }
 
 async function switchApproval(mode: 'manual' | 'smart' | 'off'): Promise<void> {
-  state.approvalMode = mode;
-  render();
-
-  if (!gatewayClient || !state.activeSessionId) return;
-
-  const liveId = await ensureLiveSessionId();
-  if (!liveId) {
-    state.dockNotice = '无法设置审批策略：当前会话没有可用的实时通道';
-    render();
-    return;
-  }
-
-  try {
-    await gatewayClient.call('config.set', {
-      session_id: liveId,
-      key: 'approval_mode',
-      value: mode,
-    });
-    state.dockNotice = '';
-  } catch (e) {
-    state.dockNotice = `设置审批策略失败: ${describeRpcError(e)}`;
-  }
-  render();
+  return sessionOperationService.switchApproval(mode);
 }
 
 
