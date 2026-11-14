@@ -13,7 +13,7 @@
 | `session.delete` | `session_id` `profile` | `deleted` | `packages/core/src/session/SessionLifecycleService.ts:52` | ✅ 0.22.5 |
 | `session.interrupt` | `session_id` `profile` `expected_hosted_task_id` `execution_generation` | `status` `interrupted` `turn_isolation` | `packages/core/src/session/interactiveService.ts:196`<br>`packages/core/src/session/SessionLifecycleService.ts:45`<br>`packages/desktop/src/renderer/services/turnExecutionService.ts:475` | ✅ 0.22.5 |
 | `session.list` | `profile` `title` `limit` `include_hidden` `scope` `workspace` `picker` | `sessions` | `packages/core/src/profile/profileService.ts:335`<br>`packages/core/src/rpc/client.ts:729` | ✅ 0.22.5 |
-| `session.resume` | `session_id` `profile` `cols` `source` `lazy` `defer_history` `omit_messages` `eager_build` `close_on_disconnect` `inline_images` `title` `latest` `workspace` `editor` `api_key` `display_projection` | `session_id` `message_count` `messages` `info` `stored_session_id` `resumed` `session_key` `messages_omitted` `hydrating` `running` `turn_started_at` `started_at` `status` `inflight` `queued` `pending_approval` `open_requests` `pending_connection` `todo_state` `auto_continue` | `packages/desktop/src/renderer/index.ts:3195`<br>`packages/desktop/src/renderer/index.ts:3197`<br>`packages/desktop/src/renderer/services/messageLoadingService.ts:410`<br>`packages/desktop/src/renderer/services/messageLoadingService.ts:417` | ✅ 0.22.5 |
+| `session.resume` | `session_id` `profile` `cols` `source` `lazy` `defer_history` `omit_messages` `eager_build` `close_on_disconnect` `inline_images` `title` `latest` `workspace` `editor` `api_key` `display_projection` | `session_id` `message_count` `messages` `info` `stored_session_id` `resumed` `session_key` `messages_omitted` `hydrating` `running` `turn_started_at` `started_at` `status` `inflight` `queued` `pending_approval` `open_requests` `pending_connection` `todo_state` `auto_continue` | `packages/desktop/src/renderer/index.ts:2755`<br>`packages/desktop/src/renderer/index.ts:2757`<br>`packages/desktop/src/renderer/services/messageLoadingService.ts:410`<br>`packages/desktop/src/renderer/services/messageLoadingService.ts:417` | ✅ 0.22.5 |
 | `session.set_hidden` | `session_id` `hidden` `profile` | `hidden` `session_key` | `packages/core/src/profile/profileService.ts:374`<br>`packages/core/src/session/SessionLifecycleService.ts:57` | ✅ 0.22.5 |
 | `session.title` | `session_id` `profile` `title` | `title` `session_key` `pending` | `packages/desktop/src/renderer/services/sessionOperationService.ts:389` | ✅ 0.22.5 |
 
@@ -99,8 +99,8 @@
 - 结果类型：`SessionResumeResult`
 - 真实探针：已通过（网关 0.22.5，录制于 2026-11-01T01:59:35.303Z）
 - 调用点：
-  - `packages/desktop/src/renderer/index.ts:3195`
-  - `packages/desktop/src/renderer/index.ts:3197`
+  - `packages/desktop/src/renderer/index.ts:2755`
+  - `packages/desktop/src/renderer/index.ts:2757`
   - `packages/desktop/src/renderer/services/messageLoadingService.ts:410`
   - `packages/desktop/src/renderer/services/messageLoadingService.ts:417`
 

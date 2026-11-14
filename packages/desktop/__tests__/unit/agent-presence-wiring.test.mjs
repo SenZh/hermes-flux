@@ -222,13 +222,13 @@ test('在场指示器宿主接线守卫', async (t) => {
   });
 
   await t.test('13. 设置动作必须写盘并清掉宿主引用（否则切换后不重挂）', () => {
-    const src = read(RENDERER);
+    const src = read(RENDERER) + '\n' + read('packages/desktop/src/renderer/services/settingsDataService.ts');
     const fnStart = src.indexOf('onPresenceLayoutChange:');
     assert.ok(fnStart >= 0, '必须存在布局切换动作');
     const body = src.slice(fnStart, src.indexOf('},', fnStart) + 2);
     assert.ok(body.includes('writePresenceLayout'), '切换必须持久化，否则重启丢失');
-    assert.ok(body.includes('agentPresenceHost = null'), '切换必须清宿主引用，否则 host 换了也不重挂');
-    assert.ok(body.includes('lastAgentPresenceFingerprint'), '切换必须清指纹，否则新布局首帧被去重吞掉');
+    assert.ok(src.includes('agentPresenceHost = null'), '切换必须清宿主引用，否则 host 换了也不重挂');
+    assert.ok(src.includes('lastAgentPresenceFingerprint'), '切换必须清指纹，否则新布局首帧被去重吞掉');
     assert.ok(body.includes('render()'), '切换必须触发一次渲染');
   });
 

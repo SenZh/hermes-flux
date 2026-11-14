@@ -153,6 +153,10 @@ import {
   createGatewayEventDispatcher,
   type GatewayEventDispatcher,
 } from './gateway/gatewayEventDispatcher.js';
+import { createProjectOperationService, type ProjectOperationService } from './services/projectOperationService.js';
+import { createGroupOperationService, type GroupOperationService } from './services/groupOperationService.js';
+import { createProfileManagementService, type ProfileManagementService } from './services/profileManagementService.js';
+import { createSettingsDataService, type SettingsDataService } from './services/settingsDataService.js';
 
 import {
   HermesGatewayClient,
@@ -1878,394 +1882,106 @@ async function fetchSessions(): Promise<void> {
   render();
 }
 
-interface ProjectRawRecord {
-  id?: string;
-  projectId?: string;
-  name?: string;
-  slug?: string;
-  primary_path?: string;
-  primaryPath?: string;
-  path?: string;
-}
-
-interface ProjectsListResponse {
-  projects?: ProjectRawRecord[];
-  data?: ProjectRawRecord[];
-}
-
-/**
- * 智能体副标题与时间联动（严格实体领域隔离与单一事实来源）
- *
- * 【设计意图 (Why)】
- * 专职 Bot 的主工位（Forever Chat）与普通旁聊会话（Session）是相互正交的两个独立实体领域。
- * 抽屉顶部的专职 Bot 卡片（rail-primary-agent-card）展现的时间和副标题，仅且必须代表
- * 该 Bot 本身主工位（Forever Chat）的真实对话状态。
- *
- * 【防范的历史坑 (Pitfall)】
- * 历史上曾经在第 3 步扫描普通会话池（state.sessions）拿取最新普通会话覆盖 Bot 卡片，
- * 导致用户在专职主工位聊天时，左上角卡片显示着另一个旁聊会话（如“奥特曼反差猫短剧方案 昨天 23:54”）
- * 的时间和文案，造成严重的时间、副标题与内容不一致与闪烁回退。
- *
- * 【约束与规则 (Rules)】
- * 严禁使用普通会话列表覆盖 Bot 属性；Bot 时间必须经过 formatSessionTime 统一格式化。
- */
-function syncProfileLastMessages(): void {
-  botActivityStore.withActivityMap((activityMap) => {
-    state.profiles = syncBotProfiles({
-      profiles: state.profiles,
-      activityMap,
-      foreverChatCache: botForeverChatCache,
-      sessionMessagesCache,
-      formatTime: formatSessionTime,
-    });
-  });
-}
-
-const projectService = new ProjectService();
-
-/** 真实拉取网关工程项目列表 (使用官方 ProjectService 契约通道) 并自动关联所属会话 */
-async function fetchProjects(): Promise<void> {
-  const client = gatewayClient;
-  if (!client) return;
-  try {
-    let summaries: ProjectSummary[] = await projectService.listProjects(client, true).catch(() => []);
-
-    // 容错兜底：若 Service 解析为空，尝试无参 raw 契约解析
-    if (summaries.length === 0) {
-      const rawRes = await client.call<ProjectsListResponse>('projects.list', {}).catch(() => null);
-      const rawList = Array.isArray(rawRes?.projects)
-        ? rawRes.projects
-        : Array.isArray(rawRes?.data)
-        ? rawRes.data
-        : [];
-      if (rawList.length > 0) {
-        summaries = rawList.map((p) => ({
-          projectId: String(p.id || p.projectId || ''),
-          name: String(p.name || p.id || 'Project'),
-          slug: String(p.slug || p.name || p.id || 'project'),
-          primaryPath: String(p.primary_path || p.primaryPath || p.path || ''),
-          additionalFolders: [],
-          isActive: false,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        }));
-      }
-    }
-
-    state.projects = summaries.map((s) => ({
-      id: s.projectId,
-      name: s.name,
-      path: s.primaryPath,
-    }));
-
-    render();
-  } catch (e) {
-    // Failure Is Not Empty: 网络或网关故障时绝不可将 state.projects 抹杀为空数组伪装成没有项目
-    console.warn('[Flux] fetchProjects failed:', e);
-    // 保留上一次已拉取到的项目列表或提示错误，严禁静默覆盖为权威空
-    render();
-  }
-}
-
-/** 网关托管房间 ID 集合：支持 groups.send / groups.log */
-const hostedRoomIds = new Set<string>();
-
-/** 真实拉取网关多 Agent 群聊房间列表 (以官方 groups.* 服务端托管为主) */
-async function fetchGroupRooms(): Promise<void> {
-  const client = gatewayClient;
-  if (!client) return;
-  try {
-    if (state.profiles.length === 0) {
-      try {
-        state.profiles = await client.listProfiles();
-      } catch (e) {
-        console.warn('[Flux] listProfiles failed before fetchGroupRooms:', e);
-      }
-    }
-
-    const mergedRoomsMap = new Map<string, LeftRailGroupRoom>();
-    let groupsAuthoritative = false;
-
-    // 1. 网关正统托管房间（支持 groups.send / groups.log / 真实多智能体协同调度）
-    hostedRoomIds.clear();
-    try {
-      const rpcRooms = await groupRoomStore.listRooms(client);
-      groupsAuthoritative = true;
-      for (const r of rpcRooms) {
-        hostedRoomIds.add(r.roomId);
-        const existing = state.groupRooms.find((old) => old.roomId === r.roomId);
-        if (existing && r.updatedAt && existing.updatedAt && r.updatedAt > existing.updatedAt) {
-          if (state.activeFocus.type !== 'group' || state.activeFocus.roomId !== r.roomId) {
-            if (!activeRunningGroupRoomIds.has(r.roomId)) {
-              unreadGroupRoomIds.add(r.roomId);
-            }
-          }
-        }
-        const normUpdatedAt = typeof r.updatedAt === 'number' ? (r.updatedAt > 1e11 ? r.updatedAt : r.updatedAt * 1000) : Date.now();
-        const normCreatedAt = typeof r.createdAt === 'number' ? (r.createdAt > 1e11 ? r.createdAt : r.createdAt * 1000) : Date.now();
-        mergedRoomsMap.set(r.roomId, {
-          roomId: r.roomId,
-          name: r.name,
-          members: r.members,
-          createdAt: normCreatedAt,
-          updatedAt: normUpdatedAt,
-        });
-      }
-    } catch (e) {
-      console.warn('[Flux] groups.list failed:', e);
-    }
-
-    // 权威门：只有 groups.list 完整成功才允许覆盖列表与写缓存；
-    // 失败时保留既有群聊，避免一次弱网抖动把整列群聊清空（失败 ≠ 空）。
-    if (groupsAuthoritative) {
-      state.groupRooms = Array.from(mergedRoomsMap.values());
-      persistGroupsToCache(state.groupRooms);
-    }
-    render();
-  } catch (e) {
-    console.warn('[Flux] fetchGroupRooms failed:', e);
-    // 保留既有列表，不清空
-    render();
-  }
-}
-
-/**
- * 群聊当前说话者的唯一写入口。
- *
- * 【设计意图 (Why)】
- *   在场指示器在群聊里必须回答「谁在干活」。`groups.log` 的每条事件都带真实的
- *   `senderProfile`（来自官方 `actor.display_name || actor.profile`），
- *   因此「末条 assistant 事件的发送者」就是最权威的说话者事实。
- *
- * 【防范的历史坑 (Pitfall)】
- *   1. 曾考虑用 `groups.send` 的响应当说话者——那是**人类用户自己**，不是 Agent 成员，
- *      会导致指示器高亮一个没在干活的头像。宁可 null 降级，也绝不伪造。
- *   2. `senderProfile` 可能是 **displayName**，而房间 `members` 存的是 **profile name**。
- *      直接写入会让组件侧的「说话者必须在成员列表里」守卫判定为未知而全量降级——
- *      接线看似通了、实际永远不高亮。因此这里必须做一次 displayName → member 归一化。
- *
- * 【约束与规则 (Rules)】
- *   1. 只在群聊域写；非群聊域一律置 null，避免跨域残留；
- *   2. 末条是用户消息（人类刚发话、成员尚未应答）时置 null——此刻确实没有 Agent 在说话；
- *   3. 归一化失败（sender 不在成员列表）时置 null，绝不沿用上一位。
- */
-function syncActiveGroupSpeakerFromMessages(): void {
-  if (state.activeFocus.type !== 'group') {
-    state.activeGroupSpeaker = null;
-    return;
-  }
-  const roomId = state.activeFocus.roomId;
-  const members = state.groupRooms.find((g) => g.roomId === roomId)?.members ?? [];
-  // 归一化与倒序查找全部在 core 的纯函数里（可单测，且符合「壳层不写域逻辑」的分层铁律）
-  state.activeGroupSpeaker = resolveGroupSpeaker(state.messages, members, state.profiles);
-}
-
-/** 进入指定多 Agent 研讨会议室并载入研讨记录 */
-async function openGroupRoom(roomId: string): Promise<void> {
-  if (!roomId || !gatewayClient) return;
-  // 切换焦点域前解除挂起回滚，防止普通会话的乐观裁撤横幅泄漏进群聊视图
-  disarmRollbackOnLeave();
-  state.activeFocus = { type: 'group', roomId };
-  applyEnteredRead(unreadGroupRoomIds, roomId);
-  activityTransitionTracker.clear('group', roomId);
-  const targetRoom = state.groupRooms.find((r) => r.roomId === roomId);
-
-  state.activeSessionId = roomId;
-  state.activeLiveSessionId = roomId;
-  state.isLoadingOlder = false;
-  state.hasOlderMessages = false;
-  // 研讨记录尚未到达：与普通会话同口径声明 loading，避免把"切换房间的空窗"读成空会话。
-  state.messagesPhase = 'loading';
-  const generation = ++activeLoadMessagesGeneration;
-  const guard = { sessionId: roomId, generation };
-
-  // 切换房间时重置线程上下文，避免跨房间误用同一 thread_id
-  turnExecutionService.resetActiveGroupThread();
-  // 【在场指示器】换房间立刻清空说话者：上一个房间的成员绝不能在新房间被高亮
-  state.activeGroupSpeaker = null;
-
-  // 从 groups.log 拉取官方事件流
-  let fetchedLogs: GroupMessageEntry[] = [];
-  try {
-    const guarded = await runGuarded(
-      guard,
-      () => ({ sessionId: state.activeSessionId, generation: activeLoadMessagesGeneration }),
-      () => undefined,
-      () => groupRoomStore.fetchLogs(roomId, gatewayClient!),
-      logSession,
-    );
-    if (guarded.status === 'discarded') return;
-    const logs = guarded.value;
-    fetchedLogs = logs ? [...logs] : [];
-    if (logs && logs.length > 0) {
-      state.messages = logs.map((entry, idx) => {
-        const senderName = entry.senderProfile || 'Agent';
-        return {
-          id: entry.messageId || `g_msg_${idx}`,
-          role: entry.actorKind === 'user' || entry.senderProfile === 'user' ? 'user' : 'assistant',
-          content: entry.text,
-          sender: senderName,
-          senderAvatar: resolveAgentAvatar(senderName),
-          timestamp: formatTimestamp(entry.timestamp || Date.now()),
-        };
-      });
-    } else {
-      const roomName = targetRoom?.name || t('group.defaultRoomName');
-      const membersText = targetRoom?.members?.join('、') || '';
-      state.messages = [
-        {
-          id: 'group_seed_notice',
-          role: 'system',
-          content: t('group.welcomeInit', { name: roomName, members: membersText }),
-          timestamp: formatTimestamp(Date.now()),
-        },
-      ];
-    }
-  } catch {
-    if (state.activeSessionId !== guard.sessionId || activeLoadMessagesGeneration !== guard.generation) return;
-    const roomName = targetRoom?.name || t('group.defaultRoomName');
-    const membersText = targetRoom?.members?.join('、') || '';
-    state.messages = [
-      {
-        id: 'group_seed_notice',
-        role: 'system',
-        content: t('group.welcomeReady', { name: roomName, members: membersText }),
-        timestamp: formatTimestamp(Date.now()),
-      },
-    ];
-  }
-
-  pendingScrollToBottom = true;
-  // 无论拿到日志还是回落种子通知，研讨记录都已落地：离开骨架相位。
-  state.messagesPhase = 'ready';
-  // 【在场指示器】按真实日志末条事件推导说话者（详见 syncActiveGroupSpeakerFromMessages 注释）
-  syncActiveGroupSpeakerFromMessages();
-  render();
-
-  if (hostedRoomIds.has(roomId) && activeRunningGroupRoomIds.has(roomId) && !groupPollerManager.isPolling(roomId)) {
-    groupPollerManager.startAwaitReply(roomId, captureGroupLogBaseline(fetchedLogs));
-  }
-}
+/** 跨会话内存消息缓存 */
+const sessionMessagesCache = new Map<string, MessageViewModel[]>();
+let activeLoadMessagesGeneration = 0;
 
 /** Bot 终身主工位内存秒开缓存 (消除串行 RPC 延迟，实现 0ms 瞬间切换) */
 const botForeverChatCache = new Map<string, string>();
 
-/** 点击指定 Bot 项直接进入该专职 Bot 的主工位对话界面 (Forever Chat 专属接口) */
+const projectOperationService = createProjectOperationService({
+  getState: () => state,
+  getGatewayClient: () => gatewayClient,
+  render: () => render(),
+  botActivityStore,
+  botForeverChatCache,
+  sessionMessagesCache,
+  formatSessionTime,
+});
+
+function syncProfileLastMessages(): void {
+  projectOperationService.syncProfileLastMessages();
+}
+
+async function fetchProjects(): Promise<void> {
+  return projectOperationService.fetchProjects();
+}
+
+const groupOperationService = createGroupOperationService({
+  getState: () => state,
+  getGatewayClient: () => gatewayClient,
+  render: () => render(),
+  t: (key, params) => t(key, params),
+  disarmRollbackOnLeave: () => disarmRollbackOnLeave(),
+  unreadGroupRoomIds,
+  activeRunningGroupRoomIds,
+  activityTransitionTracker,
+  turnExecutionService: {
+    resetActiveGroupThread: () => turnExecutionService.resetActiveGroupThread(),
+    syncGroupRoomLogsToState: (roomId, logs) => turnExecutionService.syncGroupRoomLogsToState(roomId, logs),
+    refreshGroupRoomLog: (roomId) => turnExecutionService.refreshGroupRoomLog(roomId),
+    sendGroupMessage: (roomId, text) => turnExecutionService.sendGroupMessage(roomId, text),
+  },
+  groupPollerManager: {
+    isPolling: (roomId) => groupPollerManager.isPolling(roomId),
+    startAwaitReply: (roomId, baseline) => groupPollerManager.startAwaitReply(roomId, baseline),
+    stop: (roomId) => groupPollerManager.stop(roomId),
+    stopAll: () => groupPollerManager.stopAll(),
+  },
+  persistGroupsToCache: (rooms) => persistGroupsToCache(rooms),
+  resolveAgentAvatar: (name) => resolveAgentAvatar(name),
+  formatTimestamp: (ts) => formatTimestamp(ts),
+  nextLoadMessagesGeneration: () => ++activeLoadMessagesGeneration,
+  getCurrentLoadMessagesGeneration: () => activeLoadMessagesGeneration,
+  logSession,
+  setPendingScrollToBottom: (pending) => { pendingScrollToBottom = pending; },
+});
+
+const hostedRoomIds = groupOperationService.hostedRoomIds as Set<string>;
+
+async function fetchGroupRooms(): Promise<void> {
+  return groupOperationService.fetchGroupRooms();
+}
+
+function syncActiveGroupSpeakerFromMessages(): void {
+  groupOperationService.syncActiveGroupSpeakerFromMessages();
+}
+
+async function openGroupRoom(roomId: string): Promise<void> {
+  return groupOperationService.openGroupRoom(roomId);
+}
+
+const profileManagementService = createProfileManagementService({
+  getState: () => state,
+  getGatewayClient: () => gatewayClient,
+  render: () => render(),
+  t: (key, params) => t(key, params),
+  describeRpcError: (error) => describeRpcError(error),
+  botActivityStore,
+  unreadBotNames,
+  activityTransitionTracker,
+  sessionMessagesCache,
+  syncProfileLastMessages: () => syncProfileLastMessages(),
+  applyColdStartFocus: async () => applyColdStartFocus(),
+  cancelColdStartFocus: () => cancelColdStartFocus(),
+  fetchSessions: async () => fetchSessions(),
+  fetchModelOptions: async (opts) => fetchModelOptions(opts),
+  selectSession: async (id, opts) => selectSession(id, opts),
+  openGroupRoom: async (roomId) => openGroupRoom(roomId),
+  restoreComposerFocus: () => restoreComposerFocus(),
+  disarmRollbackOnLeave: () => disarmRollbackOnLeave(),
+  persistAgentsToCache: (profiles) => persistAgentsToCache(profiles),
+  persistAvatarCache: () => persistAvatarCache(),
+  profileAvatarCache,
+  botForeverChatCache,
+  nextLoadMessagesGeneration: () => ++activeLoadMessagesGeneration,
+  getCurrentLoadMessagesGeneration: () => activeLoadMessagesGeneration,
+  logSession,
+  setPendingScrollToBottom: (pending) => { pendingScrollToBottom = pending; },
+});
+
 async function openBotChat(botProfile: string): Promise<void> {
-  const client = gatewayClient;
-  if (!botProfile || !client) return;
-  // 任何一次显式进入 Agent 都视为用户已表达意图，冷启动落点不得再抢焦点。
-  cancelColdStartFocus();
-
-  // 【失败回退 (Rules)】记录进入前的焦点与 Profile：冷路径失败时完整恢复，
-  // 绝不把用户困在空白工位，也不让左侧选中 Agent 与实际 Profile 上下文错配。
-  const outgoingFocus = state.activeFocus;
-  const outgoingSessionId = state.activeSessionId;
-  const outgoingProfileName = state.profileName;
-  const wasBotFocused = state.activeFocus.type === 'bot' && state.activeFocus.botName === botProfile;
-
-  state.profileName = botProfile;
-  // 切入 Bot 专职工位前解除普通会话挂起回滚，防跨域泄漏
-  disarmRollbackOnLeave();
-  state.activeFocus = { type: 'bot', botName: botProfile };
-  const generation = ++activeLoadMessagesGeneration;
-  const guard = { sessionId: `bot:${botProfile}`, generation };
-  localStorage.setItem('hermes_flux_profile', botProfile);
-  localStorage.setItem('hermes_aura_profile', botProfile);
-
-  // 清除属于该智能体的未读标记（仅针对该 Bot 本身，会话状态严格独立）
-  applyEnteredRead(unreadBotNames, botProfile);
-  activityTransitionTracker.clear('bot', botProfile);
-
-  // 1. 若内存缓存已持有该 Bot 的 Forever Chat ID，0ms 瞬间秒开切入！
-  const cachedSessionId = botForeverChatCache.get(botProfile);
-  if (cachedSessionId) {
-    // 【设计意图 (Why)】selectSession 的同步段会经 loadMessages 渲染一次（缓存命中 2688 / 未命中清屏 2699）；
-    // 只有它在 3329 行因“同一会话已挂载”早退时才需要补一次渲染。
-    // 【防范的历史坑 (Pitfall)】这里曾无条件再 render() 一次，导致 Agent 点击链路每次多付一整轮
-    // 左轨、标题栏与消息列表绘制，点击处理耗时约为普通会话的两倍。
-    const alreadyMounted = state.activeSessionId === cachedSessionId
-      && Boolean(state.activeLiveSessionId)
-      && state.messages.length > 0;
-    void selectSession(cachedSessionId, { preserveFocus: true });
-    void fetchModelOptions({ clearNotice: true });
-    if (alreadyMounted) {
-      // selectSession 早退不会渲染；未读点已在 applyEnteredRead 中清除，这里同步刷新左轨并保持输入舱焦点。
-      if (wasBotFocused) restoreComposerFocus();
-      render();
-    }
-    return;
-  }
-
-  // 2. 首次探查前先给出首帧反馈：把旧会话落内存缓存、清空视口，再显示目标 Bot 的空态。
-  // 【防范的历史坑 (Pitfall)】历史实现只 render() 不清空 messages，等待 session.list 的近 1 秒里
-  //   “新 Bot 标题 + 旧会话内容”并置，用户会误以为点错或没点上。
-  if (outgoingSessionId && state.messages.length > 0) {
-    sessionMessagesCache.set(outgoingSessionId, [...state.messages]);
-  }
-  state.messages = [];
-  state.hasOlderMessages = false;
-  state.isLoadingOlder = false;
-  state.activeSessionId = '';
-  state.activeLiveSessionId = '';
-  // 冷路径要等 session.list：这段空窗必须声明 loading，否则会先闪一张"开始新的对话"。
-  state.messagesPhase = 'loading';
-  pendingScrollToBottom = true;
-  render();
-
-  try {
-    // 2. 首次探查并建立缓存
-    const guarded = await runGuarded(
-      guard,
-      () => ({ sessionId: `bot:${state.activeFocus.type === 'bot' ? state.activeFocus.botName : ''}`, generation: activeLoadMessagesGeneration }),
-      () => undefined,
-      () => profileService.getOrCreateForeverChat(botProfile, client),
-      logSession,
-    );
-    if (guarded.status === 'discarded') return;
-    const foreverChat = guarded.value;
-    botForeverChatCache.set(botProfile, foreverChat.sessionId);
-
-    // 【竞态守卫 (Rules)】await 期间用户可能已切到别的 Bot/会话。只有仍瞄准本 Bot 时才提交焦点与渲染，
-    // 否则迟到的冷路径会把视口和焦点掰回旧目标，造成“焦点在 A、内容在 B”的连点错配（历史坑）。
-    if (state.activeFocus.type !== 'bot' || state.activeFocus.botName !== botProfile) return;
-    state.activeFocus = { type: 'bot', botName: botProfile };
-    await selectSession(foreverChat.sessionId, { preserveFocus: true });
-    if (state.activeFocus.type !== 'bot' || state.activeFocus.botName !== botProfile) return;
-    state.activeFocus = { type: 'bot', botName: botProfile };
-    render();
-  } catch (err) {
-    if (activeLoadMessagesGeneration !== guard.generation || state.activeFocus.type !== 'bot' || state.activeFocus.botName !== botProfile) return;
-    console.error('[Flux] Failed to resolve Forever Chat for bot:', botProfile, err);
-    state.dockNotice = t('dock.enterBotChatFailed', { name: botProfile, error: describeRpcError(err) });
-    // 失败不能停在空白工位：先恢复进入前的 Profile，再按原焦点回退；回退本身也走代际守卫。
-    state.profileName = outgoingProfileName;
-    localStorage.setItem('hermes_flux_profile', outgoingProfileName);
-    localStorage.setItem('hermes_aura_profile', outgoingProfileName);
-    if (outgoingFocus.type === 'session' && outgoingSessionId) {
-      void selectSession(outgoingSessionId);
-    } else if (outgoingFocus.type === 'group') {
-      void openGroupRoom(outgoingFocus.roomId);
-    } else if (outgoingFocus.type === 'bot') {
-      const outgoingForeverId = botForeverChatCache.get(outgoingFocus.botName);
-      if (outgoingForeverId) {
-        state.activeFocus = { type: 'bot', botName: outgoingFocus.botName };
-        void selectSession(outgoingForeverId, { preserveFocus: true });
-        render();
-      } else {
-        // 上一个 Bot 也没有缓存：保持空态但不要递归触发第二次冷路径，避免失败风暴。
-        // 【规则】失败必须离开 loading：否则界面把"进入主工位失败"伪装成"一直在加载"。
-        state.messagesPhase = 'ready';
-        render();
-      }
-    } else {
-      state.messagesPhase = 'ready';
-      render();
-    }
-    return;
-  }
-
-  void fetchModelOptions({ clearNotice: true });
+  return profileManagementService.openBotChat(botProfile);
 }
 
 /**
@@ -2356,188 +2072,35 @@ async function fetchModelOptions(options: { clearNotice?: boolean } = {}): Promi
   render();
 }
 
-/** 服务端改了 Bot 显示名后，把旧会话上的 botDisplayName 一并收敛，避免左轨归属匹配失配。 */
 function syncSessionBotDisplayNames(profiles: AgentProfile[]): void {
-  const byName = new Map(profiles.map((p) => [p.name.toLowerCase(), p]));
-  for (const s of state.sessions) {
-    if (!s.botName) continue;
-    const profile = byName.get(s.botName.toLowerCase());
-    if (profile && s.botDisplayName !== profile.displayName) {
-      s.botDisplayName = profile.displayName;
-    }
-  }
+  profileManagementService.syncSessionBotDisplayNames(profiles);
 }
 
 async function fetchProfiles(options: { refresh?: boolean } = {}): Promise<void> {
-  const client = gatewayClient;
-  if (!client) return;
-  const generation = ++profileFetchGeneration;
-  try {
-    const list = await client.listProfiles();
-    if (generation !== profileFetchGeneration) return;
-    // 1. 命中持久缓存，0ms 秒开回填头像资产
-    for (const p of list) {
-      if (!p.avatar) {
-        const cached = profileAvatarCache.get(p.name.toLowerCase()) || (p.displayName ? profileAvatarCache.get(p.displayName.toLowerCase()) : undefined);
-        if (cached) p.avatar = cached;
-      }
-    }
-    // 定时/聚焦刷新：关键展示字段完全一致时直接返回，不产生 render、资产拉取与预取。
-    if (options.refresh && !profilesDiffer(state.profiles, list)) return;
-    const profileTopologyChanged = options.refresh && (
-      state.profiles.length !== list.length
-      || list.some((p) => !state.profiles.some((old) => old.name === p.name))
-    );
-    state.profiles = list;
-    // 数据已到达（含空列表）：无论内容如何都必须离开骨架相位，否则永久假加载。
-    state.profilesPhase = 'ready';
-    persistAgentsToCache(list);
-    syncSessionBotDisplayNames(list);
-    syncProfileLastMessages();
-    render();
-    void applyColdStartFocus();
-
-    // 2. 已有头像只回填内存缓存；缺失的才向网关拉取 (profiles.get_asset)。
-    for (const p of list) {
-      if (!p.avatar) continue;
-      profileAvatarCache.set(p.name.toLowerCase(), p.avatar);
-      if (p.displayName) profileAvatarCache.set(p.displayName.toLowerCase(), p.avatar);
-    }
-    // 主工位预取必须与头像拉取并行启动：任意一个头像请求慢/挂起，都不能阻塞 Forever Chat 缓存，
-    // 否则首次点击 Agent 仍会掉回 session.list 冷路径（约 1 秒空窗）。
-    void warmBotForeverChats(list, client);
-    await Promise.allSettled(
-      list.filter((p) => !p.avatar).map(async (p) => {
-        try {
-          const assetBase64 = await profileService.getAsset(p.name, 'avatar', client);
-          if (assetBase64) {
-            const finalUrl = assetBase64.startsWith('data:')
-              ? assetBase64
-              : `data:image/png;base64,${assetBase64}`;
-            p.avatar = finalUrl;
-            profileAvatarCache.set(p.name.toLowerCase(), finalUrl);
-            if (p.displayName) profileAvatarCache.set(p.displayName.toLowerCase(), finalUrl);
-            persistAvatarCache();
-
-            // 同步将真实头像回填到会话列表中对应 Bot 的所有会话项，彻底消除占位图腾
-            for (const s of state.sessions) {
-              if (s.botName === p.name || (s.botDisplayName && s.botDisplayName === p.displayName)) {
-                s.botAvatar = finalUrl;
-              }
-            }
-            render();
-          }
-        } catch (e) {
-          // 显式记录失败原因：头像拉取异常不得伪装成"没有头像"
-          console.warn(`[Flux] profiles.get_asset failed for ${p.name}:`, e);
-        }
-      })
-    );
-
-    // 【防范的历史坑 (Pitfall)】历史实现把预取放在 `if (p.avatar) { …; return; }` 之后：
-    //   头像一旦从持久缓存回填，该 return 就会永久跳过主工位预取，导致第二次启动起首次点击
-    //   任一 Agent 必走 session.list 冷路径，出现约 1 秒空白。
-    // 服务端新增/删除了 Agent（profile 主键变化）时，会话归属需要重新对齐。
-    if (profileTopologyChanged) void fetchSessions();
-  } catch (e) {
-    console.warn('[Flux] fetchProfiles failed:', e);
-    // 失败同样结束骨架相位：错误由错误行与日志表达，绝不能让骨架把故障伪装成慢。
-    state.profilesPhase = 'ready';
-    void applyColdStartFocus();
-    render();
-  }
+  return profileManagementService.fetchProfiles(options);
 }
 
-/**
- * 后台预热每个 Bot 的终身主工位：建立 Forever Chat 缓存与卡片最近动态。
- * 【并发规则】最多 3 路并发，避免 Bot 数量增长时对网关造成瞬时惊群。
- * 【失败策略】单个 Bot 失败只跳过自身，不影响其余 Bot 与首屏（gate-degrade）。
- */
 async function warmBotForeverChats(
   list: AgentProfile[],
   client: NonNullable<typeof gatewayClient>,
 ): Promise<void> {
-  const queue = [...list];
-  const worker = async (): Promise<void> => {
-    for (;;) {
-      const p = queue.shift();
-      if (!p) return;
-      // 已建立过主工位缓存的 Bot 无需重复探查，避免定时刷新在网关侧制造无意义 RPC。
-      if (botForeverChatCache.has(p.name)) continue;
-      try {
-        const forever = await profileService.getOrCreateForeverChat(p.name, client);
-        if (!forever?.sessionId) continue;
-        botForeverChatCache.set(p.name, forever.sessionId);
-        const histRes = await client.fetchSessionMessages(forever.sessionId, { limit: 1, offset: 0, order: 'latest', profile: p.name });
-        if (histRes.status === 'success' && histRes.messages.length > 0) {
-          const last = histRes.messages[0];
-          const parts = Array.isArray(last.parts) ? (last.parts as Array<{ type?: string; text?: string }>) : [];
-          const textPart = parts.find((pt) => pt.type === 'text');
-          const previewText = textPart?.text || (typeof last.content === 'string' ? last.content : '');
-          const ts = last.created_at || last.timestamp;
-          const numTs = typeof ts === 'number' ? (ts > 1e11 ? ts : ts * 1000) : typeof ts === 'string' ? Date.parse(ts) || Date.now() : Date.now();
-          botActivityStore.updateLatestActivity(p.name, previewText, numTs);
-          render();
-        }
-      // gate-degrade: 单条主工位探测失败按跳过处理，不影响其余 Bot 资产渲染
-      } catch {
-        // 容错放行
-      }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(3, queue.length) }, () => worker()));
+  return profileManagementService.warmBotForeverChats(list, client);
 }
 
-/** 定时刷新 Bot Profile：服务端改名/改描述/换模型后，最迟一分钟内自动同步。 */
-const PROFILE_REFRESH_INTERVAL_MS = 60_000;
-const PROFILE_REFRESH_MIN_GAP_MS = 15_000;
-let profileAutoRefreshTimer: ReturnType<typeof setInterval> | null = null;
-let lastProfileRefreshAt = 0;
-let profileRefreshInFlight = false;
-/** Profile 拉取代际：先发后至的旧响应不得覆盖新快照。 */
-let profileFetchGeneration = 0;
-
 function stopProfileAutoRefresh(): void {
-  if (profileAutoRefreshTimer) {
-    clearInterval(profileAutoRefreshTimer);
-    profileAutoRefreshTimer = null;
-  }
+  profileManagementService.stopProfileAutoRefresh();
 }
 
 function startProfileAutoRefresh(): void {
-  stopProfileAutoRefresh();
-  profileAutoRefreshTimer = setInterval(() => { void refreshProfilesFromServer(); }, PROFILE_REFRESH_INTERVAL_MS);
+  profileManagementService.startProfileAutoRefresh();
 }
 
-/**
- * 从网关重新读取 Agent Profile。
- * 【规则】只在已连接且页面可见时执行；15 秒冷却吸收窗口焦点抖动；
- *   失败静默（连接态由 FSM 负责），内容不变时 fetchProfiles 内部直接返回，不产生重绘。
- */
 async function refreshProfilesFromServer(): Promise<void> {
-  if (!gatewayClient || !state.gatewayConnected || profileRefreshInFlight) return;
-  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-  const now = Date.now();
-  if (now - lastProfileRefreshAt < PROFILE_REFRESH_MIN_GAP_MS) return;
-  lastProfileRefreshAt = now;
-  profileRefreshInFlight = true;
-  try {
-    await fetchProfiles({ refresh: true });
-  // gate-degrade: 定时刷新失败保持现状，下一轮继续；连接态由 FSM 负责。
-  } catch {
-    // 定时刷新失败保持现状，下一轮继续；连接态由 FSM 负责。
-  } finally {
-    profileRefreshInFlight = false;
-  }
+  return profileManagementService.refreshProfilesFromServer();
 }
 
 async function switchProfile(name: string): Promise<void> {
-  if (!name || state.profileName === name) return;
-  state.profileName = name;
-  localStorage.setItem('hermes_flux_profile', name);
-  localStorage.setItem('hermes_aura_profile', name);
-  render();
-  await Promise.allSettled([fetchSessions(), fetchModelOptions()]);
+  return profileManagementService.switchProfile(name);
 }
 
 // OpenChamber Standard Message Paging: Initial Window 100 items for instant cold launch
@@ -2993,9 +2556,6 @@ function showToast(message: string, durationMs = 2200): void {
     }
   }, durationMs);
 }
-
-const sessionMessagesCache = new Map<string, MessageViewModel[]>();
-let activeLoadMessagesGeneration = 0;
 
 const messageLoadingService = createMessageLoadingService({
   getState: () => state,
@@ -4690,937 +4250,84 @@ function syncAgentPresence(): void {
 }
 
 /* --------------------------------------------------------------------------
- * 设置中心：快照构造、动作表与网关数据装载
+ * 设置中心：快照构造、动作表与网关数据装载（经由 settingsDataService 委托）
  * -------------------------------------------------------------------------- */
 
-let updateReactSettings: (() => void) | null = null;
-let lastSettingsSnapshotJson = '';
-let settingsController: ReturnType<typeof createSettingsController> | null = null;
-let providerAdminController: ReturnType<typeof createProviderAdminController> | null = null;
+const settingsDataService = createSettingsDataService({
+  getState: () => state,
+  getGatewayClient: () => gatewayClient,
+  getDesktopApi: () => desktopApi,
+  getCurrentTicket: () => currentTicket ?? null,
+  getEffectiveUrl: (url) => getEffectiveUrl(url),
+  render: () => render(),
+  t: (key, params) => t(key, params),
+  describeRpcError: (error) => describeRpcError(error),
+  showToast: (message, durationMs) => showToast(message, durationMs),
+  bootLog,
+  fetchModelOptions: async (opts) => fetchModelOptions(opts),
+  fetchProfiles: async (opts) => fetchProfiles(opts),
+  testConnection: (url, user, pass) => testConnection(url, user, pass),
+  connect: async () => connect(),
+  disconnect: () => disconnect(),
+  getFontPreferences: () => fontPreferences,
+  setFontPreferences: (prefs) => { fontPreferences = prefs; },
+  applyFontPreferences: (prefs) => applyFontPreferences(prefs),
+  getActivityIndicatorVariant: () => activityIndicatorVariant,
+  setActivityIndicatorVariant: (v) => { activityIndicatorVariant = v; },
+  saveActivityIndicatorVariant: (v) => saveActivityIndicatorVariant(v),
+  resolveActivityIndicatorVariant: (v) => resolveActivityIndicatorVariant(v),
+  resolveSkinId: (theme) => resolveSkinId(theme),
+  writePresenceLayout: (layout) => writePresenceLayout(layout === 'dock' ? 'dock' : 'stage'),
+  onPresenceLayoutChanged: () => {
+    agentPresenceHost = null;
+    lastAgentPresenceFingerprint = '';
+  },
+  profileAvatarCache,
+  persistAvatarCache: () => persistAvatarCache(),
+});
 
-/** 提供商配置的作用域 Bot：显式选中优先，否则跟随连接 profile。 */
 function scopedProfileName(): string {
-  return state.settingsScopedProfile || state.profileName || 'default';
+  return settingsDataService.scopedProfileName();
 }
 
-/**
- * 订阅的共享 auth profile。
- * 【为什么不是 scopedProfile】订阅是账号级来源，登录态落在共享 auth，
- *   由 `share_auth` 回落到首个 profile；登录、轮询、退出都必须作用于它，
- *   否则会把令牌签进一个不参与共享的 profile，其他 Agent 仍然用不了。
- */
 function subscriptionProfileName(): string {
-  return botRoster()[0]?.profile || state.profileName || 'default';
+  return settingsDataService.subscriptionProfileName();
 }
 
-/**
- * 提供商管理控制器（自定义端点 / 订阅账号）。
- * 【约束】REST 一律带 `profile`，禁止依赖网关进程的默认 profile，
- *   否则用户以为在配这个 Bot，实际写到了别的 Bot 上。
- */
-function getProviderAdminController(): ReturnType<typeof createProviderAdminController> {
-  if (providerAdminController) return providerAdminController;
-  const rest = createProviderAdminRest({
-    baseUrl: () => getEffectiveUrl(state.gatewayUrl),
-    ticket: () => currentTicket ?? '',
-    proxy: (options) => {
-      if (!desktopApi?.httpProxy) throw new Error('Desktop REST proxy is unavailable');
-      return desktopApi.httpProxy(options);
-    },
-  });
-  providerAdminController = createProviderAdminController({
-    rest,
-    render: () => render(),
-    describeError: (error) => describeRpcError(error),
-    getEndpoints: () => state.settingsCustomEndpoints,
-    setEndpoints: (value) => { state.settingsCustomEndpoints = value; },
-    getOauth: () => state.settingsSubscriptionCatalog,
-    setOauth: (value) => { state.settingsSubscriptionCatalog = value; },
-    setBusy: (busy) => { state.settingsProviderAdminBusy = busy; },
-    notify: (message) => showToast(message),
-    warn: (message, meta) => bootLog.warn(message, meta),
-    onCatalogChanged: () => { void fetchModelOptions({ clearNotice: false }); },
-  });
-  return providerAdminController;
-}
-
-/**
- * 装载统一提供商表。
- * 【设计意图】首屏要回答"我接了哪些模型来源、哪些 Agent 在用"，这需要每个 Agent 的
- *   `model.options` 加一份订阅目录加各 profile 的端点列表，全部并发拉取后归并。
- * 【规则】任一 Agent 失败都进 `settingsProviderFailures` 显式提示，
- *   不允许把"读取失败"渲染成"未配置"。
- */
-async function reloadProviderCatalog(): Promise<void> {
-  const agents = botRoster();
-  state.settingsProviderViews = { status: 'loading' };
-  render();
-  try {
-    const rest = createProviderAdminRest({
-      baseUrl: () => getEffectiveUrl(state.gatewayUrl),
-      ticket: () => currentTicket ?? '',
-      proxy: (options) => {
-        if (!desktopApi?.httpProxy) throw new Error('Desktop REST proxy is unavailable');
-        return desktopApi.httpProxy(options);
-      },
-    });
-    const result = await loadProviderCatalog({
-      agents,
-      rest,
-      rpc: {
-        call: <T,>(method: string, params?: Record<string, unknown>) => {
-          if (!gatewayClient) return Promise.reject(new Error(t('settings.notConnected'))) as Promise<T>;
-          return gatewayClient.call<T>(method, params);
-        },
-      },
-      describeError: (error) => describeRpcError(error),
-    });
-    state.settingsProviderViews = { status: 'ready', data: result.views };
-    state.settingsProviderFailures = result.failed;
-    // 端点与订阅的**原始行**必须落进快照：编辑表单要 base_url / has_api_key，
-    // 添加弹框要包含未登录项。用归并后的视图反推这两个域，正是"编辑打不开""弹框没得选"的根因。
-    state.settingsCustomEndpoints = { status: 'ready', data: result.endpoints.map((entry) => entry.row) };
-    state.settingsEndpointProfiles = Object.fromEntries(
-      result.endpoints.map((entry) => [normalizeEndpointId(entry.row.id), [...entry.profiles]]),
-    );
-    state.settingsEndpointFailures = result.endpointFailures;
-    state.settingsSubscriptionCatalog = result.subscriptionsOk
-      ? { status: 'ready', data: result.subscriptions }
-      : { status: 'error', message: result.subscriptionsError || t('settings.loadFailed') };
-  } catch (error) {
-    state.settingsProviderViews = { status: 'error', message: describeRpcError(error) };
-    state.settingsProviderFailures = [];
-    state.settingsCustomEndpoints = { status: 'error', message: describeRpcError(error) };
-    state.settingsEndpointProfiles = {};
-    state.settingsEndpointFailures = [];
-    state.settingsSubscriptionCatalog = { status: 'error', message: describeRpcError(error) };
-  }
-  render();
-}
-
-/**
- * Bot 花名册的唯一投影：从 `state.profiles`（网关真实档案）派生。
- * 【规则】不另存一份 `settingsBots`：双真值必然漂移，头像条与扇出回显会各说一套。
- */
 function botRoster(): Array<{ profile: string; displayName: string; avatar?: string }> {
-  if (state.profiles.length === 0) {
-    const name = state.profileName || 'default';
-    return [{ profile: name, displayName: name }];
-  }
-  return state.profiles.map((profile) => ({
-    profile: profile.name,
-    displayName: profile.displayName || profile.name,
-    avatar: profile.avatar,
-  }));
+  return settingsDataService.botRoster();
 }
 
-
-/** 当前生效的语言：state.lang 是唯一真值，i18n 模块只做消费者。 */
-function syncLocale(): void {
-  setLocale(state.lang === 'en' ? 'en-US' : 'zh-CN');
+async function reloadProviderCatalog(): Promise<void> {
+  return settingsDataService.reloadProviderCatalog();
 }
 
-/**
- * 设置编排控制器（惰性构造，全进程单例）。
- * 【约束】所有状态读写仍以 `state` 为唯一真源，控制器只通过 deps 操作它。
- */
-function getSettingsController(): ReturnType<typeof createSettingsController> {
-  if (settingsController) return settingsController;
-  settingsController = createSettingsController({
-    isConnected: () => Boolean(gatewayClient) && state.gatewayConnected,
-    profileName: () => state.profileName || 'default',
-    call: <T,>(method: string, params?: Record<string, unknown>) => {
-      if (!gatewayClient) return Promise.reject(new Error(t('settings.loadFailed'))) as Promise<T>;
-      return gatewayClient.call<T>(method, params);
-    },
-    render: () => render(),
-    translate: (key) => t(key),
-    describeError: (error) => describeRpcError(error),
-    getProfiles: () => state.settingsProfiles,
-    setProfiles: (value) => { state.settingsProfiles = value; },
-    getMcp: () => state.settingsMcp,
-    setMcp: (value) => { state.settingsMcp = value; },
-    getSkills: () => state.settingsSkills,
-    setSkills: (value) => { state.settingsSkills = value; },
-    setBusy: (busy) => { state.settingsBusy = busy; },
-    onCatalogChanged: () => { void fetchModelOptions({ clearNotice: false }); },
-    notify: (message) => showToast(message),
-    warn: (message, meta) => bootLog.warn(message, meta),
-  });
-  return settingsController;
-}
-
-/* --------------------------------------------------------------------------
- * BOT 配置中枢：宿主控制器（惰性单例）
- * -------------------------------------------------------------------------- */
-
-let botManagementController: ReturnType<typeof createBotManagementController> | null = null;
-
-/**
- * BOT 面板控制器（全进程单例）。
- * 【约束】状态仍以 AppState 为唯一真源，控制器只经 getState/setState 读写；
- *   所有网关调用都走 core 的 ProfileService，禁止在壳层手拼 RPC 参数。
- */
-function getBotManagementController(): ReturnType<typeof createBotManagementController> {
-  if (botManagementController) return botManagementController;
-
-  botManagementController = createBotManagementController({
-    isConnected: () => Boolean(gatewayClient) && state.gatewayConnected,
-    // 花名册复用设置中心的 profiles.list 编排，避免两条数据通路各自持有加载态与令牌。
-    loadProfiles: () => getSettingsController().loadProfiles(),
-    getProfiles: () => state.settingsProfiles,
-    getState: () => ({
-      status: state.botManagementStatus,
-      activeBotId: state.botManagementActiveBotId,
-      activeDetail: state.botManagementDetail,
-      drafts: state.botDrafts,
-      errorBanner: state.botManagementError,
-      confirmPending: state.botManagementConfirm,
-      isBusy: state.botManagementBusy,
-    }),
-    setState: (patch) => {
-      if (patch.status !== undefined) state.botManagementStatus = patch.status;
-      if (patch.activeBotId !== undefined) state.botManagementActiveBotId = patch.activeBotId;
-      // 显式 undefined 代表"清空详情/横幅"，必须用 in 判断，不能用 !== undefined 吞掉清除动作。
-      if ('activeDetail' in patch) state.botManagementDetail = patch.activeDetail;
-      if (patch.drafts !== undefined) state.botDrafts = patch.drafts;
-      if ('errorBanner' in patch) state.botManagementError = patch.errorBanner;
-      if ('confirmPending' in patch) state.botManagementConfirm = patch.confirmPending;
-      if (patch.isBusy !== undefined) state.botManagementBusy = patch.isBusy;
-    },
-    describeBot: (botId, hint) => {
-      if (!gatewayClient) return Promise.reject(new Error(t('settings.notConnected')));
-      return profileService.describeBot(botId, gatewayClient, hint);
-    },
-    /**
-     * 全局技能目录：只在 describe 未返回 skills 时用于补全展示。
-     * 【规则】读取失败返回 null（界面保留非权威提示），绝不把失败当成空目录。
-     */
-    fetchSkillInventory: async (botId) => {
-      if (!gatewayClient) return null;
-      try {
-        const result = await gatewayClient.request<{ skills?: Record<string, string[]> | null }>(
-          'skills.manage',
-          { profile: botId, action: 'list' },
-        );
-        const groups = result?.skills;
-        if (!groups || typeof groups !== 'object') return null;
-        const names: string[] = [];
-        for (const value of Object.values(groups)) {
-          if (!Array.isArray(value)) continue;
-          for (const name of value) if (typeof name === 'string' && name) names.push(name);
-        }
-        return names;
-      // gate-degrade: 技能目录读取失败只影响非权威清单的补全展示，界面会显示"清单读取不完整"；不阻塞 BOT 详情，也不伪装成空目录。
-      } catch {
-        return null;
-      }
-    },
-    /**
-     * MCP 探活：失败返回 null，界面显示"状态未知"。
-     * 【契约】0.23.1 的运行时行用 `tools` 计工具数，`connected` 才是探活结论。
-     */
-    fetchMcpStatus: async (botId) => {
-      if (!gatewayClient) return null;
-      try {
-        const result = await gatewayClient.request<{
-          servers?: Array<{ name?: string; connected?: boolean; transport?: string; tools?: number }>;
-        }>('mcp.servers.status', { profile: botId });
-        if (!Array.isArray(result?.servers)) return null;
-        return result.servers
-          .filter((row) => typeof row?.name === 'string' && row.name)
-          .map((row) => ({
-            name: row.name as string,
-            connected: row.connected === true,
-            transport: typeof row.transport === 'string' ? row.transport : undefined,
-            toolCount: typeof row.tools === 'number' ? row.tools : undefined,
-          }));
-      // gate-degrade: 探活失败等价于"状态未知"（online 保持 undefined），界面不得画红灯；已有清单照常展示。
-      } catch {
-        return null;
-      }
-    },
-    configureBot: (params: ProfilesConfigureParams) => {
-      if (!gatewayClient) return Promise.reject(new Error(t('settings.notConnected')));
-      return profileService.configureBot(params, gatewayClient);
-    },
-    setAsset: (botId, dataUrl, clear) => {
-      if (!gatewayClient) return Promise.reject(new Error(t('settings.notConnected')));
-      return profileService.setAsset(botId, 'avatar', dataUrl, gatewayClient, { clear });
-    },
-    render: () => render(),
-    translate: (key) => t(key),
-    describeError: (error) => describeRpcError(error),
-    notify: (message) => showToast(message),
-    // 保存成功后刷左轨/花名册投影；fetchProfiles 自带 generation 令牌，不与控制器抢写。
-    onProfilesChanged: () => { void fetchProfiles(); },
-    /**
-     * 头像资产不在 profiles.list 的回显里（网关只给 has_avatar），保存成功后必须主动同步
-     * 内存缓存、花名册行与会话投影；否则左轨与选择器继续画旧头像，用户以为保存没生效。
-     */
-    onAvatarChanged: (botId, dataUrl) => {
-      const key = botId.toLowerCase();
-      if (dataUrl) profileAvatarCache.set(key, dataUrl);
-      else profileAvatarCache.delete(key);
-      const profile = state.profiles.find((item) => item.name === botId);
-      if (profile) {
-        profile.avatar = dataUrl;
-        profile.hasAvatar = Boolean(dataUrl);
-        if (profile.displayName) {
-          const named = profile.displayName.toLowerCase();
-          if (dataUrl) profileAvatarCache.set(named, dataUrl);
-          else profileAvatarCache.delete(named);
-        }
-      }
-      if (state.settingsProfiles.status === 'ready') {
-        state.settingsProfiles = {
-          status: 'ready',
-          data: state.settingsProfiles.data.map((row) =>
-            row.name === botId ? { ...row, avatar: dataUrl, hasAvatar: Boolean(dataUrl) } : row,
-          ),
-        };
-      }
-      for (const session of state.sessions) {
-        if (session.botName === botId) session.botAvatar = dataUrl;
-      }
-      persistAvatarCache();
-    },
-    // 160ms 静止防抖：测试可注入假定时器，生产沿用宿主 setTimeout。
-    schedule: (fn, ms) => {
-      const timer = setTimeout(fn, ms);
-      return () => clearTimeout(timer);
-    },
-  });
-  return botManagementController;
-}
-
-/**
- * 打开设置中心的 BOT 面板并选中指定 BOT。
- * 【设计意图】左轨右键"编辑资料"与设置页花名册的"编辑"共用同一入口，
- *   避免出现两套打开逻辑（一套走弹窗、一套走面板）。
- * 【规则】立即取详情，不等 160ms 防抖——这是用户的显式意图，不是滑动落点。
- */
 function openBotSettings(botId: string): void {
-  state.isSettingsOpen = true;
-  state.settingsSection = 'agents';
-
-  // 先把目标写入 activeBotId：loadRoster 完成时会"保持仍在花名册中的 activeBotId"，
-  // 因此不需要在列表未就绪时抢跑 describe，避免花名册与详情各打一次 RPC。
-  state.botManagementActiveBotId = botId;
-  const status = state.botManagementStatus.status;
-  ensureSettingsSectionData('agents');
-  if (status !== 'uninitialized' && status !== 'fetching_list') {
-    getBotManagementController().selectBot(botId, { immediate: true });
-  }
-  render();
+  settingsDataService.openBotSettings(botId);
 }
 
-/**
- * BOT 面板渲染快照。
- * 【规则】只从 AppState 现算，不在这里发 RPC；草稿 hasDraft 必须来自草稿池，
- *   不能用"字段是否非空"猜测（空字符串也是合法草稿值）。
- */
 function getBotManagementSnapshot(): SettingsSnapshot['botManagement'] {
-  // 花名册投影走 core 的纯函数：hasDraft 由草稿池现算，且该函数有落盘测试。
-  const roster: SettingsSnapshot['botManagement']['roster'] =
-    state.settingsProfiles.status === 'ready'
-      ? projectBotRoster(
-          state.settingsProfiles.data.map((row) => ({
-            name: row.name,
-            displayName: row.displayName,
-            // 模型优先取设置域行，其次回落到全局 profiles 投影（两条来源都可能先到）。
-            model: row.model || state.profiles.find((item) => item.name === row.name)?.model || '',
-            avatar: row.avatar || state.profiles.find((item) => item.name === row.name)?.avatar || undefined,
-            isDefault: row.isDefault,
-          })),
-          state.botDrafts,
-        )
-      : [];
-
-  // 模型目录按 provider 顺序聚合；同一 provider 下重复模型只保留首个。
-  const availableModels: SettingsSnapshot['botManagement']['availableModels'] = [];
-  const seenModels = new Set<string>();
-  if (state.settingsProviderViews.status === 'ready') {
-    for (const view of state.settingsProviderViews.data) {
-      // 未配置/读取失败的 provider 不得进入下拉：选中也保存不了，等于给用户假选项。
-      // 当前模型若属于这类 provider，UI 会用"[离线/不可用]"占位保留，不会被静默清空。
-      if (view.availability !== 'active' && view.availability !== 'ready') continue;
-      for (const modelId of view.models) {
-        const key = `${view.id}\u0000${modelId}`;
-        if (seenModels.has(key)) continue;
-        seenModels.add(key);
-        availableModels.push({
-          id: modelId,
-          name: formatModelDisplayName(modelId, view.name),
-          provider: view.id,
-          providerName: view.name,
-        });
-      }
-    }
-  }
-
-  return {
-    status: state.botManagementStatus,
-    roster,
-    activeBotId: state.botManagementActiveBotId,
-    activeDetail: state.botManagementDetail,
-    availableModels,
-    // 草稿池整表不进快照：每个 render 都会 JSON.stringify 快照做指纹，
-    // SOUL（64KB）进草稿后整表序列化会拖慢长会话。UI 只需要当前 BOT 的草稿；
-    // 其它 BOT 的脏标记由 roster[].hasDraft 逐行表达，避免出现两份真值。
-    activeDraft: state.botManagementActiveBotId
-      ? state.botDrafts[state.botManagementActiveBotId]
-      : undefined,
-    // 本步不实现新建向导与离场弹窗：给受控组件的空默认，禁止用 undefined 让组件猜。
-    wizard: {
-      open: false,
-      draft: {
-        mode: 'blank',
-        name: '',
-        displayName: '',
-        description: '',
-        model: '',
-        provider: '',
-        cloneFrom: '',
-        cloneChannels: false,
-        mirrorCredentials: false,
-      },
-      busy: false,
-    },
-    exitPrompt: null,
-    errorBanner: state.botManagementError,
-    confirmPending: state.botManagementConfirm,
-    // 新建向导落地前没有"高亮新 BOT"的来源；显式 undefined 而非伪造一个 ID。
-    highlightBotId: undefined,
-    // 保存忙态独立于 status：UI 用它禁用保存按钮并锁输入，status 仍保持 idle/saving 语义。
-    isBusy: state.botManagementBusy,
-  };
+  return settingsDataService.getBotManagementSnapshot();
 }
 
 function getSettingsSnapshot(): SettingsSnapshot {
-  return {
-    isOpen: state.isSettingsOpen,
-    section: state.settingsSection,
-    theme: state.theme,
-    locale: state.lang === 'en' ? 'en' : 'zh',
-    fontPrefs: fontPreferences,
-    activityVariant: activityIndicatorVariant,
-    // 提供商的旧 providers 域已并入统一表 providerViews，快照不再单列 providers。
-    profiles: state.settingsProfiles,
-    bots: botRoster(),
-    botManagement: getBotManagementSnapshot(),
-    scopedProfile: scopedProfileName(),
-    providerViews: state.settingsProviderViews,
-    providerFailures: state.settingsProviderFailures,
-    subscriptionCatalog: state.settingsSubscriptionCatalog,
-    customEndpoints: state.settingsCustomEndpoints,
-    endpointProfiles: state.settingsEndpointProfiles,
-    endpointFailures: state.settingsEndpointFailures,
-    providerAdminBusy: state.settingsProviderAdminBusy,
-    mcp: state.settingsMcp,
-    skills: state.settingsSkills,
-    gateway: {
-      url: state.gatewayUrl,
-      username: state.username,
-      // 密码永不进入快照 JSON（它会被指纹缓存、也可能被 DevTools 导出）。
-      hasStoredPassword: Boolean(state.password),
-      profileName: state.profileName,
-      status: state.gatewayConnected ? 'connected' : state.gatewayConnecting ? 'connecting' : 'disconnected',
-      latencyMs: state.gatewayLatencyMs,
-      test: state.testStatus,
-    },
-    appVersion: state.appVersion,
-    platform: state.platform,
-    busy: state.settingsBusy,
-    presenceLayout: state.presenceLayout,
-  };
+  return settingsDataService.getSettingsSnapshot();
 }
 
-/**
- * 按当前 section 懒加载对应数据；幂等、并发收敛由控制器统一保证。
- * 【规则】提供商域只需一次统一装载：每个 Agent 的 model.options + 订阅目录 + 端点列表
- *   都在 loadProviderCatalog 内并发完成，不需要再单独跑端点/订阅的两次装载。
- */
 function ensureSettingsSectionData(section: SettingsSectionId, force = false): void {
-  // BOT 面板的花名册由 bot controller 统一编排：这里绝不能再调 settingsController.ensureSection('agents')，
-  // 否则同一次进入面板会并发两次 profiles.list，两个令牌互相覆盖，列表可能闪回旧数据。
-  if (section === 'agents') {
-    getBotManagementController().ensureLoaded(force);
-    // 模型绑定下拉的唯一数据源是统一提供商表；进入 BOT 面板必须确保目录已装载，
-    // 否则首次进入只能看到空下拉（用户以为该 BOT 没有可选模型）。
-    if (force || state.settingsProviderViews.status === 'idle') {
-      void reloadProviderCatalog();
-    }
-    return;
-  }
-  getSettingsController().ensureSection(section, force);
-  if (section !== 'providers') return;
-  // 花名册是 Agent 槽位的来源；空列表时补拉一次，已有数据不重复请求。
-  if (state.profiles.length === 0) void getSettingsController().loadProfiles();
-  if (force || state.settingsProviderViews.status === 'idle') {
-    void reloadProviderCatalog();
-  }
-}
-/** 连接表单提交：先落 state + localStorage，再走真实 connect()。 */
-function applyGatewayDraft(draft: GatewayDraft): void {
-  state.gatewayUrl = draft.url.trim();
-  state.username = draft.username;
-  // 表单留空 = 沿用已保存的密码；避免把空密码写回、也避免把明文回填给 React。
-  state.password = resolveGatewayPassword(draft.password, state.password);
-  state.profileName = draft.profileName.trim() || 'default';
-  localStorage.setItem('hermes_flux_gateway_url', state.gatewayUrl);
-  localStorage.setItem('hermes_aura_gateway_url', state.gatewayUrl);
-  localStorage.setItem('hermes_flux_username', state.username);
-  localStorage.setItem('hermes_aura_username', state.username);
-  localStorage.setItem('hermes_flux_password', state.password);
-  localStorage.setItem('hermes_aura_password', state.password);
-  localStorage.setItem('hermes_flux_profile', state.profileName);
-  localStorage.setItem('hermes_aura_profile', state.profileName);
+  settingsDataService.ensureSettingsSectionData(section, force);
 }
 
 function createSettingsActions(): SettingsActions {
-  return {
-    onClose: () => {
-      state.isSettingsOpen = false;
-      render();
-    },
-    onSelectSection: (section) => {
-      state.settingsSection = section;
-      ensureSettingsSectionData(section);
-      render();
-    },
-    onThemeChange: (theme) => {
-      state.theme = resolveSkinId(theme);
-      localStorage.setItem('hermes_flux_theme', state.theme);
-      localStorage.setItem('hermes_aura_theme', state.theme);
-      render();
-    },
-    /**
-     * 切换 Agent 状态指示器的位置变体。
-     *
-     * 【设计意图 (Why)】两套效果并存，由用户在外观设置里选。切换只改表现位置：
-     *   状态机、文案、动效全部复用，因此这里只写偏好 + 重建 host 的落点。
-     * 【约束与规则】必须先写持久化再 render：render 内的 `ensureAgentPresenceHost`
-     *   读的是内存 state，落盘顺序不影响本次渲染，但顺序反了会在崩溃时丢失选择。
-     */
-    onPresenceLayoutChange: (layout) => {
-      state.presenceLayout = layout === 'dock' ? 'dock' : 'stage';
-      writePresenceLayout(state.presenceLayout);
-      // host 位置变化必须让 React 重挂：先清空引用，render 时会按 host 比对重新 mount
-      agentPresenceHost = null;
-      lastAgentPresenceFingerprint = '';
-      render();
-    },
-    onLocaleChange: (locale) => {
-      state.lang = locale === 'en' ? 'en' : 'zh';
-      localStorage.setItem('hermes_flux_lang', state.lang);
-      syncLocale();
-      render();
-    },
-    onFontPrefsChange: (prefs) => {
-      fontPreferences = prefs;
-      saveFontPreferences(prefs);
-      applyFontPreferences(prefs);
-      render();
-    },
-    onActivityVariantChange: (variant) => {
-      activityIndicatorVariant = resolveActivityIndicatorVariant(variant);
-      saveActivityIndicatorVariant(activityIndicatorVariant);
-      render();
-    },
-    // 设置页的"刷新"现在服务 BOT 面板：它会同时刷新花名册与当前详情。
-    onRefreshProfiles: () => { void getBotManagementController().loadRoster(true); },
-    onScopeProfileChange: (profile) => {
-      state.settingsScopedProfile = profile;
-      render();
-    },
-    onReloadProviders: () => {
-      void reloadProviderCatalog();
-    },
-    onProbeEndpoint: (draft) => getProviderAdminController().probe(draft),
-    onSaveEndpoint: async (draft, options) => {
-      const outcome = await getProviderAdminController().save(scopedProfileName(), draft, {
-        fanOutTo: options.fanOutTo,
-        makeDefault: options.makeDefault,
-        profileDisplayNames: Object.fromEntries(botRoster().map((bot) => [bot.profile, bot.displayName])),
-      });
-      if (outcome.currentOk === false) return { ok: false, message: outcome.current.message || t('settings.saveFailed') };
-      void reloadProviderCatalog();
-      return { ok: true, fanOut: [outcome.current, ...outcome.fanOut] };
-    },
-    /**
-     * 使用：把选中 Agent 的主模型切到这个提供商。
-     * 【规则】必须带具体模型。网关的 `custom-endpoints/{id}/activate` 只认自定义端点，
-     *   订阅走它必然 404；统一走 `/api/model/set` 后才能覆盖订阅。
-     * 【约束】只影响当前作用域那一个 Agent，不做跨 Agent 批量。
-     * 【为什么不弹二次确认】模型选择弹窗已经把"让哪个 Agent 用哪个模型"写在标题上，
-     *   再弹一次确认等于让用户点两遍同一个决定。
-     */
-    onActivateProvider: async (providerId, model, confirmExpensive) => {
-      const controller = getProviderAdminController();
-      const profile = scopedProfileName();
-      const view = state.settingsProviderViews.status === 'ready'
-        ? state.settingsProviderViews.data.find((item) => item.id === providerId)
-        : undefined;
-      const result = await controller.useMainModel(profile, {
-        provider: providerId,
-        model,
-        baseUrl: view?.kind === 'custom' ? view.detail : undefined,
-        confirmExpensive,
-      });
-      if (result.ok) {
-        showToast(t('settings.providerUsed', { name: view?.name || providerId }));
-        void reloadProviderCatalog();
-      }
-      return result;
-    },
-    /** 退出订阅：订阅是账号级来源，退出共享 auth 后所有 Agent 一起失去它。 */
-    onLogoutProvider: (providerId) =>
-      new Promise((resolve) => {
-        const controller = getProviderAdminController();
-        const profileAtOpen = subscriptionProfileName();
-        const target = planDeleteTarget(
-          profileAtOpen,
-          botRoster().find((bot) => bot.profile === profileAtOpen)?.displayName ?? profileAtOpen,
-        );
-        const view = state.settingsProviderViews.status === 'ready'
-          ? state.settingsProviderViews.data.find((item) => item.id === providerId)
-          : undefined;
-        if (view?.manualHint) {
-          // 网关明确说这个订阅不能自动断开：显示它自己的做法，不假装能一键退出。
-          state.confirmModal = {
-            title: t('settings.logoutConfirmTitle'),
-            message: t('settings.logoutManual', { command: view.manualHint }),
-            confirmLabel: t('settings.close'),
-            cancelLabel: t('settings.cancel'),
-            isDanger: false,
-            onConfirm: async () => resolve({ ok: false, cancelled: true }),
-            onCancel: () => resolve({ ok: false, cancelled: true }),
-          };
-          render();
-          return;
-        }
-        state.confirmModal = {
-          title: t('settings.logoutConfirmTitle'),
-          message: t('settings.logoutConfirmMessage', { bot: target.displayName, name: view?.name || providerId }),
-          confirmLabel: t('settings.providerLogout'),
-          cancelLabel: t('settings.cancel'),
-          isDanger: true,
-          onConfirm: async () => {
-            const result = await controller.logoutOauth(target.profile, providerId);
-            if (result.ok) {
-              showToast(t('settings.logoutDone', { name: view?.name || providerId }));
-              void reloadProviderCatalog();
-            }
-            resolve(result);
-          },
-          onCancel: () => resolve({ ok: false, cancelled: true }),
-        };
-        render();
-      }),
-    onStartLogin: (providerId) => getProviderAdminController().startLogin(subscriptionProfileName(), providerId),
-    onPollLogin: (providerId, sessionId) =>
-      getProviderAdminController().pollLogin(subscriptionProfileName(), providerId, sessionId),
-    onCancelLogin: (sessionId) => getProviderAdminController().cancelLogin(subscriptionProfileName(), sessionId),
-    onCopy: async (text) => {
-      try {
-        await navigator.clipboard.writeText(text);
-        return true;
-      } catch (error) {
-        bootLog.warn('clipboard write failed', { error: describeRpcError(error) });
-        return false;
-      }
-    },
-    /**
-     * 删除端点：用户看到的是一行，删除就必须是整体删除。
-     * 【规则】作用范围取 `view.agents` 里 active/ready 的 Agent（真正配了它的），
-     *   不取"当前作用域"那一个——只删一个的话这行还在，用户会认为按钮没生效。
-     * 【约束】读取失败的 Agent 不在删除范围内：读不到就不能猜着删。
-     */
-    onDeleteEndpoint: (id) =>
-      new Promise((resolve) => {
-        const controller = getProviderAdminController();
-        const targetId = normalizeEndpointId(id);
-        const view = state.settingsProviderViews.status === 'ready'
-          ? state.settingsProviderViews.data.find((item) => normalizeEndpointId(item.id) === targetId)
-          : undefined;
-        if (!view) {
-          // 视图里找不到这一行：说明快照已经过期，不能拿一个猜出来的 id 去删。
-          showToast(t('settings.providerDeleteUnknown'));
-          resolve({ ok: false, message: t('settings.providerDeleteUnknown') });
-          return;
-        }
-
-        /**
-         * 删除的作用域是**配置集合**，不是在用集合。
-         * 【为什么】端点可以存在于某 profile 的配置里、却没进 model.options（未生效、未带模型）。
-         *   用 profilesWithProvider 会得到空集，于是"能看见却删不掉"。
-         */
-        // 配置集合不完整时不许删：某个 Agent 的端点清单读失败，它的端点不在集合里，
-        // 删除会漏掉它却报成功。读不到就不能猜着删。
-        if (state.settingsEndpointFailures.length > 0) {
-          const names = state.settingsEndpointFailures.map((item) => item.displayName).join('、');
-          showToast(t('settings.providerDeleteScopeIncomplete', { agents: names }));
-          resolve({ ok: false, message: t('settings.providerDeleteScopeIncomplete', { agents: names }) });
-          return;
-        }
-
-        const plan = planProviderRemoval(view, state.settingsEndpointProfiles[targetId] ?? []);
-
-        if (plan.kind === 'blocked-in-use') {
-          const names = plan.agents
-            .map((agent) => (agent.model ? `${agent.displayName}（${agent.model}）` : agent.displayName))
-            .join('、');
-          state.confirmModal = {
-            title: t('settings.providerDeleteBlockedTitle'),
-            message: t('settings.providerDeleteBlocked', { name: view.name, agents: names }),
-            confirmLabel: t('settings.close'),
-            cancelLabel: t('settings.cancel'),
-            isDanger: false,
-            onConfirm: async () => resolve({ ok: false, message: t('settings.providerDeleteBlockedShort') }),
-            onCancel: () => resolve({ ok: false, cancelled: true }),
-          };
-          render();
-          return;
-        }
-
-        if (plan.kind === 'empty') {
-          // 数据不一致：行还在，但没有任何 profile 承认配置过它。既不能删，也不能说"没人在用"。
-          showToast(t('settings.providerDeleteInconsistent'));
-          resolve({ ok: false, message: t('settings.providerDeleteInconsistent') });
-          return;
-        }
-
-        const names = plan.profiles.map(
-          (profile) => botRoster().find((bot) => bot.profile === profile)?.displayName || profile,
-        );
-        state.confirmModal = {
-          title: t('settings.providerDelete'),
-          message: t('settings.providerDeleteConfirm', { name: view.name, agents: names.join('、') }),
-          confirmLabel: t('settings.providerDelete'),
-          cancelLabel: t('settings.cancel'),
-          isDanger: true,
-          onConfirm: async () => {
-            const result = await controller.remove(plan.profiles, view.id);
-            // 只有全部成功才算删掉。部分失败必须如实回显失败名单，不能先报"已删除"。
-            if (result.ok) {
-              showToast(t('settings.providerDeleted', { name: view.name }));
-              void reloadProviderCatalog();
-              resolve(result);
-              return;
-            }
-            const detail = result.failed
-              .map((item) => `${item.displayName}：${item.message || ''}`)
-              .join('；');
-            const message = result.failed.length > 0
-              ? t('settings.providerDeletePartial', { detail })
-              : result.message || t('settings.providerToggleFailed');
-            void reloadProviderCatalog();
-            resolve({ ok: false, message });
-          },
-          onCancel: () => resolve({ ok: false, cancelled: true }),
-        };
-        render();
-      }),
-
-    /**
-     * 勾选 / 取消勾选某一个 Agent 的绑定。
-     *
-     * 【规则】判定全部交给 core 的 planBindingToggle，壳层只执行与回显：
-     *   正在使用的 Agent 不允许取消（用户已确认的策略：先改模型再移除）；
-     *   未配置的自定义端点必须带 `attachIntent`，缺意图一律返回 `confirmRequired: true` 且不写任何配置；
-     *   自定义端点新增必须补密钥（网关不回明文）；订阅只能引导去登录。
-     * 【规则】是否改写默认模型跟随 `plan.makeDefault`，模型取运行时目录里真实存在的那个
-     *   （`resolveBindingDefaultModel`）；仅当 `plan.makeDefault` 为真时才校验 `currentIsDefault`。
-     */
-    onToggleProviderAgent: async (providerId, profile, nextChecked, apiKey, options) => {
-      const controller = getProviderAdminController();
-      const targetId = normalizeEndpointId(providerId);
-      const view = state.settingsProviderViews.status === 'ready'
-        ? state.settingsProviderViews.data.find((item) => normalizeEndpointId(item.id) === targetId)
-        : undefined;
-      if (!view) return { ok: false, message: t('settings.providerDeleteUnknown') };
-
-      const plan = planBindingToggle(view, profile, nextChecked, options?.attachIntent);
-      switch (plan.kind) {
-        case 'noop':
-          return { ok: true };
-        case 'unknown-profile':
-          return { ok: false, message: t('settings.providerToggleUnknownProfile', { profile }) };
-        case 'blocked-active':
-          return { ok: false, message: t('settings.providerToggleBlockedActive', { profile }) };
-        case 'blocked-error':
-          return { ok: false, message: plan.message || t('settings.providerToggleBlockedError', { profile }) };
-        case 'login-required':
-          return { ok: false, message: t('settings.providerToggleLoginRequired', { profile }) };
-        case 'confirm-attach':
-          return { ok: false, confirmRequired: true, message: t('settings.providerAttachConfirmRequired') };
-        default:
-          break;
-      }
-
-      const flightKey = `${targetId}\u0000${profile}`;
-      const signature = plan.kind + (plan.kind === 'attach' ? plan.intent : '');
-      const existing = inFlightProviderBindings.get(flightKey);
-      if (existing) {
-        if (existing.signature === signature) return existing.promise;
-        return { ok: false, message: t('settings.providerAttachBusy') };
-      }
-
-      const promise = (async (): Promise<ToggleProviderAgentResult> => {
-        switch (plan.kind) {
-          case 'detach': {
-            const result = await controller.remove([profile], view.id);
-            if (result.ok) {
-              // 等回读完成再清 pending：否则用户会看到"点了没反应"的旧勾选态。
-              await reloadProviderCatalog();
-              return { ok: true };
-            }
-            return { ok: false, message: result.message || t('settings.providerToggleFailed') };
-          }
-          case 'attach': {
-            const row = state.settingsCustomEndpoints.status === 'ready'
-              ? state.settingsCustomEndpoints.data.find(
-                  (item) => normalizeEndpointId(item.id) === targetId,
-                )
-              : undefined;
-            if (!row) return { ok: false, message: t('settings.providerEditUnavailable') };
-            let key = (apiKey ?? '').trim();
-            if (!key) {
-              // 先尝试从其它成员复制：取消绑定会连密钥一起删，用户刚勾回来不该被要求重输。
-              const sources = (state.settingsEndpointProfiles[targetId] ?? [])
-                .filter((source) => source !== profile);
-              const copied = await controller.resolveEndpointKey(view.id, sources);
-              if (!copied.ok) {
-                if (copied.reason === 'no-readable-key') {
-                  // 确实没有可读来源（所有成员都缺密钥）：这时才让用户就地补一次。
-                  return {
-                    ok: false,
-                    needsKey: true,
-                    message: t('settings.providerToggleNeedsKey', { profile }),
-                  };
-                }
-                // 读取故障必须原样透出，不能伪装成"请重输密钥"（Failure Is Not Empty）。
-                return { ok: false, message: copied.message || t('settings.providerToggleFailed') };
-              }
-              key = copied.key;
-            }
-            // 模型取运行时目录里真实存在的那个；是否切换默认模型由 plan.makeDefault 决定。
-            const draft = draftForBindingAttach(row, view.models, key);
-            const outcome = await controller.save(profile, draft, { fanOutTo: [], makeDefault: plan.makeDefault });
-            // 【规则】默认模型两条守卫的判定统一由 core 的 `classifyAttachWrite` 表达，
-            //   壳层只做 `kind → i18n` 映射：这样"要求设默认却没设"与"只要求启用却被改成默认"
-            //   两个方向共用同一份可穷举的真值，不会一边补了另一边忘掉。
-            const verdict = classifyAttachWrite(plan, outcome);
-            if (verdict.kind === 'failed') {
-              return { ok: false, message: outcome.current.message || t('settings.providerToggleFailed') };
-            }
-            const verdictKey = messageKeyForVerdict(verdict);
-            if (verdictKey) {
-              // 【规则】失败也要先回读：端点已经写进网关，列表必须如实反映。
-              //   错误本身由界面另存为行级提示，不依赖确认条存活——回读后目标格子不再是
-              //   `absent`，确认条会被目录收敛清空，把错误挂在条上等于静默丢掉它。
-              await reloadProviderCatalog();
-              return { ok: false, message: t(verdictKey) };
-            }
-            // 等回读完成再清 pending：否则用户会看到"点了没反应"的旧勾选态。
-            await reloadProviderCatalog();
-            return { ok: true };
-          }
-          case 'logout-subscription': {
-            // 订阅的绑定就是该 Agent 的 OAuth 登录态，只能走断开登录，不能删端点。
-            const result = await controller.logoutOauth(profile, view.id);
-            if (result.ok) {
-              await reloadProviderCatalog();
-              return { ok: true };
-            }
-            return { ok: false, message: result.message || t('settings.providerToggleFailed') };
-          }
-          default:
-            return { ok: false, message: t('settings.providerToggleFailed') };
-        }
-      })();
-
-      const entry = { signature, promise };
-      inFlightProviderBindings.set(flightKey, entry);
-      try {
-        return await promise;
-      } finally {
-        if (inFlightProviderBindings.get(flightKey) === entry) {
-          inFlightProviderBindings.delete(flightKey);
-        }
-      }
-    },
-    onNotify: (message) => showToast(message),
-
-    /* ---- BOT 配置中枢（本步只实现基础信息与头像） ---- */
-    /** 草稿实时写入；脏净判定由 core 的 isBotDraftDirty 统一决定。 */
-    onBotDraftChange: (botId, patch) => getBotManagementController().updateDraft(botId, patch),
-    /** 选择器静止吸附后的详情请求；160ms 防抖与并发令牌在控制器内。 */
-    onSelectBotSettle: (botId) => getBotManagementController().selectBot(botId),
-    /** 原子保存当前草稿（profiles.configure + profiles.set_asset）。 */
-    onSaveBotConfig: (botId, options) => getBotManagementController().saveBot(botId, options),
-    /** 丢弃当前 BOT 的草稿，表单回到权威快照。 */
-    onResetBotDraft: (botId) => getBotManagementController().resetDraft(botId),
-    /** 新建向导本步不实现功能：显式空实现，绝不假装已打开或已提交。 */
-    onOpenBotWizard: () => {},
-    onCloseBotWizard: () => {},
-    onBotWizardDraftChange: () => {},
-    /** 向导未落地时提交必须显式失败，禁止静默返回成功。 */
-    onSubmitCreateBot: async () => ({ ok: false, message: t('bot.createFailed') }),
-    /** 花名册重试：忽略缓存并重新装载。 */
-    onRetryBotList: () => { void getBotManagementController().loadRoster(true); },
-    onDismissBotError: () => getBotManagementController().dismissError(),
-    onDismissBotConfirm: () => getBotManagementController().dismissConfirm(),
-    /** 离场守卫本步不实现：没有脏守卫注册，就不会弹确认框。 */
-    onConfirmBotExit: () => {},
-    onCancelBotExit: () => {},
-    onRegisterBotDirtyGuard: () => {},
-    /** 花名册行内"编辑"：打开 BOT 面板并立即选中目标。 */
-    onOpenAgent: (name) => {
-      openBotSettings(name);
-    },
-    onRefreshExtensions: () => { void getSettingsController().loadExtensions(); },
-    onReloadSkills: () => getSettingsController().reloadSkills(),
-    onTestGateway: (draft) => {
-      applyGatewayDraft(draft);
-      void getSettingsController().runBusy(async () => {
-        state.testStatus = await testConnection(state.gatewayUrl, state.username, state.password);
-      });
-    },
-    onConnectGateway: (draft) => {
-      applyGatewayDraft(draft);
-      if (!state.gatewayUrl) {
-        state.testStatus = { ok: false, message: t('gateway.urlRequired'), latency: 0 };
-        render();
-        return;
-      }
-      void connect();
-    },
-    onDisconnectGateway: () => { disconnect(); },
-  };
+  return settingsDataService.createSettingsActions();
 }
 
-/** 设置快照指纹：内容不变就不推 React，避免流式输出期间每帧重渲染整棵设置树。 */
 function syncReactSettings(): void {
-  const host = document.getElementById('react-settings-host');
-  if (!host) return;
-  if (!updateReactSettings) {
-    updateReactSettings = mountSettingsModal(host, getSettingsSnapshot, createSettingsActions());
-    lastSettingsSnapshotJson = '';
-  }
-  // 关闭态零成本：设置树整体卸载后没有必要每帧序列化一份 50+ provider 的快照。
-  if (!state.isSettingsOpen) {
-    if (lastSettingsSnapshotJson === '') return;
-    lastSettingsSnapshotJson = '';
-    updateReactSettings();
-    return;
-  }
-  const snapshot = getSettingsSnapshot();
-  const json = JSON.stringify(snapshot);
-  if (json === lastSettingsSnapshotJson) return;
-  lastSettingsSnapshotJson = json;
-  updateReactSettings();
+  settingsDataService.syncReactSettings();
+}
+
+function syncLocale(): void {
+  setLocale(state.lang === 'en' ? 'en-US' : 'zh-CN');
 }
 
 function mountReactShellComponents(): void {

@@ -16,6 +16,7 @@ import path from 'node:path';
 
 const RENDERER = path.resolve(import.meta.dirname, '../../src/renderer/index.ts');
 const RENDER_COORD = path.resolve(import.meta.dirname, '../../src/renderer/renderCoordinator.ts');
+const SETTINGS_DATA = path.resolve(import.meta.dirname, '../../src/renderer/services/settingsDataService.ts');
 const LEFTRAIL_DOMAIN = path.resolve(import.meta.dirname, '../../src/renderer/leftrail/leftRailSnapshotManager.ts');
 const CONTROLLER = path.resolve(import.meta.dirname, '../../src/renderer/settingsController.ts');
 const SETTINGS_UI = path.resolve(import.meta.dirname, '../../../ui/src/components-react/settings/SettingsModal.tsx');
@@ -23,6 +24,7 @@ const UI_INDEX = path.resolve(import.meta.dirname, '../../../ui/src/index.ts');
 const source = [
   fs.readFileSync(RENDERER, 'utf8'),
   fs.existsSync(RENDER_COORD) ? fs.readFileSync(RENDER_COORD, 'utf8') : '',
+  fs.existsSync(SETTINGS_DATA) ? fs.readFileSync(SETTINGS_DATA, 'utf8') : '',
 ].join('\n');
 const leftRailDomain = fs.existsSync(LEFTRAIL_DOMAIN) ? fs.readFileSync(LEFTRAIL_DOMAIN, 'utf8') : '';
 const controller = fs.readFileSync(CONTROLLER, 'utf8');
@@ -104,8 +106,8 @@ test('设置页的网关调用必须是真实契约方法，且参数在契约�
 
 test('设置快照不得包含明文密码（指纹缓存与 DevTools 都会把它带出去）', () => {
   const snapshotBlock = source.slice(
-    source.indexOf('function getSettingsSnapshot'),
-    source.indexOf('function ensureSettingsSectionData'),
+    source.lastIndexOf('function getSettingsSnapshot'),
+    source.lastIndexOf('function ensureSettingsSectionData'),
   );
   assert.ok(snapshotBlock.length > 0);
   assert.equal(/password:\s*state\.password/.test(snapshotBlock), false, '快照禁止直出明文密码');

@@ -433,6 +433,21 @@ async function buildAll() {
     external: ['@hermes-flux/core', '@hermes-flux/ui'],
     sourcemap: true,
   });
+
+  // Batch 6 终极收官服务：项目树、群聊研讨室、Profile 管理与设置中心数据服务
+  for (const serviceName of ['projectOperationService', 'groupOperationService', 'profileManagementService', 'settingsDataService']) {
+    await esbuild.build({
+      entryPoints: [path.join(rootDir, `src/renderer/services/${serviceName}.ts`)],
+      outfile: path.join(rootDir, `dist/renderer/services/${serviceName}.mjs`),
+      bundle: true,
+      platform: 'node',
+      target: 'node20',
+      format: 'esm',
+      external: ['@hermes-flux/core', '@hermes-flux/ui'],
+      sourcemap: true,
+    });
+  }
+  console.log('  ✔ Batch 6 services compiled (projectOperationService, groupOperationService, profileManagementService, settingsDataService)');
   console.log('  ✔ Batch 5 modules compiled (messageWindowManager, renderCoordinator, dropdownKeybindController)');
   console.log('  ✔ Transcript rows + slash catalog + desktop cache bridge + agent presence + prompt nav + cascade + viewport + leftrail + state + inspector + modal + inputDock + sessionOperation + messageLoading + turnExecution + gatewayEventDispatcher modules compiled');
 
