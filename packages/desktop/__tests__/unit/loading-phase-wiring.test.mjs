@@ -14,18 +14,27 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const source = readFileSync(path.resolve(__dirname, '../../src/renderer/index.ts'), 'utf8');
+const indexSource = readFileSync(path.resolve(__dirname, '../../src/renderer/index.ts'), 'utf8');
+const gatewayDispatchPath = path.resolve(__dirname, '../../src/renderer/gateway/gatewayEventDispatcher.ts');
+const gatewayDispatchSource = existsSync(gatewayDispatchPath) ? readFileSync(gatewayDispatchPath, 'utf8') : '';
 
 /** 取函数体片段：从签名起到下一个顶层声明之前。 */
 function bodyOf(signatureMarker) {
-  const start = source.indexOf(signatureMarker);
+  let fileSource = indexSource;
+  let start = fileSource.indexOf(signatureMarker);
+  if (start < 0 || fileSource.slice(start, start + 300).includes('gatewayEventDispatcher.')) {
+    if (gatewayDispatchSource.includes(signatureMarker)) {
+      fileSource = gatewayDispatchSource;
+      start = fileSource.indexOf(signatureMarker);
+    }
+  }
   assert.ok(start >= 0, `找不到函数签名：${signatureMarker}`);
-  const rest = source.slice(start + signatureMarker.length);
+  const rest = fileSource.slice(start + signatureMarker.length);
   const boundary = rest.search(/\n(?:export )?(?:async function |function |const |let |interface |type )/);
   return boundary < 0 ? rest : rest.slice(0, boundary);
 }

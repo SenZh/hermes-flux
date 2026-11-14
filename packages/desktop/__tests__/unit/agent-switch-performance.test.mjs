@@ -22,7 +22,8 @@ const repoRoot = path.resolve(__dirname, '../../../..');
 const read = (relativePath) => readFileSync(path.join(repoRoot, relativePath), 'utf8');
 
 const msgLoadSource = read('packages/desktop/src/renderer/services/messageLoadingService.ts');
-const rendererSource = read('packages/desktop/src/renderer/index.ts') + '\n' + msgLoadSource;
+const gatewayDispatchSource = read('packages/desktop/src/renderer/gateway/gatewayEventDispatcher.ts');
+const rendererSource = read('packages/desktop/src/renderer/index.ts') + '\n' + msgLoadSource + '\n' + gatewayDispatchSource;
 const leftRailSnapshotSource = read('packages/desktop/src/renderer/leftrail/leftRailSnapshotManager.ts');
 const profileRefreshSource = read('packages/desktop/src/renderer/profileRefresh.ts');
 const messageListSource = read('packages/ui/src/components-react/conversation/ConversationMessageList.tsx');
@@ -106,6 +107,6 @@ test('Profile 自动同步 - 定时刷新、可见性守卫与显示名收敛必
   assert.match(profileRefreshSource, /export function profilesDiffer\(/, '缺少 Profile 关键字段差异比较');
   assert.match(rendererSource, /import \{ profilesDiffer \} from '\.\/profileRefresh\.js'/, '渲染层必须消费 Profile 差异比较');
   assert.match(rendererSource, /function syncSessionBotDisplayNames\(/, '服务端改名后必须收敛旧会话的 botDisplayName');
-  assert.match(rendererSource, /startProfileAutoRefresh\(\);/, '连接成功后必须启动定时刷新');
-  assert.match(rendererSource, /stopProfileAutoRefresh\(\);/, '断开连接时必须停止定时刷新');
+  assert.match(rendererSource, /(?:deps\.)?startProfileAutoRefresh\(\);/, '连接成功后必须启动定时刷新');
+  assert.match(rendererSource, /(?:deps\.)?stopProfileAutoRefresh\(\);/, '断开连接时必须停止定时刷新');
 });

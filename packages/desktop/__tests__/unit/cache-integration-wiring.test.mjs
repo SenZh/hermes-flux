@@ -24,10 +24,14 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sessionOpPath = path.resolve(__dirname, '../../src/renderer/services/sessionOperationService.ts');
 const messageLoadPath = path.resolve(__dirname, '../../src/renderer/services/messageLoadingService.ts');
+const turnExecPath = path.resolve(__dirname, '../../src/renderer/services/turnExecutionService.ts');
+const gatewayDispatchPath = path.resolve(__dirname, '../../src/renderer/gateway/gatewayEventDispatcher.ts');
 const rendererSource = [
   readFileSync(path.resolve(__dirname, '../../src/renderer/index.ts'), 'utf8'),
   existsSync(sessionOpPath) ? readFileSync(sessionOpPath, 'utf8') : '',
   existsSync(messageLoadPath) ? readFileSync(messageLoadPath, 'utf8') : '',
+  existsSync(turnExecPath) ? readFileSync(turnExecPath, 'utf8') : '',
+  existsSync(gatewayDispatchPath) ? readFileSync(gatewayDispatchPath, 'utf8') : '',
 ].join('\n');
 
 const countMatches = (re) => (rendererSource.match(re) || []).length;

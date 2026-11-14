@@ -20,6 +20,8 @@ async function buildAll() {
   fs.mkdirSync(path.join(rootDir, 'dist/main'), { recursive: true });
   fs.mkdirSync(path.join(rootDir, 'dist/preload'), { recursive: true });
   fs.mkdirSync(path.join(rootDir, 'dist/renderer'), { recursive: true });
+  fs.mkdirSync(path.join(rootDir, 'dist/renderer/services'), { recursive: true });
+  fs.mkdirSync(path.join(rootDir, 'dist/renderer/gateway'), { recursive: true });
 
   // Tailwind v4 从 UI 组件源码扫描类名，并保留皮肤变量的运行时解析。
   // 设计意图(Why)：bun 把 workspace 依赖就近装在 packages/ui/node_modules，跨包管理器稳健的调用方式是直接 spawn CLI 的 JS 入口，不依赖 .bin shim 的平台后缀。
@@ -371,7 +373,31 @@ async function buildAll() {
     external: ['@hermes-flux/core', '@hermes-flux/ui'],
     sourcemap: true,
   });
-  console.log('  ✔ Transcript rows + slash catalog + desktop cache bridge + agent presence + prompt nav + cascade + viewport + leftrail + state + inspector + modal + inputDock + sessionOperation + messageLoading modules compiled');
+
+  // 回合执行与队列控制服务：从 index.ts 抽出
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/services/turnExecutionService.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/services/turnExecutionService.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+
+  // 网关连接生命周期与 WebSocket 下行事件分发服务：从 index.ts 抽出
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/gateway/gatewayEventDispatcher.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/gateway/gatewayEventDispatcher.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+  console.log('  ✔ Transcript rows + slash catalog + desktop cache bridge + agent presence + prompt nav + cascade + viewport + leftrail + state + inspector + modal + inputDock + sessionOperation + messageLoading + turnExecution + gatewayEventDispatcher modules compiled');
 
   // 4. Copy static assets
   fs.copyFileSync(

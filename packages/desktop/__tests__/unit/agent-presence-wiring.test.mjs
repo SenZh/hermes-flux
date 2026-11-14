@@ -29,10 +29,12 @@ const read = (rel) => fs.readFileSync(path.join(repoRoot, rel), 'utf8');
 const RENDERER = 'packages/desktop/src/renderer/index.ts';
 const PRESENCE_DOMAIN = 'packages/desktop/src/renderer/presence/agentPresenceManager.ts';
 const STATE_DOMAIN = 'packages/desktop/src/renderer/state/appState.ts';
+const TURN_EXEC_DOMAIN = 'packages/desktop/src/renderer/services/turnExecutionService.ts';
 const MIDDLE_POD = 'packages/ui/src/components/MiddlePod/MiddlePod.ts';
 
 const presenceSrc = () => (fs.existsSync(path.join(repoRoot, PRESENCE_DOMAIN)) ? read(PRESENCE_DOMAIN) : read(RENDERER));
 const stateSrc = () => (fs.existsSync(path.join(repoRoot, STATE_DOMAIN)) ? read(STATE_DOMAIN) : read(RENDERER));
+const turnExecSrc = () => (fs.existsSync(path.join(repoRoot, TURN_EXEC_DOMAIN)) ? read(TURN_EXEC_DOMAIN) : read(RENDERER));
 
 test('在场指示器宿主接线守卫', async (t) => {
   await t.test('1. host 挂在 pod 层，且不在 #conversation-stream 内部', () => {
@@ -62,7 +64,7 @@ test('在场指示器宿主接线守卫', async (t) => {
   });
 
   await t.test('3. 终态 TTL 必须成对：arm 内先 clearTimeout，clear 内也清定时器', () => {
-    const src = read(RENDERER);
+    const src = turnExecSrc();
     const armStart = src.indexOf('function armPresenceTerminal');
     assert.ok(armStart >= 0, '必须存在终态装填函数');
     const armBody = src.slice(armStart, src.indexOf('\nfunction ', armStart + 10));

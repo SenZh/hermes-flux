@@ -353,6 +353,10 @@ export const zhDict = {
   'capsule.dismiss': '收起',
   'capsule.openChild': '打开子会话',
   'chat.gatewayNotConnected': '未连接网关，无法执行此操作',
+  'chat.watchdogTimeoutNotice': '上游长时间没有回传本轮结果，已解除发送锁定；如需继续请重新发送', 'chat.interruptedEmpty': '*(已中断本轮生成)*', 'chat.interruptedSuffix': ' *(已中断)*',
+  'chat.turnInterruptedNotice': '本轮生成已中断', 'chat.sendGatewayNotConnected': '未连接网关，无法发送消息', 'chat.turnGeneratingNotice': '当前回合仍在生成中，请等待完成或稍后重试',
+  'chat.noLiveChannelNotice': '当前会话没有可用的实时通道，请重新选择会话后再发送', 'chat.gatewayNotAccepted': '[网关未受理本轮] status={status}', 'chat.submitFailed': '[提交失败] {error}',
+  'chat.turnFailedPrefix': '[回合中断] {message}', 'chat.wsHandshakeFailed': 'WebSocket 连接握手失败: {error}', 'chat.networkError': '网络异常',
   'chat.streamBusyNotice': '当前回合仍在生成中，请等待完成',
   'chat.thought': '推理',
   'chat.thoughtSeconds': '已思考 {seconds} 秒',
@@ -941,9 +945,7 @@ export const zhDict = {
   'gallery.fontCodeLabel': '代码字体（皮肤槽位 --font-mono）',
   'gallery.fontCodeSample': 'hermes gateway --profile default --transport ws',
 } as const;
-
 export type I18nKey = keyof typeof zhDict;
-
 export const enDict: Record<I18nKey, string> = {
   'titlebar.defaultTitle': 'Hermes Flux — Select or create a session',
   'titlebar.notConnected': 'Gateway Disconnected',
@@ -1286,6 +1288,10 @@ export const enDict: Record<I18nKey, string> = {
   'capsule.dismiss': 'Dismiss',
   'capsule.openChild': 'Open child session',
   'chat.gatewayNotConnected': 'Gateway disconnected, action unavailable',
+  'chat.watchdogTimeoutNotice': 'Upstream took too long to respond. Send lock released; please try again if needed', 'chat.interruptedEmpty': '*(Turn generation interrupted)*', 'chat.interruptedSuffix': ' *(Interrupted)*',
+  'chat.turnInterruptedNotice': 'Turn generation interrupted', 'chat.sendGatewayNotConnected': 'Gateway not connected, cannot send message', 'chat.turnGeneratingNotice': 'Turn currently generating, please wait or retry later',
+  'chat.noLiveChannelNotice': 'No active realtime channel for current session, please select a session and retry', 'chat.gatewayNotAccepted': '[Gateway rejected turn] status={status}', 'chat.submitFailed': '[Submit failed] {error}',
+  'chat.turnFailedPrefix': '[Turn interrupted] {message}', 'chat.wsHandshakeFailed': 'WebSocket handshake failed: {error}', 'chat.networkError': 'Network error',
   'chat.streamBusyNotice': 'Turn currently generating, please wait',
   'chat.thought': 'Reasoning',
   'chat.thoughtSeconds': 'Thought for {seconds}s',
@@ -1873,27 +1879,21 @@ export const enDict: Record<I18nKey, string> = {
   'gallery.fontCodeLabel': 'Code font (follows the skin slot --font-mono)',
   'gallery.fontCodeSample': 'hermes gateway --profile default --transport ws',
 };
-
 export type Locale = 'zh-CN' | 'en-US';
-
 export const DICTIONARIES: Record<Locale, Record<I18nKey, string>> = {
   'zh-CN': zhDict,
   'en-US': enDict,
 };
-
 let currentLocale: Locale = 'zh-CN';
-
 export function setLocale(locale: Locale): void {
   currentLocale = locale;
   if (typeof document !== 'undefined') {
     document.documentElement.lang = locale;
   }
 }
-
 export function getLocale(): Locale {
   return currentLocale;
 }
-
 export function t(key: I18nKey, params?: Record<string, string | number>): string {
   const dict = DICTIONARIES[currentLocale] || zhDict;
   let text: string = dict[key] ?? zhDict[key] ?? key;

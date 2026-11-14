@@ -145,6 +145,14 @@ import {
   type AppState,
   createInitialState,
 } from './state/appState.js';
+import {
+  createTurnExecutionService,
+  type TurnExecutionService,
+} from './services/turnExecutionService.js';
+import {
+  createGatewayEventDispatcher,
+  type GatewayEventDispatcher,
+} from './gateway/gatewayEventDispatcher.js';
 
 import {
   HermesGatewayClient,
@@ -2059,8 +2067,7 @@ async function openGroupRoom(roomId: string): Promise<void> {
   const guard = { sessionId: roomId, generation };
 
   // 切换房间时重置线程上下文，避免跨房间误用同一 thread_id
-  activeGroupThreadId = null;
-  activeGroupThreadAt = 0;
+  turnExecutionService.resetActiveGroupThread();
   // 【在场指示器】换房间立刻清空说话者：上一个房间的成员绝不能在新房间被高亮
   state.activeGroupSpeaker = null;
 
@@ -3436,753 +3443,218 @@ async function switchApproval(mode: 'manual' | 'smart' | 'off'): Promise<void> {
 }
 
 
+const turnExecutionService = createTurnExecutionService({
+  getState: () => state,
+  getGatewayClient: () => gatewayClient,
+  getRpcCaller: () => rpcCaller,
+  getInteractiveService: () => interactiveService,
+  getCacheService: () => cacheService,
+  getGroupRoomStore: () => groupRoomStore,
+  getActivityTransitionTracker: () => activityTransitionTracker,
+  getTokenCoalescer: () => tokenCoalescer,
+  getSessionHandleRegistry: () => defaultSessionHandleRegistry,
+  getSessionMessagesCache: () => sessionMessagesCache,
+  getSessionDrafts: () => sessionDrafts,
+  getBotActivityStore: () => botActivityStore,
+  getHandoffService: () => handoffService,
+  completeEntityTurn,
+
+  getActiveRunningSessionIds: () => activeRunningSessionIds,
+  getUnreadSessionIds: () => unreadSessionIds,
+  getActiveRunningBotNames: () => activeRunningBotNames,
+  getUnreadBotNames: () => unreadBotNames,
+  getActiveRunningGroupRoomIds: () => activeRunningGroupRoomIds,
+  getUnreadGroupRoomIds: () => unreadGroupRoomIds,
+
+  getActiveStreamingContext: () => ({
+    activeStreamingMessageId,
+    activeStreamingStoredSessionId,
+    activeStreamingLiveId,
+    activeStreamingBotName,
+  }),
+  setActiveStreamingContext: (ctx) => {
+    if ('activeStreamingMessageId' in ctx) activeStreamingMessageId = ctx.activeStreamingMessageId ?? null;
+    if ('activeStreamingStoredSessionId' in ctx) activeStreamingStoredSessionId = ctx.activeStreamingStoredSessionId ?? null;
+    if ('activeStreamingLiveId' in ctx) activeStreamingLiveId = ctx.activeStreamingLiveId ?? null;
+    if ('activeStreamingBotName' in ctx) activeStreamingBotName = ctx.activeStreamingBotName ?? null;
+  },
+  getTurnStartedSessionId: () => turnStartedSessionId,
+  setTurnStartedSessionId: (id) => { turnStartedSessionId = id; },
+
+  getSessionHistoryTrust: () => sessionHistoryTrust,
+  forgetOlderCursorState: (id) => messageLoadingService.forgetOlderCursorState(id),
+  createNewSession: () => createNewSession(),
+  ensureLiveSessionId: () => ensureLiveSessionId(),
+  setMessageContent: (mid, content) => setMessageContent(mid, content),
+  syncActiveGroupSpeakerFromMessages: () => syncActiveGroupSpeakerFromMessages(),
+  resolveAgentAvatar: (name) => resolveAgentAvatar(name),
+  scrollStreamToBottom: (reason) => scrollStreamToBottom(reason),
+  setPendingScrollToBottom: (val) => { pendingScrollToBottom = val; },
+
+  runSlashCommand: (cmd) => inputDockController.runSlashCommand(cmd),
+  enqueueDraft: () => inputDockController.enqueueDraft(),
+  handleQueueAction: (action, id) => inputDockController.handleQueueAction(action, id),
+
+  render: () => render(),
+  t,
+  logStream,
+});
+
+const groupPollerManager = turnExecutionService.getGroupPollerManager();
+
+const gatewayEventDispatcher = createGatewayEventDispatcher({
+  getState: () => state,
+  getGatewayClient: () => gatewayClient,
+  setGatewayClient: (client) => { gatewayClient = client; },
+  getCurrentTicket: () => currentTicket,
+  setCurrentTicket: (ticket) => { currentTicket = ticket; },
+  getDesktopApi: () => desktopApi,
+  getEffectiveUrl: (url) => getEffectiveUrl(url ?? state.gatewayUrl),
+  testConnection: (url, user, pass) => testConnection(url, user, pass),
+  completeEntityTurn,
+
+  getSessionHandleRegistry: () => defaultSessionHandleRegistry,
+  getSessionMessagesCache: () => sessionMessagesCache,
+  getTokenCoalescer: () => tokenCoalescer,
+  getActivityTransitionTracker: () => activityTransitionTracker,
+  getBotActivityStore: () => botActivityStore,
+  getCacheService: () => cacheService,
+
+  getActiveRunningSessionIds: () => activeRunningSessionIds,
+  getUnreadSessionIds: () => unreadSessionIds,
+  getActiveRunningBotNames: () => activeRunningBotNames,
+  getUnreadBotNames: () => unreadBotNames,
+  getActiveRunningGroupRoomIds: () => activeRunningGroupRoomIds,
+  getUnreadGroupRoomIds: () => unreadGroupRoomIds,
+
+  getActiveStreamingContext: () => ({
+    activeStreamingMessageId,
+    activeStreamingStoredSessionId,
+    activeStreamingLiveId,
+    activeStreamingBotName,
+  }),
+  setActiveStreamingContext: (ctx) => {
+    if ('activeStreamingMessageId' in ctx) activeStreamingMessageId = ctx.activeStreamingMessageId ?? null;
+    if ('activeStreamingStoredSessionId' in ctx) activeStreamingStoredSessionId = ctx.activeStreamingStoredSessionId ?? null;
+    if ('activeStreamingLiveId' in ctx) activeStreamingLiveId = ctx.activeStreamingLiveId ?? null;
+    if ('activeStreamingBotName' in ctx) activeStreamingBotName = ctx.activeStreamingBotName ?? null;
+  },
+  getTurnStartedSessionId: () => turnStartedSessionId,
+  setTurnStartedSessionId: (id) => { turnStartedSessionId = id; },
+
+  stopProfileAutoRefresh: () => stopProfileAutoRefresh(),
+  startProfileAutoRefresh: () => startProfileAutoRefresh(),
+  stopAllGroupPollers: () => groupPollerManager.stopAll(),
+  clearTransitionRefreshTimer: () => clearTransitionRefreshTimer(),
+  clearSessionsRefreshTimer: () => {
+    if (sessionsRefreshTimer) {
+      clearTimeout(sessionsRefreshTimer);
+      sessionsRefreshTimer = null;
+    }
+  },
+  scheduleSessionsRefresh: () => scheduleSessionsRefresh(),
+
+  persistTurnToCache: (sid, bot, msgs) => persistTurnToCache(sid, bot, msgs),
+  persistSessionsToCache: (sessions) => persistSessionsToCache(sessions),
+  syncProfileLastMessages: () => syncProfileLastMessages(),
+  syncAgentPresence: () => syncAgentPresence(),
+  scheduleToolPatch: (mid) => scheduleToolPatch(mid),
+  stopRunningToolTimers: () => stopRunningToolTimers(),
+  setMessageContent: (mid, content) => setMessageContent(mid, content),
+  toStoredSessionId: (id) => toStoredSessionId(id),
+
+  applyColdStartFocus: () => applyColdStartFocus(),
+  fetchProfiles: () => fetchProfiles(),
+  fetchSessions: () => fetchSessions(),
+  fetchGroupRooms: () => fetchGroupRooms(),
+  fetchModelOptions: () => fetchModelOptions(),
+  fetchProjects: () => fetchProjects(),
+  prefetchSlashCatalog: () => inputCompletion.prefetchSlashCatalog(),
+
+  armTurnWatchdog: () => turnExecutionService.armTurnWatchdog(),
+  disarmTurnWatchdog: () => turnExecutionService.disarmTurnWatchdog(),
+  clearPresenceTerminal: () => turnExecutionService.clearPresenceTerminal(),
+  armPresenceTerminal: (terminal) => turnExecutionService.armPresenceTerminal(terminal),
+  setTimedDockNotice: (msg, dur) => turnExecutionService.setTimedDockNotice(msg, dur),
+
+  render: () => render(),
+  t,
+});
+
 /** Force-unlocks the composer if a turn goes silent, so the UI can never latch. */
 function armTurnWatchdog(): void {
-  if (turnWatchdogTimer) clearTimeout(turnWatchdogTimer);
-  turnWatchdogTimer = setTimeout(() => {
-    turnWatchdogTimer = null;
-    if (!state.isStreaming) return;
-    tokenCoalescer.flush();
-    const timedOutSessionId = activeStreamingStoredSessionId;
-    const timedOutBotName = activeStreamingBotName;
-    settleTurnTermination({
-      runningSessionIds: activeRunningSessionIds,
-      runningBotNames: activeRunningBotNames,
-      sessionId: timedOutSessionId,
-      botName: timedOutBotName,
-    });
-    if (timedOutSessionId) activityTransitionTracker.clear('session', timedOutSessionId);
-    if (timedOutBotName) activityTransitionTracker.clear('bot', timedOutBotName);
-    state.isStreaming = false;
-    // 【在场指示器】看门狗解除锁定后回合已不在运行：时长锚点必须一并清空，
-    // 否则指示器会拿着一个早已超时的锚点算出虚高的语气档。
-    state.turnStartedAt = undefined;
-    turnStartedSessionId = null;
-    activeStreamingMessageId = null;
-    activeStreamingStoredSessionId = null;
-    activeStreamingLiveId = null;
-    activeStreamingBotName = null;
-    state.dockNotice = '上游长时间没有回传本轮结果，已解除发送锁定；如需继续请重新发送';
-    render();
-  }, TURN_WATCHDOG_MS);
+  turnExecutionService.armTurnWatchdog();
 }
 
 function disarmTurnWatchdog(): void {
-  if (turnWatchdogTimer) {
-    clearTimeout(turnWatchdogTimer);
-    turnWatchdogTimer = null;
-  }
+  turnExecutionService.disarmTurnWatchdog();
 }
 
 function isStreamingActiveForCurrentSession(): boolean {
-  return Boolean(
-    activeStreamingStoredSessionId &&
-    activeStreamingStoredSessionId === state.activeSessionId &&
-    state.isStreaming
-  );
+  return turnExecutionService.isStreamingActiveForCurrentSession();
 }
 
-/**
- * 在场指示器终态（failed / interrupted）的展示时长。
- *
- * 【设计意图 (Why)】终态需要被看见，但不能永久挂在对话区顶部——它不是历史，是即时反馈。
- * 【约束与规则 (Rules)】8s 是「读得完一句话 + 不会误以为是当前状态」的折中值。
- */
-const PRESENCE_TERMINAL_TTL_MS = 8_000;
-
-/** 终态展示的清理定时器；重复写入必须先清旧定时器（见 armPresenceTerminal 注释）。 */
-let presenceTerminalTimer: ReturnType<typeof setTimeout> | null = null;
-
-/**
- * 清除在场终态并撤销它的退场定时器。
- *
- * 【约束与规则 (Rules)】清 state 与清定时器必须成对出现：只清 state 不清定时器，
- *   定时器到期时会去清一条已经不属于它的终态（若期间又来了新终态就会被提前抹掉）。
- */
 function clearPresenceTerminal(): void {
-  if (presenceTerminalTimer) {
-    clearTimeout(presenceTerminalTimer);
-    presenceTerminalTimer = null;
-  }
-  state.presenceTerminal = undefined;
+  turnExecutionService.clearPresenceTerminal();
 }
 
-/**
- * 写入在场终态并按 TTL 自动退场。
- *
- * 【设计意图 (Why)】
- *   `turn-failed` / `interruptTurn()` 之后流式痕迹立刻消失，若不给终态一段展示窗口，
- *   指示器会直接跳回 idle，用户读不到「为什么停了」。
- *
- * 【防范的历史坑 (Pitfall)】
- *   连续两次失败（或失败后立刻中断）时，若不清旧定时器，**第一个**定时器到期
- *   会把**第二个**终态提前清掉，表现为「终态闪一下就没了」。
- *
- * 【约束与规则 (Rules)】
- *   1. 写入前必须先 `clearTimeout` 旧定时器；
- *   2. 到期回调只清「当前仍是这条终态」的情形——引用比较，避免误伤后续新终态；
- *   3. 到期必须 `render()`，否则 state 变了界面不变（Failure Is Not Silent）。
- */
 function armPresenceTerminal(terminal: NonNullable<AppState['presenceTerminal']>): void {
-  if (presenceTerminalTimer) {
-    clearTimeout(presenceTerminalTimer);
-    presenceTerminalTimer = null;
-  }
-  state.presenceTerminal = terminal;
-  presenceTerminalTimer = setTimeout(() => {
-    presenceTerminalTimer = null;
-    if (state.presenceTerminal !== terminal) return;
-    state.presenceTerminal = undefined;
-    render();
-  }, PRESENCE_TERMINAL_TTL_MS);
+  turnExecutionService.armPresenceTerminal(terminal);
 }
 
 function setTimedDockNotice(msg: string, durationMs = 4000): void {
-  state.dockNotice = msg;
-  // 【防范的历史坑 (Pitfall)】F14：旧实现只写 state.dockNotice 不调 render()，
-  // 依赖调用方顺带 render；Fork/回滚失败等纯提示路径因此永不上屏，用户误判“点了没反应”。
-  // 现显式触发 render，保证任何一条 dock notice 都即时可见。
-  render();
-  if (dockNoticeDismissTimer) {
-    clearTimeout(dockNoticeDismissTimer);
-    dockNoticeDismissTimer = null;
-  }
-  if (msg && durationMs > 0) {
-    dockNoticeDismissTimer = setTimeout(() => {
-      dockNoticeDismissTimer = null;
-      if (state.dockNotice === msg) {
-        state.dockNotice = '';
-        render();
-      }
-    }, durationMs);
-  }
+  turnExecutionService.setTimedDockNotice(msg, durationMs);
 }
 
 /** Asks the gateway to stop the running turn (the composer turns into a stop button). */
 async function interruptTurn(): Promise<void> {
-  const targetLiveId = activeStreamingLiveId || state.activeLiveSessionId;
-  const targetStoredId = activeStreamingStoredSessionId || state.activeSessionId;
-
-  // 1. Immediately force client-side cancellation & flush
-  tokenCoalescer.flush();
-  disarmTurnWatchdog();
-
-  const isCurrent = activeStreamingStoredSessionId === state.activeSessionId;
-  if (isCurrent && activeStreamingMessageId) {
-    const target = state.messages.find((m) => m.id === activeStreamingMessageId);
-    if (target) {
-      if (!target.content) {
-        target.content = '*(已中断本轮生成)*';
-      } else {
-        target.content += ' *(已中断)*';
-      }
-      setMessageContent(activeStreamingMessageId, target.content);
-    }
-  } else if (targetStoredId && activeStreamingMessageId) {
-    const cached = sessionMessagesCache.get(targetStoredId);
-    const target = cached?.find((m) => m.id === activeStreamingMessageId);
-    if (target) {
-      target.content = target.content ? target.content + ' *(已中断)*' : '*(已中断本轮生成)*';
-    }
-  }
-
-  const interruptedSessionId = activeStreamingStoredSessionId;
-  const interruptedBotName = activeStreamingBotName;
-  const interruptedGroupRoomId =
-    !interruptedSessionId && !interruptedBotName && state.activeFocus.type === 'group'
-      ? state.activeFocus.roomId
-      : null;
-  settleTurnTermination({
-    runningSessionIds: activeRunningSessionIds,
-    runningBotNames: activeRunningBotNames,
-    runningGroupRoomIds: activeRunningGroupRoomIds,
-    sessionId: interruptedSessionId,
-    botName: interruptedBotName,
-    groupRoomId: interruptedGroupRoomId,
-  });
-  if (interruptedSessionId) activityTransitionTracker.clear('session', interruptedSessionId);
-  if (interruptedBotName) activityTransitionTracker.clear('bot', interruptedBotName);
-  if (interruptedGroupRoomId) {
-    groupPollerManager.stop(interruptedGroupRoomId);
-    activityTransitionTracker.clear('group', interruptedGroupRoomId);
-  }
-
-  state.isStreaming = false;
-  // 【在场指示器】用户主动中断：落中断终态（TTL 8s 自动退场），让「已停手」被看见一次
-  armPresenceTerminal({ kind: 'interrupted' });
-  activeStreamingMessageId = null;
-  activeStreamingStoredSessionId = null;
-  activeStreamingLiveId = null;
-  activeStreamingBotName = null;
-
-  setTimedDockNotice('本轮生成已中断');
-  render();
-
-  // 2. Notify remote gateway
-  if (gatewayClient && targetLiveId) {
-    try {
-      await gatewayClient.call('session.interrupt', { session_id: targetLiveId });
-    } catch (e) {
-      console.warn('[Hermes Gateway] Remote interrupt notification ignored:', e);
-    }
-  }
+  return turnExecutionService.interruptTurn();
 }
-
-/**
- * 当前群聊线程上下文：15 分钟内的连续发言复用同一 thread_id（与官方桌面端分组规则一致）
- */
-let activeGroupThreadId: string | null = null;
-let activeGroupThreadAt = 0;
-const GROUP_THREAD_GAP_MS = 15 * 60 * 1000;
 
 /** 向托管群聊房间发送一条人类消息（官方 groups.send 契约） */
 async function sendGroupMessage(roomId: string, text: string): Promise<void> {
-  const client = gatewayClient;
-  if (!client) return;
-
-  const now = Date.now();
-  const threadId = activeGroupThreadId && now - activeGroupThreadAt < GROUP_THREAD_GAP_MS
-    ? activeGroupThreadId
-    : undefined;
-  const baseline = captureGroupLogBaseline(groupRoomStore.getLogs(roomId));
-
-  const userMsgId = `grp-usr-${now}`;
-  state.messages.push({
-    id: userMsgId,
-    role: 'user',
-    content: text,
-    timestamp: formatTimestamp(now),
-  });
-  pendingScrollToBottom = true;
-
-  // 即时更新该群聊最新消息副标题与时间戳，并排在列表最前
-  const targetRoom = state.groupRooms.find((r) => r.roomId === roomId);
-  if (targetRoom) {
-    targetRoom.lastMessage = text;
-    targetRoom.updatedAt = now;
-    state.groupRooms = [targetRoom, ...state.groupRooms.filter((r) => r.roomId !== roomId)];
-  }
-  applyTurnStarted(activeRunningGroupRoomIds, unreadGroupRoomIds, roomId);
-  syncActiveGroupSpeakerFromMessages();
-  activityTransitionTracker.clear('group', roomId);
-
-  render();
-  scrollStreamToBottom('group message sent');
-
-  try {
-    const res = await groupRoomStore.sendMessage(roomId, text, 'user', client, { threadId });
-    activeGroupThreadId = res.event?.payload?.thread_id || threadId || null;
-    activeGroupThreadAt = now;
-
-    void refreshGroupRoomLog(roomId);
-    groupPollerManager.startAwaitReply(roomId, baseline);
-  } catch (err) {
-    applyTurnFailed(activeRunningGroupRoomIds, roomId);
-    activityTransitionTracker.clear('group', roomId);
-    console.error('[Flux] groups.send failed:', err);
-    setTimedDockNotice(t('group.sendFailed', { error: describeRpcError(err) }));
-    render();
-  }
+  return turnExecutionService.sendGroupMessage(roomId, text);
 }
 
 function syncGroupRoomLogsToState(roomId: string, logs: readonly GroupMessageEntry[]): void {
-  if (!logs || logs.length === 0) return;
-  const lastEntry = logs[logs.length - 1];
-  const targetRoom = state.groupRooms.find((r) => r.roomId === roomId);
-  if (targetRoom && lastEntry) {
-    targetRoom.lastMessage = lastEntry.text;
-    const rawEntryTs = lastEntry.timestamp || Date.now();
-    targetRoom.updatedAt = typeof rawEntryTs === 'number'
-      ? (rawEntryTs > 1e11 ? rawEntryTs : rawEntryTs * 1000)
-      : Date.now();
-    state.groupRooms = [targetRoom, ...state.groupRooms.filter((r) => r.roomId !== roomId)];
-  }
-  if (state.activeFocus.type === 'group' && state.activeFocus.roomId === roomId) {
-    state.messages = logs.map((entry, idx) => {
-      const senderName = entry.senderProfile || 'Agent';
-      return {
-        id: entry.messageId || `g_msg_${idx}`,
-        role: entry.actorKind === 'user' || entry.senderProfile === 'user' ? 'user' : 'assistant',
-        content: entry.text,
-        sender: senderName,
-        senderAvatar: resolveAgentAvatar(senderName),
-        timestamp: formatTimestamp(entry.timestamp || Date.now()),
-      };
-    });
-    pendingScrollToBottom = true;
-    syncActiveGroupSpeakerFromMessages();
-    render();
-  }
+  turnExecutionService.syncGroupRoomLogsToState(roomId, logs);
 }
 
 /** 回读群聊房间日志并增量刷新中间对话舱 */
 async function refreshGroupRoomLog(roomId: string): Promise<number> {
-  const client = gatewayClient;
-  if (!client) return 0;
-  try {
-    const logs = await groupRoomStore.fetchLogs(roomId, client);
-    syncGroupRoomLogsToState(roomId, logs);
-    return logs.length;
-  } catch (e) {
-    console.warn('[Flux] refreshGroupRoomLog failed:', e);
-    return 0;
-  }
+  return turnExecutionService.refreshGroupRoomLog(roomId);
 }
-
-const groupPollerManager = new GroupLogPollerManager<GroupMessageEntry>({
-  fetchLogs: (roomId) => {
-    if (!gatewayClient) {
-      return Promise.reject(new Error('Gateway not connected'));
-    }
-    return groupRoomStore.fetchLogs(roomId, gatewayClient);
-  },
-  isFocused: (roomId) => state.activeFocus.type === 'group' && state.activeFocus.roomId === roomId,
-  onSyncLogs: (roomId, logs) => {
-    syncGroupRoomLogsToState(roomId, logs);
-  },
-  onCompleted: (roomId, focused) => {
-    completeEntityTurn('group', activeRunningGroupRoomIds, unreadGroupRoomIds, roomId, focused);
-    render();
-  },
-  onFailed: (roomId) => {
-    applyTurnFailed(activeRunningGroupRoomIds, roomId);
-    activityTransitionTracker.clear('group', roomId);
-    render();
-  },
-});
 
 async function sendMessage(text: string): Promise<void> {
-  const trimmed = text.trim();
-  if (!trimmed) return;
-
-  if (!gatewayClient) {
-    setTimedDockNotice('未连接网关，无法发送消息');
-    render();
-    return;
-  }
-
-  // 群聊房间必须走官方 groups.send
-  //
-  // 【防范的历史坑 (Pitfall)】
-  // 群聊的 roomId 不是 session_id。若沿用普通会话的 prompt.submit 通道，
-  // 网关会把它当成会话去查，直接返回 `[4001] session not found`。
-  if (state.activeFocus.type === 'group') {
-    await sendGroupMessage(state.activeFocus.roomId, trimmed);
-    return;
-  }
-
-  // A latched busy flag used to swallow every later message without feedback.
-  if (state.isStreaming) {
-    setTimedDockNotice('当前回合仍在生成中，请等待完成或稍后重试');
-    render();
-    return;
-  }
-
-  if (!state.activeSessionId) {
-    await createNewSession();
-  }
-
-  const liveId = await ensureLiveSessionId();
-  if (!liveId) {
-    setTimedDockNotice('当前会话没有可用的实时通道，请重新选择会话后再发送');
-    render();
-    return;
-  }
-
-  state.dockNotice = '';
-
-  // 挂起回滚事务：发送时以持久锚点重算切点，乐观裁撤本地尾部并保存快照供失败恢复。
-  // 截断 wire 载荷一律由 core InteractiveService 单点构造，渲染层绝不手拼 truncate 字段。
-  const armed =
-    state.rollbackArmed && state.rollbackArmed.sessionId === state.activeSessionId
-      ? state.rollbackArmed
-      : null;
-  let armedSnapshotForRestore: MessageViewModel[] | null = null;
-  let armedRowId: number | null = null;
-  if (armed && armed.anchor.kind === 'row') {
-    // 两段式设计：点击回滚时已乐观裁撤（state.messages 已无该锚点行），
-    // 故此处 resolveCutIndexByAnchor 返回 -1 是常态、不代表"无锚点降级"。
-    // armedRowId 始终携带交由网关做权威截断校验；截断失败由下方 catch 原子恢复快照。
-    // 这里再次 slice 仅覆盖"回滚后又有历史加载把该锚点行带回本地"的边缘情形。
-    armedRowId = armed.anchor.rowId;
-    armedSnapshotForRestore = armed.snapshot.map((m) => ({ ...m }));
-    const cut = resolveCutIndexByAnchor(state.messages, armed.anchor);
-    if (cut >= 0) {
-      state.messages = state.messages.slice(0, cut);
-    }
-  }
-  state.rollbackArmed = null;
-
-  // 处理附件：若输入框暂存了图片或文档，提取图文清单并显式赋予结构化标号（如 Image 1, Doc 1）
-  const currentAttachments = [...state.attachments];
-  state.attachments = [];
-  let finalText = trimmed;
-  if (currentAttachments.length > 0) {
-    let imgCount = 0;
-    let docCount = 0;
-    const attachmentLines = currentAttachments.map((att) => {
-      const isImg = att.type === 'image';
-      if (isImg) imgCount++;
-      else docCount++;
-      const label = att.label || (isImg ? `Image ${imgCount}` : `Doc ${docCount}`);
-      return `- ${label}: ${att.name}`;
-    });
-    finalText = `[${t('dock.attachmentHeader')}]\n${attachmentLines.join('\n')}\n\n${trimmed}`;
-  }
-
-  if (state.activeSessionId) {
-    sessionDrafts.delete(state.activeSessionId);
-  }
-
-  const userMsgId = `usr-${Date.now()}`;
-  const userMsg: MessageViewModel = {
-    id: userMsgId,
-    role: 'user',
-    content: trimmed,
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-  };
-  state.messages.push(userMsg);
-
-  const assistantMsgId = `ast-${Date.now()}`;
-  activeStreamingMessageId = assistantMsgId;
-  activeStreamingStoredSessionId = state.activeSessionId;
-  activeStreamingLiveId = liveId;
-  if (liveId && state.activeSessionId) {
-    defaultSessionHandleRegistry.register({ liveId, storedId: state.activeSessionId });
-  }
-  if (state.activeSessionId) {
-    // 回合开始：进入 running 并当场清除该会话的历史未读残留（禁止"运行中 + 未读绿点"并存）
-    applyTurnStarted(activeRunningSessionIds, unreadSessionIds, state.activeSessionId);
-    activityTransitionTracker.clear('session', state.activeSessionId);
-    // 即时更新当前会话的最新消息副标题与时间戳，并排在会话列表最前
-    const activeSess = state.sessions.find((s) => s.id === state.activeSessionId);
-    if (activeSess) {
-      activeSess.preview = trimmed;
-      activeSess.timestamp = Date.now();
-      activeSess.time = formatTimestamp(Date.now());
-      state.sessions = [activeSess, ...state.sessions.filter((s) => s.id !== activeSess.id)];
-    }
-  }
-
-  // 状态严格独立：仅当用户处于 Bot 专属工位时，才标记该 Bot 处于运行态
-  const currentFocus = state.activeFocus;
-  activeStreamingBotName = currentFocus.type === 'bot' ? currentFocus.botName : null;
-  if (currentFocus.type === 'bot') {
-    applyTurnStarted(activeRunningBotNames, unreadBotNames, currentFocus.botName);
-    activityTransitionTracker.clear('bot', currentFocus.botName);
-    const focusBotName = currentFocus.botName;
-    const nowMs = Date.now();
-    botActivityStore.updateLatestActivity(focusBotName, trimmed, nowMs);
-  }
-
-  const assistantMsg: MessageViewModel = {
-    id: assistantMsgId,
-    role: 'assistant',
-    content: '',
-    thought: '',
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-  };
-  state.messages.push(assistantMsg);
-
-  // Sync session cache
-  sessionMessagesCache.set(state.activeSessionId, [...state.messages]);
-
-  state.isStreaming = true;
-  // 【在场指示器】乐观发送路径同样要立起时长锚点，否则本地先上屏的回合没有时长分层
-  state.turnStartedAt = Date.now();
-  turnStartedSessionId = state.activeSessionId;
-  clearPresenceTerminal();
-  tokenCoalescer.clear();
-  armTurnWatchdog();
-  pendingScrollToBottom = true;
-  render();
-  scrollStreamToBottom('message sent');
-  logStream.info('turn started', { session: state.activeLiveSessionId, chars: trimmed.length });
-
-  try {
-    // 挂载图片附件（若存在）
-    for (const att of currentAttachments) {
-      if (att.type === 'image' && att.previewUrl?.startsWith('data:')) {
-        const base64Data = att.previewUrl.split(',')[1];
-        if (base64Data) {
-          try {
-            await gatewayClient.call<AttachedImageResult>('image.attach_bytes', {
-              session_id: liveId,
-              content_base64: base64Data,
-              filename: att.name,
-            });
-          } catch (e) {
-            logStream.warn('image.attach_bytes failed, continuing with prompt manifest', { error: String(e) });
-          }
-        }
-      }
-    }
-
-    // `reasoning_effort` is not part of PromptSubmitParams on this gateway
-    // (it answers 4000 / Extra inputs), so reasoning is configured through
-    // config.set instead of being smuggled into the submit payload.
-    let submitResult: PromptSubmitResult;
-    if (armedRowId !== null) {
-      // 回滚截断走 core 单点构造，持久 rowId 锚点唯一，杜绝临时 id 逃逸
-      submitResult = await interactiveService.truncateAndSubmit(rpcCaller, {
-        sessionId: liveId,
-        text: finalText,
-        rowId: armedRowId,
-      });
-    } else {
-      submitResult = await gatewayClient.call<PromptSubmitResult>('prompt.submit', {
-        session_id: liveId,
-        text: finalText,
-      });
-    }
-
-    // 截断/新轮成功后立刻把网关签发的权威 rowId 绑定回本地乐观用户行，形成下次回滚锚点
-    if (typeof submitResult?.user_row_id === 'number' && submitResult.user_row_id > 0) {
-      userMsg.rowId = submitResult.user_row_id;
-      if (state.activeSessionId) {
-        const cached = sessionMessagesCache.get(state.activeSessionId);
-        const cachedUser = cached?.find((m) => m.id === userMsg.id);
-        if (cachedUser) cachedUser.rowId = submitResult.user_row_id;
-      }
-    }
-    if (armedRowId !== null && state.activeSessionId) {
-      // 截断成功：本会话历史以服务端为准，禁用“本地更长则保留”合并守卫，防已删消息复活
-      sessionHistoryTrust.set(state.activeSessionId, 'server-priority');
-      forgetOlderCursorState(state.activeSessionId);
-      state.hasOlderMessages = false;
-
-      // 截断成功同步驱逐持久化缓存中的被截断消息（定理 24，彻底避免冷启动复活）
-      let survivorMap: Map<number, number | null> | null = null;
-      if (submitResult?.survivor_row_id_map && typeof submitResult.survivor_row_id_map === 'object') {
-        survivorMap = new Map();
-        for (const [k, v] of Object.entries(submitResult.survivor_row_id_map)) {
-          const numKey = Number(k);
-          if (Number.isFinite(numKey)) {
-            survivorMap.set(numKey, typeof v === 'number' && Number.isFinite(v) ? v : null);
-          }
-        }
-      }
-      const truncateCacheRef: CacheChannelRef = {
-        profile: activeStreamingBotName || state.profileName || 'default',
-        channel: 'session',
-        channelId: state.activeSessionId,
-      };
-      void cacheService.truncate(truncateCacheRef, armedRowId, survivorMap).catch((e) => {
-        console.warn('[Flux:cache] truncate cache failed:', e);
-      });
-    }
-
-    if (submitResult?.status && submitResult.status !== 'streaming' && submitResult.status !== 'queued') {
-      assistantMsg.content = `[网关未受理本轮] status=${String(submitResult.status)}`;
-      state.isStreaming = false;
-      armPresenceTerminal({ kind: 'failed', message: `status=${String(submitResult.status)}` });
-      if (activeStreamingStoredSessionId) {
-        applyTurnFailed(activeRunningSessionIds, activeStreamingStoredSessionId);
-        activityTransitionTracker.clear('session', activeStreamingStoredSessionId);
-      }
-      if (activeStreamingBotName) {
-        applyTurnFailed(activeRunningBotNames, activeStreamingBotName);
-        activityTransitionTracker.clear('bot', activeStreamingBotName);
-        activeStreamingBotName = null;
-      }
-      activeStreamingMessageId = null;
-      activeStreamingStoredSessionId = null;
-      activeStreamingLiveId = null;
-      disarmTurnWatchdog();
-      // 网关未受理且有挂起回滚：按快照原子恢复，草稿绝不丢失
-      if (armedSnapshotForRestore && state.activeSessionId) {
-        state.messages = armedSnapshotForRestore;
-        sessionMessagesCache.set(state.activeSessionId, [...state.messages]);
-        setTimedDockNotice(t('chat.rollbackFailed', { reason: String(submitResult?.status ?? '') }));
-      }
-      render();
-    }
-  } catch (err) {
-    console.error('[Hermes Gateway] prompt.submit failed:', err);
-    assistantMsg.content = `[提交失败] ${describeRpcError(err)}`;
-    state.isStreaming = false;
-    armPresenceTerminal({ kind: 'failed', message: describeRpcError(err) });
-    if (activeStreamingStoredSessionId) {
-      applyTurnFailed(activeRunningSessionIds, activeStreamingStoredSessionId);
-      activityTransitionTracker.clear('session', activeStreamingStoredSessionId);
-    }
-    if (activeStreamingBotName) {
-      applyTurnFailed(activeRunningBotNames, activeStreamingBotName);
-      activityTransitionTracker.clear('bot', activeStreamingBotName);
-      activeStreamingBotName = null;
-    }
-    activeStreamingMessageId = null;
-    activeStreamingStoredSessionId = null;
-    activeStreamingLiveId = null;
-    disarmTurnWatchdog();
-    // 截断失败自愈：恢复乐观裁撤前快照，用户可见“消息回来了 + 草稿还在”，杜绝静默丢历史
-    if (armedSnapshotForRestore && state.activeSessionId) {
-      state.messages = armedSnapshotForRestore;
-      sessionMessagesCache.set(state.activeSessionId, [...state.messages]);
-      setTimedDockNotice(t('chat.rollbackFailed', { reason: describeRpcError(err) }));
-    }
-    render();
-  }
+  return turnExecutionService.sendMessage(text);
 }
 
-/**
- * 发送主分流入口（D4）。渲染层不再自行解析 '@'，统一交给 core planSendRoute 裁决，
- * 三态分别落 prompt.background / prompt.btw / groups.send，无提及走普通 prompt.submit。
- * 【防范的历史坑 (Pitfall)】旧实现把 "@架构王 ..." 原文当普通提问 prompt.submit，
- * 模型收到自然语言里的 @ 便答复"无法调用"，且从不调度被呼叫的 Agent。
- */
 async function routeSend(text: string): Promise<void> {
-  const sessionKind = deriveSessionKind(state.activeFocus);
-  const knownProfiles = state.profiles.map((p) => p.name);
-  for (const p of state.profiles) {
-    if (p.displayName) knownProfiles.push(p.displayName);
-  }
-  const route = planSendRoute({
-    text,
-    sessionKind,
-    knownProfiles,
-    pickedMentionToken: state.pickedMention?.profile ?? null,
-  });
-  state.pickedMention = null;
-
-  switch (route.kind) {
-    case 'plain':
-      if (route.text.startsWith('/') && gatewayClient) {
-        await runSlashCommand(route.text);
-        return;
-      }
-      await sendMessage(route.text);
-      return;
-    case 'group-message':
-      if (state.activeFocus.type === 'group') await sendGroupMessage(state.activeFocus.roomId, route.text);
-      else await sendMessage(route.text);
-      return;
-    case 'mention-group':
-      if (state.activeFocus.type === 'group') await sendGroupMessage(state.activeFocus.roomId, route.text);
-      return;
-    case 'mention-btw':
-      await askSideAgent('btw', route.targetProfile, route.cleanText);
-      return;
-    case 'mention-subagent':
-      await askSideAgent('delegation', route.targetProfile, route.cleanText);
-      return;
-    default: {
-      // 穷尽守卫：新增 SendRoute 变体若未在此处理，编译期即失败，绝不静默吞消息
-      const exhaustive: never = route;
-      void exhaustive;
-      return;
-    }
-  }
+  return turnExecutionService.routeSend(text);
 }
 
-/**
- * 把当前草稿加入待发送队列（运行中专用）。
- *
- * 【设计意图 (Why)】
- *   运行中用户仍可继续写，主按钮此时是「加入队列」：草稿交给网关排到 FIFO 尾部，
- *   由服务端在回合结束后接续执行。客户端不自己维护队列真相，只把准入回执写进展示态。
- *
- * 【约束与规则 (Rules)】
- *   1. 走 `prompt.submit` 的 `queued: true`，不另开 RPC；
- *   2. 成功后按 `admission_id` 追加一条展示行，文本取提交前的草稿；
- *   3. 失败必须显式提示并保留草稿，绝不静默清空。
- */
 async function enqueueDraft(): Promise<void> {
-  await inputDockController.enqueueDraft();
+  return turnExecutionService.enqueueDraft();
 }
 
 async function handleQueueAction(action: string, admissionId: string): Promise<void> {
-  await inputDockController.handleQueueAction(action, admissionId);
+  return turnExecutionService.handleQueueAction(action, admissionId);
 }
 
 async function runSlashCommand(command: string): Promise<void> {
-  await inputDockController.runSlashCommand(command);
+  return inputDockController.runSlashCommand(command);
 }
 
-/** 旁路呼叫：BTW 只读外援 / 子代理委派。结果以独立胶囊呈现，严禁混入主消息流。 */
 async function askSideAgent(
   kind: 'btw' | 'delegation',
   targetProfile: string,
   question: string
 ): Promise<void> {
-  if (!gatewayClient) {
-    setTimedDockNotice(t('chat.gatewayNotConnected'));
-    return;
-  }
-  const liveId = await ensureLiveSessionId();
-  if (!liveId) {
-    setTimedDockNotice(t('chat.forkNoLive'));
-    render();
-    return;
-  }
-
-  // 解析 displayName → 真实 profile name（BTW/background 需要网关 profile 实名）
-  const resolved =
-    state.profiles.find((p) => p.name === targetProfile || p.displayName === targetProfile)?.name || targetProfile;
-
-  try {
-    let taskId: string;
-    if (kind === 'btw') {
-      const res = await handoffService.sendBtw(liveId, question, resolved, rpcCaller);
-      taskId = res.task_id;
-    } else {
-      const res = await gatewayClient.call<{ task_id?: string }>('prompt.background', {
-        session_id: liveId,
-        text: question,
-        profile: resolved,
-      });
-      if (!res?.task_id) throw new Error('prompt.background missing task_id');
-      taskId = res.task_id;
-    }
-
-    state.sideAgentCapsules = [
-      ...state.sideAgentCapsules,
-      {
-        id: taskId,
-        kind,
-        profile: resolved,
-        question,
-        status: 'pending',
-        startedAt: Date.now(),
-      },
-    ];
-    armCapsuleTimers(taskId);
-    render();
-  } catch (err) {
-    state.sideAgentCapsules = [
-      ...state.sideAgentCapsules,
-      {
-        id: `failed-${Date.now()}`,
-        kind,
-        profile: resolved,
-        question,
-        status: 'failed',
-        startedAt: Date.now(),
-        notice: describeRpcError(err),
-      },
-    ];
-    render();
-  }
+  return turnExecutionService.askSideAgent(kind, targetProfile, question);
 }
 
-/** 胶囊两档超时：15 秒提示仍在等待，10 分钟置 expired，杜绝永远转圈 */
 function armCapsuleTimers(taskId: string): void {
-  const cap = state.sideAgentCapsules.find((c) => c.id === taskId);
-  if (!cap) return;
-  cap.hintTimer = setTimeout(() => {
-    const c = state.sideAgentCapsules.find((x) => x.id === taskId);
-    if (c && c.status === 'pending') {
-      c.notice = t('capsule.slowHint');
-      render();
-    }
-  }, 15000);
-  cap.expireTimer = setTimeout(() => {
-    const c = state.sideAgentCapsules.find((x) => x.id === taskId);
-    if (c && c.status === 'pending') {
-      c.status = 'expired';
-      render();
-    }
-  }, 600000);
+  turnExecutionService.armCapsuleTimers(taskId);
 }
 
 /**
@@ -4239,571 +3711,24 @@ function setMessageContent(messageId: string, text: string): void {
 
 /** Applies the actions produced by the pure gateway-event reducer. */
 function applyTurnActions(actions: TurnAction[]): void {
-  let needsRender = false;
-  let finalReplace: { messageId: string; text: string } | null = null;
-
-  for (const action of actions) {
-    switch (action.type) {
-      case 'turn-started':
-        if (!state.isStreaming) {
-          state.isStreaming = true;
-          needsRender = true;
-        }
-        // 【在场指示器】新回合开始：重置时长锚点并清掉上一轮的终态残留
-        state.turnStartedAt = Date.now();
-        turnStartedSessionId = activeStreamingStoredSessionId || state.activeSessionId;
-        clearPresenceTerminal();
-        armTurnWatchdog();
-        break;
-
-      case 'append-content':
-        tokenCoalescer.push({ messageId: action.messageId, delta: action.text, isThought: false });
-        break;
-
-      case 'append-thought':
-        tokenCoalescer.push({ messageId: action.messageId, delta: action.text, isThought: true });
-        break;
-
-      case 'tool-start': {
-        const now = Date.now();
-        const target = state.messages.find((m) => m.id === action.messageId);
-        if (target) {
-          if (!target.toolCalls) target.toolCalls = [];
-          // 同 id 重复 start 不新建第二枚胶囊（状态机收敛不变量，定理 10）
-          if (!target.toolCalls.some((tc) => tc.id === action.toolCall.id)) {
-            target.toolCalls.push({
-              id: action.toolCall.id,
-              name: action.toolCall.name,
-              status: 'running',
-              args: action.toolCall.args,
-              startTime: now,
-            });
-          }
-          // 流式期间增量直写工具插槽，绕开被短路的 messagesChanged 全量重建
-          scheduleToolPatch(action.messageId);
-        }
-        // Also update background cache if not focused
-        if (activeStreamingStoredSessionId) {
-          const cached = sessionMessagesCache.get(activeStreamingStoredSessionId);
-          const cachedTarget = cached?.find((m) => m.id === action.messageId);
-          if (cachedTarget) {
-            if (!cachedTarget.toolCalls) cachedTarget.toolCalls = [];
-            if (!cachedTarget.toolCalls.some((t) => t.id === action.toolCall.id)) {
-              cachedTarget.toolCalls.push({
-                id: action.toolCall.id,
-                name: action.toolCall.name,
-                status: 'running',
-                args: action.toolCall.args,
-                startTime: now,
-              });
-            }
-          }
-        }
-        break;
-      }
-
-      case 'tool-complete': {
-        const now = Date.now();
-        const updateTc = (target?: MessageViewModel) => {
-          if (target && target.toolCalls) {
-            const tc = target.toolCalls.find((t) => action.toolCallId && t.id === action.toolCallId);
-            // 契约 tool_id 精确匹配；未命中不再兜底改最近 running（防并发工具串态），仅记日志
-            if (tc) {
-              tc.status = 'completed';
-              if (action.output) {
-                tc.output = typeof action.output === 'object' ? JSON.stringify(action.output, null, 2) : String(action.output);
-              }
-              const serverMs = action.durationMs;
-              if (typeof serverMs === 'number' && serverMs >= 0) {
-                tc.durationMs = tc.durationMs !== undefined ? Math.max(tc.durationMs, serverMs) : serverMs;
-              } else if (tc.startTime) {
-                const computed = Math.max(100, now - tc.startTime);
-                tc.durationMs = tc.durationMs !== undefined ? Math.max(tc.durationMs, computed) : computed;
-              }
-            }
-          }
-        };
-
-        const target = state.messages.find((m) => m.id === action.messageId);
-        if (target) {
-          updateTc(target);
-          scheduleToolPatch(action.messageId);
-        }
-        if (activeStreamingStoredSessionId) {
-          const cached = sessionMessagesCache.get(activeStreamingStoredSessionId);
-          updateTc(cached?.find((m) => m.id === action.messageId));
-        }
-        break;
-      }
-
-      case 'persisted-turn': {
-        // 回合落盘权威行地址：把网关 rowId 绑定回本地乐观的 user / assistant 行，
-        // 使下一轮回滚拥有可信持久锚点（D1 半环，杜绝把 usr- 临时 id 当锚点触发 4018）。
-        let changed = bindTurnRowIds({
-          messages: state.messages,
-          assistantMessageId: action.messageId,
-          userRowId: action.userRowId,
-          assistantRowId: action.assistantRowId,
-          rowIds: action.rowIds,
-        });
-
-        if (activeStreamingStoredSessionId) {
-          const cached = sessionMessagesCache.get(activeStreamingStoredSessionId);
-          if (cached && cached !== state.messages) {
-            const cachedChanged = bindTurnRowIds({
-              messages: cached,
-              assistantMessageId: action.messageId,
-              userRowId: action.userRowId,
-              assistantRowId: action.assistantRowId,
-              rowIds: action.rowIds,
-            });
-            if (cachedChanged) changed = true;
-          }
-        }
-
-        if (changed) {
-          needsRender = true;
-          const targetSessionId = activeStreamingStoredSessionId || state.activeSessionId;
-          const msgsToPersist = targetSessionId === state.activeSessionId ? state.messages : (sessionMessagesCache.get(targetSessionId) || []);
-          if (targetSessionId && msgsToPersist.length > 0) {
-            persistTurnToCache(targetSessionId, activeStreamingBotName, msgsToPersist);
-          }
-        }
-        break;
-      }
-
-      case 'replace-content':
-        // Deferred: buffered deltas must be flushed first, otherwise they would be
-        // appended on top of the authoritative text.
-        finalReplace = { messageId: action.messageId, text: action.text };
-        break;
-
-      case 'turn-completed':
-        tokenCoalescer.flush();
-        stopRunningToolTimers();
-        if (finalReplace) {
-          const replacement = finalReplace;
-          setMessageContent(replacement.messageId, replacement.text);
-          // Sync cache if completed in background
-          if (activeStreamingStoredSessionId) {
-            const cached = sessionMessagesCache.get(activeStreamingStoredSessionId);
-            const target = cached?.find((m) => m.id === replacement.messageId);
-            if (target) target.content = replacement.text;
-          }
-        }
-        // 当回合终结时，所有消息内部若仍残留 status === 'running' 的工具，强制收拢为 completed 保证状态自愈
-        for (const msg of state.messages) {
-          if (msg.toolCalls) {
-            for (const tc of msg.toolCalls) {
-              if (tc.status === 'running') {
-                tc.status = 'completed';
-                if (tc.startTime && !tc.durationMs) {
-                  tc.durationMs = Math.max(100, Date.now() - tc.startTime);
-                }
-              }
-            }
-          }
-        }
-        const rawTargetId = action.sessionId || activeStreamingStoredSessionId;
-        const completedTargetId = toStoredSessionId(rawTargetId);
-        if (completedTargetId) {
-          // 回合完成：退出 running；焦点不在该会话时置未读（显式传入焦点判定，禁止函数内从全局反推）
-          const isFocused = completedTargetId === state.activeSessionId;
-          completeEntityTurn('session', activeRunningSessionIds, unreadSessionIds, completedTargetId, isFocused);
-          // 【核心隔离固化】仅当当前焦点处于该会话时，state.messages 才属于该会话！
-          // 若用户已切到其他会话，绝不能拿当前会话的 state.messages 去覆盖后台会话的缓存！
-          if (isFocused) {
-            sessionMessagesCache.set(completedTargetId, [...state.messages]);
-          }
-          const msgsToPersist = isFocused ? state.messages : (sessionMessagesCache.get(completedTargetId) || []);
-          if (msgsToPersist.length > 0) {
-            persistTurnToCache(completedTargetId, activeStreamingBotName, msgsToPersist);
-          }
-          const completedSess = state.sessions.find((s) => s.id === completedTargetId);
-          if (completedSess) {
-            const finalMsg = isFocused
-              ? (state.messages.length > 0 ? state.messages[state.messages.length - 1] : null)
-              : (sessionMessagesCache.get(completedTargetId)?.slice(-1)[0] || null);
-            if (finalMsg?.content) {
-              completedSess.preview = finalMsg.content;
-            }
-            completedSess.timestamp = Date.now();
-            completedSess.time = formatTimestamp(Date.now());
-            state.sessions = [completedSess, ...state.sessions.filter((s) => s.id !== completedSess.id)];
-            persistSessionsToCache(state.sessions);
-          }
-        }
-        // 状态严格独立：用"回合发起时的 Bot"收尾，与当前焦点解耦。
-        // 用户切走后仍能正确退出 running 并置未读；仍停在该 Bot 工位则直接已读。
-        if (activeStreamingBotName) {
-          const isBotFocused = state.activeFocus.type === 'bot' && state.activeFocus.botName === activeStreamingBotName;
-          const finalMsg = isBotFocused
-            ? (state.messages.length > 0 ? state.messages[state.messages.length - 1] : null)
-            : (activeStreamingStoredSessionId ? sessionMessagesCache.get(activeStreamingStoredSessionId)?.slice(-1)[0] || null : null);
-          if (finalMsg?.content) {
-            botActivityStore.updateLatestActivity(activeStreamingBotName, finalMsg.content, Date.now());
-          }
-          completeEntityTurn('bot', activeRunningBotNames, unreadBotNames, activeStreamingBotName, isBotFocused);
-          activeStreamingBotName = null;
-        }
-        syncProfileLastMessages();
-        state.isStreaming = false;
-        // 【在场指示器】回合正常结束：时长锚点与终态都必须归零，否则指示器会停在上一轮的时长档位上
-        state.turnStartedAt = undefined;
-        turnStartedSessionId = null;
-        clearPresenceTerminal();
-        activeStreamingMessageId = null;
-        activeStreamingStoredSessionId = null;
-        activeStreamingLiveId = null;
-        disarmTurnWatchdog();
-        needsRender = true;
-        break;
-
-      case 'turn-failed': {
-        tokenCoalescer.flush();
-        stopRunningToolTimers();
-        const pendingMsg = activeStreamingMessageId
-          ? state.messages.find((m) => m.id === activeStreamingMessageId)
-          : undefined;
-        if (pendingMsg && !pendingMsg.content) {
-          pendingMsg.content = `[回合中断] ${action.message}`;
-        }
-        const rawFailedId = action.sessionId || activeStreamingStoredSessionId;
-        const failedTargetId = toStoredSessionId(rawFailedId);
-        if (failedTargetId) {
-          // 回合失败：退出 running，但绝不置未读（失败没有可查看的成果）
-          applyTurnFailed(activeRunningSessionIds, failedTargetId);
-          activityTransitionTracker.clear('session', failedTargetId);
-        }
-        if (activeStreamingBotName) {
-          applyTurnFailed(activeRunningBotNames, activeStreamingBotName);
-          activityTransitionTracker.clear('bot', activeStreamingBotName);
-          activeStreamingBotName = null;
-        }
-        syncProfileLastMessages();
-        state.isStreaming = false;
-        // 【在场指示器】失败是终态：先落终态快照（TTL 后自动退场），再收尾流式状态
-        armPresenceTerminal({ kind: 'failed', message: action.message });
-        activeStreamingMessageId = null;
-        activeStreamingStoredSessionId = null;
-        activeStreamingLiveId = null;
-        setTimedDockNotice(action.message);
-        disarmTurnWatchdog();
-        needsRender = true;
-        break;
-      }
-
-      case 'refresh-sessions':
-        scheduleSessionsRefresh();
-        break;
-
-      case 'session-title':
-        state.sessions = applySessionTitle(state.sessions, action.sessionId, action.title);
-        needsRender = true;
-        break;
-
-      case 'side-agent-complete': {
-        // 旁路应答只更新独立胶囊状态，绝不写入 state.messages / 会话缓存（防上下文毒化）
-        const capsule = state.sideAgentCapsules.find((c) => c.id === action.taskId);
-        if (capsule) {
-          capsule.status = action.text ? 'done' : 'failed';
-          capsule.answer = action.text || undefined;
-          if (capsule.hintTimer) { clearTimeout(capsule.hintTimer); capsule.hintTimer = undefined; }
-          if (capsule.expireTimer) { clearTimeout(capsule.expireTimer); capsule.expireTimer = undefined; }
-          needsRender = true;
-        }
-        break;
-      }
-    }
-  }
-
-  if (needsRender) render();
-  // 【在场指示器】事件驱动的即时推送：工具开始/结束与正文/思考切换不一定会触发全量 render
-  // （token 走 coalescer 直写、工具插槽走 rAF 补丁），若只靠 1s 节拍器，工具态会晚一拍才出现。
-  syncAgentPresence();
+  gatewayEventDispatcher.applyTurnActions(actions);
 }
 
 /** Inspector-side events (artifacts, browser frames, workspace diffs). */
 function handleInspectorEvent(params: unknown): void {
-  if (!params || typeof params !== 'object') return;
-  const frame = params as { type?: unknown; payload?: Record<string, any> };
-  const type = typeof frame.type === 'string' ? frame.type : '';
-  const payload = frame.payload || {};
-  if (!type) return;
-
-  if (type === 'artifact.created' || type === 'artifact.updated') {
-    if (!payload.id || !payload.name) return;
-    const existing = state.artifacts.find((a) => a.id === payload.id);
-    if (existing) {
-      Object.assign(existing, payload);
-    } else {
-      state.artifacts.unshift({
-        id: payload.id,
-        name: payload.name,
-        type: payload.type || 'FILE',
-        size: payload.size || '1KB',
-        preview: payload.preview || '',
-      });
-    }
-    render();
-    return;
-  }
-
-  if ((type === 'browser.frame' || type === 'browser.navigate') && payload.url) {
-    state.browserFrame = {
-      url: payload.url,
-      title: payload.title || 'Page',
-      screenshotUrl: payload.screenshotUrl || payload.screenshot,
-    };
-    render();
-    return;
-  }
-
-  if ((type === 'git.diff' || type === 'workspace.diff') && Array.isArray(payload.diffs)) {
-    state.gitDiffs = payload.diffs;
-    render();
-  }
+  gatewayEventDispatcher.handleInspectorEvent(params);
 }
 
-let connectionEpoch = 0;
+function getConnectionEpoch(): number {
+  return gatewayEventDispatcher.getConnectionEpoch();
+}
 
 async function connect(targetUrl?: string): Promise<void> {
-  const epoch = ++connectionEpoch;
-
-  // 1. 彻底断开旧客户端，停止一切在途重连定时器与后台网络噪音
-  stopProfileAutoRefresh();
-  if (gatewayClient) {
-    gatewayClient.disconnect();
-    gatewayClient = null;
-  }
-
-  if (targetUrl) {
-    state.gatewayUrl = targetUrl;
-  }
-
-  // 空地址不建立连接：地址必须由用户显式填写，首次启动停留在连接面板
-  if (!getEffectiveUrl(state.gatewayUrl)) {
-    state.gatewayConnected = false;
-    state.gatewayConnecting = false;
-    // 不会发起任何拉取，就绝不能停在骨架相位：否则永久假加载。
-    state.profilesPhase = 'ready';
-    state.sessionsPhase = 'ready';
-    state.messagesPhase = 'ready';
-    state.testStatus = undefined;
-    void applyColdStartFocus();
-    render();
-    return;
-  }
-
-  // 确保新目标地址即时持久化，杜绝回退老地址
-  localStorage.setItem('hermes_flux_gateway_url', state.gatewayUrl);
-  localStorage.setItem('hermes_flux_username', state.username);
-  localStorage.setItem('hermes_flux_password', state.password);
-  localStorage.setItem('hermes_flux_profile', state.profileName);
-  localStorage.setItem('hermes_aura_gateway_url', state.gatewayUrl);
-  localStorage.setItem('hermes_aura_username', state.username);
-  localStorage.setItem('hermes_aura_password', state.password);
-  localStorage.setItem('hermes_aura_profile', state.profileName);
-
-  state.gatewayConnecting = true;
-  state.testStatus = undefined;
-  render();
-
-  try {
-    const test = await testConnection(
-      state.gatewayUrl,
-      state.username,
-      state.password
-    );
-
-    // 过期代际保护：若在探测期间用户触发了新连接，丢弃陈旧响应
-    if (epoch !== connectionEpoch) return;
-
-    state.gatewayLatencyMs = test.latency;
-    state.testStatus = test;
-
-    if (!test.ok) {
-      state.gatewayConnecting = false;
-      state.gatewayConnected = false;
-      // 连接失败：没有数据会到达，骨架必须让位于错误提示与缓存快照。
-      state.profilesPhase = 'ready';
-      state.sessionsPhase = 'ready';
-      state.messagesPhase = 'ready';
-      void applyColdStartFocus();
-      render();
-      return;
-    }
-
-    currentTicket = test.ticket;
-
-    const baseUrl = getEffectiveUrl(state.gatewayUrl);
-    const buildWsUrl = (ticket?: string): string =>
-      buildGatewayWsUrl(baseUrl, ticket, desktopApi?.proxyWebSocketUrl);
-
-    gatewayClient = new HermesGatewayClient({
-      url: buildWsUrl(test.ticket),
-      resolveUrl: createGatewayReconnectResolver({
-        epoch,
-        getCurrentEpoch: () => connectionEpoch,
-        authenticate: () => testConnection(state.gatewayUrl, state.username, state.password),
-        buildUrl: buildWsUrl,
-        onRefreshed: (refreshed) => {
-          state.gatewayLatencyMs = refreshed.latency;
-          state.testStatus = refreshed;
-          if (refreshed.ok) {
-            currentTicket = refreshed.ticket;
-          }
-        },
-        fallbackErrorMessage: t('chat.gatewayNotConnected'),
-      }),
-      autoConnect: true,
-      timeoutMs: 25000,
-    });
-
-    // Mount desktop HTTP REST Proxy fallback
-    if (desktopApi?.httpProxy) {
-      gatewayClient.setRestFallbackHandler(async (path, opts) => {
-        return await desktopApi!.httpProxy({
-          baseUrl,
-          path,
-          method: opts?.method,
-          ticket: currentTicket,
-          params: opts?.params,
-          body: opts?.body,
-        });
-      });
-    }
-
-    // Register event listeners for streaming
-    gatewayClient.onNotification('event', (params: unknown) => {
-      const runningStoredIds = Array.from(activeRunningSessionIds);
-      const runningLiveIds = defaultSessionHandleRegistry.getLiveIds(runningStoredIds);
-      const activeLiveMapped = state.activeSessionId ? defaultSessionHandleRegistry.toLiveId(state.activeSessionId) : null;
-      const activeStoredMapped = state.activeLiveSessionId ? defaultSessionHandleRegistry.toStoredId(state.activeLiveSessionId) : null;
-      const streamingLiveMapped = activeStreamingStoredSessionId ? defaultSessionHandleRegistry.toLiveId(activeStreamingStoredSessionId) : null;
-      const streamingStoredMapped = activeStreamingLiveId ? defaultSessionHandleRegistry.toStoredId(activeStreamingLiveId) : null;
-
-      const activeIds = [
-        state.activeLiveSessionId,
-        state.activeSessionId,
-        activeLiveMapped,
-        activeStoredMapped,
-        activeStreamingLiveId,
-        activeStreamingStoredSessionId,
-        streamingLiveMapped,
-        streamingStoredMapped,
-        ...runningStoredIds,
-        ...runningLiveIds,
-      ].filter((id): id is string => Boolean(id));
-
-      const actions = reduceGatewayEvent(params, {
-        activeSessionIds: Array.from(new Set(activeIds)),
-        activeStreamingMessageId,
-      });
-      if (actions.length > 0) applyTurnActions(actions);
-
-      handleInspectorEvent(params);
-    });
-
-    // Subscribe to FSM transitions (CONNECTING, CONNECTED, DISCONNECTED)
-    gatewayClient.getFsm().onStateChange((fsmState) => {
-      // 过期代际保护
-      if (epoch !== connectionEpoch) return;
-
-      const isConnected = fsmState === 'CONNECTED' || fsmState === 'HANDSHAKING';
-      const isConnecting = fsmState === 'CONNECTING';
-
-      if (state.gatewayConnected !== isConnected || state.gatewayConnecting !== isConnecting) {
-        state.gatewayConnected = isConnected;
-        state.gatewayConnecting = isConnecting;
-
-        // 防刷新保护：若用户正在弹窗或文本框打字，非连通变动不重绘 DOM 树
-        const isUserEditing = document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA');
-        if (state.isSettingsOpen && isUserEditing && !isConnected) {
-          return;
-        }
-
-        render();
-
-        if (isConnected) {
-          startProfileAutoRefresh();
-          Promise.allSettled([fetchProfiles().then(() => Promise.allSettled([fetchSessions(), fetchGroupRooms(), inputCompletion.prefetchSlashCatalog()])), fetchModelOptions(), fetchProjects()]);
-        }
-      }
-    });
-
-    // Initial check
-    if (gatewayClient.getState() === 'CONNECTED') {
-      state.gatewayConnected = true;
-      state.gatewayConnecting = false;
-      render();
-      startProfileAutoRefresh();
-      Promise.allSettled([fetchProfiles().then(() => Promise.allSettled([fetchSessions(), fetchGroupRooms(), inputCompletion.prefetchSlashCatalog()])), fetchModelOptions(), fetchProjects()]);
-    }
-  } catch (err: any) {
-    console.error('[Flux Connect] Connection failed:', err);
-    state.gatewayConnected = false;
-    state.gatewayConnecting = false;
-    // 握手中断：不再有任何数据会到达，离开骨架相位，避免把网络故障伪装成加载中。
-    state.profilesPhase = 'ready';
-    state.sessionsPhase = 'ready';
-    state.messagesPhase = 'ready';
-    state.testStatus = {
-      ok: false,
-      message: `WebSocket 连接握手失败: ${err.message || '网络异常'}`,
-      latency: 0,
-    };
-  }
-
-  render();
+  return gatewayEventDispatcher.connect(targetUrl);
 }
 
 function disconnect(): void {
-  connectionEpoch++;
-  stopProfileAutoRefresh();
-  if (gatewayClient) {
-    gatewayClient.disconnect();
-    gatewayClient = null;
-  }
-  tokenCoalescer.clear();
-  disarmTurnWatchdog();
-  groupPollerManager.stopAll();
-  activityTransitionTracker.clearAll();
-  clearTransitionRefreshTimer();
-  activeStreamingMessageId = null;
-  activeStreamingStoredSessionId = null;
-  activeStreamingLiveId = null;
-  activeStreamingBotName = null;
-  // 断线时清空全部三态集合：连接已断，"进行中"不再有任何真实依据，
-  // 残留会让重连后的界面继续显示呼吸动效与未读绿点（历史坑）。
-  activeRunningSessionIds.clear();
-  unreadSessionIds.clear();
-  activeRunningBotNames.clear();
-  unreadBotNames.clear();
-  activeRunningGroupRoomIds.clear();
-  unreadGroupRoomIds.clear();
-  if (sessionsRefreshTimer) {
-    clearTimeout(sessionsRefreshTimer);
-    sessionsRefreshTimer = null;
-  }
-  state.gatewayConnected = false;
-  state.gatewayConnecting = false;
-  state.gatewayLatencyMs = 0;
-  // 断线后不会再有历史到达：立刻离开 loading，避免骨架把断线表现成"一直在加载"。
-  state.messagesPhase = 'ready';
-  state.sessions = [];
-  state.messages = [];
-  // 断线即丢弃挂起回滚：会话通道已断，乐观裁撤快照不再有意义，残留会让重连后横幅跨会话泄漏
-  state.rollbackArmed = null;
-  state.activeSessionId = '';
-  state.activeLiveSessionId = '';
-  state.pendingSessionIds = [];
-  state.isStreaming = false;
-  state.modelMenuOpen = false;
-  state.sessionListError = '';
-  state.dockNotice = '';
-  activeStreamingMessageId = null;
-  render();
+  gatewayEventDispatcher.disconnect();
 }
 
 interface StreamAnchor {
