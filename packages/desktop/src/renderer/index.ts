@@ -268,6 +268,19 @@ import {
   type SessionOperationService,
   createSessionOperationService,
 } from './services/sessionOperationService.js';
+import {
+  type MessageWindowManager,
+  createMessageWindowManager,
+} from './messageWindowManager.js';
+import {
+  type RenderCoordinator,
+  createRenderCoordinator,
+  type RenderMessagesSnapshot,
+} from './renderCoordinator.js';
+import {
+  type DropdownKeybindController,
+  createDropdownKeybindController,
+} from './dropdownKeybindController.js';
 
 /** 头像绑定/解绑写操作的在途合流表：同键同签名复用 promise，异签名拒绝重入。 */
 const inFlightProviderBindings = new Map<string, { signature: string; promise: Promise<ToggleProviderAgentResult> }>();
@@ -2551,279 +2564,92 @@ let messageWindowSessionId = '';
 let messageWindowStart = 0;
 let messageWindowEnd = 0;
 let messageWindowUserExpanded = false;
-/**
- * 待处理的会话切换推送标记。
- *
- * 【设计意图 (Why)】切会话后窗口起点、平均行高与虚拟高度全部换了口径，
- *   必须向 React 推一次快照。只靠「消息 id 有变化」判定不够稳：
- *   一旦 `renderedMessageIds` 与新区间意外相同，列表就会停在旧窗口，
- *   正文与虚拟坐标脱节，贴底直接落到空白区（实测 2738 条会话切回后整屏空白）。
- *
- * 【约束与规则 (Rules)】由 `ensureMessageWindow` 在会话切换时置位，
- *   `syncReactMessageList` 推送后清空；不得跨会话残留。
- */
 let sessionSwitchPending = false;
-/** 切会话后允许落定循环忽略收敛判据的剩余帧数，见 ensureMessageWindow 注释。 */
 let settleMinFrames = 0;
-/**
- * 滚动扩窗锁必须是模块级：render() 每次都会重绑 onscroll，局部锁会被新闭包重置，
- * 同一次手势就能连续扩窗，把锚点补偿推到列表底部。
- */
 let streamScrollCooldown = false;
 let lastStreamScrollTop = 0;
-/**
- * 首屏落定标志：切会话或冷启动恢复会话后，视口必须先落到最新消息。
- *
- * 【设计意图 (Why)】冷启动会直接渲染缓存的活跃会话，此时 `scrollTop` 初值为 0，
- *   而窗口已按末尾规划。滚动处理器把「视口在窗口上沿之上」判成读者向上回溯，
- *   连续扩窗把窗口搬离末尾并置真 `messageWindowUserExpanded`，
- *   行高锁定后那次贴底又因该标志被跳过，读者最终停在会话中部。
- *   实测 1128 条会话：窗口从 [1008,1128] 落到 [907,1027]，距底 25756px。
- *
- * 【约束与规则 (Rules)】只在首屏落定期间工作，贴底完成或超时即解除；
- *   期间滚动处理器只更新导航轨，不做扩窗、回收与跳转。
- */
 let initialBottomSettling = false;
-/**
- * 已完成首屏落定时的布局指纹（`消息条数:平均行高锁定状态`）。
- *
- * 【设计意图 (Why)】只用消息条数判定会漏掉行高锁定：条数不变，但 scrollHeight 会从
- *   96 的估算口径（1128×96≈108k）跳到实测口径（1128×122≈138k），
- *   残留的 scrollTop 就停在新旧口径之间的会话中部。
- *   冷启动的缓存恢复与分页补齐又是分批的，所以两个维度都要追踪。
- *
- * 【约束与规则 (Rules)】与 `readerScrolledSessionId` 配合：读者一旦主动向上回溯，
- *   本会话的自动贴底立即永久让位，绝不把正在回看的读者拽回底部。
- */
 let settledLayoutSignature = '';
-/** 布局指纹：条数 + 平均行高，任一变化都要求重新落定首屏。 */
-function layoutSignature(): string {
-  return `${state.messages.length}:${averageRowHeightLocked ? averageRowHeightPx.toFixed(2) : 'pending'}`;
-}
-/**
- * 读者主动向上回溯过的会话 id。
- *
- * 【设计意图 (Why)】只有读者的手势能证明「我不想在底部」。
- *   程序贴底时 scrollTop 单调增大，读者向上翻时单调减小，用方向即可区分，
- *   不必猜测是滚轮、触摸还是拖动滚动条。
- */
 let readerScrolledSessionId = '';
-/**
- * 最近一次程序写入 scrollTop 后实际落地的值（浏览器会夹到最大值）。
- *
- * 【设计意图 (Why)】锚点校正会把 scrollTop 改小几十到几百像素，
- *   在滚动处理器眼里与「读者向上回溯」完全同形。若不加区分，
- *   一次锚点校正就会把本会话永久标记成"读者已回溯"，首屏补齐后再也不贴底。
- *
- * 【约束与规则 (Rules)】只在程序写入后登记；滚动处理器消费一次即清空，
- *   读者真正滚动时 scrollTop 不会等于登记值，判定自然放行。
- */
 let programmaticScrollTarget: number | null = null;
 let programmaticScrollIgnoreUntil = 0;
-
-/** 程序写下 scrollTop 后登记落地值与瞬时时间窗，供滚动处理器区分程序滚动与读者手势。 */
-function markProgrammaticScroll(stream: HTMLElement): void {
-  programmaticScrollTarget = Math.round(stream.scrollTop);
-  programmaticScrollIgnoreUntil = performance.now() + 80;
-}
-/** 上一轮"正在加载更早历史"的起始时刻，用于熔断被节流打断的陈旧加载锁 */
 let olderLoadingStartedAt = 0;
+let averageRowHeightPx = 96;
+let averageRowHeightSessionId = '';
+let averageRowHeightLocked = false;
+let layoutDriftUntil = 0;
+let observedWindowHeight = 0;
 
-/**
- * 维护消息挂载窗口。
- * 【规则】切会话回到末尾窗口；读者贴底且窗口未扩展时保持尾部窗口；
- *   其余情况保持起点并按容量上限截断末端。窗口是 [start, end) 有界区间，
- *   长度永不突破 MESSAGE_WINDOW_CAPACITY，因此每帧重排成本与历史总量解耦。
- */
+const messageWindowManager = createMessageWindowManager({
+  getState: () => state,
+  render: () => render(),
+  isStreamNearBottom: (stream) => isStreamNearBottom(stream),
+  scrollStreamToBottom: (reason) => scrollStreamToBottom(reason),
+  scrollStreamToContentBottom: (stream, inset) => scrollStreamToContentBottom(stream, inset),
+  settleInitialBottom: () => settleInitialBottom(),
+  syncPromptNavigatorFromScroll: () => syncPromptNavigatorFromScroll(),
+  setCanvasStructureDirty: (val) => { canvasStructureDirty = val; },
+  setSuppressPinBottomOnce: (val) => { suppressPinBottomOnce = val; },
+  setSessionSwitchPending: (val) => { sessionSwitchPending = val; },
+  setSettleMinFrames: (val) => { settleMinFrames = val; },
+  setInitialBottomSettling: (val) => { initialBottomSettling = val; },
+  setSettledLayoutSignature: (val) => { settledLayoutSignature = val; },
+  setLastStreamScrollTop: (val) => { lastStreamScrollTop = val; },
+  setStreamScrollCooldown: (val) => { streamScrollCooldown = val; },
+  logScroll,
+});
+
+function syncWindowLocalState(): void {
+  messageWindowStart = messageWindowManager.getMessageWindowStart();
+  messageWindowEnd = messageWindowManager.getMessageWindowEnd();
+  messageWindowUserExpanded = messageWindowManager.isMessageWindowUserExpanded();
+  averageRowHeightPx = messageWindowManager.getAverageRowHeightPx();
+  averageRowHeightLocked = messageWindowManager.isAverageRowHeightLocked();
+  layoutDriftUntil = messageWindowManager.getLayoutDriftUntil();
+  programmaticScrollTarget = messageWindowManager.getProgrammaticScrollTarget();
+  programmaticScrollIgnoreUntil = messageWindowManager.getProgrammaticScrollIgnoreUntil();
+  readerScrolledSessionId = messageWindowManager.getReaderScrolledSessionId();
+}
+
+function layoutSignature(): string {
+  return messageWindowManager.layoutSignature();
+}
+
+function markProgrammaticScroll(stream: HTMLElement): void {
+  messageWindowManager.markProgrammaticScroll(stream);
+  syncWindowLocalState();
+}
+
 function ensureMessageWindow(total: number): void {
-  const sessionChanged = messageWindowSessionId !== state.activeSessionId;
-  if (sessionChanged) {
-    messageWindowSessionId = state.activeSessionId;
-    /**
-     * 【切会话必须重锁行高 (Rules)】平均行高按窗口内容实测得出，换会话后窗口内容整体不同；
-     *   若沿用上一个会话的值，`总条数 × 平均行高` 与实际窗口高度就对不上，
-     *   贴底时视口会落到最后一条真实消息之后（实测 2738 条会话切回后整屏空白）。
-     *   这里只清锁定标记，真正的重量由 scheduleVirtualHeightSync 在 React 提交后执行。
-     */
-    averageRowHeightLocked = false;
-    averageRowHeightSessionId = '';
-    /** 切会话清零滚动状态，防止上个会话的落定/冷却/坐标污染新会话 */
-    lastStreamScrollTop = 0;
-    programmaticScrollTarget = null;
-    programmaticScrollIgnoreUntil = 0;
-    readerScrolledSessionId = '';
-    settledLayoutSignature = '';
-    initialBottomSettling = false;
-    streamScrollCooldown = false;
-    /**
-     * 【窗口几何状态随会话清零 (Rules)】`observedWindowHeight` 若带着上个会话的高度，
-     *   切到更矮会话时首次高度变化会被误判成「变矮」，进而登记布局漂移、吞掉切换后
-     *   真实的上滚手势。
-     */
-    observedWindowHeight = 0;
-    layoutDriftUntil = 0;
-    /**
-     * 【底部留白必须随会话重置 (Rules)】`#conversation-stream` 跨会话复用，追加的留白若无条件
-     *   带进下一个会话，`scrollStreamToContentBottom` 会按它把末条顶到离视口底数千像素处。
-     *   注释一直写着「切换会话时重置为基准值」，此前没有任何一行实现它。
-     */
-    document.getElementById('conversation-stream')?.style.removeProperty('--conv-gutter-bottom');
-    /** 切会话必须无条件推一次快照：窗口起点、行高、虚拟高度全部换了口径。 */
-    sessionSwitchPending = true;
-    /** 前 8 帧不判断收敛：此时 DOM 还是上一个会话的内容，容易误判"已经贴住"。 */
-    settleMinFrames = 8;
-  }
-  const stream = document.getElementById('conversation-stream');
-  const plan = planMessageWindow({
-    total,
-    start: messageWindowStart,
-    end: messageWindowEnd,
-    userExpanded: messageWindowUserExpanded,
-    sessionChanged,
-    followBottom: stream ? isStreamNearBottom(stream) : true,
-    initialWindow: INITIAL_RENDER_WINDOW,
-    capacity: MESSAGE_WINDOW_CAPACITY,
-  });
-  messageWindowStart = plan.start;
-  messageWindowEnd = plan.end;
-  messageWindowUserExpanded = plan.userExpanded;
+  messageWindowManager.ensureMessageWindow(total);
+  syncWindowLocalState();
 }
 
-/**
- * 向上扩展本地窗口；返回 true 表示本次滚动已由本地消息满足，无需请求服务端。
- *
- * 【竞态守卫 (Rules)】扩展只移动起点，末端由容量推导，因此区间长度恒定；
- *   读者向上翻时尾部自动滑出，挂载量不随回溯轮次增长。
- * 【虚拟坐标 (Rules)】画布高度钉成全高后，搬迁窗口必须把 scrollTop 同步到新起点的虚拟位置，
- *   否则读者会停在原处而内容已被换掉。
- */
 function expandMessageWindow(): boolean {
-  const total = state.messages.length;
-  const nextStart = expandMessageWindowStart(messageWindowStart, RENDER_WINDOW_STEP, Math.max(0, total - MESSAGE_WINDOW_CAPACITY));
-  const nextEnd = windowEndFor(nextStart, total, MESSAGE_WINDOW_CAPACITY, INITIAL_RENDER_WINDOW);
-  if (nextStart === messageWindowStart && nextEnd === messageWindowEnd) return false;
-  messageWindowStart = nextStart;
-  messageWindowEnd = nextEnd;
-  messageWindowUserExpanded = true;
-  canvasStructureDirty = true;
-  suppressPinBottomOnce = true;
-  render();
-  // 占位块已按新起点补偿，内容在虚拟坐标中的位置不变；仅当视口已落在窗口外时才校正。
-  requestAnimationFrame(() => syncScrollTopToWindow('expand upward'));
-  return true;
+  const result = messageWindowManager.expandMessageWindow();
+  syncWindowLocalState();
+  return result;
 }
 
-/**
- * 向下滑动窗口：读者从历史区滚回挂载区间尾部时整体前移窗口。
- *
- * 【设计意图 (Why)】有界窗口意味着向下滚动必须回收顶部，否则滚到底会撞上“没有更多”的空洞。
- * 【约束与规则 (Rules)】起点单调不减且不越过 total - capacity；只有已扩展过的窗口才滑动。
- *   搬迁后必须把 scrollTop 校正到新窗口的虚拟坐标，否则读者会被固定在原处。
- */
 function slideMessageWindowForward(): void {
-  if (!messageWindowUserExpanded) return;
-  const total = state.messages.length;
-  const capacity = MESSAGE_WINDOW_CAPACITY;
-  if (total <= capacity) return;
-  const nextStart = slideMessageWindowDown(
-    messageWindowStart,
-    total,
-    capacity,
-    RENDER_WINDOW_STEP,
-    INITIAL_RENDER_WINDOW,
-  );
-  if (nextStart === messageWindowStart) return;
-  messageWindowStart = nextStart;
-  messageWindowEnd = windowEndFor(nextStart, total, capacity, INITIAL_RENDER_WINDOW);
-  canvasStructureDirty = true;
-  render();
-  requestAnimationFrame(() => syncScrollTopToWindow('slide forward'));
-  logScroll.trace('window slid forward on downward scroll', {
-    start: messageWindowStart,
-    end: messageWindowEnd,
-    total,
-  });
+  messageWindowManager.slideMessageWindowForward();
+  syncWindowLocalState();
 }
 
-/**
- * 把窗口移动到指定消息索引周围（拖滚动条跳转时使用）。
- *
- * 【规则】前留少量上文行数，起点受容量约束；索引越界时不改窗口。
- */
 function relocateMessageWindowToIndex(index: number): boolean {
-  const total = state.messages.length;
-  if (!Number.isFinite(index) || index < 0 || index >= total) return false;
-  const nextStart = windowStartAroundIndex(index, total, MESSAGE_WINDOW_CAPACITY, 4, INITIAL_RENDER_WINDOW);
-  const nextEnd = windowEndFor(nextStart, total, MESSAGE_WINDOW_CAPACITY, INITIAL_RENDER_WINDOW);
-  if (nextStart === messageWindowStart && nextEnd === messageWindowEnd) return false;
-  messageWindowStart = nextStart;
-  messageWindowEnd = nextEnd;
-  messageWindowUserExpanded = true;
-  canvasStructureDirty = true;
-  return true;
+  const result = messageWindowManager.relocateMessageWindowToIndex(index);
+  syncWindowLocalState();
+  return result;
 }
 
-/**
- * 把窗口搬迁后校正 scrollTop（仅在视口已完全脱离窗口时兜底）。
- *
- * 【设计意图 (Why)】占位块已按新起点补偿，窗口搬迁不改变内容在虚拟坐标中的位置，
- *   因此正常滚动时绝不能改写 scrollTop —— 那会吞掉用户的滚动距离（实测滚 11050px 只推进 36 条）。
- *   只有视口彻底脱离窗口覆盖范围（拖滚动条、跳转）时才需要兜底定位。
- * 【约束与规则 (Rules)】视口落在窗口覆盖区间内时保持原样。
- */
 function syncScrollTopToWindow(reason: string): void {
-  const stream = document.getElementById('conversation-stream');
-  if (!stream) return;
-  const virtualTop = Math.round(messageWindowStart * averageRowHeightPx);
-  const virtualBottom = Math.round(messageWindowEnd * averageRowHeightPx);
-  if (stream.scrollTop >= virtualTop - stream.clientHeight && stream.scrollTop <= virtualBottom) return;
-  const target = Math.max(0, Math.min(virtualTop, stream.scrollHeight - stream.clientHeight));
-  stream.scrollTop = target;
-  markProgrammaticScroll(stream);
-  logScroll.debug('scrollTop synced to window', { reason, start: messageWindowStart, target });
+  messageWindowManager.syncScrollTopToWindow(reason);
+  syncWindowLocalState();
 }
 
-/**
- * 安排一次虚拟高度同步，未锁定行高时逐帧重试。
- *
- * 【设计意图 (Why)】`mountMessageList` 返回时 React 可能尚未提交，rAF 里读不到行，
- *   一次性调用会永远错过锁定时机（实测 averageRowHeightPx 停在默认 96，
- *   导致滚动 11050px 只推进 36 条消息）。
- * 【约束与规则 (Rules)】最多重试 8 帧；锁定成功后不再重试。
- */
 function scheduleVirtualHeightSync(attempt = 0): void {
-  requestAnimationFrame(() => {
-    const locked = lockAverageRowHeight();
-    syncCanvasVirtualHeight();
-    observeVirtualWindowGeometry();
-    if (locked) {
-      // 行高锁定会改变占位高度与画布虚拟高度，必须重渲染让占位块用上新值。
-      canvasStructureDirty = true;
-      render();
-      /**
-       * 【位置重算 (Rules)】行高从默认 96 变成实测值后，同一个 scrollTop 对应的消息下标完全变了；
-       *   若 scrollTop 恰好停在底部，此后不会再产生 scroll 事件，导航会永久停在 96 的口径。
-       */
-      syncPromptNavigatorFromScroll();
-      /**
-       * 【首屏贴底 (Rules)】画布高度变成虚拟全高后，scrollTop 必须落到窗口在虚拟坐标中的
-       *   真实位置（≈ 窗口起点 × 行高），否则会停在 0 也就是会话最开头，
-       *   读者打开会话看到的是最早的记录而不是最新消息。
-       */
-      if (!messageWindowUserExpanded) {
-        requestAnimationFrame(() => scrollStreamToBottom('virtual height locked'));
-      }
-      // 行高锁定后 scrollHeight 才等于虚拟全高，首屏落定必须按新口径重跑一次。
-      settleInitialBottom();
-      return;
-    }
-    if (!averageRowHeightLocked && attempt < 8) {
-      scheduleVirtualHeightSync(attempt + 1);
-      return;
-    }
-    // 行高迟迟锁不上时也要落定首屏，否则读者会停在旧口径的中部。
-    settleInitialBottom();
-  });
+  messageWindowManager.scheduleVirtualHeightSync(attempt);
+  syncWindowLocalState();
 }
 
 /* --------------------------------------------------------------------------
@@ -3833,29 +3659,8 @@ function stabilizeStreamAnchor(anchor: StreamAnchor): void {
   }
 }
 
-interface RenderMessagesSnapshot {
-  sessionId: string;
-  count: number;
-  lastMsgId: string;
-  lastContentLen: number;
-  isStreaming: boolean;
-  gatewayConnected: boolean;
-  gatewayConnecting: boolean;
-  hasOlder: boolean;
-  isLoadingOlder: boolean;
-  profileName: string;
-  messagesPhase: DataPhase;
-  rollbackActive: boolean;
-  capsuleCount: number;
-}
-
 let lastMessagesSnapshot: RenderMessagesSnapshot | null = null;
 let lastInputDockSnapshot: RenderInputDockSnapshot | null = null;
-let updateReactTitlebar: (() => void) | null = null;
-let updateReactLeftRail: (() => void) | null = null;
-/** 左轨/标题栏快照指纹：内容不变时跳过 React 推送，避免每次 render 都全量协调 42+ 行。 */
-let lastTitlebarSnapshotJson = '';
-let lastPushedLeftRailSnapshot: LeftRailSnapshot | null = null;
 
 /**
  * 快照指纹。
@@ -3867,34 +3672,6 @@ function snapshotFingerprint(value: unknown): string {
   } catch {
     return `__unserializable_${Date.now()}_${Math.random()}`;
   }
-}
-
-let inspectorMotionController: ReturnType<typeof attachMotionController> | null = null;
-let lastInspectorCollapsed = true;
-
-/**
- * 复合检查舱动效控制器生命周期绑定器。
- * 设计意图 (Why):
- *   统一构造并管理 InspectionPod 的动效控制器，确保任何时机挂载均持有完整的 onExited 兜底。
- * 防范的历史坑 (Pitfall):
- *   之前在展开与折叠两处各写一套 attach，导致 onExited 回调短路失效，节点退场无法安全收敛为 display: none；
- *   且高频 render 未 detach 旧实例造成潜在事件泄漏。
- * 约束与规则 (Rules):
- *   每次重新绑定前强制对前序实例执行 detach()。
- */
-function bindInspectorController(el: HTMLElement): NonNullable<typeof inspectorMotionController> {
-  if (inspectorMotionController) {
-    inspectorMotionController.detach();
-  }
-  const controller = attachMotionController(el, {
-    triggerProperty: 'width',
-    onExited: () => {
-      el.style.display = 'none';
-      el.classList.add('inspector-collapsed');
-    },
-  });
-  inspectorMotionController = controller;
-  return controller;
 }
 
 async function disbandGroupRoom(roomId: string): Promise<void> {
@@ -4345,356 +4122,78 @@ function resolveSessionKnownFiles(): readonly string[] {
   return knownFilesValue;
 }
 
-/**
- * 已挂载消息的平均渲染高度（px），用于把窗口外历史折算成等效高度。
- *
- * 【设计意图 (Why)】窗口有界后原生滚动条只反映挂载部分（实测 scrollHeight 在 14k~33k 之间乱跳），
- *   必须让 scrollHeight 恒等于全量估算高度，thumb 长度与位置才稳定。
- * 【防范的历史坑 (Pitfall)】若每帧都从当前挂载行重测平均行高，滚动过程中估值会持续漂移，
- *   scrollHeight 随之从 1.0M 涨到 2.3M，滚动条照样乱飞。必须在同一会话内锁定。
- * 【约束与规则 (Rules)】每个会话只在首次拿到足够样本时锁定一次，切会话才重置。
- */
-let averageRowHeightPx = 96;
-let averageRowHeightSessionId = '';
-let averageRowHeightLocked = false;
+const renderCoordinator = createRenderCoordinator({
+  getState: () => state,
+  messageWindowManager,
+  modalInteractionController,
+  isStreamingActiveForCurrentSession: () => isStreamingActiveForCurrentSession(),
+  resolveSessionKnownFiles: () => resolveSessionKnownFiles(),
+  getTitlebarSnapshot: () => getTitlebarSnapshot(),
+  onMinimizeWindow: () => desktopApi?.minimize(),
+  onMaximizeWindow: async () => {
+    if (!desktopApi) return;
+    const result = await desktopApi.maximize();
+    state.isMaximized = typeof result === 'boolean' ? result : await desktopApi.isMaximized();
+    render();
+  },
+  onCloseWindow: () => desktopApi?.close(),
+  onToggleTheme: () => {
+    state.theme = getToggleTheme(state.theme);
+    localStorage.setItem('hermes_flux_theme', state.theme);
+    localStorage.setItem('hermes_aura_theme', state.theme);
+    render();
+  },
+  getLeftRailSnapshot: () => getLeftRailSnapshot(),
+  createLeftRailActions: () => createLeftRailActions(),
+  getPromptNavigatorSnapshot: () => getPromptNavigatorSnapshot(),
+  createPromptNavigatorActions: () => createPromptNavigatorActions(),
+  rebuildPromptEntries: () => rebuildPromptEntries(),
+  syncPromptNavigatorMeta: () => syncPromptNavigatorMeta(),
+  syncPromptNavigator: () => syncPromptNavigator(),
+  syncReactSettings: () => syncReactSettings(),
+  ensureSettingsSectionData: (section) => ensureSettingsSectionData(section),
+  syncAgentPresenceHost: () => syncAgentPresenceHost(),
+  syncAgentPresence: () => syncAgentPresence(),
+  captureStreamAnchor: () => captureStreamAnchor(),
+  applyStreamAnchor: (anchor, pin) => applyStreamAnchor(anchor, pin),
+  stabilizeStreamAnchor: (anchor) => stabilizeStreamAnchor(anchor),
+  isStreamNearBottom: (stream) => isStreamNearBottom(stream),
+  syncStreamBottomInset: () => syncStreamBottomInset(),
+  settleInitialBottom: () => settleInitialBottom(),
+  bindEvents: () => bindEvents(),
+  syncComposerPoppers: () => syncComposerPoppers(),
+  logRender,
+});
 
-/** 锁定本会话的平均行高；返回 true 表示本次完成了锁定（需要重渲染以更新占位）。 */
 function lockAverageRowHeight(): boolean {
-  if (averageRowHeightLocked && averageRowHeightSessionId === state.activeSessionId) return false;
-  if (averageRowHeightSessionId !== state.activeSessionId) {
-    averageRowHeightSessionId = state.activeSessionId;
-    averageRowHeightLocked = false;
-    averageRowHeightPx = 96;
-  }
-  const canvas = document.querySelector<HTMLElement>('.conv-canvas');
-  if (!canvas) return false;
-  const rows = canvas.querySelectorAll<HTMLElement>('[data-msg-id]');
-  if (rows.length < 5) return false;
-  let contentH = 0;
-  /**
-   * 【按消息去重累加 (Rules)】同一条消息会在行内渲染多个带 `data-msg-id` 的节点
-   *   （复制 / 重试 / 删除三个操作按钮都继承了该属性）。实测 120 条窗口里有 158 个节点、
-   *   只对应 68 条消息，逐节点累加会把平均行高抬高 32%，虚拟全高随之虚高，
-   *   贴底时视口落到最后一个真实内容之后（整屏空白）。
-   *   只累加「最外层同 id 节点」一次，才是这条消息真正占的高度。
-   */
-  const seenIds = new Set<string>();
-  const measuredIds: string[] = [];
-  for (const row of rows) {
-    const id = row.getAttribute('data-msg-id');
-    if (id) {
-      if (seenIds.has(id)) continue;
-      const outerSame = row.parentElement?.closest('[data-msg-id]');
-      if (outerSame && outerSame.getAttribute('data-msg-id') === id) continue;
-      seenIds.add(id);
-      measuredIds.push(id);
-    }
-    const h = row.getBoundingClientRect().height;
-    if (Number.isFinite(h) && h > 0) contentH += h;
-  }
-  /**
-   * 口径与守卫全部收敛到纯函数（见 planAverageRowHeightLock）。
-   * 【实测依据】切会话瞬间 total=0、窗口塌成 [0,0)，而画布里还挂着上一会话的 57 行，
-   *   分母兜底成 1 会把整棵树的高度锁成单行行高（10804px），586 条会话因此
-   *   撑出 633 万 px 虚拟高度，读者永远到不了列表开头。
-   */
-  const plan = planAverageRowHeightLock({
-    windowStart: messageWindowStart,
-    windowEnd: messageWindowEnd,
-    total: state.messages.length,
-    contentHeightPx: contentH,
-    measuredIds,
-    windowIds: state.messages
-      .slice(messageWindowStart, messageWindowEnd)
-      .map((m) => m.id),
-  });
-  if (!plan.lock) return false;
-  averageRowHeightPx = plan.averageRowHeightPx;
-  averageRowHeightLocked = true;
-  return true;
+  const result = messageWindowManager.lockAverageRowHeight();
+  syncWindowLocalState();
+  return result;
 }
 
-/**
- * 虚拟高度由内层视口自撑（`.conv-virtual-viewport` 的 height），
- * 不再需要给画布写 min-height，避免两套高度互相打架。
- */
 function syncCanvasVirtualHeight(): void {
-  const canvas = document.querySelector<HTMLElement>('.conv-canvas');
-  if (!canvas) return;
-  if (canvas.style.minHeight) canvas.style.minHeight = '';
+  messageWindowManager.syncCanvasVirtualHeight();
 }
-
-/**
- * 末尾窗口几何观察器。
- *
- * 【设计意图 (Why)】工具执行组是原生 `<details>`，展开与收起由浏览器改布局，既不经过
- *   React state，也不产生宿主 `render()`。组件内已按实测高度收敛虚拟全高，但滚动位置
- *   必须由宿主跟着改：容器变高时把视口推到新的内容底，变矮时拉回内容底而不是停在半空。
- *
- * 【防范的历史坑 (Pitfall)】容器变矮时浏览器会把 `scrollTop` 钳到新的最大值并派发 scroll，
- *   与读者向上回溯同形。若不登记布局漂移窗口，`readerScrolledSessionId` 会被永久置位，
- *   该会话从此再也不会自动贴底。
- *
- * 【约束与规则 (Rules)】
- *   1. 只在窗口覆盖末尾时接管滚动位置；窗口在中间时内容底不是会话底；
- *   2. 变高只在读者原本贴底时跟随，回溯中的读者不打扰；
- *   3. 观察器只读高度，不写 DOM。虚拟全高由表现层按实测值收敛，宿主只负责滚动位置，
- *      两者分工见 `ConversationSnapshot.virtualWindowAtTail`。
- */
-let virtualWindowObserver: ResizeObserver | null = null;
-let virtualWindowObserved: HTMLElement | null = null;
-let observedWindowHeight = 0;
-/** 布局漂移窗口：容器变矮引起 scrollTop 被钳制时，由此期间的 scroll 事件不算读者手势。 */
-let layoutDriftUntil = 0;
 
 function observeVirtualWindowGeometry(attempt = 0): void {
-  if (typeof ResizeObserver === 'undefined') return;
-  const windowEl = document.querySelector<HTMLElement>('.conv-virtual-window');
-  if (!windowEl) {
-    virtualWindowObserver?.disconnect();
-    virtualWindowObserved = null;
-    observedWindowHeight = 0;
-    /**
-     * 【提交后重试 (Rules)】首次窗口化那一帧 React 还没提交，节点不存在；只挂一次会永久失联，
-     *   折叠与展开就再也没有人通知宿主。最多重试 8 帧，与行高锁定同一节奏。
-     */
-    if (attempt < 8) requestAnimationFrame(() => observeVirtualWindowGeometry(attempt + 1));
-    return;
-  }
-  if (!virtualWindowObserver) {
-    virtualWindowObserver = new ResizeObserver((entries) => {
-      const height = entries[0]?.borderBoxSize?.[0]?.blockSize
-        ?? entries[0]?.contentRect.height
-        ?? 0;
-      const previousHeight = observedWindowHeight;
-      const shrank = previousHeight > 0 && height < previousHeight - 1;
-      observedWindowHeight = height;
-      /**
-       * 【只豁免变矮 (Rules)】只有容器变矮时浏览器才会把 scrollTop 钳到新的最大值，
-       *   派生出与读者向上回溯同形的 scroll 事件。变高不改 scrollTop，无需豁免；
-       *   若无条件登记，流式期间窗口每个 token 都在长高，豁免窗口永不失效，
-       *   读者真实的向上回溯会被永久吞掉，后续补齐又会把人拽回底部。
-       */
-      if (shrank) layoutDriftUntil = performance.now() + 200;
-      if (messageWindowEnd < state.messages.length) return;
-      const stream = document.getElementById('conversation-stream');
-      if (!stream) return;
-      /**
-       * 【用变矮前的位置判定 (Rules)】容器变矮的瞬间浏览器已经把 scrollTop 钳小了，
-       *   此刻再量 distanceToBottom 会被钳制结果误导。这里按高度差反推变矮前的
-       *   scrollHeight，还原读者变矮前是否贴底。
-       */
-      const heightDelta = previousHeight > 0 ? previousHeight - height : 0;
-      const distanceBefore = stream.scrollHeight + heightDelta - stream.scrollTop - stream.clientHeight;
-      const wasNearBottom = distanceBefore <= STICK_TO_BOTTOM_THRESHOLD_PX;
-      const align = (): void => {
-        requestAnimationFrame(() => {
-          const target = document.getElementById('conversation-stream');
-          if (!target) return;
-          scrollStreamToContentBottom(target, parseFloat(getComputedStyle(target).paddingBottom) || 0);
-        });
-      };
-      /**
-       * 【跟随必须以变矮前贴底为前提 (Rules)】窗口变矮还有一个非读者来源：工具执行结束时
-       *   `ToolCapsule` 会把 `<details>` 的 open 自动收回。读者若正在末尾窗口内向上回看，
-       *   无条件对齐会把人拽回底部。只有变矮前就在底部附近才跟随。
-       */
-      if (!wasNearBottom) return;
-      align();
-    });
-  }
-  if (virtualWindowObserved !== windowEl) {
-    virtualWindowObserver.disconnect();
-    virtualWindowObserver.observe(windowEl);
-    virtualWindowObserved = windowEl;
-    observedWindowHeight = 0;
-  }
+  messageWindowManager.observeVirtualWindowGeometry(attempt);
+  syncWindowLocalState();
 }
 
-/** 计算窗口内容在虚拟坐标中的纵向偏移。 */
 function computeContentOffsetPx(): number {
-  if (messageWindowStart <= 0) return 0;
-  return Math.round(messageWindowStart * averageRowHeightPx);
+  return messageWindowManager.computeContentOffsetPx();
 }
 
-/**
- * 虚拟总高度；未超过容量时返回 0，表示不启用虚拟定位。
- *
- * 【设计意图 (Why)】长会话里同一窗口内各行高度差异极大（实测 120 条窗口真实高度 14451，
- *   而 `120 × 平均行高` 会算到 19000），单靠「总条数 × 平均行高」估算，
- *   窗口底与虚拟底会差出上千像素。此时贴底就是把视口放到最后一条真实消息之后——整屏空白。
- *   窗口覆盖末尾时改用「窗口偏移 + 窗口实测高度」，让虚拟底与内容底严格重合。
- *
- * 【约束与规则 (Rules)】
- *   1. 只有窗口覆盖末尾才生效；窗口在中间时仍用估算，尾部还有占位补偿；
- *   2. DOM 尚未提交时（拿不到窗口高度）回退到估算，绝不返回 0 以外的异常值。
- */
 function computeVirtualHeightPx(): number {
-  const total = state.messages.length;
-  if (total <= MESSAGE_WINDOW_CAPACITY) return 0;
-  if (messageWindowEnd >= total) {
-    const virtualWindow = document.querySelector<HTMLElement>('.conv-virtual-window');
-    const realHeight = virtualWindow?.getBoundingClientRect().height ?? 0;
-    if (realHeight > 0) {
-      return Math.round(computeContentOffsetPx() + realHeight);
-    }
-  }
-  return Math.round(total * averageRowHeightPx);
+  return messageWindowManager.computeVirtualHeightPx();
 }
 
-/** 把当前会话状态映射为对话区只读视图模型；不做任何排序或解析。 */
 function buildConversationSnapshot(): ConversationSnapshot {
-  const focusType = state.activeFocus.type;
-  const streaming = isStreamingActiveForCurrentSession();
-  ensureMessageWindow(state.messages.length);
-  const windowedMessages = state.messages.slice(messageWindowStart, messageWindowEnd);
-  // 【末条判定 (Rules)】必须取窗口内最后一条可上屏的行：末条若被 display_kind 标成 hidden，
-  // 真正可见的最后一条就拿不到页脚与流式态。
-  const lastMessageId = (() => {
-    for (let i = windowedMessages.length - 1; i >= 0; i--) {
-      const kind = windowedMessages[i].displayKind ?? 'user';
-      if (kind !== 'hidden') return windowedMessages[i].id;
-    }
-    return undefined;
-  })();
-  return {
-    mode: focusType === 'group' ? 'group' : focusType === 'bot' ? 'foreground' : 'scratchpad',
-    connection: state.gatewayConnected ? 'connected' : state.gatewayConnecting ? 'connecting' : 'disconnected',
-    isStreaming: streaming,
-    // 本地未挂载行由滚动事件中的 expandMessageWindow() 平滑物理延展，仅当服务端真有更早历史时才展示拉取提示
-    hasOlderMessages: state.hasOlderMessages,
-    isLoadingOlder: state.isLoadingOlder,
-    messagesPhase: state.messagesPhase,
-    profileName: state.profileName,
-    contentOffsetPx: computeContentOffsetPx(),
-    virtualHeightPx: computeVirtualHeightPx(),
-    /**
-     * 末尾窗口由组件按实测高度收敛虚拟全高，宿主只需声明窗口是否覆盖末尾。
-     * 见 `ConversationSnapshot.virtualWindowAtTail` 与 `ConversationMessageList` 的实测分支。
-     */
-    virtualWindowAtTail: messageWindowEnd >= state.messages.length,
-    knownFiles: resolveSessionKnownFiles(),
-    locale: state.lang,
-    messages: windowedMessages.map((m) => {
-      const isLast = m.id === lastMessageId;
-      const displayKind = m.displayKind ?? 'user';
-      const toolsSignature = m.toolCalls?.map((tc) => `${tc.id}:${tc.status}:${tc.output?.length ?? 0}:${tc.args?.length ?? 0}`).join('|') ?? '';
-      if (!isLast) {
-        const cached = conversationVmCache.get(m);
-        if (cached
-          && cached.content === m.content
-          && cached.thought === m.thought
-          && cached.toolsRef === m.toolCalls
-          && cached.toolsSignature === toolsSignature
-          && cached.displayKind === displayKind
-          && cached.displayMetadata === m.displayMetadata) {
-          return cached.vm;
-        }
-      }
-      const vm: ConversationMessageVM = {
-        id: m.id,
-        rowId: m.rowId,
-        role: m.role,
-        content: m.content,
-        sender: m.sender,
-        senderAvatar: m.senderAvatar,
-        model: m.model,
-        thought: m.thought,
-        thoughtDurationMs: m.thoughtDurationMs,
-        durationMs: m.durationMs,
-        timestamp: m.timestamp,
-        status: streaming && isLast ? 'streaming' : undefined,
-        isStreaming: streaming && isLast,
-        displayKind,
-        displayMetadata: m.displayMetadata,
-        toolCalls: m.toolCalls?.map((tc) => ({
-          id: tc.id,
-          name: tc.name,
-          status: tc.status,
-          args: tc.args,
-          output: tc.output,
-          durationMs: tc.durationMs,
-          startedAt: tc.startTime,
-        })),
-      };
-      if (!isLast) {
-        conversationVmCache.set(m, {
-          vm,
-          content: m.content,
-          thought: m.thought,
-          toolsRef: m.toolCalls,
-          toolsSignature,
-          displayKind,
-          displayMetadata: m.displayMetadata,
-        });
-      }
-      return vm;
-    }),
-  };
+  return renderCoordinator.buildConversationSnapshot();
 }
 
-let lastSeenLoadingOlder = false;
-let lastSeenMessagesPhase: DataPhase = 'ready';
-
-/**
- * 同步 React 消息列表。
- * 【设计意图】流式期间不推送新快照，正文由锚点直写；只在出现新消息行或回合结束时收敛，
- * 避免 React 重渲染覆盖 ref / innerHTML 直写的内容。
- */
 function syncReactMessageList(force = false): void {
-  const host = document.getElementById('react-message-list-host');
-  if (!host) {
-    reactMessageList?.unmount();
-    reactMessageList = null;
-    reactMessageListHost = null;
-    renderedMessageIds = new Set();
-    lastSeenStreaming = false;
-    lastSeenLoadingOlder = false;
-    lastSeenMessagesPhase = state.messagesPhase;
-    return;
-  }
-  ensureMessageWindow(state.messages.length);
-  const currentIds = state.messages.slice(messageWindowStart, messageWindowEnd).map((m) => m.id);
-  if (reactMessageListHost !== host) {
-    reactMessageList?.unmount();
-    reactMessageList = mountMessageList(host, buildConversationSnapshot);
-    reactMessageListHost = host;
-    renderedMessageIds = new Set(currentIds);
-    lastSeenStreaming = isStreamingActiveForCurrentSession();
-    lastSeenLoadingOlder = state.isLoadingOlder;
-    sessionSwitchPending = false;
-    lastSeenMessagesPhase = state.messagesPhase;
-    // 【首挂必须也锁定行高 (Rules)】首次挂载若跳过锁定，虚拟高度永不生效，
-    // 实测 scrollHeight 停在 751118（= 7625×96 的默认估值）、滚动 11050px 只推进 0 条。
-    scheduleVirtualHeightSync();
-    return;
-  }
-  const streaming = isStreamingActiveForCurrentSession();
-  const justStoppedStreaming = lastSeenStreaming && !streaming;
-  lastSeenStreaming = streaming;
-
-  const loadingOlderChanged = lastSeenLoadingOlder !== state.isLoadingOlder;
-  lastSeenLoadingOlder = state.isLoadingOlder;
-
-  // 首屏相位翻转必须推送：骨架 ⇄ 真实空态/历史在不换 id 的情况下也要换脸。
-  const messagesPhaseChanged = lastSeenMessagesPhase !== state.messagesPhase;
-  lastSeenMessagesPhase = state.messagesPhase;
-
-  const shouldPush = decideConversationPush({
-    prevIds: renderedMessageIds,
-    nextIds: currentIds,
-    justStoppedStreaming,
-    force: force || sessionSwitchPending,
-    loadingOlderChanged,
-    messagesPhaseChanged,
-  });
-  if (shouldPush && reactMessageList) {
-    sessionSwitchPending = false;
-    reactMessageList.update();
-    renderedMessageIds = new Set(currentIds);
-    // React 提交后锁定本会话平均行高并钉住画布虚拟高度，供占位与滚动条映射使用。
-    scheduleVirtualHeightSync();
-  }
+  renderCoordinator.syncReactMessageList(force);
 }
 
 /* --------------------------------------------------------------------------
@@ -6125,611 +5624,11 @@ function syncReactSettings(): void {
 }
 
 function mountReactShellComponents(): void {
-  const titlebarHost = document.getElementById('react-titlebar-host');
-  const leftRailHost = document.getElementById('react-leftrail-host');
-  if (titlebarHost && !updateReactTitlebar) {
-    updateReactTitlebar = mountTitlebar(titlebarHost, getTitlebarSnapshot, {
-      onMinimize: () => desktopApi?.minimize(),
-      onMaximize: async () => {
-        if (!desktopApi) return;
-        const result = await desktopApi.maximize();
-        state.isMaximized = typeof result === 'boolean' ? result : await desktopApi.isMaximized();
-        render();
-      },
-      onClose: () => desktopApi?.close(),
-      onToggleLeftRail: () => { state.leftRailCollapsed = !state.leftRailCollapsed; render(); },
-      onToggleInspector: () => { state.inspectorCollapsed = !state.inspectorCollapsed; render(); },
-      onOpenSettings: () => {
-        state.isSettingsOpen = true;
-        ensureSettingsSectionData(state.settingsSection);
-        render();
-      },
-      onToggleTheme: () => {
-        state.theme = getToggleTheme(state.theme);
-        localStorage.setItem('hermes_flux_theme', state.theme);
-        localStorage.setItem('hermes_aura_theme', state.theme);
-        render();
-      },
-    });
-  }
-  if (leftRailHost && !updateReactLeftRail) {
-    updateReactLeftRail = mountLeftRail(leftRailHost, getLeftRailSnapshot, createLeftRailActions());
-  }
-  // 【设计意图 (Why)】绝大多数 render 并不改变左轨/标题栏内容（流式 token、dock 通知、消息追加等）。
-  // 无条件 root.render 会把 42+ 行会话列表整棵协调一遍，白白占用主线程。
-  // 【规则】左轨快照按输入引用缓存（O(1) 比较），绝不用 JSON.stringify 全量序列化——
-  //   89 个会话的快照序列化实测 15~20ms，比它想省下的渲染还贵。
-  if (updateReactTitlebar) {
-    const fingerprint = snapshotFingerprint(getTitlebarSnapshot());
-    if (fingerprint !== lastTitlebarSnapshotJson) {
-      lastTitlebarSnapshotJson = fingerprint;
-      updateReactTitlebar();
-    }
-  }
-  if (updateReactLeftRail) {
-    const snapshot = getLeftRailSnapshot();
-    if (snapshot !== lastPushedLeftRailSnapshot) {
-      lastPushedLeftRailSnapshot = snapshot;
-      updateReactLeftRail();
-    }
-  }
-  syncReactSettings();
-  syncReactMessageList();
-
-  /**
-   * Agent 在场指示器挂载与推送。
-   *
-   * 【设计意图 (Why)】
-   *   与 `mountPromptNavigator` 完全同构：host 常驻 `.flux-middle-pod`，只挂一次 createRoot，
-   *   之后只推快照。指示器内部的眨眼时钟（`usePresenceTicker`）因此不会被宿主每帧
-   *   `render()` 重置成「永远睁眼」。
-   *
-   * 【防范的历史坑 (Pitfall)】
-   *   1. 放在 `syncReactMessageList()` 之后：首帧 host 已存在但消息列表还没建，
-   *      提前推送读到的是空消息集，指示器会停在 idle，直到下一次 render 才修正。
-   *   2. host 绝不可放进 `#conversation-stream`——那里会被 `renderConversationCanvas` 整块销毁。
-   *   3. **全量重建会换掉 host 节点**（`root.innerHTML = html` 里 `renderMiddlePod` 重新产出模板）。
-   *      若只判 `!updateReactAgentPresence`，重建后旧 root 挂在已脱离文档的节点上，
-   *      指示器从此永久消失。因此必须按 host 引用比对（与 `syncReactMessageList` 同法）。
-   *
-   * 【约束与规则 (Rules)】同一 host 只挂一次；推送统一走 `syncAgentPresence`（指纹去重）。
-   */
-  /*
-   * 【位置校正必须先于取 host (Rules)】`dock` 变体的 host 必须活在 `.input-dock-container`
-   * 内部才能贴住输入舱上沿；而输入舱每次内容变化都会整块 `outerHTML` 替换容器，
-   * 顺带销毁宿主。因此这里每帧校正一次位置（必要时重建 host），再由下方引用比对触发重挂。
-   *
-   * 【为什么抽成函数 (Pitfall)】本函数在 `render()` 的输入舱替换**之前**执行，
-   *   而输入舱替换会把 dock 变体的 host 连带销毁。若只在挂载段校正一次，
-   *   指示器会在每次模型/通知/附件变化后永久消失（host 已脱离文档、root 仍在渲染）。
-   *   因此输入舱更新块之后必须再调一次同一个函数（见 `render()` 里的第二次调用）。
-   */
-  syncAgentPresenceHost();
-
-  /**
-   * 提示词导航轨挂载与推送。
-   * 【设计意图 (Why)】必须放在 syncReactMessageList 之后：首帧 host 已存在但消息列表还没建，
-   *   提前挂载读到的是旧窗口信息。
-   * 【约束与规则 (Rules)】host 常驻 pod 层，只挂一次；推送统一走 syncPromptNavigator。
-   */
-  const navHost = document.getElementById('react-prompt-navigator-host');
-  if (navHost && !updateReactPromptNavigator) {
-    const promptNavigatorMount = mountPromptNavigator(
-      navHost,
-      getPromptNavigatorSnapshot,
-      createPromptNavigatorActions()
-    );
-    updateReactPromptNavigator = promptNavigatorMount.update;
-  }
-  // 缓存命中时是两次引用比较；未命中才整表重建并按 scrollTop 重算当前项。
-  rebuildPromptEntries();
-  syncPromptNavigatorMeta();
-  syncPromptNavigator();
-  /**
-   * 首屏贴底不变式：窗口覆盖末尾 + 读者未回溯 ⇒ 视口应在底部。
-   * 【触发点 (Rules)】按布局指纹判定，而不是会话切换那一刻：
-   *   冷启动的缓存恢复、分页补齐与行高锁定都是分批到达的，首次规划发生在消息到位之前，
-   *   那一刻触发会落空，之后口径变化时再也不会落定。
-   * 【意图 (Why)】没有这一步，scrollTop 初值 0 会被滚动处理器判成读者向上回溯，
-   *   窗口被连续扩离末尾，读者最终停在会话中部（实测 1128 条会话距底 25756px）。
-   * 【兜底 (Rules)】脱离一屏以上说明旧口径残留，即便指纹已记录也重新落定一轮。
-   */
-  const streamForSettle = document.getElementById('conversation-stream');
-  const atTail = messageWindowEnd >= state.messages.length && state.messages.length > MESSAGE_WINDOW_CAPACITY;
-  const drifted = streamForSettle
-    ? streamForSettle.scrollHeight - streamForSettle.scrollTop - streamForSettle.clientHeight > streamForSettle.clientHeight
-    : false;
-  if (shouldSettleInitialBottom({
-    sessionId: state.activeSessionId,
-    readerScrolledSessionId,
-    atTail,
-    settledSignature: settledLayoutSignature,
-    currentSignature: layoutSignature(),
-    drifted,
-  })) {
-    initialBottomSettling = true;
-  }
-  settleInitialBottom();
-  // 输入舱高度决定会话流底部留白，必须在消息列表挂载后同步一次。
-  syncStreamBottomInset();
+  renderCoordinator.mountReactShellComponents();
 }
 
 function render(): void {
-  const root = document.getElementById('flux-app-root');
-  if (!root) return;
-  const renderStartedAt = performance.now();
-
-  const existingInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
-  const draftText = existingInput ? existingInput.value : '';
-  const inputHadFocus = Boolean(existingInput) && document.activeElement === existingInput;
-  const caretStart = existingInput?.selectionStart ?? draftText.length;
-  const caretEnd = existingInput?.selectionEnd ?? draftText.length;
-
-  // 通用保护当前聚焦的任何输入框（避免设置弹窗打字时被后台事件冲刷丢失焦点与文本）
-  const activeEl = document.activeElement as HTMLElement | null;
-  const activeInputId = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA') ? activeEl.id : null;
-  const activeInputVal = activeEl && 'value' in activeEl ? (activeEl as HTMLInputElement).value : '';
-  const activeCaretStart = activeEl && 'selectionStart' in activeEl ? (activeEl as HTMLInputElement).selectionStart : null;
-  const activeCaretEnd = activeEl && 'selectionEnd' in activeEl ? (activeEl as HTMLInputElement).selectionEnd : null;
-
-  const suppressPinOnce = suppressPinBottomOnce;
-  suppressPinBottomOnce = false;
-  const forcedBottom = suppressPinOnce ? false : pendingScrollToBottom;
-  pendingScrollToBottom = false;
-  const streamEl = document.getElementById('conversation-stream');
-  const wasNearBottom = isStreamNearBottom(streamEl);
-  // 【滚动不变量 (Rules)】窗口扩展触发的一次性抑制必须同时压住 forcedBottom 与 wasNearBottom：
-  // 内容仅略超一屏时，scrollTop=0 同时满足“触顶扩展”与“贴底跟随”，只压前者仍会跳底再弹回。
-  const pinBottom = suppressPinOnce ? false : (forcedBottom || wasNearBottom);
-  const streamAnchor = captureStreamAnchor();
-
-  document.documentElement.setAttribute('data-theme', state.theme);
-  // 【规则】皮肤明暗必须同步到一个可被纯 CSS 消费的属性上：厂商图标的双轨切换
-  // （哪些皮肤出品牌原色、哪些出 mono）全部由 `data-appearance` 决定。
-  // 让 CSS 承担这个判断，渲染层就不必为每个图标节点写条件分支，
-  // 换肤时也无需重新渲染选择器树——属性变化会直接触发样式重算。
-  document.documentElement.setAttribute(
-    'data-appearance',
-    SKINS[resolveSkinId(state.theme)]?.variant === 'light' ? 'light' : 'dark',
-  );
-  document.documentElement.dataset.maximized = state.isMaximized ? 'true' : 'false';
-
-  let currentProjectName: string | undefined;
-  let currentProjectPath: string | undefined;
-
-  const currentTitle = resolveTitlebarTitle({
-    activeFocus: state.activeFocus,
-    profiles: state.profiles,
-    groupRooms: state.groupRooms,
-    sessions: state.sessions,
-    activeSessionId: state.activeSessionId,
-    defaultTitle: t('titlebar.defaultTitle'),
-    notConnectedTitle: t('titlebar.notConnected'),
-    defaultRoomName: t('group.defaultRoomName'),
-    isConnected: state.gatewayConnected,
-    profileName: state.profileName,
-  });
-
-  const activeSession = state.sessions.find((s) => s.id === state.activeSessionId);
-  if (activeSession) {
-    const currentProject = state.projects.find((p) => p.id === activeSession.projectId || (activeSession.projectName && p.name === activeSession.projectName) || doesSessionBelongToProject(activeSession, p));
-    currentProjectName = currentProject ? currentProject.name : activeSession?.projectName;
-    currentProjectPath = currentProject ? currentProject.path : undefined;
-
-    // 兜底路径推断：若会话未关联项目实体，但拥有有效工作目录 cwd，从目录末端提取 Workspace 名称展示
-    if (!currentProjectName && activeSession?.cwd) {
-      const norm = activeSession.cwd.replace(/\\/g, '/').replace(/\/+$/, '');
-      const folderName = norm.split('/').pop() || norm;
-      if (folderName && folderName !== '/' && !folderName.endsWith(':')) {
-        currentProjectName = folderName;
-        currentProjectPath = norm;
-      }
-    }
-  }
-
-  const currentLastMsg = state.messages.length > 0 ? state.messages[state.messages.length - 1] : null;
-  const currentMessagesSnapshot: RenderMessagesSnapshot = {
-    sessionId: state.activeSessionId,
-    count: state.messages.length,
-    lastMsgId: currentLastMsg ? currentLastMsg.id : '',
-    lastContentLen: currentLastMsg ? (currentLastMsg.content?.length || 0) : 0,
-    isStreaming: state.isStreaming,
-    gatewayConnected: state.gatewayConnected,
-    gatewayConnecting: state.gatewayConnecting,
-    hasOlder: state.hasOlderMessages,
-    isLoadingOlder: state.isLoadingOlder,
-    profileName: state.profileName,
-    messagesPhase: state.messagesPhase,
-    rollbackActive: Boolean(state.rollbackArmed),
-    capsuleCount: state.sideAgentCapsules.length,
-  };
-
-  const isStreamingCurrent = isStreamingActiveForCurrentSession();
-  const currentDockSnapshot: RenderInputDockSnapshot = {
-    selectedModel: state.selectedModel,
-    currentProvider: state.currentProvider,
-    reasoningLevel: state.reasoningLevel,
-    approvalMode: state.approvalMode,
-    isStreaming: isStreamingCurrent,
-    disabled: !state.gatewayConnected,
-    modelMenuOpen: state.modelMenuOpen,
-    notice: state.dockNotice,
-    modelCount: state.availableModels.length,
-    modelCatalogHash: state.modelCatalogHash,
-    modelSearchQuery: state.modelSearchQuery,
-    recentModelsHash: state.recentModels.join(','),
-    favoriteModelsHash: state.favoriteModels.join(','),
-    attachmentsCount: state.attachments.length,
-    attachmentsHash: state.attachments.map((a) => `${a.id}:${a.name}`).join(','),
-    queuedHash: state.queuedMessages.map((q) => `${q.admissionId}:${q.text}`).join('|'),
-    rollbackArmedHash: state.rollbackArmed
-      ? `${state.rollbackArmed.targetId}:${state.rollbackArmed.removedCount}`
-      : '',
-  };
-
-  const inOngoingStreamingTurn =
-    state.isStreaming &&
-    lastMessagesSnapshot?.isStreaming &&
-    lastMessagesSnapshot.sessionId === currentMessagesSnapshot.sessionId &&
-    lastMessagesSnapshot.count === currentMessagesSnapshot.count;
-
-  const structureDirty = canvasStructureDirty;
-  const messagesChanged =
-    (structureDirty || !inOngoingStreamingTurn) &&
-    (structureDirty ||
-      !lastMessagesSnapshot ||
-      lastMessagesSnapshot.sessionId !== currentMessagesSnapshot.sessionId ||
-      lastMessagesSnapshot.count !== currentMessagesSnapshot.count ||
-      lastMessagesSnapshot.lastMsgId !== currentMessagesSnapshot.lastMsgId ||
-      lastMessagesSnapshot.isStreaming !== currentMessagesSnapshot.isStreaming ||
-      lastMessagesSnapshot.gatewayConnected !== currentMessagesSnapshot.gatewayConnected ||
-      lastMessagesSnapshot.gatewayConnecting !== currentMessagesSnapshot.gatewayConnecting ||
-      lastMessagesSnapshot.hasOlder !== currentMessagesSnapshot.hasOlder ||
-      lastMessagesSnapshot.isLoadingOlder !== currentMessagesSnapshot.isLoadingOlder ||
-      lastMessagesSnapshot.profileName !== currentMessagesSnapshot.profileName ||
-      lastMessagesSnapshot.messagesPhase !== currentMessagesSnapshot.messagesPhase ||
-      lastMessagesSnapshot.rollbackActive !== currentMessagesSnapshot.rollbackActive ||
-      lastMessagesSnapshot.capsuleCount !== currentMessagesSnapshot.capsuleCount);
-
-  const bodyContainer = root.querySelector('.flux-body-container');
-
-  if (!bodyContainer) {
-    // 1. Initial full skeleton mount
-    const html = `
-      <div id="react-titlebar-host"></div>
-
-      <div class="flux-body-container" style="flex: 1; display: flex; position: relative; overflow: hidden; width: 100%;">
-        <!-- React 左轨岛宿主：只做容器，绝不作为任何 innerHTML/outerHTML 的目标 -->
-        <div id="react-leftrail-host" style="display: contents;"></div>
-
-        ${renderMiddlePod({
-          gatewayConnected: state.gatewayConnected,
-          gatewayConnecting: state.gatewayConnecting,
-          gatewayUrl: state.gatewayUrl,
-          username: state.username,
-          password: state.password,
-          profileName: state.profileName,
-          messages: state.messages,
-          messagesPhase: state.messagesPhase,
-          testStatus: state.testStatus,
-          hasOlderMessages: state.hasOlderMessages,
-          isLoadingOlder: state.isLoadingOlder,
-          isStreaming: isStreamingActiveForCurrentSession(),
-          dockHtml: state.gatewayConnected
-            ? renderInputDock({
-                selectedModel: state.selectedModel,
-                models: state.availableModels,
-                modelDetails: state.modelDetails,
-                modelCatalog: state.modelCatalog,
-                currentProvider: state.currentProvider,
-                favoriteModels: state.favoriteModels,
-                recentModels: state.recentModels,
-                modelSearchQuery: state.modelSearchQuery,
-                collapsedProviders: state.collapsedProviders,
-                reasoningLevel: state.reasoningLevel,
-                approvalMode: state.approvalMode,
-                isStreaming: isStreamingActiveForCurrentSession(),
-                hasDraft: Boolean(draftText.trim()) || state.attachments.length > 0,
-                disabled: !state.gatewayConnected,
-                modelMenuOpen: state.modelMenuOpen,
-                notice: state.dockNotice,
-                attachments: state.attachments,
-                queuedMessages: state.queuedMessages,
-                slashPopperOpen: state.slashPopperOpen,
-                slashItems: state.slashItems,
-                mentionPopperOpen: state.mentionPopperOpen,
-                mentionItems: state.mentionItems,
-                rollbackBanner: state.rollbackArmed
-                  ? { removedCount: state.rollbackArmed.removedCount, anchorLabel: state.rollbackArmed.anchorLabel }
-                  : null,
-              })
-            : '',
-        })}
-
-        ${renderInspectionPod({
-          collapsed: state.inspectorCollapsed,
-          activeTab: state.activeInspectorTab,
-          gatewayConnected: state.gatewayConnected,
-          isFullscreen: state.inspectorFullscreen,
-          openFiles: state.openFiles,
-          activeFilePath: state.activeFilePath,
-          viewMode: state.fileViewMode,
-          showLineNumbers: state.fileShowLineNumbers,
-          wordWrap: state.fileWordWrap,
-          searchOpen: state.fileSearchOpen,
-          searchQuery: state.fileSearchQuery,
-          artifacts: state.artifacts,
-          browserFrame: state.browserFrame,
-          gitDiffs: state.gitDiffs,
-          memories: state.memories,
-        })}
-      </div>
-
-      <!-- 设置中心 React 岛宿主：常驻挂载，关闭态由组件返回 null 表达，绝不 outerHTML 覆写 -->
-      <div id="react-settings-host" style="display: contents;"></div>
-
-      ${modalInteractionController.renderTaskModalHtml()}
-
-      ${modalInteractionController.renderContextMenuHtml()}
-
-      ${modalInteractionController.renderConfirmModalHtml()}
-    `;
-
-    root.innerHTML = html;
-    mountReactShellComponents();
-    lastMessagesSnapshot = currentMessagesSnapshot;
-    lastInputDockSnapshot = currentDockSnapshot;
-    applyStreamAnchor(streamAnchor, pinBottom);
-  } else {
-    // 2. High-performance Subtree/Section Isolation Update (Zero DOM thrashing on conversation stream)
-    mountReactShellComponents();
-
-    // 左轨由 React 岛自管子树，递增更新路径不再触碰其 DOM（不会重建滚动容器与输入框）。
-
-    const inspectEl = (root.querySelector('#flux-inspector-pod') || root.querySelector('.flux-inspector-pod')) as HTMLElement | null;
-    if (inspectEl) {
-      if (lastInspectorCollapsed !== state.inspectorCollapsed) {
-        if (!state.inspectorCollapsed) {
-          // 折叠 ➔ 展开：构建新节点并实施两阶段挂载帧序，确保浏览器感知 0 到 420px 的 120ms 平滑展开
-          inspectEl.outerHTML = renderInspectionPod({
-            collapsed: false,
-            activeTab: state.activeInspectorTab,
-            gatewayConnected: state.gatewayConnected,
-            isFullscreen: state.inspectorFullscreen,
-            openFiles: state.openFiles,
-            activeFilePath: state.activeFilePath,
-            viewMode: state.fileViewMode,
-            showLineNumbers: state.fileShowLineNumbers,
-            wordWrap: state.fileWordWrap,
-            searchOpen: state.fileSearchOpen,
-            searchQuery: state.fileSearchQuery,
-            artifacts: state.artifacts,
-            browserFrame: state.browserFrame,
-            gitDiffs: state.gitDiffs,
-            memories: state.memories,
-          });
-          const nextInspectEl = root.querySelector('#flux-inspector-pod') as HTMLElement | null;
-          if (nextInspectEl) {
-            // 阶段 1：首帧强制折叠态 width: 0 并使容器立即可见
-            nextInspectEl.classList.add('inspector-collapsed');
-            nextInspectEl.style.display = 'flex';
-            // 关键帧刷新：强制触发重绘，锁定 width: 0 为起始跃迁帧
-            void nextInspectEl.offsetWidth;
-
-            // 阶段 2：挂载控制器并移除折叠类，激发 120ms 平滑入场
-            const controller = bindInspectorController(nextInspectEl);
-            nextInspectEl.classList.remove('inspector-collapsed');
-            void controller.enter();
-          }
-        } else {
-          // 展开 ➔ 折叠：保持节点保活，触发 200ms 退场收缩，动画结束后 onExited 自动置为 display: none
-          const controller = inspectorMotionController || bindInspectorController(inspectEl);
-          inspectEl.classList.add('inspector-collapsed');
-          void controller.exit();
-        }
-        lastInspectorCollapsed = state.inspectorCollapsed;
-      } else if (!state.inspectorCollapsed) {
-        // 展开状态下的内容增量更新（切换文件/Tab等）
-        inspectEl.outerHTML = renderInspectionPod({
-          collapsed: false,
-          activeTab: state.activeInspectorTab,
-          gatewayConnected: state.gatewayConnected,
-          isFullscreen: state.inspectorFullscreen,
-          openFiles: state.openFiles,
-          activeFilePath: state.activeFilePath,
-          viewMode: state.fileViewMode,
-          showLineNumbers: state.fileShowLineNumbers,
-          wordWrap: state.fileWordWrap,
-          searchOpen: state.fileSearchOpen,
-          searchQuery: state.fileSearchQuery,
-          artifacts: state.artifacts,
-          browserFrame: state.browserFrame,
-          gitDiffs: state.gitDiffs,
-          memories: state.memories,
-        });
-        const nextInspectEl = root.querySelector('#flux-inspector-pod') as HTMLElement | null;
-        if (nextInspectEl) {
-          bindInspectorController(nextInspectEl);
-        }
-      }
-    }
-
-
-    // Input Dock update (Zero DOM thrashing & caret preservation)
-    // 【设计意图 (Why)】
-    // 保护输入舱在非输入舱相关状态演变（如会话切换、侧边栏收缩、未读点刷新）时不被破坏性全量替换，
-    // 保持真实的 <textarea> DOM 节点与 Blink Caret 选区拓扑 100% 物理稳定。
-    // 【防范的历史坑 (Pitfall)】
-    // 历史代码在每帧 render() 中无条件执行 existingDock.outerHTML = nextDockHtml，
-    // 导致输入框被连根拔除重建，刚获得的焦点与输入法状态瞬间清空，引发“无光标无法输入文字”。
-    // 【约束与规则 (Rules)】
-    // 仅在 dockChanged（模型/流式/通知/禁用态变化）或不存在 existingDock 时执行替换，否则原生节点绝对不动。
-    const existingDock = root.querySelector('.input-dock-container');
-    const dockChanged = hasDockSnapshotChanged(lastInputDockSnapshot, currentDockSnapshot);
-    // 【设计意图 (Why)】renderInputDock 会展开全 provider × 全模型的选择器 HTML；
-    // 只有 dock 需要新增或内容指纹变化时才构建，避免每次 render（流式收敛、左轨交互）白付这笔字符串成本。
-    const shouldBuildDock = state.gatewayConnected && (!existingDock || dockChanged);
-
-    const nextDockHtml = shouldBuildDock
-      ? renderInputDock({
-          selectedModel: state.selectedModel,
-          models: state.availableModels,
-          modelDetails: state.modelDetails,
-          modelCatalog: state.modelCatalog,
-          currentProvider: state.currentProvider,
-          favoriteModels: state.favoriteModels,
-          recentModels: state.recentModels,
-          modelSearchQuery: state.modelSearchQuery,
-          collapsedProviders: state.collapsedProviders,
-          reasoningLevel: state.reasoningLevel,
-          approvalMode: state.approvalMode,
-          isStreaming: isStreamingCurrent,
-          hasDraft: Boolean(draftText.trim()) || state.attachments.length > 0,
-          disabled: !state.gatewayConnected,
-          modelMenuOpen: state.modelMenuOpen,
-          notice: state.dockNotice,
-          attachments: state.attachments,
-          queuedMessages: state.queuedMessages,
-          slashPopperOpen: state.slashPopperOpen,
-          slashItems: state.slashItems,
-          mentionPopperOpen: state.mentionPopperOpen,
-          mentionItems: state.mentionItems,
-          rollbackBanner: state.rollbackArmed
-            ? { removedCount: state.rollbackArmed.removedCount, anchorLabel: state.rollbackArmed.anchorLabel }
-            : null,
-        })
-      : '';
-
-    /*
-     * 【单一出口 (Rules)】输入舱有三条变更路径（断连移除 / 整块替换 / 首次新建），
-     *   三条都必须走同一个函数，且**之后**统一做一次指示器宿主重校。
-     *   历史缺陷：把重校写进某一条分支里，另外两条分支就会让指示器永久消失；
-     *   写成「分支内各调一次」时守卫测试也无法区分是否漏了一条。
-     */
-    const applyInputDockUpdate = (): void => {
-      if (existingDock) {
-        if (!state.gatewayConnected) {
-          existingDock.remove();
-          lastInputDockSnapshot = null;
-        } else if (dockChanged && nextDockHtml) {
-          existingDock.outerHTML = nextDockHtml;
-          lastInputDockSnapshot = currentDockSnapshot;
-        }
-      } else if (nextDockHtml) {
-        const middlePod = root.querySelector('.flux-middle-pod');
-        if (middlePod) middlePod.insertAdjacentHTML('beforeend', nextDockHtml);
-        lastInputDockSnapshot = currentDockSnapshot;
-      }
-    };
-
-    applyInputDockUpdate();
-    /*
-     * 【必须在输入舱变更之后重校 (Pitfall)】dock 变体的 host 是 `.input-dock-container`
-     *   的首子节点，上述任一路径都可能把它连带销毁。挂载段在变更**之前**执行，
-     *   因此这里必须重新校正宿主并推送，否则 root 挂在脱离文档的节点上：
-     *   指示器永久消失，且 React root 泄漏。
-     */
-    syncAgentPresenceHost();
-    syncAgentPresence();
-
-    // 设置中心由 React 岛自管子树（见 mountReactSettings），此处不再做任何 DOM 替换。
-
-    // 模态弹窗与右键菜单增量更新
-    modalInteractionController.updateModals(root);
-
-    // Conversation Stream: React 列表已挂载时只更新列表，不重建 canvas（避免销毁 React root）
-    const activeStream = document.getElementById('conversation-stream');
-    if (activeStream && messagesChanged) {
-      const reactHost = document.getElementById('react-message-list-host');
-      // 【骨架也走 React 宿主 (Rules)】历史未到达时同样由宿主渲染骨架，
-      // 否则 loading 相位会被模板的欢迎空态抢走，界面又对用户断言"没有对话"。
-      const canUseReactList = state.gatewayConnected && (state.messages.length > 0 || state.messagesPhase === 'loading');
-      if (reactHost && canUseReactList) {
-        /**
-         * 【结构变化必须强制推送 (Rules)】行高锁定会改写 `virtualHeightPx` 与 `contentOffsetPx`，
-         *   但挂载窗口的消息 id 可能一个都没变（首屏 120 条原地不动）。
-         *   若不强制推送，视口会一直停在旧口径的 scrollHeight 上，读者看到的是会话中部。
-         */
-        syncReactMessageList(structureDirty);
-        canvasStructureDirty = false;
-        applyStreamAnchor(streamAnchor, pinBottom);
-        lastMessagesSnapshot = currentMessagesSnapshot;
-      } else {
-        activeStream.innerHTML = renderConversationCanvas({
-          gatewayConnected: state.gatewayConnected,
-          gatewayConnecting: state.gatewayConnecting,
-          gatewayUrl: state.gatewayUrl,
-          username: state.username,
-          password: state.password,
-          profileName: state.profileName,
-          messages: state.messages,
-          messagesPhase: state.messagesPhase,
-          testStatus: state.testStatus,
-          hasOlderMessages: state.hasOlderMessages,
-          isLoadingOlder: state.isLoadingOlder,
-          isStreaming: isStreamingActiveForCurrentSession(),
-          sideAgentCapsules: state.sideAgentCapsules,
-        });
-        canvasStructureDirty = false;
-        syncReactMessageList(true);
-        applyStreamAnchor(streamAnchor, pinBottom);
-        lastMessagesSnapshot = currentMessagesSnapshot;
-      }
-    }
-  }
-
-  // Restore the composer draft, its caret and its focus
-  const newInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
-  if (newInput) {
-    if (draftText && newInput.value !== draftText) newInput.value = draftText;
-    if (inputHadFocus) {
-      newInput.focus({ preventScroll: true });
-      const max = newInput.value.length;
-      newInput.setSelectionRange(Math.min(caretStart, max), Math.min(caretEnd, max));
-    }
-  }
-
-  bindEvents();
-
-  // 恢复非 Dock 输入框的焦点与光标位置（防止设置弹窗打字被打断）
-  if (activeInputId && activeInputId !== 'dock-prompt-input') {
-    const restoredEl = document.getElementById(activeInputId) as HTMLInputElement | null;
-    if (restoredEl) {
-      if (typeof activeInputVal === 'string' && restoredEl.value !== activeInputVal) restoredEl.value = activeInputVal;
-      restoredEl.focus({ preventScroll: true });
-      if (activeCaretStart !== null && activeCaretEnd !== null) {
-        // gate-degrade: 元素不支持 selectionRange 时的安全回落，降级为默认聚焦
-        try { restoredEl.setSelectionRange(activeCaretStart, activeCaretEnd); } catch { /* 忽略不支持选区的输入类型 */ }
-      }
-    }
-  }
-
-  // Popper 增量同步：只替换 #composer-popper-mount 子树，绝不重建 dock / textarea
-  syncComposerPoppers();
-
-  if (messagesChanged) {
-    requestAnimationFrame(() => {
-      if (pinBottom) {
-        const stream = document.getElementById('conversation-stream');
-        if (stream) {
-          stream.scrollTop = stream.scrollHeight;
-          markProgrammaticScroll(stream);
-        }
-      } else {
-        stabilizeStreamAnchor(streamAnchor);
-      }
-    });
-  }
-
-  logRender.debug('render', {
-    ms: Math.round((performance.now() - renderStartedAt) * 10) / 10,
-    messages: state.messages.length,
-    messagesChanged,
-    session: state.activeSessionId || '(none)',
-    forcedBottom,
-    pinBottom,
-    anchor: streamAnchor.id,
-  });
+  renderCoordinator.render();
 }
 
 /**
@@ -7952,487 +6851,55 @@ function bindRailResizeEvents(): void {
   });
 }
 
+const dropdownKeybindController = createDropdownKeybindController({
+  getState: () => state,
+  render: () => render(),
+  switchModel: (model, provider) => switchModel(model, provider),
+  switchReasoning: (level) => switchReasoning(level),
+  modalInteractionController,
+  ensureSettingsSectionData: (section) => ensureSettingsSectionData(section),
+  getLastInputDockSnapshot: () => renderCoordinator.getLastInputDockSnapshot(),
+  setLastInputDockSnapshot: (snapshot) => renderCoordinator.setLastInputDockSnapshot(snapshot),
+});
+
 function bindModelDropdownEvents(): void {
-  // Search model input
-  const modelSearchInput = document.getElementById('dock-model-search-input') as HTMLInputElement | null;
-  if (modelSearchInput) {
-    modelSearchInput.onclick = (e) => e.stopPropagation();
-    modelSearchInput.oninput = (e) => {
-      e.stopPropagation();
-      state.modelSearchQuery = (e.target as HTMLInputElement).value;
-      updateModelDropdownSubtree();
-    };
-  }
-
-  // Toggle favorite model
-  document.querySelectorAll('.btn-toggle-favorite').forEach((btn) => {
-    (btn as HTMLElement).onclick = (e) => {
-      e.stopPropagation();
-      const modelId = (e.currentTarget as HTMLElement).getAttribute('data-model');
-      if (modelId) {
-        if (state.favoriteModels.includes(modelId)) {
-          state.favoriteModels = state.favoriteModels.filter((m) => m !== modelId);
-        } else {
-          state.favoriteModels.push(modelId);
-        }
-        localStorage.setItem('hermes_flux_fav_models', JSON.stringify(state.favoriteModels));
-        localStorage.setItem('hermes_aura_fav_models', JSON.stringify(state.favoriteModels));
-        updateModelDropdownSubtree();
-      }
-    };
-  });
-
-  // 【规则】列表滚动必须收起级联：面板是 dropdown 的子节点、不在滚动容器内，
-  // 滚轮滚动时行在动而面板不动，会立刻错位到别的行旁边。
-  const scrollList = document.getElementById('model-picker-scroll-list');
-  if (scrollList && !scrollList.dataset.cascadeScrollBound) {
-    scrollList.dataset.cascadeScrollBound = 'true';
-    scrollList.addEventListener('scroll', () => hideModelCascade(), { passive: true });
-  }
-
-  // Provider 分组折叠：点标题把该 provider 的模型整体收起/展开
-  document.querySelectorAll('.model-provider-group-header').forEach((header) => {
-    const el = header as HTMLElement;
-    const toggle = () => {
-      // 搜索期间折叠被临时忽略：此时标题是纯分组标签，点了不该有副作用
-      if (el.getAttribute('data-search-open') === 'true') return;
-      const slug = el.getAttribute('data-provider');
-      if (!slug) return;
-      const idx = state.collapsedProviders.indexOf(slug);
-      if (idx >= 0) state.collapsedProviders.splice(idx, 1);
-      else state.collapsedProviders.push(slug);
-      // 【规则】折叠只重建列表子树，不重建整个 dock —— 否则搜索框与滚动位置一并丢失
-      hideModelCascade();
-      updateModelDropdownSubtree();
-    };
-    el.onclick = (e) => {
-      e.stopPropagation();
-      toggle();
-    };
-    el.onkeydown = (e) => {
-      if (e.key !== 'Enter' && e.key !== ' ') return;
-      e.preventDefault();
-      e.stopPropagation();
-      toggle();
-    };
-  });
-
-  // 模型行：点击切换模型；悬停或键盘聚焦时在其右侧浮出「思考等级」二级级联
-  document.querySelectorAll('.model-option').forEach((opt) => {
-    const el = opt as HTMLElement;
-    el.onclick = (e) => {
-      e.stopPropagation();
-      // 【规则】网关标记不可用的模型禁止发起切换：必然被 config.set 拒绝，白跑一次失败
-      if (el.dataset.locked === 'true') return;
-      const model = el.getAttribute('data-model');
-      const provider = el.getAttribute('data-provider') || undefined;
-      hideModelCascade();
-      state.modelMenuOpen = false;
-      if (model) void switchModel(model, provider);
-      else render();
-    };
-    el.onmouseenter = () => {
-      if (el.dataset.locked === 'true') return;
-      showModelCascade(el);
-    };
-    el.onmouseleave = () => {
-      scheduleHideModelCascade();
-    };
-    /**
-     * 【键盘可达性】思考等级此前只有 footer 一个按钮能 Tab 到；该按钮删除后，
-     * 若不给模型行补一条键盘路径，键盘用户将彻底失去设置等级的能力。
-     * 聚焦行即展开级联，↑↓/Home/End 在行间移动，→ 进入级联，Enter/空格选模型，
-     * Esc 收起；级联内部用 ↑↓ 选等级、Enter 应用、Esc 退回行。
-     */
-    el.onfocus = () => {
-      if (el.dataset.locked === 'true') return;
-      showModelCascade(el);
-    };
-    el.onblur = () => {
-      /**
-       * 【为什么必须记下当时的面板归属】失焦 → 聚焦可能在同一个同步块内连续发生
-       * （键盘上下移动、Esc 回退）。此时 setTimeout(0) 里的回调已经在跑新面板的展开之后，
-       * 若只判断「焦点不在级联里」就收起，会把刚为**另一行**打开的面板一起误杀，
-       * 表现为「聚焦别的行，面板闪一下就没了」。
-       * 因此只在「面板仍属于当前这行」时才允许收起。
-       */
-      const ownerModel = rowModelOf(el);
-      window.setTimeout(() => {
-        const cascade = document.getElementById('model-reasoning-cascade');
-        if (cascade && cascade.contains(document.activeElement)) return;
-        if (state.modelCascadeModel !== ownerModel) return;
-        scheduleHideModelCascade();
-      }, 0);
-    };
-    el.onkeydown = (e) => {
-      if (e.key === 'ArrowRight') {
-        if (el.dataset.locked === 'true') return;
-        const cascade = document.getElementById('model-reasoning-cascade');
-        const first = cascade?.querySelector<HTMLElement>('.model-cascade__item');
-        if (first) {
-          e.preventDefault();
-          e.stopPropagation();
-          // 键盘主动展开不被此前的选完抑制窗口拦截
-          cascadeSuppressUntil = 0;
-          showModelCascade(el);
-          first.focus();
-        }
-        return;
-      }
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        el.click();
-        return;
-      }
-      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End') return;
-      e.preventDefault();
-      const rows = [...document.querySelectorAll<HTMLElement>('.model-option')].filter((r) => r.offsetParent !== null);
-      const current = rows.indexOf(el);
-      if (current < 0) return;
-      const next =
-        e.key === 'Home'
-          ? 0
-          : e.key === 'End'
-            ? rows.length - 1
-            : e.key === 'ArrowDown'
-              ? Math.min(rows.length - 1, current + 1)
-              : Math.max(0, current - 1);
-      rows[next]?.focus();
-    };
-  });
-
-  // 二级级联自身：进入不收起，离开才收起
-  const cascade = document.getElementById('model-reasoning-cascade');
-  if (cascade) {
-    cascade.onmouseenter = () => {
-      cancelHideModelCascade();
-    };
-    cascade.onmouseleave = () => {
-      scheduleHideModelCascade();
-    };
-    const items = [...cascade.querySelectorAll<HTMLElement>('.model-cascade__item')];
-    items.forEach((el, index) => {
-      el.onclick = (e) => {
-        e.stopPropagation();
-        pickReasoningLevel(el);
-      };
-      el.onkeydown = (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          e.stopPropagation();
-          pickReasoningLevel(el);
-          return;
-        }
-        if (e.key === 'Escape' || e.key === 'ArrowLeft') {
-          e.preventDefault();
-          e.stopPropagation();
-          const model = state.modelCascadeModel;
-          // 【规则】Esc 的目标是「收起面板」而不是「把面板重新唤起来」：
-          // 焦点回到模型行会立刻触发该行的 onfocus → showModelCascade，
-          // 必须同时开启抑制窗口，否则 Esc 表现为「按了没反应」。
-          if (model) {
-            cascadeSuppressModel = model;
-            cascadeSuppressUntil = Date.now() + 400;
-          }
-          hideModelCascade();
-          if (model) {
-            document.querySelector<HTMLElement>(`.model-option[data-model="${CSS.escape(model)}"]`)?.focus({
-              preventScroll: true,
-            });
-          }
-          return;
-        }
-        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End') return;
-        e.preventDefault();
-        const next =
-          e.key === 'Home'
-            ? 0
-            : e.key === 'End'
-              ? items.length - 1
-              : e.key === 'ArrowDown'
-                ? Math.min(items.length - 1, index + 1)
-                : Math.max(0, index - 1);
-        items[next]?.focus();
-      };
-    });
-  }
+  dropdownKeybindController.bindModelDropdownEvents();
 }
 
-/** 应用某个思考等级（点击与键盘共用同一路径）。 */
 function pickReasoningLevel(item: HTMLElement): void {
-  // 【规则】`data-level` 是字符串，必须过白名单再断言成联合类型：
-  // 模板与消费者不在同一包，直接 as 等于把运行时校验交给运气。
-  const LEVELS: ReadonlySet<string> = new Set(['default', 'none', 'low', 'high', 'max']);
-  const raw = item.getAttribute('data-level');
-  if (!raw || !LEVELS.has(raw)) return;
-  const level = raw as AppState['reasoningLevel'];
-  // 【规则】抑制窗口对所有行生效：选等级会触发 render 重建列表，
-  // 重建后浏览器可能把焦点还给某个模型行，若只按 model 抑制就会漏掉，
-  // 面板立刻又弹回来，表现为「选了没生效」。
-  const returnToModel = state.modelCascadeModel ?? null;
-  cascadeSuppressModel = null;
-  cascadeSuppressUntil = Date.now() + 600;
-  hideModelCascade();
-  void switchReasoning(level);
-  // 【键盘可达性】选完必须把焦点还给原模型行：blur 到 body 会让键盘用户
-  // 从整个界面的第一个可聚焦元素重新 Tab 一遍。
-  // 放到下一帧：switchReasoning 会触发 render 重建列表，此刻旧行节点已被替换。
-  if (returnToModel) {
-    requestAnimationFrame(() => {
-      const row = document.querySelector<HTMLElement>(`.model-option[data-model="${CSS.escape(returnToModel)}"]`);
-      row?.focus({ preventScroll: true });
-    });
-  }
+  dropdownKeybindController.pickReasoningLevel(item);
 }
 
-/* ------------------------------------------------------------------ *
- * 模型行 → 思考等级二级级联（单例面板，按需定位）
- * ------------------------------------------------------------------ */
+function hideModelCascade(): void {
+  dropdownKeybindController.hideModelCascade();
+}
 
-let modelCascadeHideTimer: number | null = null;
-/**
- * 刚选完等级的模型行与其抑制窗口。
- *
- * 【为什么需要】选完等级会触发 render 重建列表；此时鼠标仍停在该行上，Chromium 会在
- * DOM 替换后重新派发 mouseenter，面板立刻又弹出来——用户会觉得「选了没生效」。
- * 抑制 600ms（且仅限同一行）即可让这次选择视觉上真正收住，移开再回来仍然可用。
- */
-let cascadeSuppressModel: string | null = null;
-let cascadeSuppressUntil = 0;
+function scheduleHideModelCascade(): void {
+  dropdownKeybindController.scheduleHideModelCascade();
+}
 
 function cancelHideModelCascade(): void {
-  if (modelCascadeHideTimer !== null) {
-    window.clearTimeout(modelCascadeHideTimer);
-    modelCascadeHideTimer = null;
-  }
+  dropdownKeybindController.cancelHideModelCascade();
 }
 
-/** 收起二级级联。只改 DOM，不触发 render —— 它不参与任何状态快照。 */
-function hideModelCascade(): void {
-  cancelHideModelCascade();
-  const cascade = document.getElementById('model-reasoning-cascade');
-  if (cascade) cascade.style.display = 'none';
-  state.modelCascadeModel = undefined;
-}
-
-/** 离开行/面板后延迟收起，给「鼠标从行移到面板」留出穿越间隙。 */
-function scheduleHideModelCascade(): void {
-  cancelHideModelCascade();
-  modelCascadeHideTimer = window.setTimeout(() => {
-    modelCascadeHideTimer = null;
-    hideModelCascade();
-  }, 160);
-}
-
-/**
- * 每次打开模型下拉时把搜索态归零。
- *
- * 【设计意图 (Why)】
- *   残留的搜索词会让用户看到上一次过滤后的残缺列表，误以为模型丢了。
- *   必须**无条件**清空并重建列表子树——挂在 `if (state.modelSearchQuery)` 里看似等价，
- *   但一旦条件写错（`if (false)`）整段逻辑就静默失效，而文本断言完全看不出来。
- *
- * 【约束与规则 (Rules)】
- *   只改搜索态与列表子树；搜索框的 `value` 由调用方同步（那里还要 focus）。
- */
 function resetModelSearchOnOpen(): void {
-  state.modelSearchQuery = '';
-  // 【状态对齐】输入舱快照只随整舱 render() 更新；直接改列表子树清掉搜索词时，
-  // 若不同步对齐快照，下一次无关的 render() 会误判「搜索词变了」而整舱 outerHTML 重建，
-  // 直接打断用户在搜索框里的输入焦点。
-  if (lastInputDockSnapshot) {
-    lastInputDockSnapshot = { ...lastInputDockSnapshot, modelSearchQuery: '' };
-  }
-  updateModelDropdownSubtree();
+  dropdownKeybindController.resetModelSearchOnOpen();
 }
 
-/** 读取模型行的模型 ID（唯一取法，避免各处手写 getAttribute）。 */
-function rowModelOf(row: HTMLElement): string | undefined {
-  return row.getAttribute('data-model') || undefined;
-}
-
-/** 级联面板距视口上下/左右边缘的安全留白（px）。 */
-const CASCADE_VIEWPORT_PADDING_PX = 8;
-
-/**
- * 把二级级联定位到某一行右侧并显示。
- *
- * 【设计意图 (Why)】面板是单例：300 行 × 5 个等级若逐行渲染，会凭空多出上千个节点，
- * 而同一时刻只可能看一个。定位用相对下拉容器的绝对坐标，滚动时随行一起移动。
- *
- * 【约束与规则 (Rules)】右侧空间不足时翻到左侧；上下不足时夹取，绝不溢出视口。
- */
 function showModelCascade(row: HTMLElement): void {
-  const cascade = document.getElementById('model-reasoning-cascade');
-  const dropdown = document.getElementById('dock-model-dropdown');
-  if (!cascade || !dropdown) return;
-  // 刚选完等级：DOM 重建后浏览器可能补发 mouseenter/focus，这里按住 600ms 不重开
-  const rowModel = row.getAttribute('data-model');
-  if (Date.now() < cascadeSuppressUntil && (cascadeSuppressModel === null || rowModel === cascadeSuppressModel)) return;
-  cancelHideModelCascade();
-
-  state.modelCascadeModel = rowModel || undefined;
-  // 必须先切到 display='block' 再量尺寸：display:none 时 getBoundingClientRect 全为 0，
-  // 算出来的水平翻转与垂直夹取区间毫无意义。
-  cascade.style.display = 'block';
-  cascade.classList.remove('model-cascade--flip', 'model-cascade--inset');
-
-  const rowRect = row.getBoundingClientRect();
-  const dropdownRect = dropdown.getBoundingClientRect();
-  const cascadeRect = cascade.getBoundingClientRect();
-  const cascadeWidth = cascadeRect.width || 148;
-  const cascadeHeight = cascadeRect.height || 0;
-
-  // 1. 水平三档：右侧够放 → 右外侧；左侧够放 → 左外侧；两侧都不够（窄屏/移动端）→ 内缩停靠右内缘
-  const spaceRight = window.innerWidth - dropdownRect.right;
-  const spaceLeft = dropdownRect.left;
-  let useInset = false;
-  if (spaceRight >= cascadeWidth + 12) {
-    // 默认右外侧
-  } else if (spaceLeft >= cascadeWidth + 12) {
-    cascade.classList.add('model-cascade--flip');
-  } else {
-    cascade.classList.add('model-cascade--inset');
-    useInset = true;
-  }
-
-  // 2. 垂直：常规右/左外侧时顶部对齐该行，但必须夹在视口内；
-  //    内缩态（--inset）要避开当前锚定行本身文字，优先放行下方，不够再放行上方。
-  const viewportBottom = window.innerHeight - CASCADE_VIEWPORT_PADDING_PX;
-  let desiredTop = rowRect.top;
-  if (useInset) {
-    const belowTop = rowRect.bottom + 4;
-    const aboveTop = rowRect.top - cascadeHeight - 4;
-    desiredTop = belowTop + cascadeHeight <= viewportBottom ? belowTop : Math.max(CASCADE_VIEWPORT_PADDING_PX, aboveTop);
-  }
-  const maxTop = Math.max(CASCADE_VIEWPORT_PADDING_PX, viewportBottom - cascadeHeight);
-  const clampedTop = Math.min(Math.max(desiredTop, CASCADE_VIEWPORT_PADDING_PX), maxTop);
-  // absolute 定位基准是 padding-box 顶部（视口坐标 dropdownRect.top + dropdown.clientTop），因此须减 clientTop
-  cascade.style.top = `${Math.round(clampedTop - dropdownRect.top - dropdown.clientTop)}px`;
+  dropdownKeybindController.showModelCascade(row);
 }
 
-/** 统一收起模型下拉：同步 state、直接写 DOM（兜底防快照跳过）并触发重绘。 */
 function closeModelMenu(): void {
-  hideModelCascade();
-  state.modelMenuOpen = false;
-  const dropdown = document.getElementById('dock-model-dropdown');
-  if (dropdown) dropdown.style.display = 'none';
-  const trigger = document.getElementById('dock-model-selector-btn');
-  if (trigger) trigger.setAttribute('aria-expanded', 'false');
-  render();
+  dropdownKeybindController.closeModelMenu();
 }
 
 function updateModelDropdownSubtree(): void {
-  const scrollList = document.getElementById('model-picker-scroll-list');
-  if (!scrollList) return;
-  scrollList.innerHTML = renderModelPickerTree({
-    selectedModel: state.selectedModel,
-    models: state.availableModels,
-    modelDetails: state.modelDetails,
-    modelCatalog: state.modelCatalog,
-    currentProvider: state.currentProvider,
-    favoriteModels: state.favoriteModels,
-    recentModels: state.recentModels,
-    modelSearchQuery: state.modelSearchQuery,
-    collapsedProviders: state.collapsedProviders,
-    reasoningLevel: state.reasoningLevel,
-    approvalMode: state.approvalMode,
-    isStreaming: state.isStreaming,
-  });
-  bindModelDropdownEvents();
+  dropdownKeybindController.updateModelDropdownSubtree();
 }
 
-// Global keyboard shortcuts
-window.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
-    e.preventDefault();
-    state.leftRailCollapsed = !state.leftRailCollapsed;
-    render();
-  }
-  if ((e.ctrlKey || e.metaKey) && e.key === '\\') {
-    e.preventDefault();
-    state.inspectorCollapsed = !state.inspectorCollapsed;
-    render();
-  }
-  if ((e.ctrlKey || e.metaKey) && e.key === ',') {
-    e.preventDefault();
-    state.isSettingsOpen = !state.isSettingsOpen;
-    if (state.isSettingsOpen) ensureSettingsSectionData(state.settingsSection);
-    render();
-  }
-  if (e.key === 'Escape') {
-    if (modalInteractionController.handleGlobalEscape()) {
-      return;
-    }
-    if (state.isSettingsOpen) {
-      state.isSettingsOpen = false;
-      render();
-    } else if (state.modelMenuOpen) {
-      closeModelMenu();
-    }
-  }
-  if (e.key === 'Enter') {
-    if (modalInteractionController.handleGlobalEnter()) {
-      e.preventDefault();
-      return;
-    }
-  }
-});
-
-/**
- * 点击空白处收起浮层。
- *
- * 【设计意图 (Why)】
- *   1. 用 **capture 阶段的 pointerdown**，而不是冒泡阶段的 mousedown：
- *      浮层内部任何一处 stopPropagation（搜索框、行、分组标题都写了）都不会再让
- *      「点外面」失效；pointerdown 也覆盖触控板与触摸。
- *   2. 白名单从「第一个 `.pill-dropdown-wrapper`」改成「下拉根节点 + 触发按钮 + 二级级联」
- *      三个实名节点：分组标题、列表空白、级联面板都属于菜单自身，点它们不该收起菜单，
- *      而菜单外的任何像素都必须收起 —— 这正是之前「点空白不消失」的判定漏洞。
- */
-document.addEventListener(
-  'pointerdown',
-  (e) => {
-    if (!state.modelMenuOpen) return;
-    const target = e.target as Node | null;
-    if (!target) return;
-    const dropdown = document.getElementById('dock-model-dropdown');
-    const trigger = document.getElementById('dock-model-selector-btn');
-    const cascade = document.getElementById('model-reasoning-cascade');
-    if (dropdown?.contains(target) || trigger?.contains(target) || cascade?.contains(target)) return;
-    closeModelMenu();
-  },
-  true,
-);
-
-document.addEventListener('mousedown', (e) => {
-  const approvalDropdown = document.getElementById('dock-approval-dropdown');
-  const approvalBtn = document.getElementById('dock-approval-toggle-btn');
-  if (approvalDropdown && approvalDropdown.style.display === 'block') {
-    if (!approvalDropdown.contains(e.target as Node) && !approvalBtn?.contains(e.target as Node)) {
-      approvalDropdown.style.display = 'none';
-    }
-  }
-
-  // 【规则】/ 与 @ 浮层必须响应外部点击：它们只在输入事件里开合，
-  //   没有外部点击通道时，用户点空白处浮层会一直挂着，直到再次键入才消失。
-  //   判据是「点击目标既不在浮层内、也不在输入舱内」——点输入舱本身不该收起，
-  //   否则用户点一下输入框想继续打字，列表会先消失。
-  if (state.slashPopperOpen || state.mentionPopperOpen) {
-    const target = e.target as Node | null;
-    const popper = document.querySelector('.composer-popper');
-    const dock = document.querySelector('.input-dock-container');
-    const insidePopper = popper ? popper.contains(target) : false;
-    const insideDock = dock ? dock.contains(target) : false;
-    if (!insidePopper && !insideDock) {
-      state.slashPopperOpen = false;
-      state.mentionPopperOpen = false;
-      render();
-    }
-  }
-
-  modalInteractionController.closeContextMenuIfClickedOutside(e.target as Node | null);
-});
+dropdownKeybindController.setupGlobalKeybinds();
+dropdownKeybindController.setupOutsideClickHandlers();
 
 /**
  * 浏览器直跑演示模式：仅在 http(s) 且 URL 带 `?demo=conversation` 时生效。

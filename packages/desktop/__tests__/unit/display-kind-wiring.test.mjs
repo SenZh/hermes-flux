@@ -9,7 +9,11 @@ import { findPreviousUserPrompt } from '../../dist/renderer/messageActions.mjs';
 import { bindTurnRowIds } from '../../dist/renderer/rollbackTransaction.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const rendererSource = readFileSync(path.resolve(__dirname, '../../src/renderer/index.ts'), 'utf8');
+const renderCoordPath = path.resolve(__dirname, '../../src/renderer/renderCoordinator.ts');
+const rendererSource = [
+  readFileSync(path.resolve(__dirname, '../../src/renderer/index.ts'), 'utf8'),
+  existsSync(renderCoordPath) ? readFileSync(renderCoordPath, 'utf8') : '',
+].join('\n');
 
 /**
  * display_kind 接线守卫（宿主编排层）

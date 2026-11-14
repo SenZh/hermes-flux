@@ -166,7 +166,8 @@ test('在场指示器宿主接线守卫', async (t) => {
   });
 
   await t.test('11. 输入舱变更后必须重校宿主（三条路径同一出口）', () => {
-    const src = read(RENDERER);
+    const RENDER_COORD_DOMAIN = 'packages/desktop/src/renderer/renderCoordinator.ts';
+    const src = read(RENDERER) + '\n' + (fs.existsSync(path.join(repoRoot, RENDER_COORD_DOMAIN)) ? read(RENDER_COORD_DOMAIN) : '');
     /*
      * 【真实缺陷回归】dock 变体的 host 是输入舱首子节点，断连移除 / outerHTML 替换 /
      *   首次新建三条路径都会连带销毁它。重校若写进某一条分支，另外两条就会让指示器

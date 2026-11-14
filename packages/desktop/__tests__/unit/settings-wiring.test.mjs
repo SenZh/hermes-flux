@@ -15,11 +15,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const RENDERER = path.resolve(import.meta.dirname, '../../src/renderer/index.ts');
+const RENDER_COORD = path.resolve(import.meta.dirname, '../../src/renderer/renderCoordinator.ts');
 const LEFTRAIL_DOMAIN = path.resolve(import.meta.dirname, '../../src/renderer/leftrail/leftRailSnapshotManager.ts');
 const CONTROLLER = path.resolve(import.meta.dirname, '../../src/renderer/settingsController.ts');
 const SETTINGS_UI = path.resolve(import.meta.dirname, '../../../ui/src/components-react/settings/SettingsModal.tsx');
 const UI_INDEX = path.resolve(import.meta.dirname, '../../../ui/src/index.ts');
-const source = fs.readFileSync(RENDERER, 'utf8');
+const source = [
+  fs.readFileSync(RENDERER, 'utf8'),
+  fs.existsSync(RENDER_COORD) ? fs.readFileSync(RENDER_COORD, 'utf8') : '',
+].join('\n');
 const leftRailDomain = fs.existsSync(LEFTRAIL_DOMAIN) ? fs.readFileSync(LEFTRAIL_DOMAIN, 'utf8') : '';
 const controller = fs.readFileSync(CONTROLLER, 'utf8');
 const settingsUi = fs.readFileSync(SETTINGS_UI, 'utf8');

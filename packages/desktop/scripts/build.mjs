@@ -397,6 +397,43 @@ async function buildAll() {
     external: ['@hermes-flux/core', '@hermes-flux/ui'],
     sourcemap: true,
   });
+
+  // 对话流虚拟窗口管理服务：从 index.ts 抽出
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/messageWindowManager.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/messageWindowManager.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+
+  // 渲染装配与协调管线服务：从 index.ts 抽出
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/renderCoordinator.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/renderCoordinator.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+
+  // 模型下拉与全局热键控制器：从 index.ts 抽出
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/dropdownKeybindController.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/dropdownKeybindController.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+  console.log('  ✔ Batch 5 modules compiled (messageWindowManager, renderCoordinator, dropdownKeybindController)');
   console.log('  ✔ Transcript rows + slash catalog + desktop cache bridge + agent presence + prompt nav + cascade + viewport + leftrail + state + inspector + modal + inputDock + sessionOperation + messageLoading + turnExecution + gatewayEventDispatcher modules compiled');
 
   // 4. Copy static assets

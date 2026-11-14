@@ -23,7 +23,9 @@ const read = (relativePath) => readFileSync(path.join(repoRoot, relativePath), '
 
 const msgLoadSource = read('packages/desktop/src/renderer/services/messageLoadingService.ts');
 const gatewayDispatchSource = read('packages/desktop/src/renderer/gateway/gatewayEventDispatcher.ts');
-const rendererSource = read('packages/desktop/src/renderer/index.ts') + '\n' + msgLoadSource + '\n' + gatewayDispatchSource;
+const messageWindowMgrSource = read('packages/desktop/src/renderer/messageWindowManager.ts');
+const renderCoordSource = read('packages/desktop/src/renderer/renderCoordinator.ts');
+const rendererSource = read('packages/desktop/src/renderer/index.ts') + '\n' + msgLoadSource + '\n' + gatewayDispatchSource + '\n' + messageWindowMgrSource + '\n' + renderCoordSource;
 const leftRailSnapshotSource = read('packages/desktop/src/renderer/leftrail/leftRailSnapshotManager.ts');
 const profileRefreshSource = read('packages/desktop/src/renderer/profileRefresh.ts');
 const messageListSource = read('packages/ui/src/components-react/conversation/ConversationMessageList.tsx');

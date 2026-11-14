@@ -18,9 +18,18 @@ import path from 'node:path';
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const rendererSource = readFileSync(path.resolve(__dirname, '../../src/renderer/index.ts'), 'utf8');
 const CASCADE_DOMAIN = path.resolve(__dirname, '../../src/renderer/cascade/modelCascadeManager.ts');
 const cascadeSource = existsSync(CASCADE_DOMAIN) ? readFileSync(CASCADE_DOMAIN, 'utf8') : '';
+const DROPDOWN_DOMAIN = path.resolve(__dirname, '../../src/renderer/dropdownKeybindController.ts');
+const dropdownSource = existsSync(DROPDOWN_DOMAIN) ? readFileSync(DROPDOWN_DOMAIN, 'utf8') : '';
+const RENDER_DOMAIN = path.resolve(__dirname, '../../src/renderer/renderCoordinator.ts');
+const renderCoordSource = existsSync(RENDER_DOMAIN) ? readFileSync(RENDER_DOMAIN, 'utf8') : '';
+const rendererSource = [
+  dropdownSource,
+  renderCoordSource,
+  cascadeSource,
+  readFileSync(path.resolve(__dirname, '../../src/renderer/index.ts'), 'utf8'),
+].join('\n');
 
 /** 取某个调用（如 `renderInputDock({`）的整段实参块。 */
 function callBlocks(marker) {
