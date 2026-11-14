@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -92,12 +92,14 @@ test('display_kind 宿主编排接线（精确字符串契约）', async (t) => 
   });
 
   await t.test('6. 持久层回读必须窄化，禁止裸 as 断言', () => {
+    const cacheBridgePath = path.resolve(__dirname, '../../src/renderer/cache/desktopCacheBridge.ts');
+    const targetSource = existsSync(cacheBridgePath) ? readFileSync(cacheBridgePath, 'utf8') : rendererSource;
     assert.ok(
-      rendererSource.includes("displayKind: isKnownDisplayKind(row.displayKind) ? row.displayKind : 'user',"),
+      targetSource.includes("displayKind: isKnownDisplayKind(row.displayKind) ? row.displayKind : 'user',"),
       'IndexedDB 是不可信来源，非法 kind 必须回落 user'
     );
     assert.ok(
-      !rendererSource.includes("displayKind: (row.displayKind as MessageDisplayKind | undefined) ?? 'user',"),
+      !targetSource.includes("displayKind: (row.displayKind as MessageDisplayKind | undefined) ?? 'user',"),
       '严禁用 as 断言把未知值带进下游分派'
     );
   });

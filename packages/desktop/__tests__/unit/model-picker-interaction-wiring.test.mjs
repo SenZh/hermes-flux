@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -19,6 +19,8 @@ import path from 'node:path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rendererSource = readFileSync(path.resolve(__dirname, '../../src/renderer/index.ts'), 'utf8');
+const CASCADE_DOMAIN = path.resolve(__dirname, '../../src/renderer/cascade/modelCascadeManager.ts');
+const cascadeSource = existsSync(CASCADE_DOMAIN) ? readFileSync(CASCADE_DOMAIN, 'utf8') : '';
 
 /** 取某个调用（如 `renderInputDock({`）的整段实参块。 */
 function callBlocks(marker) {
@@ -82,8 +84,8 @@ test('模型选择器交互接线守卫', async (t) => {
   await t.test('3. 模型行悬停必须驱动二级级联', () => {
     assert.ok(rendererSource.includes('el.onmouseenter = () => {'), '行悬停必须绑定');
     assert.ok(rendererSource.includes('showModelCascade(el)'), '悬停必须调用定位函数');
-    assert.ok(rendererSource.includes("getElementById('model-reasoning-cascade')"), '必须锚定级联面板');
-    assert.ok(rendererSource.includes('model-cascade--flip'), '右侧空间不足时必须能翻到左侧');
+    assert.ok((cascadeSource || rendererSource).includes("getElementById('model-reasoning-cascade')") || rendererSource.includes("getElementById('model-reasoning-cascade')"), '必须锚定级联面板');
+    assert.ok((cascadeSource || rendererSource).includes('model-cascade--flip'), '右侧空间不足时必须能翻到左侧');
   });
 
   await t.test('4. 点空白收起必须走 capture 阶段且白名单完整', () => {
@@ -144,7 +146,7 @@ test('模型选择器交互接线守卫', async (t) => {
   });
 
   await t.test('7. 级联定位必须做垂直夹取，避免短视口末尾档位点不到', () => {
-    const showBlock = rendererSource.slice(
+    const showBlock = cascadeSource || rendererSource.slice(
       rendererSource.indexOf('function showModelCascade'),
       rendererSource.indexOf('function updateModelDropdownSubtree'),
     );

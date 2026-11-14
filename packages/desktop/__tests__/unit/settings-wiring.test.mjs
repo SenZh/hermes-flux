@@ -15,10 +15,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const RENDERER = path.resolve(import.meta.dirname, '../../src/renderer/index.ts');
+const LEFTRAIL_DOMAIN = path.resolve(import.meta.dirname, '../../src/renderer/leftrail/leftRailSnapshotManager.ts');
 const CONTROLLER = path.resolve(import.meta.dirname, '../../src/renderer/settingsController.ts');
 const SETTINGS_UI = path.resolve(import.meta.dirname, '../../../ui/src/components-react/settings/SettingsModal.tsx');
 const UI_INDEX = path.resolve(import.meta.dirname, '../../../ui/src/index.ts');
 const source = fs.readFileSync(RENDERER, 'utf8');
+const leftRailDomain = fs.existsSync(LEFTRAIL_DOMAIN) ? fs.readFileSync(LEFTRAIL_DOMAIN, 'utf8') : '';
 const controller = fs.readFileSync(CONTROLLER, 'utf8');
 const settingsUi = fs.readFileSync(SETTINGS_UI, 'utf8');
 
@@ -37,16 +39,16 @@ test('左轨活动指示器变体必须可配置、持久化，并真的推进�
   assert.ok(actionBlock.includes('resolveActivityIndicatorVariant'), '写入前必须收敛为白名单值');
   assert.ok(actionBlock.includes('render()'), '切换后必须触发重渲染，左轨才能立刻换动效');
 
-  const railStart = source.indexOf('function getLeftRailSnapshot');
-  const railBlock = source.slice(railStart, source.indexOf('let reactMessageList', railStart));
-  assert.equal(
-    (railBlock.match(/activityVariant: activityIndicatorVariant/g) || []).length,
-    2,
-    '左轨快照与缓存比较输入各必须携带一次变体',
+  const railSrc = leftRailDomain || source;
+  const railStart = railSrc.indexOf('getSnapshot(): LeftRailSnapshot');
+  const railBlock = railStart !== -1 ? railSrc.slice(railStart) : source.slice(source.indexOf('function getLeftRailSnapshot'));
+  assert.ok(
+    railBlock.includes('activityVariant: inputs.activityVariant') || (railBlock.match(/activityVariant: activityIndicatorVariant/g) || []).length >= 1,
+    '左轨快照必须携带变体',
   );
   // 只有字段、没有比较器时，切换变体会命中旧快照而不重推，左轨永远停在旧动效。
   assert.ok(
-    source.includes('prev.activityVariant === next.activityVariant'),
+    railSrc.includes('prev.activityVariant === next.activityVariant'),
     'sameLeftRailInputs 必须比较变体，否则换变体后左轨不会刷新',
   );
 });

@@ -133,6 +133,18 @@ import {
   buildHostPromptNavigatorSnapshot,
   isHostPromptNavigatorMetaSame,
 } from './promptNavigator.js';
+import {
+  ModalInteractionController,
+  createModalInteractionController,
+} from './events/modalInteractionController.js';
+import {
+  InputDockController,
+  createInputDockController,
+} from './events/inputDockController.js';
+import {
+  type AppState,
+  createInitialState,
+} from './state/appState.js';
 
 import {
   HermesGatewayClient,
@@ -240,18 +252,6 @@ import { createSessionDraftStore } from './persistence/sessionDrafts.js';
 import { isStringArray, safeParseJson, resolveDurableOrderKey } from './persistence/persistedJson.js';
 import { DesktopCacheStore } from './cache/DesktopCacheStore.js';
 import { loadProviderCatalog } from './providerCatalog.js';
-import { parseMentionToken } from './mentionToken.js';
-import {
-  applyEnqueueReceipt,
-  canSendDraft,
-  clampComposerHeight,
-  planEnqueue,
-  planEnterAction,
-  planQueueAction,
-  queuedAfterAction,
-  resolveComposerPhase,
-  shouldShowQueueButton,
-} from './queueControl.js';
 
 /** 头像绑定/解绑写操作的在途合流表：同键同签名复用 promise，异签名拒绝重入。 */
 const inFlightProviderBindings = new Map<string, { signature: string; promise: Promise<ToggleProviderAgentResult> }>();
@@ -617,223 +617,6 @@ declare global {
   }
 }
 
-interface AppState {
-  platform: 'windows' | 'macos' | 'linux' | 'ios' | 'android' | 'web';
-  theme: 'obsidian-gold' | 'suet-jade' | 'jade-white' | 'warm-paper' | 'ayu-light' | 'cyber-matrix';
-  lang: 'zh' | 'en';
-  isMaximized: boolean;
-  leftRailCollapsed: boolean;
-  inspectorCollapsed: boolean;
-  activeInspectorTab: InspectorTab;
-  /** Stored id of the focused conversation — the id the left rail lists. */
-  activeSessionId: string;
-  /** Live transport id of the focused conversation — required by prompt.submit / config.set. */
-  activeLiveSessionId: string;
-  selectedModel: string;
-  availableModels: string[];
-  modelDetails: ModelDetail[];
-  /** 归一化后的模型目录（带可读显示名 / 价格 / 能力），选择器与输入舱标签的唯一数据源 */
-  modelCatalog: ModelCatalogEntry[];
-  /**
-   * 模型目录指纹，随 `modelCatalog` 一起在拉取时计算一次。
-   *
-   * 【设计意图 (Why)】
-   *   `render()` 在流式输出期间每帧都会执行；若在快照里现算 `map().join()`，
-   *   72 个模型的字符串拼接会被无意义地重复几十次/秒。
-   *
-   * 【规则 (Rules)】
-   *   只允许在目录被赋值的地方同步更新，禁止在渲染路径里重算。
-   */
-  modelCatalogHash: string;
-  currentProvider: string;
-  profiles: AgentProfile[];
-  profileName: string;
-  projects: LeftRailProject[];
-  groupRooms: LeftRailGroupRoom[];
-  activeFocus: LeftRailActiveFocus;
-  sessionSearchQuery: string;
-  isBotsGroupExpanded: boolean;
-  isSessionsGroupExpanded: boolean;
-  isGroupsGroupExpanded: boolean;
-  isMoreSessionsExpanded: boolean;
-  isNewTaskModalOpen: boolean;
-  /** PR-3d：新建弹窗初始甲板（会话 header 的 + 传 solo，群聊 header 的 + 传 group），入队即快照、出队不重推。 */
-  newTaskModalTab: 'solo' | 'group';
-  selectedNewTaskProjectId?: string;
-  editingGroupRoomId?: string;
-  /** Model menu visibility lives in state so a re-render cannot swallow it. */
-  modelMenuOpen: boolean;
-  /**
-   * 思考等级二级面板当前锚定的模型行（`data-model`），undefined 表示未展开。
-   * 【规则】面板是单例、由桌面端定位，不随行渲染 —— 300 行 × 5 项会白白多造上千节点。
-   */
-  modelCascadeModel?: string;
-  /** 已折叠的 provider 分组 slug；点击分组标题切换。 */
-  collapsedProviders: string[];
-  /** Context menu for session, bot or group room item */
-  sessionContextMenu?: ContextMenuProps;
-  /** 全局极客美学二次确认模态状态机，彻底替换 Win32 阻塞式原生 confirm */
-  confirmModal?: {
-    title: string;
-    message: string;
-    confirmLabel?: string;
-    cancelLabel?: string;
-    isDanger?: boolean;
-    onConfirm: () => void | Promise<void>;
-    onCancel?: () => void;
-  };
-  /** Inline failure line inside the dock (failure must never be silent). */
-  dockNotice: string;
-  /** Rail-level failure line, distinct from a legitimately empty session list. */
-  sessionListError: string;
-  /**
-   * 首屏三域的首次到达相位（与 settingsModel 的 SettingsLoadable 同源思路：加载 ≠ 空）。
-   *
-   * 【设计意图 (Why)】骨架屏只在数据尚未到达时出现；三域各自独立，因为 Profile 与会话
-   *   是两批 RPC，用单一 boolean 会让先到的一方永远等后到的一方。
-   * 【约束与规则 (Rules)】数据到达（含空结果或失败）必须切 ready，否则骨架永久假加载。
-   */
-  profilesPhase: DataPhase;
-  sessionsPhase: DataPhase;
-  messagesPhase: DataPhase;
-  /** Conversations optimistically inserted while the gateway persists them. */
-  pendingSessionIds: string[];
-  reasoningLevel: 'default' | 'none' | 'low' | 'high' | 'max' | 'off' | 'medium';
-  approvalMode: 'manual' | 'smart' | 'off';
-  isStreaming: boolean;
-  gatewayConnected: boolean;
-  gatewayConnecting: boolean;
-  gatewayLatencyMs: number;
-  gatewayUrl: string;
-  username: string;
-  password: string;
-  isSettingsOpen: boolean;
-  settingsSection: SettingsSectionId;
-  /**
-   * Agent 在场指示器的位置变体。
-   *
-   * 【设计意图 (Why)】同一份状态真值要能落在两个位置：对话区顶部悬浮（`stage`）与
-   *   输入舱上沿（`dock`）。这是**表现位置**，不是第二套状态模型。
-   * 【约束与规则】持久化在 localStorage，缺省 `stage`（改造前的行为）。 */
-  presenceLayout: 'stage' | 'dock';
-  /** 设置中心的网关数据快照：每个域各自持有加载态，禁止用一个 boolean 混住"没数据"与"加载失败"。 */
-  settingsProfiles: SettingsLoadable<SettingsProfileRow[]>;
-  /** BOT 面板主状态机（core 判别联合）；空列表/失败/详情失败都是显式状态。 */
-  botManagementStatus: BotManagementStatus;
-  botManagementActiveBotId: string;
-  botManagementDetail?: BotDetailData;
-  /** 跨设置弹窗挂载存活的草稿池；key 是 BOT ID，关闭设置不丢未保存修改。 */
-  botDrafts: Record<string, BotDraftState>;
-  botManagementError?: string;
-  /** 网关要求二次确认的待办文案；只放纯数据，确认动作由闭包持有。 */
-  botManagementConfirm?: { message: string };
-  botManagementBusy: boolean;
-  /** 提供商配置当前作用到的 Bot；空串表示跟随连接 profile。 */
-  settingsScopedProfile: string;
-  /** 统一提供商表（订阅 + 自定义，含每个 Agent 的生效状态）。 */
-  settingsProviderViews: SettingsLoadable<SettingsProviderView[]>;
-  /** 读取失败的 Agent，必须显式提示。 */
-  settingsProviderFailures: Array<{ profile: string; displayName: string; message: string }>;
-  /** 添加面板用的订阅目录（含未登录项）。 */
-  settingsSubscriptionCatalog: SettingsLoadable<SettingsOauthProviderRow[]>;
-  /** 端点表单编辑用的原始端点行（含 base_url / has_api_key）。 */
-  settingsCustomEndpoints: SettingsLoadable<SettingsCustomEndpointRow[]>;
-  /**
-   * provider 的**配置集合**：归一化 id → 配置了它的 profile。
-   * 删除必须按这个集合收敛；`providerViews[].agents` 是在用集合，会漏掉未生效的端点。
-   */
-  settingsEndpointProfiles: Record<string, string[]>;
-  /** 端点清单读取失败的 Agent：删除作用域不完整时不能猜着删。 */
-  settingsEndpointFailures: Array<{ profile: string; displayName: string; message: string }>;
-  settingsProviderAdminBusy: boolean;
-  settingsMcp: SettingsLoadable<SettingsMcpRow[]>;
-  settingsSkills: SettingsLoadable<SettingsSkillRow[]>;
-  settingsBusy: boolean;
-  appVersion?: string;
-  sessions: NormalizedSession[];
-  messages: MessageViewModel[];
-  hasOlderMessages: boolean;
-  isLoadingOlder: boolean;
-  favoriteModels: string[];
-  recentModels: string[];
-  modelSearchQuery: string;
-  testStatus?: { ok?: boolean; message?: string; latency?: number };
-  artifacts: Array<{ id: string; name: string; type: string; size: string; preview?: string }>;
-  browserFrame?: { url: string; title: string; screenshotUrl?: string };
-  gitDiffs: Array<{ file: string; additions: number; deletions: number; patch?: string }>;
-  memories: Array<{ category: string; content: string; updated?: string }>;
-  /**
-   * 回合开始的本地时间戳；在场指示器的时长分层唯一输入。
-   *
-   * 【设计意图 (Why)】「卡住 60 秒」与「刚开始 1 秒」必须能被区分，否则指示器永远同一句话。
-   * 【约束与规则 (Rules)】只在 `turn-started` 写入、`turn-completed` 清空；中断/失败不清空，
-   *   由终态压过在途痕迹（见 core `deriveAgentPresence` 的优先级）。
-   */
-  turnStartedAt?: number;
-  /**
-   * 回合终态（失败/中断）的短暂展示态。
-   *
-   * 【设计意图 (Why)】回合结束后流式痕迹立刻消失，若没有这一段缓冲，
-   *   用户只会看到指示器直接跳回 idle，完全读不到「为什么停了」。
-   * 【约束与规则 (Rules)】TTL（`PRESENCE_TERMINAL_TTL_MS`）到期后必须清空并重渲染；
-   *   重复写入必须先清旧定时器，否则旧定时器会把新终态提前抹掉。
-   */
-  presenceTerminal?: { kind: 'failed'; message: string } | { kind: 'interrupted' };
-  /**
-   * 群聊当前说话者；null/undefined 表示未知。
-   *
-   * 【约束与规则 (Rules)】未知时指示器必须走降级路径（不高亮、不加前缀），
-   *   绝对不允许猜测或沿用上一位说话者——伪造说话者比不显示更糟。
-   */
-  activeGroupSpeaker?: string | null;
-  inspectorFullscreen?: boolean;
-  // Multi-tab file viewer & OpenChamber toolbar states
-  openFiles: Array<{ id?: string; path: string; content: string; language?: string; isDiff?: boolean }>;
-  activeFilePath: string;
-  fileViewMode: 'rendered' | 'raw';
-  fileShowLineNumbers: boolean;
-  fileWordWrap: boolean;
-  fileSearchOpen: boolean;
-  fileSearchQuery: string;
-  attachments: InputAttachmentItem[];
-  /**
-   * 运行中的待发送队列（来自网关 `pending_rows`）。
-   *
-   * 【设计意图 (Why)】
-   *   排队项由服务端持久化，客户端只做展示与三个控制动作；本地不另建一份真相。
-   *   `admissionId` 是网关准入 id，三个动作（放回编辑 / 立即发送 / 取消）都按它定位。
-   */
-  queuedMessages: Array<{ id: string; admissionId: string; text: string }>;
-  slashPopperOpen: boolean;
-  slashItems: SlashCommandOption[];
-  mentionPopperOpen: boolean;
-  mentionItems: MentionReferenceOption[];
-  /** 回滚事务的乐观裁撤状态；null 表示无挂起回滚 */
-  rollbackArmed: {
-    sessionId: string;
-    targetId: string;
-    anchor: { kind: 'row'; rowId: number };
-    snapshot: MessageViewModel[];
-    removedCount: number;
-    anchorLabel: string;
-  } | null;
-  /** @Agent 旁路呼叫（BTW 只读外援 / 子代理委派）的独立渲染域，绝不混入主消息流 */
-  sideAgentCapsules: Array<{
-    id: string;
-    kind: 'btw' | 'delegation';
-    profile: string;
-    question: string;
-    answer?: string;
-    status: 'pending' | 'done' | 'failed' | 'expired';
-    startedAt: number;
-    notice?: string;
-    hintTimer?: ReturnType<typeof setTimeout>;
-    expireTimer?: ReturnType<typeof setTimeout>;
-  }>;
-  /** popper 点选产生的显式 @Agent 提及，发送前校验并作为 planSendRoute 的权威输入 */
-  pickedMention: { profile: string; token: string } | null;
-}
-
 const desktopApi: HermesDesktopBridge | undefined = window.hermesDesktop;
 
 /** 启动阶段专用 logger（此时业务 logger 尚未初始化） */
@@ -1021,107 +804,10 @@ let activityIndicatorVariant: ActivityIndicatorVariant = loadActivityIndicatorVa
 const PRESENCE_LAYOUT_STORAGE_KEY = 'hermes_flux_presence_layout';
 
 const state: AppState = {
-  platform: detectInitialPlatform(),
-  theme: (() => {
-    const savedTheme = localStorage.getItem('hermes_flux_theme') || localStorage.getItem('hermes_aura_theme');
-    return resolveSkinId(savedTheme);
-  })(),
-  lang: (localStorage.getItem('hermes_flux_lang') || localStorage.getItem('hermes_aura_lang') as any) || 'zh',
-  isMaximized: false,
-  leftRailCollapsed: typeof window !== 'undefined' && window.innerWidth <= 768,
-  inspectorCollapsed: true,
-  activeInspectorTab: 'artifacts',
-  activeSessionId: '',
-  activeLiveSessionId: '',
-  selectedModel: '',
-  availableModels: [],
-  modelDetails: [],
-  modelCatalog: [],
-  modelCatalogHash: '',
-  currentProvider: '',
-  profiles: [],
-  projects: [],
-  groupRooms: [],
-  activeFocus: { type: 'bot', botName: localStorage.getItem('hermes_flux_profile') || 'default' },
-  sessionSearchQuery: '',
-  isBotsGroupExpanded: true,
-  isSessionsGroupExpanded: true,
-  isGroupsGroupExpanded: true,
-  isMoreSessionsExpanded: false,
-  isNewTaskModalOpen: false,
-  newTaskModalTab: 'solo',
-  editingGroupRoomId: undefined,
-  profileName: localStorage.getItem('hermes_flux_profile') || localStorage.getItem('hermes_aura_profile') || 'default',
-  modelMenuOpen: false,
-  modelCascadeModel: undefined,
-  collapsedProviders: [],
-  dockNotice: '',
-  sessionListError: '',
-  profilesPhase: 'loading',
-  sessionsPhase: 'loading',
-  messagesPhase: 'loading',
-  pendingSessionIds: [],
-  favoriteModels: safeParseJson<string[]>(localStorage.getItem('hermes_flux_fav_models') || localStorage.getItem('hermes_aura_fav_models'), [], isStringArray),
-  recentModels: safeParseJson<string[]>(localStorage.getItem('hermes_flux_recent_models') || localStorage.getItem('hermes_aura_recent_models'), [], isStringArray),
-  modelSearchQuery: '',
-  reasoningLevel: 'high',
-  approvalMode: 'smart',
-  isStreaming: false,
-  gatewayConnected: false,
-  gatewayConnecting: Boolean(localStorage.getItem('hermes_flux_gateway_url') || localStorage.getItem('hermes_aura_gateway_url')),
-  gatewayLatencyMs: 0,
-  gatewayUrl: localStorage.getItem('hermes_flux_gateway_url') || localStorage.getItem('hermes_aura_gateway_url') || '',
-  username: localStorage.getItem('hermes_flux_username') || localStorage.getItem('hermes_aura_username') || '',
-  password: localStorage.getItem('hermes_flux_password') || localStorage.getItem('hermes_aura_password') || '',
-  isSettingsOpen: false,
-  settingsSection: 'appearance',
-  presenceLayout: readPresenceLayout(),
-  settingsProfiles: { status: 'idle' },
-  botManagementStatus: { status: 'uninitialized' },
-  botManagementActiveBotId: '',
-  botManagementDetail: undefined,
-  botDrafts: {},
-  botManagementError: undefined,
-  botManagementConfirm: undefined,
-  botManagementBusy: false,
-  settingsScopedProfile: '',
-  settingsProviderViews: { status: 'idle' },
-  settingsProviderFailures: [],
-  settingsSubscriptionCatalog: { status: 'idle' },
-  settingsCustomEndpoints: { status: 'idle' },
-  settingsEndpointProfiles: {},
-  settingsEndpointFailures: [],
-  settingsProviderAdminBusy: false,
-  settingsMcp: { status: 'idle' },
-  settingsSkills: { status: 'idle' },
-  settingsBusy: false,
-  appVersion: undefined,
-  sessions: [],
-  messages: [],
-  hasOlderMessages: false,
-  isLoadingOlder: false,
-  inspectorFullscreen: false,
-  openFiles: [],
-  activeFilePath: '',
-  fileViewMode: 'rendered',
-  fileShowLineNumbers: true,
-  fileWordWrap: false,
-  fileSearchOpen: false,
-  fileSearchQuery: '',
-  testStatus: undefined,
-  artifacts: [],
-  browserFrame: undefined,
-  gitDiffs: [],
-  memories: [],
-  attachments: [],
-  queuedMessages: [],
-  slashPopperOpen: false,
-  slashItems: [],
-  mentionPopperOpen: false,
-  mentionItems: [],
-  rollbackArmed: null,
-  sideAgentCapsules: [],
-  pickedMention: null,
+  ...createInitialState({
+    platform: detectInitialPlatform(),
+    leftRailCollapsedDefault: typeof window !== 'undefined' && window.innerWidth <= 768,
+  }),
 };
 
 const handoffService = new HandoffService();
@@ -1389,30 +1075,7 @@ const botActivityStore = createBotActivityStore({
  * 仅在当前活动元素非目标 input 时进行重聚焦，避免对用户正在操作的光标选区造成强制跳动。
  */
 function restoreComposerFocus(): void {
-  const restore = () => {
-    if (desktopApi?.activateWindow) {
-      void desktopApi.activateWindow().catch(() => {});
-    }
-    const input = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
-    if (input) {
-      if (typeof window !== 'undefined' && typeof window.focus === 'function') {
-        window.focus();
-      }
-      input.focus({ preventScroll: true });
-      const len = input.value.length;
-      input.setSelectionRange(len, len);
-    }
-  };
-  // 同步先尝试立即聚焦
-  restore();
-  // 双阶 rAF：首帧等待 DOM 几何排版收敛，次帧在系统窗口与样式激活稳定时执行聚焦
-  requestAnimationFrame(() => {
-    restore();
-    requestAnimationFrame(restore);
-  });
-  setTimeout(restore, 50);
-  setTimeout(restore, 200);
-  setTimeout(restore, 400);
+  inputDockController.restoreComposerFocus(desktopApi);
 }
 
 /** 健壮的 Agent 头像解析器：按 ID、实名、显示名、别名双向穿透查找缓存，避免单聊/群聊匹配丢失 */
@@ -5580,145 +5243,15 @@ async function routeSend(text: string): Promise<void> {
  *   3. 失败必须显式提示并保留草稿，绝不静默清空。
  */
 async function enqueueDraft(): Promise<void> {
-  const el = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
-  const draft = planEnqueue({
-    text: el?.value ?? '',
-    hasGateway: Boolean(gatewayClient),
-    // liveId 的探测在下面做：这里先按"有会话"放行，真正的通道缺失由 ensureLiveSessionId 返回。
-    hasLiveSession: true,
-  });
-  if (draft.kind === 'skip') return;
-  if (draft.kind === 'fail') {
-    setTimedDockNotice(t(draft.reasonKey as Parameters<typeof t>[0]));
-    render();
-    return;
-  }
-  if (!state.activeSessionId) {
-    await createNewSession();
-  }
-  const liveId = await ensureLiveSessionId();
-  if (!liveId) {
-    // 【规则】入队失败的原因是通道缺失，不是"回合进行中"：复用 busyEnterBlocked 会把用户引向停止按钮。
-    setTimedDockNotice(t('dock.queueNoLive'));
-    render();
-    return;
-  }
-  try {
-    const receipt = await gatewayClient!.call<{
-      admission_id?: string | null;
-      status?: string | null;
-      user_row_id?: number | null;
-    }>('prompt.submit', {
-      session_id: liveId,
-      text: draft.text,
-      queued: true,
-    });
-    const outcome = applyEnqueueReceipt(receipt, draft.text);
-    if (outcome.kind === 'failed') {
-      // 失败保留草稿：用户写的内容不能因为网关没回 admission_id 就被清掉。
-      setTimedDockNotice(t(outcome.reasonKey as Parameters<typeof t>[0]));
-      render();
-      return;
-    }
-    state.queuedMessages = [...state.queuedMessages, outcome.entry];
-    if (el) {
-      el.value = '';
-      el.style.height = '';
-    }
-    setTimedDockNotice('');
-    render();
-  } catch (err) {
-    setTimedDockNotice(`${t('dock.queueFailed')}: ${describeRpcError(err)}`);
-    render();
-  }
+  await inputDockController.enqueueDraft();
 }
 
-/**
- * 队列行的三个动作（放回编辑 / 立即发送 / 取消）。
- *
- * 【设计意图 (Why)】
- *   队列真相在网关，客户端只按 `admission_id` 发指令，失败一律保留原行并显式提示。
- *   三个动作都会让该准入离开排队态，因此成功后必须同步移除本地展示行 ——
- *   否则「立即发送」执行完的那行会永久留在界面上，而网关里早已不存在。
- *
- * 【约束与规则 (Rules)】
- *   - 放回编辑：撤销该准入，再把文本写回输入舱并聚焦，让用户继续改；
- *   - 立即发送：`prompt.steer_queued` 插到当前回合前执行；
- *   - 取消：`prompt.cancel` 按准入撤销；
- *   - 未知 action 直接忽略，绝不默认落到取消。
- */
 async function handleQueueAction(action: string, admissionId: string): Promise<void> {
-  const entry = state.queuedMessages.find((q) => q.admissionId === admissionId);
-  if (!entry) return;
-  const plan = planQueueAction(action, entry.text);
-  if (plan.kind === 'unknown') return;
-
-  const liveId = await ensureLiveSessionId();
-  if (!liveId) {
-    setTimedDockNotice(t('chat.forkNoLive'));
-    render();
-    return;
-  }
-  try {
-    if (plan.kind === 'steer') {
-      await interactiveService.steerQueued(rpcCaller, liveId, admissionId, state.profileName || undefined);
-    } else {
-      await interactiveService.cancelQueued(rpcCaller, liveId, admissionId);
-    }
-    state.queuedMessages = queuedAfterAction(state.queuedMessages, admissionId) as typeof state.queuedMessages;
-
-    if (plan.kind === 'replace') {
-      const el = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
-      if (el) {
-        el.value = plan.restoreText;
-        el.focus({ preventScroll: true });
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-    }
-    render();
-  } catch (err) {
-    setTimedDockNotice(`${t('dock.queueActionFailed')}: ${describeRpcError(err)}`);
-    render();
-  }
+  await inputDockController.handleQueueAction(action, admissionId);
 }
 
-/**
- * 执行斜杠指令并按 DispatchType 分派（契约：exec/plugin→output，alias→target，
- * send/prefill/skill→message，UI 展示 display 绝不展示 message 原文）。
- */
 async function runSlashCommand(command: string): Promise<void> {
-  const liveId = await ensureLiveSessionId();
-  if (!liveId) {
-    setTimedDockNotice(t('chat.forkNoLive'));
-    render();
-    return;
-  }
-  try {
-    const res = await interactiveService.execSlash(rpcCaller, liveId, command, state.profileName || undefined);
-    const type = res.type || 'exec';
-    if (type === 'prefill') {
-      const el = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
-      if (el) el.value = res.target || res.message || '';
-      setTimedDockNotice(res.display || res.notice || '');
-      render();
-      return;
-    }
-    if (type === 'send' || type === 'skill') {
-      const text = res.message || res.output;
-      if (text) await sendMessage(text);
-      return;
-    }
-    if (type === 'alias') {
-      if (res.target) await runSlashCommand(res.target);
-      return;
-    }
-    // exec / plugin：以系统提示呈现 output，不产生回合
-    const out = res.output || res.warning || '';
-    setTimedDockNotice(out || res.display || t('dock.cmdHelp'));
-    render();
-  } catch (err) {
-    setTimedDockNotice(`${t('chat.gatewayNotConnected')}: ${describeRpcError(err)}`);
-  }
+  await inputDockController.runSlashCommand(command);
 }
 
 /** 旁路呼叫：BTW 只读外援 / 子代理委派。结果以独立胶囊呈现，严禁混入主消息流。 */
@@ -6594,6 +6127,93 @@ function bindInspectorController(el: HTMLElement): NonNullable<typeof inspectorM
   return controller;
 }
 
+async function disbandGroupRoom(roomId: string): Promise<void> {
+  if (!gatewayClient) return;
+  await groupRoomStore.disbandRoom(roomId, gatewayClient);
+  groupPollerManager.stop(roomId);
+  settleTurnTermination({
+    runningSessionIds: activeRunningSessionIds,
+    runningBotNames: activeRunningBotNames,
+    runningGroupRoomIds: activeRunningGroupRoomIds,
+    groupRoomId: roomId,
+  });
+  unreadGroupRoomIds.delete(roomId);
+  activityTransitionTracker.clear('group', roomId);
+  await fetchGroupRooms();
+  if (state.activeFocus.type === 'group' && state.activeFocus.roomId === roomId) {
+    if (state.sessions.length > 0) void selectSession(state.sessions[0].id);
+  }
+}
+
+const modalInteractionController = createModalInteractionController({
+  getState: () => state,
+  commitState: (patch) => { Object.assign(state, patch); },
+  requestRender: () => render(),
+  restoreComposerFocus: () => restoreComposerFocus(),
+  createNewSession: (opts) => createNewSession(opts),
+  deleteSession: (id) => deleteSession(id),
+  renameSession: (id, title) => renameSession(id, title),
+  pinSession: (id) => pinSession(id),
+  archiveSession: (id) => archiveSession(id),
+  exportMarkdown: (id) => exportMarkdown(id),
+  copySessionId: (id) => copySessionId(id),
+  openBotChat: (profile) => openBotChat(profile),
+  openBotSettings: (profile) => openBotSettings(profile),
+  openGroupRoom: (roomId) => openGroupRoom(roomId),
+  createGroupRoom: (title, members) => groupRoomStore.createRoom(title, members, gatewayClient!),
+  disbandGroupRoom: (roomId) => disbandGroupRoom(roomId),
+  fetchGroupRooms: () => fetchGroupRooms(),
+  t: (key, params) => t(key, params),
+});
+
+function closeConfirmModal(action: 'ok' | 'cancel'): void {
+  modalInteractionController.closeConfirmModal(action);
+}
+
+const inputDockController = createInputDockController({
+  getState: () => state,
+  commitState: (patch) => { Object.assign(state, patch); },
+  requestRender: () => render(),
+  routeSend: (text) => routeSend(text),
+  interruptTurn: () => interruptTurn(),
+  handleRollbackCancel: () => handleRollbackCancel(),
+  requestSlashCompletion: (prefix) => inputCompletion.requestSlashCompletion(prefix),
+  requestPathCompletion: (query, agentItems) => inputCompletion.requestPathCompletion(query, agentItems),
+  isStreamingActiveForCurrentSession: () => isStreamingActiveForCurrentSession(),
+  t: (key, params) => t(key, params),
+  clearDockNoticeDismissTimer: () => {
+    if (dockNoticeDismissTimer) {
+      clearTimeout(dockNoticeDismissTimer);
+      dockNoticeDismissTimer = null;
+    }
+  },
+  setTimedDockNotice: (msg) => setTimedDockNotice(msg),
+  getGatewayClient: () => gatewayClient,
+  ensureLiveSessionId: () => ensureLiveSessionId(),
+  createNewSession: () => createNewSession(),
+  sendMessage: (text) => sendMessage(text),
+  interactiveService: interactiveService,
+  getRpcCaller: () => rpcCaller,
+  describeRpcError: (err) => describeRpcError(err),
+});
+
+function syncComposerHeight(): void {
+  const inputEl = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
+  inputDockController.syncComposerHeight(inputEl);
+}
+
+function handleSend(source: 'button' | 'enter'): void {
+  inputDockController.handleSend(source);
+}
+
+async function addInputAttachments(fileList: FileList | File[]): Promise<void> {
+  await inputDockController.addInputAttachments(fileList);
+}
+
+function syncComposerPoppers(): void {
+  inputDockController.syncComposerPoppers();
+}
+
 /**
  * 左轨动作表：每个动作只改 state 再 render，事件语义由 React 侧保证。
  * 【约束与规则】点击 Bot/群聊/会话一律不自动展开抽屉（leftRailCollapsed 不动），保留用户当前折叠意图。
@@ -6655,18 +6275,7 @@ async function confirmGroupRename(roomId: string, name: string): Promise<void> {
   }
 }
 
-/**
- * 斜杠与智能引用 Popper 的独立子树同步。
- * 【设计意图 (Why)】Popper 开合高频，绝不能触发整个 dock 的 outerHTML 替换（会重建 textarea、
- * 丢光标与 IME，违反键盘时序军规）。此处只写 #composer-popper-mount.innerHTML。
- */
-function syncComposerPoppers(): void {
-  const mount = document.getElementById('composer-popper-mount');
-  if (!mount) return;
-  mount.innerHTML =
-    renderSlashPopper(state.slashItems, state.slashPopperOpen) +
-    renderMentionPopper(state.mentionItems, state.mentionPopperOpen);
-}
+
 
 /**
  * 左轨实体装饰缓存。
@@ -9089,25 +8698,11 @@ function render(): void {
       <!-- 设置中心 React 岛宿主：常驻挂载，关闭态由组件返回 null 表达，绝不 outerHTML 覆写 -->
       <div id="react-settings-host" style="display: contents;"></div>
 
-      ${renderNewTaskModal({
-        isOpen: state.isNewTaskModalOpen,
-        profiles: state.profiles,
-        projects: state.projects,
-        selectedProfile: state.profileName || 'default',
-        selectedProjectId: state.selectedNewTaskProjectId,
-        initialType: state.newTaskModalTab,
-      })}
+      ${modalInteractionController.renderTaskModalHtml()}
 
-      ${renderContextMenu(state.sessionContextMenu)}
+      ${modalInteractionController.renderContextMenuHtml()}
 
-      ${renderConfirmModal(state.confirmModal ? {
-        isOpen: true,
-        title: state.confirmModal.title,
-        message: state.confirmModal.message,
-        confirmLabel: state.confirmModal.confirmLabel,
-        cancelLabel: state.confirmModal.cancelLabel,
-        isDanger: state.confirmModal.isDanger,
-      } : undefined)}
+      ${modalInteractionController.renderConfirmModalHtml()}
     `;
 
     root.innerHTML = html;
@@ -9269,55 +8864,8 @@ function render(): void {
 
     // 设置中心由 React 岛自管子树（见 mountReactSettings），此处不再做任何 DOM 替换。
 
-    // New Task & Group Modal
-    const taskModalRoot = document.getElementById('new-task-modal-overlay');
-    const nextTaskModalHtml = renderNewTaskModal({
-      isOpen: state.isNewTaskModalOpen,
-      profiles: state.profiles,
-      projects: state.projects,
-      selectedProfile: state.profileName || 'default',
-      selectedProjectId: state.selectedNewTaskProjectId,
-      initialType: state.newTaskModalTab,
-    });
-    if (taskModalRoot) {
-      if (nextTaskModalHtml) {
-        taskModalRoot.outerHTML = nextTaskModalHtml;
-      } else {
-        taskModalRoot.remove();
-      }
-    } else if (nextTaskModalHtml) {
-      root.insertAdjacentHTML('beforeend', nextTaskModalHtml);
-    }
-
-    // Confirm Modal
-    const confirmModalRoot = document.getElementById('flux-confirm-modal-overlay');
-    const nextConfirmModalHtml = renderConfirmModal(state.confirmModal ? {
-      isOpen: true,
-      title: state.confirmModal.title,
-      message: state.confirmModal.message,
-      confirmLabel: state.confirmModal.confirmLabel,
-      cancelLabel: state.confirmModal.cancelLabel,
-      isDanger: state.confirmModal.isDanger,
-    } : undefined);
-    if (confirmModalRoot) {
-      if (nextConfirmModalHtml) {
-        confirmModalRoot.outerHTML = nextConfirmModalHtml;
-      } else {
-        confirmModalRoot.remove();
-      }
-    } else if (nextConfirmModalHtml) {
-      root.insertAdjacentHTML('beforeend', nextConfirmModalHtml);
-    }
-
-    // Context Menu
-    const existingMenu = document.getElementById('session-context-menu');
-    const nextMenuHtml = renderContextMenu(state.sessionContextMenu);
-    if (existingMenu) {
-      if (nextMenuHtml) existingMenu.outerHTML = nextMenuHtml;
-      else existingMenu.remove();
-    } else if (nextMenuHtml) {
-      root.insertAdjacentHTML('beforeend', nextMenuHtml);
-    }
+    // 模态弹窗与右键菜单增量更新
+    modalInteractionController.updateModals(root);
 
     // Conversation Stream: React 列表已挂载时只更新列表，不重建 canvas（避免销毁 React root）
     const activeStream = document.getElementById('conversation-stream');
@@ -9858,238 +9406,8 @@ function bindEvents(): void {
   // PR-3d：#new-chat-btn 旧 DOM 死绑定清除——React 岛经 onNewChat 回调接管，此处再留一套
   // 就是第二个写入口（5470 注释已声明迁移完毕，此段是漏删的残肢）。
 
-  // New Task & Group Modal Events
-  const closeTaskModalBtn = document.getElementById('btn-close-task-modal');
-  const cancelTaskModalBtn = document.getElementById('btn-cancel-task-modal');
-  if (closeTaskModalBtn) closeTaskModalBtn.onclick = () => { state.isNewTaskModalOpen = false; render(); };
-  if (cancelTaskModalBtn) cancelTaskModalBtn.onclick = () => { state.isNewTaskModalOpen = false; render(); };
-
-  // Confirm Modal Events
-  const confirmModalOkBtn = document.getElementById('btn-confirm-modal-ok');
-  const confirmModalCancelBtn = document.getElementById('btn-confirm-modal-cancel');
-  const confirmModalCloseBtn = document.getElementById('btn-confirm-modal-close');
-  const confirmModalOverlay = document.getElementById('flux-confirm-modal-overlay');
-
-  const closeConfirmModal = (action: 'ok' | 'cancel') => {
-    const modal = state.confirmModal;
-    state.confirmModal = undefined;
-    render();
-    if (action === 'ok' && modal?.onConfirm) {
-      void modal.onConfirm();
-    } else if (action === 'cancel') {
-      if (modal?.onCancel) modal.onCancel();
-      else restoreComposerFocus();
-    }
-  };
-
-  if (confirmModalOkBtn) confirmModalOkBtn.onclick = () => closeConfirmModal('ok');
-  if (confirmModalCancelBtn) confirmModalCancelBtn.onclick = () => closeConfirmModal('cancel');
-  if (confirmModalCloseBtn) confirmModalCloseBtn.onclick = () => closeConfirmModal('cancel');
-  if (confirmModalOverlay) {
-    confirmModalOverlay.onclick = (e) => {
-      if (e.target === confirmModalOverlay) closeConfirmModal('cancel');
-    };
-  }
-
-  let activeModalType: 'solo' | 'group' = state.newTaskModalTab;
-  const modalTabSolo = document.getElementById('modal-tab-solo');
-  const modalTabGroup = document.getElementById('modal-tab-group');
-  const secSolo = document.getElementById('modal-section-solo-agent');
-  const secGroup = document.getElementById('modal-section-group-members');
-
-  if (modalTabSolo && modalTabGroup) {
-    modalTabSolo.onclick = () => {
-      activeModalType = 'solo'; state.newTaskModalTab = 'solo';
-      modalTabSolo.classList.add('active');
-      modalTabSolo.style.background = 'var(--bg-card)';
-      modalTabSolo.style.borderColor = 'var(--border-medium)';
-      modalTabSolo.style.color = 'var(--text-main)';
-      modalTabGroup.classList.remove('active');
-      modalTabGroup.style.background = 'transparent';
-      modalTabGroup.style.borderColor = 'transparent';
-      modalTabGroup.style.color = 'var(--text-muted)';
-      if (secSolo) secSolo.style.display = 'flex';
-      if (secGroup) secGroup.style.display = 'none';
-    };
-    modalTabGroup.onclick = () => {
-      activeModalType = 'group'; state.newTaskModalTab = 'group';
-      modalTabGroup.classList.add('active');
-      modalTabGroup.style.background = 'var(--bg-card)';
-      modalTabGroup.style.borderColor = 'var(--border-medium)';
-      modalTabGroup.style.color = 'var(--text-main)';
-      modalTabSolo.classList.remove('active');
-      modalTabSolo.style.background = 'transparent';
-      modalTabSolo.style.borderColor = 'transparent';
-      modalTabSolo.style.color = 'var(--text-muted)';
-      if (secSolo) secSolo.style.display = 'none';
-      if (secGroup) secGroup.style.display = 'flex';
-    };
-  }
-
-  let selectedModalAgent = state.profileName || 'default';
-  document.querySelectorAll('.modal-agent-option').forEach((opt) => {
-    (opt as HTMLElement).onclick = () => {
-      document.querySelectorAll('.modal-agent-option').forEach((o) => {
-        (o as HTMLElement).classList.remove('selected');
-        (o as HTMLElement).style.borderColor = 'var(--border-subtle)';
-        (o as HTMLElement).style.background = 'var(--bg-panel)';
-      });
-      (opt as HTMLElement).classList.add('selected');
-      (opt as HTMLElement).style.borderColor = 'var(--accent)';
-      (opt as HTMLElement).style.background = 'var(--accent-subtle)';
-      selectedModalAgent = (opt as HTMLElement).dataset.profile || 'default';
-    };
-  });
-
-  const submitTaskModalBtn = document.getElementById('btn-submit-task-modal');
-  if (submitTaskModalBtn) {
-    submitTaskModalBtn.onclick = async () => {
-      const titleInput = (document.getElementById('modal-task-title-input') as HTMLInputElement)?.value.trim();
-      const projSelect = (document.getElementById('modal-project-select') as HTMLSelectElement)?.value;
-      state.isNewTaskModalOpen = false;
-
-      if (activeModalType === 'solo') {
-        await createNewSession({
-          profile: selectedModalAgent,
-          projectId: projSelect || undefined,
-          title: titleInput || t('chat.defaultTaskTitle'),
-        });
-      } else {
-        const checkedMembers: string[] = [];
-        document.querySelectorAll('.modal-group-member-checkbox:checked').forEach((cb) => {
-          checkedMembers.push((cb as HTMLInputElement).value);
-        });
-        const members = checkedMembers.length >= 2 ? checkedMembers : [selectedModalAgent, 'default'];
-        try {
-          const room = await groupRoomStore.createRoom(titleInput || t('chat.defaultGroupTitle'), members, gatewayClient!);
-          await fetchGroupRooms();
-          const roomId = room.room_id || '';
-          if (roomId) await openGroupRoom(roomId);
-        } catch (err) {
-          state.dockNotice = t('dock.createGroupFailed', { error: describeRpcError(err) });
-          render();
-        }
-      }
-    };
-  }
-
-  // 以下左轨（微轨 + 抽屉）交互已迁移至 React 岛（mountLeftRail）：
-  // 标签切换、手风琴折叠、展示更多、行点击、右键菜单、行内重命名与底部快捷入口
-  // 全部由 React props 驱动，模板侧不得再注册同名 onclick，避免事件双派发。
-
-  // Handle Context Menu Actions
-  document.querySelectorAll('#session-context-menu .ctx-item').forEach((btn) => {
-    (btn as HTMLElement).onclick = (e) => {
-      e.stopPropagation();
-      const action = (btn as HTMLElement).dataset.action;
-      const ctx = state.sessionContextMenu;
-      state.sessionContextMenu = undefined;
-      render();
-
-      if (!ctx) return;
-      if (action === 'bot-chat') {
-        void openBotChat(ctx.targetId);
-      } else if (action === 'bot-edit') {
-        // 统一走设置中心 BOT 面板：旧内联编辑器已删除，禁止再开第二套编辑浮层。
-        openBotSettings(ctx.targetId);
-      } else if (action === 'group-rename') {
-        state.editingGroupRoomId = ctx.targetId;
-        render();
-        setTimeout(() => {
-          const inputEl = document.getElementById(`rail-group-rename-input-${ctx.targetId}`) as HTMLInputElement | null;
-          if (inputEl) {
-            inputEl.focus();
-            inputEl.select();
-          }
-        }, 40);
-      } else if (action === 'disband-group') {
-        state.confirmModal = {
-          title: t('ctx.disbandGroupTitle'),
-          message: t('ctx.confirmDisbandGroup', { name: ctx.targetName }),
-          confirmLabel: t('ctx.disbandGroup'),
-          cancelLabel: t('common.cancel'),
-          isDanger: true,
-          onConfirm: () => {
-            restoreComposerFocus();
-            if (gatewayClient) {
-              void groupRoomStore.disbandRoom(ctx.targetId, gatewayClient).then(async () => {
-                groupPollerManager.stop(ctx.targetId);
-                settleTurnTermination({
-                  runningSessionIds: activeRunningSessionIds,
-                  runningBotNames: activeRunningBotNames,
-                  runningGroupRoomIds: activeRunningGroupRoomIds,
-                  groupRoomId: ctx.targetId,
-                });
-                unreadGroupRoomIds.delete(ctx.targetId);
-                activityTransitionTracker.clear('group', ctx.targetId);
-                await fetchGroupRooms();
-                if (state.activeFocus.type === 'group' && state.activeFocus.roomId === ctx.targetId) {
-                  if (state.sessions.length > 0) void selectSession(state.sessions[0].id);
-                }
-              }).catch((err) => {
-                state.dockNotice = t('ctx.disbandGroupFailed', { error: describeRpcError(err) });
-                render();
-              });
-            }
-          },
-          onCancel: () => {
-            restoreComposerFocus();
-          },
-        };
-        render();
-      } else if (action === 'rename') {
-        void renameSession(ctx.targetId, ctx.targetName);
-      } else if (action === 'copy-id') {
-        void copySessionId(ctx.targetId);
-      } else if (action === 'pin') {
-        void pinSession(ctx.targetId);
-      } else if (action === 'export') {
-        void exportMarkdown(ctx.targetId);
-      } else if (action === 'archive') {
-        void archiveSession(ctx.targetId);
-      } else if (action === 'delete') {
-        state.confirmModal = {
-          title: t('ctx.deleteSessionTitle'),
-          message: t('ctx.confirmDeleteSession', { name: ctx.targetName || ctx.targetId }),
-          confirmLabel: t('ctx.delete'),
-          cancelLabel: t('common.cancel'),
-          isDanger: true,
-          onConfirm: () => {
-            restoreComposerFocus();
-            void deleteSession(ctx.targetId);
-          },
-          onCancel: () => {
-            restoreComposerFocus();
-          },
-        };
-        render();
-      }
-    };
-  });
-
-  document.querySelectorAll('.btn-delete-session').forEach((btn) => {
-    (btn as HTMLElement).onclick = (e) => {
-      e.stopPropagation();
-      const id = (btn as HTMLElement).dataset.id;
-      if (!id) return;
-      const targetSess = state.sessions.find((s) => s.id === id);
-      state.confirmModal = {
-        title: t('ctx.deleteSessionTitle'),
-        message: t('ctx.confirmDeleteSession', { name: targetSess?.title || id }),
-        confirmLabel: t('ctx.delete'),
-        cancelLabel: t('common.cancel'),
-        isDanger: true,
-        onConfirm: () => {
-          restoreComposerFocus();
-          void deleteSession(id);
-        },
-        onCancel: () => {
-          restoreComposerFocus();
-        },
-      };
-      render();
-    };
-  });
+  // 模态弹窗、任务创建与右键上下文菜单事件由控制器统一接管
+  modalInteractionController.bindDomEvents();
 
   // Inspector Tabs
   document.querySelectorAll('.vertical-tab-item').forEach((tab) => {
@@ -10218,280 +9536,8 @@ function bindEvents(): void {
     });
   }
 
-  // 发送 / 停止 与 IME 组合防御
-  const sendBtn = document.getElementById('dock-send-btn') as HTMLButtonElement | null;
-  const queueBtn = document.getElementById('dock-queue-btn') as HTMLButtonElement | null;
-  const stopBtn = document.getElementById('dock-stop-btn') as HTMLButtonElement | null;
-  const inputEl = document.getElementById('dock-prompt-input') as HTMLTextAreaElement;
-  let isComposing = false;
-
-  // 输入区高度：66px 起步，按 scrollHeight 增长，触顶 220px 后转内部滚动。
-  // 【规则】先把 height 归 auto 再量 scrollHeight，回删时高度才能同步收回；
-  //   高度不做过渡，避免高频输入时把排版抖动放大成跳行。边界值定义在 queueControl.ts。
-  const syncComposerHeight = () => {
-    if (!inputEl) return;
-    // 先归 auto 再量：否则回删时读到的是被旧高度撑住的滚动高度，高度会卡在上限。
-    inputEl.style.height = 'auto';
-    inputEl.style.height = `${clampComposerHeight(inputEl.scrollHeight)}px`;
-  };
-
-  const submitDraft = () => {
-    if (!inputEl) return;
-    const text = inputEl.value.trim();
-    if (!text) return;
-    inputEl.value = '';
-    syncComposerHeight();
-    void routeSend(text);
-  };
-
-  const handleSend = (source: 'button' | 'enter') => {
-    if (!inputEl) return;
-    // 【规则】相位与回车动作都走纯决策层，渲染与按键读同一份输入：
-    //   历史上渲染读 isStreamingActiveForCurrentSession()、按键读 state.isStreaming，
-    //   切换会话后两者分歧，界面明明是发送按钮，回车却弹「回合仍在生成中」。
-    //   运行态下发送按钮并不存在（主按钮是停止），入队按钮有自己的 onclick，
-    //   因此这里只需把 idle 交给 submitDraft、把 running 交给 enqueueDraft。
-    const action = planEnterAction({
-      phase: resolveComposerPhase({ activeTurn: isStreamingActiveForCurrentSession() }),
-      text: inputEl.value,
-      attachmentCount: state.attachments.length,
-    });
-    if (action.kind === 'submit') submitDraft();
-    if (action.kind === 'enqueue') void enqueueDraft();
-  };
-
-  // 空内容时发送禁用；网关未连接时模板已写死 disabled + data-locked，这里不得擅自解锁。
-  // 【规则】附件真值只有 state.attachments 一处，不再查 DOM 类名。
-  const syncSendAvailability = () => {
-    if (!sendBtn || !inputEl || sendBtn.dataset.locked === 'true') return;
-    sendBtn.disabled = !canSendDraft({
-      text: inputEl.value,
-      attachmentCount: state.attachments.length,
-    });
-  };
-
-  if (sendBtn) sendBtn.onclick = () => handleSend('button');
-  if (queueBtn) {
-    queueBtn.onclick = () => {
-      void enqueueDraft();
-    };
-  }
-  if (stopBtn) {
-    stopBtn.onclick = () => {
-      void interruptTurn();
-    };
-  }
-  // 运行态草稿有无只切按钮可见性，绝不触发整舱重绘（否则 textarea 与光标会被销毁）
-  const syncQueueButtonVisibility = () => {
-    if (!queueBtn || !inputEl) return;
-    queueBtn.hidden = !shouldShowQueueButton({
-      text: inputEl.value,
-      attachmentCount: state.attachments.length,
-    });
-  };
-  syncSendAvailability();
-  syncComposerHeight();
-  // 【规则】无条件补一次：附件增减会触发整舱重建，但重建路径不保证再走这里，
-  //   不能依赖"附件变化必然重绘"这种隐式契约。
-  syncQueueButtonVisibility();
-  if (inputEl) {
-    if (inputEl.dataset.dockEventsBound !== 'true') {
-      inputEl.dataset.dockEventsBound = 'true';
-      inputEl.addEventListener('compositionstart', () => {
-        isComposing = true;
-      });
-      inputEl.addEventListener('compositionend', () => {
-        isComposing = false;
-        syncComposerHeight();
-      });
-      inputEl.addEventListener('input', syncSendAvailability);
-      inputEl.addEventListener('input', syncQueueButtonVisibility);
-      syncQueueButtonVisibility();
-
-      inputEl.addEventListener('input', () => {
-        if (!isComposing) syncComposerHeight();
-        const textBeforeCursor = inputEl.value.slice(0, inputEl.selectionStart || inputEl.value.length);
-
-        // 斜杠命令 (/): 处于开头或空格后 → complete.slash 动态补全（失败降级目录快照）
-        const slashMatch = /(?:^|\s)\/([a-zA-Z0-9_-]*)$/.exec(textBeforeCursor);
-        if (slashMatch) {
-          state.mentionPopperOpen = false;
-          inputCompletion.requestSlashCompletion(slashMatch[1]);
-          return;
-        } else if (state.slashPopperOpen) {
-          state.slashPopperOpen = false;
-          render();
-        }
-
-        // 智能引用 (@): Agent 项本地枚举 + 文件项走 complete.path 动态检索
-        // 【规则】token 解析走纯函数：`@` 之后可能是路径（含 `/`、`~`、`.`），
-        //   用「只允许字母数字」的正则会把 `/opt` 这类输入整个漏掉，表现为「@ 搜不到路径」。
-        const mentionToken = parseMentionToken(textBeforeCursor);
-        if (mentionToken) {
-          const query = mentionToken.query;
-          const agentItems: MentionReferenceOption[] = [];
-          const isGroupChat = state.activeFocus.type === 'group';
-
-          // 【规则】含路径分隔符的 token 不参与 Bot 名过滤：
-          //   拿 `/opt` 去筛 Bot 只会得到空列表，把用户真正想要的路径候选挤掉。
-          if (!mentionToken.isPath) {
-            if (isGroupChat) {
-              agentItems.push({ type: 'agent', name: 'all', detail: t('mention.allDetail') });
-              // 设计意图 (Why): 群聊内 @ 成员补全必须匹配当前聚焦的群聊房间成员。
-              // 防范的历史坑 (Pitfall): 曾误用 editingGroupRoomId，导致常规打字时 currentRoom 恒为 undefined，参会 Bot 列表全部丢失。
-              // 规则 (Rules): 严格从 state.activeFocus 提取 activeRoomId。
-              const activeRoomId = state.activeFocus.type === 'group' ? state.activeFocus.roomId : undefined;
-              const currentRoom = state.groupRooms.find((r) => r.roomId === activeRoomId);
-              if (currentRoom) {
-                for (const member of currentRoom.members) {
-                  agentItems.push({ type: 'agent', name: member, detail: t('mention.groupMember') });
-                }
-              }
-            } else {
-              // 【规则】专职 Bot 主工位同样要列 @ 候选：该会话的发路由 planSendRoute 判定为 mention-btw，
-              //   浮层不给任何 Bot 就等于把「旁路外援」这条唯一通道藏起来。
-              //   只是主工位不应把「自己」列为候选 —— 自指既无意义，也会让 btw 路由指向本 Bot。
-              const selfName = state.activeFocus.type === 'bot' ? state.activeFocus.botName : null;
-              for (const p of state.profiles) {
-                if (selfName && (p.name === selfName || p.displayName === selfName)) continue;
-                agentItems.push({ type: 'agent', name: p.displayName || p.name, detail: p.name });
-              }
-            }
-          }
-
-          const filteredAgents = agentItems.filter((m) => m.name.toLowerCase().includes(query.toLowerCase()));
-          state.mentionItems = filteredAgents;
-          state.mentionPopperOpen = filteredAgents.length > 0;
-          state.slashPopperOpen = false;
-          render();
-          inputCompletion.requestPathCompletion(query, agentItems);
-          return;
-        } else if (state.mentionPopperOpen) {
-          state.mentionPopperOpen = false;
-          render();
-        }
-      });
-
-      // 剪贴板图片/文件粘贴监听 (Ctrl+V)
-      inputEl.addEventListener('paste', (e) => {
-        const files = e.clipboardData?.files;
-        if (files && files.length > 0) {
-          e.preventDefault();
-          void addInputAttachments(files);
-        }
-      });
-
-      // 拖拽支持 (Drag & Drop)
-      const dockContainer = document.querySelector('.input-dock-container') as HTMLElement | null;
-      if (dockContainer && dockContainer.dataset.dragBound !== 'true') {
-        dockContainer.dataset.dragBound = 'true';
-        dockContainer.addEventListener('dragover', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-        });
-        dockContainer.addEventListener('drop', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const files = e.dataTransfer?.files;
-          if (files && files.length > 0) {
-            void addInputAttachments(files);
-          }
-        });
-      }
-
-      // 恢复草稿后按真实内容重新量一次高度
-      syncComposerHeight();
-
-      inputEl.onkeydown = (e) => {
-        if (e.key === 'Escape') {
-          if (state.slashPopperOpen || state.mentionPopperOpen) {
-            e.preventDefault();
-            state.slashPopperOpen = false;
-            state.mentionPopperOpen = false;
-            render();
-            return;
-          }
-        }
-        if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
-          if (state.slashPopperOpen || state.mentionPopperOpen) {
-            state.slashPopperOpen = false;
-            state.mentionPopperOpen = false;
-          }
-          e.preventDefault();
-          handleSend('enter');
-        }
-      };
-    }
-  }
-
-  // 附件移除与 Popper 补全委托
-  const dockBox = document.querySelector('.input-dock-container');
-  if (dockBox && !dockBox.hasAttribute('data-popper-delegated')) {
-    dockBox.setAttribute('data-popper-delegated', 'true');
-    dockBox.addEventListener('click', (e) => {
-      const target = e.target as HTMLElement;
-
-      // 移除附件按钮
-      const removeBtn = target.closest<HTMLElement>('.btn-remove-attachment');
-      if (removeBtn) {
-        e.stopPropagation();
-        const attId = removeBtn.getAttribute('data-att-id');
-        if (attId) {
-          state.attachments = state.attachments.filter((a) => a.id !== attId);
-          render();
-        }
-        return;
-      }
-
-      // 斜杠命令项点击：按网关 replace_from 精确替换光标 token
-      const slashOption = target.closest<HTMLElement>('.slash-item-option');
-      if (slashOption) {
-        e.stopPropagation();
-        const cmd = slashOption.getAttribute('data-command') || '';
-        const replaceFromRaw = slashOption.getAttribute('data-replace-from');
-        const replaceFrom = replaceFromRaw ? parseInt(replaceFromRaw, 10) : null;
-        if (cmd && inputEl) {
-          if (replaceFrom !== null && Number.isFinite(replaceFrom)) {
-            const caret = inputEl.selectionStart ?? inputEl.value.length;
-            inputEl.value = inputEl.value.slice(0, replaceFrom) + cmd + ' ' + inputEl.value.slice(caret);
-            const pos = replaceFrom + cmd.length + 1;
-            inputEl.setSelectionRange(pos, pos);
-          } else {
-            inputEl.value = `${cmd} `;
-            inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
-          }
-          inputEl.focus();
-          state.slashPopperOpen = false;
-          render();
-        }
-        return;
-      }
-
-      // 智能引用项点击：区分 Agent（写 pickedMention 权威）与 File（插入相对路径）
-      const mentionOption = target.closest<HTMLElement>('.mention-item-option');
-      if (mentionOption) {
-        e.stopPropagation();
-        const mention = mentionOption.getAttribute('data-mention') || '';
-        const mtype = mentionOption.getAttribute('data-type') || 'agent';
-        if (mention && inputEl) {
-          if (mtype === 'file') {
-            const prefix = inputEl.value.replace(/@\S*$/, '');
-            inputEl.value = `${prefix}@${mention} `;
-            inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
-          } else {
-            const prefix = inputEl.value.replace(/@\S*$/, '');
-            inputEl.value = `${prefix}@${mention} `;
-            inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
-            state.pickedMention = { profile: mention, token: `@${mention}` };
-          }
-          inputEl.focus();
-          state.mentionPopperOpen = false;
-          render();
-        }
-        return;
-      }
-    });
-  }
+  // 发送、入队、停止、IME防御、自适应高度、联想补全与附件移除委托给 inputDockController
+  inputDockController.bindDomEvents();
 
   // Scroll stream: Auto-load older messages on top reach with requestAnimationFrame & cooldown lock
   const streamEl = document.getElementById('conversation-stream');
@@ -10778,57 +9824,6 @@ function bindEvents(): void {
  * - 状态透明：无论成功还是失败，均通过 setTimedDockNotice 和按钮图标微动效给予用户明确反馈；
  * - 严格类型，严禁 as any。
  */
-async function addInputAttachments(fileList: FileList | File[]): Promise<void> {
-  const files = Array.from(fileList);
-  if (files.length === 0) return;
-
-  const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB
-  let imgIndex = state.attachments.filter((a) => a.type === 'image').length;
-  let docIndex = state.attachments.filter((a) => a.type !== 'image').length;
-  const newItems: InputAttachmentItem[] = [];
-
-  for (const file of files) {
-    const isImg = file.type.startsWith('image/');
-    if (isImg && file.size > MAX_IMAGE_SIZE) {
-      setTimedDockNotice(t('dock.imageTooLarge'));
-      continue;
-    }
-
-    if (isImg) {
-      imgIndex++;
-      const dataUrl = await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve((reader.result as string) || '');
-        reader.onerror = () => resolve('');
-        reader.readAsDataURL(file);
-      });
-
-      newItems.push({
-        id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        name: file.name || `image_${imgIndex}.png`,
-        label: `Image ${imgIndex}`,
-        type: 'image',
-        previewUrl: dataUrl,
-        sizeBytes: file.size,
-      });
-    } else {
-      docIndex++;
-      newItems.push({
-        id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        name: file.name,
-        label: `Doc ${docIndex}`,
-        type: file.name.endsWith('.pdf') ? 'pdf' : 'file',
-        sizeBytes: file.size,
-      });
-    }
-  }
-
-  if (newItems.length > 0) {
-    state.attachments = [...state.attachments, ...newItems];
-    render();
-  }
-}
-
 async function handleCopyMessage(btn: HTMLElement): Promise<void> {
   await messageActionController.executeCopy(
     btn,
@@ -11596,12 +10591,7 @@ window.addEventListener('keydown', (e) => {
     render();
   }
   if (e.key === 'Escape') {
-    if (state.confirmModal) {
-      const modal = state.confirmModal;
-      state.confirmModal = undefined;
-      render();
-      if (modal.onCancel) modal.onCancel();
-      else restoreComposerFocus();
+    if (modalInteractionController.handleGlobalEscape()) {
       return;
     }
     if (state.isSettingsOpen) {
@@ -11611,13 +10601,11 @@ window.addEventListener('keydown', (e) => {
       closeModelMenu();
     }
   }
-  if (e.key === 'Enter' && state.confirmModal) {
-    e.preventDefault();
-    const modal = state.confirmModal;
-    state.confirmModal = undefined;
-    render();
-    if (modal.onConfirm) void modal.onConfirm();
-    return;
+  if (e.key === 'Enter') {
+    if (modalInteractionController.handleGlobalEnter()) {
+      e.preventDefault();
+      return;
+    }
   }
 });
 
@@ -11673,13 +10661,7 @@ document.addEventListener('mousedown', (e) => {
     }
   }
 
-  if (state.sessionContextMenu) {
-    const ctxMenu = document.getElementById('session-context-menu');
-    if (!ctxMenu || !ctxMenu.contains(e.target as Node)) {
-      state.sessionContextMenu = undefined;
-      render();
-    }
-  }
+  modalInteractionController.closeContextMenuIfClickedOutside(e.target as Node | null);
 });
 
 /**

@@ -22,6 +22,7 @@ const repoRoot = path.resolve(__dirname, '../../../..');
 const read = (relativePath) => readFileSync(path.join(repoRoot, relativePath), 'utf8');
 
 const rendererSource = read('packages/desktop/src/renderer/index.ts');
+const leftRailSnapshotSource = read('packages/desktop/src/renderer/leftrail/leftRailSnapshotManager.ts');
 const profileRefreshSource = read('packages/desktop/src/renderer/profileRefresh.ts');
 const messageListSource = read('packages/ui/src/components-react/conversation/ConversationMessageList.tsx');
 const messageRowSource = read('packages/ui/src/components-react/conversation/MessageRow.tsx');
@@ -78,7 +79,7 @@ test('Agent 切换 - 消息列表必须按有界窗口挂载，且向下滚动�
 });
 
 test('Agent 切换 - 左轨与标题栏按内容缓存推送，禁止 JSON 全量序列化热路径', () => {
-  assert.match(rendererSource, /function sameLeftRailInputs\(/, '缺少左轨输入引用比较');
+  assert.match(leftRailSnapshotSource || rendererSource, /function sameLeftRailInputs\(/, '缺少左轨输入引用比较');
   assert.match(rendererSource, /snapshot !== lastPushedLeftRailSnapshot/, '左轨必须按快照引用跳过未变化推送');
   assert.doesNotMatch(rendererSource, /snapshotFingerprint\(getLeftRailSnapshot\(\)\)/, '禁止对 89 个会话的快照做 JSON.stringify');
 });

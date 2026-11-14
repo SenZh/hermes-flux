@@ -47,6 +47,7 @@
     "gates:json": "node scripts/gates/run.mjs --json",
     "gates:freeze": "node scripts/gates/run.mjs --update-baseline",
     "gates:mutation": "node scripts/gates/mutation-check.mjs",
+    "mutation:stryker": "node scripts/gates/mutation-stryker.mjs",
     "gates:allow": "node scripts/gates/allow-budget.mjs",
     "gates:invariants": "node scripts/verify/invariant-map.mjs --check",
     "gates:self-proof": "node scripts/verify/gate-self-proof.mjs",
@@ -66,6 +67,8 @@
     "prepare": "node -e \"try { require('child_process').execSync('git config core.hooksPath .githooks'); } catch {}\""
   },
   "devDependencies": {
+    "@stryker-mutator/core": "^10.1.1",
+    "@stryker-mutator/tap-runner": "^10.1.1",
     "electron": "34.2.0",
     "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",

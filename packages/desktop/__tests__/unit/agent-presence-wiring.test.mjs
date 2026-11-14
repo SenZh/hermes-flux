@@ -27,7 +27,12 @@ const repoRoot = path.resolve(__dirname, '../../../..');
 const read = (rel) => fs.readFileSync(path.join(repoRoot, rel), 'utf8');
 
 const RENDERER = 'packages/desktop/src/renderer/index.ts';
+const PRESENCE_DOMAIN = 'packages/desktop/src/renderer/presence/agentPresenceManager.ts';
+const STATE_DOMAIN = 'packages/desktop/src/renderer/state/appState.ts';
 const MIDDLE_POD = 'packages/ui/src/components/MiddlePod/MiddlePod.ts';
+
+const presenceSrc = () => (fs.existsSync(path.join(repoRoot, PRESENCE_DOMAIN)) ? read(PRESENCE_DOMAIN) : read(RENDERER));
+const stateSrc = () => (fs.existsSync(path.join(repoRoot, STATE_DOMAIN)) ? read(STATE_DOMAIN) : read(RENDERER));
 
 test('在场指示器宿主接线守卫', async (t) => {
   await t.test('1. host 挂在 pod 层，且不在 #conversation-stream 内部', () => {
@@ -44,7 +49,7 @@ test('在场指示器宿主接线守卫', async (t) => {
   });
 
   await t.test('2. 快照指纹不得包含 sinceMs 与正文（否则去重失效）', () => {
-    const src = read(RENDERER);
+    const src = presenceSrc();
     const fnStart = src.indexOf('function agentPresenceFingerprint');
     assert.ok(fnStart >= 0, '必须存在指纹函数');
     // 取函数体到下一个顶层函数声明之前
@@ -72,15 +77,15 @@ test('在场指示器宿主接线守卫', async (t) => {
   });
 
   await t.test('4. 群聊说话者只在回合运行时非 null', () => {
-    const src = read(RENDERER);
+    const src = presenceSrc();
     assert.ok(
-      /speaker:\s*domain\.isRunning\s*\?\s*\(state\.activeGroupSpeaker\s*\?\?\s*null\)\s*:\s*null/.test(src),
+      /speaker:\s*domain\.isRunning\s*\?\s*\(this\.host\.activeGroupSpeaker\s*\?\?\s*null\)\s*:\s*null|speaker:\s*domain\.isRunning\s*\?\s*\(host\.activeGroupSpeaker\s*\?\?\s*null\)\s*:\s*null|speaker:\s*domain\.isRunning\s*\?\s*\(state\.activeGroupSpeaker\s*\?\?\s*null\)\s*:\s*null/.test(src),
       '说话者必须在回合未运行时强制 null，否则会高亮一个早已说完话的成员',
     );
   });
 
   await t.test('5. 群聊运行态必须读 activeRunningGroupRoomIds 而非单聊的 isStreaming', () => {
-    const src = read(RENDERER);
+    const src = presenceSrc();
     const fnStart = src.indexOf('function resolvePresenceDomain');
     assert.ok(fnStart >= 0, '必须存在运行态裁决函数');
     const body = src.slice(fnStart, src.indexOf('\nfunction ', fnStart + 10));
@@ -89,7 +94,7 @@ test('在场指示器宿主接线守卫', async (t) => {
   });
 
   await t.test('6. 节拍器必须在 idle 时停止（禁止无条件常驻 setInterval）', () => {
-    const src = read(RENDERER);
+    const src = presenceSrc();
     const fnStart = src.indexOf('function ensurePresenceTicker');
     assert.ok(fnStart >= 0, '必须存在节拍器函数');
     const body = src.slice(fnStart, src.indexOf('\nfunction ', fnStart + 10));
@@ -133,8 +138,9 @@ test('在场指示器宿主接线守卫', async (t) => {
       'PRESENCE_LAYOUT_STORAGE_KEY 必须声明在 state 初始化之前，否则冷启动读不到已保存的布局',
     );
     // 读取失败不得静默：只有 localStorage 不可用时才回落，且必须留痕
-    const readStart = src.indexOf('function readPresenceLayout');
-    const readBody = src.slice(readStart, src.indexOf('\n}', readStart));
+    const readSrc = stateSrc();
+    const readStart = readSrc.indexOf('function readPresenceLayout');
+    const readBody = readSrc.slice(readStart, readSrc.indexOf('\n}', readStart));
     assert.ok(readBody.includes('console.warn'), '读取失败必须留痕，禁止空 catch 吞掉');
     assert.ok(readBody.includes("'dock'"), '必须识别 dock');
     assert.ok(readBody.includes("'stage'"), '缺省必须回落 stage');
@@ -198,7 +204,7 @@ test('在场指示器宿主接线守卫', async (t) => {
   });
 
   await t.test('12. 指纹必须真的带上快照里的布局值（不得写成常量）', () => {
-    const src = read(RENDERER);
+    const src = presenceSrc();
     const fnStart = src.indexOf('function agentPresenceFingerprint');
     const body = src.slice(fnStart, src.indexOf('\nfunction ', fnStart + 10));
     /*
@@ -246,8 +252,14 @@ test('在场指示器宿主接线守卫', async (t) => {
      *   指示器静默不出现。三处引用一并断言。
      */
     assert.ok(body.includes('agentPresenceHost = null'), '必须清宿主引用（否则重连后引用比对误判已挂载）');
-    assert.ok(body.includes('pendingPresenceSnapshot = null'), '必须清待渲染快照');
-    assert.ok(body.includes("lastAgentPresenceFingerprint = ''"), '必须清指纹（否则重连首帧被去重吞掉）');
+    assert.ok(
+      body.includes('pendingPresenceSnapshot = null') || body.includes('agentPresenceManager.pendingPresenceSnapshot = null'),
+      '必须清待渲染快照'
+    );
+    assert.ok(
+      body.includes("lastAgentPresenceFingerprint = ''") || body.includes("agentPresenceManager.lastAgentPresenceFingerprint = ''"),
+      '必须清指纹（否则重连首帧被去重吞掉）'
+    );
 
     /*
      * 【守卫必须用 ensure 的返回值 (Rules)】MiddlePod 模板里有一个同 id 的静态空宿主；

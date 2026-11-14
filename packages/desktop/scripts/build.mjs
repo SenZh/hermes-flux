@@ -227,7 +227,127 @@ async function buildAll() {
     external: ['@hermes-flux/ui', '@hermes-flux/core'],
     sourcemap: true,
   });
-  console.log('  ✔ Transcript rows + slash catalog modules compiled');
+
+  // 客户端缓存桥接领域：从 index.ts 整簇抽出，依赖 @hermes-flux/ui 与 core
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/cache/desktopCacheBridge.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/cache/desktopCacheBridge.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+
+  // Agent 在场与语气状态机领域：从 index.ts 整簇抽出，依赖 @hermes-flux/ui 与 core
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/presence/agentPresenceManager.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/presence/agentPresenceManager.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+
+  // 提示词导航状态机领域：从 index.ts 整簇抽出，依赖 @hermes-flux/ui 与 core
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/navigation/promptNavigatorManager.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/navigation/promptNavigatorManager.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+
+  // 思考等级级联定位领域：从 index.ts 抽出，纯几何与抑制状态机
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/cascade/modelCascadeManager.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/cascade/modelCascadeManager.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+
+  // 会话流视口滚动与锚定领域：从 index.ts 抽出
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/viewport/streamViewportManager.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/viewport/streamViewportManager.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+
+  // 左轨实体装饰与快照管理领域：从 index.ts 抽出
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/leftrail/leftRailSnapshotManager.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/leftrail/leftRailSnapshotManager.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+
+  // 全局应用状态模型领域：从 index.ts 抽出
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/state/appState.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/state/appState.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+
+  // 检查舱动效与下载控制器：从 index.ts 抽出
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/inspector/inspectorController.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/inspector/inspectorController.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+
+  // 模态弹窗与右键菜单控制器：从 index.ts 抽出
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/events/modalInteractionController.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/events/modalInteractionController.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+
+  // 输入舱交互控制器：从 index.ts 抽出
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/events/inputDockController.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/events/inputDockController.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+  console.log('  ✔ Transcript rows + slash catalog + desktop cache bridge + agent presence + prompt nav + cascade + viewport + leftrail + state + inspector + modal + inputDock modules compiled');
 
   // 4. Copy static assets
   fs.copyFileSync(
