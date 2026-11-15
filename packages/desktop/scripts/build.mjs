@@ -293,6 +293,18 @@ async function buildAll() {
     sourcemap: true,
   });
 
+  // 桌面壳视口装配：把 StreamViewportHost 的真实依赖收敛为可单测入口
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/viewport/desktopStreamViewport.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/viewport/desktopStreamViewport.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+
   // 左轨实体装饰与快照管理领域：从 index.ts 抽出
   await esbuild.build({
     entryPoints: [path.join(rootDir, 'src/renderer/leftrail/leftRailSnapshotManager.ts')],

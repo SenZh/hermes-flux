@@ -74,13 +74,27 @@ test('Agent 切换 - 消息列表必须按有界窗口挂载，且向下滚动�
     '严禁保留开放区间切片：这正是挂载量只增不减的根因'
   );
   assert.match(rendererSource, /messageWindowSessionId !== state\.activeSessionId/, '切会话必须重置窗口');
-  assert.match(rendererSource, /const expanded = expandMessageWindow\(\);/, '顶部滚动必须先尝试扩展本地窗口');
+  /**
+   * 这三条断言原先靠 index.ts 里的注释靶子命中，属于「断言注释而非实现」的假守卫：
+   * 真实实现已随 Batch 3/4/5 迁出到 conversationStreamController / messageLoadingService / renderCoordinator。
+   * 现改为断言真实调用点，确保删除实现会真实变红。
+   */
+  const streamControllerSource = read('packages/desktop/src/renderer/events/conversationStreamController.ts');
   assert.match(
-    rendererSource,
-    /slideMessageWindowForward\(\)/,
+    streamControllerSource,
+    /const expanded = expandMessageWindow\(\);/,
+    '顶部滚动必须先尝试扩展本地窗口'
+  );
+  assert.match(
+    streamControllerSource,
+    /slideMessageWindowForward\(\);/,
     '向下滚到窗口尾部必须整体前移窗口，否则读者会撞上空白'
   );
-  assert.match(rendererSource, /applyStreamAnchor\(anchor, false\)/, '窗口扩展后必须重放滚动锚点');
+  assert.match(
+    msgLoadSource,
+    /applyStreamAnchor\(anchor, false\)/,
+    '窗口扩展后必须重放滚动锚点'
+  );
 });
 
 test('Agent 切换 - 左轨与标题栏按内容缓存推送，禁止 JSON 全量序列化热路径', () => {

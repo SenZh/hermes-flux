@@ -93,6 +93,12 @@ export interface RenderCoordinatorDeps {
   // 提示词导航轨操作
   getPromptNavigatorSnapshot: () => PromptNavigatorSnapshot;
   createPromptNavigatorActions: () => PromptNavigatorActions;
+  /**
+   * 挂载成功后把 React 的 update 句柄回注给 PromptNavigatorManager。
+   *
+   * 可选：旧调用方（单测/迁移期）可不提供，此时仅本地持有句柄、不推送快照。
+   */
+  setPromptNavigatorUpdateHandler?: (handler: (() => void) | null) => void;
   rebuildPromptEntries: () => void;
   syncPromptNavigatorMeta: () => void;
   syncPromptNavigator: () => void;
@@ -424,6 +430,20 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
         deps.createPromptNavigatorActions(),
       );
       updateReactPromptNavigator = promptNavigatorMount.update;
+      /**
+       * 【设计意图 (Why)】
+       *   导航器快照推送的唯一出口在 PromptNavigatorManager.sync()，它在没有 update 句柄时
+       *   第一行直接 return。挂载成功后必须把句柄回注给管理器，否则快照永远停在空态。
+       *
+       * 【防范历史坑 (Pitfall)】
+       *   Batch 5/7 把挂载搬进 renderCoordinator 时，只赋值了本地的 updateReactPromptNavigator，
+       *   忘记调用 setUpdateHandler 回注；管理器侧 `if (!this.updateReactPromptNavigator) return;`
+       *   使整条推送链静默短路，导航轨在所有会话下都不出现，且无任何报错。
+       *
+       * 【约束规则 (Rules)】
+       *   每次挂载（含 React 树重建导致 navHost 换新）都必须重新回注，不得只做一次。
+       */
+      deps.setPromptNavigatorUpdateHandler?.(promptNavigatorMount.update);
     }
 
     deps.rebuildPromptEntries();

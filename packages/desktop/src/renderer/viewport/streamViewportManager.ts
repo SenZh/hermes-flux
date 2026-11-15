@@ -162,13 +162,13 @@ export class StreamViewportManager {
    * 首屏落定：在落定期内逐帧把视口贴到最新消息。
    */
   public settleInitialBottom(attempt = 0): void {
-    if (!this.initialBottomSettling) return;
+    if (!this.isInitialBottomSettling()) return;
     this.runRaf(() => {
-      if (!this.initialBottomSettling) return;
+      if (!this.isInitialBottomSettling()) return;
       const stream = this.host.getStreamElement();
       if (!stream) {
-        this.initialBottomSettling = false;
-        this.settledLayoutSignature = this.host.layoutSignature();
+        this.setInitialBottomSettling(false);
+        this.setSettledLayoutSignature(this.host.layoutSignature());
         return;
       }
       const distance = stream.scrollHeight - stream.scrollTop - stream.clientHeight;
@@ -176,8 +176,8 @@ export class StreamViewportManager {
       this.scrollStreamToContentBottom(stream, reserve);
       const after = Math.abs(stream.scrollHeight - stream.scrollTop - stream.clientHeight);
 
-      if (this.settleMinFrames > 0) {
-        this.settleMinFrames -= 1;
+      if (this.getSettleMinFrames() > 0) {
+        this.setSettleMinFrames(this.getSettleMinFrames() - 1);
       } else if (after <= 2 || Math.abs(distance - after) <= 2) {
         const virtualWindow = this.host.getVirtualWindowElement
           ? this.host.getVirtualWindowElement()
@@ -185,8 +185,8 @@ export class StreamViewportManager {
         const windowBottom = virtualWindow?.getBoundingClientRect().bottom;
         const safeBottom = stream.getBoundingClientRect().bottom - reserve;
         if (windowBottom === undefined || Math.abs(windowBottom - safeBottom) <= 2) {
-          this.initialBottomSettling = false;
-          this.settledLayoutSignature = this.host.layoutSignature();
+          this.setInitialBottomSettling(false);
+          this.setSettledLayoutSignature(this.host.layoutSignature());
           return;
         }
       }
@@ -195,8 +195,8 @@ export class StreamViewportManager {
         this.settleInitialBottom(attempt + 1);
         return;
       }
-      this.initialBottomSettling = false;
-      this.settledLayoutSignature = this.host.layoutSignature();
+      this.setInitialBottomSettling(false);
+      this.setSettledLayoutSignature(this.host.layoutSignature());
       this.host.logDebug?.('initial bottom settled', {
         attempt,
         start: this.host.getMessageWindowStart?.() ?? 0,
@@ -239,7 +239,7 @@ export class StreamViewportManager {
         const prev = stream.style.getPropertyValue('--conv-gutter-bottom');
         if (next !== prev) {
           stream.style.setProperty('--conv-gutter-bottom', next);
-          this.initialBottomSettling = true;
+          this.setInitialBottomSettling(true);
           this.settleInitialBottom();
         }
       }
@@ -297,7 +297,7 @@ export class StreamViewportManager {
    */
   public applyStreamAnchor(anchor: StreamAnchor, pinBottom: boolean): void {
     if (this.host.isPromptJumpSettling()) return;
-    if (this.initialBottomSettling) return;
+    if (this.isInitialBottomSettling()) return;
     const stream = this.host.getStreamElement();
     if (!stream) return;
 
@@ -341,7 +341,7 @@ export class StreamViewportManager {
    */
   public stabilizeStreamAnchor(anchor: StreamAnchor): void {
     if (this.host.isPromptJumpSettling()) return;
-    if (this.initialBottomSettling) return;
+    if (this.isInitialBottomSettling()) return;
     if (!anchor.id) return;
     const stream = this.host.getStreamElement();
     if (!stream) return;
