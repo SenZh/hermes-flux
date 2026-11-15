@@ -871,6 +871,7 @@ const turnExecutionService = createTurnExecutionService({
   resolveAgentAvatar: (name) => resolveAgentAvatar(name), scrollStreamToBottom: (reason) => scrollStreamToBottom(reason),
   setPendingScrollToBottom: (val) => { pendingScrollToBottom = val; }, runSlashCommand: (cmd) => inputDockController.runSlashCommand(cmd),
   enqueueDraft: () => inputDockController.enqueueDraft(), handleQueueAction: (action, id) => inputDockController.handleQueueAction(action, id),
+  setMessageWindowUserExpanded: (val) => { messageWindowUserExpanded = val; }, ensureMessageWindow: (total) => ensureMessageWindow(total),
   render: () => render(), t, logStream,
 });
 

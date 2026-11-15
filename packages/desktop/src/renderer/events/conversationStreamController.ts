@@ -134,6 +134,7 @@ export function createConversationStreamController(
     getMessageWindowStart,
     getMessageWindowEnd,
     isMessageWindowUserExpanded,
+    setMessageWindowUserExpanded,
     getAverageRowHeightPx,
     isInitialBottomSettling,
     setInitialBottomSettling,
@@ -374,15 +375,23 @@ export function createConversationStreamController(
             setSettledLayoutSignature(layoutSignature());
           }
         }
-        if (streamEl.scrollTop > getLastStreamScrollTop() + 4) {
-          setStreamScrollCooldown(false);
-        }
         setLastStreamScrollTop(streamEl.scrollTop);
 
         if (isInitialBottomSettling()) return;
 
-        if (streamEl.scrollHeight - streamEl.scrollTop - streamEl.clientHeight <= STICK_TO_BOTTOM_THRESHOLD_PX) {
+        const distanceToBottom = streamEl.scrollHeight - streamEl.scrollTop - streamEl.clientHeight;
+        const isNearBottomNow = distanceToBottom <= STICK_TO_BOTTOM_THRESHOLD_PX;
+
+        if (isNearBottomNow) {
           scheduleStreamBottomInset();
+          // 【双因子退出闭环 (Why)】当物理贴底且窗口已覆盖尾部时，宣告读者已回到最新对话流，
+          //   解除 userExpanded 锁定并清空 readerScrolledSessionId，允许后续微漂移重新自动吸附。
+          if (getMessageWindowEnd() >= state.messages.length) {
+            if (isMessageWindowUserExpanded()) {
+              setMessageWindowUserExpanded(false);
+              setReaderScrolledSessionId('');
+            }
+          }
         }
 
         if (getStreamScrollCooldown() || state.isLoadingOlder) return;
@@ -398,33 +407,44 @@ export function createConversationStreamController(
         const msgWindowStart = getMessageWindowStart();
         const avgRowHeight = getAverageRowHeightPx();
 
-        if (isMessageWindowUserExpanded() && msgWindowEnd < state.messages.length) {
-          const distanceToEnd = streamEl.scrollHeight - streamEl.scrollTop - streamEl.clientHeight;
-          if (distanceToEnd < viewportPrefetch) {
-            setStreamScrollCooldown(true);
-            slideMessageWindowForward();
+        // 1. 获取当前挂载窗口的实际物理几何（优先取 DOM 实测高度，回退取切片名义估算）
+        const virtualWindowTop = Math.round(msgWindowStart * avgRowHeight);
+        const realWindowHeight = virtualWindowEl?.getBoundingClientRect().height;
+        const windowHeight = typeof realWindowHeight === 'number' && Number.isFinite(realWindowHeight) && realWindowHeight > 0
+          ? realWindowHeight
+          : Math.max(1, msgWindowEnd - msgWindowStart) * avgRowHeight;
+        const currentWindowBottom = virtualWindowTop + windowHeight;
+        const currentViewportBottom = streamEl.scrollTop + streamEl.clientHeight;
+
+        // 2. 真实计算视口底边距离当前挂载窗口底边的间距
+        const distanceToWindowEnd = currentWindowBottom - currentViewportBottom;
+        const isAtTail = msgWindowEnd >= state.messages.length;
+
+        // 3. 【向下平滑滑窗 (Why)】当未到尾部且视口底边自然接近当前窗口底边时（在下沿预取带内），顺畅向前滑动窗口。
+        //   若整个视口已深度跌出当前窗口之外（<-clientHeight * 0.5），则属于拖拽滚动条跨越式寻址，必须放行至下面的 outside 分支直接重定位。
+        const isNearWindowBottomEdge = distanceToWindowEnd < viewportPrefetch
+          && distanceToWindowEnd >= -streamEl.clientHeight * 0.5;
+
+        if (!isAtTail && isNearWindowBottomEdge) {
+          setStreamScrollCooldown(true);
+          slideMessageWindowForward();
+          if (typeof requestAnimationFrame !== 'undefined') {
             requestAnimationFrame(() => { setStreamScrollCooldown(false); });
-            return;
+          } else {
+            setStreamScrollCooldown(false);
           }
+          return;
         }
 
         if (state.messages.length > MESSAGE_WINDOW_CAPACITY) {
-          const virtualTop = Math.round(msgWindowStart * avgRowHeight);
-          const virtualBottom = Math.round(msgWindowEnd * avgRowHeight);
-          const outside = streamEl.scrollTop < virtualTop - streamEl.clientHeight * 2
-            || streamEl.scrollTop > virtualBottom;
+          // 【对齐真实物理底边 (Pitfall)】出界上限必须结合 realWindowBottom，防范包含万级像素巨型工具块时
+          //   因名义 virtualBottom 远小于实际内容而误判出界提前卸载 DOM；下界扣除 clientHeight 消除死区空白。
+          const realWindowBottom = Math.max(Math.round(msgWindowEnd * avgRowHeight), currentWindowBottom);
+          const outside = streamEl.scrollTop < virtualWindowTop - streamEl.clientHeight * 1.5
+            || streamEl.scrollTop > realWindowBottom + streamEl.clientHeight * 0.5;
           if (outside) {
-            if (!shouldExpandWindow({
-              sessionId: state.activeSessionId,
-              readerScrolledSessionId: getReaderScrolledSessionId(),
-              total: state.messages.length,
-              capacity: MESSAGE_WINDOW_CAPACITY,
-            })) {
-              setInitialBottomSettling(true);
-              settleInitialBottom();
-              scrollStreamToBottom('initial scroll position offscreen');
-              return;
-            }
+            // 【解耦滚动条拖拽直接寻址 (Why)】当读者直接拖动滚动条跨越式跳转（Seek）时，这是显式定位意图，
+            //   无条件放行 relocateMessageWindowToIndex，严禁退化回 scrollStreamToBottom 强行把滚动条踢到底部。
             const targetIndex = Math.floor(streamEl.scrollTop / Math.max(1, avgRowHeight));
             if (relocateMessageWindowToIndex(targetIndex)) {
               setStreamScrollCooldown(true);
@@ -435,20 +455,28 @@ export function createConversationStreamController(
                 && state.hasOlderMessages
                 && getReaderScrolledSessionId() === state.activeSessionId;
               if (!handoffToFetch) {
-                requestAnimationFrame(() => {
+                if (typeof requestAnimationFrame !== 'undefined') {
+                  requestAnimationFrame(() => {
+                    syncScrollTopToWindow('scrollbar jump');
+                    setStreamScrollCooldown(false);
+                  });
+                } else {
                   syncScrollTopToWindow('scrollbar jump');
                   setStreamScrollCooldown(false);
-                });
+                }
                 return;
               }
-              requestAnimationFrame(() => {
+              if (typeof requestAnimationFrame !== 'undefined') {
+                requestAnimationFrame(() => {
+                  syncScrollTopToWindow('scrollbar jump');
+                });
+              } else {
                 syncScrollTopToWindow('scrollbar jump');
-              });
+              }
             }
           }
         }
 
-        const virtualWindowTop = Math.round(msgWindowStart * avgRowHeight);
         const upwardAction = planUpwardScrollAction({
           sessionId: state.activeSessionId,
           readerScrolledSessionId: getReaderScrolledSessionId(),

@@ -147,3 +147,160 @@ test('ConversationStreamController: handleForkMessage 分叉成功后切换新�
   await controller.handleForkMessage(fakeBtn);
   assert.deepEqual(selectedSessions, ['new-fork-id']);
 });
+
+test('ConversationStreamController - 滚动几何与滑窗状态机回归守卫', async (t) => {
+  await t.test('1. 物理底沿判定：视口接近当前挂载窗口底边时平滑触发向前滑窗', () => {
+    let slideCalled = false;
+    let windowExpanded = true;
+    let currentScrollTop = 24000;
+
+    const fakeStream = {
+      scrollTop: currentScrollTop,
+      scrollHeight: 133330, // 撑开的超大虚拟总高
+      clientHeight: 800,
+      onscroll: null,
+      onwheel: null,
+      dataset: {},
+      addEventListener: () => {},
+    };
+
+    const fakeVirtualWindow = {
+      getBoundingClientRect: () => ({ height: 12000 }), // 当前窗口真实物理高度 12000px
+    };
+
+    const globalDoc = globalThis.document;
+    globalThis.document = {
+      getElementById: (id) => (id === 'conversation-stream' ? fakeStream : null),
+      querySelector: (sel) => (sel === '.conv-virtual-window' ? fakeVirtualWindow : null),
+      querySelectorAll: () => [],
+    };
+
+    try {
+      // 模拟当前窗口 [100, 220)，avgRowHeight=96 => virtualWindowTop = 9600px
+      // 物理下边缘 currentWindowBottom = 9600 + 12000 = 21600px
+      // 视口底部 currentViewportBottom = scrollTop + 800
+      // 当 scrollTop=20200 时，currentViewportBottom = 21000px，distanceToWindowEnd = 600px < viewportPrefetch(800px)
+      fakeStream.scrollTop = 20200;
+
+      const { deps } = createMockDeps({
+        state: {
+          messages: Array.from({ length: 1000 }, (_, i) => ({ id: `m-${i}` })),
+        },
+        deps: {
+          getMessageWindowStart: () => 100,
+          getMessageWindowEnd: () => 220,
+          isMessageWindowUserExpanded: () => windowExpanded,
+          setMessageWindowUserExpanded: (val) => { windowExpanded = val; },
+          getAverageRowHeightPx: () => 96,
+          slideMessageWindowForward: () => { slideCalled = true; },
+        },
+      });
+
+      const controller = createConversationStreamController(deps);
+      controller.bindDomEvents();
+
+      assert.ok(typeof fakeStream.onscroll === 'function', '必须绑定 onscroll 处理器');
+      fakeStream.onscroll();
+
+      assert.equal(slideCalled, true, '视口接近挂载窗口底边时必须触发 slideMessageWindowForward');
+    } finally {
+      globalThis.document = globalDoc;
+    }
+  });
+
+  await t.test('2. 双因子贴底复位：滚到底部且窗口覆盖尾部时安全复位 userExpanded 并清空回溯标记', () => {
+    let windowExpanded = true;
+    let readerScrolledSessionId = 'sess-1';
+
+    const fakeStream = {
+      scrollTop: 95200,
+      scrollHeight: 96000,
+      clientHeight: 800, // distanceToBottom = 96000 - 95200 - 800 = 0 <= 48px (贴底)
+      onscroll: null,
+      onwheel: null,
+      dataset: {},
+      addEventListener: () => {},
+    };
+
+    const globalDoc = globalThis.document;
+    globalThis.document = {
+      getElementById: (id) => (id === 'conversation-stream' ? fakeStream : null),
+      querySelector: () => null,
+      querySelectorAll: () => [],
+    };
+
+    try {
+      const { deps } = createMockDeps({
+        state: {
+          activeSessionId: 'sess-1',
+          messages: Array.from({ length: 1000 }, (_, i) => ({ id: `m-${i}` })),
+        },
+        deps: {
+          getMessageWindowStart: () => 880,
+          getMessageWindowEnd: () => 1000, // 窗口已覆盖末尾
+          isMessageWindowUserExpanded: () => windowExpanded,
+          setMessageWindowUserExpanded: (val) => { windowExpanded = val; },
+          getReaderScrolledSessionId: () => readerScrolledSessionId,
+          setReaderScrolledSessionId: (val) => { readerScrolledSessionId = val; },
+        },
+      });
+
+      const controller = createConversationStreamController(deps);
+      controller.bindDomEvents();
+      fakeStream.onscroll();
+
+      assert.equal(windowExpanded, false, '贴底且到达尾部必须解除 userExpanded');
+      assert.equal(readerScrolledSessionId, '', '贴底且到达尾部必须清空 readerScrolledSessionId 恢复自动吸平');
+    } finally {
+      globalThis.document = globalDoc;
+    }
+  });
+
+  await t.test('3. 直接拖动滚动条寻址解耦：outside 分支无条件放行 relocateMessageWindowToIndex', () => {
+    let relocatedIndex = -1;
+
+    const fakeStream = {
+      scrollTop: 80000, // 突然拖动到 80000px
+      scrollHeight: 133330,
+      clientHeight: 800,
+      onscroll: null,
+      onwheel: null,
+      dataset: {},
+      addEventListener: () => {},
+    };
+
+    const globalDoc = globalThis.document;
+    globalThis.document = {
+      getElementById: (id) => (id === 'conversation-stream' ? fakeStream : null),
+      querySelector: () => null,
+      querySelectorAll: () => [],
+    };
+
+    try {
+      const { deps } = createMockDeps({
+        state: {
+          activeSessionId: 'sess-1',
+          messages: Array.from({ length: 1000 }, (_, i) => ({ id: `m-${i}` })),
+        },
+        deps: {
+          getMessageWindowStart: () => 100,
+          getMessageWindowEnd: () => 220,
+          getAverageRowHeightPx: () => 96,
+          getReaderScrolledSessionId: () => '', // 用户此前未手动滚轮向上过
+          relocateMessageWindowToIndex: (idx) => { relocatedIndex = idx; return true; },
+          scrollStreamToBottom: () => {
+            assert.fail('拖拽滚动条寻址绝不可被踢回底部');
+          },
+        },
+      });
+
+      const controller = createConversationStreamController(deps);
+      controller.bindDomEvents();
+      fakeStream.onscroll();
+
+      assert.equal(relocatedIndex, Math.floor(80000 / 96), '应计算目标索引并放行 relocateMessageWindowToIndex');
+    } finally {
+      globalThis.document = globalDoc;
+    }
+  });
+});

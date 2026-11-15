@@ -92,8 +92,12 @@ export function planMessageWindow(input: MessageWindowPlanInput): MessageWindowP
   if (input.sessionChanged) {
     return { start: tail, end: total, userExpanded: false };
   }
-  // 贴底时窗口必须覆盖末尾，否则流式直写锚点找不到最后一条消息。
-  if (input.followBottom && !input.userExpanded) {
+  // 【尾部自愈不变量 (Why)】当视口贴底时，如果用户未主动回溯历史，或者虽然曾回溯过但当前窗口
+  //   已经在物理/逻辑上触达尾部（start >= tail），必须无条件收敛到尾部窗口并解除 userExpanded，
+  //   彻底杜绝新消息到达时窗口末端掉队引发的流式锚点丢失与空白断崖。
+  // 【防范历史坑 (Pitfall)】曾仅看 !input.userExpanded，导致用户回溯后再滚到底部，状态机永久卡死在
+  //   userExpanded=true，新消息到来时窗口末端无法跟随递增。
+  if (input.followBottom && (!input.userExpanded || input.start >= tail)) {
     return { start: tail, end: total, userExpanded: false };
   }
   const start = clampStart(input.start, maxStart);

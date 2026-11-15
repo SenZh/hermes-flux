@@ -138,6 +138,9 @@ export interface TurnExecutionDeps {
   readonly enqueueDraft: () => Promise<void>;
   readonly handleQueueAction: (action: string, admissionId: string) => Promise<void>;
 
+  readonly setMessageWindowUserExpanded?: (val: boolean) => void;
+  readonly ensureMessageWindow?: (total: number) => void;
+
   readonly render: () => void;
   readonly t: (key: I18nKey, params?: Record<string, string | number>) => string;
   readonly logStream?: {
@@ -604,6 +607,11 @@ export function createTurnExecutionService(deps: TurnExecutionDeps): TurnExecuti
     state.messages.push(assistantMsg);
 
     deps.getSessionMessagesCache().set(state.activeSessionId, [...state.messages]);
+
+    // 【主动意图对齐 (Why)】用户发出新 Prompt，明确要求观察最新回合。
+    //   解除历史回溯冻结并强制将窗口对齐到尾部，保证新消息在 DOM 中存在，流式直写锚点可用。
+    deps.setMessageWindowUserExpanded?.(false);
+    deps.ensureMessageWindow?.(state.messages.length);
 
     state.isStreaming = true;
     state.turnStartedAt = Date.now();

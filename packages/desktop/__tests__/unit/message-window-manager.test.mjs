@@ -97,7 +97,7 @@ test('MessageWindowManager - 虚拟化窗口管理领域纯行为测试', async 
     assert.ok(sideEffects.renders >= 1);
   });
 
-  await t.test('4. slideMessageWindowForward 向下滑动有界窗口', () => {
+  await t.test('4. slideMessageWindowForward 向下滑动有界窗口与尾部自愈', () => {
     const { state, manager } = createHarness(200);
     manager.ensureMessageWindow(state.messages.length);
     manager.expandMessageWindow(); // start: 40
@@ -108,6 +108,20 @@ test('MessageWindowManager - 虚拟化窗口管理领域纯行为测试', async 
     // 应该整体前移 RENDER_WINDOW_STEP = 40
     assert.equal(manager.getMessageWindowStart(), 40);
     assert.equal(manager.getMessageWindowEnd(), 160);
+
+    // 再次向前滑动，到达物理尾部 (200 - 120 = 80)
+    manager.slideMessageWindowForward();
+    assert.equal(manager.getMessageWindowStart(), 80);
+    assert.equal(manager.getMessageWindowEnd(), 200);
+    // 到达尾部且贴底时，userExpanded 自动自愈复位为 false
+    assert.equal(manager.isMessageWindowUserExpanded(), false, '到达物理尾部且贴底必须自愈解除扩展锁定');
+
+    // 【从顶部顺序下滚场景 (Why)】即使 userExpanded=false，只要未到达物理末尾，依然必须允许向前滑窗
+    manager.setMessageWindowStart(0);
+    manager.setMessageWindowEnd(120);
+    assert.equal(manager.isMessageWindowUserExpanded(), false);
+    manager.slideMessageWindowForward();
+    assert.equal(manager.getMessageWindowStart(), 40, 'userExpanded=false 从顶部下滚必须允许向前滑窗');
   });
 
   await t.test('5. relocateMessageWindowToIndex 在索引越界时拒绝，合法时定位', () => {

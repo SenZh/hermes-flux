@@ -136,6 +136,10 @@ function createMockTurnDeps(overrides = {}) {
   };
 
   const completedTurns = [];
+  const depsRecorded = {
+    userExpandedState: null,
+    ensuredWindowTotal: null,
+  };
 
   const deps = {
     getState: () => state,
@@ -190,6 +194,13 @@ function createMockTurnDeps(overrides = {}) {
     enqueueDraft: async () => {},
     handleQueueAction: async () => {},
 
+    setMessageWindowUserExpanded: (val) => {
+      depsRecorded.userExpandedState = val;
+    },
+    ensureMessageWindow: (total) => {
+      depsRecorded.ensuredWindowTotal = total;
+    },
+
     render: () => { rendered.push(Date.now()); },
     t: (key, params) => {
       if (key === 'chat.interruptedSuffix') return ' *(已中断)*';
@@ -208,6 +219,7 @@ function createMockTurnDeps(overrides = {}) {
     tokenCoalescer,
     botActivityStore,
     rendered,
+    depsRecorded,
     activeStreamingContext: () => activeStreamingContext,
   };
 }
@@ -256,7 +268,7 @@ test('D5: turnExecutionService - interruptTurn 终止当前流式并更新消息
 });
 
 test('D5: turnExecutionService - sendMessage 发送单聊并挂载流式上下文', async () => {
-  const { deps, state, rpcCalls, activeStreamingContext } = createMockTurnDeps();
+  const { deps, state, rpcCalls, activeStreamingContext, depsRecorded } = createMockTurnDeps();
   const service = createTurnExecutionService(deps);
 
   await service.sendMessage('请帮我分析这段架构');
@@ -264,6 +276,8 @@ test('D5: turnExecutionService - sendMessage 发送单聊并挂载流式上下�
   assert.equal(state.isStreaming, true);
   assert.ok(state.turnStartedAt > 0);
   assert.equal(state.messages.length, 3); // usr-1 + new user + new assistant
+  assert.equal(depsRecorded.userExpandedState, false, '发消息必须主动解除历史回溯扩展锁定');
+  assert.equal(depsRecorded.ensuredWindowTotal, 3, '发消息必须强制根据新总数对齐窗口');
   const userMsg = state.messages[1];
   assert.equal(userMsg.role, 'user');
   assert.equal(userMsg.content, '请帮我分析这段架构');

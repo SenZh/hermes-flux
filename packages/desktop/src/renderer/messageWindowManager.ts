@@ -189,10 +189,9 @@ export function createMessageWindowManager(deps: MessageWindowManagerDeps): Mess
   }
 
   function slideMessageWindowForward(): void {
-    if (!messageWindowUserExpanded) return;
     const total = deps.getState().messages.length;
     const capacity = MESSAGE_WINDOW_CAPACITY;
-    if (total <= capacity) return;
+    if (total <= capacity || messageWindowEnd >= total) return;
     const nextStart = slideMessageWindowDown(
       messageWindowStart,
       total,
@@ -203,11 +202,21 @@ export function createMessageWindowManager(deps: MessageWindowManagerDeps): Mess
     if (nextStart === messageWindowStart) return;
     messageWindowStart = nextStart;
     messageWindowEnd = windowEndFor(nextStart, total, capacity, INITIAL_RENDER_WINDOW);
+    // 【尾部自愈收敛 (Why)】若窗口向前滑动已彻底覆盖物理尾部，且视口处于贴底区间，
+    //   解除 userExpanded 锁定，恢复自然流式尾部跟随。
+    const maxStart = Math.max(0, total - capacity);
+    if (nextStart >= maxStart) {
+      const stream = typeof document !== 'undefined' ? document.getElementById('conversation-stream') : null;
+      if (!stream || deps.isStreamNearBottom(stream)) {
+        messageWindowUserExpanded = false;
+      }
+    }
     deps.setCanvasStructureDirty?.(true);
     deps.render();
-    if (typeof requestAnimationFrame !== 'undefined') {
-      requestAnimationFrame(() => syncScrollTopToWindow('slide forward'));
-    }
+    // 【禁止调用 syncScrollTopToWindow (Pitfall)】向下平滑滑窗是读者的自然连续手势，
+    //   此时严禁调用 syncScrollTopToWindow 强改 stream.scrollTop！
+    //   该函数依据粗暴平均行高估算，在包含巨型工具块的长会话中会导致实际位置远大于 virtualBottom，
+    //   误判出界将读者瞬间反向弹飞数万像素（Rubber-banding Pop）。保持原生滚动惯性。
     logScroll.trace('window slid forward on downward scroll', {
       start: messageWindowStart,
       end: messageWindowEnd,
