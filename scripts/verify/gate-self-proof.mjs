@@ -174,14 +174,16 @@ scenario('size', '超过上限一行必须阻断；等于上限必须放行', as
 scenario('size', '已登记文件涨过登记值必须阻断', async () => {
   const { fileLineLimitRules, KNOWN_OVERSIZE } = await import('../gates/rules/maintainability.mjs');
   const { stripComments } = await import('../gates/lib/scanner.mjs');
-  const file = 'packages/desktop/src/renderer/index.ts';
+  // 选取仍大于 1500 硬上限的已知超限源文件作为检验对象
+  const file = Object.keys(KNOWN_OVERSIZE).find((k) => !KNOWN_OVERSIZE[k].generated && KNOWN_OVERSIZE[k].max > 1500)
+    || 'packages/ui/src/i18n/index.ts';
   const max = KNOWN_OVERSIZE[file].max;
   const make = (n) => Array.from({ length: n }, (_, i) => `const v${i} = ${i};`).join('\n');
   const at = fileLineLimitRules.check(file, { ...stripComments(make(max)), warnings: [] });
   const over = fileLineLimitRules.check(file, { ...stripComments(make(max + 1)), warnings: [] });
   return {
     ok: at.length === 0 && over.length === 1 && over[0].ruleId === 'size/oversize-grown',
-    detail: `登记值=${max}；等于登记值违规=${at.length}；超一行违规=${over.length}`,
+    detail: `测试文件=${file}；登记值=${max}；等于登记值违规=${at.length}；超一行违规=${over.length}`,
   };
 });
 

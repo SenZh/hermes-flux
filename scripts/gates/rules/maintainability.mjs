@@ -44,7 +44,6 @@ export const FILE_LINE_LIMIT = 1500;
  * `generated: true` 是构建产物（由生成器写出），人工拆分无意义。
  */
 export const KNOWN_OVERSIZE = {
-  'packages/desktop/src/renderer/index.ts': { max: 5790 },
   'packages/core/src/rpc/contracts/gateway-contract.generated.ts': { max: 7515, generated: true },
   'packages/ui/src/i18n/index.ts': { max: 1907 },
   'packages/ui/src/components-react/settings/ProvidersAdminPanel.tsx': { max: 1523 },

@@ -52,7 +52,9 @@ test('size · 超过上限一行即阻断，且报出可执行的拆分指令', 
 
 test('size · 已登记的存量文件在登记值内放行，涨过登记值即阻断', async () => {
   const { KNOWN_OVERSIZE } = await import('../gates/rules/maintainability.mjs');
-  const file = 'packages/desktop/src/renderer/index.ts';
+  // 选取仍大于 1500 上限的已知超限源文件作为检验对象
+  const file = Object.keys(KNOWN_OVERSIZE).find((k) => !KNOWN_OVERSIZE[k].generated && KNOWN_OVERSIZE[k].max > FILE_LINE_LIMIT)
+    || 'packages/ui/src/i18n/index.ts';
   const registered = KNOWN_OVERSIZE[file].max;
 
   // 等于登记值必须放行（边界闭合）

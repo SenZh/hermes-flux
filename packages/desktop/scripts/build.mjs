@@ -22,6 +22,9 @@ async function buildAll() {
   fs.mkdirSync(path.join(rootDir, 'dist/renderer'), { recursive: true });
   fs.mkdirSync(path.join(rootDir, 'dist/renderer/services'), { recursive: true });
   fs.mkdirSync(path.join(rootDir, 'dist/renderer/gateway'), { recursive: true });
+  fs.mkdirSync(path.join(rootDir, 'dist/renderer/bootstrap'), { recursive: true });
+  fs.mkdirSync(path.join(rootDir, 'dist/renderer/events'), { recursive: true });
+  fs.mkdirSync(path.join(rootDir, 'dist/renderer/stream'), { recursive: true });
 
   // Tailwind v4 从 UI 组件源码扫描类名，并保留皮肤变量的运行时解析。
   // 设计意图(Why)：bun 把 workspace 依赖就近装在 packages/ui/node_modules，跨包管理器稳健的调用方式是直接 spawn CLI 的 JS 入口，不依赖 .bin shim 的平台后缀。
@@ -326,6 +329,30 @@ async function buildAll() {
     sourcemap: true,
   });
 
+  // 左轨交互控制器：从 index.ts 抽出
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/events/leftRailController.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/events/leftRailController.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+
+  // 在场控制器：从 index.ts 抽出
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/events/presenceController.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/events/presenceController.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+
   // 模态弹窗与右键菜单控制器：从 index.ts 抽出
   await esbuild.build({
     entryPoints: [path.join(rootDir, 'src/renderer/events/modalInteractionController.ts')],
@@ -447,6 +474,68 @@ async function buildAll() {
       sourcemap: true,
     });
   }
+  // Batch 7 终极决战服务与控制器：文件查看器、顶栏状态机与启动自举
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/services/fileViewerService.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/services/fileViewerService.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/titlebarController.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/titlebarController.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/bootstrap/appBootstrap.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/bootstrap/appBootstrap.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/events/conversationStreamController.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/events/conversationStreamController.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/events/onboardingController.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/events/onboardingController.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/stream/tokenStreamWriter.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/stream/tokenStreamWriter.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+  console.log('  ✔ Batch 7 modules compiled (fileViewerService, titlebarController, appBootstrap, conversationStreamController, onboardingController, tokenStreamWriter)');
   console.log('  ✔ Batch 6 services compiled (projectOperationService, groupOperationService, profileManagementService, settingsDataService)');
   console.log('  ✔ Batch 5 modules compiled (messageWindowManager, renderCoordinator, dropdownKeybindController)');
   console.log('  ✔ Transcript rows + slash catalog + desktop cache bridge + agent presence + prompt nav + cascade + viewport + leftrail + state + inspector + modal + inputDock + sessionOperation + messageLoading + turnExecution + gatewayEventDispatcher modules compiled');

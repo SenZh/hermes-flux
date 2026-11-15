@@ -34,12 +34,16 @@ import {
   type SessionHandleRegistry,
   type CacheChannelRef,
   type CacheService,
+  type AgentProfile,
   SessionLifecycleService,
   RpcErrorCode,
   readSessionHandles,
   toPendingSession,
   upsertSession,
   applyEnteredRead,
+  reconcileSessionList,
+  preserveRunningActivity,
+  SessionListGeneration,
 } from '@hermes-flux/core';
 import type { I18nKey, MessageViewModel } from '@hermes-flux/ui';
 import { planRollbackLeaveRestore } from '../rollbackTransaction.js';
@@ -100,8 +104,14 @@ export interface SessionOperationDeps {
   readonly loadMessages: (sessionId: string, targetBotName?: string) => Promise<void>;
   readonly openBotChat: (botName: string) => Promise<void>;
   readonly ensureLiveSessionId: () => Promise<string>;
-  readonly fetchSessions: () => Promise<void>;
+  readonly fetchSessions?: () => Promise<void>;
   readonly incrementActiveLoadMessagesGeneration?: () => number;
+  readonly sessionPreviewCache?: Map<string, { lastActive: number; text: string; botName?: string }>;
+  readonly formatSessionTime?: (ts: number) => string;
+  readonly resolveAgentAvatar?: (name?: string) => string;
+  readonly syncProfileLastMessages?: () => void;
+  readonly logSessionWarn?: (msg: string, meta?: Record<string, unknown>) => void;
+  readonly logSessionDebug?: (msg: string, meta?: Record<string, unknown>) => void;
 
   // 可选 DOM/环境抽象（便于脱离 DOM 纯逻辑单测）
   readonly getPromptInputValue?: () => string;
@@ -682,8 +692,203 @@ export class SessionOperationService {
     if (this.sessionsRefreshTimer) clearTimeout(this.sessionsRefreshTimer);
     this.sessionsRefreshTimer = setTimeout(() => {
       this.sessionsRefreshTimer = null;
-      void this.deps.fetchSessions();
+      void this.fetchSessions();
     }, delayMs);
+  }
+
+  private enrichPreviewGeneration = 0;
+
+  persistSessionPreviewCache(): void {
+    try {
+      const storage = this.getStorage();
+      if (!storage || !this.deps.sessionPreviewCache) return;
+      const obj: Record<string, { lastActive: number; text: string; botName?: string }> = {};
+      for (const [k, v] of this.deps.sessionPreviewCache.entries()) {
+        obj[k] = v;
+      }
+      storage.setItem('hermes_flux_session_preview_cache', JSON.stringify(obj));
+    // gate-degrade: 会话副标题持久化失败可降级
+    } catch {}
+  }
+
+  async enrichVisibleSessionPreviews(): Promise<void> {
+    const client = this.deps.getGatewayClient();
+    if (!client || !this.deps.sessionPreviewCache) return;
+    const gen = ++this.enrichPreviewGeneration;
+    const state = this.deps.getState();
+
+    const currentBot = state.profileName || 'default';
+    const targets = state.sessions
+      .filter((s) => !s.isArchived && !s.hidden && (s.botName === currentBot || (!s.botName && currentBot === 'default')))
+      .filter((s) => {
+        const cached = this.deps.sessionPreviewCache!.get(s.id);
+        return !cached || Math.abs((s.timestamp || 0) - cached.lastActive) >= 1000;
+      })
+      .slice(0, 10);
+
+    if (targets.length === 0) return;
+
+    const updates = new Map<string, { text: string; ts: number }>();
+    await Promise.all(
+      targets.map(async (t) => {
+        try {
+          const last = await client.fetchLastMessage(t.id, { profile: t.botName || 'default' });
+          if (last && last.text) {
+            updates.set(t.id, { text: last.text, ts: last.timestamp || t.timestamp });
+            this.deps.sessionPreviewCache!.set(t.id, {
+              lastActive: t.timestamp,
+              text: last.text,
+              botName: t.botName,
+            });
+          }
+        // gate-degrade: 会话预览单条拉取失败平滑跳过
+        } catch {}
+      })
+    );
+
+    if (gen !== this.enrichPreviewGeneration || updates.size === 0) return;
+    this.persistSessionPreviewCache();
+
+    let changed = false;
+    state.sessions = state.sessions.map((s) => {
+      const upd = updates.get(s.id);
+      if (upd && s.preview !== upd.text) {
+        changed = true;
+        return { ...s, preview: upd.text };
+      }
+      return s;
+    });
+
+    if (changed && gen === this.enrichPreviewGeneration) {
+      this.deps.syncProfileLastMessages?.();
+      this.deps.persistSessionsToCache(state.sessions);
+      this.deps.render();
+    }
+  }
+
+  async fetchSessions(): Promise<void> {
+    if (this.deps.fetchSessions) {
+      return this.deps.fetchSessions();
+    }
+    const client = this.deps.getGatewayClient();
+    if (!client) return;
+    const state = this.deps.getState();
+
+    const currentGen = this.deps.sessionListGeneration instanceof SessionListGeneration
+      ? this.deps.sessionListGeneration.beginFetch()
+      : 0;
+
+    // 1. 若 profiles 尚未拉取，先动态拉取全量网关 Profile 列表
+    if (state.profiles.length === 0) {
+      try {
+        state.profiles = await client.listProfiles();
+        state.profilesPhase = 'ready';
+      // gate-degrade: 会话列表内联 Profile 拉取失败降级到后续主刷新
+      } catch {}
+    }
+
+    const targetProfiles = new Set<string>(['default']);
+    if (state.profileName) targetProfiles.add(state.profileName);
+    for (const p of state.profiles) {
+      if (p.name) targetProfiles.add(p.name);
+    }
+
+    const profileMap = new Map<string, AgentProfile>();
+    for (const p of state.profiles) {
+      profileMap.set(p.name, p);
+    }
+
+    const results = await Promise.allSettled(
+      Array.from(targetProfiles).map(async (profName) => {
+        const outcome = await client.listSessions(profName, 100);
+        if (!outcome.ok || !outcome.sessions) {
+          return { ok: false, profile: profName, error: outcome.error ?? 'unknown error', sessions: [] as NormalizedSession[] };
+        }
+        const prof = profileMap.get(profName);
+        const sessions = outcome.sessions.map((s) => {
+          const botName = s.botName || profName;
+          const matchingProfile = profileMap.get(botName) || prof;
+          const timeWithDate = (this.deps.formatSessionTime ? this.deps.formatSessionTime(s.timestamp) : '') || s.time;
+          const resolvedAvatar = matchingProfile?.avatar || (this.deps.resolveAgentAvatar ? this.deps.resolveAgentAvatar(botName) || this.deps.resolveAgentAvatar(profName) : '') || '';
+          return {
+            ...s,
+            time: timeWithDate,
+            botName,
+            botDisplayName: matchingProfile?.displayName || botName,
+            botAvatar: resolvedAvatar,
+          };
+        });
+        return { ok: true, profile: profName, error: '', sessions };
+      })
+    );
+
+    if (this.deps.sessionListGeneration instanceof SessionListGeneration && !this.deps.sessionListGeneration.mayCommit(currentGen)) {
+      return;
+    }
+
+    const settled = results.map((r) =>
+      r.status === 'fulfilled'
+        ? r.value
+        : { ok: false, profile: 'unknown', error: String(r.reason), sessions: [] as NormalizedSession[] }
+    );
+    const authoritative = settled.every((r) => r.ok);
+
+    if (!authoritative) {
+      this.deps.logSessionWarn?.('session list partially failed', {
+        profiles: settled.filter((r) => !r.ok).map((r) => ({ profile: r.profile, error: r.error })),
+      });
+    }
+
+    const previousSessions = state.sessions;
+    const reconciled = reconcileSessionList({
+      previous: state.sessions,
+      fetched: settled.flatMap((r) => r.sessions),
+      authoritative,
+      pendingIds: state.pendingSessionIds,
+      profileName: state.profileName,
+    });
+    state.sessions = reconciled.sessions;
+    state.pendingSessionIds = reconciled.pendingIds;
+    state.sessionsPhase = 'ready';
+    if (authoritative) this.deps.persistSessionsToCache(reconciled.sessions);
+
+    if (this.deps.activeRunningSessionIds.size > 0) {
+      state.sessions = preserveRunningActivity(state.sessions, previousSessions, this.deps.activeRunningSessionIds);
+    }
+
+    if (reconciled.dropped.length > 0) {
+      this.deps.logSessionDebug?.('session dedupe report', {
+        dropped: reconciled.dropped.length,
+        samples: reconciled.dropped.slice(0, 5),
+      });
+    }
+    if (reconciled.pruned.length > 0) {
+      this.deps.logSessionDebug?.('session superseded by authority', {
+        pruned: reconciled.pruned.length,
+        samples: reconciled.pruned.slice(0, 5),
+      });
+    }
+
+    if (authoritative) {
+      state.sessionListError = '';
+    } else if (!state.sessionListError) {
+      state.sessionListError = this.deps.t('rail.errorSub');
+    }
+
+    if (this.deps.sessionPreviewCache) {
+      for (const s of state.sessions) {
+        const cachedPrev = this.deps.sessionPreviewCache.get(s.id);
+        if (cachedPrev && cachedPrev.text) {
+          const tsDiff = Math.abs((s.timestamp || 0) - (cachedPrev.lastActive || 0));
+          if (tsDiff < 1000 || (cachedPrev.lastActive || 0) >= (s.timestamp || 0)) {
+            s.preview = cachedPrev.text;
+          }
+        }
+      }
+    }
+
+    this.deps.render();
+    void this.enrichVisibleSessionPreviews();
   }
 
   /** 获取当前输入框内容（支持纯单测 mock） */
