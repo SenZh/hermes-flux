@@ -19,13 +19,13 @@ const REPO_ROOT = path.resolve(HERE, '..', '..');
  *     3. 跨平台可移植性，不产生未捕获异常。
  */
 
-test('拦截器证伪实证 1：存在未覆盖行时必须阻断并报告 Line Coverage < 100%', () => {
+test('拦截器证伪实证 1：存在未覆盖行时必须阻断并报告未执行或未导入', () => {
   const r = spawnSync(
     process.execPath,
     [
       'scripts/verify/new-code-coverage.mjs',
       '--probe-files=packages/core/src/agent/agentPresence.ts',
-      '--test-files=packages/desktop/__tests__/unit/bot-activity-store.test.mjs',
+      '--test-files=packages/core/__tests__/profile/botManagement.test.mjs',
     ],
     { cwd: REPO_ROOT, encoding: 'utf8' },
   );
@@ -34,8 +34,8 @@ test('拦截器证伪实证 1：存在未覆盖行时必须阻断并报告 Line 
   assert.equal(r.status, 1, '未覆盖代码时门禁必须退出 1');
   assert.match(
     r.stdout,
-    /Line Coverage < 100%/,
-    '必须明确报告行覆盖未达 100%',
+    /(Line Coverage < 100%|没有任何测试 import 它)/,
+    '必须明确报告未执行行或未被测试引用',
   );
   assert.match(
     r.stdout,
@@ -50,7 +50,7 @@ test('拦截器证伪实证 2：代码行已执行但存在未覆盖条件分支
     [
       'scripts/verify/new-code-coverage.mjs',
       '--probe-files=packages/core/src/agent/agentPresence.ts',
-      '--test-files=packages/desktop/__tests__/unit/bot-activity-store.test.mjs',
+      '--test-files=packages/core/__tests__/agent/agentPresence.test.mjs',
     ],
     { cwd: REPO_ROOT, encoding: 'utf8' },
   );

@@ -257,14 +257,57 @@ function parseLcov(lcovPath) {
 
 /* ---------------- 5. dist 行/分支 -> src 行/分支（sourcemap 反解） ---------------- */
 /**
- * 用 esbuild 产物的 .map 把「dist 行覆盖」与「dist 分支覆盖」映射回「src 行覆盖与分支」。
- *
- * 【关键】不用 source-map 包而用 @jridgewell/trace-mapping：
- *   后者是 esbuild 自身的映射实现，随 esbuild 已装在依赖树里，不需要新增依赖。
+ * 纯内置 Base64-VLQ 映射解析器，零外部第三方依赖。
+ * 将 esbuild / tsc 产物的 sourcemap 逆向反解为生成的 generatedLine -> { source, line }。
+ */
+function parseSourceMapMappings(map) {
+  if (!map || !map.mappings || !Array.isArray(map.sources)) return new Map();
+
+  const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const charToVal = new Uint8Array(256);
+  for (let i = 0; i < B64.length; i++) charToVal[B64.charCodeAt(i)] = i;
+
+  const distToSrc = new Map();
+  const lines = map.mappings.split(';');
+  let sourceIndex = 0;
+  let originalLine = 0;
+
+  for (let genLine = 1; genLine <= lines.length; genLine++) {
+    const segs = lines[genLine - 1].split(',');
+    for (const seg of segs) {
+      if (!seg) continue;
+      let shift = 0;
+      let value = 0;
+      const vals = [];
+      for (let i = 0; i < seg.length; i++) {
+        const integer = charToVal[seg.charCodeAt(i)];
+        const hasContinuation = integer & 32;
+        value += (integer & 31) << shift;
+        if (hasContinuation) {
+          shift += 5;
+        } else {
+          vals.push((value & 1) ? -(value >>> 1) : (value >>> 1));
+          value = 0;
+          shift = 0;
+        }
+      }
+      if (vals.length >= 4) {
+        sourceIndex += vals[1];
+        originalLine += vals[2];
+        const srcFile = map.sources[sourceIndex];
+        if (srcFile) {
+          distToSrc.set(genLine, { source: srcFile, line: originalLine + 1 });
+        }
+      }
+    }
+  }
+  return distToSrc;
+}
+
+/**
+ * 用 esbuild/tsc 产物的 .map 把「dist 行覆盖」与「dist 分支覆盖」映射回「src 行覆盖与分支」。
  */
 function buildSrcLineCoverage(records) {
-  const { TraceMap, eachMapping } = require('@jridgewell/trace-mapping');
-
   /** src 相对路径 -> Set<已覆盖行> */
   const srcCovered = new Map();
   /** src 相对路径 -> Set<可映射行>（用于区分"没跑到"与"没有可执行代码"） */
@@ -289,11 +332,7 @@ function buildSrcLineCoverage(records) {
     } catch {
       continue;
     }
-    const tracer = new TraceMap(map);
-    const distToSrc = new Map();
-    eachMapping(tracer, (m) => {
-      if (m.source && m.originalLine) distToSrc.set(m.generatedLine, { source: m.source, line: m.originalLine });
-    });
+    const distToSrc = parseSourceMapMappings(map);
     if (distToSrc.size === 0) continue;
     mappedRecords += 1;
 
