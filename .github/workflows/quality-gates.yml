@@ -98,6 +98,10 @@ jobs:
       - name: Gate 2e · 门禁自证套件（门禁本身具备杀伤力）
         run: npm run gates:self-proof
 
+      # 增量覆盖拦截自证：证明新增代码与分支未覆盖时门禁确实会红。
+      - name: Gate 2g · 增量覆盖率拦截器自证（未覆盖代码与分支必拦截）
+        run: npm run gates:coverage-proof
+
       # 假测试证伪：删掉五处生产实现，对应测试必须变红且原因对得上。
       # 这是唯一能客观回答"这个测试有没有用"的手段。
       - name: Gate 2f · 假测试证伪器（删生产代码必须变红）

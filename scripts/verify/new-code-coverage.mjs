@@ -77,15 +77,29 @@ const EXCLUDE_PATH = [
 
 /* ---------------- 1. 取基线 ---------------- */
 function resolveBase() {
+  if (process.argv.includes('--staged')) return 'STAGED';
   const arg = process.argv.find((a) => a.startsWith('--base='));
   if (arg) return arg.slice('--base='.length);
+
+  // GitHub Actions PR 环境变量
+  if (process.env.GITHUB_BASE_REF) {
+    return `origin/${process.env.GITHUB_BASE_REF}`;
+  }
+
   try {
     const mb = execFileSync('git', ['merge-base', 'HEAD', 'origin/dev/v0.1'], {
       cwd: REPO_ROOT,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
-    if (mb) return mb;
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    // 防范历史坑：当 mb === head 时说明分支与基准已对齐无领先 commit，
+    // 若直接比对自身会导致 diff 为空从而静默通过。此时退回 HEAD~1。
+    if (mb && mb !== head) return mb;
   } catch {
     // 没有远端分支时退回到 HEAD~1，保证本地可跑
   }
@@ -98,17 +112,32 @@ function resolveBase() {
  * 【规则】--diff-filter=ACMR 只取新增/复制/修改/重命名，删除的文件没有"新增行"。
  */
 function collectAddedLines(base) {
-  const tracked = execFileSync(
-    'git',
-    ['diff', '--unified=0', '--diff-filter=ACMR', base, '--', ...TRACKED_EXT.map((e) => `*${e}`)],
-    { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
-  );
+  const customProbe = process.argv.find((a) => a.startsWith('--probe-files='));
+  if (customProbe) {
+    const files = new Map();
+    const probeList = customProbe.slice('--probe-files='.length).split(',').map((s) => s.trim()).filter(Boolean);
+    for (const rel of probeList) {
+      const abs = path.join(REPO_ROOT, rel);
+      if (!fs.existsSync(abs)) continue;
+      const total = fs.readFileSync(abs, 'utf8').split('\n').length;
+      files.set(rel, Array.from({ length: total }, (_, i) => i + 1));
+    }
+    return files;
+  }
+
+  const diffArgs = base === 'STAGED'
+    ? ['diff', '--cached', '--unified=0', '--diff-filter=ACMR', '--', ...TRACKED_EXT.map((e) => `*${e}`)]
+    : ['diff', '--unified=0', '--diff-filter=ACMR', base, '--', ...TRACKED_EXT.map((e) => `*${e}`)];
+
+  const tracked = execFileSync('git', diffArgs, { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 
   const files = new Map();
   let current = null;
   const acceptFile = (rel) => {
     if (EXCLUDE_PATH.some((re) => re.test(rel))) return false;
     if (!TRACKED_EXT.some((e) => rel.endsWith(e))) return false;
+    // 增量覆盖率严格约束生产逻辑（packages/*/src/），非生产脚本不计入产物覆盖判定
+    if (!/^packages\/(core|ui|desktop|mobile)\/src\//.test(rel)) return false;
     return true;
   };
 
@@ -134,17 +163,19 @@ function collectAddedLines(base) {
    * 一律报「改动 0 个文件」然后放行。实测：新增一个含未覆盖分支的模块，
    * 门禁静默通过。因此未跟踪文件必须按「整文件都是新增行」计入。
    */
-  const untracked = execFileSync('git', ['ls-files', '--others', '--exclude-standard'], {
-    cwd: REPO_ROOT,
-    encoding: 'utf8',
-    maxBuffer: 32 * 1024 * 1024,
-  });
-  for (const rel of untracked.split('\n').map((s) => s.trim()).filter(Boolean)) {
-    if (!acceptFile(rel)) continue;
-    const abs = path.join(REPO_ROOT, rel);
-    if (!fs.existsSync(abs)) continue;
-    const total = fs.readFileSync(abs, 'utf8').split('\n').length;
-    files.set(rel, Array.from({ length: total }, (_, i) => i + 1));
+  if (base !== 'STAGED') {
+    const untracked = execFileSync('git', ['ls-files', '--others', '--exclude-standard'], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    for (const rel of untracked.split('\n').map((s) => s.trim()).filter(Boolean)) {
+      if (!acceptFile(rel)) continue;
+      const abs = path.join(REPO_ROOT, rel);
+      if (!fs.existsSync(abs)) continue;
+      const total = fs.readFileSync(abs, 'utf8').split('\n').length;
+      files.set(rel, Array.from({ length: total }, (_, i) => i + 1));
+    }
   }
 
   return files;
@@ -156,9 +187,9 @@ function collectAddedLines(base) {
  * 【约束】必须用 node 内置覆盖率（--experimental-test-coverage），不引入 c8：
  *   多一个依赖就多一处"装了但没用上"的风险，而内置能力已经够用。
  */
-async function collectLcov(suite) {
+async function collectLcov(suite, targetFiles = []) {
   const outFile = path.join(os.tmpdir(), `flux-lcov-${Date.now()}.info`);
-  const files = await listTestFilesForSuite(suite);
+  const files = await listTestFilesForSuite(suite, targetFiles);
   if (files.length === 0) return { path: null, files: 0 };
 
   const env = { ...process.env, FORCE_COLOR: '0' };
@@ -166,20 +197,41 @@ async function collectLcov(suite) {
 
   const r = spawnSync(
     process.execPath,
-    ['--test', '--experimental-test-coverage', '--test-reporter=lcov', `--test-reporter-destination=${outFile}`, '--test-concurrency=1', ...files],
-    { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, timeout: 30 * 60 * 1000, env },
+    ['--test', '--experimental-test-coverage', '--test-reporter=lcov', `--test-reporter-destination=${outFile}`, ...files],
+    { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, timeout: 60 * 1000, env },
   );
   if (!fs.existsSync(outFile)) return { path: null, files: files.length, status: r.status };
   return { path: outFile, files: files.length, status: r.status };
 }
 
-async function listTestFilesForSuite(suite) {
+async function listTestFilesForSuite(suite, targetFiles = []) {
+  const customFiles = process.argv.find((a) => a.startsWith('--test-files='));
+  if (customFiles) {
+    return customFiles.slice('--test-files='.length).split(',').map((f) => f.trim()).filter(Boolean);
+  }
   // 复用 census 的单一真值源，避免两套 glob 口径
   const mod = await import('../gates/lib/test-targets.mjs');
-  return mod.listSuiteFiles(suite);
+  const allFiles = mod.listSuiteFiles(suite);
+
+  // 性能优化：按改动文件所在的包精准圈定测试范围，避免无关包（如 scripts/ 下的多进程探针）拖慢门禁
+  const packagesInvolved = new Set();
+  for (const f of targetFiles) {
+    const m = /^packages\/([^/]+)\//.exec(f);
+    if (m) packagesInvolved.add(m[1]);
+  }
+
+  if (packagesInvolved.size > 0) {
+    const matched = allFiles.filter((tf) => {
+      return Array.from(packagesInvolved).some((pkg) => tf.startsWith(`packages/${pkg}/`));
+    });
+    if (matched.length > 0) return matched;
+  }
+
+  // 增量覆盖率只约束业务单元测试，默认排除 scripts/__tests__
+  return allFiles.filter((tf) => tf.startsWith('packages/'));
 }
 
-/* ---------------- 4. 解析 lcov 为 dist 行覆盖 ---------------- */
+/* ---------------- 4. 解析 lcov 为 dist 行与分支覆盖 ---------------- */
 function parseLcov(lcovPath) {
   const text = fs.readFileSync(lcovPath, 'utf8');
   const records = new Map();
@@ -189,27 +241,84 @@ function parseLcov(lcovPath) {
     const sf = sfMatch[1].trim().split(path.sep).join('/');
     const da = new Map();
     for (const m of block.matchAll(/^DA:(\d+),(\d+)/gm)) da.set(Number(m[1]), Number(m[2]));
+
+    const brda = [];
+    for (const m of block.matchAll(/^BRDA:(\d+),(\d+),(\d+),(\d+|-)/gm)) {
+      const taken = m[4] === '-' ? 0 : Number(m[4]);
+      brda.push({ distLine: Number(m[1]), block: Number(m[2]), branch: Number(m[3]), taken });
+    }
+
     const brf = /^BRF:(\d+)$/m.exec(block);
     const brh = /^BRH:(\d+)$/m.exec(block);
-    records.set(sf, { da, brf: brf ? Number(brf[1]) : 0, brh: brh ? Number(brh[1]) : 0 });
+    records.set(sf, { da, brda, brf: brf ? Number(brf[1]) : 0, brh: brh ? Number(brh[1]) : 0 });
   }
   return records;
 }
 
-/* ---------------- 5. dist 行 -> src 行（sourcemap 反解） ---------------- */
+/* ---------------- 5. dist 行/分支 -> src 行/分支（sourcemap 反解） ---------------- */
 /**
- * 用 esbuild 产物的 .map 把「dist 行覆盖」映射回「src 行覆盖」。
- *
- * 【关键】不用 source-map 包而用 @jridgewell/trace-mapping：
- *   后者是 esbuild 自身的映射实现，随 esbuild 已装在依赖树里，不需要新增依赖。
+ * 纯内置 Base64-VLQ 映射解析器，零外部第三方依赖。
+ * 将 esbuild / tsc 产物的 sourcemap 逆向反解为生成的 generatedLine -> { source, line }。
+ */
+function parseSourceMapMappings(map) {
+  if (!map || !map.mappings || !Array.isArray(map.sources)) return new Map();
+
+  const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const charToVal = new Uint8Array(256);
+  for (let i = 0; i < B64.length; i++) charToVal[B64.charCodeAt(i)] = i;
+
+  const distToSrc = new Map();
+  const lines = map.mappings.split(';');
+  let sourceIndex = 0;
+  let originalLine = 0;
+
+  for (let genLine = 1; genLine <= lines.length; genLine++) {
+    const segs = lines[genLine - 1].split(',');
+    for (const seg of segs) {
+      if (!seg) continue;
+      let shift = 0;
+      let value = 0;
+      const vals = [];
+      for (let i = 0; i < seg.length; i++) {
+        const integer = charToVal[seg.charCodeAt(i)];
+        const hasContinuation = integer & 32;
+        value += (integer & 31) << shift;
+        if (hasContinuation) {
+          shift += 5;
+        } else {
+          vals.push((value & 1) ? -(value >>> 1) : (value >>> 1));
+          value = 0;
+          shift = 0;
+        }
+      }
+      if (vals.length >= 4) {
+        sourceIndex += vals[1];
+        originalLine += vals[2];
+        const srcFile = map.sources[sourceIndex];
+        if (srcFile) {
+          distToSrc.set(genLine, { source: srcFile, line: originalLine + 1 });
+        }
+      }
+    }
+  }
+  return distToSrc;
+}
+
+/**
+ * 用 esbuild/tsc 产物的 .map 把「dist 行覆盖」与「dist 分支覆盖」映射回「src 行覆盖与分支」。
  */
 function buildSrcLineCoverage(records) {
-  const { TraceMap, eachMapping } = require('@jridgewell/trace-mapping');
-
   /** src 相对路径 -> Set<已覆盖行> */
   const srcCovered = new Map();
   /** src 相对路径 -> Set<可映射行>（用于区分"没跑到"与"没有可执行代码"） */
   const srcMapped = new Map();
+  /** src 相对路径 -> Map<行号, number>（该行分支总数） */
+  const srcBranchTotal = new Map();
+  /** src 相对路径 -> Map<行号, number>（该行命中分支数） */
+  const srcBranchHit = new Map();
+  /** src 相对路径 -> Set<存在未覆盖分支的行号> */
+  const srcBranchUncovered = new Map();
+
   let mappedRecords = 0;
 
   for (const [sf, rec] of records) {
@@ -223,15 +332,13 @@ function buildSrcLineCoverage(records) {
     } catch {
       continue;
     }
-    const tracer = new TraceMap(map);
-    const distToSrc = new Map();
-    eachMapping(tracer, (m) => {
-      if (m.source && m.originalLine) distToSrc.set(m.generatedLine, { source: m.source, line: m.originalLine });
-    });
+    const distToSrc = parseSourceMapMappings(map);
     if (distToSrc.size === 0) continue;
     mappedRecords += 1;
 
     const mapDir = path.dirname(sf);
+
+    // 反解代码行 (DA)
     for (const [distLine, hits] of rec.da) {
       const hit = distToSrc.get(distLine);
       if (!hit) continue;
@@ -245,9 +352,30 @@ function buildSrcLineCoverage(records) {
         srcCovered.get(rel).add(hit.line);
       }
     }
+
+    // 反解代码分支 (BRDA)
+    for (const b of rec.brda) {
+      const hit = distToSrc.get(b.distLine);
+      if (!hit) continue;
+      const abs = path.resolve(REPO_ROOT, mapDir, hit.source);
+      const rel = path.relative(REPO_ROOT, abs).split(path.sep).join('/');
+
+      if (!srcBranchTotal.has(rel)) srcBranchTotal.set(rel, new Map());
+      const totalMap = srcBranchTotal.get(rel);
+      totalMap.set(hit.line, (totalMap.get(hit.line) ?? 0) + 1);
+
+      if (!srcBranchHit.has(rel)) srcBranchHit.set(rel, new Map());
+      const hitMap = srcBranchHit.get(rel);
+      if (b.taken > 0) {
+        hitMap.set(hit.line, (hitMap.get(hit.line) ?? 0) + 1);
+      } else {
+        if (!srcBranchUncovered.has(rel)) srcBranchUncovered.set(rel, new Set());
+        srcBranchUncovered.get(rel).add(hit.line);
+      }
+    }
   }
 
-  return { srcCovered, srcMapped, mappedRecords };
+  return { srcCovered, srcMapped, srcBranchTotal, srcBranchHit, srcBranchUncovered, mappedRecords };
 }
 
 /* ---------------- 6. 判定可执行行 ---------------- */
@@ -299,7 +427,7 @@ async function main() {
     return;
   }
 
-  const lcov = await collectLcov('unit');
+  const lcov = await collectLcov('unit', Array.from(added.keys()));
   if (!lcov.path) {
     console.error(`${C.red}✘ 未产出覆盖率数据（测试进程可能崩溃），无法判定新增行${C.reset}`);
     process.exitCode = 1;
@@ -317,7 +445,7 @@ async function main() {
     return;
   }
 
-  const { srcCovered, srcMapped, mappedRecords } = buildSrcLineCoverage(records);
+  const { srcCovered, srcMapped, srcBranchTotal, srcBranchHit, srcBranchUncovered, mappedRecords } = buildSrcLineCoverage(records);
   console.log(
     `${C.dim}  覆盖率采样：${records.size} 个产物记录，其中 ${mappedRecords} 个可反解 sourcemap；` +
       `${srcMapped.size} 个源文件有可映射行${C.reset}\n`,
@@ -325,8 +453,10 @@ async function main() {
 
   /* ---------------- 判定 ---------------- */
   const failures = [];
-  let countedTotal = 0;
-  let coveredTotal = 0;
+  let countedLinesTotal = 0;
+  let coveredLinesTotal = 0;
+  let countedBranchesTotal = 0;
+  let coveredBranchesTotal = 0;
   const skipped = [];
 
   for (const [file, lines] of added) {
@@ -335,6 +465,9 @@ async function main() {
     const rawLines = fs.readFileSync(abs, 'utf8').split('\n');
     const covered = srcCovered.get(file) ?? new Set();
     const mapped = srcMapped.get(file) ?? new Set();
+    const branchTotal = srcBranchTotal.get(file) ?? new Map();
+    const branchHit = srcBranchHit.get(file) ?? new Map();
+    const branchUncovered = srcBranchUncovered.get(file) ?? new Set();
 
     const countable = lines.filter((ln) => isCountableLine(rawLines[ln - 1] ?? ''));
 
@@ -360,38 +493,64 @@ async function main() {
         ? `没有构建产物：该模块未登记进 esbuild 入口清单（packages/desktop/scripts/build.mjs），测试无法导入它`
         : `有构建产物（${distCandidates[0]}）但没有任何测试 import 它`;
       failures.push({ file, reason, lines: countable });
-      countedTotal += countable.length;
+      countedLinesTotal += countable.length;
       continue;
     }
 
-    const uncovered = countable.filter((ln) => !covered.has(ln));
-    countedTotal += countable.length;
-    coveredTotal += countable.length - uncovered.length;
-    if (uncovered.length > 0) {
-      failures.push({ file, reason: `${uncovered.length} 行新增代码未被任何测试执行`, lines: uncovered });
+    // 1. 行覆盖判定
+    const uncoveredLines = countable.filter((ln) => !covered.has(ln));
+    countedLinesTotal += countable.length;
+    coveredLinesTotal += countable.length - uncoveredLines.length;
+    if (uncoveredLines.length > 0) {
+      failures.push({ file, reason: `${uncoveredLines.length} 行新增代码未被任何测试执行 (Line Coverage < 100%)`, lines: uncoveredLines });
+    }
+
+    // 2. 分支覆盖判定（只对已执行的代码行判定其分支是否双向闭环）
+    const branchUncoveredLines = [];
+    for (const ln of countable) {
+      const total = branchTotal.get(ln) ?? 0;
+      const hit = branchHit.get(ln) ?? 0;
+      if (total > 0) {
+        countedBranchesTotal += total;
+        coveredBranchesTotal += hit;
+        if (covered.has(ln) && branchUncovered.has(ln)) {
+          branchUncoveredLines.push(ln);
+        }
+      }
+    }
+
+    if (branchUncoveredLines.length > 0) {
+      failures.push({
+        file,
+        reason: `${branchUncoveredLines.length} 处新增分支未全路径覆盖 (Branch Coverage < 100%)`,
+        lines: branchUncoveredLines,
+      });
     }
   }
 
   /* ---------------- 报告 ---------------- */
-  const pct = countedTotal === 0 ? 100 : Math.round((coveredTotal / countedTotal) * 1000) / 10;
-  console.log(`新增/修改可执行行：${countedTotal} · 已覆盖 ${coveredTotal} · 覆盖率 ${pct}%`);
+  const linePct = countedLinesTotal === 0 ? 100 : Math.round((coveredLinesTotal / countedLinesTotal) * 1000) / 10;
+  const branchPct = countedBranchesTotal === 0 ? 100 : Math.round((coveredBranchesTotal / countedBranchesTotal) * 1000) / 10;
+
+  console.log(`新增可执行行：${countedLinesTotal} · 已覆盖 ${coveredLinesTotal} · 行覆盖率 ${linePct}%`);
+  console.log(`新增条件分支：${countedBranchesTotal} · 已命中 ${coveredBranchesTotal} · 分支覆盖率 ${branchPct}%`);
   if (skipped.length > 0) {
     console.log(`${C.dim}  跳过 ${skipped.length} 个无新增可执行行的文件${C.reset}`);
   }
 
   if (failures.length === 0) {
-    console.log(`\n${C.green}${C.bold}✔ 增量覆盖达标：所有新增可执行行都被执行过${C.reset}`);
+    console.log(`\n${C.green}${C.bold}✔ 增量覆盖达标：新增代码行与分支覆盖率均为 100%${C.reset}`);
     process.exitCode = 0;
     fs.rmSync(lcov.path, { force: true });
     return;
   }
 
-  console.log(`\n${C.red}${C.bold}✘ 增量覆盖不达标${C.reset}`);
+  console.log(`\n${C.red}${C.bold}✘ 增量覆盖不达标 (必须达到 100% 行覆盖 + 100% 分支覆盖)${C.reset}`);
   for (const f of failures) {
     console.log(`  ${C.red}·${C.reset} ${f.file}  ${f.reason}`);
     console.log(`    ${C.dim}行：${f.lines.join(', ')}${C.reset}`);
   }
-  console.log(`${C.dim}  补测试，或在确实无法测试的行上写明理由（豁免计入 allow-budget）。${C.reset}`);
+  console.log(`${C.dim}  补齐单测覆盖未执行行及未覆盖条件分支。${C.reset}`);
   process.exitCode = 1;
   fs.rmSync(lcov.path, { force: true });
 }
