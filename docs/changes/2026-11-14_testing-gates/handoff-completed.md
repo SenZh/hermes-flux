@@ -180,6 +180,8 @@ npm run gates             # 静态门禁
 npm run gates:targets     # 套件枚举自检（不执行测试）
 npm run gates:allow       # 豁免敞口预算
 npm run gates:invariants  # 不变量映射表
+npm run gates:ci          # CI workflow 可移植性（bash 语法 / 命令掩盖 / 构建前读产物）
+npm run gates:workspace-links # workspace 链接三重校验（CI 第一步）
 npm run gates:mutation    # 门禁引擎变异检验
 npm run typecheck         # 含 mobile
 npm test                  # census 包裹的单元测试
@@ -230,15 +232,33 @@ npm run invariants:render
     改用语义等价替换 `resolved.length > 0` 后才算有效杀害。
     这正是"不能只看 exit code"的价值。
 
+11. **CI workflow 本身是无守护的盲区**。本分支自己新增的 `Verify workspace links`
+    步骤，一次带进两个必挂缺陷：`require.resolve('@hermes-flux/core')` 写在
+    `npm run build` 之前（core 的 main 指向被 .gitignore 忽略的 dist/），
+    以及内联 bash `for p in ...; do ... done` 在 windows runner 的 pwsh 下 ParserError。
+    更刺眼的是**该步骤的注释已写明"不 require.resolve，用 require 判定会假红"，
+    而代码恰是 require.resolve**——注释与实现自相矛盾，说明它从未被执行过。
+    现已由 `gates:ci` 三条规则机器拦截（见第 8.3 节），并配 6 组双向自证样本。
+
+12. **pwsh 的 step 结果取自最后一条命令的退出码**。多行 `run: |` 里先 `exit 1`
+    再 `exit 0`，整步判定为**成功**。这比 CI 假红危险得多——假红吵闹但安全，
+    假绿会把真缺陷放进主干。contract 三连因此从一条多行 run 拆成三个独立 step。
+    这条是实测结论（`pwsh -File` 复现），不是推断。
+
+13. **"给新门禁补自证"不能只补在本地脚本上**。`gates:ci` 的前一版解析器把
+    step 缩进算错（`indentOf(group + 'x') - 1 === stepsIndent`），解析出 0 个 step，
+    于是"全部通过"。若自证样本只断言 `failures.length === 0`，
+    这个 bug 会完全隐形。因此每个用例必须同时断言**解析出的 step 数量**与命中的规则 id。
+
 ---
 
 ## 八、门禁自证套件：本次最重要的产物
 
-`scripts/verify/gate-self-proof.mjs` 的 12 个场景，每个都同时给出
+`scripts/verify/gate-self-proof.mjs` 的 14 个场景，每个都同时给出
 「应当失败」与「应当放行」两侧。**只断言"会红"的场景是不够的**——
 一个见谁都报的坏实现也能全绿通过，那等于用另一个假测试去验证假测试。
 
-当前 12 个场景：
+当前 14 个场景：
 
 ```
 census（5）
@@ -264,6 +284,10 @@ invariant-map（2）
 
 allow-budget（1）
   ✔ 敞口在预算内且 i18n 标签已计入
+
+ci（2）
+  ✔ 真实 workflow 21 个 step 零违规（bash 语法 / 命令掩盖 / 构建前读产物）
+  ✔ 3 组样本双向判定正确（坏样本命中、好样本放行）
 ```
 
 新增门禁时必须同步在此加场景。这是让"门禁不会腐化"的唯一低成本手段。

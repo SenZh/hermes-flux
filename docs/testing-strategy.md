@@ -61,6 +61,7 @@
 | CI 触发分支 | 仅 `main`（开发在 `dev/v0.1`，等于零门禁） | `main` / `dev/**` / `feat/**` |
 | CI 未执行 | `verify:formal`、contract 三连、`gates:allow` | 已全部纳入 |
 | pre-commit | 7 项 | 9 项（补不变量映射表、豁免预算） |
+| CI 自身缺陷 | workflow 无任何静态守护，坏步骤只能靠"推上去看红"发现 | `gates:ci` 三条规则 + 6 组双向自证样本，见 8.3 |
 
 ### 2.2 四类"假绿"手法（实测定稿）
 
@@ -105,6 +106,7 @@
 
 ```
 L0 静态门禁      gates / typecheck / contract                          规则符合性
+L0' CI 自守护    gates:ci（workflow 可移植性）/ gates:workspace-links    裁决层自身可信
 L1 执行量自证    census（文件数/用例数/失败/跳过）                        证明真的跑了
 L2 单元与集成    npm test（node:test）                                   行为正确性
 L3 不变量        verify:formal（fast-check）+ invariant-map              性质恒成立
@@ -112,6 +114,9 @@ L4 覆盖率        node --experimental-test-coverage + 增量判定            
 L5 有效性        变异测试（gates:mutation + 锚点唯一性）                   断言杀伤力
 L6 真实渲染      CDP / Playwright                                        接线与视觉
 ```
+
+L0' 是后补的一层：前六层都在管**被测代码**是否符合规则，却没有一层管**裁决者本身**
+（CI workflow）是否配得对。三次真实事故证明这个盲区会稳定产出假红与假绿，见 8.3。
 
 **分层原则**：便宜的先跑。L0/L1 亚秒到分钟级，L5/L6 分钟级。
 
@@ -257,7 +262,9 @@ on:
 
 | 步骤 | 内容 | 为何在这个位置 |
 |---|---|---|
-| 安装 + workspace 链接校验 | `npm ci` + 4 个 link 存在性 | 装不上时后续全是空跑 |
+| 安装 | `npm ci --ignore-scripts` | 装不上时后续全是空跑 |
+| `gates:workspace-links` | 4 个链接的实体 + 包名 + realpath 三重校验 | 必须在任何门禁之前，且**不能** require 产物（产物要等 `build`） |
+| `gates:ci` | workflow 自身的可移植性静态检查 | 改 workflow 时当场拦住跨平台缺陷，见 8.4 |
 | `gates:targets` | 枚举自检（不执行测试） | 把"枚举少了"与"跑失败了"分开定位 |
 | `gates` | 静态门禁 | 最便宜 |
 | `typecheck` | 含 mobile（此前从未被检查） | |
@@ -265,10 +272,24 @@ on:
 | `gates:mutation` | 锚点唯一性 + 5 个变异点 | 防止门禁退化成空壳 |
 | `gates:allow` / `gates:invariants` | 豁免预算 + 不变量映射 | |
 | `verify:formal` | 46 项形式化不变量 | |
-| contract 三连 | 契约一致性与文档同步 | |
+| contract 三连 | 契约一致性与文档同步 | **必须拆成三个独立 step**，见 8.4 |
 | `build` | 全量构建 | 放最后，前面都过了才值得付构建成本 |
 
-### 8.3 CDP / GUI 测试的现状与风险
+### 8.3 跨平台 shell 语义（三次真实事故，已由 `gates:ci` 机器拦截）
+
+矩阵跑 `ubuntu-latest + windows-latest`，但两者承载脚本的 shell 不同：ubuntu 是 bash，**windows 是 pwsh**。以下三类缺陷都不会在本地暴露，且红的原因与被测代码无关。
+
+| # | 缺陷 | 实测表现 | 机器判定 |
+|---|---|---|---|
+| P-01 | 构建前 `require.resolve('@hermes-flux/*')` | core 的 `main` 指向被 `.gitignore` 忽略的 `dist/index.js`，两平台稳定 `MODULE_NOT_FOUND` | `ci/no-prebuild-artifact-read` |
+| P-02 | 多行 `run: \|` 内联 bash `for ... do` | windows runner 直接 `ParserError: The term 'for' is not recognized` | `ci/no-bash-only-syntax` |
+| P-03 | 多行 `run: \|` 连写多条命令 | pwsh 的 step 结果取自**最后一条**原生命令退出码，前面失败被后面成功掩盖（实测：先 `exit 1` 再 `exit 0`，整步判定为**成功**） | `ci/no-masked-command` |
+
+P-03 是三者中最危险的：P-01/P-02 造成假**红**（吵闹但安全），P-03 造成假**绿**。
+
+**约束**：跨平台逻辑一律落在 Node 脚本里（`scripts/gates/verify-*.mjs`），CI 只负责调用；确需内联多行命令时必须显式 `shell: bash` 并首行 `set -e`，或拆成独立 step。
+
+### 8.4 CDP / GUI 测试的现状与风险
 
 12 个 CDP 文件全部硬编码 Windows Edge 路径，找不到浏览器时 `t.skip()`。在 ubuntu runner 上这会变成"全绿但零执行"。
 
@@ -286,6 +307,9 @@ on:
 | 4 | 不允许单文件涨过登记上限 | `size/oversize-grown` 静态规则 | 已实现 |
 | 5 | 不允许下调套件文件数下限 | `SUITES.minFiles` 需人工改且需理由 | 部分（无机器拦截） |
 | 6 | 不允许删除 formal 测试文件 | 建议由 census 的 `formal.minFiles` 兜住 | 已实现（下限 10） |
+| 7 | CI workflow 不得含 bash 专有语法 | `ci/no-bash-only-syntax`（`gates:ci`） | 已实现 |
+| 8 | CI workflow 多行 run 不得连写多条命令 | `ci/no-masked-command`（`gates:ci`） | 已实现 |
+| 9 | CI workflow 构建前不得读取产物 | `ci/no-prebuild-artifact-read`（`gates:ci`） | 已实现 |
 
 ---
 

@@ -236,6 +236,35 @@ scenario('allow-budget', '豁免敞口必须在预算内，且统计到含数字
   };
 });
 
+/* ============================ CI 可移植性 ============================ */
+
+scenario('ci', '真实 workflow 必须通过：bash 专有语法 / 命令掩盖 / 构建前读产物', async () => {
+  const { auditWorkflow } = await import('../gates/verify-ci-workflow.mjs');
+  const src = fs.readFileSync(path.join(REPO_ROOT, '.github/workflows/quality-gates.yml'), 'utf8');
+  const { failures, steps } = auditWorkflow(src);
+  const rules = [...new Set(failures.map((f) => f.rule))];
+  return {
+    ok: failures.length === 0 && steps > 0,
+    detail: `step=${steps}；违规=${failures.length}${rules.length ? `（${rules.join(', ')}）` : ''}`,
+  };
+});
+
+scenario('ci', '修复前的三类缺陷必须被同一套规则捕获（规则杀伤力）', async () => {
+  const { SELF_PROOF_SAMPLES, auditWorkflow } = await import('../gates/verify-ci-workflow.mjs');
+  const results = Object.entries(SELF_PROOF_SAMPLES).map(([key, pair]) => ({
+    key,
+    badHit: auditWorkflow(pair.bad).failures.length > 0,
+    goodHit: auditWorkflow(pair.good).failures.length > 0,
+  }));
+  const broken = results.filter((r) => !r.badHit || r.goodHit);
+  return {
+    ok: broken.length === 0,
+    detail: broken.length === 0
+      ? `${results.length} 组样本双向判定正确（坏样本命中、好样本放行）`
+      : `判定错误：${broken.map((b) => b.key).join(', ')}`,
+  };
+});
+
 /* ============================ 主流程 ============================ */
 
 async function main() {

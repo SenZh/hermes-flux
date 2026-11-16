@@ -55,6 +55,8 @@
     "invariants:render": "node scripts/verify/invariant-map.mjs --render",
     "coverage:new": "node scripts/verify/new-code-coverage.mjs",
     "gates:config": "node scripts/gates/verify-config.mjs",
+    "gates:ci": "node scripts/gates/verify-ci-workflow.mjs",
+    "gates:workspace-links": "node scripts/gates/verify-workspace-links.mjs",
     "contract:sync": "node scripts/contract/sync.mjs",
     "contract:verify": "node scripts/contract/verify.mjs",
     "contract:coverage": "node scripts/contract/coverage.mjs",
@@ -62,7 +64,7 @@
     "contract:doc:check": "node scripts/contract/doc.mjs --check",
     "probe:gateway": "node scripts/contract/probe.mjs",
     "probe:drift": "node scripts/contract/probe.mjs --check",
-    "verify": "npm run gates && npm run gates:targets && npm run gates:self-proof && npm run gates:fake-tests && npm run gates:allow && npm run gates:invariants && npm run contract:verify && npm run contract:coverage && npm run contract:doc:check && npm run typecheck && npm test && npm run verify:formal && npm run test:perf",
+    "verify": "npm run gates && npm run gates:targets && npm run gates:self-proof && npm run gates:fake-tests && npm run gates:allow && npm run gates:invariants && npm run gates:ci && npm run contract:verify && npm run contract:coverage && npm run contract:doc:check && npm run typecheck && npm test && npm run verify:formal && npm run test:perf",
     "verify:display-kind": "node scripts/verify/display-kind-check.mjs",
     "prepare": "node -e \"try { require('child_process').execSync('git config core.hooksPath .githooks'); } catch {}\""
   },
