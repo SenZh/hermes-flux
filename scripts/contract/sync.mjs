@@ -161,7 +161,9 @@ fs.mkdirSync(OUT_DIR, { recursive: true });
 fs.writeFileSync(OUT_CONTRACT, source, 'utf8');
 
 const tableEntries = [];
-for (const [method, types] of [...methods.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+/** 纯码点排序：`localeCompare` 受运行环境 locale 影响，会让契约表跨平台漂移 */
+const byCodePoint = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+for (const [method, types] of [...methods.entries()].sort((a, b) => byCodePoint(a[0], b[0]))) {
   // 【规则】同名方法的参数取并集：白名单只回答"这个字段允不允许出现"，
   //   两张注册表任一声明过就必须放行，否则 canonical 的宽参数会在本地被误拒。
   const paramFields = new Set();
@@ -177,7 +179,7 @@ for (const [method, types] of [...methods.entries()].sort((a, b) => a[0].localeC
 }
 
 const eventEntries = [];
-for (const [name, payloadType] of [...events.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+for (const [name, payloadType] of [...events.entries()].sort((a, b) => byCodePoint(a[0], b[0]))) {
   const fields = interfaces.get(payloadType) ?? [];
   eventEntries.push(`  '${name}': { payloadType: '${payloadType}', payload: ${JSON.stringify(fields)} },`);
 }
