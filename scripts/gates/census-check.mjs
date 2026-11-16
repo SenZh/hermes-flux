@@ -71,6 +71,81 @@ export function parseTapSummary(output) {
 }
 
 /**
+ * 从 TAP 输出中提取失败用例的定位信息。
+ *
+ * 【设计意图 (Why)】
+ *   汇总行只会说"失败 3 个用例"。在本地跑还能往上翻屏，在 CI 里那条日志
+ *   早就被挤到几百行之外——排查的人要先下载整份日志、再手工 grep。
+ *   断言失败时的第一需求是「哪个用例、哪条断言、期望什么」，必须直接给出。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 解析 TAP 的 `not ok` 行取用例名（含子测试缩进层级，拼成完整路径）；
+ *   2. 紧随其后的 `error:` / `code:` / `expected:` / `actual:` 一并带上，
+ *      这是"失败原因对得上"的原始证据；
+ *   3. 解析不出名字时返回空数组而不是猜——由上层保留原始汇总行的失败数。
+ *
+ * @param {string} output TAP 文本
+ * @param {number} [limit] 最多返回多少条，避免刷屏
+ * @returns {Array<{ name: string, details: string[] }>}
+ */
+export function parseTapFailures(output, limit = 12) {
+  const lines = output.split(/\r?\n/);
+  const failures = [];
+  /** 子测试缩进栈：depth -> 名字 */
+  const stack = [];
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+
+    /**
+     * 【防范的历史坑 (Pitfall)】子测试的父级在 TAP 里既可能是 `ok N - name`，
+     * 也可能是 `# Subtest: name`（node:test 对含子测试的父级用后者）。
+     * 只跟 `ok` 行会让失败名退化成子级单独一行（实测：期望 "outer suite › inner case"，
+     * 实际只拿到 "inner case"），父级上下文整个丢失。
+     */
+    const subtest = /^(\s*)# Subtest:\s*(.*)$/.exec(line);
+    if (subtest) {
+      const depth = Math.floor(subtest[1].length / 2);
+      stack[depth] = subtest[2].trim();
+      stack.length = depth + 1;
+      continue;
+    }
+
+    const notOk = /^(\s*)not ok \d+ - (.*)$/.exec(line);
+    if (notOk) {
+      const depth = Math.floor(notOk[1].length / 2);
+      stack[depth] = notOk[2].trim();
+      stack.length = depth + 1;
+      const name = stack.filter(Boolean).join(' › ');
+
+      const details = [];
+      // 逐行读紧随其后的缩进块，收集诊断字段
+      for (let j = i + 1; j < lines.length && j < i + 40; j += 1) {
+        const cur = lines[j];
+        if (/^\s*not ok \d+ - /.test(cur) || /^\s*ok \d+ - /.test(cur) || /^# /.test(cur)) break;
+        const m = /^\s*(error|code|failureType|expected|actual|stack):\s*(.*)$/.exec(cur);
+        if (m) {
+          const value = m[2].trim();
+          if (value) details.push(`${m[1]}: ${value.slice(0, 220)}`);
+        }
+      }
+      failures.push({ name, details });
+      if (failures.length >= limit) break;
+      continue;
+    }
+
+    const ok = /^(\s*)ok \d+ - (.*)$/.exec(line);
+    if (ok) {
+      const depth = Math.floor(ok[1].length / 2);
+      stack[depth] = ok[2].trim();
+      stack.length = depth + 1;
+    }
+  }
+
+  return failures;
+}
+
+/**
  * 执行一个套件并断言其执行量。
  *
  * @param {string} suiteName SUITES 中的键
@@ -133,6 +208,13 @@ export function runCensus(suiteName, opts = {}) {
       );
     }
     if ((summary.fail ?? 0) > 0) problems.push(`失败 ${summary.fail} 个用例`);
+    if ((summary.fail ?? 0) > 0) {
+      const failures = parseTapFailures(output);
+      if (failures.length > 0) {
+        /** 直接给出「哪个用例、哪条断言」，避免 CI 里要翻整份日志 */
+        problems.push(`失败用例：\n${failures.map((f) => `     - ${f.name}${f.details.length ? `\n       ${f.details.join('\n       ')}` : ''}`).join('\n')}`);
+      }
+    }
     if ((summary.cancelled ?? 0) > 0) problems.push(`被取消 ${summary.cancelled} 个用例`);
     const skipBudget = SKIP_BUDGET[suiteName] ?? 0;
     if ((summary.skipped ?? 0) > skipBudget) {
@@ -153,6 +235,7 @@ export function runCensus(suiteName, opts = {}) {
     elapsedMs,
     summary,
     problems,
+    failures: (summary.fail ?? 0) > 0 ? parseTapFailures(output) : [],
   };
 }
 
