@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -23,7 +23,13 @@ import path from 'node:path';
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const rendererSource = readFileSync(path.resolve(__dirname, '../../src/renderer/index.ts'), 'utf8');
+const renderCoordPath = path.resolve(__dirname, '../../src/renderer/renderCoordinator.ts');
+const dropdownPath = path.resolve(__dirname, '../../src/renderer/dropdownKeybindController.ts');
+const rendererSource = [
+  readFileSync(path.resolve(__dirname, '../../src/renderer/index.ts'), 'utf8'),
+  existsSync(renderCoordPath) ? readFileSync(renderCoordPath, 'utf8') : '',
+  existsSync(dropdownPath) ? readFileSync(dropdownPath, 'utf8') : '',
+].join('\n');
 
 test('模型目录接线源码守卫', async (t) => {
   const count = (re) => (rendererSource.match(re) || []).length;

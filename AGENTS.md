@@ -40,6 +40,8 @@
 | **动效与宿主隔离** | [`docs/architecture/motion-system-and-host-isolation-spec.md`](docs/architecture/motion-system-and-host-isolation-spec.md) | 跨端通用动效引擎、Version CAS 状态机、动态 Token 探测、Grid 折叠契约与宿主渐进改造规范 |
 | **配置与多网关缓存** | [`docs/architecture/client-settings-and-multi-gateway-cache-spec.md`](docs/architecture/client-settings-and-multi-gateway-cache-spec.md) | 分桶命名空间通用配置、多网关独立凭据与物理隔离、冷启动静默连接免弹窗 |
 | **工程纪律总纲** | [`ENGINEERING_DISCIPLINE.md`](ENGINEERING_DISCIPLINE.md) | 工业级工程防御体系、AST 防 AI 糊弄 15 条棘轮、长会话性能预算与平台避坑军规 |
+| **测试体系与门禁策略** | [`docs/testing-strategy.md`](docs/testing-strategy.md) | **【强制】凡涉及测试、覆盖率、门禁改动必读**。四层门禁架构（静态/单测/不变量/覆盖率/变异/真实渲染）、新增代码 100% 覆盖机制、变异测试选型与实测、工具盲区与认知边界 |
+| **不变量映射表** | [`docs/invariants.json`](docs/invariants.json) | **新增 core 逻辑必须登记**。不变量编号 → 源码锚点（路径+符号）→ 守护测试 → 用户可见失效模式。**单一真值源是 JSON，`docs/invariants.md` 由 `npm run invariants:render` 生成，禁止手改**，由 `npm run gates:invariants` 校验 |
 | **研发路线图** | [`docs/roadmap.md`](docs/roadmap.md) | 全局研发路线图、已落地特性看板、已知缺陷跟踪 |
 
 ### 3. 本地专属自动化验证技能 (`.opencode/skills/`)

@@ -40,7 +40,18 @@ ui/icon1.jpg
 tmp-*.mjs
 *.log
 .playwright-mcp/
+
+# 统一用 npm + package-lock.json 作为唯一权威锁。
+# bun.lock 只是本地 bun 开发时的副产物，双锁并存必然漂移
+# （实测曾出现 package.json 要 electron 34.2.0 而 lock 记 ^45.1.0），
+# 故保持忽略，不入库。
 bun.lock
+
+# 变异测试（Stryker）运行残留：沙箱目录与 tap-runner 的覆盖率直写文件。
+# 它们既不进版本库，也不该出现在 git status 里干扰改动集判定。
+.stryker-tmp/
+reports/
+stryker-output-*.json
 
 
 # CDP 测试现场打包产物（每次运行重建）

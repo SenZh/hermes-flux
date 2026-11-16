@@ -36,6 +36,19 @@ const CHECK_ONLY = process.argv.includes('--check');
 const SCAN_DIRS = ['packages/core/src', 'packages/ui/src', 'packages/desktop/src'];
 const SKIP_DIRS = new Set(['node_modules', 'dist', '__tests__', 'contracts']);
 
+/**
+ * 纯码点比较。
+ *
+ * 【设计意图 (Why)】`localeCompare` 依赖运行环境的 ICU/locale：
+ * CI runner（C / en_US）与本地中文 Windows 对大小写混排的排序结果不同，
+ * 生成物字节随之漂移，`--check` 只在其中一个平台红。文档生成必须与 locale 无关。
+ *
+ * 【约束与规则 (Rules)】本文件所有排序一律走此函数，禁止再用 `localeCompare` 或裸 `sort()`。
+ */
+function codePointCompare(a, b) {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 /* ---------------- 数据采集 ---------------- */
 
 function parseContractTable() {
@@ -67,10 +80,30 @@ function parseContractTable() {
 
 function collectCallSites() {
   const sites = new Map();
+
+  /**
+   * 【防范的历史坑 (Pitfall)】目录条目必须显式排序。
+   *
+   * `fs.readdirSync` 的返回顺序由文件系统决定，**不是**字典序：
+   * Linux 按目录项哈希序、NTFS 按插入序、不同 checkout 可能不同。
+   * 调用点数组的顺序直接写进 `docs/gateway/*.md`，于是同一份源码
+   * 在 ubuntu 与 windows 上生成的文档字节不同，`contract:doc:check` 只在 ubuntu 红。
+   *
+   * 实测：`session.interrupt` 的调用点顺序在两个平台上相反
+   * （`interactiveService.ts` 与 `SessionLifecycleService.ts`，大小写混排时
+   * NTFS 让大写 S 排前，ext4 哈希序让 i 排前）。
+   *
+   * 约束：排序依据必须是纯码点比较（`<` 而非 `localeCompare`），
+   * 后者受运行环境 locale 影响，会引入同一类不可复现的跨环境漂移。
+   */
+  const entries = (dir) => fs.readdirSync(dir, { withFileTypes: true })
+    .slice()
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+
   const walk = (dir) => {
     const abs = path.join(REPO_ROOT, dir);
     if (!fs.existsSync(abs)) return;
-    for (const entry of fs.readdirSync(abs, { withFileTypes: true })) {
+    for (const entry of entries(abs)) {
       const p = path.join(abs, entry.name);
       if (entry.isDirectory()) {
         if (SKIP_DIRS.has(entry.name)) continue;
@@ -90,6 +123,11 @@ function collectCallSites() {
     }
   };
   for (const dir of SCAN_DIRS) walk(dir);
+
+  // 最终再按码点排一次：即使上层目录顺序变化，输出也稳定
+  for (const list of sites.values()) {
+    list.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  }
   return sites;
 }
 
@@ -157,7 +195,7 @@ function renderModule(mod, methods, ctx) {
     lines.push('');
     lines.push('| 事件 | payload 类型 | 字段 | 本仓库消费 |');
     lines.push('| --- | --- | --- | --- |');
-    for (const [name, spec] of Object.entries(ctx.events).sort((a, b) => a[0].localeCompare(b[0]))) {
+    for (const [name, spec] of Object.entries(ctx.events).sort((a, b) => codePointCompare(a[0], b[0]))) {
       const consumed = ctx.consumedEvents.has(name) ? '✅' : '';
       lines.push(`| \`${name}\` | ${code(spec.payloadType)} | ${fields(spec.payload)} | ${consumed} |`);
     }
@@ -171,7 +209,7 @@ function renderModule(mod, methods, ctx) {
     return `${lines.join('\n')}\n`;
   }
 
-  const entries = Object.entries(methods).sort((a, b) => a[0].localeCompare(b[0]));
+  const entries = Object.entries(methods).sort((a, b) => codePointCompare(a[0], b[0]));
   if (entries.length === 0) {
     lines.push('本模块当前没有调用点。');
     lines.push('');

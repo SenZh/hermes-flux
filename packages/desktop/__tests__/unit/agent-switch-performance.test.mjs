@@ -21,7 +21,13 @@ const repoRoot = path.resolve(__dirname, '../../../..');
 
 const read = (relativePath) => readFileSync(path.join(repoRoot, relativePath), 'utf8');
 
-const rendererSource = read('packages/desktop/src/renderer/index.ts');
+const msgLoadSource = read('packages/desktop/src/renderer/services/messageLoadingService.ts');
+const gatewayDispatchSource = read('packages/desktop/src/renderer/gateway/gatewayEventDispatcher.ts');
+const messageWindowMgrSource = read('packages/desktop/src/renderer/messageWindowManager.ts');
+const renderCoordSource = read('packages/desktop/src/renderer/renderCoordinator.ts');
+const profileMgmtSource = read('packages/desktop/src/renderer/services/profileManagementService.ts');
+const rendererSource = read('packages/desktop/src/renderer/index.ts') + '\n' + msgLoadSource + '\n' + gatewayDispatchSource + '\n' + messageWindowMgrSource + '\n' + renderCoordSource + '\n' + profileMgmtSource;
+const leftRailSnapshotSource = read('packages/desktop/src/renderer/leftrail/leftRailSnapshotManager.ts');
 const profileRefreshSource = read('packages/desktop/src/renderer/profileRefresh.ts');
 const messageListSource = read('packages/ui/src/components-react/conversation/ConversationMessageList.tsx');
 const messageRowSource = read('packages/ui/src/components-react/conversation/MessageRow.tsx');
@@ -68,17 +74,31 @@ test('Agent 切换 - 消息列表必须按有界窗口挂载，且向下滚动�
     '严禁保留开放区间切片：这正是挂载量只增不减的根因'
   );
   assert.match(rendererSource, /messageWindowSessionId !== state\.activeSessionId/, '切会话必须重置窗口');
-  assert.match(rendererSource, /const expanded = expandMessageWindow\(\);/, '顶部滚动必须先尝试扩展本地窗口');
+  /**
+   * 这三条断言原先靠 index.ts 里的注释靶子命中，属于「断言注释而非实现」的假守卫：
+   * 真实实现已随 Batch 3/4/5 迁出到 conversationStreamController / messageLoadingService / renderCoordinator。
+   * 现改为断言真实调用点，确保删除实现会真实变红。
+   */
+  const streamControllerSource = read('packages/desktop/src/renderer/events/conversationStreamController.ts');
   assert.match(
-    rendererSource,
-    /slideMessageWindowForward\(\)/,
+    streamControllerSource,
+    /const expanded = expandMessageWindow\(\);/,
+    '顶部滚动必须先尝试扩展本地窗口'
+  );
+  assert.match(
+    streamControllerSource,
+    /slideMessageWindowForward\(\);/,
     '向下滚到窗口尾部必须整体前移窗口，否则读者会撞上空白'
   );
-  assert.match(rendererSource, /applyStreamAnchor\(anchor, false\)/, '窗口扩展后必须重放滚动锚点');
+  assert.match(
+    msgLoadSource,
+    /applyStreamAnchor\(anchor, false\)/,
+    '窗口扩展后必须重放滚动锚点'
+  );
 });
 
 test('Agent 切换 - 左轨与标题栏按内容缓存推送，禁止 JSON 全量序列化热路径', () => {
-  assert.match(rendererSource, /function sameLeftRailInputs\(/, '缺少左轨输入引用比较');
+  assert.match(leftRailSnapshotSource || rendererSource, /function sameLeftRailInputs\(/, '缺少左轨输入引用比较');
   assert.match(rendererSource, /snapshot !== lastPushedLeftRailSnapshot/, '左轨必须按快照引用跳过未变化推送');
   assert.doesNotMatch(rendererSource, /snapshotFingerprint\(getLeftRailSnapshot\(\)\)/, '禁止对 89 个会话的快照做 JSON.stringify');
 });
@@ -104,6 +124,6 @@ test('Profile 自动同步 - 定时刷新、可见性守卫与显示名收敛必
   assert.match(profileRefreshSource, /export function profilesDiffer\(/, '缺少 Profile 关键字段差异比较');
   assert.match(rendererSource, /import \{ profilesDiffer \} from '\.\/profileRefresh\.js'/, '渲染层必须消费 Profile 差异比较');
   assert.match(rendererSource, /function syncSessionBotDisplayNames\(/, '服务端改名后必须收敛旧会话的 botDisplayName');
-  assert.match(rendererSource, /startProfileAutoRefresh\(\);/, '连接成功后必须启动定时刷新');
-  assert.match(rendererSource, /stopProfileAutoRefresh\(\);/, '断开连接时必须停止定时刷新');
+  assert.match(rendererSource, /(?:deps\.)?startProfileAutoRefresh\(\);/, '连接成功后必须启动定时刷新');
+  assert.match(rendererSource, /(?:deps\.)?stopProfileAutoRefresh\(\);/, '断开连接时必须停止定时刷新');
 });

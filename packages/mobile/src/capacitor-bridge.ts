@@ -59,6 +59,77 @@ export interface GatewayAuthResult {
   version?: string;
 }
 
+/**
+ * 网关 /api/status 的响应最小面。
+ *
+ * 【设计意图 (Why)】只说清移动端真正读取的字段，其余一律忽略。
+ * 用具体形状而非 `any`，是为了在网关字段改名时由类型系统先报错，
+ * 而不是在运行时静默拿到 undefined 再显示成"版本 0.22.5"的假数据。
+ */
+interface GatewayStatusPayload {
+  auth_required?: boolean;
+  version?: string;
+}
+
+/** 网关 /api/auth/ws-ticket 的响应最小面 */
+interface GatewayTicketPayload {
+  ticket?: string;
+}
+
+/**
+ * 从任意 JSON 值中安全取值，绝不把外部输入当作已知类型。
+ *
+ * 【防范的历史坑 (Pitfall)】直接把 `await res.json()` 断言成形状，
+ * 会在网关返回错误信封（如 `{ ok: false, error: ... }`）时读出 undefined，
+ * 上层再把 undefined 当成功继续跑，最终表现为"登录成功但连不上"。
+ */
+function readJsonObject(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+}
+
+/** 读取响应里的字符串字段；非字符串一律视为缺失 */
+function readOptionalString(record: Record<string, unknown>, key: string): string | undefined {
+  const v = record[key];
+  return typeof v === 'string' ? v : undefined;
+}
+
+/**
+ * 从 unknown 异常里取人类可读原因。
+ *
+ * 【约束与规则 (Rules)】不得假定 err 一定有 message：`throw 'x'` 与
+ * 原生插件抛出的非 Error 对象同样会进 catch。
+ */
+function describeError(err: unknown, fallback: string): string {
+  if (err instanceof Error) return err.message || fallback;
+  if (typeof err === 'string' && err.length > 0) return err;
+  const candidate = readJsonObject(err).message;
+  return typeof candidate === 'string' && candidate.length > 0 ? candidate : fallback;
+}
+
+/**
+ * 移动端在 window 上挂载的运行时入口与剪贴板内存回退。
+ *
+ * 【设计意图 (Why)】显式声明比 `as any` / `as unknown as` 更好：
+ * 类型断言会把拼写错误一并放过（`hermesMobil` 也能通过编译），
+ * 而全局声明让所有读写点都受同一份类型约束。
+ *
+ * 【约束与规则 (Rules)】只允许声明移动端真正使用的键；不得把整个 window 声明成 any。
+ */
+declare global {
+  interface Window {
+    hermesMobile?: HermesMobileBridge;
+    /**
+     * 移动端同时以桌面入口名暴露自己。
+     *
+     * 【设计意图 (Why)】桌面渲染层固定读取 `window.hermesDesktop`，移动端复用同一份
+     *   渲染产物时必须提供同名入口。这里如实声明它就是移动端桥，而不是断言成
+     *   桌面桥类型——两者接口同构但能力不同，谎报类型会让缺能力的方法在编译期隐身。
+     */
+    hermesDesktop?: HermesMobileBridge;
+    __hermes_clipboard_mem?: string;
+  }
+}
+
 export interface HermesMobileBridge {
   getSystemInfo(): Promise<SystemInfo>;
   minimize(): Promise<void>;
@@ -80,9 +151,9 @@ export interface HermesMobileBridge {
     method?: string;
     token?: string;
     ticket?: string;
-    body?: any;
-    params?: any;
-  }): Promise<any>;
+    body?: unknown;
+    params?: unknown;
+  }): Promise<unknown>;
   openExternal(url: string, content?: string): Promise<void>;
   openFileDialog(): Promise<string[] | null>;
   readFile(filePath: string): Promise<string | null>;
@@ -107,8 +178,9 @@ export function createCapacitorPlatformBridge(): HermesMobileBridge {
       try {
         const info = await App.getInfo();
         appVersion = info.version || '0.1.0';
-      } catch {
-        // Fallback
+      } catch (err) {
+        // gate-degrade: 版本号只用于显示；原生插件不可用（如浏览器直开）时回落默认值并留痕
+        console.warn('[Mobile PAL] App.getInfo 不可用，版本号回落默认值:', describeError(err, 'unknown'));
       }
 
       return {
@@ -126,7 +198,10 @@ export function createCapacitorPlatformBridge(): HermesMobileBridge {
     async minimize(): Promise<void> {
       try {
         await App.minimizeApp();
-      } catch {}
+      } catch (err) {
+        // gate-degrade: 移动端无独立窗口；最小化在 iOS 上不可用属预期能力差异，不得中断渲染层
+        console.warn('[Mobile PAL] minimizeApp 不可用（该平台无窗口控制）:', describeError(err, 'unknown'));
+      }
     },
 
     async maximize(): Promise<boolean> {
@@ -138,7 +213,10 @@ export function createCapacitorPlatformBridge(): HermesMobileBridge {
     async close(): Promise<void> {
       try {
         await App.minimizeApp();
-      } catch {}
+      } catch (err) {
+        // gate-degrade: 移动端"关闭"语义是退到后台；插件缺失时无替代路径，只记录不抛
+        console.warn('[Mobile PAL] close 降级为无操作（该平台无最小化能力）:', describeError(err, 'unknown'));
+      }
     },
 
     async isMaximized(): Promise<boolean> {
@@ -192,15 +270,16 @@ export function createCapacitorPlatformBridge(): HermesMobileBridge {
           return { ok: false, message: `服务返回异常 HTTP ${statusRes.status}`, latency };
         }
 
-        const statusData: any = await statusRes.json().catch(() => ({}));
-        const authRequired = Boolean(statusData.auth_required);
+        const statusData = readJsonObject(await statusRes.json().catch(() => ({})) as unknown);
+        const authRequired = statusData.auth_required === true;
+        const statusVersion = readOptionalString(statusData, 'version');
 
         if (!authRequired) {
           return {
             ok: true,
             message: `网关直连就绪 (无需认证) · 延迟 ${latency}ms`,
             latency,
-            version: statusData.version,
+            version: statusVersion,
           };
         }
 
@@ -251,18 +330,31 @@ export function createCapacitorPlatformBridge(): HermesMobileBridge {
           };
         }
 
-        const ticketData: any = await ticketRes.json().catch(() => ({}));
+        const ticketData = readJsonObject(await ticketRes.json().catch(() => ({})) as unknown);
+        const ticket = readOptionalString(ticketData, 'ticket');
+        /**
+         * 【失败不可静默 (Failure Is Not Empty)】网关回了 200 但没给 ticket 时，
+         * 若照样报 ok:true，上层会拿着 undefined 去握手，报错落在几十行之外的
+         * WebSocket 层，根因被彻底掩盖。必须在此显式失败。
+         */
+        if (!ticket) {
+          return {
+            ok: false,
+            message: '认证接口未下发 WebSocket 凭证 (ticket 为空)',
+            latency,
+          };
+        }
         return {
           ok: true,
-          ticket: ticketData.ticket,
-          message: `认证成功 · 延迟 ${latency}ms · Gateway v${statusData.version || '0.22.5'}`,
+          ticket,
+          message: `认证成功 · 延迟 ${latency}ms · Gateway v${statusVersion || '0.22.5'}`,
           latency,
-          version: statusData.version,
+          version: statusVersion,
         };
-      } catch (err: any) {
+      } catch (err: unknown) {
         return {
           ok: false,
-          message: `网络连接失败: ${err.message || '无法访问目标网关'}`,
+          message: `网络连接失败: ${describeError(err, '无法访问目标网关')}`,
           latency: Date.now() - start,
         };
       }
@@ -275,9 +367,9 @@ export function createCapacitorPlatformBridge(): HermesMobileBridge {
       method?: string;
       token?: string;
       ticket?: string;
-      body?: any;
-      params?: any;
-    }): Promise<any> {
+      body?: unknown;
+      params?: unknown;
+    }): Promise<unknown> {
       let base = (options.baseUrl || '').trim();
       if (!base) throw new Error('未配置网关地址');
       if (base.startsWith('ws://')) base = base.replace('ws://', 'http://');
@@ -294,7 +386,6 @@ export function createCapacitorPlatformBridge(): HermesMobileBridge {
         const qs = q.toString();
         if (qs) fullUrl += (fullUrl.includes('?') ? '&' : '?') + qs;
       }
-
       const headers: Record<string, string> = {
         Accept: 'application/json',
         Origin: base,
@@ -322,7 +413,7 @@ export function createCapacitorPlatformBridge(): HermesMobileBridge {
 
       const contentType = (res.headers.get('content-type') || '').toLowerCase();
       if (contentType.includes('application/json')) {
-        return await res.json();
+        return (await res.json()) as unknown;
       }
 
       // 图像二进制安全转 Base64 Data URL (WebView 内 FileReader 标准转换)
@@ -414,7 +505,9 @@ export function createCapacitorPlatformBridge(): HermesMobileBridge {
           encoding: Encoding.UTF8,
         });
         return typeof res.data === 'string' ? res.data : null;
-      } catch {
+      } catch (err) {
+        // gate-degrade: 文件不存在 / 权限被拒都应当表现为"读不到"，返回 null 由调用方显示空态
+        console.warn('[Mobile PAL] readFile 失败，按不可读处理:', describeError(err, 'unknown'));
         return null;
       }
     },
@@ -450,30 +543,34 @@ export function createCapacitorPlatformBridge(): HermesMobileBridge {
             title: `导出文件: ${safeName}`,
             url: saved.uri,
           });
-        } catch {
-          // 用户取消分享不阻断成功
+        } catch (err) {
+          // gate-degrade: 用户主动取消分享不算失败；文件已落盘，成功语义必须保留
+          console.warn('[Mobile PAL] 系统分享面板被取消或不可用，文件已保存:', describeError(err, 'unknown'));
         }
 
         return { success: true, filePath: saved.uri };
-      } catch (err: any) {
-        return { success: false, error: err?.message || '保存失败' };
+      } catch (err) {
+        return { success: false, error: describeError(err, '保存失败') };
       }
     },
 
     // 10. 原生剪贴板双向读写 (附带 DOM 三级降级保底与内存回退)
     async clipboardWrite(text: string): Promise<boolean> {
       const content = typeof text === 'string' ? text : String(text || '');
-      (window as any).__hermes_clipboard_mem = content;
+      window.__hermes_clipboard_mem = content;
       try {
         await Clipboard.write({ string: content });
         return true;
-      } catch {
+      } catch (err) {
+        console.warn('[Mobile PAL] 原生剪贴板写入失败，降级 DOM 路径:', describeError(err, 'unknown'));
         // Fallback 1: navigator.clipboard
         if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
           try {
             await navigator.clipboard.writeText(content);
             return true;
-          } catch {}
+          } catch (err2) {
+            console.warn('[Mobile PAL] navigator.clipboard 写入失败:', describeError(err2, 'unknown'));
+          }
         }
         // Fallback 2: textarea execCommand
         if (typeof document !== 'undefined') {
@@ -488,7 +585,9 @@ export function createCapacitorPlatformBridge(): HermesMobileBridge {
             const ok = document.execCommand('copy');
             document.body.removeChild(ta);
             if (ok) return true;
-          } catch {}
+          } catch (err3) {
+            console.warn('[Mobile PAL] execCommand copy 失败:', describeError(err3, 'unknown'));
+          }
         }
         // Fallback 3: 内存兜底成功
         return true;
@@ -499,14 +598,19 @@ export function createCapacitorPlatformBridge(): HermesMobileBridge {
       try {
         const res = await Clipboard.read();
         if (res.value) return res.value;
-      } catch {}
+      } catch (err) {
+        console.warn('[Mobile PAL] 原生剪贴板读取失败，降级 DOM 路径:', describeError(err, 'unknown'));
+      }
       if (typeof navigator !== 'undefined' && navigator.clipboard?.readText) {
         try {
           const val = await navigator.clipboard.readText();
           if (val) return val;
-        } catch {}
+        } catch (err2) {
+          console.warn('[Mobile PAL] navigator.clipboard 读取失败:', describeError(err2, 'unknown'));
+        }
       }
-      return (window as any).__hermes_clipboard_mem || '';
+      const mem = window.__hermes_clipboard_mem;
+      return typeof mem === 'string' ? mem : '';
     },
   };
 
@@ -539,8 +643,8 @@ export function createCapacitorPlatformBridge(): HermesMobileBridge {
 // 自动向全局注入（同时注入 hermesMobile 与 hermesDesktop，彻底消灭未适配代码的报错与冲突）
 if (typeof window !== 'undefined') {
   const mobileBridge = createCapacitorPlatformBridge();
-  (window as any).hermesMobile = mobileBridge;
-  if (!(window as any).hermesDesktop) {
-    (window as any).hermesDesktop = mobileBridge;
+  window.hermesMobile = mobileBridge;
+  if (!window.hermesDesktop) {
+    window.hermesDesktop = mobileBridge;
   }
 }

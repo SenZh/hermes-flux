@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { extractCookieHeader } from '../../dist/main/cookieHeader.mjs';
@@ -15,10 +15,11 @@ import { buildGatewayWsUrl, createGatewayReconnectResolver } from '../../dist/re
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const rendererSource = readFileSync(
-  path.resolve(__dirname, '../../src/renderer/index.ts'),
-  'utf8'
-);
+const gatewayDispatchPath = path.resolve(__dirname, '../../src/renderer/gateway/gatewayEventDispatcher.ts');
+const rendererSource = [
+  readFileSync(path.resolve(__dirname, '../../src/renderer/index.ts'), 'utf8'),
+  existsSync(gatewayDispatchPath) ? readFileSync(gatewayDispatchPath, 'utf8') : '',
+].join('\n');
 const preloadSource = readFileSync(
   path.resolve(__dirname, '../../src/preload/index.ts'),
   'utf8'

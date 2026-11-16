@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import {
@@ -22,10 +22,17 @@ import {
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const rendererSource = readFileSync(
-  path.resolve(__dirname, '../../src/renderer/index.ts'),
-  'utf8'
-);
+const sessionOpPath = path.resolve(__dirname, '../../src/renderer/services/sessionOperationService.ts');
+const messageLoadPath = path.resolve(__dirname, '../../src/renderer/services/messageLoadingService.ts');
+const turnExecPath = path.resolve(__dirname, '../../src/renderer/services/turnExecutionService.ts');
+const gatewayDispatchPath = path.resolve(__dirname, '../../src/renderer/gateway/gatewayEventDispatcher.ts');
+const rendererSource = [
+  readFileSync(path.resolve(__dirname, '../../src/renderer/index.ts'), 'utf8'),
+  existsSync(sessionOpPath) ? readFileSync(sessionOpPath, 'utf8') : '',
+  existsSync(messageLoadPath) ? readFileSync(messageLoadPath, 'utf8') : '',
+  existsSync(turnExecPath) ? readFileSync(turnExecPath, 'utf8') : '',
+  existsSync(gatewayDispatchPath) ? readFileSync(gatewayDispatchPath, 'utf8') : '',
+].join('\n');
 
 const countMatches = (re) => (rendererSource.match(re) || []).length;
 
@@ -88,22 +95,25 @@ test('Cache Integration - 1. 正向路径：具有合法 rowId 的消息转换�
   assert.equal(opened.rows[0].toolCalls?.[0]?.toolId, 'tc-1');
 });
 
-test('Cache Integration - 2. 边界极值：临时主键 (usr-/ast-) 绝不落盘', () => {
-  // 生产转换逻辑必须过滤 orderKey <= 0 或非有限数字
-  const filterDurableOrderKey = (view) => {
-    const orderKey = typeof view.rowId === 'number' && Number.isFinite(view.rowId) && view.rowId > 0
-      ? view.rowId
-      : Number.parseInt(String(view.id).replace(/^row-/, ''), 10);
-    if (!Number.isFinite(orderKey) || orderKey <= 0) return null;
-    return orderKey;
-  };
+test('Cache Integration - 2. 边界极值：临时主键 (usr-/ast-) 绝不落盘（验证生产实现）', async () => {
+  const { resolveDurableOrderKey } = await import('../../dist/renderer/persistence/persistedJson.mjs');
 
-  assert.equal(filterDurableOrderKey({ id: 'usr-173000000', role: 'user' }), null, '临时 usr- id 不得产生合法 orderKey');
-  assert.equal(filterDurableOrderKey({ id: 'ast-173000000', role: 'assistant' }), null, '临时 ast- id 不得产生合法 orderKey');
-  assert.equal(filterDurableOrderKey({ id: 'ast-173', rowId: 0 }), null, 'rowId 为 0 必须拒绝');
-  assert.equal(filterDurableOrderKey({ id: 'ast-173', rowId: -5 }), null, '负数 rowId 必须拒绝');
-  assert.equal(filterDurableOrderKey({ id: 'ast-173', rowId: 205 }), 205, '合法权威 rowId 必须被采纳');
-  assert.equal(filterDurableOrderKey({ id: 'row-300' }), 300, 'row- 前缀合法数字必须被采纳');
+  /**
+   * 【为什么改成调用生产实现】
+   * 原测试在测试内重写了一份 filterDurableOrderKey，断言的是副本。
+   * 生产实现（toCachedMessage 里的 orderKey 计算）改成任何样子测试都不会红，
+   * 于是「临时主键绝不落盘」这条保护实际上从未被验证。
+   * 现在该逻辑已抽成 resolveDurableOrderKey，测试直接打它。
+   */
+  assert.equal(resolveDurableOrderKey({ id: 'usr-173000000' }), null, '临时 usr- id 不得产生合法 orderKey');
+  assert.equal(resolveDurableOrderKey({ id: 'ast-173000000' }), null, '临时 ast- id 不得产生合法 orderKey');
+  assert.equal(resolveDurableOrderKey({ id: 'ast-173', rowId: 0 }), null, 'rowId 为 0 必须拒绝');
+  assert.equal(resolveDurableOrderKey({ id: 'ast-173', rowId: -5 }), null, '负数 rowId 必须拒绝');
+  assert.equal(resolveDurableOrderKey({ id: 'ast-173', rowId: 205 }), 205, '合法权威 rowId 必须被采纳');
+  assert.equal(resolveDurableOrderKey({ id: 'row-300' }), 300, 'row- 前缀合法数字必须被采纳');
+  assert.equal(resolveDurableOrderKey({ id: 'row-0' }), null, 'row-0 不是合法行号');
+  assert.equal(resolveDurableOrderKey({ id: 'row-abc' }), null, 'row- 前缀非数字必须拒绝');
+  assert.equal(resolveDurableOrderKey({}), null, '完全没有 id 或 rowId 时必须拒绝');
 });
 
 test('Cache Integration - 3. 边界极值：survivor_row_id_map 安全转换防御', () => {
@@ -136,21 +146,8 @@ test('Cache Integration - 3. 边界极值：survivor_row_id_map 安全转换防�
   assert.equal(parseSurvivorMap(undefined), null);
 });
 
-test('Cache Integration - 4. 负向容错：safeParseJson 带类型守卫的防御', () => {
-  const isStringArray = (val) => Array.isArray(val) && val.every((item) => typeof item === 'string');
-
-  const safeParseJson = (raw, fallback, validate) => {
-    if (!raw) return fallback;
-    try {
-      const parsed = JSON.parse(raw);
-      if (validate) {
-        return validate(parsed) ? parsed : fallback;
-      }
-      return parsed;
-    } catch {
-      return fallback;
-    }
-  };
+test('Cache Integration - 4a. 负向容错：safeParseJson 的类型守卫必须真正生效（验证生产实现）', async () => {
+  const { safeParseJson, isStringArray } = await import('../../dist/renderer/persistence/persistedJson.mjs');
 
   // 正常解析
   assert.deepEqual(safeParseJson('["model-a", "model-b"]', [], isStringArray), ['model-a', 'model-b']);
@@ -158,10 +155,28 @@ test('Cache Integration - 4. 负向容错：safeParseJson 带类型守卫的防�
   // 非法 JSON 语法
   assert.deepEqual(safeParseJson('{ malformed', ['fallback'], isStringArray), ['fallback']);
 
-  // 合规 JSON 但类型不匹配（非数组或数组中含非字符串）
-  assert.deepEqual(safeParseJson('{"foo": 1}', [], isStringArray), [], '对象不符合 string[] 守卫，必须回落 fallback');
-  assert.deepEqual(safeParseJson('[1, 2, 3]', [], isStringArray), [], '数字数组不符合 string[] 守卫，必须回落 fallback');
-  assert.deepEqual(safeParseJson('["a", 123]', [], isStringArray), [], '混杂数组必须回落 fallback');
+  // 合规 JSON 但类型不匹配：对象 / 数字数组 / 混杂数组都必须回落
+  assert.deepEqual(safeParseJson('{"foo": 1}', [], isStringArray), [], '对象不符合 string[] 守卫');
+  assert.deepEqual(safeParseJson('[1, 2, 3]', [], isStringArray), [], '数字数组不符合 string[] 守卫');
+  assert.deepEqual(safeParseJson('["a", 123]', [], isStringArray), [], '混杂数组必须回落');
+});
+
+test('Cache Integration - 4b. 守卫被移除后必须能测出来（证伪性检查）', async () => {
+  const { safeParseJson, isStringArray } = await import('../../dist/renderer/persistence/persistedJson.mjs');
+
+  /**
+   * 【为什么要有这条】
+   * 原测试在测试内重写了一份 safeParseJson 再断言副本，生产实现根本没被调用。
+   * 实测：删掉生产代码里的 validate 调用后原测试仍 12/12 全绿。
+   *
+   * 这里直接对照两种调用方式的结果差异：带守卫与不带守卫必须给出不同答案。
+   * 若生产实现忽略了 validate 参数，两者会相等，本断言立刻变红。
+   */
+  const withGuard = safeParseJson('{"foo": 1}', [], isStringArray);
+  const withoutGuard = safeParseJson('{"foo": 1}', []);
+  assert.deepEqual(withGuard, [], '带守卫时必须回落');
+  assert.deepEqual(withoutGuard, { foo: 1 }, '不带守卫时必须原样返回（证明守卫是它起的唯一作用）');
+  assert.notDeepEqual(withGuard, withoutGuard, '守卫必须真实改变结果，否则它只是装饰');
 });
 
 test('Cache Integration - 5. 时序与清理：会话删除与截断对缓存的物理驱逐', async () => {
@@ -215,12 +230,26 @@ test('Cache Integration - 6. 生产源码接线守卫（接线级证伪，若删
     );
   });
 
-  await t.test('6.4 sessionDraftMap 的持久化存盘与清理必须在新建、切换、删除与发送各处全量覆盖', () => {
-    const persistDraftCalls = countMatches(/persistDraftsToStorage\(/g);
-    assert.ok(
-      persistDraftCalls >= 4,
-      `persistDraftsToStorage 调用点必须 >= 4（包含新建/切换/删除/发送成功清空），实得 ${persistDraftCalls}`
-    );
+  await t.test('6.4 草稿必须在新建、切换、删除与发送成功各处全量覆盖（按抽象而非按函数名断言）', () => {
+    /**
+     * 【为什么改口径】草稿持久化已整簇抽到 persistence/sessionDrafts.ts：
+     * 落盘合并进 set/delete，宿主不再有 persistDraftsToStorage 这个函数。
+     * 若继续断言"某个函数被调用 >= 4 次"，测试就锁死了实现形态，
+     * 拆分一发生就假红——而它真正要保护的是"各处都覆盖到了草稿"。
+     * 因此改为断言宿主的草稿写操作分布：
+     *   set 覆盖 新建/切换/发送成功，delete 覆盖 删除会话/发送成功清空。
+     */
+    const setCalls = countMatches(/sessionDrafts\.set\(/g);
+    const deleteCalls = countMatches(/sessionDrafts\.delete\(/g);
+    assert.ok(setCalls >= 2, `草稿写入必须覆盖「切走前保存」与「发送成功后回写」，实得 ${setCalls}`);
+    assert.ok(deleteCalls >= 3, `草稿清理必须覆盖删除会话与发送成功清空，实得 ${deleteCalls}`);
+
+    /**
+     * 且宿主不得再自己碰存储：一旦又出现裸 localStorage 写草稿键，
+     * 说明有人绕过了 store，"忘了落盘"的失误面就重新打开了。
+     */
+    const rawDraftStorage = countMatches(/localStorage\.setItem\(\s*['"]hermes_flux_session_drafts/g);
+    assert.equal(rawDraftStorage, 0, '宿主不得绕过 store 直接写草稿存储键');
   });
 
   await t.test('6.5 restoreCacheToState 必须并发恢复会话索引、智能体索引与头像资产', () => {

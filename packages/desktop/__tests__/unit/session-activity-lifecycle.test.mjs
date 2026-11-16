@@ -11,7 +11,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import {
@@ -26,10 +26,12 @@ import {
   defaultSessionHandleRegistry,
 } from '../../../core/dist/index.js';
 
-const rendererSource = readFileSync(
-  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src/renderer/index.ts'),
-  'utf8'
-);
+const __dir = path.dirname(fileURLToPath(import.meta.url));
+const gatewayDispatchPath = path.resolve(__dir, '../../src/renderer/gateway/gatewayEventDispatcher.ts');
+const rendererSource = [
+  readFileSync(path.resolve(__dir, '../../src/renderer/index.ts'), 'utf8'),
+  existsSync(gatewayDispatchPath) ? readFileSync(gatewayDispatchPath, 'utf8') : '',
+].join('\n');
 
 test('Session Activity Lifecycle & Handle Normalization Invariants', async (t) => {
   await t.test('1. 静态源码守卫：必须引入并消费 Core 层 defaultSessionHandleRegistry 并在 turn-completed 中消费 toStoredSessionId', () => {
@@ -45,12 +47,12 @@ test('Session Activity Lifecycle & Handle Normalization Invariants', async (t) =
     );
     assert.match(
       rendererSource,
-      /const completedTargetId = toStoredSessionId\(/,
+      /const completedTargetId = (?:deps\.)?toStoredSessionId\(/,
       'turn-completed 必须调用 toStoredSessionId 归一化目标会话 ID'
     );
     assert.match(
       rendererSource,
-      /const failedTargetId = toStoredSessionId\(/,
+      /const failedTargetId = (?:deps\.)?toStoredSessionId\(/,
       'turn-failed 必须调用 toStoredSessionId 归一化目标会话 ID'
     );
     assert.match(

@@ -2,6 +2,14 @@
  * 变异检验（Mutation Testing）：
  * 故意破坏 scanner / rules 的关键实现，验证测试是否真的会变红。
  * 若破坏后测试仍然全绿，说明该测试是假测试。
+ *
+ * 【防范的历史坑 (Pitfall)】锚点未匹配时曾打印警告后 `continue`，等于静默跳过该变异体：
+ *   源码重构后所有锚点可能全部失配，脚本照样输出「存活 0/5，测试具备证伪能力」，
+ *   而实际一个变异都没施加。这是门禁自证环节的假绿，必须改为硬失败。
+ *
+ * 【约束与规则 (Rules)】
+ *   - 锚点必须唯一命中；命中 0 次或多次都判失败（多次会让 replace 改错位置）。
+ *   - 变异体数量必须等于登记数量，少跑一个即失败。
  */
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -46,19 +54,30 @@ const MUTATIONS = [
 
 const TEST = 'packages/core/__tests__/architecture/gate-engine.test.mjs';
 let survived = 0;
+let applied = 0;
 
 for (const m of MUTATIONS) {
   const origRaw = fs.readFileSync(m.file, 'utf8');
   const isCrlf = origRaw.includes('\r\n');
   const normalized = origRaw.replace(/\r\n/g, '\n');
 
-  if (!normalized.includes(m.needle)) {
-    console.log(`  ⚠ 跳过（锚点未匹配）: ${m.name}`);
-    continue;
+  /**
+   * 锚点唯一性断言。
+   * 源码被重构后锚点会失配，此时若继续"跳过"，本脚本会以 0 存活结束，
+   * 报告出一种它其实从未验证过的置信度。因此失配必须是硬失败。
+   */
+  const occurrences = normalized.split(m.needle).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `变��体锚点失效（命中 ${occurrences} 次，必须恰好 1 次）: ${m.name}\n` +
+        `  文件: ${m.file}\n` +
+        '  处理方式：更新 needle 使其与当前源码一致。禁止删除该变异体或放宽为"跳过"。',
+    );
   }
 
   const mutated = normalized.replace(m.needle, m.replace);
   fs.writeFileSync(m.file, isCrlf ? mutated.replace(/\n/g, '\r\n') : mutated, 'utf8');
+  applied += 1;
 
   let passed = true;
   try {
@@ -74,6 +93,11 @@ for (const m of MUTATIONS) {
   console.log(`  ${killed ? '✓ 已杀死' : '✗ 存活'}  ${m.name}`);
 }
 
-console.log(`\n变异体存活数: ${survived} / ${MUTATIONS.length}`);
-console.log(survived === 0 ? '✓ 测试具备真实证伪能力' : '✗ 存在无效测试，必须补强');
-process.exitCode = survived === 0 ? 0 : 1;
+console.log(`\n变异体存活数: ${survived} / ${MUTATIONS.length}（已施加 ${applied}）`);
+if (applied !== MUTATIONS.length) {
+  console.log(`✗ 只施加了 ${applied} / ${MUTATIONS.length} 个变异体，检验不完整`);
+  process.exitCode = 1;
+} else {
+  console.log(survived === 0 ? '✓ 测试具备真实证伪能力' : '✗ 存在无效测试，必须补强');
+  process.exitCode = survived === 0 ? 0 : 1;
+}

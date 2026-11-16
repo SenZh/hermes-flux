@@ -14,18 +14,38 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const source = readFileSync(path.resolve(__dirname, '../../src/renderer/index.ts'), 'utf8');
+const indexSource = readFileSync(path.resolve(__dirname, '../../src/renderer/index.ts'), 'utf8');
+const gatewayDispatchPath = path.resolve(__dirname, '../../src/renderer/gateway/gatewayEventDispatcher.ts');
+const gatewayDispatchSource = existsSync(gatewayDispatchPath) ? readFileSync(gatewayDispatchPath, 'utf8') : '';
+const profileMgmtPath = path.resolve(__dirname, '../../src/renderer/services/profileManagementService.ts');
+const profileMgmtSource = existsSync(profileMgmtPath) ? readFileSync(profileMgmtPath, 'utf8') : '';
+const groupOpPath = path.resolve(__dirname, '../../src/renderer/services/groupOperationService.ts');
+const groupOpSource = existsSync(groupOpPath) ? readFileSync(groupOpPath, 'utf8') : '';
 
 /** 取函数体片段：从签名起到下一个顶层声明之前。 */
 function bodyOf(signatureMarker) {
-  const start = source.indexOf(signatureMarker);
+  let fileSource = indexSource;
+  let start = fileSource.indexOf(signatureMarker);
+  const snippet = start >= 0 ? fileSource.slice(start, start + 300) : '';
+  if (start < 0 || snippet.includes('gatewayEventDispatcher.') || snippet.includes('profileManagementService.') || snippet.includes('groupOperationService.')) {
+    if (gatewayDispatchSource.includes(signatureMarker)) {
+      fileSource = gatewayDispatchSource;
+      start = fileSource.indexOf(signatureMarker);
+    } else if (profileMgmtSource.includes(signatureMarker)) {
+      fileSource = profileMgmtSource;
+      start = fileSource.indexOf(signatureMarker);
+    } else if (groupOpSource.includes(signatureMarker)) {
+      fileSource = groupOpSource;
+      start = fileSource.indexOf(signatureMarker);
+    }
+  }
   assert.ok(start >= 0, `找不到函数签名：${signatureMarker}`);
-  const rest = source.slice(start + signatureMarker.length);
+  const rest = fileSource.slice(start + signatureMarker.length);
   const boundary = rest.search(/\n(?:export )?(?:async function |function |const |let |interface |type )/);
   return boundary < 0 ? rest : rest.slice(0, boundary);
 }
@@ -38,7 +58,7 @@ test('Agent 域：成功与失败都必须离开骨架相位', () => {
   const body = bodyOf('async function fetchProfiles(');
   assert.equal(countOf(body, "state.profilesPhase = 'ready';"), 2, '成功与失败两个出口都要收敛 profilesPhase');
   const catchBlock = body.slice(body.indexOf('} catch (e) {'));
-  assert.ok(catchBlock.includes('void applyColdStartFocus();'), '失败后仍要按已有数据裁决冷启动落点');
+  assert.ok(catchBlock.includes('applyColdStartFocus();'), '失败后仍要按已有数据裁决冷启动落点');
 });
 
 test('会话域：对账落地后必须离开骨架相位', () => {

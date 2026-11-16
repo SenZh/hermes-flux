@@ -6,9 +6,9 @@ name: Quality Gates
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'dev/**', 'feat/**']
   pull_request:
-    branches: [main]
+    branches: [main, 'dev/**']
 
 concurrency:
   group: gates-${{ github.workflow }}-${{ github.ref }}
@@ -36,8 +36,39 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
+      # 安装口径必须与 package-lock.json 严格一致，禁止 `npm install` 的隐式改写。
+      # 历史坑：曾写 `npm install || npm install --legacy-peer-deps`，而包内
+      #   `workspace:*` 会让两条分支同时报 EUNSUPPORTEDPROTOCOL，CI 在第 4 步必挂；
+      #   兜底分支对同一根因无效，是典型的"假兜底"。
+      # 约束：workspace 内部依赖统一用 `*`（npm 会解析成 file link），
+      #   任何 `workspace:` 协议都会让 npm 直接失败。
       - name: Install dependencies
-        run: npm install --ignore-scripts || npm install --legacy-peer-deps
+        run: npm ci --ignore-scripts
+
+      # 依赖装不上时后续门禁全是空跑，必须显式证明 workspace 链接已建立。
+      # 历史坑 1：曾写 `require.resolve('@hermes-flux/core')`。core 的 main 指向被
+      #   .gitignore 忽略的 dist/index.js，而本步骤在 `npm run build` 之前执行，
+      #   于是两个平台稳定 MODULE_NOT_FOUND——门禁自己造了一处假红。
+      #   链接是否建立与产物是否存在是两件事，不能用后者证明前者。
+      # 历史坑 2：曾把校验内联成 bash 的 `for p in ...; do ... done`。windows runner
+      #   默认 shell 是 pwsh，同一段脚本直接 ParserError。
+      # 约束：判定逻辑一律落在 Node 脚本里，CI 只调用，不承载 shell 语义。
+      - name: Verify workspace links
+        run: node scripts/gates/verify-workspace-links.mjs
+
+      # CI workflow 自身的可移植性静态检查：bash 专有语法、多行 run 命令掩盖、
+      # 构建前 require 产物。这三类缺陷都表现为「本地全绿、CI 稳定红」，
+      # 且红的原因与被测代码无关，必须在改动 workflow 时当场拦住。
+      - name: Gate 0a · CI workflow 可移植性
+        run: npm run gates:ci
+
+      # 测试目标必须由 Node 自己枚举，不能用 shell 展开的 glob。
+      # 历史坑：bash 默认关闭 globstar 时 `**` 退化为 `*`，只能命中一层子目录，
+      #   packages/ui/__tests__ 根级 30 个文件在 ubuntu 上静默不跑，而退出码仍为 0。
+      #   现在 npm test 走 scripts/gates/census-check.mjs，它会断言文件数与用例数下限。
+      - name: Verify test census (glob 与执行量自证)
+        run: node scripts/gates/census-targets.mjs
+
 
       - name: Gate 0/4 · 静态门禁（架构 / 换肤 / i18n / 性能）
         run: node scripts/gates/run.mjs
@@ -59,6 +90,45 @@ jobs:
       - name: Gate 2c · Agent 编排一致性
         run: npm run gates:config
 
+      - name: Gate 2d · 豁免敞口预算（行内豁免只降不升）
+        run: npm run gates:allow
+
+      # 门禁自证：证明每个门禁在被违反时确实会红。
+      # 与 gates:mutation 互补——后者验证测试的杀伤力，这里验证门禁的杀伤力。
+      - name: Gate 2e · 门禁自证套件（门禁本身具备杀伤力）
+        run: npm run gates:self-proof
+
+      # 假测试证伪：删掉五处生产实现，对应测试必须变红且原因对得上。
+      # 这是唯一能客观回答"这个测试有没有用"的手段。
+      - name: Gate 2f · 假测试证伪器（删生产代码必须变红）
+        run: npm run gates:fake-tests
+
+      - name: Gate 3a · 不变量映射表（id 唯一、测试含 fc.assert、Markdown 与 JSON 一致）
+        run: npm run gates:invariants
+
+      - name: Gate 3 · 形式化不变量（fast-check）
+        run: npm run verify:formal
+        # 状态机类缺陷靠普通单例测不出来：只有随机并发交错才能暴露
+        # 「拉取在途写入被误删」「墓碑被迟滞快照复活」这类问题。
+
+      # 必须拆成三个独立 step：GitHub 在 windows runner 上用 pwsh 承载多行 `run: |`，
+      # 而 pwsh 的 step 结果是「最后一条原生命令」的退出码——前面某条失败会被
+      # 后面某条成功掩盖（实测：先 exit 1 再 exit 0，整步判定为成功）。
+      # 拆成独立 step 后每条命令各自结算，ubuntu 与 windows 口径一致。
+      - name: Gate 0b · 网关契约一致性
+        run: npm run contract:verify
+
+      - name: Gate 0c · 契约调用点覆盖
+        run: npm run contract:coverage
+
+      - name: Gate 0d · 契约文档同步
+        run: npm run contract:doc:check
+
+      # 性能基准必须独占 CPU。放在其它作业之后串行执行，避免与测试并发争抢
+      # （实测并发下同一份代码稳定慢约 3 倍：串行 15ms → 并发 41~44ms）。
+      - name: Gate 4e · 长会话性能预算（独占 CPU）
+        run: npm run test:perf
+
       - name: Gate 5 · 全量构建
         run: npm run build
 
@@ -74,6 +144,6 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-      - run: npm install --ignore-scripts || npm install --legacy-peer-deps
+      - run: npm ci --ignore-scripts
       - name: 全量严格扫描（预期失败，用于量化剩余债务）
         run: node scripts/gates/run.mjs --strict

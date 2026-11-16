@@ -59,7 +59,8 @@ test('styles.css：所有依赖顶栏高度的 fixed 定位必须同步补偿 1p
 test('styles.css：移动端检查舱选择器必须命中真实 DOM id', () => {
   const css = read('packages/desktop/src/renderer/styles.css');
   const inspectionPod = read('packages/ui/src/components/InspectionPod/InspectionPod.ts');
-  const renderer = read('packages/desktop/src/renderer/index.ts');
+  const renderCoord = read('packages/desktop/src/renderer/renderCoordinator.ts');
+  const renderer = read('packages/desktop/src/renderer/index.ts') + '\n' + renderCoord;
 
   // 真实 id 以组件模板与渲染层查询为准，二者必须一致。
   assert.ok(inspectionPod.includes('flux-inspector-pod'), '组件模板必须使用 flux-inspector-pod');

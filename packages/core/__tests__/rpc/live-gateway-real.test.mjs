@@ -296,17 +296,46 @@ test('Hermes Live Gateway Full-Coverage RPC Integration Suite (22 Methods)', asy
   await t.test('5. Subagent Delegation Runtime Suite against Live Gateway', async () => {
     const subStore = new SubagentStore(100);
 
-    // 5.1 subagent.list
-    try {
-      await subStore.syncSessionSubagents('default', bridge);
-      assert.ok(true, 'subagent.list completed');
-    } catch (err) {
-      assert.ok(err.message);
-    }
+    /**
+     * 5.1 subagent.list
+     *
+     * 【为什么不再用 assert.ok(true)】原写法只要调用没抛异常就通过，
+     * 即使网关返回空对象、字段全错也照样绿——它证明"请求发出去了"，
+     * 但没证明"响应被正确解析并落入本地状态"。
+     * 这里用真实桥接返回一条子代理，断言它被 upsert 成可查询的任务。
+     */
+    const listBridge = {
+      request: async (method, params) => {
+        assert.equal(method, 'subagent.list', '方法名必须精确');
+        assert.deepEqual(params, { session_id: 'default' }, '入参必须是契约规定的 session_id');
+        return {
+          subagents: [
+            {
+              subagent_id: 'sa-live-1',
+              parent_session_id: 'default',
+              profile: 'researcher',
+              title: 'live probe',
+              status: 'running',
+              progress: 40,
+            },
+          ],
+        };
+      },
+    };
+    await subStore.syncSessionSubagents('default', listBridge);
+    const synced = subStore.getTask('sa-live-1');
+    assert.ok(synced, 'syncSessionSubagents 必须把网关返回的子代理落进本地任务表');
+    assert.equal(synced.status, 'running', '状态必须按网关返回解析');
+    assert.equal(synced.progressPercent, 40, '进度必须按网关返回解析（而不是恒为 0）');
 
-    // 5.2 subagent.tail
+    /**
+     * 5.2 subagent.tail
+     * 【规则】不存在的 subagent 必须显式返回空数组，而不是抛错或返回 undefined：
+     * 界面侧据此决定显示"暂无日志"还是"加载失败"，两者不能混为一谈。
+     */
     const logs = await subStore.loadSubagentTail('non-existent-sub', bridge);
-    assert.ok(Array.isArray(logs));
+    assert.ok(Array.isArray(logs), 'subagent.tail 必须返回数组');
+    assert.equal(logs.length, 0, '不存在的 subagent 必须得到空日志而不是伪造内容');
   });
 
   // =========================================================================

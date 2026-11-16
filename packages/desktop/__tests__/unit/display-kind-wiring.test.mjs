@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -9,7 +9,11 @@ import { findPreviousUserPrompt } from '../../dist/renderer/messageActions.mjs';
 import { bindTurnRowIds } from '../../dist/renderer/rollbackTransaction.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const rendererSource = readFileSync(path.resolve(__dirname, '../../src/renderer/index.ts'), 'utf8');
+const renderCoordPath = path.resolve(__dirname, '../../src/renderer/renderCoordinator.ts');
+const rendererSource = [
+  readFileSync(path.resolve(__dirname, '../../src/renderer/index.ts'), 'utf8'),
+  existsSync(renderCoordPath) ? readFileSync(renderCoordPath, 'utf8') : '',
+].join('\n');
 
 /**
  * display_kind 接线守卫（宿主编排层）
@@ -52,8 +56,10 @@ test('display_kind 宿主编排接线（精确字符串契约）', async (t) => 
   });
 
   await t.test('3. 翻页过滤不得删 hidden 行（行序守恒）', () => {
-    const start = rendererSource.indexOf('const payload = outcome.messages.filter((m) => {');
-    const block = rendererSource.slice(start, start + 400);
+    const msgLoadPath = path.resolve(__dirname, '../../src/renderer/services/messageLoadingService.ts');
+    const targetSrc = existsSync(msgLoadPath) ? readFileSync(msgLoadPath, 'utf8') : rendererSource;
+    const start = targetSrc.indexOf('const payload = outcome.messages.filter((m');
+    const block = targetSrc.slice(start, start + 400);
     assert.ok(block.length > 0, '必须能定位到翻页过滤区段');
     assert.ok(
       !block.includes("if (m.display_kind === 'hidden') return false;"),
@@ -66,8 +72,10 @@ test('display_kind 宿主编排接线（精确字符串契约）', async (t) => 
   });
 
   await t.test('4. 左侧栏预览与 Bot 反哺只取真实人类正文', () => {
-    const start = rendererSource.indexOf('function syncActiveSessionPreviewToRail');
-    const block = rendererSource.slice(start, start + 1600);
+    const msgLoadPath = path.resolve(__dirname, '../../src/renderer/services/messageLoadingService.ts');
+    const targetSrc = existsSync(msgLoadPath) ? readFileSync(msgLoadPath, 'utf8') : rendererSource;
+    const start = targetSrc.indexOf('syncActiveSessionPreviewToRail(sessionId: string');
+    const block = targetSrc.slice(start, start + 1600);
     assert.ok(
       block.includes("const visibleMessages = messages.filter((m) => (m.displayKind ?? 'user') === 'user');"),
       '预览必须只用可上屏的人类行，否则副标题会显示 [System:] 或后台回执'
@@ -79,8 +87,10 @@ test('display_kind 宿主编排接线（精确字符串契约）', async (t) => 
   });
 
   await t.test('5. 导出口径与视图一致：hidden 不导出，事件单独标注', () => {
-    const start = rendererSource.indexOf('async function exportMarkdown');
-    const block = rendererSource.slice(start, start + 900);
+    const sessionOpPath = path.resolve(__dirname, '../../src/renderer/services/sessionOperationService.ts');
+    const targetSrc = existsSync(sessionOpPath) ? readFileSync(sessionOpPath, 'utf8') : rendererSource;
+    const start = targetSrc.indexOf('exportMarkdown(');
+    const block = targetSrc.slice(start, start + 900);
     assert.ok(
       block.includes(".filter((m) => (m.displayKind ?? 'user') !== 'hidden')"),
       'hidden 行不得导出成 ### User'
@@ -92,12 +102,14 @@ test('display_kind 宿主编排接线（精确字符串契约）', async (t) => 
   });
 
   await t.test('6. 持久层回读必须窄化，禁止裸 as 断言', () => {
+    const cacheBridgePath = path.resolve(__dirname, '../../src/renderer/cache/desktopCacheBridge.ts');
+    const targetSource = existsSync(cacheBridgePath) ? readFileSync(cacheBridgePath, 'utf8') : rendererSource;
     assert.ok(
-      rendererSource.includes("displayKind: isKnownDisplayKind(row.displayKind) ? row.displayKind : 'user',"),
+      targetSource.includes("displayKind: isKnownDisplayKind(row.displayKind) ? row.displayKind : 'user',"),
       'IndexedDB 是不可信来源，非法 kind 必须回落 user'
     );
     assert.ok(
-      !rendererSource.includes("displayKind: (row.displayKind as MessageDisplayKind | undefined) ?? 'user',"),
+      !targetSource.includes("displayKind: (row.displayKind as MessageDisplayKind | undefined) ?? 'user',"),
       '严禁用 as 断言把未知值带进下游分派'
     );
   });

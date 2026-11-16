@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -16,10 +16,12 @@ import path from 'node:path';
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const rendererSource = readFileSync(
-  path.resolve(__dirname, '../../src/renderer/index.ts'),
-  'utf8'
-);
+const msgLoadPath = path.resolve(__dirname, '../../src/renderer/services/messageLoadingService.ts');
+const messageLoadSource = existsSync(msgLoadPath) ? readFileSync(msgLoadPath, 'utf8') : '';
+const rendererSource = [
+  readFileSync(path.resolve(__dirname, '../../src/renderer/index.ts'), 'utf8'),
+  messageLoadSource,
+].join('\n');
 
 test('历史翻页与 Profile 透传接线守卫', async (t) => {
   const countMatches = (re) => (rendererSource.match(re) || []).length;
@@ -74,14 +76,14 @@ test('历史翻页与 Profile 透传接线守卫', async (t) => {
   });
 
   await t.test('6. 加载态必须在同步路径收敛，禁止只靠 rAF 关闭（后台标签页会被节流）', () => {
-    const tail = rendererSource.slice(rendererSource.indexOf('async function loadOlderMessages'));
+    const tail = messageLoadSource ? messageLoadSource.slice(messageLoadSource.search(/async (?:function )?loadOlderMessages/)) : rendererSource.slice(rendererSource.indexOf('async function loadOlderMessages'));
     const syncReset = /state\.isLoadingOlder = false;\s*\r?\n\s*render\(\);/.test(tail);
     assert.ok(syncReset, '成功路径必须先同步置 false 再 render，不能把收敛放进 requestAnimationFrame');
     assert.ok(tail.includes('olderLoadingStartedAt'), '必须有陈旧加载锁熔断时间戳');
   });
 
   await t.test('7. 翻页起点必须经 planOlderPagination 对齐本地覆盖行数，严禁裸用 storedOffset', () => {
-    const tail = rendererSource.slice(rendererSource.indexOf('async function loadOlderMessages'));
+    const tail = messageLoadSource ? messageLoadSource.slice(messageLoadSource.search(/async (?:function )?loadOlderMessages/)) : rendererSource.slice(rendererSource.indexOf('async function loadOlderMessages'));
     assert.ok(
       tail.includes('planOlderPagination({'),
       '翻页请求起点必须由 planOlderPagination 计算，裸 offset 会在本地缓存更长时跳过整段历史'
@@ -117,13 +119,13 @@ test('历史翻页与 Profile 透传接线守卫', async (t) => {
     const fastRest = start >= 0 ? rendererSource.slice(start, start + 1200) : '';
     assert.ok(fastRest.includes('countLocalCoveredRows(merged, sessionId)'), '首屏必须把本地覆盖行数并入 sessionServerOffset 下界');
     assert.ok(
-      /const currentKnown = Math\.max\(\s*sessionServerOffset\.get\(sessionId\)/.test(fastRest),
+      /const currentKnown = Math\.max\(\s*(?:this\.)?sessionServerOffset\.get\(sessionId\)/.test(fastRest),
       '游标只能取各来源最大值；改成 Math.min 会让首屏把已确认游标倒退回更小值'
     );
   });
 
   await t.test('9. 持久缓存恢复与 cache-first 读取必须与本会话口径一致', () => {
-    const tail = rendererSource.slice(rendererSource.indexOf('async function loadOlderMessages'));
+    const tail = messageLoadSource ? messageLoadSource.slice(messageLoadSource.search(/async (?:function )?loadOlderMessages/)) : rendererSource.slice(rendererSource.indexOf('async function loadOlderMessages'));
     assert.ok(
       tail.includes('const oldestRowId = sessionEarliestRowId();'),
       'cache-first 的上界必须取本会话最早行，头部父会话行会把读取区间带偏'

@@ -1,0 +1,934 @@
+/**
+ * Hermes Flux 设置中心业务装配与数据服务（Settings Data Service）
+ *
+ * 【设计意图 (Why)】
+ *   将设置中心数据装载（统一提供商表、自定义端点、订阅账号）、Bot 花名册与管理快照派生、
+ *   全量设置快照构造、设置中心交互动作表（SettingsActions，涵盖端点 CRUD、提供商探针/启用/退出/多 Agent 绑定开关）、
+ *   网关连接测试与配置提交、以及 React 设置弹窗的挂载与指纹防抖刷新彻底从 index.ts 中解耦。
+ *   使复杂的设置中心领域逻辑与 UI 调度脱离宿主 DOM，具备高内聚性、可单测性与单向依赖纯度。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   1. 订阅与 Auth 共享 Profile 语义：订阅是账号级来源，登录态落在共享 auth，
+ *      由 share_auth 回落到首个 profile；登录、轮询、退出都必须作用于 subscriptionProfileName，
+ *      否则会把令牌签进一个不参与共享的 profile，导致其他 Agent 无法使用；
+ *   2. 统一提供商表原始行落盘：端点与订阅的原始行必须落进快照，供编辑表单读取 base_url / has_api_key；
+ *      若用归并后的视图反推，将导致编辑弹窗无法打开或选项缺失；
+ *   3. 勾选 / 取消勾选某 Agent 绑定：判定全部交给 core 的 planBindingToggle，
+ *      正在使用的 Agent 不允许取消（必须先改模型），自定义端点新增必须补密钥，判定严格遵守 classifyAttachWrite；
+ *   4. 端点整体删除：作用范围取 view.agents 里 active/ready 的 Agent（配置集合），
+ *      配置集合不完整时严禁执行删除，防止漏删却误报成功；
+ *   5. 设置快照指纹防抖：关闭态零成本早退；开启态比对 JSON 字符串指纹，
+ *      避免在流式输出期间每帧序列化与重渲染整棵 50+ provider 的设置树。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 单向依赖：严禁反向 import index.js，所有外部状态读写与 UI 渲染通过 SettingsDataDeps 注入；
+ *   2. 严格类型约束：0 TS 报错，严禁使用 `as any`；
+ *   3. 零文本写死：通知、错误与占位提示统一走 deps.t 国际化输出。
+ */
+
+import type { AppState } from '../state/appState.js';
+import type { HermesDesktopBridge } from '../../preload/index.js';
+import {
+  type HermesGatewayClient,
+  type ProfilesConfigureParams,
+  ProfileService,
+  formatModelDisplayName,
+  projectBotRoster,
+  normalizeEndpointId,
+  planBindingToggle,
+  planProviderRemoval,
+  draftForBindingAttach,
+  classifyAttachWrite,
+} from '@hermes-flux/core';
+import {
+  mountSettingsModal,
+  type SettingsSectionId,
+  type SettingsSnapshot,
+  type SettingsActions,
+  type GatewayDraft,
+  type ToggleProviderAgentResult,
+  type I18nKey,
+  type FontPreferences,
+  type ActivityIndicatorVariant,
+  type SkinId,
+  setLocale,
+  messageKeyForVerdict,
+} from '@hermes-flux/ui';
+import { createProviderAdminRest } from '../providerAdminRest.js';
+import { createProviderAdminController, planDeleteTarget } from '../providerAdminController.js';
+import { createSettingsController, resolveGatewayPassword } from '../settingsController.js';
+import { createBotManagementController } from '../botManagementController.js';
+import { loadProviderCatalog } from '../providerCatalog.js';
+
+export interface GatewayConnectionTestResult {
+  ok: boolean;
+  message?: string;
+  latency?: number;
+  ticket?: string;
+}
+
+export interface SettingsDataDeps {
+  readonly getState: () => AppState;
+  readonly getGatewayClient: () => HermesGatewayClient | null;
+  readonly getDesktopApi?: () => HermesDesktopBridge | undefined;
+  readonly getCurrentTicket: () => string | null;
+  readonly getEffectiveUrl: (url: string) => string;
+  readonly render: () => void;
+  readonly t: (key: I18nKey, params?: Record<string, string | number>) => string;
+  readonly describeRpcError: (error: unknown) => string;
+  readonly showToast: (message: string, durationMs?: number) => void;
+  readonly bootLog: { warn(message: string, meta?: Record<string, unknown>): void };
+  readonly fetchModelOptions: (options?: { clearNotice?: boolean }) => Promise<void>;
+  readonly fetchProfiles: (options?: { refresh?: boolean }) => Promise<void>;
+  readonly testConnection: (url: string, user: string, pass: string) => Promise<GatewayConnectionTestResult>;
+  readonly connect: () => Promise<void>;
+  readonly disconnect: () => void;
+  readonly getFontPreferences: () => FontPreferences;
+  readonly setFontPreferences: (prefs: FontPreferences) => void;
+  readonly applyFontPreferences: (prefs: FontPreferences) => void;
+  readonly getActivityIndicatorVariant: () => ActivityIndicatorVariant;
+  readonly setActivityIndicatorVariant: (variant: ActivityIndicatorVariant) => void;
+  readonly saveActivityIndicatorVariant: (variant: ActivityIndicatorVariant) => void;
+  readonly resolveActivityIndicatorVariant: (variant: string) => ActivityIndicatorVariant;
+  readonly resolveSkinId: (theme: string) => SkinId;
+  readonly writePresenceLayout: (layout: string) => void;
+  readonly onPresenceLayoutChanged: () => void;
+  readonly profileAvatarCache: Map<string, string>;
+  readonly persistAvatarCache: () => void;
+}
+
+export interface SettingsDataService {
+  scopedProfileName(): string;
+  subscriptionProfileName(): string;
+  botRoster(): Array<{ profile: string; displayName: string; avatar?: string }>;
+  reloadProviderCatalog(): Promise<void>;
+  openBotSettings(botId: string): void;
+  getBotManagementSnapshot(): SettingsSnapshot['botManagement'];
+  getSettingsSnapshot(): SettingsSnapshot;
+  ensureSettingsSectionData(section: SettingsSectionId, force?: boolean): void;
+  createSettingsActions(): SettingsActions;
+  syncReactSettings(): void;
+  getSettingsController(): ReturnType<typeof createSettingsController>;
+  getProviderAdminController(): ReturnType<typeof createProviderAdminController>;
+  getBotManagementController(): ReturnType<typeof createBotManagementController>;
+}
+
+export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataService {
+  const profileService = new ProfileService();
+
+  let updateReactSettings: (() => void) | null = null;
+  let lastSettingsSnapshotJson = '';
+  let settingsController: ReturnType<typeof createSettingsController> | null = null;
+  let providerAdminController: ReturnType<typeof createProviderAdminController> | null = null;
+  let botManagementController: ReturnType<typeof createBotManagementController> | null = null;
+
+  const inFlightProviderBindings = new Map<
+    string,
+    { signature: string; promise: Promise<ToggleProviderAgentResult> }
+  >();
+
+  function scopedProfileName(): string {
+    const state = deps.getState();
+    return state.settingsScopedProfile || state.profileName || 'default';
+  }
+
+  function botRoster(): Array<{ profile: string; displayName: string; avatar?: string }> {
+    const state = deps.getState();
+    if (state.profiles.length === 0) {
+      const name = state.profileName || 'default';
+      return [{ profile: name, displayName: name }];
+    }
+    return state.profiles.map((profile) => ({
+      profile: profile.name,
+      displayName: profile.displayName || profile.name,
+      avatar: profile.avatar,
+    }));
+  }
+
+  function subscriptionProfileName(): string {
+    const state = deps.getState();
+    return botRoster()[0]?.profile || state.profileName || 'default';
+  }
+
+  function syncLocale(): void {
+    const state = deps.getState();
+    setLocale(state.lang === 'en' ? 'en-US' : 'zh-CN');
+  }
+
+  function getProviderAdminController(): ReturnType<typeof createProviderAdminController> {
+    if (providerAdminController) return providerAdminController;
+    const desktopApi = deps.getDesktopApi?.();
+    const rest = createProviderAdminRest({
+      baseUrl: () => deps.getEffectiveUrl(deps.getState().gatewayUrl),
+      ticket: () => deps.getCurrentTicket() ?? '',
+      proxy: (options) => {
+        if (!desktopApi?.httpProxy) throw new Error('Desktop REST proxy is unavailable');
+        return desktopApi.httpProxy(options);
+      },
+    });
+    providerAdminController = createProviderAdminController({
+      rest,
+      render: () => deps.render(),
+      describeError: (error) => deps.describeRpcError(error),
+      getEndpoints: () => deps.getState().settingsCustomEndpoints,
+      setEndpoints: (value) => { deps.getState().settingsCustomEndpoints = value; },
+      getOauth: () => deps.getState().settingsSubscriptionCatalog,
+      setOauth: (value) => { deps.getState().settingsSubscriptionCatalog = value; },
+      setBusy: (busy) => { deps.getState().settingsProviderAdminBusy = busy; },
+      notify: (message) => deps.showToast(message),
+      warn: (message, meta) => deps.bootLog.warn(message, typeof meta === 'object' && meta ? meta as Record<string, unknown> : undefined),
+      onCatalogChanged: () => { void deps.fetchModelOptions({ clearNotice: false }); },
+    });
+    return providerAdminController;
+  }
+
+  async function reloadProviderCatalog(): Promise<void> {
+    const state = deps.getState();
+    const agents = botRoster();
+    state.settingsProviderViews = { status: 'loading' };
+    deps.render();
+    try {
+      const desktopApi = deps.getDesktopApi?.();
+      const rest = createProviderAdminRest({
+        baseUrl: () => deps.getEffectiveUrl(state.gatewayUrl),
+        ticket: () => deps.getCurrentTicket() ?? '',
+        proxy: (options) => {
+          if (!desktopApi?.httpProxy) throw new Error('Desktop REST proxy is unavailable');
+          return desktopApi.httpProxy(options);
+        },
+      });
+      const gatewayClient = deps.getGatewayClient();
+      const result = await loadProviderCatalog({
+        agents,
+        rest,
+        rpc: {
+          call: <T,>(method: string, params?: Record<string, unknown>) => {
+            if (!gatewayClient) return Promise.reject(new Error(deps.t('settings.notConnected'))) as Promise<T>;
+            return gatewayClient.call<T>(method, params);
+          },
+        },
+        describeError: (error) => deps.describeRpcError(error),
+      });
+      state.settingsProviderViews = { status: 'ready', data: result.views };
+      state.settingsProviderFailures = result.failed;
+      state.settingsCustomEndpoints = { status: 'ready', data: result.endpoints.map((entry) => entry.row) };
+      state.settingsEndpointProfiles = Object.fromEntries(
+        result.endpoints.map((entry) => [normalizeEndpointId(entry.row.id), [...entry.profiles]]),
+      );
+      state.settingsEndpointFailures = result.endpointFailures;
+      state.settingsSubscriptionCatalog = result.subscriptionsOk
+        ? { status: 'ready', data: result.subscriptions }
+        : { status: 'error', message: result.subscriptionsError || deps.t('settings.loadFailed') };
+    } catch (error) {
+      state.settingsProviderViews = { status: 'error', message: deps.describeRpcError(error) };
+      state.settingsProviderFailures = [];
+      state.settingsCustomEndpoints = { status: 'error', message: deps.describeRpcError(error) };
+      state.settingsEndpointProfiles = {};
+      state.settingsEndpointFailures = [];
+      state.settingsSubscriptionCatalog = { status: 'error', message: deps.describeRpcError(error) };
+    }
+    deps.render();
+  }
+
+  function getSettingsController(): ReturnType<typeof createSettingsController> {
+    if (settingsController) return settingsController;
+    const state = deps.getState();
+    settingsController = createSettingsController({
+      isConnected: () => Boolean(deps.getGatewayClient()) && state.gatewayConnected,
+      profileName: () => state.profileName || 'default',
+      call: <T,>(method: string, params?: Record<string, unknown>) => {
+        const client = deps.getGatewayClient();
+        if (!client) return Promise.reject(new Error(deps.t('settings.loadFailed'))) as Promise<T>;
+        return client.call<T>(method, params);
+      },
+      render: () => deps.render(),
+      translate: (key) => deps.t(key),
+      describeError: (error) => deps.describeRpcError(error),
+      getProfiles: () => state.settingsProfiles,
+      setProfiles: (value) => { state.settingsProfiles = value; },
+      getMcp: () => state.settingsMcp,
+      setMcp: (value) => { state.settingsMcp = value; },
+      getSkills: () => state.settingsSkills,
+      setSkills: (value) => { state.settingsSkills = value; },
+      setBusy: (busy) => { state.settingsBusy = busy; },
+      onCatalogChanged: () => { void deps.fetchModelOptions({ clearNotice: false }); },
+      notify: (message) => deps.showToast(message),
+      warn: (message, meta) => deps.bootLog.warn(message, typeof meta === 'object' && meta ? meta as Record<string, unknown> : undefined),
+    });
+    return settingsController;
+  }
+
+  function getBotManagementController(): ReturnType<typeof createBotManagementController> {
+    if (botManagementController) return botManagementController;
+    const state = deps.getState();
+
+    botManagementController = createBotManagementController({
+      isConnected: () => Boolean(deps.getGatewayClient()) && state.gatewayConnected,
+      loadProfiles: () => getSettingsController().loadProfiles(),
+      getProfiles: () => state.settingsProfiles,
+      getState: () => ({
+        status: state.botManagementStatus,
+        activeBotId: state.botManagementActiveBotId,
+        activeDetail: state.botManagementDetail,
+        drafts: state.botDrafts,
+        errorBanner: state.botManagementError,
+        confirmPending: state.botManagementConfirm,
+        isBusy: state.botManagementBusy,
+      }),
+      setState: (patch) => {
+        if (patch.status !== undefined) state.botManagementStatus = patch.status;
+        if (patch.activeBotId !== undefined) state.botManagementActiveBotId = patch.activeBotId;
+        if ('activeDetail' in patch) state.botManagementDetail = patch.activeDetail;
+        if (patch.drafts !== undefined) state.botDrafts = patch.drafts;
+        if ('errorBanner' in patch) state.botManagementError = patch.errorBanner;
+        if ('confirmPending' in patch) state.botManagementConfirm = patch.confirmPending;
+        if (patch.isBusy !== undefined) state.botManagementBusy = patch.isBusy;
+      },
+      describeBot: (botId, hint) => {
+        const client = deps.getGatewayClient();
+        if (!client) return Promise.reject(new Error(deps.t('settings.notConnected')));
+        return profileService.describeBot(botId, client, hint);
+      },
+      fetchSkillInventory: async (botId) => {
+        const client = deps.getGatewayClient();
+        if (!client) return null;
+        try {
+          const result = await client.request<{ skills?: Record<string, string[]> | null }>(
+            'skills.manage',
+            { profile: botId, action: 'list' },
+          );
+          const groups = result?.skills;
+          if (!groups || typeof groups !== 'object') return null;
+          const names: string[] = [];
+          for (const value of Object.values(groups)) {
+            if (!Array.isArray(value)) continue;
+            for (const name of value) if (typeof name === 'string' && name) names.push(name);
+          }
+          return names;
+        // gate-degrade: 技能目录读取失败只影响非权威清单的补全展示，界面会显示"清单读取不完整"；不阻塞 BOT 详情，也不伪装成空目录。
+        } catch {
+          return null;
+        }
+      },
+      fetchMcpStatus: async (botId) => {
+        const client = deps.getGatewayClient();
+        if (!client) return null;
+        try {
+          const result = await client.request<{
+            servers?: Array<{ name?: string; connected?: boolean; transport?: string; tools?: number }>;
+          }>('mcp.servers.status', { profile: botId });
+          if (!Array.isArray(result?.servers)) return null;
+          return result.servers
+            .filter((row) => typeof row?.name === 'string' && row.name)
+            .map((row) => ({
+              name: row.name as string,
+              connected: row.connected === true,
+              transport: typeof row.transport === 'string' ? row.transport : undefined,
+              toolCount: typeof row.tools === 'number' ? row.tools : undefined,
+            }));
+        // gate-degrade: 探活失败等价于"状态未知"（online 保持 undefined），界面不得画红灯；已有清单照常展示。
+        } catch {
+          return null;
+        }
+      },
+      configureBot: (params: ProfilesConfigureParams) => {
+        const client = deps.getGatewayClient();
+        if (!client) return Promise.reject(new Error(deps.t('settings.notConnected')));
+        return profileService.configureBot(params, client);
+      },
+      setAsset: (botId, dataUrl, clear) => {
+        const client = deps.getGatewayClient();
+        if (!client) return Promise.reject(new Error(deps.t('settings.notConnected')));
+        return profileService.setAsset(botId, 'avatar', dataUrl, client, { clear });
+      },
+      render: () => deps.render(),
+      translate: (key) => deps.t(key),
+      describeError: (error) => deps.describeRpcError(error),
+      notify: (message) => deps.showToast(message),
+      onProfilesChanged: () => { void deps.fetchProfiles(); },
+      onAvatarChanged: (botId, dataUrl) => {
+        const key = botId.toLowerCase();
+        if (dataUrl) deps.profileAvatarCache.set(key, dataUrl);
+        else deps.profileAvatarCache.delete(key);
+        const profile = state.profiles.find((item) => item.name === botId);
+        if (profile) {
+          profile.avatar = dataUrl;
+          profile.hasAvatar = Boolean(dataUrl);
+          if (profile.displayName) {
+            const named = profile.displayName.toLowerCase();
+            if (dataUrl) deps.profileAvatarCache.set(named, dataUrl);
+            else deps.profileAvatarCache.delete(named);
+          }
+        }
+        if (state.settingsProfiles.status === 'ready') {
+          state.settingsProfiles = {
+            status: 'ready',
+            data: state.settingsProfiles.data.map((row) =>
+              row.name === botId ? { ...row, avatar: dataUrl, hasAvatar: Boolean(dataUrl) } : row,
+            ),
+          };
+        }
+        for (const session of state.sessions) {
+          if (session.botName === botId) session.botAvatar = dataUrl;
+        }
+        deps.persistAvatarCache();
+      },
+      schedule: (fn, ms) => {
+        const timer = setTimeout(fn, ms);
+        return () => clearTimeout(timer);
+      },
+    });
+    return botManagementController;
+  }
+
+  function openBotSettings(botId: string): void {
+    const state = deps.getState();
+    state.isSettingsOpen = true;
+    state.settingsSection = 'agents';
+    state.botManagementActiveBotId = botId;
+    const status = state.botManagementStatus.status;
+    ensureSettingsSectionData('agents');
+    if (status !== 'uninitialized' && status !== 'fetching_list') {
+      getBotManagementController().selectBot(botId, { immediate: true });
+    }
+    deps.render();
+  }
+
+  function getBotManagementSnapshot(): SettingsSnapshot['botManagement'] {
+    const state = deps.getState();
+    const roster: SettingsSnapshot['botManagement']['roster'] =
+      state.settingsProfiles.status === 'ready'
+        ? projectBotRoster(
+            state.settingsProfiles.data.map((row) => ({
+              name: row.name,
+              displayName: row.displayName,
+              model: row.model || state.profiles.find((item) => item.name === row.name)?.model || '',
+              avatar: row.avatar || state.profiles.find((item) => item.name === row.name)?.avatar || undefined,
+              isDefault: row.isDefault,
+            })),
+            state.botDrafts,
+          )
+        : [];
+
+    const availableModels: SettingsSnapshot['botManagement']['availableModels'] = [];
+    const seenModels = new Set<string>();
+    if (state.settingsProviderViews.status === 'ready') {
+      for (const view of state.settingsProviderViews.data) {
+        if (view.availability !== 'active' && view.availability !== 'ready') continue;
+        for (const modelId of view.models) {
+          const key = `${view.id}\u0000${modelId}`;
+          if (seenModels.has(key)) continue;
+          seenModels.add(key);
+          availableModels.push({
+            id: modelId,
+            name: formatModelDisplayName(modelId, view.name),
+            provider: view.id,
+            providerName: view.name,
+          });
+        }
+      }
+    }
+
+    return {
+      status: state.botManagementStatus,
+      roster,
+      activeBotId: state.botManagementActiveBotId,
+      activeDetail: state.botManagementDetail,
+      availableModels,
+      activeDraft: state.botManagementActiveBotId
+        ? state.botDrafts[state.botManagementActiveBotId]
+        : undefined,
+      wizard: {
+        open: false,
+        draft: {
+          mode: 'blank',
+          name: '',
+          displayName: '',
+          description: '',
+          model: '',
+          provider: '',
+          cloneFrom: '',
+          cloneChannels: false,
+          mirrorCredentials: false,
+        },
+        busy: false,
+      },
+      exitPrompt: null,
+      errorBanner: state.botManagementError,
+      confirmPending: state.botManagementConfirm,
+      highlightBotId: undefined,
+      isBusy: state.botManagementBusy,
+    };
+  }
+
+  function getSettingsSnapshot(): SettingsSnapshot {
+    const state = deps.getState();
+    return {
+      isOpen: state.isSettingsOpen,
+      section: state.settingsSection,
+      theme: state.theme,
+      locale: state.lang === 'en' ? 'en' : 'zh',
+      fontPrefs: deps.getFontPreferences(),
+      activityVariant: deps.getActivityIndicatorVariant(),
+      profiles: state.settingsProfiles,
+      bots: botRoster(),
+      botManagement: getBotManagementSnapshot(),
+      scopedProfile: scopedProfileName(),
+      providerViews: state.settingsProviderViews,
+      providerFailures: state.settingsProviderFailures,
+      subscriptionCatalog: state.settingsSubscriptionCatalog,
+      customEndpoints: state.settingsCustomEndpoints,
+      endpointProfiles: state.settingsEndpointProfiles,
+      endpointFailures: state.settingsEndpointFailures,
+      providerAdminBusy: state.settingsProviderAdminBusy,
+      mcp: state.settingsMcp,
+      skills: state.settingsSkills,
+      gateway: {
+        url: state.gatewayUrl,
+        username: state.username,
+        hasStoredPassword: Boolean(state.password),
+        profileName: state.profileName,
+        status: state.gatewayConnected ? 'connected' : state.gatewayConnecting ? 'connecting' : 'disconnected',
+        latencyMs: state.gatewayLatencyMs,
+        test: state.testStatus,
+      },
+      appVersion: state.appVersion,
+      platform: state.platform,
+      busy: state.settingsBusy,
+      presenceLayout: state.presenceLayout,
+    };
+  }
+
+  function ensureSettingsSectionData(section: SettingsSectionId, force = false): void {
+    const state = deps.getState();
+    if (section === 'agents') {
+      getBotManagementController().ensureLoaded(force);
+      if (force || state.settingsProviderViews.status === 'idle') {
+        void reloadProviderCatalog();
+      }
+      return;
+    }
+    getSettingsController().ensureSection(section, force);
+    if (section !== 'providers') return;
+    if (state.profiles.length === 0) void getSettingsController().loadProfiles();
+    if (force || state.settingsProviderViews.status === 'idle') {
+      void reloadProviderCatalog();
+    }
+  }
+
+  function applyGatewayDraft(draft: GatewayDraft): void {
+    const state = deps.getState();
+    state.gatewayUrl = draft.url.trim();
+    state.username = draft.username;
+    state.password = resolveGatewayPassword(draft.password, state.password);
+    state.profileName = draft.profileName.trim() || 'default';
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('hermes_flux_gateway_url', state.gatewayUrl);
+      localStorage.setItem('hermes_aura_gateway_url', state.gatewayUrl);
+      localStorage.setItem('hermes_flux_username', state.username);
+      localStorage.setItem('hermes_aura_username', state.username);
+      localStorage.setItem('hermes_flux_password', state.password);
+      localStorage.setItem('hermes_aura_password', state.password);
+      localStorage.setItem('hermes_flux_profile', state.profileName);
+      localStorage.setItem('hermes_aura_profile', state.profileName);
+    }
+  }
+
+  function createSettingsActions(): SettingsActions {
+    const state = deps.getState();
+    return {
+      onClose: () => {
+        state.isSettingsOpen = false;
+        deps.render();
+      },
+      onSelectSection: (section) => {
+        state.settingsSection = section;
+        ensureSettingsSectionData(section);
+        deps.render();
+      },
+      onThemeChange: (theme) => {
+        state.theme = deps.resolveSkinId(theme);
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem('hermes_flux_theme', state.theme);
+          localStorage.setItem('hermes_aura_theme', state.theme);
+        }
+        deps.render();
+      },
+      onPresenceLayoutChange: (layout) => {
+        state.presenceLayout = layout === 'dock' ? 'dock' : 'stage';
+        deps.writePresenceLayout(state.presenceLayout);
+        deps.onPresenceLayoutChanged();
+        deps.render();
+      },
+      onLocaleChange: (locale) => {
+        state.lang = locale === 'en' ? 'en' : 'zh';
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem('hermes_flux_lang', state.lang);
+        }
+        syncLocale();
+        deps.render();
+      },
+      onFontPrefsChange: (prefs) => {
+        deps.setFontPreferences(prefs);
+        deps.applyFontPreferences(prefs);
+        deps.render();
+      },
+      onActivityVariantChange: (variant) => {
+        const activityIndicatorVariant = deps.resolveActivityIndicatorVariant(variant);
+        deps.saveActivityIndicatorVariant(activityIndicatorVariant);
+        deps.setActivityIndicatorVariant(activityIndicatorVariant);
+        deps.render();
+      },
+      onRefreshProfiles: () => { void getBotManagementController().loadRoster(true); },
+      onScopeProfileChange: (profile) => {
+        state.settingsScopedProfile = profile;
+        deps.render();
+      },
+      onReloadProviders: () => {
+        void reloadProviderCatalog();
+      },
+      onProbeEndpoint: (draft) => getProviderAdminController().probe(draft),
+      onSaveEndpoint: async (draft, options) => {
+        const outcome = await getProviderAdminController().save(scopedProfileName(), draft, {
+          fanOutTo: options.fanOutTo,
+          makeDefault: options.makeDefault,
+          profileDisplayNames: Object.fromEntries(botRoster().map((bot) => [bot.profile, bot.displayName])),
+        });
+        if (outcome.currentOk === false) return { ok: false, message: outcome.current.message || deps.t('settings.saveFailed') };
+        void reloadProviderCatalog();
+        return { ok: true, fanOut: [outcome.current, ...outcome.fanOut] };
+      },
+      onActivateProvider: async (providerId, model, confirmExpensive) => {
+        const controller = getProviderAdminController();
+        const profile = scopedProfileName();
+        const view = state.settingsProviderViews.status === 'ready'
+          ? state.settingsProviderViews.data.find((item) => item.id === providerId)
+          : undefined;
+        const result = await controller.useMainModel(profile, {
+          provider: providerId,
+          model,
+          baseUrl: view?.kind === 'custom' ? view.detail : undefined,
+          confirmExpensive,
+        });
+        if (result.ok) {
+          deps.showToast(deps.t('settings.providerUsed', { name: view?.name || providerId }));
+          void reloadProviderCatalog();
+        }
+        return result;
+      },
+      onLogoutProvider: (providerId) =>
+        new Promise((resolve) => {
+          const controller = getProviderAdminController();
+          const profileAtOpen = subscriptionProfileName();
+          const target = planDeleteTarget(
+            profileAtOpen,
+            botRoster().find((bot) => bot.profile === profileAtOpen)?.displayName ?? profileAtOpen,
+          );
+          const view = state.settingsProviderViews.status === 'ready'
+            ? state.settingsProviderViews.data.find((item) => item.id === providerId)
+            : undefined;
+          if (view?.manualHint) {
+            state.confirmModal = {
+              title: deps.t('settings.logoutConfirmTitle'),
+              message: deps.t('settings.logoutManual', { command: view.manualHint }),
+              confirmLabel: deps.t('settings.close'),
+              cancelLabel: deps.t('settings.cancel'),
+              isDanger: false,
+              onConfirm: async () => resolve({ ok: false, cancelled: true }),
+              onCancel: () => resolve({ ok: false, cancelled: true }),
+            };
+            deps.render();
+            return;
+          }
+          state.confirmModal = {
+            title: deps.t('settings.logoutConfirmTitle'),
+            message: deps.t('settings.logoutConfirmMessage', { bot: target.displayName, name: view?.name || providerId }),
+            confirmLabel: deps.t('settings.providerLogout'),
+            cancelLabel: deps.t('settings.cancel'),
+            isDanger: true,
+            onConfirm: async () => {
+              const result = await controller.logoutOauth(target.profile, providerId);
+              if (result.ok) {
+                deps.showToast(deps.t('settings.logoutDone', { name: view?.name || providerId }));
+                void reloadProviderCatalog();
+              }
+              resolve(result);
+            },
+            onCancel: () => resolve({ ok: false, cancelled: true }),
+          };
+          deps.render();
+        }),
+      onStartLogin: (providerId) => getProviderAdminController().startLogin(subscriptionProfileName(), providerId),
+      onPollLogin: (providerId, sessionId) =>
+        getProviderAdminController().pollLogin(subscriptionProfileName(), providerId, sessionId),
+      onCancelLogin: (sessionId) => getProviderAdminController().cancelLogin(subscriptionProfileName(), sessionId),
+      onCopy: async (text) => {
+        try {
+          if (typeof navigator !== 'undefined' && navigator.clipboard) {
+            await navigator.clipboard.writeText(text);
+            return true;
+          }
+          return false;
+        } catch (error) {
+          deps.bootLog.warn('clipboard write failed', { error: deps.describeRpcError(error) });
+          return false;
+        }
+      },
+      onDeleteEndpoint: (id) =>
+        new Promise((resolve) => {
+          const controller = getProviderAdminController();
+          const targetId = normalizeEndpointId(id);
+          const view = state.settingsProviderViews.status === 'ready'
+            ? state.settingsProviderViews.data.find((item) => normalizeEndpointId(item.id) === targetId)
+            : undefined;
+          if (!view) {
+            deps.showToast(deps.t('settings.providerDeleteUnknown'));
+            resolve({ ok: false, message: deps.t('settings.providerDeleteUnknown') });
+            return;
+          }
+
+          if (state.settingsEndpointFailures.length > 0) {
+            const names = state.settingsEndpointFailures.map((item) => item.displayName).join('、');
+            deps.showToast(deps.t('settings.providerDeleteScopeIncomplete', { agents: names }));
+            resolve({ ok: false, message: deps.t('settings.providerDeleteScopeIncomplete', { agents: names }) });
+            return;
+          }
+
+          const plan = planProviderRemoval(view, state.settingsEndpointProfiles[targetId] ?? []);
+
+          if (plan.kind === 'blocked-in-use') {
+            const names = plan.agents
+              .map((agent) => (agent.model ? `${agent.displayName}（${agent.model}）` : agent.displayName))
+              .join('、');
+            state.confirmModal = {
+              title: deps.t('settings.providerDeleteBlockedTitle'),
+              message: deps.t('settings.providerDeleteBlocked', { name: view.name, agents: names }),
+              confirmLabel: deps.t('settings.close'),
+              cancelLabel: deps.t('settings.cancel'),
+              isDanger: false,
+              onConfirm: async () => resolve({ ok: false, message: deps.t('settings.providerDeleteBlockedShort') }),
+              onCancel: () => resolve({ ok: false, cancelled: true }),
+            };
+            deps.render();
+            return;
+          }
+
+          if (plan.kind === 'empty') {
+            deps.showToast(deps.t('settings.providerDeleteInconsistent'));
+            resolve({ ok: false, message: deps.t('settings.providerDeleteInconsistent') });
+            return;
+          }
+
+          const names = plan.profiles.map(
+            (profile) => botRoster().find((bot) => bot.profile === profile)?.displayName || profile,
+          );
+          state.confirmModal = {
+            title: deps.t('settings.providerDelete'),
+            message: deps.t('settings.providerDeleteConfirm', { name: view.name, agents: names.join('、') }),
+            confirmLabel: deps.t('settings.providerDelete'),
+            cancelLabel: deps.t('settings.cancel'),
+            isDanger: true,
+            onConfirm: async () => {
+              const result = await controller.remove(plan.profiles, view.id);
+              if (result.ok) {
+                deps.showToast(deps.t('settings.providerDeleted', { name: view.name }));
+                void reloadProviderCatalog();
+                resolve(result);
+                return;
+              }
+              const detail = result.failed
+                .map((item) => `${item.displayName}：${item.message || ''}`)
+                .join('；');
+              const message = result.failed.length > 0
+                ? deps.t('settings.providerDeletePartial', { detail })
+                : result.message || deps.t('settings.providerToggleFailed');
+              void reloadProviderCatalog();
+              resolve({ ok: false, message });
+            },
+            onCancel: () => resolve({ ok: false, cancelled: true }),
+          };
+          deps.render();
+        }),
+      onToggleProviderAgent: async (providerId, profile, nextChecked, apiKey, options) => {
+        const controller = getProviderAdminController();
+        const targetId = normalizeEndpointId(providerId);
+        const view = state.settingsProviderViews.status === 'ready'
+          ? state.settingsProviderViews.data.find((item) => normalizeEndpointId(item.id) === targetId)
+          : undefined;
+        if (!view) return { ok: false, message: deps.t('settings.providerDeleteUnknown') };
+
+        const plan = planBindingToggle(view, profile, nextChecked, options?.attachIntent);
+        switch (plan.kind) {
+          case 'noop':
+            return { ok: true };
+          case 'unknown-profile':
+            return { ok: false, message: deps.t('settings.providerToggleUnknownProfile', { profile }) };
+          case 'blocked-active':
+            return { ok: false, message: deps.t('settings.providerToggleBlockedActive', { profile }) };
+          case 'blocked-error':
+            return { ok: false, message: plan.message || deps.t('settings.providerToggleBlockedError', { profile }) };
+          case 'login-required':
+            return { ok: false, message: deps.t('settings.providerToggleLoginRequired', { profile }) };
+          case 'confirm-attach':
+            return { ok: false, confirmRequired: true, message: deps.t('settings.providerAttachConfirmRequired') };
+          default:
+            break;
+        }
+
+        const flightKey = `${targetId}\u0000${profile}`;
+        const signature = plan.kind + (plan.kind === 'attach' ? plan.intent : '');
+        const existing = inFlightProviderBindings.get(flightKey);
+        if (existing) {
+          if (existing.signature === signature) return existing.promise;
+          return { ok: false, message: deps.t('settings.providerAttachBusy') };
+        }
+
+        const promise = (async (): Promise<ToggleProviderAgentResult> => {
+          switch (plan.kind) {
+            case 'detach': {
+              const result = await controller.remove([profile], view.id);
+              if (result.ok) {
+                await reloadProviderCatalog();
+                return { ok: true };
+              }
+              return { ok: false, message: result.message || deps.t('settings.providerToggleFailed') };
+            }
+            case 'attach': {
+              const row = state.settingsCustomEndpoints.status === 'ready'
+                ? state.settingsCustomEndpoints.data.find(
+                    (item) => normalizeEndpointId(item.id) === targetId,
+                  )
+                : undefined;
+              if (!row) return { ok: false, message: deps.t('settings.providerEditUnavailable') };
+              let key = (apiKey ?? '').trim();
+              if (!key) {
+                const sources = (state.settingsEndpointProfiles[targetId] ?? [])
+                  .filter((source) => source !== profile);
+                const copied = await controller.resolveEndpointKey(view.id, sources);
+                if (!copied.ok) {
+                  if (copied.reason === 'no-readable-key') {
+                    return {
+                      ok: false,
+                      needsKey: true,
+                      message: deps.t('settings.providerToggleNeedsKey', { profile }),
+                    };
+                  }
+                  return { ok: false, message: copied.message || deps.t('settings.providerToggleFailed') };
+                }
+                key = copied.key;
+              }
+              const draft = draftForBindingAttach(row, view.models, key);
+              const outcome = await controller.save(profile, draft, { fanOutTo: [], makeDefault: plan.makeDefault });
+              const verdict = classifyAttachWrite(plan, outcome);
+              if (verdict.kind === 'failed') {
+                return { ok: false, message: outcome.current.message || deps.t('settings.providerToggleFailed') };
+              }
+              const verdictKey = messageKeyForVerdict(verdict);
+              if (verdictKey) {
+                await reloadProviderCatalog();
+                return { ok: false, message: deps.t(verdictKey) };
+              }
+              await reloadProviderCatalog();
+              return { ok: true };
+            }
+            case 'logout-subscription': {
+              const result = await controller.logoutOauth(profile, view.id);
+              if (result.ok) {
+                await reloadProviderCatalog();
+                return { ok: true };
+              }
+              return { ok: false, message: result.message || deps.t('settings.providerToggleFailed') };
+            }
+            default:
+              return { ok: false, message: deps.t('settings.providerToggleFailed') };
+          }
+        })();
+
+        const entry = { signature, promise };
+        inFlightProviderBindings.set(flightKey, entry);
+        try {
+          return await promise;
+        } finally {
+          if (inFlightProviderBindings.get(flightKey) === entry) {
+            inFlightProviderBindings.delete(flightKey);
+          }
+        }
+      },
+      onNotify: (message) => deps.showToast(message),
+
+      onBotDraftChange: (botId, patch) => getBotManagementController().updateDraft(botId, patch),
+      onSelectBotSettle: (botId) => getBotManagementController().selectBot(botId),
+      onSaveBotConfig: (botId, options) => getBotManagementController().saveBot(botId, options),
+      onResetBotDraft: (botId) => getBotManagementController().resetDraft(botId),
+      onOpenBotWizard: () => {},
+      onCloseBotWizard: () => {},
+      onBotWizardDraftChange: () => {},
+      onSubmitCreateBot: async () => ({ ok: false, message: deps.t('bot.createFailed') }),
+      onRetryBotList: () => { void getBotManagementController().loadRoster(true); },
+      onDismissBotError: () => getBotManagementController().dismissError(),
+      onDismissBotConfirm: () => getBotManagementController().dismissConfirm(),
+      onConfirmBotExit: () => {},
+      onCancelBotExit: () => {},
+      onRegisterBotDirtyGuard: () => {},
+      onOpenAgent: (name) => {
+        openBotSettings(name);
+      },
+      onRefreshExtensions: () => { void getSettingsController().loadExtensions(); },
+      onReloadSkills: () => getSettingsController().reloadSkills(),
+      onTestGateway: (draft) => {
+        applyGatewayDraft(draft);
+        void getSettingsController().runBusy(async () => {
+          state.testStatus = await deps.testConnection(state.gatewayUrl, state.username, state.password);
+        });
+      },
+      onConnectGateway: (draft) => {
+        applyGatewayDraft(draft);
+        if (!state.gatewayUrl) {
+          state.testStatus = { ok: false, message: deps.t('gateway.urlRequired'), latency: 0 };
+          deps.render();
+          return;
+        }
+        void deps.connect();
+      },
+      onDisconnectGateway: () => { deps.disconnect(); },
+    };
+  }
+
+  function syncReactSettings(): void {
+    if (typeof document === 'undefined') return;
+    const host = document.getElementById('react-settings-host');
+    if (!host) return;
+    const state = deps.getState();
+    if (!updateReactSettings) {
+      updateReactSettings = mountSettingsModal(host, getSettingsSnapshot, createSettingsActions());
+      lastSettingsSnapshotJson = '';
+    }
+    if (!state.isSettingsOpen) {
+      if (lastSettingsSnapshotJson === '') return;
+      lastSettingsSnapshotJson = '';
+      updateReactSettings();
+      return;
+    }
+    const snapshot = getSettingsSnapshot();
+    const json = JSON.stringify(snapshot);
+    if (json === lastSettingsSnapshotJson) return;
+    lastSettingsSnapshotJson = json;
+    updateReactSettings();
+  }
+
+  return {
+    scopedProfileName,
+    subscriptionProfileName,
+    botRoster,
+    reloadProviderCatalog,
+    openBotSettings,
+    getBotManagementSnapshot,
+    getSettingsSnapshot,
+    ensureSettingsSectionData,
+    createSettingsActions,
+    syncReactSettings,
+    getSettingsController,
+    getProviderAdminController,
+    getBotManagementController,
+  };
+}

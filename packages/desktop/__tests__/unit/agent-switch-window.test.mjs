@@ -55,6 +55,10 @@ test('消息窗口 - 贴底且未扩展时跟随末尾，回溯时保持起点',
   const frozen = planMessageWindow({ ...base, total: 500, start: 100, followBottom: false, userExpanded: true });
   assert.equal(frozen.start, 100);
   assert.equal(frozen.end, 220);
+
+  // 【尾部自愈测试 (Why)】用户回溯后滑回物理尾部（start >= tail）且视口贴底时，必须解除 userExpanded 并对齐末尾
+  const healed = planMessageWindow({ ...base, total: 500, start: 380, followBottom: true, userExpanded: true });
+  assert.deepEqual(healed, { start: 380, end: 500, userExpanded: false }, '滑回尾部且贴底必须自愈复位 userExpanded=false');
 });
 
 test('消息窗口 - 容量是硬上限，区间长度永不突破', () => {

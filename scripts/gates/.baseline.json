@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "frozenAt": "2026-11-12",
+  "frozenAt": "2026-11-13",
   "note": "存量债务冻结清单。新增违规一律阻断；本文件只允许收缩（--update-baseline 仅在人工确认清偿后使用）。",
   "entries": {
     "arch/type-escape::packages/core/src/models/types.ts::d9fe5b803d62": 1,
@@ -104,7 +104,6 @@
     "i18n/no-hardcoded-text::packages/desktop/src/renderer/index.ts::a804903198ad": 1,
     "i18n/no-hardcoded-text::packages/desktop/src/renderer/index.ts::060c56f87041": 1,
     "i18n/no-hardcoded-text::packages/desktop/src/renderer/index.ts::fc72c9dd796e": 1,
-    "perf/intl-in-hot-path::packages/desktop/src/renderer/index.ts::b84943678e11": 3,
-    "perf/infinite-animation::packages/desktop/src/renderer/index.ts::5ac7b4cc17b2": 1
+    "perf/intl-in-hot-path::packages/desktop/src/renderer/index.ts::b84943678e11": 3
   }
 }
