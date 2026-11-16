@@ -55,6 +55,19 @@ const SCAN_ROOTS = [
   'packages/desktop/src',
   'packages/mobile/src',
   'scripts/gates',
+  /**
+   * 【已知盲区，独立处理】测试目录（packages/ *_\_\_tests\_\_、scripts/__tests__）当前**不在**
+   * 扫描域内。`test-integrity` 规则的判定对象就是测试文件，因此它在全量门禁里
+   * 目前只能靠单测生效（`scripts/__tests__/gate-timezone-rule.test.mjs` 等）。
+   *
+   * 实测：把这四个目录加进扫描域会立刻暴露 75 条存量违规
+   * （integrity/catch-swallow 60 条、test-integrity 13 条、arch 2 条），
+   * 那是独立的技术债清偿工作，不应夹在本分支里完成——
+   * 一次性把 75 条历史债务变红，门禁会被绕开，正是本仓明确记载的反模式。
+   *
+   * 清偿路径：先单独开分支跑 `node scripts/gates/run.mjs --strict` 并逐条清理，
+   * 再把目录加入 SCAN_ROOTS 并执行 `--update-baseline`。
+   */
 ];
 
 /**

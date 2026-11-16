@@ -48,6 +48,17 @@
 
 本项目已有 `scripts/gates/mutation-check.mjs`（5 个变异点）。它的历史缺陷是**锚点匹配不上时打印警告后 `continue`**，等于静默归零。现已改为：锚点命中次数必须恰好为 1，否则 throw；且施加数与登记数不等也判失败。
 
+### 1.4 为什么"扫描域"比"规则"更容易骗人
+
+规则写错会报出来，**扫描域漏包则永远安静**。本分支实测两次撞上同一个坑：
+
+| 场景 | 表现 | 真实原因 |
+|---|---|---|
+| `packages/mobile/src` 曾不在扫描域 | 门禁报"零违规" | 该包实有 15 处 `: any`，压根没被扫 |
+| `test-integrity` 系列规则（禁 c8 ignore / 测试内 exit(0) / 时区依赖） | 单测能过、门禁永远绿 | 判定对象是测试文件，而扫描域只含 `src` |
+
+判据很简单：**每条规则都要能说出"它在全量扫描里至少命中过一次"**，否则就要怀疑它是否空跑。当前 `test-integrity` 属于上述第二种情形，清偿路径见 8.4。
+
 ---
 
 ## 二、现状事实（实测基线）
@@ -289,7 +300,27 @@ P-03 是三者中最危险的：P-01/P-02 造成假**红**（吵闹但安全）�
 
 **约束**：跨平台逻辑一律落在 Node 脚本里（`scripts/gates/verify-*.mjs`），CI 只负责调用；确需内联多行命令时必须显式 `shell: bash` 并首行 `set -e`，或拆成独立 step。
 
-### 8.4 CDP / GUI 测试的现状与风险
+### 8.4 已知盲区：`test-integrity` 规则在测试目录上不生效
+
+`test-integrity` 系列规则（禁 `c8 ignore`、禁测试内 `exit(0)`、禁时区依赖）的判定对象是测试文件，但 `scripts/gates/run.mjs` 的 `SCAN_ROOTS` 只含各包 `src` 与 `scripts/gates`。**因此这些规则在全量门禁里恒为空跑**，只能靠 `scripts/__tests__/gate-*.test.mjs` 单测证明它们本身是对的。
+
+实测把四个测试目录加入扫描域后立刻暴露 **75 条存量违规**：
+
+| 规则 | 条数 |
+|---|---|
+| `integrity/catch-swallow`（catch 吞错） | 60 |
+| `test-integrity/*` | 13 |
+| `arch/*` | 2 |
+
+**刻意不在本分支修**：一次性把 75 条历史债务变红，门禁当天就会被绕开——这正是本仓明确记载的反模式。清偿路径：
+
+1. 单独开分支，把测试目录加入 `SCAN_ROOTS`；
+2. 跑 `node scripts/gates/run.mjs --strict` 逐条清理；
+3. 清完后执行 `--update-baseline` 收缩基线。
+
+在此之前，验收时**不得**声称"测试完整性已全量守护"——只能说"规则本身有单测证明，扫描域尚缺"。
+
+### 8.5 CDP / GUI 测试的现状与风险
 
 12 个 CDP 文件全部硬编码 Windows Edge 路径，找不到浏览器时 `t.skip()`。在 ubuntu runner 上这会变成"全绿但零执行"。
 
@@ -310,6 +341,7 @@ P-03 是三者中最危险的：P-01/P-02 造成假**红**（吵闹但安全）�
 | 7 | CI workflow 不得含 bash 专有语法 | `ci/no-bash-only-syntax`（`gates:ci`） | 已实现 |
 | 8 | CI workflow 多行 run 不得连写多条命令 | `ci/no-masked-command`（`gates:ci`） | 已实现 |
 | 9 | CI workflow 构建前不得读取产物 | `ci/no-prebuild-artifact-read`（`gates:ci`） | 已实现 |
+| 10 | 测试断言不得依赖运行机器本地时区 | `test-integrity/timezone-dependent` | 规则已实现（扫描域待补，见 8.4） |
 
 ---
 

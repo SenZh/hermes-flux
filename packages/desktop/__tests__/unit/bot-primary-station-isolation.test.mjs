@@ -40,15 +40,30 @@ function renderLeftRail(props = {}) {
  * 5. 变异检验断言：生产逻辑若发生任何偏离，测试必须 100% 变红报警。
  */
 test('Bot Primary Station & Session Isolation Invariants', async (t) => {
+  /**
+   * 【防范的历史坑 (Pitfall)】这里的常量时间戳是 UTC 语义的绝对时间，
+   * 而 `getHours()` 取的是**运行机器本地时区**。
+   * 原实现直接用 `getHours()`，等于把「跑测试的机器是 UTC+8」当成隐含前提：
+   * 本地（UTC+8）得到 22:49 通过，GitHub 的 UTC runner 得到 14:49 稳定失败
+   * （实测 CI 报错 expected '昨天 22:49' / actual '昨天 14:49'，恰好差 8 小时）。
+   *
+   * 修法：格式化固定按 UTC 取值，断言随之固定为 UTC 时间；
+   * 生产代码用的 `formatTime` 本就是宿主注入的展示层函数，
+   * 这里验证的是「时间戳被正确透传并格式化」，与时区无关。
+   *
+   * 规则：本文件任何涉及小时/分钟的断言都必须显式声明时区，
+   * 禁止依赖 `getHours() / toLocaleString()` 的默认时区。
+   */
   const formatTimeMock = (ts) => {
     const d = new Date(ts);
     const p = (n) => String(n).padStart(2, '0');
-    return `昨天 ${p(d.getHours())}:${p(d.getMinutes())}`;
+    return `昨天 ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
   };
+  const EXPECTED_LOCAL_TIME = '昨天 14:49';
 
   await t.test('1. 生产 syncBotProfiles 物理领域隔离断言：严禁普通会话池污染专职 Bot 卡片', () => {
     // 1. Arrange: 模拟线上真实割裂场景
-    // aura 专职主工位真实最后一条消息是 22:49 发送的自动化验证消息
+    // aura 专职主工位真实最后一条消息的时间戳（UTC 14:49）
     const baseProfile = {
       name: 'aura',
       displayName: 'aura-bot',
@@ -66,7 +81,7 @@ test('Bot Primary Station & Session Isolation Invariants', async (t) => {
         [
           {
             content: '已收到 Flux E2E 第 2 轮自动化验证消息。',
-            rawTimestamp: 1730472540000, // 22:49
+            rawTimestamp: 1730472540000, // UTC 14:49
           },
         ],
       ],
@@ -87,7 +102,7 @@ test('Bot Primary Station & Session Isolation Invariants', async (t) => {
     assert.equal(aura.name, 'aura');
     assert.equal(aura.lastMessage, '已收到 Flux E2E 第 2 轮自动化验证消息。');
     assert.equal(aura.timestamp, 1730472540000);
-    assert.equal(aura.lastTime, '昨天 22:49');
+    assert.equal(aura.lastTime, EXPECTED_LOCAL_TIME);
 
     // 变异反向排他断言：未被污染时绝对不包含普通会话信息
     assert.equal(aura.lastTime.includes('23:54'), false, '专职 Bot 时间绝对不能包含普通会话的 23:54');
@@ -338,7 +353,7 @@ test('Bot Primary Station & Session Isolation Invariants', async (t) => {
     const cardHtml = html.slice(cardStartIndex, cardEndIndex);
 
     assert.ok(cardHtml.includes('已收到 Flux E2E 第 2 轮自动化验证消息。'), '主卡片副标题必须匹配生产同步产物');
-    assert.ok(cardHtml.includes('昨天 22:49'), '主卡片时间必须匹配生产同步产物「昨天 22:49」');
+    assert.ok(cardHtml.includes(EXPECTED_LOCAL_TIME), `主卡片时间必须匹配生产同步产物「${EXPECTED_LOCAL_TIME}」`);
     // 主工位卡的时间只来自 profile 快照；普通会话的 23:54 若出现在卡片区间即为污染
     const cardTime = /<time[^>]*>([^<]*)<\/time>/.exec(cardHtml);
     assert.ok(cardTime, '主卡片必须渲染时间元素');

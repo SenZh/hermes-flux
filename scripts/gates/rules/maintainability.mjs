@@ -189,7 +189,49 @@ export const testIntegrityRules = {
     }
 
     /**
-     * 3. 行内豁免注释。
+     * 3. 测试代码的时区依赖。
+     *
+     * 【设计意图 (Why)】绝对时间戳（`1730472540000`）是 UTC 语义，而
+     * `getHours() / getMinutes() / toLocaleTimeString()` 取的是**运行机器本地时区**。
+     * 把两者凑在一起，等于把「跑测试的机器是哪个时区」当成隐含前提。
+     * 实测事故：本地 UTC+8 得到 `昨天 22:49` 通过，GitHub 的 UTC runner
+     * 得到 `昨天 14:49` 稳定失败，报错看起来像业务逻辑坏了，实际是测试假设坏了。
+     *
+     * 【约束与规则 (Rules)】
+     *   1. 只扫测试文件：生产代码用本地时区展示是正确行为，不该被拦；
+     *   2. 命中即为违规（非警告）：时区依赖必然在某个 runner 上失败，
+     *      不存在"这次碰巧没事"的合法情形；
+     *   3. 正确写法是 `getUTCHours()/getUTCMinutes()` 或显式传入时区，
+     *      并在注释里声明取值口径。
+     */
+    if (isTestFile) {
+      const tzRe = /\.(getHours|getMinutes|getDate|getDay|getMonth|getFullYear)\s*\(\s*\)|\.toLocale(?:Time|Date)?String\s*\(/;
+      /**
+       * 本模块不 import scanner（规则只消费 ctx 提供的去注释视图），
+       * 因此豁免判定在此就地实现，语义与 scanner.hasInlineAllowance 保持一致：
+       * 当前行或上一行出现 `gate-tz-allow` 即视为豁免。
+       */
+      const allowAt = (idx) => {
+        const marker = 'gate-tz-allow';
+        return (ctx.rawLines[idx] ?? '').includes(marker) || (ctx.rawLines[idx - 1] ?? '').includes(marker);
+      };
+      ctx.codeLines.forEach((line, i) => {
+        if (!tzRe.test(line)) return;
+        if (/getUTC/.test(line)) return;
+        if (allowAt(i)) return;
+        out.push({
+          file,
+          line: i + 1,
+          lineIdx: i,
+          ruleId: 'test-integrity/timezone-dependent',
+          message: '测试断言不得依赖运行机器本地时区：getHours()/toLocaleString() 在 CI(UTC) 与本地(UTC+8) 结果不同。请改用 getUTCHours()/getUTCMinutes()，或用 // gate-tz-allow: 理由 显式豁免',
+          snippet: line.trim().slice(0, 110),
+        });
+      });
+    }
+
+    /**
+     * 4. 行内豁免注释。
      *
      * 【设计意图 (Why)】豁免机制本身是必要的（平台分支、外部依赖缺失等），
      * 把「每条豁免」当成违规会破坏既有语义：合法的豁免会被判成错误，
