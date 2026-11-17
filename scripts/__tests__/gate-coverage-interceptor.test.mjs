@@ -70,9 +70,12 @@ test('拦截器证伪实证 2：代码行已执行但存在未覆盖条件分支
 });
 
 test('拦截器健壮性：基线比对与参数解析在无源码变动时安全退出 0', () => {
+  // 【约束与规则 (Rules)】必须显式声明"本次改动集为空"：
+  //   直接拿 `--base=HEAD` 跑，结论会依赖运行者的工作区是否干净，本地未提交时必然假红，
+  //   而这条测试要守的是"空改动集 + 基线参数解析"这条路径本身。
   const r = spawnSync(
     process.execPath,
-    ['scripts/verify/new-code-coverage.mjs', '--base=HEAD'],
+    ['scripts/verify/new-code-coverage.mjs', '--base=HEAD', '--probe-files='],
     { cwd: REPO_ROOT, encoding: 'utf8' },
   );
 

@@ -91,6 +91,7 @@ function createMockGroupDeps(overrides = {}) {
     nextLoadMessagesGeneration: () => ++generation,
     getCurrentLoadMessagesGeneration: () => generation,
     logSession: () => {},
+    beginSessionEnter: overrides.beginSessionEnter,
   };
 }
 
@@ -126,7 +127,8 @@ test('groupOperationService: fetchGroupRooms retains existing rooms on failure (
 });
 
 test('groupOperationService: openGroupRoom disarms rollback, switches focus, loads logs, and syncs speaker', async () => {
-  const deps = createMockGroupDeps();
+  const enters = [];
+  const deps = createMockGroupDeps({ beginSessionEnter: (id, options) => enters.push({ id, options }) });
   const service = createGroupOperationService(deps);
 
   // 先拉房间
@@ -134,6 +136,7 @@ test('groupOperationService: openGroupRoom disarms rollback, switches focus, loa
   await service.openGroupRoom('room-1');
 
   const state = deps.getState();
+  assert.deepEqual(enters, [{ id: 'room-1', options: undefined }], '进房间必须锁存进入计划');
   assert.equal(deps.getDisarmCount(), 1);
   assert.equal(state.activeFocus.type, 'group');
   assert.equal(state.activeFocus.roomId, 'room-1');
@@ -156,4 +159,15 @@ test('groupOperationService: syncActiveGroupSpeakerFromMessages resets speaker w
   service.syncActiveGroupSpeakerFromMessages();
 
   assert.equal(deps.getState().activeGroupSpeaker, null);
+});
+
+test('groupOperationService: openGroupRoom captures stream anchor when injected', async () => {
+  let captured = 0;
+  const deps = createMockGroupDeps();
+  deps.captureStreamAnchor = () => { captured++; };
+  const service = createGroupOperationService(deps);
+
+  await service.fetchGroupRooms();
+  await service.openGroupRoom('room-1');
+  assert.equal(captured, 1, '切换群聊时必须调用 captureStreamAnchor 捕获前序视口');
 });

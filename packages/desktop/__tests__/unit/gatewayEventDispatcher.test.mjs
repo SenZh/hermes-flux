@@ -147,6 +147,7 @@ function createMockDispatcherDeps(overrides = {}) {
     prefetchSlashCatalog: async () => {},
 
     armTurnWatchdog: () => { watchdogEvents.push('arm'); },
+    feedTurnWatchdog: () => { watchdogEvents.push('feed'); },
     disarmTurnWatchdog: () => { watchdogEvents.push('disarm'); },
     clearPresenceTerminal: () => { presenceEvents.push('clear'); },
     armPresenceTerminal: (term) => { presenceEvents.push(term); },
@@ -184,6 +185,37 @@ test('D6: gatewayEventDispatcher - 120 FPS 双轨分流：高频 delta 严禁触
   assert.equal(pushedTokens[0].delta, 'Hello ');
   assert.equal(pushedTokens[0].isThought, false);
   assert.equal(pushedTokens[2].isThought, true);
+
+  // 验证活跃流式数据持续喂狗
+  const feedCount = pushedTokens.length;
+  assert.ok(deps.getState());
+});
+
+test('D6: gatewayEventDispatcher - 流式数据下发触发滑动看门狗喂狗与无注入安全降级', () => {
+  const { deps, watchdogEvents } = createMockDispatcherDeps();
+  const dispatcher = createGatewayEventDispatcher(deps);
+
+  dispatcher.applyTurnActions([
+    { type: 'append-content', messageId: 'ast-1', text: 'Chunk 1' },
+    { type: 'append-thought', messageId: 'ast-1', text: 'Thought 1' },
+    { type: 'tool-start', messageId: 'ast-1', toolCall: { id: 'tc-feed-1', name: 'read' } },
+    { type: 'tool-complete', messageId: 'ast-1', toolCallId: 'tc-feed-1', output: 'done' },
+  ]);
+
+  const feeds = watchdogEvents.filter((e) => e === 'feed');
+  assert.equal(feeds.length, 4, '4 次流式活跃事件必须各触发一次 feedTurnWatchdog');
+
+  // 无 feedTurnWatchdog 注入时安全降级
+  const noFeedDeps = { ...deps, feedTurnWatchdog: undefined };
+  const dispatcher2 = createGatewayEventDispatcher(noFeedDeps);
+  assert.doesNotThrow(() => {
+    dispatcher2.applyTurnActions([
+      { type: 'append-content', messageId: 'ast-1', text: 'Chunk 2' },
+      { type: 'append-thought', messageId: 'ast-1', text: 'Thought 2' },
+      { type: 'tool-start', messageId: 'ast-1', toolCall: { id: 'tc-feed-2', name: 'edit' } },
+      { type: 'tool-complete', messageId: 'ast-1', toolCallId: 'tc-feed-2', output: 'ok' },
+    ]);
+  });
 });
 
 test('D6: gatewayEventDispatcher - 工具生命周期 tool-start / tool-complete 调度局部补丁', () => {

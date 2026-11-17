@@ -129,7 +129,10 @@ function createMockDeps(overrides = {}) {
 
 test('SessionOperationService - 核心生命周期与状态切换测试', async (t) => {
   await t.test('1. createNewSession: 暂存当前草稿、发起 session.create 并重置焦点与输入框', async () => {
-    const { deps, state, rpcCalls } = createMockDeps();
+    const enters = [];
+    const { deps, state, rpcCalls } = createMockDeps({
+      beginSessionEnter: (id, options) => enters.push({ id, options }),
+    });
     deps.setPromptInputValue('未发送的当前草稿');
     const service = createSessionOperationService(deps);
 
@@ -138,6 +141,7 @@ test('SessionOperationService - 核心生命周期与状态切换测试', async 
     assert.equal(deps.sessionDrafts.get('sess-current'), '未发送的当前草稿', '切出会话前草稿必须被暂存');
     assert.equal(rpcCalls.some((c) => c.method === 'session.create'), true, '必须调用 session.create');
     assert.equal(state.activeSessionId, 'sess-new', 'activeSessionId 必须更新为新会话');
+    assert.deepEqual(enters, [{ id: 'sess-new', options: { forcePinToBottom: true } }], '新建会话必须强制贴底');
     assert.equal(deps.getPromptInputValue(), '', '新会话输入框必须清空');
   });
 
@@ -151,20 +155,28 @@ test('SessionOperationService - 核心生命周期与状态切换测试', async 
     assert.equal(state.activeSessionId, 'sess-next', '删除当前活动会话后焦点平滑切换至下一会话');
   });
 
-  await t.test('3. selectSession: 非破坏性草稿恢复，敲入新字时不被旧草稿覆盖', async () => {
-    const { deps, state } = createMockDeps();
+  await t.test('3. selectSession: 非破坏性草稿恢复，敲入新字时不被旧草稿覆盖，且离开前捕获锚点', async () => {
+    let capturedAnchors = 0;
+    const enters = [];
+    const { deps, state } = createMockDeps({
+      captureStreamAnchor: () => { capturedAnchors += 1; },
+      beginSessionEnter: (id, options) => { enters.push({ id, options }); },
+    });
     deps.sessionDrafts.set('sess-next', '旧会话草稿内容');
     const service = createSessionOperationService(deps);
 
-    // 场景 A: 输入框为空时恢复草稿
+    // 场景 A: 输入框为空时恢复草稿，且离开 sess-current 时调用 captureStreamAnchor
     deps.setPromptInputValue('');
     await service.selectSession('sess-next');
+    assert.equal(capturedAnchors, 1, '切离活动会话前必须调用 captureStreamAnchor 捕获快照');
+    assert.deepEqual(enters[0], { id: 'sess-next', options: undefined }, '切会话必须锁存进入计划');
     assert.equal(deps.getPromptInputValue(), '旧会话草稿内容', '空输入框切入时必须恢复旧草稿');
 
     // 场景 B: 用户已经键入文字时不被冲刷
     deps.sessionDrafts.set('sess-current', '更旧草稿');
     deps.setPromptInputValue('正在实时输入的文字');
     await service.selectSession('sess-current');
+    assert.equal(capturedAnchors, 2, '再次切离会话时继续捕获快照');
     assert.equal(deps.getPromptInputValue(), '正在实时输入的文字', '非空输入框绝对不可被草稿冲刷');
   });
 

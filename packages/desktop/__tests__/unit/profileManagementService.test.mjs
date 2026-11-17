@@ -114,6 +114,17 @@ test('profileManagementService: openBotChat hits 0ms instant cache when foreverC
   assert.equal(deps.getDisarmCount(), 1);
 });
 
+test('profileManagementService: openBotChat captures stream anchor when injected', async () => {
+  let captured = 0;
+  const deps = createMockProfileDeps();
+  deps.captureStreamAnchor = () => { captured++; };
+  deps.botForeverChatCache.set('bot-1', 'cached-forever-id');
+  const service = createProfileManagementService(deps);
+
+  await service.openBotChat('bot-1');
+  assert.equal(captured, 1, '切入数字员工前必须调用 captureStreamAnchor 捕获前序视口');
+});
+
 test('profileManagementService: switchProfile updates profileName and invokes fetchSessions', async () => {
   const deps = createMockProfileDeps();
   const service = createProfileManagementService(deps);

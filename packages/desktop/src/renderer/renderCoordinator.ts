@@ -49,6 +49,8 @@ import {
 import {
   resolveTitlebarTitle,
   doesSessionBelongToProject,
+  decideViewportPin,
+  chooseViewportAnchor,
 } from '@hermes-flux/core';
 import type { AppState } from './state/appState.js';
 import { decideConversationPush } from './conversationPush.js';
@@ -71,6 +73,9 @@ export interface RenderMessagesSnapshot {
   rollbackActive: boolean;
   capsuleCount: number;
 }
+
+export type SessionEnterPendingProbe = () => boolean;
+export type SessionEnterSettleProbe = (probeMessageId?: string) => void;
 
 export interface RenderCoordinatorDeps {
   getState: () => AppState;
@@ -118,6 +123,8 @@ export interface RenderCoordinatorDeps {
   isStreamNearBottom: (stream: HTMLElement | null) => boolean;
   syncStreamBottomInset: () => void;
   settleInitialBottom: () => void;
+  isSessionEnterPending: SessionEnterPendingProbe;
+  settleSessionEnter: SessionEnterSettleProbe;
 
   // 事件与 Popper
   bindEvents: () => void;
@@ -482,8 +489,6 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
     pendingScrollToBottom = false;
     const streamEl = document.getElementById('conversation-stream');
     const wasNearBottom = deps.isStreamNearBottom(streamEl);
-    const pinBottom = suppressPinOnce ? false : forcedBottom || wasNearBottom;
-    const streamAnchor = deps.captureStreamAnchor();
 
     document.documentElement.setAttribute('data-theme', state.theme);
     document.documentElement.setAttribute(
@@ -555,6 +560,21 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
         lastMessagesSnapshot.messagesPhase !== currentMessagesSnapshot.messagesPhase ||
         lastMessagesSnapshot.rollbackActive !== currentMessagesSnapshot.rollbackActive ||
         lastMessagesSnapshot.capsuleCount !== currentMessagesSnapshot.capsuleCount);
+
+    // 【进入计划裁决 (Rules)】跨会话「进去之后视口在哪」由纯函数统一裁决：
+    //   进入期不捕获旧 DOM、不重放锚点；非进入期沿用原有贴底/锚点语义。
+    const scrollDecision = decideViewportPin({
+      enterPending: deps.isSessionEnterPending(),
+      forcedBottom,
+      wasNearBottom,
+      messagesChanged,
+      hasRaf: typeof requestAnimationFrame !== 'undefined',
+    });
+    const pinBottom = scrollDecision.pinBottom;
+    const fallbackAnchor: StreamAnchor = { sessionId: state.activeSessionId, id: null, offset: 0, rawScrollTop: 0 };
+    const streamAnchor = chooseViewportAnchor(scrollDecision, () => deps.captureStreamAnchor(), fallbackAnchor);
+    // 单点 apply：三个渲染分支共用同一判定，避免分支漂移。
+    const applyAnchorAfterDom = () => { if (scrollDecision.applyAnchor) deps.applyStreamAnchor(streamAnchor, pinBottom); };
 
     const bodyContainer = root.querySelector('.flux-body-container');
 
@@ -642,7 +662,7 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
       mountReactShellComponents();
       lastMessagesSnapshot = currentMessagesSnapshot;
       lastInputDockSnapshot = currentDockSnapshot;
-      deps.applyStreamAnchor(streamAnchor, pinBottom);
+      applyAnchorAfterDom();
     } else {
       // 2. High-performance Subtree/Section Isolation Update
       mountReactShellComponents();
@@ -775,8 +795,6 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
         if (reactHost && canUseReactList) {
           syncReactMessageList(structureDirty);
           canvasStructureDirty = false;
-          deps.applyStreamAnchor(streamAnchor, pinBottom);
-          lastMessagesSnapshot = currentMessagesSnapshot;
         } else {
           activeStream.innerHTML = renderConversationCanvas({
             gatewayConnected: state.gatewayConnected,
@@ -795,9 +813,9 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
           });
           canvasStructureDirty = false;
           syncReactMessageList(true);
-          deps.applyStreamAnchor(streamAnchor, pinBottom);
-          lastMessagesSnapshot = currentMessagesSnapshot;
         }
+        applyAnchorAfterDom();
+        lastMessagesSnapshot = currentMessagesSnapshot;
       }
     }
 
@@ -833,8 +851,14 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
 
     deps.syncComposerPoppers();
 
-    if (messagesChanged && typeof requestAnimationFrame !== 'undefined') {
+    // 【规则】进入计划挂起时即使消息快照未变也必须推进，否则缓存命中的切会话永远不落定；
+    //   此时不再走「裸写 scrollTop = scrollHeight」的旧路径，交由 settleSessionEnter 多帧收敛。
+    if (scrollDecision.advanceSessionEnter) {
       requestAnimationFrame(() => {
+        if (!scrollDecision.capture) {
+          deps.settleSessionEnter(state.messages.length > 0 ? state.messages[state.messages.length - 1].id : '');
+          return;
+        }
         if (pinBottom) {
           const stream = document.getElementById('conversation-stream');
           if (stream) {

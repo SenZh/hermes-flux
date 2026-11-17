@@ -218,6 +218,7 @@ function createMockTurnDeps(overrides = {}) {
     groupRoomStore,
     tokenCoalescer,
     botActivityStore,
+    activityTransitionTracker,
     rendered,
     depsRecorded,
     activeStreamingContext: () => activeStreamingContext,
@@ -288,8 +289,65 @@ test('D5: turnExecutionService - sendMessage 发送单聊并挂载流式上下�
   assert.equal(submitRpc.params.text, '请帮我分析这段架构');
   assert.equal(activeStreamingContext().activeStreamingStoredSessionId, 'sess-1');
 
+  service.armTurnWatchdog();
+  service.feedTurnWatchdog();
   service.disarmTurnWatchdog();
   service.clearPresenceTerminal();
+});
+
+test('D4-watchdog: turnExecutionService - 看门狗空闲超时触发静默熔断与提示下发', async () => {
+  const { deps, state, activeStreamingContext, activityTransitionTracker } = createMockTurnDeps();
+  deps.watchdogIdleTimeoutMs = 20;
+  const service = createTurnExecutionService(deps);
+
+  state.isStreaming = true;
+  activeStreamingContext().activeStreamingStoredSessionId = 'sess-timeout';
+  // Bot 主工位的流式回合同时挂 bot 域运行态：超时必须一并摘掉活跃标记，
+  // 否则 Bot 卡片在会话侧已熔断、在 Bot 侧仍显示"正在运行"，两侧状态永久分叉。
+  activeStreamingContext().activeStreamingBotName = 'bot-x';
+  service.armTurnWatchdog();
+
+  await new Promise((resolve) => setTimeout(resolve, 60));
+
+  assert.equal(state.isStreaming, false, '超时后必须原子重置流式状态');
+  assert.equal(state.dockNotice, 'chat.watchdogTimeoutNotice');
+  assert.deepEqual(
+    activityTransitionTracker.cleared,
+    [{ domain: 'session', id: 'sess-timeout' }, { domain: 'bot', id: 'bot-x' }],
+    '会话域与 Bot 域都必须摘掉活跃标记，不得只清一侧'
+  );
+});
+
+test('D4-watchdog: turnExecutionService - 非流式态超时不误伤状态', async () => {
+  const { deps, state } = createMockTurnDeps();
+  deps.watchdogIdleTimeoutMs = 20;
+  const service = createTurnExecutionService(deps);
+
+  state.isStreaming = false;
+  state.dockNotice = '';
+  service.armTurnWatchdog();
+
+  await new Promise((resolve) => setTimeout(resolve, 60));
+
+  assert.equal(state.dockNotice, '', '非流式态超时不得下发看门狗提示');
+});
+
+test('D4-watchdog: turnExecutionService - 定时器 unref 异常时安全降级不抛错', () => {
+  const { deps } = createMockTurnDeps();
+  const service = createTurnExecutionService(deps);
+
+  const origSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = () => ({
+    unref() {
+      throw new Error('mock unref error');
+    },
+  });
+  try {
+    assert.doesNotThrow(() => service.armTurnWatchdog(), '跨端定时器缺少 unref 能力时必须安全降级');
+  } finally {
+    globalThis.setTimeout = origSetTimeout;
+    service.disarmTurnWatchdog();
+  }
 });
 
 test('D5: turnExecutionService - routeSend 分流裁决与 BTW 旁路调用', async () => {

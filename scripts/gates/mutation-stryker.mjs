@@ -78,6 +78,13 @@ function main() {
   // 1. 生成该领域的动态 Stryker 配置
   const config = {
     $schema: './node_modules/@stryker-mutator/core/schema/stryker-schema.json',
+    /**
+     * 【必须显式声明插件 (Why)】Stryker 10 在 bun 的嵌套 node_modules 布局下
+     *   会找不到 `@stryker-mutator/tap-runner` 的自动发现入口，报
+     *   "Could not inject ... Cannot find TestRunner plugin tap" 并直接退出（实测所有领域都受影响）。
+     *   显式列出插件路径即可绕过自动发现。
+     */
+    plugins: ['@stryker-mutator/tap-runner'],
     testRunner: 'tap',
     tap: {
       testFiles: domainConfig.testFiles,

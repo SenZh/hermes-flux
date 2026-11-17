@@ -286,6 +286,46 @@
       "symbol": "reconcileAttach",
       "test": "packages/core/__tests__/formal/provider-attach-flow-formal.test.mjs",
       "failure": "用户刚打开的确认条瞬间消失"
+    },
+    {
+      "id": "INV-VIEW-01",
+      "topic": "跨会话恢复决策忠实于快照（贴底 / 锚点 / 标量）",
+      "source": "packages/core/src/viewport/sessionScrollMemory.ts",
+      "symbol": "planSessionEnter",
+      "test": "packages/core/__tests__/formal/session-scroll-memory-formal.test.mjs",
+      "failure": "切回会话时贴底态被旧像素位置覆盖，或回溯位置丢失，表现为白屏或跳到别处"
+    },
+    {
+      "id": "INV-VIEW-02",
+      "topic": "会话记忆容量有界且最新会话必留",
+      "source": "packages/core/src/viewport/sessionScrollMemory.ts",
+      "symbol": "recordSnapshot#lru",
+      "test": "packages/core/__tests__/formal/session-scroll-memory-formal.test.mjs",
+      "failure": "记忆无限增长吃内存；或刚离开的会话被淘汰，切回即丢位置"
+    },
+    {
+      "id": "INV-VIEW-03",
+      "topic": "基准行高中位数恒被夹在有效区间内",
+      "source": "packages/core/src/viewport/adaptiveMedianEstimator.ts",
+      "symbol": "addSample#median-clamp",
+      "test": "packages/core/__tests__/formal/viewport-estimator-formal.test.mjs",
+      "failure": "离屏占位高度或超大代码块把基准行高拉偏，长会话滚动条滑块剧烈缩放"
+    },
+    {
+      "id": "INV-VIEW-04",
+      "topic": "渲染期视口裁决忠实于进入计划与常规两条语义",
+      "source": "packages/core/src/viewport/renderScrollDecision.ts",
+      "symbol": "decideViewportPin",
+      "test": "packages/core/__tests__/formal/render-scroll-decision-formal.test.mjs",
+      "failure": "进入期误捕获旧 DOM 把上一会话位置写进新会话记忆；或回溯态被误判贴底，切回即跳到最新消息"
+    },
+    {
+      "id": "INV-TURN-01",
+      "topic": "看门狗时序参数恒满足夹取与单调（含空时钟回落）",
+      "source": "packages/core/src/turn/slidingWatchdog.ts",
+      "symbol": "constructor#clamp",
+      "test": "packages/core/__tests__/formal/sliding-watchdog-formal.test.mjs",
+      "failure": "时钟注入为 null 时回合一开始就崩在熔断器；或上下限倒挂把 30 分钟保险丝缩成几秒"
     }
   ]
 }

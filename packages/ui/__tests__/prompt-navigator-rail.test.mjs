@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import { PromptNavigatorRail } from '../dist/components-react/conversation/PromptNavigatorRail.js';
+import { PromptNavigatorRail, createCarouselStepper, stepCarouselHighlight } from '../dist/components-react/conversation/PromptNavigatorRail.js';
 import { renderMiddlePod } from '../dist/components/MiddlePod/MiddlePod.js';
 import {
   PANEL_OVERSCAN_ROWS,
@@ -552,4 +552,177 @@ test('顶部拉取历史：接线、文案 i18n 与方案 1 刻度脉冲流样�
   const barBlock = withoutComments.slice(barAt, withoutComments.indexOf('}', barAt));
   assert.match(barBlock, /border-radius:\s*var\(--radius-pill,\s*9999px\)/, '竖条端帽圆角必须走 --radius-pill Token');
   assert.doesNotMatch(barBlock, /animation:/, '稳态竖条不得绑定 infinite 动画');
+});
+
+/**
+ * 轨道边缘单步步进决策（stepCarouselHighlight）全路径覆盖。
+ *
+ * 【设计意图 (Why)】拔掉 18px 狂飙 setInterval 后，边缘悬停改为「一次指针位移只步进一格」。
+ *   该判定的全部边界（空表 / 顶到首条触发拉取 / 高亮锁 / 底到末条 / 无高亮回落 active /
+ *   下标越界拒绝）必须由纯函数级单测锁死，否则回归成循环连发时只能靠肉眼发现。
+ */
+test('轨道边缘单步步进决策覆盖全部边界', () => {
+  const moved = [];
+  const base = {
+    total: 10,
+    hasMoreAbove: true,
+    hasMoreBelow: true,
+    activeIndex: 4,
+    highlightedIndex: null,
+    attemptLoadOlder: () => false,
+    moveHighlight: (next) => moved.push(next),
+  };
+
+  // 1. 空表：任何方向都不动作
+  assert.deepEqual(
+    stepCarouselHighlight(-1, { ...base, total: 0 }, false),
+    { triggeredLoadOlder: false }
+  );
+  assert.equal(moved.length, 0);
+
+  // 2. 顶部已到首条且允许拉取：触发一轮历史拉取
+  let olderCalls = 0;
+  const topState = {
+    ...base,
+    hasMoreAbove: false,
+    attemptLoadOlder: () => {
+      olderCalls += 1;
+      return true;
+    },
+  };
+  assert.deepEqual(
+    stepCarouselHighlight(-1, topState, false),
+    { triggeredLoadOlder: true },
+    '首次触顶必须真正触发拉取'
+  );
+  assert.equal(olderCalls, 1);
+
+  // 3. 顶部热区锁已置位：不得重复拉取
+  assert.deepEqual(
+    stepCarouselHighlight(-1, topState, true),
+    { triggeredLoadOlder: false },
+    '热区锁期间不得重复触发拉取'
+  );
+  assert.equal(olderCalls, 1, '锁生效后拉取次数不得增加');
+
+  // 4. 底部已到末条且无下行余量：直接返回
+  assert.deepEqual(
+    stepCarouselHighlight(1, { ...base, hasMoreBelow: false }, false),
+    { triggeredLoadOlder: false }
+  );
+
+  // 5. 无高亮时以 activeIndex 为锚点向下一步
+  moved.length = 0;
+  stepCarouselHighlight(1, base, false);
+  assert.deepEqual(moved, [5], '无高亮时必须回落到 activeIndex 作为锚点');
+
+  // 6. 有高亮时以高亮为锚点向上一步
+  moved.length = 0;
+  stepCarouselHighlight(-1, { ...base, highlightedIndex: 7 }, false);
+  assert.deepEqual(moved, [6], '有高亮时必须从高亮项继续步进');
+
+  // 7. 锚点非法（activeIndex 为 -1 且无高亮）：拒绝移动
+  moved.length = 0;
+  stepCarouselHighlight(1, { ...base, activeIndex: -1 }, false);
+  assert.deepEqual(moved, [], '锚点非法时不得产生 moveHighlight 调用');
+});
+
+/**
+ * 边缘热区步进器的装配契约。
+ *
+ * 【设计意图 (Why)】一次指针位移只步进一格，是否继续完全由指针事件驱动；
+ *   装配本身在渲染期完成，因此组件不必为「调用并置锁」再写一层回调，
+ *   逻辑可脱离 React 直接断言。
+ * 【约束与规则 (Rules)】步进器只读写传入的容器，不缓存任何内部状态。
+ */
+test('边缘步进器：单次调用只走一格，触发拉取后写回热区锁并拒绝重复拉取', () => {
+  const moved = [];
+  let olderCalls = 0;
+  const latestRef = {
+    current: {
+      total: 10,
+      hasMoreAbove: true,
+      hasMoreBelow: true,
+      activeIndex: 4,
+      highlightedIndex: null,
+      attemptLoadOlder: () => { olderCalls += 1; return false; },
+      moveHighlight: (next) => moved.push(next),
+    },
+  };
+  const lockRef = { current: false };
+  let clock = 1000;
+  const step = createCarouselStepper({ latestRef, topHotzoneTriggeredRef: lockRef, now: () => clock });
+
+  step(1);
+  assert.deepEqual(moved, [5], '无高亮时以 activeIndex 为锚点向下一步，且只走一格');
+
+  // 同一时刻的连续事件必须被最小步进间隔拦下：指针事件可达 120Hz，不设门会比旧定时器更快
+  step(1);
+  assert.deepEqual(moved, [5], '最小步进间隔内的重复事件不得再步进一格');
+
+  clock += 100;
+  step(-1);
+  assert.deepEqual(moved, [5, 3], '越过最小间隔后反向同样只走一格；视图未推进前仍以 activeIndex 为锚点');
+  assert.equal(olderCalls, 0, '顶部仍有上行余量时不得触发历史拉取');
+
+  // 顶到首条：触发热区拉取后必须把锁写回容器，供下一帧渲染读取
+  latestRef.current = {
+    ...latestRef.current,
+    hasMoreAbove: false,
+    attemptLoadOlder: () => { olderCalls += 1; return true; },
+  };
+  clock += 100;
+  step(-1);
+  assert.equal(lockRef.current, true, '真正触发拉取后必须置位热区锁');
+  assert.equal(olderCalls, 1);
+
+  // 锁生效后继续向上探测：不得重复拉取
+  let repeated = 0;
+  latestRef.current = {
+    ...latestRef.current,
+    attemptLoadOlder: () => { repeated += 1; return true; },
+  };
+  clock += 100;
+  step(-1);
+  assert.equal(repeated, 0, '热区锁生效期间不得重复触发拉取');
+
+  // 视图换引用后步进器看到的是最新一帧，而不是装配时的旧快照
+  latestRef.current = { ...latestRef.current, total: 0 };
+  moved.length = 0;
+  clock += 100;
+  step(1);
+  assert.deepEqual(moved, [], '空表时任何方向都不动作');
+});
+
+test('边缘步进器：未注入时钟时回落到 Date.now，首步必然放行', () => {
+  const moved = [];
+  const latestRef = {
+    current: {
+      total: 4,
+      hasMoreAbove: true,
+      hasMoreBelow: true,
+      activeIndex: 1,
+      highlightedIndex: null,
+      attemptLoadOlder: () => false,
+      moveHighlight: (next) => moved.push(next),
+    },
+  };
+  const step = createCarouselStepper({ latestRef, topHotzoneTriggeredRef: { current: false } });
+
+  step(1);
+  assert.deepEqual(moved, [2], '缺省时钟下首次步进必须立即生效，不得被间隔门拦住');
+});
+
+test('边缘热区：步进必须由指针事件驱动，禁止重新引入定时器', () => {
+  const tsx = fs.readFileSync(
+    new URL('../src/components-react/conversation/PromptNavigatorRail.tsx', import.meta.url),
+    'utf8'
+  );
+  // 只剥行首注释块与行首 // 注释，避免误伤字符串里的 //（如 URL）。
+  const code = tsx.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  assert.match(code, /startCarousel\(-1\)/, '顶部热区必须真的驱动步进器，否则热区整块失效');
+  assert.match(code, /startCarousel\(1\)/, '底部热区必须真的驱动步进器');
+  assert.doesNotMatch(code, /setInterval\s*\(/, '禁止重新引入 18px 狂飙定时器（含带空格的写法）');
+  assert.doesNotMatch(code, /requestAnimationFrame\s*\(/, '禁止用 rAF 自循环替代定时器，同样是持续高频步进');
+  assert.doesNotMatch(code, /carouselTimerRef|carouselDirRef|CAROUSEL_INTERVAL_MS/, '轮播定时器状态必须彻底拔除');
 });

@@ -651,11 +651,13 @@ html[data-maximized="true"] #flux-app-root {
 }
 
 /* Long conversations keep real layout heights.
-   `content-visibility: auto` was removed on purpose: with estimated
-   `contain-intrinsic-size` heights the stream's scrollHeight changed whenever a
-   row entered the viewport, which made the viewport jump while streaming and
-   while paging older messages. Windowed mounting (100 rows) is what keeps long
-   sessions fast. */
+   `content-visibility: auto` is used again (see packages/ui/src/styles/conversation.css):
+   the earlier removal was caused by estimated `contain-intrinsic-size` heights
+   changing the stream's scrollHeight whenever a row entered the viewport. The current
+   setup differs on both counts: `contain-intrinsic-size: auto <median>` remembers the
+   last rendered height instead of guessing, and `overflow-anchor: auto` is declared on
+   the stream so the viewport absorbs residual height changes.
+   Windowed mounting stays disabled on purpose: Blink does the off-screen culling. */
 
 /* Draggable Rail Handles
    设计意图 (Why)：宽度由 --geo-resize-handle 唯一真值源驱动，左右把手共用同一条规则；

@@ -69,6 +69,10 @@ export function isExtraInputsError(error: unknown): boolean {
   return msg.includes('Extra inputs');
 }
 
+export type SessionAnchorCapturer = () => unknown;
+
+export type SessionEnterBeginHook = (sessionId: string, options?: { forcePinToBottom?: boolean }) => void;
+
 export interface SessionOperationDeps {
   readonly getState: () => AppState;
   readonly getGatewayClient: () => HermesGatewayClient | null;
@@ -98,7 +102,9 @@ export interface SessionOperationDeps {
 
   // 视口与滚动控制
   readonly setPendingScrollToBottom: (val: boolean) => void;
+  beginSessionEnter?: SessionEnterBeginHook;
   readonly setLastMessagesSnapshot: (val: unknown) => void;
+  captureStreamAnchor?: SessionAnchorCapturer;
 
   // 跨服务联动
   readonly loadMessages: (sessionId: string, targetBotName?: string) => Promise<void>;
@@ -216,6 +222,8 @@ export class SessionOperationService {
       state.profileName = targetProfile;
       state.activeSessionId = handles.storedId;
       state.activeLiveSessionId = handles.liveId;
+      // 新建会话必须强制贴底：它没有历史记忆，且首条消息到达后要自动跟到最新。
+      this.deps.beginSessionEnter?.(handles.storedId, { forcePinToBottom: true });
       state.activeFocus = { type: 'session', sessionId: handles.storedId };
       state.messages = [];
       this.deps.sessionMessagesCache.set(handles.storedId, []);
@@ -240,7 +248,6 @@ export class SessionOperationService {
       };
       state.sessions = upsertSession(state.sessions, newSessionEntry);
 
-      this.deps.setPendingScrollToBottom(true);
       this.deps.render();
 
       // Clear input for the new clean session
@@ -489,6 +496,7 @@ export class SessionOperationService {
     // Preserve draft & message snapshot for outgoing session
     const currentInputVal = this.getInputValue();
     if (state.activeSessionId && state.activeSessionId !== id) {
+      this.deps.captureStreamAnchor?.();
       if (currentInputVal !== undefined) {
         this.deps.sessionDrafts.set(state.activeSessionId, currentInputVal);
       }
@@ -501,6 +509,9 @@ export class SessionOperationService {
 
     state.activeSessionId = id;
     state.activeLiveSessionId = ''; // must be re-resolved through session.resume
+    // 【规则】进入计划必须在 activeSessionId 已切、DOM 尚未替换时锁存：
+    // 它只读 SessionScrollMemory，不读 DOM，因此不受 React 异步提交时序影响。
+    this.deps.beginSessionEnter?.(id);
     this.deps.incrementActiveLoadMessagesGeneration?.();
     applyEnteredRead(this.deps.unreadSessionIds, id);
     this.deps.activityTransitionTracker.clear('session', id);

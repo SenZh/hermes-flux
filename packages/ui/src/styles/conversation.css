@@ -95,6 +95,10 @@
   box-sizing: border-box;
   scroll-behavior: auto;
   overscroll-behavior: contain;
+  /* 内核原生滚动锚定的初始值就是 auto；这里显式声明是为了钉死契约：
+     任何后续 reset 或第三方样式把本容器或其任一祖先设为 none，都必须先改到这一行，
+     而不是静默丢掉锚定。 */
+  overflow-anchor: auto;
 }
 
 /* L1 画布：核心自适应限宽居中列，支持宽屏展开 */
@@ -127,11 +131,14 @@
 
 /* 回合容器：历史回放会把「每次思考 / 每次工具调用」落成独立消息行，
    若直接堆叠，两条思考行之间只有 0px，文字间距比正文段落还密。
-   这里用与消息内部一致的 --conv-item-gap 补上呼吸感，实时流式只有一条消息时不受影响。 */
+   这里用与消息内部一致的 --conv-item-gap 补上呼吸感，实时流式只有一条消息时不受影响。
+   【现代 Blink 原生离屏遏制】视口外由 Chromium C++ 自动跳过 Paint 与 Layout */
 .conv-turn {
   display: flex;
   flex-direction: column;
   gap: var(--conv-item-gap);
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--conv-intrinsic-median-height, 140px);
 }
 
 /* ==========================================================================
@@ -1228,12 +1235,16 @@ details[open] > summary > .tool-row__expand {
 }
 
 /* 自绘提示气泡：原生 title 的黑底方框无法换肤，深色主题下像一块墨渍。
-   这里用与浮层同源的 Token 画小胶囊，延迟 0.35s 出现，快速划过不闪。 */
+   这里用与浮层同源的 Token 画小胶囊，延迟 0.35s 出现，快速划过不闪。
+   【必须向上弹出且按角色横向锚定 (Rules)】`.conv-turn` 开了 `content-visibility: auto`，
+   隐含 paint containment：任何越出回合边界的绘制都会被裁掉。
+   向下弹会撞回合底边；水平居中则会在用户行（右对齐，按钮贴右边界）把气泡右侧裁掉。
+   因此助手行左锚、用户行右锚，两行都在回合边界内。 */
 .msg-action-btn::after {
   content: attr(data-tooltip);
   position: absolute;
-  top: calc(100% + 6px);
-  left: 50%;
+  bottom: calc(100% + 6px);
+  left: 0;
   z-index: 20;
   padding: 3px 7px;
   border-radius: 6px;
@@ -1248,15 +1259,21 @@ details[open] > summary > .tool-row__expand {
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
-  transform: translateX(-50%) translateY(-2px);
+  transform: translateY(2px);
   transition: opacity 0.12s ease, transform 0.12s ease;
   transition-delay: 0s;
+}
+
+/* 用户行右对齐：按钮贴回合右边界，气泡必须右锚，居中会把右侧裁掉。 */
+.conv-message--user .msg-action-btn::after {
+  left: auto;
+  right: 0;
 }
 
 .msg-action-btn:hover::after,
 .msg-action-btn:focus-visible::after {
   opacity: 1;
-  transform: translateX(-50%) translateY(0);
+  transform: translateY(0);
   transition-delay: 0.35s;
 }
 

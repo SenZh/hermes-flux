@@ -150,20 +150,10 @@ export function createMessageWindowManager(deps: MessageWindowManagerDeps): Mess
       }
     }
 
-    const stream = typeof document !== 'undefined' ? document.getElementById('conversation-stream') : null;
-    const plan = planMessageWindow({
-      total,
-      start: messageWindowStart,
-      end: messageWindowEnd,
-      userExpanded: messageWindowUserExpanded,
-      sessionChanged,
-      followBottom: stream ? deps.isStreamNearBottom(stream) : true,
-      initialWindow: INITIAL_RENDER_WINDOW,
-      capacity: MESSAGE_WINDOW_CAPACITY,
-    });
-    messageWindowStart = plan.start;
-    messageWindowEnd = plan.end;
-    messageWindowUserExpanded = plan.userExpanded;
+    // 【方案 1 纯原生流】直接全量挂载，由 Chromium 内核 CSS content-visibility: auto 处理离屏遏制
+    messageWindowStart = 0;
+    messageWindowEnd = total;
+    messageWindowUserExpanded = false;
   }
 
   function expandMessageWindow(): boolean {
@@ -181,10 +171,6 @@ export function createMessageWindowManager(deps: MessageWindowManagerDeps): Mess
     deps.setCanvasStructureDirty?.(true);
     deps.setSuppressPinBottomOnce?.(true);
     deps.render();
-
-    if (typeof requestAnimationFrame !== 'undefined') {
-      requestAnimationFrame(() => syncScrollTopToWindow('expand upward'));
-    }
     return true;
   }
 
@@ -238,42 +224,18 @@ export function createMessageWindowManager(deps: MessageWindowManagerDeps): Mess
   }
 
   function syncScrollTopToWindow(reason: string): void {
-    if (typeof document === 'undefined') return;
-    const stream = document.getElementById('conversation-stream');
-    if (!stream) return;
-    const virtualTop = Math.round(messageWindowStart * averageRowHeightPx);
-    const virtualBottom = Math.round(messageWindowEnd * averageRowHeightPx);
-    if (stream.scrollTop >= virtualTop - stream.clientHeight && stream.scrollTop <= virtualBottom) return;
-    const target = Math.max(0, Math.min(virtualTop, stream.scrollHeight - stream.clientHeight));
-    stream.scrollTop = target;
-    markProgrammaticScroll(stream);
-    logScroll.debug('scrollTop synced to window', { reason, start: messageWindowStart, target });
+    // 【方案 1 纯原生流核心防御】严禁在用户滚动或窗口展开时修改 stream.scrollTop！
+    // 杜绝任何反向弹飞与破坏浏览器原生惯性滚动的行为。
+    logScroll.trace('syncScrollTopToWindow bypassed in native flow', { reason });
   }
 
-  function scheduleVirtualHeightSync(attempt = 0): void {
+  function scheduleVirtualHeightSync(_attempt = 0): void {
+    // 方案 1 原生流下无需递归 8~90 帧拉扯，单帧安全收敛
     if (typeof requestAnimationFrame === 'undefined') {
-      lockAverageRowHeight();
-      syncCanvasVirtualHeight();
+      deps.settleInitialBottom();
       return;
     }
     requestAnimationFrame(() => {
-      const locked = lockAverageRowHeight();
-      syncCanvasVirtualHeight();
-      observeVirtualWindowGeometry();
-      if (locked) {
-        deps.setCanvasStructureDirty?.(true);
-        deps.render();
-        deps.syncPromptNavigatorFromScroll();
-        if (!messageWindowUserExpanded) {
-          requestAnimationFrame(() => deps.scrollStreamToBottom('virtual height locked'));
-        }
-        deps.settleInitialBottom();
-        return;
-      }
-      if (!averageRowHeightLocked && attempt < 8) {
-        scheduleVirtualHeightSync(attempt + 1);
-        return;
-      }
       deps.settleInitialBottom();
     });
   }
@@ -390,21 +352,11 @@ export function createMessageWindowManager(deps: MessageWindowManagerDeps): Mess
   }
 
   function computeContentOffsetPx(): number {
-    if (messageWindowStart <= 0) return 0;
-    return Math.round(messageWindowStart * averageRowHeightPx);
+    return 0;
   }
 
   function computeVirtualHeightPx(): number {
-    const total = deps.getState().messages.length;
-    if (total <= MESSAGE_WINDOW_CAPACITY) return 0;
-    if (messageWindowEnd >= total && typeof document !== 'undefined') {
-      const virtualWindow = document.querySelector<HTMLElement>('.conv-virtual-window');
-      const realHeight = virtualWindow?.getBoundingClientRect().height ?? 0;
-      if (realHeight > 0) {
-        return Math.round(computeContentOffsetPx() + realHeight);
-      }
-    }
-    return Math.round(total * averageRowHeightPx);
+    return 0;
   }
 
   function dispose(): void {

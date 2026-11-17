@@ -66,6 +66,7 @@ export function createTokenStreamWriter(deps: TokenStreamWriterDeps): TokenStrea
     for (const [msgId, entry] of flushedMap.entries()) {
       const isCurrentSessionActive = activeStreamingStoredSessionId === state.activeSessionId;
       let targetMsg: MessageViewModel | undefined;
+      let cachedTarget: MessageViewModel | undefined;
 
       if (activeStreamingStoredSessionId) {
         let cached = sessionMessagesCache.get(activeStreamingStoredSessionId);
@@ -73,7 +74,7 @@ export function createTokenStreamWriter(deps: TokenStreamWriterDeps): TokenStrea
           cached = [];
           sessionMessagesCache.set(activeStreamingStoredSessionId, cached);
         }
-        let cachedTarget = cached.find((m) => m.id === msgId);
+        cachedTarget = cached.find((m) => m.id === msgId);
         if (!cachedTarget) {
           const d = new Date();
           const timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
@@ -115,7 +116,9 @@ export function createTokenStreamWriter(deps: TokenStreamWriterDeps): TokenStrea
       if (!targetMsg || targetMsg.role !== 'assistant') continue;
 
       if (entry.content && isCurrentSessionActive) {
-        targetMsg.content = (targetMsg.content || '') + entry.content;
+        if (targetMsg !== cachedTarget) {
+          targetMsg.content = (targetMsg.content || '') + entry.content;
+        }
         renderedChars += entry.content.length;
         if (typeof document !== 'undefined') {
           const contentEl = document.getElementById(`msg-content-${targetMsg.id}`);
@@ -132,7 +135,9 @@ export function createTokenStreamWriter(deps: TokenStreamWriterDeps): TokenStrea
       }
 
       if (entry.thought && isCurrentSessionActive) {
-        targetMsg.thought = (targetMsg.thought || '') + entry.thought;
+        if (targetMsg !== cachedTarget) {
+          targetMsg.thought = (targetMsg.thought || '') + entry.thought;
+        }
         if (typeof document !== 'undefined') {
           const thoughtEl = document.getElementById(`msg-thought-${targetMsg.id}`);
           if (thoughtEl) {

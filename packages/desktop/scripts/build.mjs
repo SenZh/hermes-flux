@@ -12,9 +12,51 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
 
+/**
+ * 校验 workspace 包的 dist 不比源码陈旧。
+ *
+ * 【设计意图 (Why)】入口 bundle 现在从 `@hermes-flux/core` / `@hermes-flux/ui` 的 dist
+ *   解析依赖（构建脚本第 3 步会注明原因）。而 `desktop run start` 与打包脚本只跑本文件、
+ *   不会重建 core/ui：改了 core 源码却直接打包，会把过期实现静默打进产物，
+ *   现象是"改了代码但运行时没变"。这里把它变成一次明确失败。
+ *
+ * 【约束与规则 (Rules)】只比 mtime，不做内容哈希；分不出差异时宁可放行也不误报。
+ */
+function assertWorkspaceDistFresh(pkgName) {
+  const pkgRoot = path.join(rootDir, '..', pkgName);
+  const distEntry = path.join(pkgRoot, 'dist/index.js');
+  if (!fs.existsSync(distEntry)) {
+    throw new Error(`[Hermes Flux Build] 缺少 ${pkgName}/dist/index.js：请先执行 npm run build:core && npm run build:ui`);
+  }
+  const distMtime = fs.statSync(distEntry).mtimeMs;
+  let newest = 0;
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const abs = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(abs);
+        continue;
+      }
+      if (!/\.(ts|tsx)$/.test(entry.name)) continue;
+      const mtime = fs.statSync(abs).mtimeMs;
+      if (mtime > newest) newest = mtime;
+    }
+  };
+  const srcDir = path.join(pkgRoot, 'src');
+  if (fs.existsSync(srcDir)) walk(srcDir);
+  if (newest > distMtime) {
+    throw new Error(
+      `[Hermes Flux Build] ${pkgName} 的 dist 落后于源码：请先执行 npm run build:core && npm run build:ui`,
+    );
+  }
+}
+
 async function buildAll() {
   console.log('[Hermes Flux Build] Starting esbuild compilation...');
   const startTime = Date.now();
+
+  assertWorkspaceDistFresh('core');
+  assertWorkspaceDistFresh('ui');
 
   // Ensure dist directories
   fs.mkdirSync(path.join(rootDir, 'dist/main'), { recursive: true });
@@ -86,6 +128,34 @@ async function buildAll() {
     define: {
       'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV === 'development' ? 'development' : 'production'),
     },
+    /**
+     * 【跨包依赖走编译产物 (Why)】core / ui 直接以源码内联时，入口 bundle 的 sourcemap
+     *   会把整棵 core/ui 源树再映射一次；增量覆盖率按「源文件 + 行」累加分支，
+     *   入口里未执行的函数会给已测分支贡献一条 taken=0，门禁因此对同一行反复报红
+     *   （实测 renderer/index.js 让 slidingWatchdog 的一条已覆盖分支长期判红）。
+     *   这里改用一份不带 `paths` 的运行时 tsconfig：`@hermes-flux/*` 按包入口解析到
+     *   各自 dist，映射落点不再指向 src；运行时语义不变。
+     * 【约束与规则 (Rules)】该 tsconfig 只服务入口 bundle，
+     *   类型检查仍以 tsconfig.json 的唯一真值为准，禁止在运行时配置里加 paths。
+     */
+    tsconfig: path.join(rootDir, 'tsconfig.runtime.json'),
+    /**
+     * 【切断对上游 sourcemap 的追溯 (Why)】esbuild 会读取输入文件末尾的
+     *   `//# sourceMappingURL=`，并把映射一路追回 core/ui 的 src。
+     *   入口 bundle 因此再次映射整棵跨包源树，未执行函数的分支会给已测分支贡献 taken=0。
+     *   剥掉这一行注释后，映射落点停在 dist 文件本身，门禁不再按 src 重复计数。
+     */
+    plugins: [
+      {
+        name: 'strip-upstream-sourcemap-comment',
+        setup(build) {
+          build.onLoad({ filter: /packages[\\/](core|ui)[\\/]dist[\\/].*\.js$/ }, (args) => ({
+            contents: fs.readFileSync(args.path, 'utf8').replace(/\/\/# sourceMappingURL=.*$/m, ''),
+            loader: 'js',
+          }));
+        },
+      },
+    ],
   });
   console.log('  ✔ Renderer script compiled');
 
@@ -101,6 +171,17 @@ async function buildAll() {
   });
   console.log('  ✔ Message actions module compiled');
 
+  /**
+   * 独立产物共享的运行时外部依赖。
+   *
+   * 【设计意图 (Why)】两个理由必须同时成立：
+   *   1. 打进产物会把 React 的 CJS 依赖塞进 ESM，Node 直接 import 就炸 "Dynamic require of util"；
+   *   2. 内联后同一份 core 源码会出现在多个产物的 sourcemap 里，增量覆盖率按「源文件 + 行」
+   *      累加分支，某个 bundle 未执行的分支会把已测分支压成未覆盖（实测：botManagementController
+   *      内联副本曾让 slidingWatchdog 的一条已测分支长期报红）。
+   */
+  const SHARED_RUNTIME_EXTERNALS = ['@hermes-flux/core', '@hermes-flux/ui'];
+
   // 3b. 交互区纯逻辑模块（回滚事务 + 工具补丁队列）独立产物，供真实单测导入
   await esbuild.build({
     entryPoints: [path.join(rootDir, 'src/renderer/rollbackTransaction.ts')],
@@ -109,6 +190,7 @@ async function buildAll() {
     platform: 'node',
     target: 'node20',
     format: 'esm',
+    external: SHARED_RUNTIME_EXTERNALS,
     sourcemap: true,
   });
   await esbuild.build({
@@ -118,6 +200,7 @@ async function buildAll() {
     platform: 'node',
     target: 'node20',
     format: 'esm',
+    external: SHARED_RUNTIME_EXTERNALS,
     sourcemap: true,
   });
   await esbuild.build({
@@ -127,6 +210,7 @@ async function buildAll() {
     platform: 'node',
     target: 'node20',
     format: 'esm',
+    external: SHARED_RUNTIME_EXTERNALS,
     sourcemap: true,
   });
   await esbuild.build({
@@ -136,13 +220,13 @@ async function buildAll() {
     platform: 'node',
     target: 'node20',
     format: 'esm',
+    external: SHARED_RUNTIME_EXTERNALS,
     sourcemap: true,
   });
   // 消息窗口与 Profile 刷新是热路径纯逻辑，独立产物供行为级单测直接导入（不依赖 DOM）。
   // 提示词导航轨的滚动换算与缓存判定同为纯逻辑，一并独立产物，供 host 侧单测覆盖。
   // transcriptRows 是网关行 → 视图模型的唯一翻译点，同理由行为测试直接导入。
-  // 【规则】它依赖 @hermes-flux/ui 与 core，必须以 external 保留裸包说明符：
-  //   打进产物会把 React 的 CJS 依赖塞进 ESM，Node 直接 import 就炸 "Dynamic require of util"。
+  // 【规则】一律带 SHARED_RUNTIME_EXTERNALS，理由见该常量上方的两段说明。
   for (const moduleName of ['messageWindow', 'profileRefresh', 'promptNavigator', 'coldStartFocus', 'providerAdminController', 'providerAdminRest', 'providerCatalog', 'gatewayConnection', 'queueControl', 'slashVisibility', 'botManagementController']) {
     await esbuild.build({
       entryPoints: [path.join(rootDir, `src/renderer/${moduleName}.ts`)],
@@ -151,6 +235,7 @@ async function buildAll() {
       platform: 'node',
       target: 'node20',
       format: 'esm',
+      external: SHARED_RUNTIME_EXTERNALS,
       sourcemap: true,
     });
   }
@@ -294,6 +379,12 @@ async function buildAll() {
   });
 
   // 桌面壳视口装配：把 StreamViewportHost 的真实依赖收敛为可单测入口
+  //
+  // 【设计意图 (Why)】StreamViewportManager 自身已有独立产物；这里若再内联一份，
+  //   同一份源码会以两个产物同时进入覆盖率统计，分支覆盖被重复累加（实测：bundle 侧
+  //   未执行的分支会把已测分支压成"未全覆盖"，门禁对同一行反复报红）。
+  // 【约束与规则 (Rules)】只外部化管理器本体到 ./streamViewportManager.mjs；
+  //   其余依赖都是 type-only，不产生运行时 import，禁止顺手外部化运行时代码。
   await esbuild.build({
     entryPoints: [path.join(rootDir, 'src/renderer/viewport/desktopStreamViewport.ts')],
     outfile: path.join(rootDir, 'dist/renderer/viewport/desktopStreamViewport.mjs'),
@@ -303,6 +394,15 @@ async function buildAll() {
     format: 'esm',
     external: ['@hermes-flux/core', '@hermes-flux/ui'],
     sourcemap: true,
+    plugins: [{
+      name: 'external-stream-viewport-manager',
+      setup(pluginBuild) {
+        pluginBuild.onResolve({ filter: /^\.\/streamViewportManager\.js$/ }, () => ({
+          path: './streamViewportManager.mjs',
+          external: true,
+        }));
+      },
+    }],
   });
 
   // 左轨实体装饰与快照管理领域：从 index.ts 抽出

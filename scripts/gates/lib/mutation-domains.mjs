@@ -53,4 +53,22 @@ export const MUTATION_DOMAINS = {
     buildCommand: 'npm run build:core',
     minScore: 70,
   },
+  viewport: {
+    title: '会话视口记忆与基准行高 (Session Viewport Memory & Median)',
+    mutate: [
+      'packages/core/src/viewport/sessionScrollMemory.ts',
+      'packages/core/src/viewport/adaptiveMedianEstimator.ts',
+    ],
+    testFiles: [
+      'packages/core/__tests__/viewport/sessionScrollMemory.test.mjs',
+      'packages/core/__tests__/viewport/adaptiveMedianEstimator.test.mjs',
+      'packages/core/__tests__/formal/session-scroll-memory-formal.test.mjs',
+      'packages/core/__tests__/formal/viewport-estimator-formal.test.mjs',
+    ],
+    buildCommand: 'npm run build:core',
+    // 实测 126 mutant / 123 killed / 3 survived = 97.62%（2026-11-17，本机）。
+    // 剩余 3 个经人工核对：maxEntries 恒 ≥1 使 `if (oldestKey)` 为等价守卫；
+    // 另两处为三元方向性等价变异，不改变可观测行为。
+    minScore: 90,
+  },
 };

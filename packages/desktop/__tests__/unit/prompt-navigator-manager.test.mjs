@@ -175,4 +175,81 @@ test('PromptNavigatorManager 核心状态机行为测试', async (t) => {
     assert.equal(host._renderEvents.length, 1, '必须触发一次跳转渲染');
     assert.ok(host._settlingStates.includes(true), '必须进入 settling 状态');
   });
+
+  await t.test('7. syncFromScroll 依据真实挂载行反查当前提问，缺失时回退滚动换算', () => {
+    const rows = [
+      { getAttribute: () => 'u1', getBoundingClientRect: () => ({ top: -20, bottom: 60, height: 80 }) },
+      { getAttribute: () => 'u2', getBoundingClientRect: () => ({ top: 200, bottom: 300, height: 100 }) },
+    ];
+    const stream = {
+      scrollTop: 500,
+      clientHeight: 400,
+      scrollHeight: 3000,
+      getBoundingClientRect: () => ({ top: 0, bottom: 400 }),
+      querySelectorAll: () => rows,
+      querySelector: () => null,
+    };
+    const host = createMockHost({ streamElement: stream });
+    const manager = new PromptNavigatorManager(host);
+    manager.rebuildEntries();
+    manager.syncFromScroll();
+
+    assert.equal(manager.getSnapshot().activeIndex, 1, '应以越过阅读线的首条真实行为准，定位到第二问');
+  });
+
+  await t.test('8. syncFromScroll 无可反查行时回退为滚动换算口径', () => {
+    const stream = {
+      scrollTop: 0,
+      clientHeight: 400,
+      scrollHeight: 3000,
+      getBoundingClientRect: () => ({ top: 0, bottom: 400 }),
+      querySelectorAll: () => [],
+      querySelector: () => null,
+    };
+    const host = createMockHost({ streamElement: stream });
+    const manager = new PromptNavigatorManager(host);
+    manager.rebuildEntries();
+    assert.doesNotThrow(() => manager.syncFromScroll(), '无挂载行时必须安全回退，不得抛错');
+    assert.ok(manager.getSnapshot().activeIndex >= 0);
+  });
+
+  await t.test('9. settlePromptJump 命中目标行后精确对齐并释放落定', () => {
+    const targetRow = {
+      getBoundingClientRect: () => ({ top: 212, height: 60 }),
+    };
+    const stream = {
+      scrollTop: 0,
+      clientHeight: 400,
+      scrollHeight: 3000,
+      getBoundingClientRect: () => ({ top: 0, bottom: 400 }),
+      querySelectorAll: () => [targetRow],
+      querySelector: () => null,
+    };
+    const host = createMockHost({ streamElement: stream });
+    const manager = new PromptNavigatorManager(host);
+    manager.rebuildEntries();
+
+    manager.jumpToPrompt('u2');
+    assert.equal(stream.scrollTop, 200, '目标行顶边 212 减去 12px 留白即为对齐位移');
+    assert.equal(host._settlingStates.at(-1), false, '落定完成后必须释放 settling');
+  });
+
+  await t.test('10. settlePromptJump 目标行始终未挂载时做粗估兜底并显式告警', () => {
+    const stream = {
+      scrollTop: 0,
+      clientHeight: 400,
+      scrollHeight: 3000,
+      getBoundingClientRect: () => ({ top: 0, bottom: 400 }),
+      querySelectorAll: () => [],
+      querySelector: () => null,
+    };
+    const host = createMockHost({ streamElement: stream });
+    const manager = new PromptNavigatorManager(host);
+    manager.rebuildEntries();
+
+    manager.jumpToPrompt('u2');
+    assert.equal(stream.scrollTop, 192, '未挂载时必须按行高粗估定位（2 × 96）');
+    assert.ok(host._logs.some((l) => l.msg === 'prompt jump target not mounted'), '必须显式告警而非静默失败');
+    assert.equal(host._settlingStates.at(-1), false);
+  });
 });

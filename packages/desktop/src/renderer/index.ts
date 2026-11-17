@@ -507,6 +507,8 @@ const groupOperationService = createGroupOperationService({
   formatTimestamp: (ts) => formatTimestamp(ts), nextLoadMessagesGeneration: () => ++activeLoadMessagesGeneration,
   getCurrentLoadMessagesGeneration: () => activeLoadMessagesGeneration, logSession,
   setPendingScrollToBottom: (p) => { pendingScrollToBottom = p; },
+  captureStreamAnchor: () => captureStreamAnchor(),
+  beginSessionEnter: (id, opts) => streamViewportManager.beginSessionEnter(id, opts),
 });
 
 const hostedRoomIds = groupOperationService.hostedRoomIds as Set<string>;
@@ -526,6 +528,7 @@ const profileManagementService = createProfileManagementService({
   persistAvatarCache: () => persistAvatarCache(), profileAvatarCache, botForeverChatCache,
   nextLoadMessagesGeneration: () => ++activeLoadMessagesGeneration, getCurrentLoadMessagesGeneration: () => activeLoadMessagesGeneration,
   logSession, setPendingScrollToBottom: (p) => { pendingScrollToBottom = p; },
+  captureStreamAnchor: () => captureStreamAnchor(),
 });
 
 const openBotChat = (p: string) => profileManagementService.openBotChat(p);
@@ -742,6 +745,8 @@ sessionOperationService = createSessionOperationService({
   },
   setPendingScrollToBottom: (v) => { pendingScrollToBottom = v; },
   setLastMessagesSnapshot: (v) => { lastMessagesSnapshot = v as RenderMessagesSnapshot | null; },
+  captureStreamAnchor: () => captureStreamAnchor(),
+  beginSessionEnter: (id, opts) => streamViewportManager.beginSessionEnter(id, opts),
   loadMessages: (id, bot) => loadMessages(id, bot), openBotChat: (bot) => openBotChat(bot),
   ensureLiveSessionId: () => ensureLiveSessionId(),
   incrementActiveLoadMessagesGeneration: () => {
@@ -912,7 +917,9 @@ const gatewayEventDispatcher = createGatewayEventDispatcher({
   fetchProfiles: () => fetchProfiles(), fetchSessions: () => fetchSessions(),
   fetchGroupRooms: () => fetchGroupRooms(), fetchModelOptions: () => fetchModelOptions(),
   fetchProjects: () => fetchProjects(), prefetchSlashCatalog: () => inputCompletion.prefetchSlashCatalog(),
-  armTurnWatchdog: () => turnExecutionService.armTurnWatchdog(), disarmTurnWatchdog: () => turnExecutionService.disarmTurnWatchdog(),
+  armTurnWatchdog: () => turnExecutionService.armTurnWatchdog(),
+  feedTurnWatchdog: () => turnExecutionService.feedTurnWatchdog(),
+  disarmTurnWatchdog: () => turnExecutionService.disarmTurnWatchdog(),
   clearPresenceTerminal: () => turnExecutionService.clearPresenceTerminal(),
   armPresenceTerminal: (terminal) => turnExecutionService.armPresenceTerminal(terminal),
   setTimedDockNotice: (msg, dur) => turnExecutionService.setTimedDockNotice(msg, dur),
@@ -1105,6 +1112,8 @@ const renderCoordinator = createRenderCoordinator({
   applyStreamAnchor: (anchor, pin) => applyStreamAnchor(anchor, pin), stabilizeStreamAnchor: (anchor) => stabilizeStreamAnchor(anchor),
   isStreamNearBottom: (stream) => isStreamNearBottom(stream), syncStreamBottomInset: () => syncStreamBottomInset(),
   settleInitialBottom: () => settleInitialBottom(), bindEvents: () => bindEvents(),
+  isSessionEnterPending: () => streamViewportManager.isSessionEnterPending(),
+  settleSessionEnter: (probe) => streamViewportManager.settleSessionEnter(probe),
   syncComposerPoppers: () => syncComposerPoppers(), logRender,
 });
 

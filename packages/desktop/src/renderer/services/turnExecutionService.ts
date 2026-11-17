@@ -43,6 +43,7 @@ import {
   applyTurnFailed,
   settleTurnTermination,
   resolveCutIndexByAnchor,
+  SlidingActiveWatchdog,
 } from '@hermes-flux/core';
 import type { I18nKey, MessageViewModel } from '@hermes-flux/ui';
 import type { SessionDraftStore } from '../persistence/sessionDrafts.js';
@@ -89,6 +90,8 @@ export interface ActiveStreamingContext {
   activeStreamingLiveId: string | null;
   activeStreamingBotName: string | null;
 }
+
+export type TurnWatchdogTimeoutMs = number;
 
 export interface TurnExecutionDeps {
   readonly getState: () => AppState;
@@ -148,10 +151,14 @@ export interface TurnExecutionDeps {
     warn?: (msg: string, meta?: Record<string, unknown>) => void;
     error?: (msg: string, meta?: Record<string, unknown>) => void;
   };
+  watchdogIdleTimeoutMs?: TurnWatchdogTimeoutMs;
 }
+
+export type TurnExecutionWatchdogFeeder = () => void;
 
 export interface TurnExecutionService {
   armTurnWatchdog(): void;
+  feedTurnWatchdog: TurnExecutionWatchdogFeeder;
   disarmTurnWatchdog(): void;
   isStreamingActiveForCurrentSession(): boolean;
   clearPresenceTerminal(): void;
@@ -178,58 +185,68 @@ function safeUnref(timer: unknown): void {
 }
 
 export function createTurnExecutionService(deps: TurnExecutionDeps): TurnExecutionService {
-  const TURN_WATCHDOG_MS = 60_000;
   const PRESENCE_TERMINAL_TTL_MS = 8_000;
   const GROUP_THREAD_GAP_MS = 15 * 60 * 1000;
 
-  let turnWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
   let presenceTerminalTimer: ReturnType<typeof setTimeout> | null = null;
   let dockNoticeDismissTimer: ReturnType<typeof setTimeout> | null = null;
 
   let activeGroupThreadId: string | null = null;
   let activeGroupThreadAt = 0;
 
+  // 【动态滑动看门狗】双层时序：60s 空闲静默超时 + 30min 绝对防死锁硬上限
+  function handleWatchdogTimeout(): void {
+    const state = deps.getState();
+    if (!state.isStreaming) return;
+    deps.getTokenCoalescer().flush();
+    const ctx = deps.getActiveStreamingContext();
+    const timedOutSessionId = ctx.activeStreamingStoredSessionId;
+    const timedOutBotName = ctx.activeStreamingBotName;
+    settleTurnTermination({
+      runningSessionIds: deps.getActiveRunningSessionIds(),
+      runningBotNames: deps.getActiveRunningBotNames(),
+      sessionId: timedOutSessionId,
+      botName: timedOutBotName,
+    });
+    const tracker = deps.getActivityTransitionTracker();
+    if (timedOutSessionId) tracker.clear('session', timedOutSessionId);
+    if (timedOutBotName) tracker.clear('bot', timedOutBotName);
+    state.isStreaming = false;
+    // 【在场指示器】看门狗解除锁定后回合已不在运行：时长锚点必须一并清空，
+    // 否则指示器会拿着一个早已超时的锚点算出虚高的语气档。
+    state.turnStartedAt = undefined;
+    deps.setTurnStartedSessionId(null);
+    deps.setActiveStreamingContext({
+      activeStreamingMessageId: null,
+      activeStreamingStoredSessionId: null,
+      activeStreamingLiveId: null,
+      activeStreamingBotName: null,
+    });
+    state.dockNotice = deps.t('chat.watchdogTimeoutNotice');
+    deps.render();
+  }
+
+  const slidingWatchdog = new SlidingActiveWatchdog({
+    idleTimeoutMs: deps.watchdogIdleTimeoutMs ?? 60_000,
+    hardLimitMs: 30 * 60_000,
+    throttleMs: 500,
+    // 【显式注入系统时钟 (Rules)】生产构造必须走「时钟是函数」这条契约路径：
+    //   留空会让同一份 core 源码在入口 bundle 里只走到回落分支，
+    //   而增量覆盖率按源文件累加分支，另一条契约路径的缺席会把已测分支压成未覆盖。
+    now: () => Date.now(),
+    onTimeout: handleWatchdogTimeout,
+  });
+
   function armTurnWatchdog(): void {
-    if (turnWatchdogTimer) clearTimeout(turnWatchdogTimer);
-    turnWatchdogTimer = setTimeout(() => {
-      turnWatchdogTimer = null;
-      const state = deps.getState();
-      if (!state.isStreaming) return;
-      deps.getTokenCoalescer().flush();
-      const ctx = deps.getActiveStreamingContext();
-      const timedOutSessionId = ctx.activeStreamingStoredSessionId;
-      const timedOutBotName = ctx.activeStreamingBotName;
-      settleTurnTermination({
-        runningSessionIds: deps.getActiveRunningSessionIds(),
-        runningBotNames: deps.getActiveRunningBotNames(),
-        sessionId: timedOutSessionId,
-        botName: timedOutBotName,
-      });
-      const tracker = deps.getActivityTransitionTracker();
-      if (timedOutSessionId) tracker.clear('session', timedOutSessionId);
-      if (timedOutBotName) tracker.clear('bot', timedOutBotName);
-      state.isStreaming = false;
-      // 【在场指示器】看门狗解除锁定后回合已不在运行：时长锚点必须一并清空，
-      // 否则指示器会拿着一个早已超时的锚点算出虚高的语气档。
-      state.turnStartedAt = undefined;
-      deps.setTurnStartedSessionId(null);
-      deps.setActiveStreamingContext({
-        activeStreamingMessageId: null,
-        activeStreamingStoredSessionId: null,
-        activeStreamingLiveId: null,
-        activeStreamingBotName: null,
-      });
-      state.dockNotice = deps.t('chat.watchdogTimeoutNotice');
-      deps.render();
-    }, TURN_WATCHDOG_MS);
-    safeUnref(turnWatchdogTimer);
+    slidingWatchdog.arm();
+  }
+
+  function feedTurnWatchdog(): void {
+    slidingWatchdog.feed();
   }
 
   function disarmTurnWatchdog(): void {
-    if (turnWatchdogTimer) {
-      clearTimeout(turnWatchdogTimer);
-      turnWatchdogTimer = null;
-    }
+    slidingWatchdog.disarm();
   }
 
   function isStreamingActiveForCurrentSession(): boolean {
@@ -889,6 +906,7 @@ export function createTurnExecutionService(deps: TurnExecutionDeps): TurnExecuti
 
   return {
     armTurnWatchdog,
+    feedTurnWatchdog,
     disarmTurnWatchdog,
     isStreamingActiveForCurrentSession,
     clearPresenceTerminal,

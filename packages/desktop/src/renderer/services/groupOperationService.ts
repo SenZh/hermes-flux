@@ -38,6 +38,10 @@ import {
 } from '@hermes-flux/core';
 import type { I18nKey, MessageViewModel, LeftRailGroupRoom } from '@hermes-flux/ui';
 
+export type GroupAnchorCapturer = () => unknown;
+
+export type SessionEnterBeginHook = (sessionId: string, options?: { forcePinToBottom?: boolean }) => void;
+
 export interface GroupOperationDeps {
   readonly getState: () => AppState;
   readonly getGatewayClient: () => HermesGatewayClient | null;
@@ -66,6 +70,8 @@ export interface GroupOperationDeps {
   readonly getCurrentLoadMessagesGeneration: () => number;
   readonly logSession?: Pick<FluxLogger, 'debug'> | GuardedRunLogger;
   readonly setPendingScrollToBottom?: (pending: boolean) => void;
+  beginSessionEnter?: SessionEnterBeginHook;
+  captureStreamAnchor?: GroupAnchorCapturer;
 }
 
 export interface GroupOperationService {
@@ -161,8 +167,9 @@ export function createGroupOperationService(deps: GroupOperationDeps): GroupOper
     if (!roomId || !client) return;
     const state = deps.getState();
 
-    // 切换焦点域前解除挂起回滚，防止普通会话的乐观裁撤横幅泄漏进群聊视图
+    // 切换焦点域前解除挂起回滚并捕获前序会话视口快照
     deps.disarmRollbackOnLeave();
+    deps.captureStreamAnchor?.();
     state.activeFocus = { type: 'group', roomId };
     applyEnteredRead(deps.unreadGroupRoomIds, roomId);
     deps.activityTransitionTracker.clear('group', roomId);
@@ -170,6 +177,8 @@ export function createGroupOperationService(deps: GroupOperationDeps): GroupOper
 
     state.activeSessionId = roomId;
     state.activeLiveSessionId = roomId;
+    // 【规则】群聊与普通会话共用同一套进入语义：首次进房间贴底，曾回溯则恢复原阅读位。
+    deps.beginSessionEnter?.(roomId);
     state.isLoadingOlder = false;
     state.hasOlderMessages = false;
     // 研讨记录尚未到达：与普通会话同口径声明 loading，避免把"切换房间的空窗"读成空会话。
@@ -233,9 +242,6 @@ export function createGroupOperationService(deps: GroupOperationDeps): GroupOper
       ];
     }
 
-    if (deps.setPendingScrollToBottom) {
-      deps.setPendingScrollToBottom(true);
-    }
     // 无论拿到日志还是回落种子通知，研讨记录都已落地：离开骨架相位。
     state.messagesPhase = 'ready';
     // 【在场指示器】按真实日志末条事件推导说话者

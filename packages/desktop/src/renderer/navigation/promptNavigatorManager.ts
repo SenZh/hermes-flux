@@ -218,13 +218,34 @@ export class PromptNavigatorManager {
     const total = messages.length;
     if (total <= 0 || !stream) return;
 
-    const messageIndex = promptMessageIndexAtScrollTop({
-      scrollTop: stream.scrollTop,
-      rowHeight: this.host.getAverageRowHeightPx(),
-      paddingTop: this.streamPaddingTopPx,
-      readLinePx: PROMPT_READ_LINE_PX,
-      total,
-    });
+    let messageIndex = -1;
+    const streamTop = stream.getBoundingClientRect().top;
+    const rows = stream.querySelectorAll<HTMLElement>('[data-msg-id]');
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const rect = row.getBoundingClientRect();
+      if (rect.bottom > streamTop + PROMPT_READ_LINE_PX) {
+        const id = row.getAttribute('data-msg-id');
+        if (id) {
+          const found = messages.findIndex((m) => m.id === id);
+          if (found >= 0) {
+            messageIndex = found;
+            break;
+          }
+        }
+      }
+    }
+
+    if (messageIndex < 0) {
+      messageIndex = promptMessageIndexAtScrollTop({
+        scrollTop: stream.scrollTop,
+        rowHeight: this.host.getAverageRowHeightPx(),
+        paddingTop: this.streamPaddingTopPx,
+        readLinePx: PROMPT_READ_LINE_PX,
+        total,
+      });
+    }
+
     const next = resolveActivePromptIndex(this.promptNavigatorEntries, messageIndex);
     if (
       next === (this.promptNavigatorSnapshot?.activeIndex ?? -1) &&
@@ -322,13 +343,6 @@ export class PromptNavigatorManager {
       }
 
       this.ensureStreamPaddingTop(stream);
-      if (attempt === 0) {
-        const rough = index * this.host.getAverageRowHeightPx();
-        stream.scrollTop = Math.max(
-          0,
-          Math.min(rough, stream.scrollHeight - stream.clientHeight)
-        );
-      }
 
       const escapedId =
         typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
@@ -340,10 +354,20 @@ export class PromptNavigatorManager {
       );
       if (top !== null) {
         const delta = top - stream.getBoundingClientRect().top;
-        stream.scrollTop += delta - 12;
+        if (Math.abs(delta - 12) >= 1) {
+          stream.scrollTop += delta - 12;
+        }
         this.syncFromScroll();
         this.releasePromptJump(seq);
         return;
+      }
+
+      if (attempt === 0) {
+        const rough = index * this.host.getAverageRowHeightPx();
+        const safeRough = Math.max(0, Math.min(rough, stream.scrollHeight - stream.clientHeight));
+        if (Math.abs(safeRough - stream.scrollTop) > 100) {
+          stream.scrollTop = safeRough;
+        }
       }
 
       if (attempt < 8) {

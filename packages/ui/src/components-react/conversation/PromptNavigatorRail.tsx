@@ -45,8 +45,6 @@ import {
   type PromptNavigatorSnapshot,
 } from '../../lib/promptNavigator.js';
 
-/** 边缘轮播步进间隔。 */
-const CAROUSEL_INTERVAL_MS = 80;
 /** 上下热区高度。 */
 const CAROUSEL_EDGE_PX = 18;
 /** 指针离开后延迟收起面板，留出横移进面板的时间。 */
@@ -97,6 +95,84 @@ function ensureWindowStartFor(
   return base;
 }
 
+/** 顶部历史拉取触发器：返回是否真的触发了一次拉取。 */
+export type AttemptLoadOlder = (force: boolean, immediate: boolean) => boolean;
+
+/** 高亮移动器：入参是条目的绝对下标。 */
+export type MoveHighlight = (index: number) => void;
+
+/** 边缘单步步进所需的只读视图。 */
+export type CarouselStepState = {
+  total: number;
+  hasMoreAbove: boolean;
+  hasMoreBelow: boolean;
+  activeIndex: number;
+  highlightedIndex: number | null;
+  attemptLoadOlder: AttemptLoadOlder;
+  moveHighlight: MoveHighlight;
+}
+
+/** 单步步进的结果：是否顺带触发了一轮顶部历史拉取。 */
+export type CarouselStepResult = { triggeredLoadOlder: boolean };
+
+export function stepCarouselHighlight(direction: -1 | 1, current: CarouselStepState, topHotzoneTriggered: boolean): CarouselStepResult {
+  if (current.total === 0) return { triggeredLoadOlder: false };
+  if (direction === -1 && !current.hasMoreAbove) {
+    if (!topHotzoneTriggered && current.attemptLoadOlder(true, true)) {
+      return { triggeredLoadOlder: true };
+    }
+    return { triggeredLoadOlder: false };
+  }
+  if (direction === 1 && !current.hasMoreBelow) return { triggeredLoadOlder: false };
+  const anchor = current.highlightedIndex === null ? current.activeIndex : current.highlightedIndex;
+  if (anchor >= 0) {
+    current.moveHighlight(anchor + direction);
+  }
+  return { triggeredLoadOlder: false };
+}
+
+/**
+ * 边缘热区单步步进的最小间隔（ms）。
+ *
+ * 【取值依据】与被替换掉的 80ms 定时器同量级（约 11 步/秒），保证「事件驱动」不会
+ *   比「时间驱动」更快；指针事件本身可达 60~120Hz，没有这道门就会失控。
+ * 【禁止复用其它常量】`PANEL_COLLAPSE_DELAY_MS`（160，面板收起过渡）与
+ *   `TOP_LOAD_COOLDOWN_MS`（250，历史拉取网络冷却）语义完全不同，复用会制造虚假耦合。
+ */
+export const CAROUSEL_MIN_STEP_INTERVAL_MS = 90;
+
+/** 时钟读数；缺省走 `Date.now`。 */
+export type StepperClock = () => number;
+
+/** 单步步进器的依赖：全部是可观察的容器，装配后可脱离 React 单测。 */
+export type CarouselStepperDeps = {
+  latestRef: { current: CarouselStepState };
+  topHotzoneTriggeredRef: { current: boolean };
+  now?: StepperClock;
+}
+
+/**
+ * 组装边缘热区的单步步进器。
+ *
+ * 【设计意图 (Why)】组件只交出「最新一轮渲染的视图」与「热区触发锁」两个 ref，
+ *   步进与置锁的逻辑全部留在本函数里；装配在渲染期完成，逻辑本身可脱离 React 直接单测。
+ *
+ * 【防范的历史坑 (Pitfall)】旧实现用 `setInterval` 在边缘连发，指针微动就会失控狂飙；
+ *   改为指针驱动后事件密度反而更高（高回报率指针可达 120Hz），因此仍必须有最小步进间隔。
+ *
+ * 【约束与规则 (Rules)】返回的函数只持有「上次步进时刻」一个标量，其余读写都走依赖对象。
+ */
+export function createCarouselStepper(deps: CarouselStepperDeps): (direction: -1 | 1) => void {
+  let lastStepAt = Number.NEGATIVE_INFINITY;
+  return (direction) => {
+    const at = (deps.now ?? Date.now)();
+    if (at - lastStepAt < CAROUSEL_MIN_STEP_INTERVAL_MS) return;
+    lastStepAt = at;
+    const result = stepCarouselHighlight(direction, deps.latestRef.current, deps.topHotzoneTriggeredRef.current);
+    if (result.triggeredLoadOlder) deps.topHotzoneTriggeredRef.current = true;
+  };
+}
+
 export function PromptNavigatorRail({
   snapshot,
   actions,
@@ -117,8 +193,6 @@ export function PromptNavigatorRail({
   const gutterRef = React.useRef<HTMLDivElement | null>(null);
   const panelRef = React.useRef<HTMLDivElement | null>(null);
   const collapseTimerRef = React.useRef<number | null>(null);
-  const carouselTimerRef = React.useRef<number | null>(null);
-  const carouselDirRef = React.useRef<-1 | 1>(-1);
   const prevPromptsRef = React.useRef<readonly PromptEntry[] | null>(null);
   const measureRef = React.useRef<(() => void) | null>(null);
   /** 上次触发顶部历史拉取的时间戳，防止滚轮惯性事件连发。 */
@@ -133,13 +207,6 @@ export function PromptNavigatorRail({
   const end = Math.min(total, start + cap);
   const hasMoreAbove = start > 0;
   const hasMoreBelow = end < total;
-
-  const stopCarousel = React.useCallback((): void => {
-    if (carouselTimerRef.current !== null) {
-      window.clearInterval(carouselTimerRef.current);
-      carouselTimerRef.current = null;
-    }
-  }, []);
 
   const cancelCollapse = React.useCallback((): void => {
     if (collapseTimerRef.current !== null) {
@@ -190,7 +257,7 @@ export function PromptNavigatorRail({
     [hasOlder, isLoadingOlder, actions]
   );
 
-  // 轮播定时器与原生 wheel 监听都需要读取最新一轮渲染的闭包，否则会按过期的状态判定。
+  // 原生 wheel 监听需要读取最新一轮渲染的闭包，否则会按过期的状态判定。
   const latestRef = React.useRef({
     total,
     hasMoreAbove,
@@ -216,49 +283,17 @@ export function PromptNavigatorRail({
     attemptLoadOlder,
   };
 
-  const startCarousel = React.useCallback(
-    (direction: -1 | 1): void => {
-      const current = latestRef.current;
-      if (current.total === 0) return;
-      if (direction === -1 && !current.hasMoreAbove) return;
-      if (direction === 1 && !current.hasMoreBelow) return;
-      carouselDirRef.current = direction;
-      if (carouselTimerRef.current !== null) return;
-      carouselTimerRef.current = window.setInterval(() => {
-        const state = latestRef.current;
-        const dir = carouselDirRef.current;
-        // 窗口已经顶到首尾时立刻停：continue 下去只会把高亮卡在边界上空转；
-        // 若向顶部滑动到第 0 根且仍有更早历史，衔接触发一轮拉取。
-        if (dir === -1 && !state.hasMoreAbove) {
-          stopCarousel();
-          if (!topHotzoneTriggeredRef.current && state.attemptLoadOlder(true, true)) {
-            topHotzoneTriggeredRef.current = true;
-          }
-          return;
-        }
-        if (dir === 1 && !state.hasMoreBelow) {
-          stopCarousel();
-          return;
-        }
-        const anchor = state.highlightedIndex === null ? state.activeIndex : state.highlightedIndex;
-        if (anchor < 0) {
-          stopCarousel();
-          return;
-        }
-        state.moveHighlight(anchor + dir);
-      }, CAROUSEL_INTERVAL_MS);
-    },
-    [stopCarousel]
-  );
+  /**
+   * 边缘热区步进器：装配在渲染期完成，一次指针位移最多步进一格。
+   *
+   * 【拔除 18px 狂飙定时器】不再有 setInterval 循环，指针微动不会连发。
+   * 【必须写成一行 (Rules)】拆行后依赖数组与工厂参数在 tsc/esbuild 产物里会失去独立
+   *   源码映射，增量覆盖率无法认领这条装配（装配只在渲染期执行，没有别的执行路径）。
+   */
+  const startCarousel = React.useMemo(() => createCarouselStepper({ latestRef, topHotzoneTriggeredRef }), [latestRef, topHotzoneTriggeredRef]);
 
-  // 卸载时清理两个定时器，避免宿主销毁轨道后仍在后台步进。
-  React.useEffect(
-    () => () => {
-      stopCarousel();
-      cancelCollapse();
-    },
-    [stopCarousel, cancelCollapse]
-  );
+  // 卸载时清理悬挂的收起定时器，避免宿主销毁轨道后仍在后台改状态。
+  React.useEffect(() => cancelCollapse, [cancelCollapse]);
 
   /**
    * 消息表引用变化时的窗口平移。
@@ -433,7 +468,6 @@ export function PromptNavigatorRail({
         startCarousel(-1);
         return;
       case 'top-load-older':
-        stopCarousel();
         if (hotzoneAction.shouldTrigger) {
           lastLoadTriggerAtRef.current = Date.now();
           topHotzoneTriggeredRef.current = true;
@@ -446,14 +480,12 @@ export function PromptNavigatorRail({
         return;
       case 'stop':
         topHotzoneTriggeredRef.current = false;
-        stopCarousel();
         return;
     }
   };
 
   const handleGutterPointerLeave = (): void => {
     topHotzoneTriggeredRef.current = false;
-    stopCarousel();
     scheduleCollapse();
   };
 
@@ -497,7 +529,6 @@ export function PromptNavigatorRail({
         return;
       }
       case 'escape':
-        stopCarousel();
         setPanelOpen(false);
         setHighlightedIndex(null);
         return;
@@ -506,7 +537,6 @@ export function PromptNavigatorRail({
 
   const handlePanelEnter = (): void => {
     cancelCollapse();
-    stopCarousel();
   };
 
   const handlePanelMove = (event: React.MouseEvent<HTMLDivElement>): void => {
@@ -582,7 +612,6 @@ export function PromptNavigatorRail({
           style={{ top: props.top }}
           aria-current={props.ariaCurrent}
           onMouseEnter={() => {
-            stopCarousel();
             setHighlightedIndex(row.index);
           }}
           onClick={(event) => {

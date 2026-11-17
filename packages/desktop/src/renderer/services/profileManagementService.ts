@@ -37,6 +37,8 @@ import type { I18nKey, MessageViewModel } from '@hermes-flux/ui';
 import { profilesDiffer } from '../profileRefresh.js';
 import type { BotActivityStore } from '../persistence/botActivityStore.js';
 
+export type ProfileAnchorCapturer = () => unknown;
+
 export interface ProfileManagementDeps {
   readonly getState: () => AppState;
   readonly getGatewayClient: () => HermesGatewayClient | null;
@@ -64,6 +66,7 @@ export interface ProfileManagementDeps {
   readonly getCurrentLoadMessagesGeneration: () => number;
   readonly logSession?: Pick<FluxLogger, 'debug'> | GuardedRunLogger;
   readonly setPendingScrollToBottom?: (pending: boolean) => void;
+  captureStreamAnchor?: ProfileAnchorCapturer;
 }
 
 export interface ProfileManagementService {
@@ -266,6 +269,9 @@ export function createProfileManagementService(deps: ProfileManagementDeps): Pro
     const state = deps.getState();
     const outgoingFocus = state.activeFocus;
     const outgoingSessionId = state.activeSessionId;
+    if (outgoingSessionId) {
+      deps.captureStreamAnchor?.();
+    }
     const outgoingProfileName = state.profileName;
     const wasBotFocused = state.activeFocus.type === 'bot' && state.activeFocus.botName === botProfile;
 
@@ -307,9 +313,8 @@ export function createProfileManagementService(deps: ProfileManagementDeps): Pro
     state.activeSessionId = '';
     state.activeLiveSessionId = '';
     state.messagesPhase = 'loading';
-    if (deps.setPendingScrollToBottom) {
-      deps.setPendingScrollToBottom(true);
-    }
+    // 【规则】冷路径只声明 loading，不再预置「待贴底」：真正的视口裁决发生在
+    // 解析出 foreverChat.sessionId 后由 selectSession 的进入计划统一给出。
     deps.render();
 
     try {

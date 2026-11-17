@@ -25,7 +25,7 @@ JSON 版本强制每条给出唯一 `id`、被测源码 `source`、`symbol` 与�
 | `source` 为真实源码路径 | 违者 FAIL |
 | `source`+`symbol` 组合唯一 | 违者 FAIL |
 
-## 总览（35 条，覆盖 8 个领域）
+## 总览（40 条，覆盖 10 个领域）
 
 ### ATTACH（5 条）
 
@@ -101,6 +101,21 @@ JSON 版本强制每条给出唯一 `id`、被测源码 `source`、`symbol` 与�
 |---|---|---|---|---|
 | `INV-TIME-01` | 时间格式化确定性 | `packages/ui/src/components-react/leftRailModel.ts` → `formatLeftRailTime#deterministic` | `rail-time-format-formal.test.mjs` | 同一时间戳重复渲染出不同文案，界面抖动 |
 | `INV-TIME-02` | 时间分桶单调且非法输入安全降级 | `packages/ui/src/components-react/leftRailModel.ts` → `formatLeftRailTime#buckets` | `rail-time-format-formal.test.mjs` | 未来时刻落入昨前桶；非法时间戳抛错或复活旧值 |
+
+### TURN（1 条）
+
+| 编号 | 主题 | 源码锚点 | 守护测试 | 失效模式 |
+|---|---|---|---|---|
+| `INV-TURN-01` | 看门狗时序参数恒满足夹取与单调（含空时钟回落） | `packages/core/src/turn/slidingWatchdog.ts` → `constructor#clamp` | `sliding-watchdog-formal.test.mjs` | 时钟注入为 null 时回合一开始就崩在熔断器；或上下限倒挂把 30 分钟保险丝缩成几秒 |
+
+### VIEW（4 条）
+
+| 编号 | 主题 | 源码锚点 | 守护测试 | 失效模式 |
+|---|---|---|---|---|
+| `INV-VIEW-01` | 跨会话恢复决策忠实于快照（贴底 / 锚点 / 标量） | `packages/core/src/viewport/sessionScrollMemory.ts` → `planSessionEnter` | `session-scroll-memory-formal.test.mjs` | 切回会话时贴底态被旧像素位置覆盖，或回溯位置丢失，表现为白屏或跳到别处 |
+| `INV-VIEW-02` | 会话记忆容量有界且最新会话必留 | `packages/core/src/viewport/sessionScrollMemory.ts` → `recordSnapshot#lru` | `session-scroll-memory-formal.test.mjs` | 记忆无限增长吃内存；或刚离开的会话被淘汰，切回即丢位置 |
+| `INV-VIEW-03` | 基准行高中位数恒被夹在有效区间内 | `packages/core/src/viewport/adaptiveMedianEstimator.ts` → `addSample#median-clamp` | `viewport-estimator-formal.test.mjs` | 离屏占位高度或超大代码块把基准行高拉偏，长会话滚动条滑块剧烈缩放 |
+| `INV-VIEW-04` | 渲染期视口裁决忠实于进入计划与常规两条语义 | `packages/core/src/viewport/renderScrollDecision.ts` → `decideViewportPin` | `render-scroll-decision-formal.test.mjs` | 进入期误捕获旧 DOM 把上一会话位置写进新会话记忆；或回溯态被误判贴底，切回即跳到最新消息 |
 
 ## 尚未覆盖的领域（刻意登记为空）
 

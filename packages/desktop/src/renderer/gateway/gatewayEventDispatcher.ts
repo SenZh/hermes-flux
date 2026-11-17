@@ -43,6 +43,8 @@ import { formatTimestamp } from '../services/turnExecutionService.js';
 import type { BotActivityStore } from '../persistence/botActivityStore.js';
 import { buildGatewayWsUrl, createGatewayReconnectResolver, type GatewayAuthResponse } from '../gatewayConnection.js';
 
+export type TurnWatchdogFeeder = () => void;
+
 export interface GatewayEventDispatcherDeps {
   readonly getState: () => AppState;
   readonly getGatewayClient: () => HermesGatewayClient | null;
@@ -104,6 +106,7 @@ export interface GatewayEventDispatcherDeps {
   readonly prefetchSlashCatalog: () => Promise<void>;
 
   readonly armTurnWatchdog: () => void;
+  feedTurnWatchdog?: TurnWatchdogFeeder;
   readonly disarmTurnWatchdog: () => void;
   readonly clearPresenceTerminal: () => void;
   readonly armPresenceTerminal: (terminal: NonNullable<AppState['presenceTerminal']>) => void;
@@ -195,14 +198,17 @@ export function createGatewayEventDispatcher(deps: GatewayEventDispatcherDeps): 
           break;
 
         case 'append-content':
+          deps.feedTurnWatchdog?.();
           deps.getTokenCoalescer().push({ messageId: action.messageId, delta: action.text, isThought: false });
           break;
 
         case 'append-thought':
+          deps.feedTurnWatchdog?.();
           deps.getTokenCoalescer().push({ messageId: action.messageId, delta: action.text, isThought: true });
           break;
 
         case 'tool-start': {
+          deps.feedTurnWatchdog?.();
           const now = Date.now();
           const target = state.messages.find((m) => m.id === action.messageId);
           if (target) {
@@ -238,6 +244,7 @@ export function createGatewayEventDispatcher(deps: GatewayEventDispatcherDeps): 
         }
 
         case 'tool-complete': {
+          deps.feedTurnWatchdog?.();
           const now = Date.now();
           const updateTc = (target?: MessageViewModel) => {
             if (target && target.toolCalls) {

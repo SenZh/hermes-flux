@@ -280,9 +280,7 @@ export class MessageLoadingService {
         INITIAL_WINDOW_PAGE_SIZE,
         this.hasRemainingParentLineage(sessionId),
       );
-      this.deps.setPendingScrollToBottom(true);
       this.deps.render();
-      this.deps.scrollStreamToBottom('cache hit');
       this.deps.logSession?.debug('session rendered from cache', {
         sessionId,
         mounted: state.messages.length,
@@ -322,9 +320,7 @@ export class MessageLoadingService {
             INITIAL_WINDOW_PAGE_SIZE,
             this.hasRemainingParentLineage(sessionId),
           );
-          this.deps.setPendingScrollToBottom(true);
           this.deps.render();
-          this.deps.scrollStreamToBottom('persistent cache hit');
           this.deps.logSession?.info('session rendered from persistent cache', {
             sessionId,
             mounted: state.messages.length,
@@ -385,9 +381,7 @@ export class MessageLoadingService {
           ? true
           : computeHasOlderMessages(merged, serverKnownCount, INITIAL_WINDOW_PAGE_SIZE, this.hasRemainingParentLineage(sessionId));
         state.dockNotice = '';
-        this.deps.setPendingScrollToBottom(true);
         this.deps.render();
-        this.deps.scrollStreamToBottom('fast rest loaded');
         fastLoaded = true;
 
         this.deps.logSession?.info('session loaded via high-speed REST', {
@@ -510,9 +504,7 @@ export class MessageLoadingService {
               INITIAL_WINDOW_PAGE_SIZE,
               this.hasRemainingParentLineage(sessionId),
             );
-            this.deps.setPendingScrollToBottom(true);
             this.deps.render();
-            this.deps.scrollStreamToBottom('ws fallback loaded');
           } else {
             const existing = this.deps.sessionMessagesCache.get(sessionId);
             const sessionHistoryTrust = this.sessionHistoryTrust;
