@@ -1408,4 +1408,23 @@ test('会话进入计划 beginSessionEnter / settleSessionEnter', async (t) => {
       else globalThis.getComputedStyle = saved;
     }
   });
+
+  await t.test('14. isNearBottom 纳入输入舱安全线', () => {
+    const saved = globalThis.getComputedStyle;
+    globalThis.getComputedStyle = () => ({ paddingBottom: '120px' });
+    try {
+      const host = createMockViewportHost();
+      const manager = new StreamViewportManager(host);
+      // 安全线 120 → 阈值 128：几何距离 100 仍算视觉贴底，300 才算离开。
+      assert.equal(manager.isNearBottom({ scrollHeight: 1000, scrollTop: 500, clientHeight: 400 }), true);
+      assert.equal(manager.isNearBottom({ scrollHeight: 1000, scrollTop: 300, clientHeight: 400 }), false);
+      // 安全线为 0 时回落到 48px 常量阈值（覆盖 `|| 0` 的兜底分支）。
+      globalThis.getComputedStyle = () => ({ paddingBottom: '0px' });
+      assert.equal(manager.isNearBottom({ scrollHeight: 1000, scrollTop: 600, clientHeight: 400 }), true);
+      assert.equal(manager.isNearBottom(null), false, '空容器必须判为非贴底');
+    } finally {
+      if (saved === undefined) delete globalThis.getComputedStyle;
+      else globalThis.getComputedStyle = saved;
+    }
+  });
 });

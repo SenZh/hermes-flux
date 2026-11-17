@@ -154,9 +154,20 @@ export class StreamViewportManager {
     }
   }
 
+  /**
+   * 是否处于贴底安全区。
+   * 【规则】贴底落点由 `scrollStreamToContentBottom` 按输入舱安全线（`padding-bottom`）对齐，
+   *   因此判据必须包含同一个 reserve：只比几何底（`scrollHeight - clientHeight`）会在
+   *   安全线大于 48px 时把「视觉贴底」误判成「不在底部」，流式跟随随即断开。
+   */
   public isNearBottom(stream: HTMLElement | null = this.host.getStreamElement()): boolean {
     if (!stream) return false;
-    return stream.scrollHeight - stream.scrollTop - stream.clientHeight <= STICK_TO_BOTTOM_THRESHOLD_PX;
+    const distance = stream.scrollHeight - stream.scrollTop - stream.clientHeight;
+    let padding = 0;
+    if (typeof getComputedStyle === 'function') {
+      padding = parseFloat(getComputedStyle(stream).paddingBottom) || 0;
+    }
+    return distance <= Math.max(STICK_TO_BOTTOM_THRESHOLD_PX, padding + 8);
   }
 
   /**

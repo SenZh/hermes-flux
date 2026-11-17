@@ -407,7 +407,7 @@ function isExtraInputsError(error: unknown): boolean {
   return obj.code === -32602 && (msg.includes('Extra inputs are not permitted') || data.includes('Extra inputs are not permitted'));
 }
 
-let pendingScrollToBottom = false, suppressPinBottomOnce = false, streamViewportManager!: StreamViewportManager;
+let streamViewportManager!: StreamViewportManager;
 
 const isStreamNearBottom = (s: HTMLElement | null): boolean => (streamViewportManager ? streamViewportManager.isNearBottom(s) : false);
 const scrollStreamToBottom = (r: string): void => { streamViewportManager?.scrollStreamToBottom(r); };
@@ -506,7 +506,7 @@ const groupOperationService = createGroupOperationService({
   persistGroupsToCache: (r) => persistGroupsToCache(r), resolveAgentAvatar: (n) => resolveAgentAvatar(n),
   formatTimestamp: (ts) => formatTimestamp(ts), nextLoadMessagesGeneration: () => ++activeLoadMessagesGeneration,
   getCurrentLoadMessagesGeneration: () => activeLoadMessagesGeneration, logSession,
-  setPendingScrollToBottom: (p) => { pendingScrollToBottom = p; },
+  setPendingScrollToBottom: (p) => renderCoordinator.setPendingScrollToBottom(p),
   captureStreamAnchor: () => captureStreamAnchor(),
   beginSessionEnter: (id, opts) => streamViewportManager.beginSessionEnter(id, opts),
 });
@@ -527,7 +527,7 @@ const profileManagementService = createProfileManagementService({
   disarmRollbackOnLeave: () => disarmRollbackOnLeave(), persistAgentsToCache: (p) => persistAgentsToCache(p),
   persistAvatarCache: () => persistAvatarCache(), profileAvatarCache, botForeverChatCache,
   nextLoadMessagesGeneration: () => ++activeLoadMessagesGeneration, getCurrentLoadMessagesGeneration: () => activeLoadMessagesGeneration,
-  logSession, setPendingScrollToBottom: (p) => { pendingScrollToBottom = p; },
+  logSession, setPendingScrollToBottom: (p) => renderCoordinator.setPendingScrollToBottom(p),
   captureStreamAnchor: () => captureStreamAnchor(),
 });
 
@@ -604,7 +604,7 @@ const messageWindowManager = createMessageWindowManager({
   isStreamNearBottom: (stream) => isStreamNearBottom(stream), scrollStreamToBottom: (reason) => scrollStreamToBottom(reason),
   scrollStreamToContentBottom: (stream, inset) => scrollStreamToContentBottom(stream, inset),
   settleInitialBottom: () => settleInitialBottom(), syncPromptNavigatorFromScroll: () => syncPromptNavigatorFromScroll(),
-  setCanvasStructureDirty: (val) => { canvasStructureDirty = val; }, setSuppressPinBottomOnce: (val) => { suppressPinBottomOnce = val; },
+  setCanvasStructureDirty: (val) => { canvasStructureDirty = val; }, setSuppressPinBottomOnce: (val) => renderCoordinator.setSuppressPinBottomOnce(val),
   setSessionSwitchPending: (val) => { sessionSwitchPending = val; }, setSettleMinFrames: (val) => { streamSettleState.settleMinFrames = val; },
   setInitialBottomSettling: (val) => { streamSettleState.initialBottomSettling = val; }, setSettledLayoutSignature: (val) => { streamSettleState.settledLayoutSignature = val; },
   setLastStreamScrollTop: (val) => { lastStreamScrollTop = val; },
@@ -703,13 +703,13 @@ const messageLoadingService = createMessageLoadingService({
   sessionMessagesCache, cacheService,
   persistMessagesToCache: (ref, msgs, fMax) => persistMessagesToCache(ref, msgs, fMax ?? 0),
   syncPromptNavigatorMeta: () => syncPromptNavigatorMeta(), syncPromptNavigatorFromScroll: () => syncPromptNavigatorFromScroll(),
-  scrollStreamToBottom: (r) => scrollStreamToBottom(r ?? ''), setPendingScrollToBottom: (v) => { pendingScrollToBottom = v; },
+  scrollStreamToBottom: (r) => scrollStreamToBottom(r ?? ''), setPendingScrollToBottom: (v) => renderCoordinator.setPendingScrollToBottom(v),
   isStreamNearBottom: (el) => isStreamNearBottom(el), captureStreamAnchor: () => captureStreamAnchor(),
   applyStreamAnchor: (a, m) => applyStreamAnchor(a as StreamAnchor, m ?? false),
   getMessageWindowStart: () => messageWindowStart, setMessageWindowStart: (v) => { messageWindowStart = v; },
   getMessageWindowEnd: () => messageWindowEnd, setMessageWindowEnd: (v) => { messageWindowEnd = v; },
   setMessageWindowUserExpanded: (v) => { messageWindowUserExpanded = v; },
-  setCanvasStructureDirty: (v) => { canvasStructureDirty = v; }, setSuppressPinBottomOnce: (v) => { suppressPinBottomOnce = v; },
+  setCanvasStructureDirty: (v) => { canvasStructureDirty = v; }, setSuppressPinBottomOnce: (v) => renderCoordinator.setSuppressPinBottomOnce(v),
   isGroupConversationActive: (id) => isGroupConversationActive(id), hostedRoomIds, formatSessionTime, formatTimestamp: (ts) => formatTimestamp(ts),
   botActivityStore, botForeverChatCache, sessionPreviewCache,
   persistSessionPreviewCache: () => persistSessionPreviewCache(), getActiveStreamingStoredSessionId: () => activeStreamingStoredSessionId,
@@ -743,7 +743,7 @@ sessionOperationService = createSessionOperationService({
     activeStreamingMessageId = null; activeStreamingStoredSessionId = null;
     activeStreamingLiveId = null; activeStreamingBotName = null; state.isStreaming = false;
   },
-  setPendingScrollToBottom: (v) => { pendingScrollToBottom = v; },
+  setPendingScrollToBottom: (v) => renderCoordinator.setPendingScrollToBottom(v),
   setLastMessagesSnapshot: (v) => { lastMessagesSnapshot = v as RenderMessagesSnapshot | null; },
   captureStreamAnchor: () => captureStreamAnchor(),
   beginSessionEnter: (id, opts) => streamViewportManager.beginSessionEnter(id, opts),
@@ -874,7 +874,7 @@ const turnExecutionService = createTurnExecutionService({
   setMessageContent: (mid, content) => setMessageContent(mid, content),
   syncActiveGroupSpeakerFromMessages: () => syncActiveGroupSpeakerFromMessages(),
   resolveAgentAvatar: (name) => resolveAgentAvatar(name), scrollStreamToBottom: (reason) => scrollStreamToBottom(reason),
-  setPendingScrollToBottom: (val) => { pendingScrollToBottom = val; }, runSlashCommand: (cmd) => inputDockController.runSlashCommand(cmd),
+  setPendingScrollToBottom: (val) => renderCoordinator.setPendingScrollToBottom(val), runSlashCommand: (cmd) => inputDockController.runSlashCommand(cmd),
   enqueueDraft: () => inputDockController.enqueueDraft(), handleQueueAction: (action, id) => inputDockController.handleQueueAction(action, id),
   setMessageWindowUserExpanded: (val) => { messageWindowUserExpanded = val; }, ensureMessageWindow: (total) => ensureMessageWindow(total),
   render: () => render(), t, logStream,

@@ -860,11 +860,18 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
           return;
         }
         if (pinBottom) {
-          const stream = document.getElementById('conversation-stream');
-          if (stream) {
-            stream.scrollTop = stream.scrollHeight;
-            deps.messageWindowManager.markProgrammaticScroll(stream);
-          }
+          // 【三帧收敛 (Why)】React 19 的提交可能晚于本帧：单帧裸写只会写上旧高度，
+          // 内容随后长高就停在半途（实测差 193px，超过跟随阈值后流式彻底不再跟）。
+          const pin = () => {
+            const stream = document.getElementById('conversation-stream');
+            if (stream) {
+              stream.scrollTop = stream.scrollHeight;
+              deps.messageWindowManager.markProgrammaticScroll(stream);
+            }
+          };
+          pin();
+          requestAnimationFrame(pin);
+          requestAnimationFrame(() => requestAnimationFrame(pin));
         } else {
           deps.stabilizeStreamAnchor(streamAnchor);
         }

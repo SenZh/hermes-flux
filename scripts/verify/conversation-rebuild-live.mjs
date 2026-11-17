@@ -61,6 +61,8 @@ function normalizeGatewayUrl(rawUrl) {
 
 const results = [];
 const screenshots = [];
+/** 只跑指定用例（逗号分隔），用于定向复验，避免每次都触发全部真实发送。 */
+const ONLY = (process.env.FLUX_VERIFY_ONLY || '').trim();
 
 function log(message) {
   console.log(message);
@@ -73,6 +75,10 @@ function record(id, title, status, detail, metrics) {
 }
 
 async function caseRun(id, title, fn) {
+  if (ONLY && !ONLY.split(',').map((s) => s.trim()).includes(id)) {
+    record(id, title, 'SKIP', `FLUX_VERIFY_ONLY 未包含 ${id}`);
+    return;
+  }
   log(`  ▶ [${id}] ${title}`);
   try {
     const out = await fn();
@@ -320,6 +326,7 @@ const snapshotExpr = `(() => {
   const rows = [...stream.querySelectorAll('${ROW_SELECTOR}')];
   const turns = [...stream.querySelectorAll('.conv-turn')];
   const max = stream.scrollHeight - stream.clientHeight;
+  const paddingBottom = parseFloat(getComputedStyle(stream).paddingBottom) || 0;
   return {
     ok: true,
     scrollTop: +stream.scrollTop.toFixed(2),
@@ -327,6 +334,9 @@ const snapshotExpr = `(() => {
     clientHeight: stream.clientHeight,
     maxScrollTop: +max.toFixed(2),
     distanceToBottom: +(max - stream.scrollTop).toFixed(2),
+    paddingBottom,
+    // 视觉贴底：以输入舱安全线为基准，与产品内 isNearBottom 的口径一致。
+    effectiveDistance: +(max - stream.scrollTop - paddingBottom).toFixed(2),
     rowCount: rows.length,
     turnCount: turns.length,
     lastRowTextLength: rows.length ? (rows[rows.length - 1].innerText || '').length : 0,
@@ -400,6 +410,7 @@ const FRAME_SERIES = `(async () => {
     const s = document.getElementById('conversation-stream');
     if (!s) { out.push({ at: mark, ok: false }); continue; }
     const max = s.scrollHeight - s.clientHeight;
+    const paddingBottom = parseFloat(getComputedStyle(s).paddingBottom) || 0;
     out.push({
       at: mark,
       ok: true,
@@ -407,6 +418,8 @@ const FRAME_SERIES = `(async () => {
       scrollHeight: s.scrollHeight,
       clientHeight: s.clientHeight,
       distanceToBottom: +(max - s.scrollTop).toFixed(2),
+      paddingBottom,
+      effectiveDistance: +(max - s.scrollTop - paddingBottom).toFixed(2),
       rows: s.querySelectorAll('${ROW_SELECTOR}').length,
       containerSame: window.__fluxStreamRef ? s === window.__fluxStreamRef : null,
     });
@@ -541,7 +554,7 @@ async function main() {
       const trace = await session.evaluate(TAKE_SCROLL_TRACE);
       const metrics = { sessionId: best.id, rows: best.rows, settled, series, writes: trace.writes };
 
-      const pinned = series.filter((s) => s.ok && Math.abs(s.distanceToBottom) <= 8);
+      const pinned = series.filter((s) => s.ok && s.effectiveDistance <= 8);
       if (pinned.length === 0) {
         // 对照实验：手动钉到底后看是否被代码强行拉回，用以区分
         // 「从未触发落底」与「落底后被重置」两种完全不同的根因。
@@ -551,13 +564,13 @@ async function main() {
         metrics.manualPin = { scrollTop: manual.scrollTop, max: manual.maxScrollTop, distanceToBottom: manual.distanceToBottom };
         const err = new Error(
           `3s 内从未贴底：${JSON.stringify(series.map((s) => `${s.at}ms top=${s.scrollTop}/${s.scrollHeight} dist=${s.distanceToBottom}`))}；`
-          + `写入 ${trace.writes.length} 次；手动钉底后距底 ${manual.distanceToBottom}px（${Math.abs(manual.distanceToBottom) <= 8 ? '可保持，说明从未触发落底' : '被强行拉回'}）`,
+          + `写入 ${trace.writes.length} 次；手动钉底后视觉距底 ${manual.effectiveDistance}px（${manual.effectiveDistance <= 8 ? '可保持，说明从未触发落底' : '被强行拉回'}）`,
         );
         err.metrics = metrics;
         throw err;
       }
       const last = series[series.length - 1];
-      if (Math.abs(last.distanceToBottom) > 8) {
+      if (last.effectiveDistance > 8) {
         const err = new Error(`曾贴底但随后被顶开：3000ms 时距底 ${last.distanceToBottom}px`);
         err.metrics = metrics;
         throw err;
@@ -599,7 +612,7 @@ async function main() {
       const deepest = Math.max(...series.map((s) => (s.ok ? s.scrollHeight - s.clientHeight : 0)), 0);
       if (rows <= 0) return { skip: `目标会话 ${targetId} 没有可渲染消息行，贴底语义不可判`, metrics };
       if (deepest <= 200) return { skip: `目标会话可滚动深度仅 ${deepest}px，贴底语义不可区分`, metrics };
-      const pinned = series.filter((s) => s.ok && Math.abs(s.distanceToBottom) <= 8);
+      const pinned = series.filter((s) => s.ok && s.effectiveDistance <= 8);
       if (pinned.length === 0) {
         const err = new Error(
           `从非贴底会话切入后 3s 内未贴底：${JSON.stringify(series.map((s) => `${s.at}ms top=${s.scrollTop}/${s.scrollHeight} dist=${s.distanceToBottom}`))}`,
@@ -1098,6 +1111,84 @@ async function main() {
         throw err;
       }
       return { skip: '切回时回复已结束且无运行指示，无法区分「已完成」与「切换打断后完成」', metrics };
+    });
+
+    /* —— R9 提交提示词后自动贴底并跟随流式输出 —— */
+    await caseRun('R9', '提交提示词后自动贴底并跟随流式输出', async () => {
+      if (process.env.FLUX_VERIFY_SKIP_SEND === '1') {
+        return { skip: 'FLUX_VERIFY_SKIP_SEND=1：本轮不向真实会话发送测试指令' };
+      }
+      await session.evaluate(clickBest);
+      await new Promise((r) => setTimeout(r, 900));
+
+      // 制造「用户停在历史位置」：这是用户报告的场景——发送前视口不在底部。
+      const before = await session.evaluate(`(() => {
+        const s = ${STREAM};
+        const max = s.scrollHeight - s.clientHeight;
+        s.scrollTop = Math.round(max * 0.3);
+        return { max: +max.toFixed(1), scrollTop: +s.scrollTop.toFixed(1) };
+      })()`);
+      await new Promise((r) => setTimeout(r, 500));
+
+      const filled = await session.evaluate(helpers.fill(
+        '#dock-prompt-input',
+        '请逐行输出 30 行，每行格式严格为「跟随行 N: ok」，不要调用任何工具。',
+      ));
+      if (!filled) return { skip: '输入舱不可用（#dock-prompt-input 缺失）' };
+      const sent = await session.evaluate(helpers.click('#dock-send-btn'));
+      if (!sent) return { skip: '发送按钮不可用（#dock-send-btn 缺失）' };
+
+      const series = [];
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < 45000) {
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((r) => setTimeout(r, 1500));
+        // eslint-disable-next-line no-await-in-loop
+        series.push(await session.evaluate(`(() => {
+          const s = ${STREAM};
+          if (!s) return { ok: false };
+          const max = s.scrollHeight - s.clientHeight;
+          const paddingBottom = parseFloat(getComputedStyle(s).paddingBottom) || 0;
+          return {
+            ok: true,
+            distanceToBottom: +(max - s.scrollTop).toFixed(1),
+            effectiveDistance: +(max - s.scrollTop - paddingBottom).toFixed(1),
+            paddingBottom,
+            scrollTop: +s.scrollTop.toFixed(1),
+            max: +max.toFixed(1),
+            running: Boolean(document.querySelector('.activity-pulse-indicator')),
+          };
+        })()`));
+      }
+      await session.screenshot('08-send-follow.png');
+
+      const metrics = { before, series };
+      const pinned = series.filter((s) => s.ok && s.effectiveDistance <= 8);
+      if (pinned.length === 0) {
+        const err = new Error(`发送后 45s 内从未自动贴底：${JSON.stringify(series.map((s) => `${s.scrollTop}/${s.max}`))}`);
+        err.metrics = metrics;
+        throw err;
+      }
+      const last = series[series.length - 1];
+      if (!last.ok || last.effectiveDistance > 8) {
+        const err = new Error(`输出结束时仍偏离底部 ${last.distanceToBottom}px（跟随中断）`);
+        err.metrics = metrics;
+        throw err;
+      }
+      const runningFrames = series.filter((s) => s.ok && s.running);
+      const runningPinned = runningFrames.filter((s) => s.effectiveDistance <= 8);
+      if (runningFrames.length > 0 && runningPinned.length !== runningFrames.length) {
+        const err = new Error(
+          `流式运行期间有 ${runningFrames.length - runningPinned.length} 帧脱离底部：`
+          + `${JSON.stringify(runningFrames.filter((s) => Math.abs(s.distanceToBottom) > 8).map((s) => s.distanceToBottom))}`,
+        );
+        err.metrics = metrics;
+        throw err;
+      }
+      return {
+        detail: `发送前停在 ${before.scrollTop}/${before.max}；首帧贴底后 ${pinned.length}/${series.length} 帧贴底，运行帧 ${runningFrames.length} 帧全部跟随`,
+        metrics,
+      };
     });
 
     await session.screenshot('07-final.png');

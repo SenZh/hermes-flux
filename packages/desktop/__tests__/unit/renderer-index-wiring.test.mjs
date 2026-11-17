@@ -42,6 +42,15 @@ test('renderer index 顶层装配：入口必须真实构造视口管理器与�
     '入口必须真实构造视口管理器，否则 render() 每帧都会 TypeError'
   );
   assert.match(source, /feedTurnWatchdog: \(\) => turnExecutionService\.feedTurnWatchdog\(\)/, '入口必须把喂狗通道接进事件分发器');
+  // 【守卫】发送提示词后的贴底标记必须是单一真值源：历史坑是它被写进 index 的模块副本，
+  // 而 renderCoordinator 读自己那份，导致「发送后从不贴底、流式不跟随」。
+  assert.doesNotMatch(source, /let pendingScrollToBottom/, '禁止再声明待贴底的模块级副本');
+  assert.doesNotMatch(source, /let suppressPinBottomOnce/, '禁止再声明抑制贴底的模块级副本');
+  assert.match(
+    source,
+    /setPendingScrollToBottom: \(p\) => renderCoordinator\.setPendingScrollToBottom\(p\)/,
+    '待贴底标记必须转发给渲染协调器',
+  );
 
   const req = createRequire(import.meta.url);
   try {

@@ -328,7 +328,9 @@ export function createTurnExecutionService(deps: TurnExecutionDeps): TurnExecuti
           timestamp: formatTimestamp(entry.timestamp || Date.now()),
         };
       });
-      deps.setPendingScrollToBottom(true);
+      // 【跟随语义】后台轮询到新日志时只在用户本就贴底的情况下跟随；
+      // 这里不再强置待贴底，交由 render 的 wasNearBottom（48px 安全区）自然判定，
+      // 否则用户上翻阅读历史时会被每条新消息拽回底部。
       deps.syncActiveGroupSpeakerFromMessages();
       deps.render();
     }
