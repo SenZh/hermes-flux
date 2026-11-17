@@ -378,6 +378,18 @@ async function buildAll() {
     sourcemap: true,
   });
 
+  // 提交后驱动观察器：从 renderCoordinator.ts 抽出，使挂载/重建/合并/释放契约可脱宿主单测
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/viewport/postCommitPinObservers.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/viewport/postCommitPinObservers.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+
   // 桌面壳视口装配：把 StreamViewportHost 的真实依赖收敛为可单测入口
   //
   // 【设计意图 (Why)】StreamViewportManager 自身已有独立产物；这里若再内联一份，

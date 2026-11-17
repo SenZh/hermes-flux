@@ -28,6 +28,7 @@ function createMockViewportHost(overrides = {}) {
   const programmaticScrolls = [];
   const traces = [];
   const debugs = [];
+  const warns = [];
 
   const host = {
     getActiveSessionId: () => activeSessionId,
@@ -41,6 +42,7 @@ function createMockViewportHost(overrides = {}) {
     markProgrammaticScroll: (stream) => programmaticScrolls.push(stream),
     logTrace: (msg, meta) => traces.push({ msg, meta }),
     logDebug: (msg, meta) => debugs.push({ msg, meta }),
+    logWarn: (msg, meta) => warns.push({ msg, meta }),
     requestAnimationFrame: (cb) => {
       cb();
       return 1;
@@ -50,6 +52,7 @@ function createMockViewportHost(overrides = {}) {
     _programmaticScrolls: programmaticScrolls,
     _traces: traces,
     _debugs: debugs,
+    _warns: warns,
   };
 
   return host;
@@ -1180,26 +1183,44 @@ test('StreamViewportManager 核心视口与锚点行为单测', async (t) => {
 test('会话进入计划 beginSessionEnter / settleSessionEnter', async (t) => {
   const makeStream = ({ scrollHeight = 2000, clientHeight = 800, rows = [] } = {}) => {
     let top = 0;
-    const el = {
-      scrollHeight,
-      clientHeight,
-      style: { setProperty() {}, getPropertyValue: () => '' },
-      getBoundingClientRect: () => ({ top: 0, bottom: clientHeight }),
-      querySelector: (selector) => rows.find((row) => selector.includes(`"${row.id}"`)) ?? null,
-      querySelectorAll: () => rows,
-    };
-    Object.defineProperty(el, 'scrollTop', {
-      get: () => top,
-      set: (value) => { top = Math.max(0, Math.min(value, scrollHeight - clientHeight)); },
-    });
-    for (const row of rows) {
+    /** 行几何必须在「被查询到的当下」绑定：用例会在计划推进中途 push 新行（模拟 React 提交）。 */
+    const attachGeometry = (row) => {
       row.getBoundingClientRect = () => ({
         top: row.baseTop - top,
         height: row.height,
         bottom: row.baseTop - top + row.height,
       });
+      return row;
+    };
+    const el = {
+      scrollHeight,
+      clientHeight,
+      style: { setProperty() {}, getPropertyValue: () => '' },
+      getBoundingClientRect: () => ({ top: 0, bottom: clientHeight }),
+      querySelector: (selector) => {
+        const row = rows.find((candidate) => selector.includes(`"${candidate.id}"`)) ?? null;
+        return row ? attachGeometry(row) : null;
+      },
+      querySelectorAll: () => rows.map(attachGeometry),
+    };
+    Object.defineProperty(el, 'scrollTop', {
+      get: () => top,
+      set: (value) => { top = Math.max(0, Math.min(value, el.scrollHeight - el.clientHeight)); },
+    });
+    for (const row of rows) {
+      attachGeometry(row);
     }
     return { el, rows, getTop: () => top };
+  };
+
+  /** 有界推进帧队列：只驱动已排队的帧，避免实现缺陷导致无限 rAF 把测试挂死。 */
+  const drainFrames = (queue, limit = 120) => {
+    let frames = 0;
+    while (queue.length > 0 && frames < limit) {
+      queue.shift()();
+      frames += 1;
+    }
+    return frames;
   };
 
   await t.test('1. 生命周期：无记忆生成 pin-to-bottom，getPending 暴露类型，cancel 清空', () => {
@@ -1426,5 +1447,473 @@ test('会话进入计划 beginSessionEnter / settleSessionEnter', async (t) => {
       if (saved === undefined) delete globalThis.getComputedStyle;
       else globalThis.getComputedStyle = saved;
     }
+  });
+
+  await t.test('15. TDD红灯守卫: Blink阶梯展开下末行未对齐安全底线严禁提前退出(防Early Exit)', () => {
+    const saved = globalThis.getComputedStyle;
+    globalThis.getComputedStyle = () => ({ paddingBottom: '160px' });
+    try {
+      // 模拟长对话：客户端高 800px，输入舱安全区 160px，期望安全底线为 800 - 160 = 640px
+      // 末行消息 mLast 位于真实高度 4800px 处，高 200px
+      const mLast = { id: 'mLast', baseTop: 4800, height: 200 };
+      const stream = makeStream({ scrollHeight: 2000, clientHeight: 800, rows: [mLast] });
+      const host = createMockViewportHost({ streamElement: stream.el, activeSessionId: 's1' });
+      const manager = new StreamViewportManager(host);
+      const queue = [];
+      host.requestAnimationFrame = (cb) => { queue.push(cb); return 1; };
+
+      manager.beginSessionEnter('s1');
+      // 首次以末行探针推进
+      manager.settleSessionEnter('mLast', 's1', 'ready', 50);
+
+      // 第 1 帧执行：此时 scrollHeight 是伪高度 2000，虽然 scrollTop 暂时跳到了 1200，但 mLast.bottom 远在视口下方深处
+      if (queue.length > 0) queue.shift()();
+      assert.equal(manager.isSessionEnterPending(), true, '第1帧末行未贴合安全底线，严禁收敛');
+
+      // 模拟 Blink 第 2 帧：异步排版稍作延迟，scrollHeight 此时未变（差值为 0）
+      // 旧代码会因 heightStable=true 而在第 2 帧错误销毁任务；新方案必须断言其保持存活！
+      if (queue.length > 0) queue.shift()();
+      assert.equal(manager.isSessionEnterPending(), true, '第2帧高度虽暂稳但末行未贴底，绝对严禁Early Exit');
+
+      // 模拟 Blink 后续帧展开全部高度至 5160px (5000px 内容 + 160px paddingBottom)
+      stream.el.scrollHeight = 5160;
+      while (queue.length > 0) {
+        queue.shift()();
+      }
+
+      // 全部收敛后，末行底边 4800 - scrollTop + 200 应严格对齐安全底线 640px，即 scrollTop === 4360
+      assert.equal(stream.getTop(), 4360, '最终末行必须精准对齐输入舱上方安全底线(5000-800+160=4360)');
+      assert.equal(manager.isSessionEnterPending(), false, '末行对齐安全底线后方可收敛');
+    } finally {
+      if (saved === undefined) delete globalThis.getComputedStyle;
+      else globalThis.getComputedStyle = saved;
+    }
+  });
+
+  await t.test('16. 权威消息数>0 但 DOM 尚未提交时严禁走短会话短路', () => {
+    // 【实测缺陷复现（根因 1）】
+    //   推进帧跑在 React 提交之前时读到空容器：scrollHeight == clientHeight == 762、rows == 0。
+    //   旧实现用「DOM 高度 scrollHeight <= clientHeight」判定「不足一屏短会话」，
+    //   于是写 scrollTop = 0、setInitialBottomSettling(false)、settledLayoutSignature = 当前签名、
+    //   pendingSessionEnter = null —— 计划永久死亡；20ms 后 React 提交 50 行，此后无任何贴底动作。
+    // 【本用例的裁决语义】权威消息数 50 说明内容一定存在，DOM 空只是「尚未提交」，
+    //   绝不是「内容不足一屏」，计划必须存活到真实行挂载为止。
+    const stream = makeStream({ scrollHeight: 762, clientHeight: 762, rows: [] });
+    const host = createMockViewportHost({ streamElement: stream.el, activeSessionId: 's1' });
+    const manager = new StreamViewportManager(host);
+    const queue = [];
+    host.requestAnimationFrame = (cb) => { queue.push(cb); return 1; };
+
+    manager.beginSessionEnter('s1');
+    manager.settleSessionEnter('m-last', 's1', 'ready', 50);
+
+    assert.equal(manager.isSessionEnterPending(), true, '权威消息数 50 时计划必须存活，严禁按空 DOM 高度短路');
+    assert.equal(manager.getSettledLayoutSignature(), '', '不得把空容器高度当成「已落定」写死');
+
+    // React 提交 50 行：末行出现、内容撑高到 4000（远超一屏 762）
+    stream.rows.push({ id: 'm-last', baseTop: 3900, height: 100 });
+    stream.el.scrollHeight = 4000;
+
+    manager.settleSessionEnter('m-last', 's1', 'ready', 50);
+    let frames = 0;
+    while (queue.length > 0 && frames < 120) { queue.shift()(); frames += 1; }
+
+    const maxScrollTop = stream.el.scrollHeight - stream.el.clientHeight; // 4000 - 762 = 3238
+    assert.equal(stream.getTop(), maxScrollTop, '提交后必须落到 scrollHeight - clientHeight = 3238（视口高恒为 762，不是 makeStream 默认的 800）');
+    assert.equal(manager.isSessionEnterPending(), false, '真正落底后计划才允许收敛');
+  });
+
+  await t.test('17. TDD红灯守卫: 生命周期相位协同(loading冻结挂起 vs ready空会话优雅退出)', () => {
+    const stream = makeStream();
+    const host = createMockViewportHost({ streamElement: stream.el, activeSessionId: 's1' });
+    const manager = new StreamViewportManager(host);
+    const queue = [];
+    host.requestAnimationFrame = (cb) => { queue.push(cb); return 1; };
+
+    manager.beginSessionEnter('s1');
+
+    // 场景 A：网络仍在 loading 且消息数 0，调用 settle 必须冻结挂起，不得触发 rAF 调度消耗 30 帧
+    manager.settleSessionEnter('', 's1', 'loading', 0);
+    assert.equal(manager.isSessionEnterPending(), true, '数据加载中必须保持挂起');
+    assert.equal(queue.length, 0, '加载中严禁调度 rAF 消耗熔断配额');
+
+    // 场景 B：确定已 ready 且真实 0 消息，调用 settle 必须立即收敛释放
+    manager.settleSessionEnter('', 's1', 'ready', 0);
+    assert.equal(manager.isSessionEnterPending(), false, '真实空会话就绪后必须优雅退出解除挂起');
+  });
+
+  await t.test('18. TDD红灯守卫: 跨会话防污染(SessionId校验)', () => {
+    const stream = makeStream();
+    const host = createMockViewportHost({ streamElement: stream.el, activeSessionId: 's2' });
+    const queue = [];
+    host.requestAnimationFrame = (cb) => { queue.push(cb); return 1; };
+    const manager = new StreamViewportManager(host);
+
+    manager.beginSessionEnter('s2');
+    assert.equal(manager.getPendingSessionEnter().sessionId, 's2');
+
+    // 来自 s1 的延迟回调试图注入探针与调度推进
+    manager.settleSessionEnter('probe-from-s1', 's1', 'ready', 10);
+
+    // 【杀伤力断言】
+    // 1. 跨会话非法调用必须被第一道防线丢弃，绝对不得调度任何 rAF 推进帧
+    assert.equal(queue.length, 0, '跨会话非法调用不得调度 rAF 推进帧');
+    // 2. 挂起状态对象上的探针 id 绝不得被改写为来自旧会话的 probe-from-s1
+    assert.notEqual(manager.pendingSessionEnter?.probeMessageId, 'probe-from-s1', '跨会话迟到调用绝不得污染当前挂起探针');
+  });
+
+  await t.test('19. 真正的空会话（messagesCount=0 且 ready）仍必须首帧短路退出', () => {
+    // 【防护性对照】修复「空 DOM 不得短路」时严禁把短会话短路一并删掉：
+    //   权威消息数就是 0 且相位已 ready，说明会话确实为空，必须立即收敛、不得空转 rAF。
+    const stream = makeStream({ scrollHeight: 762, clientHeight: 762, rows: [] });
+    const host = createMockViewportHost({ streamElement: stream.el, activeSessionId: 's1' });
+    const manager = new StreamViewportManager(host);
+    const queue = [];
+    host.requestAnimationFrame = (cb) => { queue.push(cb); return 1; };
+
+    manager.beginSessionEnter('s1');
+    manager.settleSessionEnter('', 's1', 'ready', 0);
+
+    assert.equal(manager.isSessionEnterPending(), false, '真实空会话必须首帧立即收敛释放');
+    assert.equal(stream.getTop(), 0, '空会话必须夹紧在顶部 0');
+    assert.equal(queue.length, 0, '空会话不得调度后续多余帧');
+  });
+
+  await t.test('20. 探针行在 DOM 中缺失时必须降级贴底并留痕（禁止静默 no-op）', () => {
+    // 【实测缺陷复现（根因 3 + 根因 4）】
+    //   末条 displayKind === 'hidden' 时，buildConversationSnapshot 会跳过它，
+    //   DOM 里没有对应 [data-msg-id]，于是 lastRow === null。
+    //   旧实现的熔断分支判据 `else if (lastRow || !pending.probeMessageId)`：
+    //   lastRow 为 null 且 probe 非空 → 恒假 → 不写位置、不打任何日志，
+    //   却照样把 settledLayoutSignature 写成「已落定」，随后计划释放。
+    // 【裁决语义】容器已有真实内容高度（scrollHeight > clientHeight）但探针行缺失时，
+    //   唯一安全的降级是「贴到可滚动底部」，并且必须留下可观测痕迹。
+    const stream = makeStream({ scrollHeight: 3000, clientHeight: 800, rows: [] });
+    const host = createMockViewportHost({ streamElement: stream.el, activeSessionId: 's1' });
+    const manager = new StreamViewportManager(host);
+    const queue = [];
+    host.requestAnimationFrame = (cb) => { queue.push(cb); return 1; };
+
+    manager.beginSessionEnter('s1');
+    manager.settleSessionEnter('m-hidden', 's1', 'ready', 50);
+    // 熔断上限 30 帧，给足余量
+    drainFrames(queue, 60);
+
+    assert.equal(stream.getTop(), 2200, '探针行缺失时必须降级写 scrollTop = scrollHeight - clientHeight = 2200');
+    const logCalls = host._traces.length + host._debugs.length + host._warns.length;
+    assert.ok(logCalls > 0, '降级路径必须留痕（logTrace/logDebug/logWarn 至少一条），禁止静默 no-op');
+    // 只禁止「静默写死已落定」这一组合：若实现把签名写成已落定，则必须真的贴到底。
+    // （不做「签名必须不等于某值」的裸不等式，否则会把「合法降级后标记落定」也判红。）
+    if (typeof manager.getSettledLayoutSignature === 'function' && manager.getSettledLayoutSignature() !== '') {
+      assert.equal(stream.getTop(), 2200, '写下已落定签名时必须真的贴到底，禁止把 no-op 记成已对齐');
+    }
+  });
+
+  await t.test('21. 占位高度逐帧展开时严禁按 errorPx<=2 提前收敛', () => {
+    // 【实测缺陷复现（根因 2）】
+    //   进入期 capture:false 使 content-visibility 的 contain-intrinsic-size 恒为兜底占位高度，
+    //   末行 rect 只是占位坐标。当占位坐标恰好让 |row.bottom - safeBottom| <= 2 时，
+    //   旧实现把「占位对齐」当成真对齐，连续 2 帧稳定即收敛；
+    //   随后 Blink 逐帧展开真实高度（2000 → 2400 → 3200 → 4000），末行被顶到输入舱下方。
+    const row = { id: 'm-last', baseTop: 700, height: 100 };
+    const stream = makeStream({ scrollHeight: 2000, clientHeight: 800, rows: [row] });
+    const host = createMockViewportHost({ streamElement: stream.el, activeSessionId: 's1' });
+    const manager = new StreamViewportManager(host);
+    const queue = [];
+    host.requestAnimationFrame = (cb) => { queue.push(cb); return 1; };
+
+    manager.beginSessionEnter('s1');
+    manager.settleSessionEnter('m-last', 's1', 'ready', 50);
+
+    // 第 1 帧：占位几何恰好贴合安全底线（row.bottom = 700 + 100 = 800 = safeBottom），误差 0
+    const step = (queue) => { if (queue.length > 0) { queue.shift()(); return true; } return false; };
+    assert.equal(step(queue), true, '首帧必须被调度（否则计划根本没在推进）');
+
+    // 第 2 帧：内容开始逐帧展开，占位 rect 尚未更新
+    stream.el.scrollHeight = 2400;
+    step(queue);
+    assert.equal(manager.isSessionEnterPending(), true, 'scrollHeight 仍在变化时严禁收敛（errorPx<=2 只是占位假象）');
+
+    // 第 3 帧：继续展开
+    stream.el.scrollHeight = 3200;
+    step(queue);
+    assert.equal(manager.isSessionEnterPending(), true, '第 3 个不同高度帧仍不得收敛，必须等高度连续 3 帧稳定');
+
+    // 真实布局落定：末行真实位置 3900..4000，总高 4000，安全底线 800
+    stream.el.scrollHeight = 4000;
+    row.baseTop = 3900;
+    drainFrames(queue);
+
+    assert.equal(stream.getTop(), 3200, '最终必须停在 scrollTop === scrollHeight - clientHeight = 3200');
+    const rowRect = stream.rows[0].getBoundingClientRect();
+    assert.ok(
+      Math.abs(rowRect.bottom - 800) <= 2,
+      `末行底边必须贴合输入舱上方安全线 800（容差 2px），实测 ${rowRect.bottom}`
+    );
+    assert.equal(manager.isSessionEnterPending(), false, '高度连续稳定后计划才允许收敛');
+  });
+
+  await t.test('22. 缓存批次对齐后不得收敛：REST 最新页到达前计划必须存活', () => {
+    // 【实测缺陷复现（根因 5）】
+    //   旧实现的 loading 冻结只在 messagesCount === 0 生效。缓存批次（20 条、末条是用户提问、
+    //   DOM 已可对齐）被当成终态收敛；REST 最新页到达（20 → 50）时计划早已释放，
+    //   最新 agent 回复永远停在输入舱下方。
+    const stream = makeStream({ scrollHeight: 2000, clientHeight: 800, rows: [{ id: 'm-user-20', baseTop: 1900, height: 100 }] });
+    const host = createMockViewportHost({ streamElement: stream.el, activeSessionId: 's1' });
+    const manager = new StreamViewportManager(host);
+    const queue = [];
+    host.requestAnimationFrame = (cb) => { queue.push(cb); return 1; };
+
+    manager.beginSessionEnter('s1');
+
+    // 场景 A：网络仍在 loading，缓存批次已对齐 —— 必须冻结挂起而不是收敛
+    manager.settleSessionEnter('m-user-20', 's1', 'loading', 20);
+    drainFrames(queue);
+    assert.equal(manager.isSessionEnterPending(), true, 'loading 相位下即使缓存批次已对齐也不得收敛');
+
+    /**
+     * 【假绿铲除 (P0-4)】原「场景 B」声称测「缓存批次不收敛」，但它继承了场景 A 的 loading 冻结
+     * （`lastSeenScrollHeight` 已被 loading 分支污染成 2000），所以看起来存活。
+     * probe27 实测：纯 ready 起步时 6 帧就收敛，该场景对根因零杀伤力。
+     * 「纯 ready 起步」已拆成独立用例 26（不继承任何 loading 状态），此处不得再保留靠副作用才绿的场景。
+     */
+
+    // 场景 C：REST 最新页到达（20 → 50），末条换成 agent 回复，内容撑高
+    stream.rows.length = 0;
+    stream.rows.push({ id: 'm-agent-50', baseTop: 4900, height: 100 });
+    stream.el.scrollHeight = 5000;
+    manager.settleSessionEnter('m-agent-50', 's1', 'ready', 50);
+    drainFrames(queue);
+
+    assert.equal(stream.getTop(), 4200, '最新页到达后必须落到 scrollHeight - clientHeight = 4200');
+    assert.equal(manager.isSessionEnterPending(), false, '最新页真正落底后计划才允许收敛');
+  });
+
+  await t.test('23. reassertActivePin 幂等入口：armed 时重新对齐，取消后不得写入', () => {
+    // 【契约】React 提交后的贴底驱动入口：无参、幂等、可重复调用；
+    //   armed（计划存活）期间调用必须重新对齐一次；用户手势 cancelSessionEnter() 之后不得写入任何 scrollTop。
+    const row = { id: 'm-last', baseTop: 3800, height: 100 };
+    const stream = makeStream({ scrollHeight: 4000, clientHeight: 800, rows: [row] });
+    const host = createMockViewportHost({ streamElement: stream.el, activeSessionId: 's1' });
+    const manager = new StreamViewportManager(host);
+    const queue = [];
+    host.requestAnimationFrame = (cb) => { queue.push(cb); return 1; };
+
+    assert.equal(typeof manager.reassertActivePin, 'function', '必须暴露无参幂等入口 reassertActivePin()');
+
+    manager.beginSessionEnter('s1');
+    manager.settleSessionEnter('m-last', 's1', 'ready', 50);
+    if (queue.length > 0) queue.shift()();
+    assert.equal(manager.isSessionEnterPending(), true, '先只推进一帧，计划必须仍在途');
+
+    // React 提交后内容再次长高：末行真实位置下移、总高变化
+    row.baseTop = 4500;
+    stream.el.scrollHeight = 4600;
+    manager.reassertActivePin();
+    assert.equal(stream.getTop(), 3800, 'armed 期间调用必须重新对齐到 scrollHeight - clientHeight = 3800');
+
+    // 幂等：无漂移重复调用不得改变位置，也不得抛错
+    const topBeforeRepeat = stream.getTop();
+    assert.doesNotThrow(() => manager.reassertActivePin(), 'reassertActivePin 必须可重复调用');
+    assert.equal(stream.getTop(), topBeforeRepeat, '无漂移时重复调用必须幂等');
+
+    // 用户手势取消后：不得再写任何 scrollTop
+    manager.cancelSessionEnter();
+    stream.el.scrollTop = 1000;
+    manager.reassertActivePin();
+    assert.equal(stream.el.scrollTop, 1000, '用户手势取消后 reassertActivePin 不得写入 scrollTop');
+  });
+
+  await t.test('24. reassertActivePin 重复调用不得并行出多条推进帧（armedFrames 每帧最多递增一次）', () => {
+    // 【实测缺陷复现（P1-2）】
+    //   runSessionEnterFrame 未收敛时会自己排下一帧；而 renderCoordinator 的 MutationObserver
+    //   每帧都会调用 reassertActivePin()。旧实现让每次 reassert 同步推进并各自再排一条 rAF 链，
+    //   于是同一 ticket 上并行出 N 条链，armedFrames 每帧递增 N 次，
+    //   600 帧硬上限被 N 倍速提前耗尽 → 内容真正稳定前就被兜底截断。
+    // 【裁决语义】同一 ticket 任意时刻最多一条在途推进帧。
+    const row = { id: 'm-last', baseTop: 4500, height: 100 };
+    // 末行永远贴不上安全线（4500 - 3200 + 100 = 1400 > safeBottom 800），计划全程保持 armed。
+    const stream = makeStream({ scrollHeight: 4000, clientHeight: 800, rows: [row] });
+    const host = createMockViewportHost({ streamElement: stream.el, activeSessionId: 's1' });
+    const manager = new StreamViewportManager(host);
+    const queue = [];
+    host.requestAnimationFrame = (cb) => { queue.push(cb); return 1; };
+
+    manager.beginSessionEnter('s1');
+    manager.settleSessionEnter('m-last', 's1', 'ready', 50);
+    assert.equal(manager.isSessionEnterPending(), true, '末行始终不贴安全线，计划必须保持 armed');
+    assert.equal(queue.length, 1, '同步推进后只允许一条在途帧');
+
+    for (let i = 0; i < 5; i += 1) manager.reassertActivePin();
+    assert.equal(
+      queue.length,
+      1,
+      'reassertActivePin 重复调用绝不可并行出多条推进帧（旧实现会累加成 5 条以上）'
+    );
+
+    queue.shift()();
+    for (let i = 0; i < 3; i += 1) manager.reassertActivePin();
+    assert.equal(queue.length, 1, '推进一帧后重入 reassertActivePin 同样只允许一条在途帧');
+  });
+
+  await t.test('25. cancelSessionEnter 后重入 reassertActivePin 不得重新起帧', () => {
+    // 【契约】用户手势取消后，在途帧必须静默作废，reassertActivePin 必须保持纯 no-op。
+    const row = { id: 'm-last', baseTop: 4500, height: 100 };
+    const stream = makeStream({ scrollHeight: 4000, clientHeight: 800, rows: [row] });
+    const host = createMockViewportHost({ streamElement: stream.el, activeSessionId: 's1' });
+    const manager = new StreamViewportManager(host);
+    const queue = [];
+    host.requestAnimationFrame = (cb) => { queue.push(cb); return 1; };
+
+    manager.beginSessionEnter('s1');
+    manager.settleSessionEnter('m-last', 's1', 'ready', 50);
+    assert.equal(queue.length, 1, '取消前必须存在一条在途帧');
+
+    manager.cancelSessionEnter();
+    drainFrames(queue, 10);
+    assert.equal(queue.length, 0, '取消后在途帧必须静默作废，不得再排下一帧');
+
+    for (let i = 0; i < 3; i += 1) manager.reassertActivePin();
+    assert.equal(queue.length, 0, '取消后重入 reassertActivePin 不得重新起帧');
+  });
+
+  /**
+   * 【实测缺陷复现（P0-1 / P0-4）】
+   *   真实链路 `messageLoadingService.loadMessages` 命中内存缓存时直接把 `messagesPhase` 置为 `'ready'`，
+   *   而 REST 最新页仍在路上。于是进入计划看到的是「纯 ready」：缓存批次（20 条）高度 2000→2100→2200
+   *   稳定 3 帧后，`converged` 全部条件成立 → 第 6 帧 `pending=false`（probe27 实测）。
+   *   随后 REST 到达（20 → 50、scrollHeight=5000）时计划已死，视口停在 1400 而非 4200。
+   * 【裁决语义】`'ready'` 不再等于「权威页已到」：宿主必须显式声明权威完成信号；
+   *   未拿到信号时只保持 armed（对齐 + 冻结），绝不写已落定签名。
+   */
+  await t.test('26. 缓存批次在纯 ready 相位下对齐后不得收敛（REST 权威页未到）', () => {
+    const stream = makeStream({ scrollHeight: 2000, clientHeight: 800, rows: [{ id: 'm-user-20', baseTop: 1900, height: 100 }] });
+    const host = createMockViewportHost({ streamElement: stream.el, activeSessionId: 's1' });
+    const manager = new StreamViewportManager(host);
+    const queue = [];
+    host.requestAnimationFrame = (cb) => { queue.push(cb); return 1; };
+
+    manager.beginSessionEnter('s1');
+    // 缓存批次：宿主明确声明「权威页尚未到达」，全程不出现 'loading'
+    manager.settleSessionEnter('m-user-20', 's1', 'ready', 20, false);
+
+    // Blink 逐帧展开缓存批次的真实高度：2000 → 2100 → 2200 后稳定
+    for (const height of [2000, 2100, 2200, 2200, 2200]) {
+      stream.el.scrollHeight = height;
+      drainFrames(queue, 60);
+    }
+
+    assert.equal(
+      manager.isSessionEnterPending(),
+      true,
+      '缓存批次对齐后不得收敛：REST 权威页尚未到达（当前实现第 6 帧就会 false）'
+    );
+    assert.equal(manager.getSettledLayoutSignature(), '', '权威页未到前不得把缓存批次登记成「已落定」');
+
+    // REST 最新页到达：20 → 50，末行换成 agent 回复，内容撑高到 5000
+    stream.rows.length = 0;
+    stream.rows.push({ id: 'm-agent-50', baseTop: 4900, height: 100 });
+    stream.el.scrollHeight = 5000;
+    manager.settleSessionEnter('m-agent-50', 's1', 'ready', 50, true);
+    drainFrames(queue, 120);
+
+    assert.equal(stream.getTop(), 4200, '权威页到达后必须落到 scrollHeight - clientHeight = 4200');
+    assert.equal(manager.isSessionEnterPending(), false, '权威页真正落底后计划才允许收敛');
+  });
+
+  /**
+   * 【实测缺陷复现（P0-2）】
+   *   `trackPinStability` 的 loading 分支把 `lastSeenScrollHeight` 设成当前高度，
+   *   切 ready 后高度没变 → `armedHeightChangedSinceArm` 永假 → 只能等 600 帧硬上限（约 10 秒）。
+   *   期间 `decideViewportPin` 全程 `capture:false`，流式输出完全不跟随。
+   * 【裁决语义】loading 期间只清稳定计数、不污染基线；相位切换到 ready 时重置基线，
+   *   使「ready 之后的第一帧高度」就是可信的对比起点。
+   */
+  await t.test('27. loading 转 ready 且高度不变时必须在 10 帧内收敛（不得退化成 600 帧硬上限）', () => {
+    const stream = makeStream({ scrollHeight: 2000, clientHeight: 800, rows: [{ id: 'm-last', baseTop: 1900, height: 100 }] });
+    const host = createMockViewportHost({ streamElement: stream.el, activeSessionId: 's1' });
+    const manager = new StreamViewportManager(host);
+    const queue = [];
+    host.requestAnimationFrame = (cb) => { queue.push(cb); return 1; };
+
+    manager.beginSessionEnter('s1');
+    // loading 期间高度恒为 2000：基线不得被这次「缓存批次高度」污染
+    manager.settleSessionEnter('m-last', 's1', 'loading', 20);
+    drainFrames(queue, 5);
+    assert.equal(manager.isSessionEnterPending(), true, 'loading 相位下不得收敛');
+
+    // 权威页到达：相位切 ready，高度没有变化（仍是 2000），末行已对齐安全底线
+    manager.settleSessionEnter('m-last', 's1', 'ready', 20);
+    drainFrames(queue, 10);
+
+    assert.equal(
+      manager.isSessionEnterPending(),
+      false,
+      'loading→ready 且高度不变时必须在 10 帧内收敛（当前实现恒假高度变化，只能等 600 帧）'
+    );
+    assert.equal(stream.getTop(), 1200, 'pin 必须写到最后可滚动位置 2000 - 800 = 1200');
+  });
+
+  /**
+   * 【实测缺陷复现（P0-3）】
+   *   restore-anchor 分支在锚点行尚未提交（`querySelector` 返回 null）时直接写 fallback 并把
+   *   `errorPx` 判为 0；两帧后 `finishPinPlan()` 把「未恢复」登记成「已落定」。
+   *   React 随后提交锚点行时计划已死，回溯恢复彻底丢失。
+   * 【裁决语义】锚点行未提交 = 计划尚未就绪：只保持 armed，绝不写 fallback、绝不写已落定签名；
+   *   由提交后驱动（reassertActivePin / 后续 settle）继续推进。
+   */
+  await t.test('28. restore-anchor 锚点行未提交时不得写 fallback 也不得写已落定签名', () => {
+    const stream = makeStream({ scrollHeight: 2000, clientHeight: 800, rows: [] });
+    const host = createMockViewportHost({ streamElement: stream.el, activeSessionId: 's1' });
+    const manager = new StreamViewportManager(host);
+    const queue = [];
+    host.requestAnimationFrame = (cb) => { queue.push(cb); return 1; };
+
+    manager.getSessionScrollMemory().recordSnapshot({
+      sessionId: 's1', scrollTop: 300, scrollHeight: 2000, clientHeight: 800,
+      anchorMessageId: 'm-anchor', anchorOffsetRatio: 0,
+    });
+    manager.beginSessionEnter('s1');
+    assert.equal(manager.getPendingSessionEnter().kind, 'restore-anchor');
+
+    // DOM 里没有 m-anchor：React 尚未提交目标会话的消息行
+    manager.settleSessionEnter('m-anchor', 's1', 'ready', 40);
+    drainFrames(queue, 10);
+
+    assert.equal(manager.isSessionEnterPending(), true, '锚点行未提交时必须保持 armed（当前实现两帧后就 false）');
+    assert.equal(stream.getTop(), 0, '锚点行未提交时绝不写 fallback 300');
+    assert.equal(manager.getSettledLayoutSignature(), '', '锚点行未提交时绝不写已落定签名');
+
+    // React 提交锚点行：位置在 450（delta = 450 - 0 + 0 = 450，仍在 0.6 屏可信域 480 内）
+    stream.rows.push({ id: 'm-anchor', baseTop: 450, height: 100 });
+    manager.settleSessionEnter('m-anchor', 's1', 'ready', 40);
+    drainFrames(queue, 60);
+
+    assert.equal(stream.getTop(), 450, '锚点行提交后必须按行精确恢复，而不是停在 fallback');
+    assert.equal(manager.isSessionEnterPending(), false, '真正对齐后计划才允许收敛');
+  });
+
+  /**
+   * 【有界兜底对照】锚点行在整个熔断窗口内都不出现（例如已被 session.undo 截断）：
+   *   计划不得永久 armed（会冻结滚动记忆），必须在熔断帧数内按标量基准有界降级并收口。
+   * 【杀伤力】把 `!target` 分支写成纯 return 会让 `isSessionEnterPending()` 永远为 true，本用例必红。
+   */
+  await t.test('29. restore-anchor 锚点行始终不提交时必须在熔断帧内按 fallback 有界收口', () => {
+    const stream = makeStream({ scrollHeight: 2000, clientHeight: 800, rows: [] });
+    const host = createMockViewportHost({ streamElement: stream.el, activeSessionId: 's1' });
+    const manager = new StreamViewportManager(host);
+    const queue = [];
+    host.requestAnimationFrame = (cb) => { queue.push(cb); return 1; };
+
+    manager.getSessionScrollMemory().recordSnapshot({
+      sessionId: 's1', scrollTop: 320, scrollHeight: 2000, clientHeight: 800,
+      anchorMessageId: 'gone', anchorOffsetRatio: 0.5,
+    });
+    manager.beginSessionEnter('s1');
+    manager.settleSessionEnter('gone', 's1', 'ready', 40);
+    drainFrames(queue, 80);
+
+    assert.equal(stream.getTop(), 320, '熔断后必须按记忆里的标量基准有界降级，而不是永久 armed');
+    assert.equal(manager.isSessionEnterPending(), false, '熔断后必须收口，否则滚动记忆被永久冻结');
   });
 });

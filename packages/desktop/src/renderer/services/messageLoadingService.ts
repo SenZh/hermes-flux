@@ -233,7 +233,14 @@ export class MessageLoadingService {
   async loadMessages(sessionId: string, targetBotName?: string): Promise<void> {
     const cached = sessionId ? this.deps.sessionMessagesCache.get(sessionId) : undefined;
     const state = this.deps.getState();
-    state.messagesPhase = cached && cached.length > 0 ? 'ready' : 'loading';
+    /**
+     * 【缓存批次不是终态 (Rules)】命中内存缓存只代表「可以立刻上屏」，不代表「权威最新页已到」。
+     *   旧实现命中缓存就直接 `ready`，进入计划据此把缓存批次当终态收敛：
+     *   REST 最新页随后到达（20 → 50）时计划已死，视口停在旧位置（实测 1400 而非 4200）。
+     *   因此只有「无网关的纯离线读缓存」才允许立刻 ready；有网关时必须由
+     *   `loadMessagesInner` 结束（REST 已返回或已判定失败）后的 finally 收敛。
+     */
+    state.messagesPhase = cached && cached.length > 0 && !this.deps.getGatewayClient() ? 'ready' : 'loading';
     const expectedGeneration = this.activeLoadMessagesGeneration + 1;
     try {
       await this.loadMessagesInner(sessionId, targetBotName);

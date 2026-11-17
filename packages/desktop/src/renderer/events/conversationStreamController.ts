@@ -89,6 +89,7 @@ export interface ConversationStreamControllerDeps {
   getReaderScrolledSessionId: () => string;
   setReaderScrolledSessionId: (val: string) => void;
   setSettledLayoutSignature: (val: string) => void;
+  cancelSessionEnter?: () => void;
   STICK_TO_BOTTOM_THRESHOLD_PX: number;
   MESSAGE_WINDOW_CAPACITY: number;
 }
@@ -359,17 +360,33 @@ export function createConversationStreamController(
         syncPromptNavigatorFromScroll();
 
         const progTarget = getProgrammaticScrollTarget();
+        /**
+         * 【判定程序化滚动 (Why)】忽略窗口内必须把 scrollTop 的「向下回退」也视为程序化：
+         *   布局 clamp（内容高度收缩 / 末行重排）会让 scrollTop 变小，若沿用
+         *   `scrollTop >= lastStreamScrollTop` 的方向限制，这种 6px 回退会被误判成读者手势，
+         *   直接 cancelSessionEnter() 杀掉进入计划（实测首屏因此永远落不到底）。
+         * 【方向判别不可省 (Pitfall)】只按「窗口内 ⇒ 程序化」判定会反向误杀读者手势：
+         *   贴底写入后 180ms 窗口内读者向上滚动也被吞掉，视口随即被 reassertActivePin 拽回底部，
+         *   最坏情况在 armed 的 600 帧窗口内（约 10 秒）无法回溯历史。
+         *   因此窗口内只豁免「小幅回退（布局 clamp）」，向上超过阈值的位移仍是读者手势。
+         * 【同一时基 (Rules)】忽略截止由 markProgrammaticScroll 以 performance.now() 写入，
+         *   这里的比较必须同域，禁止混用 Date.now()。
+         * 【取样顺序 (Rules)】previousTop 必须先于判定取值：它同时是方向判别的基准与后续手势判据。
+         */
+        const previousTop = getLastStreamScrollTop();
+        const inIgnoreWindow = performance.now() <= getProgrammaticScrollIgnoreUntil();
+        const isLayoutClamp = inIgnoreWindow && streamEl.scrollTop >= previousTop - 8;
         const isProgrammatic =
           (progTarget !== null && Math.abs(streamEl.scrollTop - progTarget) <= 2)
-          || (performance.now() <= getProgrammaticScrollIgnoreUntil() && streamEl.scrollTop >= getLastStreamScrollTop());
+          || isLayoutClamp;
 
         if (progTarget !== null && Math.abs(streamEl.scrollTop - progTarget) <= 2) {
           setProgrammaticScrollTarget(null);
         }
-        const previousTop = getLastStreamScrollTop();
 
         if (!isProgrammatic && performance.now() > getLayoutDriftUntil() && Math.abs(streamEl.scrollTop - previousTop) > 4) {
           setInitialBottomSettling(false);
+          deps.cancelSessionEnter?.();
           if (streamEl.scrollTop < previousTop - 4) {
             setReaderScrolledSessionId(state.activeSessionId);
             setSettledLayoutSignature(layoutSignature());
@@ -531,8 +548,19 @@ export function createConversationStreamController(
         });
       };
 
+      /**
+       * 【打断语义一致 (Why)】两个入口对「什么算用户手势」必须一致：只有向上滚动（或显著位移）
+       *   才算读者接管视口；向下滚应保留 armed 贴底意图，否则读者一次向下微调就会把
+       *   尚未落定的进入计划打死，首屏停在半空。
+       * 【防范历史坑 (Pitfall)】旧实现把 cancel 放在 guard 之前无条件执行（含向下滚、含 cooldown 期），
+       *   与 onscroll 的 `!isProgrammatic && 位移 > 4` 判据双标。
+       * 【与下方 guard 同源 (Rules)】方向判据必须与 `e.deltaY >= 0` 的早退条件严格互补：
+       *   `deltaY` 缺失（合成事件 / 旧内核）按读者手势处理，绝不静默吞掉取消。
+       */
       streamEl.onwheel = (e: WheelEvent) => {
-        if (e.deltaY >= 0 || getStreamScrollCooldown() || state.isLoadingOlder) return;
+        const isDownwardWheel = Boolean(e && e.deltaY >= 0);
+        if (!isDownwardWheel) deps.cancelSessionEnter?.();
+        if (e && e.deltaY >= 0 || getStreamScrollCooldown() || state.isLoadingOlder) return;
         if (state.activeFocus.type === 'group' || !state.activeSessionId || !state.hasOlderMessages) return;
         const isShortNoOverflow = streamEl.scrollHeight <= streamEl.clientHeight + 4;
         if (isShortNoOverflow) {

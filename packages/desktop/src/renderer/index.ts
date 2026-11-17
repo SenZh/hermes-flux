@@ -594,7 +594,7 @@ let averageRowHeightPx = 80;
 let streamScrollCooldown = 0;
 let lastStreamScrollTop = 0;
 let programmaticScrollTarget: number | null = null;
-let programmaticScrollIgnoreUntil = 0;
+let programmaticScrollIgnoreUntil = 0; // performance.now() 域，与 conversationStreamController 的比较同域
 let layoutDriftUntil = 0;
 let readerScrolledSessionId: string | null = null;
 let sessionSwitchPending = false;
@@ -622,7 +622,7 @@ function syncWindowLocalState(): void {
 const layoutSignature = (): string => `${state.activeSessionId ?? ''}:${state.messages.length}:${messageWindowStart}:${messageWindowEnd}`;
 function markProgrammaticScroll(stream: HTMLElement): void {
   programmaticScrollTarget = Math.round(stream.scrollTop);
-  programmaticScrollIgnoreUntil = Date.now() + 180;
+  programmaticScrollIgnoreUntil = (typeof performance !== 'undefined' ? performance.now() : Date.now()) + 180;
 }
 
 const ensureMessageWindow = (total: number) => { messageWindowManager.ensureMessageWindow(total); syncWindowLocalState(); };
@@ -795,7 +795,7 @@ const syncActiveSessionPreviewToRail = (s: string, m: MessageViewModel[], b?: st
 
 async function loadMessages(sessionId: string, targetBotName?: string): Promise<void> {
   const cached = sessionId ? sessionMessagesCache.get(sessionId) : undefined;
-  state.messagesPhase = cached && cached.length > 0 ? 'ready' : 'loading';
+  state.messagesPhase = cached && cached.length > 0 && !gatewayClient ? 'ready' : 'loading'; // 缓存命中只上屏；有网关时权威页未到，由 finally 收敛
   const expectedGeneration = activeLoadMessagesGeneration + 1;
   try {
     await messageLoadingService.loadMessagesInner(sessionId, targetBotName);
@@ -1112,8 +1112,8 @@ const renderCoordinator = createRenderCoordinator({
   applyStreamAnchor: (anchor, pin) => applyStreamAnchor(anchor, pin), stabilizeStreamAnchor: (anchor) => stabilizeStreamAnchor(anchor),
   isStreamNearBottom: (stream) => isStreamNearBottom(stream), syncStreamBottomInset: () => syncStreamBottomInset(),
   settleInitialBottom: () => settleInitialBottom(), bindEvents: () => bindEvents(),
-  isSessionEnterPending: () => streamViewportManager.isSessionEnterPending(),
-  settleSessionEnter: (probe) => streamViewportManager.settleSessionEnter(probe),
+  // React 提交后驱动：提交后重新对齐 armed 计划（观察器合并到一帧），语义见 streamViewportManager.reassertActivePin。
+  isSessionEnterPending: () => streamViewportManager.isSessionEnterPending(), settleSessionEnter: (probe, sessionId, phase, count, authoritativeReady) => streamViewportManager.settleSessionEnter(probe, sessionId, phase, count, authoritativeReady), reassertActivePin: () => streamViewportManager?.reassertActivePin(),
   syncComposerPoppers: () => syncComposerPoppers(), logRender,
 });
 
@@ -1299,7 +1299,9 @@ const conversationStreamController = createConversationStreamController({
   getProgrammaticScrollTarget: () => programmaticScrollTarget, setProgrammaticScrollTarget: (val) => { programmaticScrollTarget = val; },
   getProgrammaticScrollIgnoreUntil: () => programmaticScrollIgnoreUntil, getLayoutDriftUntil: () => layoutDriftUntil,
   getReaderScrolledSessionId: () => readerScrolledSessionId ?? '', setReaderScrolledSessionId: (val) => { readerScrolledSessionId = val || null; },
-  setSettledLayoutSignature: (val) => { streamSettleState.settledLayoutSignature = val; }, STICK_TO_BOTTOM_THRESHOLD_PX, MESSAGE_WINDOW_CAPACITY,
+  setSettledLayoutSignature: (val) => { streamSettleState.settledLayoutSignature = val; },
+  cancelSessionEnter: () => streamViewportManager?.cancelSessionEnter(),
+  STICK_TO_BOTTOM_THRESHOLD_PX, MESSAGE_WINDOW_CAPACITY,
 });
 
 const onboardingController = createOnboardingController({

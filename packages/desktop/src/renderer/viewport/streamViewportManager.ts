@@ -58,14 +58,58 @@ export interface StreamAnchor {
 }
 
 /**
+ * 会话进入计划的 pin 意图（供宿主与单测观测）。
+ * 【约束与规则 (Rules)】'none' 表示当前没有挂起的进入计划，其余取值与 ScrollRestoreStrategy 同名。
+ */
+export type PinIntent = 'none' | 'pin-to-bottom' | 'restore-anchor' | 'restore-scroll-top';
+
+/** 末行底边与安全线的判定容差（px）。 */
+const SESSION_ENTER_ALIGN_TOLERANCE_PX = 2;
+/** 对齐连续稳定帧数：单帧贴合可能是占位高度的假象。 */
+const SESSION_ENTER_ALIGNED_STABLE_FRAMES = 2;
+/** 内容高度连续稳定帧数：Blink 逐帧展开真实高度期间严禁提前收口。 */
+const SESSION_ENTER_HEIGHT_STABLE_FRAMES = 3;
+/** 等 React 提交期间的帧轮询上限：超过后交给 MutationObserver 驱动，避免空转占满合成器。 */
+const SESSION_ENTER_WAIT_FRAME_LIMIT = 90;
+/** pin 计划的硬上限兜底帧数：防止永久 armed 把滚动记忆永久冻结。 */
+const SESSION_ENTER_HARD_CAP_FRAMES = 600;
+/** 回溯类计划（restore-anchor / restore-scroll-top）的熔断帧数，语义与旧实现保持一致。 */
+const RESTORE_PLAN_HARD_CAP_FRAMES = 30;
+
+/** 一次「会话进入」的挂起计划（内部状态，不对外暴露）。 */
+interface SessionEnterPlan {
+  ticket: number;
+  sessionId: string;
+  plan: ScrollRestoreStrategy;
+  probeMessageId: string;
+  /** 最近一次推进时宿主上报的生命周期相位；'loading' 期间禁止收口。 */
+  phase: string;
+  /** 最近一次推进时宿主上报的权威消息数；>0 才允许「探针缺失」降级贴底。 */
+  messagesCount?: number;
+  /**
+   * 权威完成信号：宿主明确声明「REST 权威页已到 / 已判定」。
+   *
+   * 【设计意图 (Why)】`messagesPhase === 'ready'` 在真实链路里曾同时表示两种完全不同的语义：
+   *   ①「权威页已到」（可以收口）；②「内存缓存批次已上屏、REST 还在路上」（绝不能收口）。
+   *   旧实现按 ② 收口，导致缓存批次被当终态，REST 到达后视口停在旧位置（实测 1400 而非 4200）。
+   * 【约束与规则 (Rules)】缺省（undefined）视为「宿主未声明」：只有 phase 为 'ready' 才放行，
+   *   显式 false 则一律不放行。这样旧调用方（不传该参数）仍保持既有语义，不会误杀。
+   */
+  authoritativeReady?: boolean;
+}
+
+/**
  * 会话进入计划。
  * 【设计意图 (Why)】跨会话「进去之后视口在哪」必须是一次显式、可收敛的裁决，
  *   不能再依赖「旧会话 DOM 的 wasNearBottom」或浏览器对旧 scrollTop 的继承：
  *   前者会把上一会话的贴底态串台，后者会留下 350px 这类继承值。
  * 【约束与规则 (Rules)】
- *   1. `probeMessageId` 是「React 已把目标会话提交进 DOM」的判据；未就绪时不计数、不收敛；
- *   2. 收敛条件是连续 2 帧误差 ≤ 2px，硬熔断 30 帧，绝不无限 rAF；
- *   3. 任何用户手势或导航跳转都能立即取消（见 cancelSessionEnter）。
+ *   1. `probeMessageId` 是「React 已把目标会话提交进 DOM」的判据；未就绪时不写视口、不计数收敛；
+ *   2. 严禁用「DOM 高度 scrollHeight <= clientHeight」推断短会话：权威消息数 > 0 时那只是尚未提交；
+ *   3. pin 的收敛是「armed 意图 + 终态判据」：末行对齐连续稳定 + 内容高度连续稳定 + 权威完成信号
+ *      + 自 armed 起确实观测到高度变化（或到达硬上限兜底），绝不按单条几何误差提前收口；
+ *      权威完成信号由宿主的 `messagesPhase` 与显式 `authoritativeReady` 共同表达；
+ *   4. 任何用户手势或导航跳转都能立即取消（见 cancelSessionEnter）。
  */
 
 export interface StreamViewportHost {
@@ -97,8 +141,37 @@ export class StreamViewportManager {
   private initialBottomSettling = false;
   private settleMinFrames = 0;
   private settledLayoutSignature = '';
-  private pendingSessionEnter: { ticket: number; sessionId: string; plan: ScrollRestoreStrategy; probeMessageId: string; frames: number; stableFrames: number; prevScrollHeight: number } | null = null;
+  private pendingSessionEnter: SessionEnterPlan | null = null;
   private sessionEnterTicket = 0;
+
+  /**
+   * 【armed 意图状态机 (Rules)】这些计数只在「一次会话进入」的生命周期内有效：
+   *   beginSessionEnter 全量重置、cancelSessionEnter 全量清除，
+   *   保证 reassertActivePin() 在取消后是纯 no-op，也保证新旧计划绝不串台。
+   */
+  private armedFrames = 0;
+  private alignedStableFrames = 0;
+  private scrollHeightStableFrames = 0;
+  private armedHeightChangedSinceArm = false;
+  private lastSeenScrollHeight = 0;
+  private probeMissingLogged = false;
+
+  /**
+   * 【单链推进闸门 (Why)】`runSessionEnterFrame` 未收敛时会自排下一帧，而宿主
+   *   （renderCoordinator 的 MutationObserver / ResizeObserver）每帧还会调用
+   *   `reassertActivePin()`。旧实现每次 reassert 都同步推进并各自再排一条 rAF 链，
+   *   于是同一 ticket 上并行出 N 条链，`armedFrames` 每帧被递增 N 次，
+   *   600 帧硬上限被 N 倍速提前耗尽 → 内容真正稳定前就被兜底截断。
+   * 【约束与规则 (Rules)】
+   *   1. `pinFrameInFlight` 是唯一在途闸门：同一 ticket 任意时刻最多一条排队推进帧，
+   *      因此「每动画帧最多一次配额递增」由「每帧最多一个排队帧」结构性保证；
+   *   2. 只有排队帧（advance 模式）消耗帧配额并裁决收敛；同步入口（settle / reassert）
+   *      只做几何对齐，保住「提交后立刻对齐」语义，但不计数、不叠链；
+   *   3. `pinFrameSerial` 让取消/重建计划后残留的旧回调静默作废，
+   *      绝不把推进权带进新计划。
+   */
+  private pinFrameInFlight = false;
+  private pinFrameSerial = 0;
 
   private readonly sessionScrollMemory = new SessionScrollMemory();
   private readonly medianEstimator = new AdaptiveMedianEstimator();
@@ -398,7 +471,7 @@ export class StreamViewportManager {
    */
   public beginSessionEnter(sessionId: string, options: { forcePinToBottom?: boolean } = {}): void {
     if (!sessionId) {
-      this.pendingSessionEnter = null;
+      this.clearSessionEnter();
       return;
     }
     const ticket = ++this.sessionEnterTicket;
@@ -413,10 +486,9 @@ export class StreamViewportManager {
       sessionId,
       plan,
       probeMessageId: '',
-      frames: 0,
-      stableFrames: 0,
-      prevScrollHeight: 0,
+      phase: 'ready',
     };
+    this.resetArmedState();
     // 回溯类计划必须关闭落底门禁，否则 settleInitialBottom 会把它拽回底部。
     if (plan.type !== 'pin-to-bottom') this.setInitialBottomSettling(false);
   }
@@ -430,105 +502,432 @@ export class StreamViewportManager {
     return pending ? { sessionId: pending.sessionId, kind: pending.plan.type } : null;
   }
 
+  /** 当前 armed 的 pin 意图，'none' 表示没有挂起的进入计划。 */
+  public getPinIntent(): PinIntent {
+    const pending = this.pendingSessionEnter;
+    return pending ? pending.plan.type : 'none';
+  }
+
   public cancelSessionEnter(): void {
+    this.clearSessionEnter();
+  }
+
+  /**
+   * React 提交后的贴底驱动入口：无参、幂等。
+   *
+   * 【设计意图 (Why)】首屏内容由 React 异步提交，提交时刻既可能早于也可能晚于
+   *   `settleSessionEnter` 的推进帧。若只靠渲染流程里的单次推进，提交晚于那一帧时
+   *   视口就永远停在半空（实测差 7958px）。宿主通过 MutationObserver / ResizeObserver
+   *   在提交后调用本方法，armed 计划会立刻重新对齐一次。
+   *
+   * 【约束与规则 (Rules)】
+   *   1. 无 armed 计划（含 `cancelSessionEnter()` 之后）必须纯 no-op，绝不写 scrollTop；
+   *   2. 同步执行一次**几何对齐**（sync 模式：不消耗帧配额、不裁决收敛），
+   *      不重置 `armedHeightChangedSinceArm`（否则「内容确实长高过」的事实被抹掉）；
+   *   3. 幂等：无漂移时重复调用不得改变位置；
+   *   4. **绝不叠帧**：在途闸门 `pinFrameInFlight` 保证同一 ticket 任意时刻只有一条
+   *      排队推进帧；重复调用只做同步对齐，不会并行出 N 条 rAF 链把 600 帧上限烧穿。
+   */
+  public reassertActivePin(): void {
+    const pending = this.pendingSessionEnter;
+    if (!pending) return;
+    this.runSessionEnterFrame(pending.ticket, 'sync');
+  }
+
+  /**
+   * 把下一帧推进排队（单链闸门）。
+   * 【约束与规则 (Rules)】
+   *   1. 同一 ticket 已有在途帧时直接返回，绝不叠链；
+   *   2. 帧回调按 `pinFrameSerial` 作废旧计划残留：取消或重建计划后，迟到回调是纯 no-op，
+   *      不写位置、不消耗配额、不把推进权带进新计划；
+   *   3. 回调先释放闸门再推进，保证推进过程中新排的帧仍被同一闸门约束。
+   */
+  private schedulePinFrame(ticket: number): void {
+    if (this.pinFrameInFlight) return;
+    this.pinFrameInFlight = true;
+    const serial = this.pinFrameSerial;
+    this.runRaf(() => {
+      if (serial !== this.pinFrameSerial) return;
+      this.pinFrameInFlight = false;
+      this.runSessionEnterFrame(ticket, 'advance');
+    });
+  }
+
+  private resetArmedState(): void {
+    this.armedFrames = 0;
+    this.alignedStableFrames = 0;
+    this.scrollHeightStableFrames = 0;
+    this.armedHeightChangedSinceArm = false;
+    this.lastSeenScrollHeight = 0;
+    this.probeMissingLogged = false;
+    // 【在途帧闸门必须同生命周期 (Rules)】armed 计数归零的同时必须作废在途帧：
+    //   serial 递增后旧回调静默退出，绝不会把旧计划的推进权带进新计划。
+    this.pinFrameInFlight = false;
+    this.pinFrameSerial += 1;
+  }
+
+  private clearSessionEnter(): void {
     this.pendingSessionEnter = null;
+    this.resetArmedState();
+  }
+
+  /**
+   * 权威源短路：会话确实为空（消息数 0 且相位 ready）。
+   * 【规则】只认权威消息数，绝不拿 DOM 高度推断；空会话必须夹紧在顶部并立即释放计划。
+   */
+  private completeEmptySession(): void {
+    const stream = this.host.getStreamElement();
+    if (stream) {
+      stream.scrollTop = 0;
+      this.host.markProgrammaticScroll(stream);
+    }
+    this.setInitialBottomSettling(false);
+    this.setSettledLayoutSignature(this.host.layoutSignature());
+    this.clearSessionEnter();
   }
 
   /**
    * 推进进入计划。
-   * 【规则】`probeMessageId` 由宿主在每次 render 时喂入（目标会话最后一条可见消息 id）：
-   *   它挂载之前一律视为「React 尚未提交」，不写位置也不计数收敛，避免在骨架高度上贴成 0。
+   * 【规则】
+   *   1. 保持第一参数为 probeMessageId，完美兼容单测与旧装配契约；
+   *   2. 跨会话防污染：校验可选的 sessionId，丢弃过期会话的延迟调用；
+   *   3. 生命周期协同：loading 且 0 消息时冻结挂起（不消耗帧）；
+   *   4. 真实空会话（ready 且 0 消息）走权威源短路，禁止状态机死锁挂起；
+   *   5. 相位从 loading 切到 ready 时重置高度基线（见 resetHeightBaselineOnAuthoritativeReady）。
    */
-  public settleSessionEnter(probeMessageId?: string): void {
+  public settleSessionEnter(
+    probeMessageId?: string,
+    sessionId?: string,
+    phase?: string,
+    messagesCount?: number,
+    authoritativeReady?: boolean
+  ): void {
     const pending = this.pendingSessionEnter;
     if (!pending) return;
+
+    // 跨会话防污染：校验可选的 sessionId，若与当前挂起计划不匹配则直接丢弃
+    if (sessionId && sessionId !== pending.sessionId) {
+      return;
+    }
+
+    const currentPhase = phase || 'ready';
+    const previousPhase = pending.phase;
+    pending.phase = currentPhase;
+    if (typeof messagesCount === 'number') pending.messagesCount = messagesCount;
+    if (typeof authoritativeReady === 'boolean') pending.authoritativeReady = authoritativeReady;
+
+    /**
+     * 【相位切换必须重置高度基线 (Rules)】
+     *   loading 期间的内容高度是缓存批次的中间态，不构成终态判据（见 trackPinStability）。
+     *   若基线停留在 loading 期间的高度，切 ready 后高度没变 → `armedHeightChangedSinceArm`
+     *   永假 → 只能等 600 帧硬上限（约 10 秒），期间流式输出完全不跟随。
+     *   因此相位首次进入 ready 时必须重置基线，让「ready 之后的第一帧高度」成为可信对比起点。
+     *   `armedFrames` 刻意不清零：否则反复 settle 就能无限续命，绕过硬上限兜底。
+     */
+    if (previousPhase !== currentPhase && currentPhase === 'ready') {
+      this.resetHeightBaselineOnAuthoritativeReady();
+    }
+
+    if (messagesCount === 0) {
+      if (currentPhase === 'loading') return;
+      this.completeEmptySession();
+      return;
+    }
+
     if (probeMessageId) pending.probeMessageId = probeMessageId;
-    this.runSessionEnterFrame(pending.ticket);
+    this.runSessionEnterFrame(pending.ticket, 'sync');
   }
 
-  private isProbeReady(stream: HTMLElement, probeMessageId: string): boolean {
-    if (!probeMessageId) return true;
-    return Boolean(stream.querySelector(`[data-msg-id="${escapeMessageId(probeMessageId)}"]:not(.msg-action-btn)`));
+  /**
+   * 相位进入 ready 时重置高度基线。
+   * 【约束与规则 (Rules)】只重置与「高度对比」相关的计数，绝不清零 `armedFrames`：
+   *   后者是硬上限兜底的唯一依据，被清零就等于给了无限续命的通道。
+   */
+  private resetHeightBaselineOnAuthoritativeReady(): void {
+    this.armedHeightChangedSinceArm = false;
+    this.lastSeenScrollHeight = 0;
+    this.scrollHeightStableFrames = 0;
+    this.alignedStableFrames = 0;
   }
 
-  private runSessionEnterFrame(ticket: number): void {
+  /**
+   * 执行一帧 pin 对齐推进。
+   *
+   * 【两种模式 (Why)】
+   *   - `advance`：唯一会消耗帧配额（`armedFrames` 与稳定性计数）、唯一有权裁决收敛的模式；
+   *     它只由 `schedulePinFrame` 排出的排队帧触发，而排队帧受单链闸门约束，
+   *     因此「armedFrames 每动画帧最多递增一次」由结构直接保证。
+   *   - `sync`：宿主提交后的同步入口（`settleSessionEnter` / `reassertActivePin`）。
+   *     它必须保住「提交后立刻对齐」的语义（否则首屏停在半空差 7958px），
+   *     但不计数、不裁决收敛、不额外叠帧，因此不会把 600 帧上限烧穿。
+   * 【规则】返回 true 表示本帧已收敛并释放计划，调用方不得再排下一帧。
+   */
+  private runPinFrame(
+    stream: HTMLElement,
+    pending: SessionEnterPlan,
+    ticket: number,
+    advance: boolean
+  ): boolean {
+    const padding = typeof getComputedStyle === 'function' ? parseFloat(getComputedStyle(stream).paddingBottom) || 0 : 0;
+    const maxScroll = Math.max(0, stream.scrollHeight - stream.clientHeight);
+    const probeId = pending.probeMessageId;
+    const lastRow = probeId
+      ? stream.querySelector<HTMLElement>(`[data-msg-id="${escapeMessageId(probeId)}"]:not(.msg-action-btn)`)
+      : null;
+
+    /**
+     * 【React 尚未提交 (Rules)】指定了探针却查不到行，且没有权威消息数佐证内容已存在
+     * （或容器高度还没撑出视口）时：只保持 armed，绝不写视口、不写已落定签名。
+     * 帧轮询有上限，超过后由宿主提交后的 `reassertActivePin()` 继续驱动。
+     */
+    const authoritativeCount = pending.messagesCount ?? 0;
+    if (probeId && !lastRow && (authoritativeCount === 0 || stream.scrollHeight <= stream.clientHeight)) {
+      if (advance) {
+        this.armedFrames += 1;
+        if (this.armedFrames < SESSION_ENTER_WAIT_FRAME_LIMIT) this.schedulePinFrame(ticket);
+      } else {
+        // 同步帧不计数，但必须保证推进链存在，否则计划在途却无人推进。
+        this.schedulePinFrame(ticket);
+      }
+      return false;
+    }
+
+    // 贴底地基：pin 意图绝不向上回退，先把视口压到当前可滚动底部。
+    if (Math.abs(stream.scrollTop - maxScroll) > SESSION_ENTER_ALIGN_TOLERANCE_PX) {
+      stream.scrollTop = maxScroll;
+      this.host.markProgrammaticScroll(stream);
+    }
+
+    const safeBottom = stream.getBoundingClientRect().bottom - padding;
+    let aligned: boolean;
+    if (lastRow && typeof lastRow.getBoundingClientRect === 'function') {
+      const delta = Math.round(lastRow.getBoundingClientRect().bottom - safeBottom);
+      if (delta > SESSION_ENTER_ALIGN_TOLERANCE_PX) {
+        // 末行仍被安全线截断：向下补齐，但受可滚动底部夹紧，绝不反向搬移
+        const nextTop = Math.min(maxScroll, stream.scrollTop + delta);
+        if (Math.abs(nextTop - stream.scrollTop) > SESSION_ENTER_ALIGN_TOLERANCE_PX) {
+          stream.scrollTop = nextTop;
+          this.host.markProgrammaticScroll(stream);
+        }
+      }
+      const deltaAfter = Math.round(lastRow.getBoundingClientRect().bottom - safeBottom);
+      /**
+       * 【终态判据的几何部分 (Rules)】同时要求两项：
+       *   1. 视口已在绝对底部（scrollTop === maxScroll，容差 2px）；
+       *   2. 末行底边不在安全线下方（deltaAfter <= 2）：落在安全线上方属于「内容不足一屏」，
+       *      此时再向上搬移只会破坏贴底，故不要求精确贴合。
+       */
+      aligned = Math.abs(stream.scrollTop - maxScroll) <= SESSION_ENTER_ALIGN_TOLERANCE_PX
+        && deltaAfter <= SESSION_ENTER_ALIGN_TOLERANCE_PX;
+    } else {
+      /**
+       * 【降级贴底必须留痕 (Rules)】探针行缺失（displayKind === 'hidden' / 空行 / 已提交但无该行）时，
+       * 唯一安全的降级是贴到可滚动底部；但严禁静默，每个进入计划只留一条可观测痕迹。
+       */
+      if (probeId && !this.probeMissingLogged) {
+        this.probeMissingLogged = true;
+        this.host.logDebug?.('session enter probe row missing', { reason: 'probe-row-missing', probeId, maxScroll });
+      }
+      aligned = Math.abs(stream.scrollTop - maxScroll) <= SESSION_ENTER_ALIGN_TOLERANCE_PX;
+    }
+
+    /**
+     * 【同步模式只对齐不裁决 (Rules)】sync 帧到此为止：几何已对齐，
+     *   但不消耗帧配额、不累计稳定性计数、不裁决收敛 —— 那些只属于排队帧。
+     *   【链条不得断 (Rules)】仍需保证推进链存在：否则宿主只在提交时同步对齐一次，
+     *   之后没有任何帧去累计稳定性计数，计划会永久 armed。
+     */
+    if (!advance) {
+      this.schedulePinFrame(ticket);
+      return false;
+    }
+
+    this.trackPinStability(stream, pending, aligned);
+
+    if (this.armedFrames >= SESSION_ENTER_HARD_CAP_FRAMES) {
+      // 硬上限兜底：最后一次贴底并留痕，避免永久 armed 冻结滚动记忆
+      if (Math.abs(stream.scrollTop - maxScroll) > SESSION_ENTER_ALIGN_TOLERANCE_PX) {
+        stream.scrollTop = maxScroll;
+        this.host.markProgrammaticScroll(stream);
+      }
+      this.host.logDebug?.('session enter hard cap', {
+        reason: 'session-enter-hard-cap',
+        sessionId: pending.sessionId,
+        probeId,
+        maxScroll,
+        aligned,
+      });
+      this.finishPinPlan();
+      return true;
+    }
+
+    const converged = this.alignedStableFrames >= SESSION_ENTER_ALIGNED_STABLE_FRAMES
+      && this.scrollHeightStableFrames >= SESSION_ENTER_HEIGHT_STABLE_FRAMES
+      && this.isAuthoritativeReady(pending)
+      && (this.armedHeightChangedSinceArm || this.armedFrames >= SESSION_ENTER_HARD_CAP_FRAMES);
+
+    if (!converged) {
+      this.schedulePinFrame(ticket);
+      return false;
+    }
+
+    if (!aligned) {
+      this.host.logDebug?.('session enter settled without aligned row', {
+        reason: 'session-enter-settled-unaligned',
+        sessionId: pending.sessionId,
+        probeId,
+        maxScroll,
+        scrollTop: Math.round(stream.scrollTop),
+      });
+    }
+    this.finishPinPlan();
+    return true;
+  }
+
+  /**
+   * 【终态判据的输入追踪 (Rules)】
+   *   1. 内容高度变化即视为「自 armed 起确实发生过真实生长」，同时清零高度稳定计数；
+   *   2. loading 相位的内容高度只是缓存批次的中间态，不构成终态判据：
+   *      只清稳定计数，**绝不把基线设成当前高度**。
+   *      旧实现写 `lastSeenScrollHeight = scrollHeight`，于是切 ready 后高度没变就恒等，
+   *      `armedHeightChangedSinceArm` 永假 → 只能等 600 帧硬上限（约 10 秒不跟随）。
+   */
+  private trackPinStability(stream: HTMLElement, pending: SessionEnterPlan, aligned: boolean): void {
+    const scrollHeight = stream.scrollHeight;
+    if (pending.phase === 'loading') {
+      this.scrollHeightStableFrames = 0;
+    } else if (scrollHeight !== this.lastSeenScrollHeight) {
+      this.armedHeightChangedSinceArm = true;
+      this.scrollHeightStableFrames = 0;
+      this.lastSeenScrollHeight = scrollHeight;
+    } else {
+      this.scrollHeightStableFrames += 1;
+    }
+    this.alignedStableFrames = aligned ? this.alignedStableFrames + 1 : 0;
+    this.armedFrames += 1;
+  }
+
+  /**
+   * 权威完成信号是否已到。
+   * 【约束与规则 (Rules)】
+   *   1. 显式 `authoritativeReady === false` 一律不放行（宿主明确说「权威页还在路上」）；
+   *   2. 显式 `true` 直接放行；
+   *   3. 未声明（undefined）时回落为 `phase === 'ready'`，保住旧调用方的既有语义。
+   */
+  private isAuthoritativeReady(pending: SessionEnterPlan): boolean {
+    if (pending.authoritativeReady === false) return false;
+    if (pending.authoritativeReady === true) return true;
+    return pending.phase === 'ready';
+  }
+
+  private finishPinPlan(): void {
+    this.setInitialBottomSettling(false);
+    this.setSettledLayoutSignature(this.host.layoutSignature());
+    this.clearSessionEnter();
+  }
+
+  private runSessionEnterFrame(ticket: number, mode: 'advance' | 'sync' = 'advance'): void {
     const pending = this.pendingSessionEnter;
     if (!pending || pending.ticket !== ticket) return;
     if (this.host.isPromptJumpSettling()) {
-      this.pendingSessionEnter = null;
+      this.clearSessionEnter();
       return;
     }
     const stream = this.host.getStreamElement();
     if (!stream) {
-      this.pendingSessionEnter = null;
+      this.clearSessionEnter();
+      return;
+    }
+
+    const advance = mode === 'advance';
+
+    if (pending.plan.type === 'pin-to-bottom') {
+      this.runPinFrame(stream, pending, ticket, advance);
       return;
     }
 
     const plan = pending.plan;
-    let padding = 0;
-    if (typeof getComputedStyle === 'function') {
-      padding = parseFloat(getComputedStyle(stream).paddingBottom) || 0;
-    }
-    const probeReady = this.isProbeReady(stream, pending.probeMessageId);
     let errorPx = Number.POSITIVE_INFINITY;
 
-    if (probeReady) {
-      if (plan.type === 'pin-to-bottom') {
-        this.scrollStreamToContentBottom(stream, padding);
-        errorPx = Math.abs(stream.scrollHeight - stream.scrollTop - stream.clientHeight);
-      } else if (plan.type === 'restore-anchor') {
-        const target = stream.querySelector<HTMLElement>(`[data-msg-id="${escapeMessageId(plan.anchorMessageId)}"]:not(.msg-action-btn)`);
-        const max = Math.max(0, stream.scrollHeight - stream.clientHeight);
-        const fallback = Math.max(0, Math.min(plan.fallbackScrollTop, max));
-        if (target) {
-          const streamTop = stream.getBoundingClientRect().top;
-          const rect = target.getBoundingClientRect();
-          const delta = rect.top - streamTop + rect.height * plan.anchorOffsetRatio;
-          /**
-           * 【锚点可信域 (Rules)】`content-visibility: auto` 下，未渲染回合返回的是
-           * `contain-intrinsic-size` 占位高度，锚点行坐标可能与真实排版差出上千像素。
-           * 偏差超过 0.6 屏即视为估算失真：先退回标量基准，并**继续迭代**而不是就地收敛，
-           * 等布局稳定后若 delta 落回可信域再做精确校正；30 帧熔断时停在 fallback。
-           */
-          if (Math.abs(delta) > stream.clientHeight * 0.6) {
-            stream.scrollTop = fallback;
-            errorPx = Number.POSITIVE_INFINITY;
-          } else {
-            if (Math.abs(delta) >= 1) stream.scrollTop += delta;
-            errorPx = Math.abs(delta);
+    if (plan.type === 'restore-scroll-top') {
+      const max = Math.max(0, stream.scrollHeight - stream.clientHeight);
+      stream.scrollTop = Math.max(0, Math.min(plan.scrollTop, max));
+      errorPx = 0;
+      this.host.markProgrammaticScroll(stream);
+    } else {
+      const target = stream.querySelector<HTMLElement>(`[data-msg-id="${escapeMessageId(plan.anchorMessageId)}"]:not(.msg-action-btn)`);
+      const max = Math.max(0, stream.scrollHeight - stream.clientHeight);
+      const fallback = Math.max(0, Math.min(plan.fallbackScrollTop, max));
+      if (!target) {
+        /**
+         * 【提交后驱动 (Rules)】锚点行尚未提交（React 还没把目标会话的消息行挂进 DOM）：
+         *   只保持 armed，绝不写 fallback、绝不写已落定签名。
+         *   写 fallback 会让 errorPx=0 → 两帧后 finishPinPlan() 把「未恢复」登记成「已落定」，
+         *   随后 React 提交锚点行时计划已死，回溯恢复彻底丢失。
+         * 【有界兜底 (Rules)】但绝不能永久 armed（会冻结滚动记忆）：达到回溯熔断帧数后，
+         *   按标量基准做一次有界降级并收口，语义与旧实现一致（锚点行确实已不在序列里）。
+         */
+        if (advance) {
+          this.armedFrames += 1;
+          if (this.armedFrames < RESTORE_PLAN_HARD_CAP_FRAMES) {
+            this.schedulePinFrame(ticket);
+            return;
           }
-        } else {
           stream.scrollTop = fallback;
-          errorPx = 0;
+          this.host.markProgrammaticScroll(stream);
+          this.host.logDebug?.('restore anchor row never committed', {
+            reason: 'restore-anchor-hard-cap',
+            sessionId: pending.sessionId,
+            anchorMessageId: plan.anchorMessageId,
+            fallback,
+          });
+          this.finishPinPlan();
+          return;
         }
-      } else {
-        const max = Math.max(0, stream.scrollHeight - stream.clientHeight);
-        stream.scrollTop = Math.max(0, Math.min(plan.scrollTop, max));
-        errorPx = 0;
+        this.schedulePinFrame(ticket);
+        return;
+      }
+      {
+        const streamTop = stream.getBoundingClientRect().top;
+        const rect = target.getBoundingClientRect();
+        const delta = rect.top - streamTop + rect.height * plan.anchorOffsetRatio;
+        /**
+         * 【锚点可信域 (Rules)】`content-visibility: auto` 下，未渲染回合返回的是
+         * `contain-intrinsic-size` 占位高度，锚点行坐标可能与真实排版差出上千像素。
+         * 偏差超过 0.6 屏即视为估算失真：先退回标量基准，并**继续迭代**而不是就地收敛，
+         * 等布局稳定后若 delta 落回可信域再做精确校正；熔断时停在 fallback。
+         */
+        if (Math.abs(delta) > stream.clientHeight * 0.6) {
+          stream.scrollTop = fallback;
+          errorPx = Number.POSITIVE_INFINITY;
+        } else {
+          if (Math.abs(delta) >= 1) stream.scrollTop += delta;
+          errorPx = Math.abs(delta);
+        }
       }
       this.host.markProgrammaticScroll(stream);
     }
 
-    pending.frames += 1;
-    // pin 分支还要求内容高度已稳定：React 提交后离屏回合会继续撑高 scrollHeight，
-    // 只看「此刻是否贴底」会在中途误判收敛（实测停在 1017/4858）。
-    const heightStable = pending.prevScrollHeight > 0 && Math.abs(stream.scrollHeight - pending.prevScrollHeight) <= 2;
-    pending.prevScrollHeight = stream.scrollHeight;
-    const stable = probeReady && errorPx <= 2 && (plan.type !== 'pin-to-bottom' || heightStable);
-    pending.stableFrames = stable ? pending.stableFrames + 1 : 0;
-
-    if ((pending.stableFrames >= 2 && pending.frames >= 2) || pending.frames >= 30) {
-      if (plan.type === 'pin-to-bottom') {
-        // 熔断时补一次贴底：30 帧内内容仍在长高时，至少不要停在半空。
-        // probe 未就绪说明 React 还没提交，此时补底只会在骨架高度上贴成 0，必须不动。
-        if (probeReady) this.scrollStreamToContentBottom(stream, padding);
-        this.setInitialBottomSettling(false);
-        this.setSettledLayoutSignature(this.host.layoutSignature());
-      }
-      this.pendingSessionEnter = null;
+    /**
+     * 【同步模式只对齐不裁决 (Rules)】restore 类计划同样遵守该边界：
+     *   几何已写回，但帧配额与收敛裁决只属于排队帧。
+     *   【链条不得断 (Rules)】仍须把推进链续上，否则计划在途却无人推进。
+     */
+    if (!advance) {
+      this.schedulePinFrame(ticket);
       return;
     }
-    this.runRaf(() => this.runSessionEnterFrame(ticket));
+
+    this.armedFrames += 1;
+    this.alignedStableFrames = errorPx <= SESSION_ENTER_ALIGN_TOLERANCE_PX ? this.alignedStableFrames + 1 : 0;
+
+    if ((this.alignedStableFrames >= 2 && this.armedFrames >= 2) || this.armedFrames >= RESTORE_PLAN_HARD_CAP_FRAMES) {
+      this.setInitialBottomSettling(false);
+      this.setSettledLayoutSignature(this.host.layoutSignature());
+      this.clearSessionEnter();
+      return;
+    }
+    this.schedulePinFrame(ticket);
   }
 
   public applyStreamAnchor(anchor: StreamAnchor, pinBottom: boolean): void {

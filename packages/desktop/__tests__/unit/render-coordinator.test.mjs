@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createRenderCoordinator } from '../../dist/renderer/renderCoordinator.mjs';
+import { createPostCommitPinObservers } from '../../dist/renderer/viewport/postCommitPinObservers.mjs';
 import { decideViewportPin, chooseViewportAnchor } from '@hermes-flux/core';
 
 test('RenderCoordinator - 渲染装配与协调管线领域纯行为测试', async (t) => {
@@ -352,6 +353,218 @@ test('RenderCoordinator - 渲染装配与协调管线领域纯行为测试', asy
     const idle = chooseViewportAnchor(entered, () => { captureCalls += 1; return 'captured'; }, 'fallback');
     assert.equal(idle, 'fallback', '进入期必须用兜底锚点');
     assert.equal(captureCalls, 1, '进入期绝不可调用捕获函数');
+  });
+
+  await t.test('13. advanceSessionEnter 完整透传探针、会话、生命周期与消息数', () => {
+    const dom = installDomStub();
+    try {
+      let capturedArgs = null;
+      const { coordinator, state } = createHarness({
+        isSessionEnterPending: () => true,
+        settleSessionEnter: (...args) => {
+          capturedArgs = args;
+        },
+      });
+      state.activeSessionId = 'sess-active-xyz';
+      state.messagesPhase = 'loading';
+      state.messages = [{ id: 'm1' }, { id: 'm2' }];
+      coordinator.render();
+
+      assert.deepEqual(capturedArgs, ['m2', 'sess-active-xyz', 'loading', 2], '必须完整透传 probeMessageId, sessionId, messagesPhase, messages.length');
+    } finally {
+      dom.restore();
+    }
+  });
+
+  /**
+   * 【实测缺陷复现（根因 4）】renderCoordinator.ts:865 传给 settleSessionEnter 的 probeId
+   * 取 `state.messages` 原始末条，而 buildConversationSnapshot（本文件 222-228 行）自己会跳过
+   * `displayKind === 'hidden'`。末条为 hidden 时 DOM 里没有对应 `[data-msg-id]`，
+   * 进入计划的探针永远等不到挂载 → 直落 30 帧熔断且不写位置。
+   * 【裁决语义】探针必须是「渲染层真正会挂载的最后一条可见消息」的 id。
+   */
+  await t.test('14. 末条为 hidden 时探针必须跳过 hidden 取最后一条可见消息', () => {
+    const dom = installDomStub();
+    try {
+      const settles = [];
+      const { coordinator } = createHarness({
+        isSessionEnterPending: () => true,
+        settleSessionEnter: (...args) => { settles.push(args); },
+      });
+
+      // createHarness 默认消息：m-1(user) / m-2(assistant) / m-3(hidden)
+      coordinator.render();
+
+      assert.equal(settles.length, 1, '进入期必须推进一次进入计划');
+      assert.equal(settles[0][0], 'm-2', 'probeId 必须是跳过 hidden 后的最后一条可见消息 id，而不是 hidden 末条');
+      assert.notEqual(settles[0][0], 'm-3', 'hidden 末条不得作为探针（DOM 中没有该行，计划必然熔断失败）');
+    } finally {
+      dom.restore();
+    }
+  });
+
+  /**
+   * 提交后驱动观察器契约（P0-5 的观察器侧）。
+   * 【设计意图 (Why)】R1「切换会话默认贴底」在真实 Blink 里能否落底，取决于
+   *   MutationObserver / ResizeObserver 是否真的挂在「当前」宿主上、是否合并成一次 reassert。
+   *   该生命周期已剥离为 `viewport/postCommitPinObservers` 独立单元（renderCoordinator 直接消费它），
+   *   因此这里直接对该单元施加桩，把「挂载 / 重建 / 合并 / 释放」四契约钉死。
+   * 【约束与规则 (Rules)】桩只记录调用序列，不改变任何真实语义；每个用例必须还原全局对象。
+   */
+  function installObserverStub() {
+    const saved = { mo: globalThis.MutationObserver, ro: globalThis.ResizeObserver };
+    const mutations = [];
+    const resizes = [];
+    class TrackedMutation {
+      constructor(cb) { this.cb = cb; this.active = false; this.target = null; mutations.push(this); }
+      observe(target) { this.active = true; this.target = target; }
+      disconnect() { this.active = false; }
+      /** 模拟一次真实 DOM 变更：仅当仍在 observe 状态才回调（与真实观察器一致）。 */
+      fire() { if (this.active) this.cb([]); }
+    }
+    class TrackedResize {
+      constructor(cb) { this.cb = cb; this.active = false; this.target = null; resizes.push(this); }
+      observe(target) { this.active = true; this.target = target; }
+      disconnect() { this.active = false; }
+      fire() { if (this.active) this.cb([]); }
+    }
+    globalThis.MutationObserver = TrackedMutation;
+    globalThis.ResizeObserver = TrackedResize;
+    return {
+      mutations,
+      resizes,
+      restore: () => {
+        globalThis.MutationObserver = saved.mo;
+        globalThis.ResizeObserver = saved.ro;
+      },
+    };
+  }
+
+  await t.test('15. 宿主元素重建时先 disconnect 旧观察器再 observe 新元素', () => {
+    const stub = installObserverStub();
+    try {
+      const canvas = { id: 'conv-canvas' };
+      const messageHostA = { id: 'react-message-list-host', variant: 'A' };
+      const messageHostB = { id: 'react-message-list-host', variant: 'B' };
+      let currentMessageHost = messageHostA;
+
+      const reasserts = [];
+      const observers = createPostCommitPinObservers({
+        getMessageHost: () => currentMessageHost,
+        getCanvasElement: () => canvas,
+        isSessionEnterPending: () => true,
+        reassertActivePin: () => reasserts.push(1),
+        requestFrame: (cb) => { cb(); },
+      });
+
+      observers.ensure();
+      assert.equal(stub.mutations.length, 1, '首次 ensure 必须为消息宿主建立 MutationObserver');
+      assert.equal(stub.mutations[0].target, messageHostA, '必须观察当前宿主 A');
+      assert.equal(stub.resizes.length, 1, '首次 ensure 必须为画布建立 ResizeObserver');
+      assert.equal(stub.resizes[0].target, canvas, '必须观察 .conv-canvas');
+
+      // React 岛重建：宿主元素被换成 B
+      currentMessageHost = messageHostB;
+      observers.ensure();
+
+      assert.equal(stub.mutations.length, 2, '宿主重建必须新建观察器');
+      assert.equal(stub.mutations[0].active, false, '旧观察器必须先 disconnect，绝不与新元素并存');
+      assert.equal(stub.mutations[1].target, messageHostB, '新观察器必须挂在重建后的宿主 B');
+      assert.equal(stub.resizes.length, 1, '画布未重建时不得重复 observe（重复 observe 会叠加回调）');
+    } finally {
+      stub.restore();
+    }
+  });
+
+  await t.test('16. 连续多次 mutation 只触发一次 reassertActivePin（rAF 合并）', () => {
+    const stub = installObserverStub();
+    const rafQueue = [];
+    try {
+      const reasserts = [];
+      const observers = createPostCommitPinObservers({
+        getMessageHost: () => ({ id: 'react-message-list-host' }),
+        getCanvasElement: () => null,
+        isSessionEnterPending: () => true,
+        reassertActivePin: () => reasserts.push(1),
+        requestFrame: (cb) => { rafQueue.push(cb); },
+      });
+      observers.ensure();
+      assert.equal(stub.mutations.length, 1, '必须先建立 MutationObserver');
+
+      // 同一帧内连续 5 次 DOM 变更
+      for (let i = 0; i < 5; i += 1) stub.mutations[0].fire();
+      assert.equal(rafQueue.length, 1, '5 次变更必须只排一条 rAF（否则每帧反复对齐，计划被烧穿）');
+      assert.equal(reasserts.length, 0, 'rAF 未执行前不得同步对齐');
+
+      while (rafQueue.length > 0) rafQueue.shift()();
+      assert.equal(reasserts.length, 1, '合并后只允许一次 reassertActivePin');
+
+      // 下一帧再来 3 次：可以再合并一次，但同样只一次
+      for (let i = 0; i < 3; i += 1) stub.mutations[0].fire();
+      while (rafQueue.length > 0) rafQueue.shift()();
+      assert.equal(reasserts.length, 2, '跨帧重新计数：每帧最多一次对齐');
+    } finally {
+      stub.restore();
+    }
+  });
+
+  await t.test('17. 无挂起进入计划时观察器回调不调用 reassertActivePin', () => {
+    const stub = installObserverStub();
+    const rafQueue = [];
+    try {
+      const reasserts = [];
+      const observers = createPostCommitPinObservers({
+        getMessageHost: () => ({ id: 'react-message-list-host' }),
+        getCanvasElement: () => ({ id: 'conv-canvas' }),
+        isSessionEnterPending: () => false,
+        reassertActivePin: () => reasserts.push(1),
+        requestFrame: (cb) => { rafQueue.push(cb); },
+      });
+      observers.ensure();
+
+      // 流式输出期：每帧都有大量 mutation / resize，但无 armed 计划 → 必须零额外开销
+      for (let i = 0; i < 10; i += 1) stub.mutations[0].fire();
+      for (const o of stub.resizes) o.fire();
+      assert.equal(rafQueue.length, 0, '无挂起计划时不得排任何对齐帧（流式期零开销）');
+      while (rafQueue.length > 0) rafQueue.shift()();
+      assert.equal(reasserts.length, 0, '无挂起计划时观察器回调必须纯 no-op');
+    } finally {
+      stub.restore();
+    }
+  });
+
+  await t.test('18. dispose() 后两个观察器均 disconnect 且不再响应变更', () => {
+    const stub = installObserverStub();
+    const rafQueue = [];
+    try {
+      const reasserts = [];
+      const observers = createPostCommitPinObservers({
+        getMessageHost: () => ({ id: 'react-message-list-host' }),
+        getCanvasElement: () => ({ id: 'conv-canvas' }),
+        isSessionEnterPending: () => true,
+        reassertActivePin: () => reasserts.push(1),
+        requestFrame: (cb) => { rafQueue.push(cb); },
+      });
+      observers.ensure();
+      assert.equal(stub.mutations.length, 1);
+      assert.equal(stub.resizes.length, 1);
+      assert.equal(stub.mutations[0].active, true);
+      assert.equal(stub.resizes[0].active, true);
+
+      observers.dispose();
+
+      assert.equal(stub.mutations[0].active, false, 'dispose 必须断开 MutationObserver，否则宿主卸载后仍在回调');
+      assert.equal(stub.resizes[0].active, false, 'dispose 必须断开 ResizeObserver');
+      assert.equal(observers.isReassertScheduled(), false, 'dispose 必须清空挂起标记');
+
+      // 已断开的观察器不得再触发对齐
+      stub.mutations[0].fire();
+      stub.resizes[0].fire();
+      assert.equal(rafQueue.length, 0, 'dispose 后不得再排对齐帧');
+      assert.equal(reasserts.length, 0, 'dispose 后不得再调用 reassertActivePin');
+    } finally {
+      stub.restore();
+    }
   });
 
   function installDomStub() {    const saved = {

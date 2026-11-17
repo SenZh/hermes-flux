@@ -359,6 +359,14 @@ const snapshotExpr = `(() => {
   const turns = [...stream.querySelectorAll('.conv-turn')];
   const max = stream.scrollHeight - stream.clientHeight;
   const paddingBottom = parseFloat(getComputedStyle(stream).paddingBottom) || 0;
+  /**
+   * 【贴底判据必须落到底边 (Why)】只看 scrollTop === max 只能证明「滚到底了」，
+   *   不能证明「末行真的贴在输入舱安全线上方」——末行被安全线截断时 scrollTop 同样等于 max。
+   *   因此补采 lastRowBottom / safeBottom 两个几何量，让 R1 能直接断言末行底边贴合安全线。
+   */
+  const lastRow = rows.length ? rows[rows.length - 1] : null;
+  const lastRowBottom = lastRow ? +lastRow.getBoundingClientRect().bottom.toFixed(2) : null;
+  const safeBottom = +(stream.getBoundingClientRect().bottom - paddingBottom).toFixed(2);
   return {
     ok: true,
     scrollTop: +stream.scrollTop.toFixed(2),
@@ -369,6 +377,8 @@ const snapshotExpr = `(() => {
     paddingBottom,
     // 视觉贴底：以输入舱安全线为基准，与产品内 isNearBottom 的口径一致。
     effectiveDistance: +(max - stream.scrollTop - paddingBottom).toFixed(2),
+    lastRowBottom,
+    safeBottom,
     rowCount: rows.length,
     turnCount: turns.length,
     lastRowTextLength: rows.length ? (rows[rows.length - 1].innerText || '').length : 0,
@@ -607,6 +617,9 @@ const FRAME_SERIES = `(async () => {
     if (!s) { out.push({ at: mark, ok: false }); continue; }
     const max = s.scrollHeight - s.clientHeight;
     const paddingBottom = parseFloat(getComputedStyle(s).paddingBottom) || 0;
+    // 【末行底边实测】贴底断言必须能区分「滚到底」与「末行贴在安全线上」，见 snapshotExpr 注释。
+    const rows = [...s.querySelectorAll('${ROW_SELECTOR}')];
+    const lastRow = rows.length ? rows[rows.length - 1] : null;
     out.push({
       at: mark,
       ok: true,
@@ -616,7 +629,9 @@ const FRAME_SERIES = `(async () => {
       distanceToBottom: +(max - s.scrollTop).toFixed(2),
       paddingBottom,
       effectiveDistance: +(max - s.scrollTop - paddingBottom).toFixed(2),
-      rows: s.querySelectorAll('${ROW_SELECTOR}').length,
+      lastRowBottom: lastRow ? +lastRow.getBoundingClientRect().bottom.toFixed(2) : null,
+      safeBottom: +(s.getBoundingClientRect().bottom - paddingBottom).toFixed(2),
+      rows: rows.length,
       containerSame: window.__fluxStreamRef ? s === window.__fluxStreamRef : null,
     });
   }
@@ -777,8 +792,39 @@ async function main() {
         err.metrics = metrics;
         throw err;
       }
+      /**
+       * 【末行贴合安全线 (Why)】`scrollTop === scrollHeight - clientHeight` 只证明「滚到底」，
+       *   末行被输入舱安全线截断时它同样成立。这里用末行底边与安全线的实测差做第二重判据：
+       *   `|lastRowBottom - safeBottom| <= 2` 才算「末条真的停在安全线上方」。
+       */
+      const geometric = {
+        scrollTop: last.scrollTop,
+        scrollHeight: last.scrollHeight,
+        clientHeight: last.clientHeight,
+        lastRowBottom: last.lastRowBottom,
+        safeBottom: last.safeBottom,
+        distanceToBottom: last.distanceToBottom,
+        bottomDelta: last.lastRowBottom === null ? null : +(last.lastRowBottom - last.safeBottom).toFixed(2),
+      };
+      metrics.geometric = geometric;
+      const expectedTop = last.scrollHeight - last.clientHeight;
+      if (Math.abs(last.scrollTop - expectedTop) > 2) {
+        const err = new Error(
+          `末帧 scrollTop=${last.scrollTop} 未达 scrollHeight-clientHeight=${expectedTop}（容差 2px）`,
+        );
+        err.metrics = metrics;
+        throw err;
+      }
+      if (geometric.bottomDelta !== null && Math.abs(geometric.bottomDelta) > 2) {
+        const err = new Error(
+          `末行底边 ${last.lastRowBottom} 与安全线 ${last.safeBottom} 偏差 ${geometric.bottomDelta}px（容差 2px），末条被安全线截断`,
+        );
+        err.metrics = metrics;
+        throw err;
+      }
       return {
-        detail: `贴底帧 ${pinned.map((s) => `${s.at}ms`).join(',')}，末次距底 ${last.distanceToBottom}px，写入 ${trace.writes.length} 次，容器唯一`,
+        detail: `贴底帧 ${pinned.map((s) => `${s.at}ms`).join(',')}，末次距底 ${last.distanceToBottom}px，`
+          + `末行底边 ${last.lastRowBottom}/${last.safeBottom}（差 ${geometric.bottomDelta}px），写入 ${trace.writes.length} 次，容器唯一`,
         metrics,
       };
     });

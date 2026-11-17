@@ -57,6 +57,7 @@ import { decideConversationPush } from './conversationPush.js';
 import type { MessageWindowManager } from './messageWindowManager.js';
 import type { ModalInteractionController } from './events/modalInteractionController.js';
 import type { StreamAnchor } from './viewport/streamViewportManager.js';
+import { createPostCommitPinObservers } from './viewport/postCommitPinObservers.js';
 
 export interface RenderMessagesSnapshot {
   sessionId: string;
@@ -75,7 +76,13 @@ export interface RenderMessagesSnapshot {
 }
 
 export type SessionEnterPendingProbe = () => boolean;
-export type SessionEnterSettleProbe = (probeMessageId?: string) => void;
+export type SessionEnterSettleProbe = (
+  probeMessageId?: string,
+  sessionId?: string,
+  phase?: string,
+  messagesCount?: number,
+  authoritativeReady?: boolean
+) => void;
 
 export interface RenderCoordinatorDeps {
   getState: () => AppState;
@@ -125,6 +132,11 @@ export interface RenderCoordinatorDeps {
   settleInitialBottom: () => void;
   isSessionEnterPending: SessionEnterPendingProbe;
   settleSessionEnter: SessionEnterSettleProbe;
+  /**
+   * React 提交后重新对齐 armed 的贴底意图（幂等、无参）。
+   * 可选：旧调用方（单测/迁移期）不提供时，提交后驱动降级为不动作。
+   */
+  reassertActivePin?: () => void;
 
   // 事件与 Popper
   bindEvents: () => void;
@@ -164,6 +176,24 @@ function snapshotFingerprint(value: unknown): string {
   }
 }
 
+/**
+ * 取「渲染层真正会挂载的最后一条可见消息」的 id。
+ *
+ * 【设计意图 (Why)】会话进入计划的探针必须是 DOM 里真实存在的行：若取 `messages` 原始末条，
+ *   而它恰好是 `displayKind === 'hidden'` 的隐藏行，DOM 中根本没有对应 `[data-msg-id]`，
+ *   探针永远等不到挂载，计划只能熔断收场（实测视口差 7958px）。
+ *
+ * 【约束与规则 (Rules)】本函数是唯一口径：`buildConversationSnapshot` 的最后可见行标记
+ *   与 `settleSessionEnter` 的探针 id 必须共用同一实现，严禁各自维护一套倒序扫描逻辑。
+ */
+function lastVisibleMessageId(messages: readonly MessageViewModel[]): string | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const kind = messages[i].displayKind ?? 'user';
+    if (kind !== 'hidden') return messages[i].id;
+  }
+  return undefined;
+}
+
 export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoordinator {
   const conversationVmCache = new WeakMap<
     MessageViewModel,
@@ -201,9 +231,34 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
   let lastInspectorCollapsed = true;
   let inspectorMotionController: ReturnType<typeof attachMotionController> | null = null;
 
+  /**
+   * 【提交后驱动 (Why)】React 的提交时机与 rAF 推进帧无固定先后：提交晚于推进帧时，
+   *   单靠 render() 里的推进永远看不到真实末行（实测停在半空差 7958px）。
+   *   观察器生命周期已剥离为 `viewport/postCommitPinObservers` 独立单元，
+   *   使「挂载 / 重建 / 合并 / 释放」四契约可在无真实 DOM 内核时被确定性验证。
+   */
+  const postCommitPinObservers = deps.reassertActivePin
+    ? createPostCommitPinObservers({
+      getMessageHost: () => (typeof document === 'undefined' ? null : document.getElementById('react-message-list-host')),
+      getCanvasElement: () => (typeof document === 'undefined' ? null : document.querySelector<HTMLElement>('.conv-canvas')),
+      isSessionEnterPending: () => deps.isSessionEnterPending(),
+      reassertActivePin: () => deps.reassertActivePin?.(),
+    })
+    : null;
+
   const logRender = deps.logRender ?? {
     debug: () => {},
   };
+
+  /**
+   * 幂等地挂载「提交后驱动」观察器。
+   * 【约束与规则 (Rules)】`document` 缺失或宿主未接线时安全跳过；
+   *   具体挂载 / 重建 / 合并语义由 postCommitPinObservers 承担。
+   */
+  function ensurePostCommitPinObservers(): void {
+    if (typeof document === 'undefined' || !deps.reassertActivePin) return;
+    postCommitPinObservers?.ensure();
+  }
 
   function buildConversationSnapshot(): ConversationSnapshot {
     const state = deps.getState();
@@ -214,13 +269,7 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
     const messageWindowEnd = deps.messageWindowManager.getMessageWindowEnd();
     const windowedMessages = state.messages.slice(messageWindowStart, messageWindowEnd);
 
-    const lastMessageId = ((): string | undefined => {
-      for (let i = windowedMessages.length - 1; i >= 0; i--) {
-        const kind = windowedMessages[i].displayKind ?? 'user';
-        if (kind !== 'hidden') return windowedMessages[i].id;
-      }
-      return undefined;
-    })();
+    const lastMessageId = lastVisibleMessageId(windowedMessages);
 
     return {
       mode: focusType === 'group' ? 'group' : focusType === 'bot' ? 'foreground' : 'scratchpad',
@@ -467,6 +516,8 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
     if (!root) return;
     const renderStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const state = deps.getState();
+    // 提交后驱动：先确保观察器挂载，再走本轮 DOM 装配（首次装配的提交由观察器捕获）。
+    ensurePostCommitPinObservers();
 
     const existingInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
     const draftText = existingInput ? existingInput.value : '';
@@ -856,7 +907,18 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
     if (scrollDecision.advanceSessionEnter) {
       requestAnimationFrame(() => {
         if (!scrollDecision.capture) {
-          deps.settleSessionEnter(state.messages.length > 0 ? state.messages[state.messages.length - 1].id : '');
+          /**
+           * 【权威完成信号 (Rules)】`state.messagesPhase` 现在真正等于「权威页已到」：
+           *   缓存命中但有网关时相位保持 'loading'，由 loadMessagesInner 结束后的 finally 收敛。
+           *   因此这里按相位透传即可——`settleSessionEnter` 缺省（不传第 5 参）时以 phase 为判据，
+           *   显式 `authoritativeReady` 仅留给需要更强信号的调用方。
+           */
+          deps.settleSessionEnter(
+            lastVisibleMessageId(state.messages) ?? '',
+            state.activeSessionId,
+            state.messagesPhase,
+            state.messages.length
+          );
           return;
         }
         if (pinBottom) {
@@ -893,6 +955,7 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
   }
 
   function dispose(): void {
+    postCommitPinObservers?.dispose();
     if (inspectorMotionController) {
       inspectorMotionController.detach();
       inspectorMotionController = null;

@@ -44,14 +44,30 @@ test('display_kind 宿主编排接线（精确字符串契约）', async (t) => 
     );
   });
 
-  await t.test('2. 末条判定必须跳过不上屏的行', () => {
+  await t.test('2. 末条判定必须跳过不上屏的行（统一口径 helper）', () => {
+    // 【统一口径 (Why)】hidden 行不上屏，末条判定必须跳过它；且快照的 isLastInTurn/流式态
+    //   与进入会话的探针 id 必须共用同一实现。历史上两处各写一套，导致探针指向 hidden 行、
+    //   DOM 里没有该 [data-msg-id]，进入计划整段静默空转。
+    //
+    // 【行尾归一 (Rules)】本机 `core.autocrlf=true` 会把工作区源码检出为 CRLF，而仓库索引与
+    //   CI 检出为 LF：跨行契约串若直接对原始文本匹配，同一守卫在本机恒红、在 CI 恒绿。
+    //   因此对归一后的投影匹配（只抹平 CR，不抹平任何字符与缩进），契约强度不变且两侧等价。
+    const sourceLf = rendererSource.replace(/\r\n/g, '\n');
     assert.ok(
-      rendererSource.includes("      if (kind !== 'hidden') return windowedMessages[i].id;"),
-      '末条若是 hidden，真正可见的最后一条必须拿到 isLastInTurn 与流式态'
+      sourceLf.includes("    const kind = messages[i].displayKind ?? 'user';\n    if (kind !== 'hidden') return messages[i].id;"),
+      '倒序查找必须比较 displayKind 并跳过 hidden'
     );
     assert.ok(
-      !rendererSource.includes('const lastMessageId = windowedMessages[windowedMessages.length - 1]?.id;'),
-      '严禁保留直接取窗口末条的实现'
+      sourceLf.includes('const lastMessageId = lastVisibleMessageId(windowedMessages);'),
+      '快照末条必须走统一 helper'
+    );
+    assert.ok(
+      sourceLf.includes("lastVisibleMessageId(state.messages) ?? ''"),
+      '进入计划的探针必须走统一 helper，严禁直接取 state.messages 原始末条'
+    );
+    assert.ok(
+      !sourceLf.includes('state.messages[state.messages.length - 1].id'),
+      '严禁保留直接取原始末条的实现'
     );
   });
 
