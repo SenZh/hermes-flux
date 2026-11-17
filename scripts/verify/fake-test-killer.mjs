@@ -101,6 +101,26 @@ const MUTATIONS = [
     expect: '网关确认无结果时必须如实呈现空',
     why: '「全部被隐藏」曾被误判为「请求失败」，回退快照后隐藏静默失效',
   },
+  {
+    name: 'MessageRow: 流式末行不再放行空助手行（回退 2026-11-09 的守卫写法）',
+    file: 'packages/ui/dist/components-react/conversation/MessageRow.js',
+    // 保持语法有效：只去掉流式例外条件，模拟"守卫回潮"
+    find: /!hasTools && !isStreaming\)/,
+    replace: '!hasTools)',
+    test: 'packages/ui/__tests__/streaming-anchor-formal.test.mjs',
+    expect: '流式末行必须产出直写锚点',
+    why: '空助手行整行判空吞掉流式首帧锚点，tokenStreamWriter 直写全程空转，正文退化为一次性铺满',
+  },
+  {
+    name: 'MarkdownBlock: 空正文不再产出隐形锚点（回退到 89ca860 的写法）',
+    file: 'packages/ui/dist/components-react/conversation/MarkdownBlock.js',
+    // 保持语法有效：把"有 anchorId 就保住锚点"改成无条件返回 null
+    find: /if \(!anchorId\)\s*return null;/,
+    replace: 'return null;',
+    test: 'packages/ui/__tests__/streaming-anchor-formal.test.mjs',
+    expect: '流式末行必须产出直写锚点',
+    why: '空正文容器返回 null 后 #msg-content-* 不存在，流式增量无处落地，正文退化为一次性铺满',
+  },
 ];
 
 function runTest(relTest) {

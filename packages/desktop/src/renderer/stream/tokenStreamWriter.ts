@@ -62,6 +62,9 @@ export function createTokenStreamWriter(deps: TokenStreamWriterDeps): TokenStrea
     const streamEl = typeof document !== 'undefined' ? document.getElementById('conversation-stream') : null;
     const followBottom = isStreamNearBottom(streamEl);
     let renderedChars = 0;
+    // 【Failure Is Not Empty】直写只 patch 已存在锚点；锚点缺失时必须留痕，
+    // 否则"正文一次性上屏"与"流式正常"在日志上完全无法区分（见 findings.md P1-1）。
+    let anchorsMissing = 0;
 
     for (const [msgId, entry] of flushedMap.entries()) {
       const isCurrentSessionActive = activeStreamingStoredSessionId === state.activeSessionId;
@@ -122,7 +125,12 @@ export function createTokenStreamWriter(deps: TokenStreamWriterDeps): TokenStrea
         renderedChars += entry.content.length;
         if (typeof document !== 'undefined') {
           const contentEl = document.getElementById(`msg-content-${targetMsg.id}`);
-          if (contentEl) {
+          if (!contentEl) {
+            // 锚点缺失：内容已进 state，但 DOM 无处落地。可能原因见 findings.md：
+            // 空助手行被整行判空 / MarkdownBlock 空正文返回 null / 渲染提交未落地。
+            anchorsMissing += 1;
+            logStream?.trace('stream-anchor-miss', { id: targetMsg.id });
+          } else {
             if (contentEl.style.display === 'none') {
               contentEl.style.display = 'flex';
             }
@@ -165,6 +173,7 @@ export function createTokenStreamWriter(deps: TokenStreamWriterDeps): TokenStrea
       ms: Math.round((performance.now() - flushStartedAt) * 10) / 10,
       messages: flushedMap.size,
       chars: renderedChars,
+      anchorsMissing,
       followBottom,
       scrollTop: streamEl ? Math.round(streamEl.scrollTop) : null,
     });

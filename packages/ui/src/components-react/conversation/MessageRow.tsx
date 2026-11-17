@@ -10,7 +10,10 @@
  *   1. 正文使用现有 Markdown 渲染器，经 dangerouslySetInnerHTML 注入；
  *   2. 保留 #msg-content-* / #msg-thought-* / #msg-tools-* 锚点，流式直写仍然有效；
  *   3. 操作按钮保留 data-action 属性，复用宿主的事件委托，不新增回调通道；
- *   4. 流式进行中不渲染页脚，避免生成过程中暴露操作与时间。
+ *   4. 流式进行中不渲染页脚，避免生成过程中暴露操作与时间；
+ *   5. 空助手行（正文/思考/工具全空）只有「当前流式回合的末行」可以挂载：
+ *      整行守卫必须同时排除 isStreaming，否则流式首帧的锚点不存在，正文直写全程空转；
+ *      反过来，非末行与非流式行仍走原判空，不回潮 b22147c 消灭空占位块的历史修复。
  */
 
 import * as React from 'react';
@@ -117,10 +120,14 @@ export const MessageRow = React.memo(function MessageRow({
   }
 
   // 【消除空白占位 Bug 2 根因】：如果助手行既无正文、又无思考、且无工具调用，直接返回 null，严禁渲染空占位 DOM
+  // 【流式锚点契约】但"流式目标行"必须例外：空助手行正是流式首帧的必经状态，
+  // 此时整行返回 null 会让 #msg-content-* 锚点无处可生，tokenStreamWriter 的直写全部空转。
+  // isStreaming 的真实语义是「当前流式回合的最后一行」（ConversationMessageList → TurnGroup 双重收窄），
+  // 历史回合恒为 false，因此不会回潮本守卫要消灭的空占位块。
   const hasContent = Boolean(message.content && message.content.trim());
   const hasThought = Boolean(message.thought && message.thought.trim());
   const hasTools = Boolean(message.toolCalls && message.toolCalls.length > 0);
-  if (!isUser && !hasContent && !hasThought && !hasTools) {
+  if (!isUser && !hasContent && !hasThought && !hasTools && !isStreaming) {
     return null;
   }
 

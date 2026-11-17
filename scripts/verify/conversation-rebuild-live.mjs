@@ -183,7 +183,7 @@ async function launchBrowser(baseUrl) {
     '--no-default-browser-check',
     `--user-data-dir=${userDataDir}`,
     '--window-size=1440,900',
-    baseUrl,
+    'about:blank',
   ], { stdio: 'ignore' });
 
   let wsUrl = null;
@@ -212,6 +212,7 @@ async function launchBrowser(baseUrl) {
 
   let msgId = 0;
   const pending = new Map();
+  const wsFrames = [];
   ws.addEventListener('message', (evt) => {
     try {
       const data = JSON.parse(evt.data);
@@ -223,6 +224,31 @@ async function launchBrowser(baseUrl) {
       }
     } catch { /* 忽略非 JSON */ }
   });
+
+  /**
+   * 【独立事件连接】`Network.webSocketFrameReceived` 的帧量极大，
+   * 挂在主命令连接上会把 evaluate 的响应挤到超时。这里另开一条只读连接，
+   * 只负责统计网关下行增量帧，主连接保持纯粹的命令/响应。
+   */
+  const eventWs = new WebSocket(wsUrl);
+  await new Promise((resolve, reject) => {
+    eventWs.addEventListener('open', resolve);
+    eventWs.addEventListener('error', reject);
+  });
+  let eventId = 0;
+  eventWs.addEventListener('message', (evt) => {
+    const raw = typeof evt.data === 'string' ? evt.data : '';
+    if (!raw.includes('webSocketFrameReceived')) return;
+    const entry = {
+      t: Date.now(),
+      hasDelta: raw.includes('delta') || raw.includes('append-content'),
+      size: raw.length,
+    };
+    if (wsFrames.length < 5) entry.sample = raw.slice(0, 300);
+    wsFrames.push(entry);
+    if (wsFrames.length > 3000) wsFrames.shift();
+  });
+  eventWs.send(JSON.stringify({ id: ++eventId, method: 'Network.enable', params: {} }));
 
   const send = (method, params = {}, timeoutMs = 15000) => new Promise((resolve, reject) => {
     const id = ++msgId;
@@ -241,9 +267,14 @@ async function launchBrowser(baseUrl) {
 
   await send('Page.enable');
   await send('Runtime.enable');
+  // 探针必须在页面脚本执行前注入，否则抓不到首屏建立的那条 WebSocket。
+  await send('Page.addScriptToEvaluateOnNewDocument', { source: WS_PROBE_SOURCE });
+  await send('Page.navigate', { url: baseUrl });
 
   const session = {
     send,
+    getWsFrames: () => wsFrames.slice(),
+    clearWsFrames: () => { wsFrames.length = 0; },
     async evaluate(expression) {
       const res = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
       if (res.exceptionDetails) {
@@ -276,6 +307,7 @@ async function launchBrowser(baseUrl) {
           await send('Browser.close').catch(() => {});
           ws.close();
         }
+        if (eventWs.readyState === WebSocket.OPEN) eventWs.close();
       } catch { /* 忽略 */ }
       try { proc.kill(); } catch { /* 忽略 */ }
       try { fs.rmSync(userDataDir, { recursive: true, force: true }); } catch { /* 忽略 */ }
@@ -399,7 +431,171 @@ const INSTALL_SCROLL_PROBE = `(() => {
   return { installed: true, hasRef: Boolean(window.__fluxStreamRef) };
 })()`;
 
-/** 帧级采样：0/16/50/100/200/300/1000/3000ms 八个时刻各读一次几何。 */
+/** 页面内 WebSocket 探针：统计网关下行帧与增量帧，用于判定「上游是否真的在流式」。 */
+const WS_PROBE_SOURCE = `(() => {
+  const NativeWS = window.WebSocket;
+  const probe = window.__fluxWsProbe = {
+    frames: 0, delta: 0, thinking: 0, times: [], samples: [],
+    timeline: [], thinkingTexts: [], truncated: 0, t0: Date.now(), domAfterDelta: [],
+  };
+  const MAX_TIMELINE = 800;
+  const brief = (value, limit) => {
+    if (typeof value === 'string') return value.slice(0, limit);
+    if (value === null || value === undefined) return null;
+    try { return JSON.stringify(value).slice(0, limit); } catch { return null; }
+  };
+  const pushTimeline = (type, payload, frameSessionId) => {
+    if (probe.timeline.length >= MAX_TIMELINE) { probe.truncated += 1; return; }
+    const pl = payload && typeof payload === 'object' ? payload : {};
+    probe.timeline.push({
+      at: Date.now(),
+      t: Date.now() - probe.t0,
+      type,
+      // 帧顶层 session_id 是网关的 live id：reducer 会用它做会话过滤，
+      // 一旦与客户端持有的 live id 不一致，整帧（含正文 delta）会被静默丢弃。
+      sid: brief(frameSessionId, 40),
+      textLen: typeof pl.text === 'string' ? pl.text.length : null,
+      status: typeof pl.status === 'string' ? pl.status : null,
+      warning: typeof pl.warning === 'string' ? pl.warning.slice(0, 240) : null,
+      // 终态错误与模型/provider 身份：判定「provider 挂了」与「流式被关闭」必须分开看，
+      // 一次 error 终态会让本回合必然无正文 delta，不能据此判流式退化。
+      error: brief(pl.error, 200),
+      recoverable: typeof pl.recoverable === 'boolean' ? pl.recoverable : null,
+      errorSurface: brief(pl.error_surface, 60),
+      textHead: (type === 'message.complete' || type === 'status.update') ? brief(pl.text, 120) : null,
+      model: type === 'session.info' ? brief(pl.model, 60) : null,
+      provider: type === 'session.info' ? brief(pl.provider, 60) : null,
+      keys: Object.keys(pl).slice(0, 12),
+    });
+  };
+  window.WebSocket = class extends NativeWS {
+    constructor(...args) {
+      super(...args);
+      this.addEventListener('message', (ev) => {
+        probe.frames += 1;
+        const data = typeof ev.data === 'string' ? ev.data : '';
+        if (!data) return;
+        if (data.includes('thinking.delta')) probe.thinking += 1;
+        // 只把正文增量算作「流式正文」：thinking.delta 是思考过程，不能代替正文流。
+        if (data.includes('message.delta') || data.includes('append-content')) {
+          probe.delta += 1;
+          probe.times.push(Date.now());
+          if (probe.samples.length < 3) probe.samples.push(data.slice(0, 240));
+        }
+        // 【完整帧时间线】判定「上游从未流式」与「上游流式但前端吞并」必须看事件序列，
+        // 只看增量帧计数无法区分二者。这里只留判定所需字段（类型/时间/正文长度/
+        // 终态状态与 warning 文案），绝不把整帧原文写进 evidence（原文含正文全文）。
+        try {
+          const obj = JSON.parse(data);
+          const params = obj && obj.params;
+          if (params && typeof params.type === 'string') {
+            pushTimeline(params.type, params.payload, params.session_id);
+            if (params.type === 'thinking.delta' && params.payload
+                && typeof params.payload.text === 'string' && params.payload.text) {
+              if (probe.thinkingTexts.length < 12) probe.thinkingTexts.push(params.payload.text.slice(0, 200));
+            }
+            // 【正文落盘取证】200ms 轮询「最后一条非空行长度」会被空占位行干扰：
+            // 新回合的行在正文写入前 textContent 为空，轮询会继续指向上一轮消息。
+            // 这里在每次正文增量后 40ms 直接量一次所有 msg-content 容器的 innerHTML 总量，
+            // 才能分清「DOM 真没写」与「采样口径看不见」。
+            if (params.type === 'message.delta' && params.payload
+                && typeof params.payload.text === 'string' && params.payload.text) {
+              if (probe.domAfterDelta.length < 40) {
+                setTimeout(() => {
+                  const els = document.querySelectorAll('[id^="msg-content-"]');
+                  let total = 0;
+                  els.forEach((el) => { total += (el.innerHTML || '').length; });
+                  // 同时记绝对时间与当时的 t0：重置后基准可能变化，绝对时间才能和 timeline 对齐。
+                  probe.domAfterDelta.push({ at: Date.now(), t0: probe.t0, count: els.length, total });
+                }, 40);
+              }
+            }
+          }
+        } catch { /* 非 JSON 帧（心跳等）不计入时间线 */ }
+      });
+    }
+  };
+  // 【rAF 心跳】TokenCoalescer 的逐帧节奏完全依赖 requestAnimationFrame：
+  // 页面不可见时 Blink 会暂停 rAF，增量会全部积压在缓冲里，直到回合结束 flush()
+  // 一次性写入 —— 视觉上等同「正文一次性铺满」。判定前端吞并前必须证明 rAF 在跑。
+  const raf = window.__fluxRafProbe = { ticks: 0, t0: Date.now(), lastAt: Date.now() };
+  const rafTick = () => { raf.ticks += 1; raf.lastAt = Date.now(); requestAnimationFrame(rafTick); };
+  requestAnimationFrame(rafTick);
+  // 【正文写入探针】区分「reducer 丢弃了 delta」与「writer 找不到目标节点」：
+  // 只有把 msg-content-* 的 innerHTML 写入次数与长度记下来，
+  // 才能证明流式期间正文到底有没有落到 DOM，而不是靠轮询文本长度反推。
+  const innerWrites = window.__fluxInnerWrites = { writes: [], truncated: 0 };
+  const innerDesc = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+  if (innerDesc && innerDesc.set) {
+    Object.defineProperty(Element.prototype, 'innerHTML', {
+      configurable: true,
+      enumerable: innerDesc.enumerable,
+      get: innerDesc.get,
+      set(value) {
+        try {
+          const id = this && this.id;
+          if (typeof id === 'string' && (id.startsWith('msg-content-') || id.startsWith('msg-thought-'))) {
+            if (innerWrites.writes.length < 400) {
+              innerWrites.writes.push({
+                t: Date.now() - probe.t0,
+                id: id.slice(0, 28),
+                len: String(value == null ? '' : value).length,
+              });
+            } else {
+              innerWrites.truncated += 1;
+            }
+          }
+        } catch { /* 记录失败绝不能影响写入本身 */ }
+        return innerDesc.set.call(this, value);
+      },
+    });
+  }
+  // 【出站 id 探针】reducer 会用帧顶层 session_id 做会话过滤：
+  // 若客户端提交时用的 live id 与网关推送帧的 session_id 不一致，
+  // 整个回合（含正文 delta）会被静默丢弃。这里记下每条出站方法的 session_id 以便比对。
+  const sends = window.__fluxWsSends = { items: [], truncated: 0 };
+  const nativeSend = NativeWS.prototype.send;
+  NativeWS.prototype.send = function (payload) {
+    try {
+      const obj = JSON.parse(String(payload));
+      if (obj && typeof obj.method === 'string') {
+        if (sends.items.length < 80) {
+          sends.items.push({
+            at: Date.now(),
+            method: obj.method,
+            sid: obj.params && obj.params.session_id ? String(obj.params.session_id).slice(0, 24) : null,
+          });
+        } else {
+          sends.truncated += 1;
+        }
+      }
+    } catch { /* 非 JSON 出站帧忽略 */ }
+    return nativeSend.call(this, payload);
+  };
+  // 【合流缓冲探针】TokenCoalescer 的 buffer 是 Map<messageId, ...>，push 时必然 set。
+  // 统计 key 形如 ast-* 的 Map.set 次数，可把「reducer 丢帧（push 从未发生）」
+  // 与「push 正常但 writer 没写 DOM」彻底二分。
+  const mapWrites = window.__fluxMapWrites = { ast: 0, other: 0, samples: [] };
+  const nativeMapSet = Map.prototype.set;
+  Map.prototype.set = function (key, value) {
+    try {
+      if (typeof key === 'string' && key.startsWith('ast-')) {
+        mapWrites.ast += 1;
+        if (mapWrites.samples.length < 3) {
+          let stack = '';
+          try { stack = String((new Error()).stack || '').split('\\n').slice(1, 5).join(' <- '); } catch {}
+          mapWrites.samples.push({
+            at: Date.now(),
+            tail: key.slice(-6),
+            len: key.length,
+            stack: stack.slice(0, 300),
+          });
+        }
+      }
+    } catch { /* 统计失败不影响 Map 语义 */ }
+    return nativeMapSet.call(this, key, value);
+  };
+})();`;
 const FRAME_SERIES = `(async () => {
   const marks = [0, 16, 50, 100, 200, 300, 1000, 3000];
   const out = [];
@@ -1187,6 +1383,250 @@ async function main() {
       }
       return {
         detail: `发送前停在 ${before.scrollTop}/${before.max}；首帧贴底后 ${pinned.length}/${series.length} 帧贴底，运行帧 ${runningFrames.length} 帧全部跟随`,
+        metrics,
+      };
+    });
+
+    /* —— R10 流式增量步进（200ms 细采样） —— */
+    await caseRun('R10', '流式输出必须逐段到达而不是一次性全量', async () => {
+      if (process.env.FLUX_VERIFY_SKIP_SEND === '1') {
+        return { skip: 'FLUX_VERIFY_SKIP_SEND=1：本轮不向真实会话发送测试指令' };
+      }
+      await session.evaluate(clickBest);
+      await new Promise((r) => setTimeout(r, 900));
+
+      await session.evaluate(`(() => {
+        const p = window.__fluxWsProbe;
+        if (p) {
+          p.delta = 0; p.times = []; p.samples = [];
+          // 完整时间线按本轮请求重新计时，否则上一轮的会话加载帧会污染首末跨度。
+          p.timeline = []; p.thinkingTexts = []; p.truncated = 0; p.t0 = Date.now();
+          p.domAfterDelta = [];
+          const iw = window.__fluxInnerWrites;
+          if (iw) { iw.writes = []; iw.truncated = 0; }
+          const mw = window.__fluxMapWrites;
+          if (mw) { mw.ast = 0; mw.samples = []; }
+          const snd = window.__fluxWsSends;
+          if (snd) { snd.items = []; snd.truncated = 0; }
+        }
+        return true;
+      })()`);
+      const filled = await session.evaluate(helpers.fill(
+        '#dock-prompt-input',
+        '这次回复不要调用任何工具。请逐行输出 60 行，每行格式严格为「步进行 N: ok」，N 从 1 到 60，每行之间换行。',
+      ));
+      if (!filled) return { skip: '输入舱不可用（#dock-prompt-input 缺失）' };
+      const sent = await session.evaluate(helpers.click('#dock-send-btn'));
+      if (!sent) return { skip: '发送按钮不可用（#dock-send-btn 缺失）' };
+
+      const lengths = [];
+      const domSamples = [];
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < 30000) {
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((r) => setTimeout(r, 100));
+        // eslint-disable-next-line no-await-in-loop
+        const sample = await session.evaluate(`(() => {
+          const s = ${STREAM};
+          let len = 0;
+          if (s) {
+            const rows = [...s.querySelectorAll('${ROW_SELECTOR}')];
+            const texts = rows.map((r) => (r.textContent || '').trim());
+            const lastNonEmpty = [...texts].reverse().find((t) => t.length > 0) || '';
+            len = lastNonEmpty.length;
+          }
+          const probe = window.__fluxWsProbe;
+          const raf = window.__fluxRafProbe || { ticks: 0 };
+          const contentEls = [...document.querySelectorAll('[id^="msg-content-"]')];
+          const lastEl = contentEls[contentEls.length - 1] || null;
+          const sessionItems = [...document.querySelectorAll('.session-item')];
+          const firstSession = sessionItems[0] || null;
+          let emptyContent = 0;
+          for (const el of contentEls) {
+            if (!(el.textContent || '').trim()) emptyContent += 1;
+          }
+          return {
+            at: Date.now(),
+            t: Date.now() - (probe && typeof probe.t0 === 'number' ? probe.t0 : Date.now()),
+            len,
+            visibility: document.visibilityState,
+            focused: document.hasFocus(),
+            rafTicks: raf.ticks,
+            // 会话列表首项即当前会话（发送时会被置顶）：它的 preview 由 writer 在累加正文时写入，
+            // 因此 preview 是否增长可以直接判定「delta 到底有没有进 writer」。
+            sessTextLen: firstSession ? (firstSession.textContent || '').length : null,
+            lastContentId: lastEl ? String(lastEl.id).slice(-12) : null,
+            lastContentLen: lastEl ? (lastEl.innerHTML || '').length : null,
+            emptyContent,
+          };
+        })()`);
+        lengths.push(Number(sample?.len) || 0);
+        domSamples.push(sample);
+      }
+
+      const growthSteps = lengths.filter((v, i) => i > 0 && v > lengths[i - 1]).length;
+      const first = lengths.find((v) => v > 0) ?? 0;
+      const last = lengths[lengths.length - 1] ?? 0;
+
+      // 上游增量帧取证：只有网关真的分段推送，「前端是否流式」才有意义。
+      const probe = await session.evaluate('window.__fluxWsProbe || { frames: 0, delta: 0, times: [], samples: [] }');
+      const innerWrites = await session.evaluate('window.__fluxInnerWrites || { writes: [], truncated: 0 }');
+      const wsSends = await session.evaluate('window.__fluxWsSends || { items: [], truncated: 0 }');
+      const mapWrites = await session.evaluate('window.__fluxMapWrites || { ast: 0, samples: [] }');
+      const deltaFrames = Number(probe.delta) || 0;
+      const frameSpanMs = Array.isArray(probe.times) && probe.times.length > 1
+        ? probe.times[probe.times.length - 1] - probe.times[0]
+        : 0;
+      const upstreamStreaming = deltaFrames >= 5 && frameSpanMs >= 500;
+
+      // 完整帧时间线：判定「上游从未流式」与「上游流式但被吞」的唯一可靠依据。
+      // byType 给出每种事件的帧数（message.start / message.delta / message.complete / thinking.delta …），
+      // warnings 抓 message.complete.warning 等终态告警（agent 侧关闭流式会在这里留痕）。
+      const timeline = Array.isArray(probe.timeline) ? probe.timeline : [];
+      const byType = {};
+      for (const frame of timeline) byType[frame.type] = (byType[frame.type] || 0) + 1;
+      const warnings = timeline.filter((f) => f.warning).map((f) => f.warning);
+      const complete = [...timeline].reverse().find((f) => f.type === 'message.complete') || null;
+      const startFrame = timeline.find((f) => f.type === 'message.start') || null;
+      const bodyDeltaFrames = timeline.filter(
+        (f) => f.type === 'message.delta' && typeof f.textLen === 'number' && f.textLen > 0,
+      ).length;
+      const firstBodyDelta = timeline.find(
+        (f) => f.type === 'message.delta' && typeof f.textLen === 'number' && f.textLen > 0,
+      ) || null;
+      // 终态 error 是本回合无正文 delta 的第一解释项：必须先排除「回合失败」，
+      // 否则会把 provider 故障误读成流式退化。
+      const models = [...new Set(timeline.map((f) => f.model).filter(Boolean))];
+      const providers = [...new Set(timeline.map((f) => f.provider).filter(Boolean))];
+      const statusTexts = timeline.filter((f) => f.type === 'status.update' && f.textHead).map((f) => f.textHead);
+
+      // 【rAF 门】TokenCoalescer 的逐帧节奏完全依赖 requestAnimationFrame；页面不可见时
+      // Blink 会暂停 rAF，增量只能等回合结束 flush() 一次性写入，视觉上与「前端吞并」同形。
+      // 因此必须先用 delta 窗口内的真实 rAF 频率证明渲染时钟在跑，否则 DOM 增长次数不具判定力。
+      // 绝对时间（Date.now）与相对时间 t 双轨：t 的基准来自页面内探针 t0，
+      // 一旦页面重建探针对象，t 就不可跨观测源比对；at 永远可对齐。
+      const deltaWindowStart = firstBodyDelta ? firstBodyDelta.at : null;
+      const windowSamples = deltaWindowStart === null
+        ? []
+        : domSamples.filter((s) => typeof s.at === 'number' && s.at >= deltaWindowStart);
+      const rafFirst = windowSamples[0] ?? null;
+      const rafLast = windowSamples[windowSamples.length - 1] ?? null;
+      const rafTicksInWindow = rafFirst && rafLast
+        ? Math.max(0, (rafLast.rafTicks || 0) - (rafFirst.rafTicks || 0))
+        : 0;
+      const rafWindowMs = rafFirst && rafLast ? Math.max(0, rafLast.at - rafFirst.at) : 0;
+      const rafHz = rafWindowMs > 0 ? Number((rafTicksInWindow / (rafWindowMs / 1000)).toFixed(1)) : 0;
+      const rafStalled = Boolean(rafFirst && rafLast && rafWindowMs >= 300 && rafHz < 10);
+      const visibilityStates = [...new Set(domSamples.map((s) => s.visibility).filter(Boolean))];
+
+      // 正文容器写入统计：writes 为 0 说明 writer 从未写 DOM（reducer 丢弃或目标节点缺失），
+      // 与「写了但被采样漏掉」是两种完全不同的缺陷。
+      const allInnerWrites = Array.isArray(innerWrites?.writes) ? innerWrites.writes : [];
+      const contentWrites = allInnerWrites.filter((w) => String(w.id || '').startsWith('msg-content-'));
+      const thoughtWrites = allInnerWrites.filter((w) => String(w.id || '').startsWith('msg-thought-'));
+
+      const metrics = {
+        lengths, growthSteps, first, last, samples: lengths.length,
+        upstream: {
+          deltaFrames,
+          spanMs: frameSpanMs,
+          streaming: upstreamStreaming,
+          totalFrames: Number(probe.frames) || 0,
+          thinkingFrames: Number(probe.thinking) || 0,
+          bodyDeltaFrames,
+          byType,
+          timelineTruncated: Number(probe.truncated) || 0,
+          startAt: startFrame ? startFrame.t : null,
+          firstBodyDeltaAt: firstBodyDelta ? firstBodyDelta.t : null,
+          completeAt: complete ? complete.t : null,
+          completeTextLen: complete ? complete.textLen : null,
+          completeStatus: complete ? complete.status : null,
+          completeError: complete ? complete.error : null,
+          completeRecoverable: complete ? complete.recoverable : null,
+          models,
+          providers,
+          statusTexts,
+          warnings,
+        },
+        frameSamples: Array.isArray(probe.samples) ? probe.samples : [],
+        thinkingTexts: Array.isArray(probe.thinkingTexts) ? probe.thinkingTexts : [],
+        dom: {
+          visibilityStates,
+          rafHz,
+          rafTicksInWindow,
+          rafWindowMs,
+          rafStalled,
+          samples: domSamples,
+          afterDelta: Array.isArray(probe.domAfterDelta) ? probe.domAfterDelta : [],
+          contentWrites: contentWrites.length,
+          thoughtWrites: thoughtWrites.length,
+          innerWritesTruncated: Number(innerWrites?.truncated) || 0,
+          contentWriteTail: contentWrites.slice(-6),
+          promptSid: (() => {
+            const items = Array.isArray(wsSends?.items) ? wsSends.items : [];
+            const submit = [...items].reverse().find((x) => x.method === 'prompt.submit');
+            return submit ? submit.sid : null;
+          })(),
+          eventSid: (() => {
+            const first = timeline.find((f) => f.type === 'message.delta');
+            return first ? first.sid : null;
+          })(),
+          outboundMethods: [...new Set((Array.isArray(wsSends?.items) ? wsSends.items : []).map((x) => x.method))],
+          coalescerAstSets: Number(mapWrites?.ast) || 0,
+          coalescerSamples: Array.isArray(mapWrites?.samples) ? mapWrites.samples : [],
+        },
+        timeline,
+      };
+      if (!upstreamStreaming) {
+        const shape = Object.entries(byType).map(([k, v]) => `${k}×${v}`).join(' ');
+        if (complete && complete.status === 'error') {
+          // 【判据边界】回合在 provider 层失败时根本没有正文，delta=0 是必然结果，
+          // 不是流式退化。过去把这种失败回合的终态错误文案当成「正文一次性到达」，
+          // 会把 provider 故障误报成前端/网关流式缺陷。
+          return {
+            skip: `本回合在 provider 层失败（complete.status=error），无正文，不构成流式判定依据；`
+              + `错误：${complete.error || '未提供'}；事件序列 ${shape || '（空）'}`,
+            metrics,
+          };
+        }
+        return {
+          skip: `上游正文增量 ${bodyDeltaFrames} 帧（thinking.delta ${Number(probe.thinking) || 0} 帧，`
+            + `共 ${Number(probe.frames) || 0} 帧，跨度 ${frameSpanMs}ms），本次正文一次性返回；`
+            + `事件序列 ${shape || '（空）'}${warnings.length ? `；终态告警 ${warnings.join(' | ')}` : ''}`,
+          metrics,
+        };
+      }
+      // 【判据权威口径】contentWrites 是「正文直写」的唯一直接证据。
+      // growthSteps 取自最后一条非空行的 textContent，思考行与工具胶囊同样计入：
+      // 本批只修正文锚点（思考仍整段闪现），思考文本增长会把 growthSteps 抬高造成假 PASS。
+      const afterDelta = Array.isArray(probe.domAfterDelta) ? probe.domAfterDelta : [];
+      let anchorGrowth = 0;
+      for (let index = 1; index < afterDelta.length; index += 1) {
+        if (Number(afterDelta[index].total) > Number(afterDelta[index - 1].total)) anchorGrowth += 1;
+      }
+      const anchoredStreaming = contentWrites.length >= 5 && anchorGrowth >= 5;
+      if (!anchoredStreaming) {
+        if (rafStalled) {
+          // 环境伪影：渲染时钟停摆时，增量只能积压到回合结束 flush()，DOM 必然一次跳变。
+          // 这种结果既不能判通过，也不能判产品缺陷，必须显式说明并跳过。
+          return {
+            skip: `上游 ${deltaFrames} 帧 / ${frameSpanMs}ms 已到达，但 delta 窗口内 rAF 仅 ${rafHz}Hz`
+              + `（visibility=${visibilityStates.join('/') || '未知'}，采样 ${rafWindowMs}ms）：`
+              + '页面不可见导致 TokenCoalescer 停摆，DOM 增长次数无判定意义',
+            metrics,
+          };
+        }
+        const err = new Error(
+          `上游 ${deltaFrames} 帧 / ${frameSpanMs}ms 已流式到达，但正文锚点写入仅 ${contentWrites.length} 次、`
+            + `锚点总量增长 ${anchorGrowth} 次（辅助：末行增长 ${growthSteps} 次，rAF ${rafHz}Hz）`
+            + '→ 属前端吞并/锚点缺失',
+        );
+        err.metrics = metrics;
+        throw err;
+      }
+      return {
+        detail: `上游 ${deltaFrames} 帧 / ${frameSpanMs}ms；正文锚点写入 ${contentWrites.length} 次、`
+          + `锚点总量增长 ${anchorGrowth} 次；rAF ${rafHz}Hz（辅助：末行增长 ${growthSteps} 次）`,
         metrics,
       };
     });

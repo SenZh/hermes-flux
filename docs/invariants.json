@@ -326,6 +326,14 @@
       "symbol": "constructor#clamp",
       "test": "packages/core/__tests__/formal/sliding-watchdog-formal.test.mjs",
       "failure": "时钟注入为 null 时回合一开始就崩在熔断器；或上下限倒挂把 30 分钟保险丝缩成几秒"
+    },
+    {
+      "id": "INV-STREAM-01",
+      "topic": "流式直写锚点存在性：流式末条助手行恒有 #msg-content-*，非流式全空行恒不占位",
+      "source": "packages/ui/src/components-react/conversation/MessageRow.tsx",
+      "symbol": "MessageRow#streamingAnchor",
+      "test": "packages/ui/__tests__/streaming-anchor-formal.test.mjs",
+      "failure": "流式正文一次性铺满：空助手行被判空抹掉锚点，tokenStreamWriter 直写全程空转"
     }
   ]
 }

@@ -155,3 +155,41 @@ test('TokenStreamWriter: 当 targetMsg.content 初始为空字符串时触发假
 
   assert.equal(emptyMsg.content, 'FirstToken');
 });
+
+test('TokenStreamWriter: 命中锚点时点亮 display 并直写 innerHTML', (t) => {
+  const el = { id: 'msg-content-m1', innerHTML: '', style: { display: 'none', flexDirection: '' } };
+  const previousDocument = globalThis.document;
+  globalThis.document = { getElementById: (id) => (id === 'msg-content-m1' ? el : null) };
+  t.after(() => { globalThis.document = previousDocument; });
+
+  const { deps } = createMockDeps();
+  const writer = createTokenStreamWriter(deps);
+  const flushedMap = new Map();
+  flushedMap.set('m1', { content: 'world!', thought: '' });
+  writer.writeFlushedTokens(flushedMap);
+
+  assert.match(el.innerHTML, /world/, '内容必须直写进锚点');
+  assert.equal(el.style.display, 'flex', '隐形锚点（display:none）必须在首写时点亮');
+  assert.equal(el.style.flexDirection, 'column', '必须锁定 column，防止多段落被排成多列');
+});
+
+test('TokenStreamWriter: 锚点缺失必须留痕并计入 flush 统计（Failure Is Not Empty）', (t) => {
+  const previousDocument = globalThis.document;
+  globalThis.document = { getElementById: () => null };
+  t.after(() => { globalThis.document = previousDocument; });
+
+  const traces = [];
+  const { deps } = createMockDeps({
+    deps: { logStream: { trace: (msg, meta) => traces.push([msg, meta]) } },
+  });
+  const writer = createTokenStreamWriter(deps);
+  const flushedMap = new Map();
+  flushedMap.set('m1', { content: 'lost', thought: '' });
+  writer.writeFlushedTokens(flushedMap);
+
+  const miss = traces.filter(([msg]) => msg === 'stream-anchor-miss');
+  assert.equal(miss.length, 1, '缺锚点必须打点，否则「一次性上屏」与「流式正常」在日志上无法区分');
+  assert.equal(miss[0][1].id, 'm1', '打点必须带消息 id');
+  const flush = traces.find(([msg]) => msg === 'flush');
+  assert.equal(flush[1].anchorsMissing, 1, 'flush 统计必须带上缺锚点计数');
+});

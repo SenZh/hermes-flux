@@ -25,7 +25,7 @@ JSON 版本强制每条给出唯一 `id`、被测源码 `source`、`symbol` 与�
 | `source` 为真实源码路径 | 违者 FAIL |
 | `source`+`symbol` 组合唯一 | 违者 FAIL |
 
-## 总览（40 条，覆盖 10 个领域）
+## 总览（41 条，覆盖 11 个领域）
 
 ### ATTACH（5 条）
 
@@ -94,6 +94,12 @@ JSON 版本强制每条给出唯一 `id`、被测源码 `source`、`symbol` 与�
 | `INV-STAGE-02` | 截断锚点排他性与临时 id 零逃逸 | `packages/desktop/src/renderer/rollbackTransaction.ts` → `resolveRollbackTarget` | `interactive-stage-formal.test.mjs` | 回滚锚点错位；客户端临时 id 泄漏到服务端触发 4018 |
 | `INV-STAGE-03` | 流式工具状态机收敛 | `packages/core/src/session/eventReducer.ts` → `reduceEvent` | `interactive-stage-formal.test.mjs` | 工具卡状态不收敛，幽灵工具残留 |
 | `INV-STAGE-04` | @ 路由排他性与 cleanText 不残留 token | `packages/desktop/src/renderer/mentionToken.ts` → `parseMentionToken` | `interactive-stage-formal.test.mjs` | 通道类型错配；正文里残留 @token 原文 |
+
+### STREAM（1 条）
+
+| 编号 | 主题 | 源码锚点 | 守护测试 | 失效模式 |
+|---|---|---|---|---|
+| `INV-STREAM-01` | 流式直写锚点存在性：流式末条助手行恒有 #msg-content-*，非流式全空行恒不占位 | `packages/ui/src/components-react/conversation/MessageRow.tsx` → `MessageRow#streamingAnchor` | `streaming-anchor-formal.test.mjs` | 流式正文一次性铺满：空助手行被判空抹掉锚点，tokenStreamWriter 直写全程空转 |
 
 ### TIME（2 条）
 
