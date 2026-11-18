@@ -26,6 +26,8 @@
 @theme inline {
   --leading-tight: 1.25;
   --leading-normal: 1.6;
+  --tracking-tight: -0.015em;
+  --tracking-tighter: -0.02em;
   --tracking-wide: 0.025em;
 }
 
@@ -59,6 +61,10 @@
   --color-warning: var(--warning);
   --color-border: var(--border);
   --color-ring: var(--ring);
+  --color-code: var(--code);
+  --color-interactive-hover: var(--interactive-hover);
+  --color-interactive-active: var(--interactive-active);
+  --color-interactive-selection: var(--interactive-selection);
   /* 字体族映射不在这里：--font-* 需要先清空默认命名空间再重建，
      若在清空之前定义，会被随后的 `--font-*: initial` 一并抹掉（已实测）。见下方独立块。 */
   /* 时长与缓动不在此定义：--duration-fast/--duration-normal 由 :root 节奏层（styles.css）单一来源持有，同名定义会造成隐式覆盖 */
@@ -127,9 +133,9 @@
   --text-section: var(--fs-section, 14px);
   --text-section--line-height: 20px;
   --text-body: var(--fs-body, 13px);
-  --text-body--line-height: 19px;
+  --text-body--line-height: 20px;
   --text-aux: var(--fs-aux, 12px);
-  --text-aux--line-height: 16px;
+  --text-aux--line-height: 18px;
   --text-caption: var(--fs-caption, 11px);
   --text-caption--line-height: 14px;
   --text-overline: var(--fs-caption, 11px);
@@ -166,6 +172,35 @@
 
 @utility rounded-window {
   border-radius: var(--radius-window, 12px);
+}
+
+/*
+ * OpenChamber 风格扁平微透着色按钮（Flat Tinted Buttons）。
+ * 设计意图(Why)：替代刺眼的高对比纯色实心块，用 12%~16% 主题微透底 + 22% 微距描边 +
+ *   可读主题色文字呈现轻盈极客质感；文字通过 color-mix 向 --foreground 收敛，确保深浅主题皆可读。
+ */
+@utility btn-tint-primary {
+  background-color: color-mix(in srgb, var(--primary) 14%, transparent);
+  color: color-mix(in srgb, var(--primary) 72%, var(--foreground));
+  border: 1px solid color-mix(in srgb, var(--primary) 24%, transparent);
+  &:hover {
+    background-color: color-mix(in srgb, var(--primary) 22%, transparent);
+  }
+  &:active {
+    background-color: color-mix(in srgb, var(--primary) 30%, transparent);
+  }
+}
+
+@utility btn-tint-destructive {
+  background-color: color-mix(in srgb, var(--destructive) 12%, transparent);
+  color: color-mix(in srgb, var(--destructive) 78%, var(--foreground));
+  border: 1px solid color-mix(in srgb, var(--destructive) 22%, transparent);
+  &:hover {
+    background-color: color-mix(in srgb, var(--destructive) 18%, transparent);
+  }
+  &:active {
+    background-color: color-mix(in srgb, var(--destructive) 26%, transparent);
+  }
 }
 
 /**

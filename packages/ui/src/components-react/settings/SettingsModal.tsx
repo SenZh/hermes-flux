@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Blocks, Bot, Info, KeyRound, Palette, Plug, RefreshCw, Search, X } from 'lucide-react';
+import { Blocks, Bot, ChevronDown, Info, KeyRound, Palette, Plug, RefreshCw, Search, X } from 'lucide-react';
 import { t } from '../../i18n/index.js';
 import type { I18nKey } from '../../i18n/index.js';
 import { SKINS, SKIN_ALIASES, type SkinId } from '../../tokens/skins.js';
@@ -10,6 +10,8 @@ import { Input } from '../primitives/Input.js';
 import { Badge } from '../primitives/Badge.js';
 import { ActivityIndicator } from '../primitives/ActivityIndicator.js';
 import { SegmentedControl } from './SegmentedControl.js';
+import { SettingField, SettingInset, SettingRow, SettingSection, SettingTwoColumn } from './SettingRow.js';
+import { SettingsSectionHeading } from './SettingsSectionHeading.js';
 import { LoadBoundary } from './LoadBoundary.js';
 import { ProvidersAdminPanel } from './ProvidersAdminPanel.js';
 import { BotManagerView } from './BotManagerView.js';
@@ -36,10 +38,11 @@ const ICONS: Record<SettingsIconName, React.ComponentType<{ size?: number; class
 };
 
 /** 主题卡片顺序：与 SKINS 真值表一致，别名皮肤不单独成卡。 */
-const THEME_ORDER = ['obsidian-gold', 'jade-white', 'warm-paper', 'ayu-light', 'cyber-matrix'] as const;
+const THEME_ORDER = ['obsidian-gold', 'ayu-dark', 'jade-white', 'warm-paper', 'ayu-light', 'cyber-matrix'] as const;
 
 const THEME_LABEL_KEY: Record<(typeof THEME_ORDER)[number], I18nKey> = {
   'obsidian-gold': 'common.theme.obsidianLabel',
+  'ayu-dark': 'common.theme.ayuDarkLabel',
   'jade-white': 'common.theme.jadeWhiteLabel',
   'warm-paper': 'common.theme.warmPaperLabel',
   'ayu-light': 'common.theme.ayuLightLabel',
@@ -60,39 +63,10 @@ const ACTIVITY_VARIANT_TEXT: Record<ActivityIndicatorVariant, { label: I18nKey; 
   matrix: { label: 'settings.activityMatrix', hint: 'settings.activityMatrixHint' },
 };
 
-/**
- * 设置行的唯一实现。
- * 【设计意图】所有设置项共用同一行骨架（左标签右控件），避免每个面板各写一套间距与字阶。
- * 【规则】label 必填；hint 用于解释"为什么需要它"，不是重复 label。
- */
-function SettingRow({
-  label,
-  hint,
-  htmlFor,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  htmlFor?: string;
-  children: React.ReactNode;
-}): React.ReactElement {
-  return (
-    <div className="flex items-start justify-between gap-6 border-b border-border-subtle py-3 last:border-b-0">
-      <div className="min-w-0">
-        <label htmlFor={htmlFor} className="block text-body text-foreground">
-          {label}
-        </label>
-        {hint ? <p className="mt-0.5 text-caption text-muted-foreground">{hint}</p> : null}
-      </div>
-      <div className="flex shrink-0 items-center gap-2">{children}</div>
-    </div>
-  );
-}
-
 function StatusDot({ tone }: { tone: 'success' | 'warning' | 'destructive' | 'muted' }): React.ReactElement {
   const color =
     tone === 'success' ? 'bg-success' : tone === 'warning' ? 'bg-warning' : tone === 'destructive' ? 'bg-destructive' : 'bg-muted-foreground';
-  return <span className={`size-1.5 shrink-0 rounded-full ${color}`} aria-hidden="true" />;
+  return <span className={`size-2 shrink-0 rounded-full ${color}`} aria-hidden="true" />;
 }
 
 function AppearancePanel({
@@ -105,9 +79,8 @@ function AppearancePanel({
   const activeTheme = SKIN_ALIASES[snapshot.theme] ?? snapshot.theme;
   return (
     <div className="flex flex-col gap-6">
-      <section>
-        <h3 className="mb-1 text-section font-medium text-foreground">{t('settings.themeTitle')}</h3>
-        <p className="mb-3 text-caption text-muted-foreground">{t('settings.themeHint')}</p>
+      <SettingSection>
+        <SettingsSectionHeading title={t('settings.themeTitle')} hint={t('settings.themeHint')} />
         <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label={t('settings.themeTitle')}>
           {THEME_ORDER.map((id) => {
             const skin = SKINS[id];
@@ -121,7 +94,7 @@ function AppearancePanel({
                 aria-checked={active}
                 data-theme-option={id}
                 onClick={() => actions.onThemeChange(id)}
-                className={`flex items-center gap-3 rounded-panel border px-3 py-2.5 text-left transition-colors ${
+                className={`flex items-center gap-3 rounded-panel border px-3 py-3 text-left transition-colors ${
                   active ? 'border-primary bg-primary-subtle' : 'border-border-subtle bg-transparent hover:bg-card-hover'
                 }`}
               >
@@ -132,7 +105,7 @@ function AppearancePanel({
                 </span>
                 <span className="flex min-w-0 flex-col">
                   <span className="truncate text-body text-foreground">{t(THEME_LABEL_KEY[id])}</span>
-                  <span className="text-micro text-muted-foreground">
+                  <span className="text-caption text-muted-foreground">
                     {skin.variant === 'dark' ? t('settings.themeDark') : t('settings.themeLight')}
                   </span>
                 </span>
@@ -140,11 +113,10 @@ function AppearancePanel({
             );
           })}
         </div>
-      </section>
+      </SettingSection>
 
-      <section>
-        <h3 className="mb-1 text-section font-medium text-foreground">{t('settings.activityTitle')}</h3>
-        <p className="mb-3 text-caption text-muted-foreground">{t('settings.activityHint')}</p>
+      <SettingSection>
+        <SettingsSectionHeading title={t('settings.activityTitle')} hint={t('settings.activityHint')} />
         <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label={t('settings.activityTitle')}>
           {ACTIVITY_INDICATOR_VARIANTS.map((variant) => {
             const active = snapshot.activityVariant === variant;
@@ -156,7 +128,7 @@ function AppearancePanel({
                 aria-checked={active}
                 data-activity-variant={variant}
                 onClick={() => actions.onActivityVariantChange(variant)}
-                className={`flex items-center gap-3 rounded-panel border px-3 py-2.5 text-left transition-colors ${
+                className={`flex items-center gap-3 rounded-panel border px-3 py-3 text-left transition-colors ${
                   active ? 'border-primary bg-primary-subtle' : 'border-border-subtle bg-transparent hover:bg-card-hover'
                 }`}
               >
@@ -166,90 +138,99 @@ function AppearancePanel({
                 </span>
                 <span className="flex min-w-0 flex-col">
                   <span className="truncate text-body text-foreground">{t(ACTIVITY_VARIANT_TEXT[variant].label)}</span>
-                  <span className="truncate text-micro text-muted-foreground">{t(ACTIVITY_VARIANT_TEXT[variant].hint)}</span>
+                  <span className="truncate text-caption text-muted-foreground">{t(ACTIVITY_VARIANT_TEXT[variant].hint)}</span>
                 </span>
               </button>
             );
           })}
         </div>
-      </section>
+      </SettingSection>
 
-      <section>
-        <h3 className="mb-1 text-section font-medium text-foreground">{t('settings.typographyTitle')}</h3>
-        <p className="mb-2 text-caption text-muted-foreground">{t('settings.typographyHint')}</p>
-        <SettingRow label={t('settings.uiFont')} htmlFor="settings-ui-font">
-          <select
-            id="settings-ui-font"
-            value={snapshot.fontPrefs.uiFont}
-            onChange={(event) => actions.onFontPrefsChange({ ...snapshot.fontPrefs, uiFont: event.target.value as typeof snapshot.fontPrefs.uiFont })}
-            className="h-8 min-w-40 rounded-inner border border-border bg-input px-2 text-body text-foreground"
-          >
-            {getUiFontSelectOptions().map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </SettingRow>
-        <SettingRow label={t('settings.codeFont')} htmlFor="settings-mono-font">
-          <select
-            id="settings-mono-font"
-            value={snapshot.fontPrefs.monoFont}
-            onChange={(event) => actions.onFontPrefsChange({ ...snapshot.fontPrefs, monoFont: event.target.value as typeof snapshot.fontPrefs.monoFont })}
-            className="h-8 min-w-40 rounded-inner border border-border bg-input px-2 text-body text-foreground"
-          >
-            {MONO_FONT_OPTIONS.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </SettingRow>
-        <SettingRow label={t('settings.textSize')}>
-          <SegmentedControl
-            ariaLabel={t('settings.textSize')}
-            value={snapshot.fontPrefs.sizeScale}
-            onChange={(sizeScale) => actions.onFontPrefsChange({ ...snapshot.fontPrefs, sizeScale })}
-            options={[
-              { value: 'small', label: t('settings.sizeSmall') },
-              { value: 'medium', label: t('settings.sizeMedium') },
-              { value: 'large', label: t('settings.sizeLarge') },
-            ]}
-          />
-        </SettingRow>
-      </section>
+      <SettingSection>
+        <SettingsSectionHeading title={t('settings.typographyTitle')} hint={t('settings.typographyHint')} />
+        <SettingInset>
+          <SettingRow label={t('settings.uiFont')} htmlFor="settings-ui-font">
+            <div className="relative inline-flex items-center">
+              <select
+                id="settings-ui-font"
+                value={snapshot.fontPrefs.uiFont}
+                onChange={(event) => actions.onFontPrefsChange({ ...snapshot.fontPrefs, uiFont: event.target.value as typeof snapshot.fontPrefs.uiFont })}
+                className="h-8 min-w-44 appearance-none rounded-card border border-border bg-input pl-3 pr-8 text-body text-foreground transition-colors focus-visible:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {getUiFontSelectOptions().map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={14} className="pointer-events-none absolute right-2 text-muted-foreground" aria-hidden="true" />
+            </div>
+          </SettingRow>
+          <SettingRow label={t('settings.codeFont')} htmlFor="settings-mono-font">
+            <div className="relative inline-flex items-center">
+              <select
+                id="settings-mono-font"
+                value={snapshot.fontPrefs.monoFont}
+                onChange={(event) => actions.onFontPrefsChange({ ...snapshot.fontPrefs, monoFont: event.target.value as typeof snapshot.fontPrefs.monoFont })}
+                className="h-8 min-w-44 appearance-none rounded-card border border-border bg-input pl-3 pr-8 text-body text-foreground transition-colors focus-visible:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {MONO_FONT_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={14} className="pointer-events-none absolute right-2 text-muted-foreground" aria-hidden="true" />
+            </div>
+          </SettingRow>
+          <SettingRow label={t('settings.textSize')}>
+            <SegmentedControl
+              ariaLabel={t('settings.textSize')}
+              value={snapshot.fontPrefs.sizeScale}
+              onChange={(sizeScale) => actions.onFontPrefsChange({ ...snapshot.fontPrefs, sizeScale })}
+              options={[
+                { value: 'small', label: t('settings.sizeSmall') },
+                { value: 'medium', label: t('settings.sizeMedium') },
+                { value: 'large', label: t('settings.sizeLarge') },
+              ]}
+            />
+          </SettingRow>
+        </SettingInset>
+      </SettingSection>
 
-      <section>
-        <h3 className="mb-1 text-section font-medium text-foreground">{t('settings.presenceTitle')}</h3>
-        <p className="mb-2 text-caption text-muted-foreground">{t('settings.presenceHint')}</p>
-        <SettingRow label={t('settings.presenceLayout')}>
-          <SegmentedControl
-            ariaLabel={t('settings.presenceLayout')}
-            value={snapshot.presenceLayout}
-            onChange={(layout) => actions.onPresenceLayoutChange(layout)}
-            options={[
-              { value: 'stage', label: t('settings.presenceLayoutStage') },
-              { value: 'dock', label: t('settings.presenceLayoutDock') },
-            ]}
-          />
-        </SettingRow>
-      </section>
+      <SettingSection>
+        <SettingsSectionHeading title={t('settings.presenceTitle')} hint={t('settings.presenceHint')} />
+        <SettingInset>
+          <SettingRow label={t('settings.presenceLayout')}>
+            <SegmentedControl
+              ariaLabel={t('settings.presenceLayout')}
+              value={snapshot.presenceLayout}
+              onChange={(layout) => actions.onPresenceLayoutChange(layout)}
+              options={[
+                { value: 'stage', label: t('settings.presenceLayoutStage') },
+                { value: 'dock', label: t('settings.presenceLayoutDock') },
+              ]}
+            />
+          </SettingRow>
+        </SettingInset>
+      </SettingSection>
 
-      <section>
-        <h3 className="mb-1 text-section font-medium text-foreground">{t('settings.languageTitle')}</h3>
-        <p className="mb-2 text-caption text-muted-foreground">{t('settings.languageHint')}</p>
-        <SettingRow label={t('settings.languageLabel')}>
-          <SegmentedControl
-            ariaLabel={t('settings.languageLabel')}
-            value={snapshot.locale}
-            onChange={(locale) => actions.onLocaleChange(locale)}
-            options={[
-              { value: 'zh', label: t('settings.languageZh') },
-              { value: 'en', label: t('settings.languageEn') },
-            ]}
-          />
-        </SettingRow>
-      </section>
+      <SettingSection>
+        <SettingsSectionHeading title={t('settings.languageTitle')} hint={t('settings.languageHint')} />
+        <SettingInset>
+          <SettingRow label={t('settings.languageLabel')}>
+            <SegmentedControl
+              ariaLabel={t('settings.languageLabel')}
+              value={snapshot.locale}
+              onChange={(locale) => actions.onLocaleChange(locale)}
+              options={[
+                { value: 'zh', label: t('settings.languageZh') },
+                { value: 'en', label: t('settings.languageEn') },
+              ]}
+            />
+          </SettingRow>
+        </SettingInset>
+      </SettingSection>
     </div>
   );
 }
@@ -279,14 +260,16 @@ function ExtensionsPanel({
 }): React.ReactElement {
   return (
     <div className="flex flex-col gap-6">
-      <section>
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <h3 className="text-section font-medium text-foreground">{t('settings.mcpTitle')}</h3>
-          <Button variant="outline" size="sm" type="button" disabled={snapshot.busy} onClick={actions.onRefreshExtensions}>
-            <RefreshCw size={12} />
-            {t('settings.refresh')}
-          </Button>
-        </div>
+      <SettingSection>
+        <SettingsSectionHeading
+          title={t('settings.mcpTitle')}
+          action={
+            <Button variant="outline" size="sm" type="button" disabled={snapshot.busy} onClick={actions.onRefreshExtensions}>
+              <RefreshCw size={12} />
+              {t('settings.refresh')}
+            </Button>
+          }
+        />
         <LoadBoundary state={snapshot.mcp} onRetry={actions.onRefreshExtensions} emptyLabel={t('settings.mcpEmpty')}>
           {(rows) => (
             <div className="flex flex-col">
@@ -308,19 +291,21 @@ function ExtensionsPanel({
             </div>
           )}
         </LoadBoundary>
-      </section>
+      </SettingSection>
 
-      <section>
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <h3 className="text-section font-medium text-foreground">{t('settings.skillsTitle')}</h3>
-          <Button variant="outline" size="sm" type="button" disabled={snapshot.busy} onClick={actions.onReloadSkills}>
-            <RefreshCw size={12} />
-            {t('settings.skillsReload')}
-          </Button>
-        </div>
+      <SettingSection>
+        <SettingsSectionHeading
+          title={t('settings.skillsTitle')}
+          action={
+            <Button variant="outline" size="sm" type="button" disabled={snapshot.busy} onClick={actions.onReloadSkills}>
+              <RefreshCw size={12} />
+              {t('settings.skillsReload')}
+            </Button>
+          }
+        />
         <LoadBoundary state={snapshot.skills} onRetry={actions.onRefreshExtensions} emptyLabel={t('settings.skillsEmpty')}>
           {(rows) => (
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap gap-2">
               {rows.map((row) => (
                 <Badge key={`${row.category}:${row.name}`} variant="secondary">
                   {row.name}
@@ -329,7 +314,7 @@ function ExtensionsPanel({
             </div>
           )}
         </LoadBoundary>
-      </section>
+      </SettingSection>
     </div>
   );
 }
@@ -380,11 +365,8 @@ function ConnectionPanel({
         ) : null}
       </div>
 
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-col gap-1">
-          <label htmlFor="settings-gateway-url" className="text-caption text-secondary-foreground">
-            {t('settings.gatewayUrl')}
-          </label>
+      <SettingInset className="gap-3 py-4">
+        <SettingField label={t('settings.gatewayUrl')} htmlFor="settings-gateway-url">
           <Input
             id="settings-gateway-url"
             value={draft.url}
@@ -392,12 +374,9 @@ function ConnectionPanel({
             onChange={(event) => setDraft({ ...draft, url: event.target.value })}
             className="font-code"
           />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="flex flex-col gap-1">
-            <label htmlFor="settings-gateway-username" className="text-caption text-secondary-foreground">
-              {t('settings.gatewayUsername')}
-            </label>
+        </SettingField>
+        <SettingTwoColumn>
+          <SettingField label={t('settings.gatewayUsername')} htmlFor="settings-gateway-username">
             <Input
               id="settings-gateway-username"
               value={draft.username}
@@ -405,11 +384,8 @@ function ConnectionPanel({
               onChange={(event) => setDraft({ ...draft, username: event.target.value })}
               className="font-code"
             />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label htmlFor="settings-gateway-password" className="text-caption text-secondary-foreground">
-              {t('settings.gatewayPassword')}
-            </label>
+          </SettingField>
+          <SettingField label={t('settings.gatewayPassword')} htmlFor="settings-gateway-password">
             <Input
               id="settings-gateway-password"
               type="password"
@@ -419,20 +395,17 @@ function ConnectionPanel({
               onChange={(event) => setDraft({ ...draft, password: event.target.value })}
               className="font-code"
             />
-          </div>
-        </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="settings-gateway-profile" className="text-caption text-secondary-foreground">
-            {t('settings.gatewayProfile')}
-          </label>
+          </SettingField>
+        </SettingTwoColumn>
+        <SettingField label={t('settings.gatewayProfile')} htmlFor="settings-gateway-profile">
           <Input
             id="settings-gateway-profile"
             value={draft.profileName}
             onChange={(event) => setDraft({ ...draft, profileName: event.target.value })}
             className="font-code"
           />
-        </div>
-      </div>
+        </SettingField>
+      </SettingInset>
 
       {snapshot.gateway.test ? (
         <p className={`text-caption ${snapshot.gateway.test.ok ? 'text-success' : 'text-destructive'}`}>
@@ -455,13 +428,13 @@ function ConnectionPanel({
 function AboutPanel({ snapshot }: { snapshot: SettingsSnapshot }): React.ReactElement {
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-0.5">
+      <div className="flex flex-col gap-1">
         <span className="text-title text-foreground">Hermes Flux</span>
         <span className="font-code text-caption text-muted-foreground">
           {t('settings.aboutVersion', { version: snapshot.appVersion || t('settings.aboutVersionUnknown') })}
         </span>
       </div>
-      <div className="flex flex-col gap-1.5 text-body text-secondary-foreground">
+      <div className="flex flex-col gap-2 text-body text-secondary-foreground">
         <span>{t('settings.aboutPlatform', { platform: snapshot.platform })}</span>
         <span>{t('settings.aboutProtocol')}</span>
       </div>
@@ -549,7 +522,7 @@ export function SettingsModal({
 
   return (
     <div
-      className="flux-settings fixed inset-0 z-[1000] flex items-center justify-center bg-backdrop/80 p-6"
+      className="flux-settings fixed inset-0 z-50 flex items-center justify-center bg-backdrop/80 p-6"
       role="presentation"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) actions.onClose();
@@ -562,9 +535,10 @@ export function SettingsModal({
         data-testid="settings-dialog"
         ref={dialogRef}
         tabIndex={-1}
-        className="flex h-[min(680px,calc(100vh-96px))] w-[900px] max-w-[94vw] overflow-hidden rounded-window border border-border bg-popover text-foreground shadow-[var(--shadow-window)]"
+        className="flex overflow-hidden rounded-window border border-border bg-popover text-foreground shadow-window"
+        style={{ height: 'min(680px, calc(100vh - 96px))', width: '900px', maxWidth: '94vw' }}
       >
-        <aside className="flex w-[212px] shrink-0 flex-col border-r border-border-subtle bg-sidebar">
+        <aside className="flex w-53 shrink-0 flex-col border-r border-border-subtle bg-sidebar">
           <div className="flex items-center justify-between px-4 pb-2 pt-4">
             <h2 id="settings-dialog-title" className="text-title text-foreground">
               {t('settings.title')}
@@ -593,7 +567,7 @@ export function SettingsModal({
             </div>
           </div>
 
-          <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2 pb-3" aria-label={t('settings.title')}>
+          <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-2 pb-3" aria-label={t('settings.title')}>
             {visible.map((section) => {
               const Icon = ICONS[section.icon];
               const selected = section.id === snapshot.section;
@@ -622,7 +596,7 @@ export function SettingsModal({
         <section className="flex min-w-0 flex-1 flex-col">
           <header className="border-b border-border-subtle px-6 pb-3 pt-4">
             <h3 className="text-title text-foreground">{t(active.titleKey)}</h3>
-            <p className="mt-0.5 text-caption text-muted-foreground">{t(active.descKey)}</p>
+            <p className="mt-1 text-caption text-muted-foreground">{t(active.descKey)}</p>
           </header>
           <div className={snapshot.section === 'agents' ? 'flex-1 min-h-0' : 'flex-1 overflow-y-auto px-6 py-4'}>
             {renderPanel(snapshot.section, snapshot, actions)}

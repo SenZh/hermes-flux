@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { cn } from '../../lib/utils.js';
 
 /**
  * 设置项行骨架（唯一实现）。
@@ -64,4 +65,45 @@ export function SettingField({
       {children}
     </div>
   );
+}
+
+/** 设置大区容器：自带底部微距发丝分割线与 24px 呼吸留白。 */
+export function SettingSection({
+  className,
+  children,
+}: {
+  className?: string;
+  children: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <section className={cn('flex flex-col gap-3 border-b border-border-subtle pb-6 last:border-b-0', className)}>
+      {children}
+    </section>
+  );
+}
+
+/** 内嵌分组容器：用 L2 面板底色承载成组设置行，拉开与浮层背景的层次。 */
+export function SettingInset({
+  className,
+  children,
+}: {
+  className?: string;
+  children: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <div className={cn('flex flex-col rounded-panel border border-border-subtle bg-panel px-4 py-1', className)}>
+      {children}
+    </div>
+  );
+}
+
+/** 双栏字段网格：用于并排表单输入。 */
+export function SettingTwoColumn({
+  className,
+  children,
+}: {
+  className?: string;
+  children: React.ReactNode;
+}): React.ReactElement {
+  return <div className={cn('grid grid-cols-2 gap-4', className)}>{children}</div>;
 }

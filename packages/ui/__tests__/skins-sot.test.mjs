@@ -31,9 +31,9 @@ test('前置：标记区两个 marker 均存在且顺序正确（缺失即报本
   assert.ok(e > s, '结束标记缺失或先于起始标记');
 });
 
-test('槽表结构：43 槽、5 皮肤、别名表、字段仅 label/variant/slots/sources、中文名在表', () => {
+test('槽表结构：43 槽、6 皮肤、别名表、字段仅 label/variant/slots/sources、中文名在表', () => {
   assert.equal(T.slotIds.length, 43);
-  assert.equal(Object.keys(T.skins).length, 5);
+  assert.equal(Object.keys(T.skins).length, 6);
   assert.deepEqual(T.aliases, { 'suet-jade': 'jade-white' });
   for (const skin of Object.values(T.skins)) {
     assert.deepEqual(Object.keys(skin).sort(), ['label', 'slots', 'sources', 'variant']);
@@ -43,6 +43,7 @@ test('槽表结构：43 槽、5 皮肤、别名表、字段仅 label/variant/slo
 
 test('variant 明暗精确断言', () => {
   assert.equal(T.skins['obsidian-gold'].variant, 'dark');
+  assert.equal(T.skins['ayu-dark'].variant, 'dark');
   assert.equal(T.skins['cyber-matrix'].variant, 'dark');
   for (const id of ['jade-white', 'ayu-light', 'warm-paper']) assert.equal(T.skins[id].variant, 'light');
 });

@@ -128,7 +128,7 @@ export function saveFontPreferences(prefs: FontPreferences): void {
 
 function scalePx(base: string, factor: number): string {
   const value = Number.parseFloat(base) * factor;
-  return `${Math.round(value * 10) / 10}px`;
+  return `${Math.round(value)}px`;
 }
 
 /**
@@ -153,7 +153,9 @@ export function applyFontPreferences(prefs: FontPreferences, root: HTMLElement =
   root.style.setProperty('--font-sans', uiStack);
   root.style.setProperty('--font-mono', monoStack);
   root.style.setProperty('--chat-text-markdown', scalePx(TYPOGRAPHY_TOKENS.markdown, factor));
+  root.style.setProperty('--chat-text-markdown-lh', scalePx('26px', factor));
   root.style.setProperty('--chat-text-code', scalePx(TYPOGRAPHY_TOKENS.code, factor));
+  root.style.setProperty('--chat-text-code-lh', scalePx('20px', factor));
   root.style.setProperty('--chat-text-ui-label', scalePx(TYPOGRAPHY_TOKENS.uiLabel, factor));
   root.style.setProperty('--chat-text-meta', scalePx(TYPOGRAPHY_TOKENS.meta, factor));
   root.style.setProperty('--chat-text-micro', scalePx(TYPOGRAPHY_TOKENS.micro, factor));

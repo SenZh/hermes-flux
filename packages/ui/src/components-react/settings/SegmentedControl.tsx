@@ -24,7 +24,7 @@ export function SegmentedControl<T extends string>({
   ariaLabel: string;
 }): React.ReactElement {
   return (
-    <div role="group" aria-label={ariaLabel} className="inline-flex items-center gap-1 rounded-card border border-border bg-input p-1">
+    <div role="group" aria-label={ariaLabel} className="inline-flex h-8 items-center gap-1 rounded-card border border-border bg-input p-1">
       {options.map((option) => {
         const active = option.value === value;
         return (
@@ -34,8 +34,8 @@ export function SegmentedControl<T extends string>({
             aria-pressed={active}
             data-segmented-value={option.value}
             onClick={() => onChange(option.value)}
-            className={`h-7 rounded-inner px-2 text-caption transition-colors ${
-              active ? 'bg-card-active text-foreground' : 'text-secondary-foreground hover:text-foreground'
+            className={`h-6 rounded-inner px-3 text-caption transition-colors ${
+              active ? 'bg-card-active font-medium text-foreground' : 'text-secondary-foreground hover:text-foreground'
             }`}
           >
             {option.label}

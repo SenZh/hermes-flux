@@ -17,16 +17,23 @@ export function SettingsSectionHeading({
   title,
   hint,
   meta,
+  action,
 }: {
   title: string;
   hint?: string;
   meta?: React.ReactNode;
+  action?: React.ReactNode;
 }): React.ReactElement {
   return (
     <div className="mb-2 flex flex-col gap-1">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="text-section font-medium text-foreground">{title}</h3>
-        {meta ? <span className="shrink-0 text-caption text-muted-foreground">{meta}</span> : null}
+        <h3 className="text-section font-semibold text-foreground">{title}</h3>
+        {meta || action ? (
+          <div className="flex shrink-0 items-center gap-2">
+            {meta ? <span className="shrink-0 text-caption text-muted-foreground">{meta}</span> : null}
+            {action}
+          </div>
+        ) : null}
       </div>
       {hint ? <p className="text-caption text-muted-foreground">{hint}</p> : null}
     </div>

@@ -6,17 +6,17 @@
 
 export const DIMENSIONS = {
   titlebarHeight: 42,
-  leftRailWidth: 260,
+  leftRailWidth: 264,
   inspectorWidth: 410,
   inspectorRailWidth: 62,
   inspectorDetailWidth: 348,
-  statusBarHeight: 22,
+  statusBarHeight: 0,
   inputDockMaxWidth: 740,
   conversationPaddingBottom: 180,
-  dockScrimFadeHeight: 120,
-  radiusWindow: 14,
-  radiusCard: 10,
-  radiusInner: 6,
+  dockScrimFadeHeight: 100,
+  radiusWindow: 12,
+  radiusCard: 6,
+  radiusInner: 4,
   radiusPill: 9999,
 };
 
