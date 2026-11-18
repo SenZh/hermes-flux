@@ -71,4 +71,11 @@ export const MUTATION_DOMAINS = {
     // 另两处为三元方向性等价变异，不改变可观测行为。
     minScore: 90,
   },
+  codeCopy: {
+    title: '代码块复制委托 (Markdown Code Block Copy)',
+    mutate: ['packages/ui/src/lib/codeCopy.ts'],
+    testFiles: ['packages/ui/__tests__/code-copy.test.mjs'],
+    buildCommand: 'npm run build:ui',
+    minScore: 80,
+  },
 };

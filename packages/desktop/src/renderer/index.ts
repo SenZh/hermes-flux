@@ -920,7 +920,7 @@ const gatewayEventDispatcher = createGatewayEventDispatcher({
   disarmTurnWatchdog: () => turnExecutionService.disarmTurnWatchdog(),
   clearPresenceTerminal: () => turnExecutionService.clearPresenceTerminal(),
   armPresenceTerminal: (terminal) => turnExecutionService.armPresenceTerminal(terminal),
-  setTimedDockNotice: (msg, dur) => turnExecutionService.setTimedDockNotice(msg, dur),
+  setTimedDockNotice: (msg, dur) => turnExecutionService.setTimedDockNotice(msg, dur), isStreamNearBottom: () => isStreamNearBottom(document.getElementById('conversation-stream')), setPendingScrollToBottom: (val) => renderCoordinator.setPendingScrollToBottom(val),
   render: () => render(), t,
 });
 

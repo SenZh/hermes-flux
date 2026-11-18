@@ -112,6 +112,9 @@ export interface GatewayEventDispatcherDeps {
   readonly armPresenceTerminal: (terminal: NonNullable<AppState['presenceTerminal']>) => void;
   readonly setTimedDockNotice: (msg: string, durationMs?: number) => void;
 
+  readonly isStreamNearBottom?: () => boolean;
+  readonly setPendingScrollToBottom?: (val: boolean) => void;
+
   readonly render: () => void;
   readonly t: (key: I18nKey, params?: Record<string, string | number>) => string;
 }
@@ -316,6 +319,11 @@ export function createGatewayEventDispatcher(deps: GatewayEventDispatcherDeps): 
           break;
 
         case 'turn-completed': {
+          // 【贴底意图必须在 flush / finalReplace 改写 DOM 之前捕获 (Why)】
+          //   flush() 与 setMessageContent() 会瞬间撑高 #msg-content-*，若等到 render()
+          //   再测 isStreamNearBottom，新增高度超过 168px 就会被误判为「用户不在底部」，
+          //   从而把视口锁回上方的用户提示词位置。
+          const wasNearBottomBeforeSettle = deps.isStreamNearBottom?.() ?? false;
           deps.getTokenCoalescer().flush();
           deps.stopRunningToolTimers();
           if (finalReplace) {
@@ -343,6 +351,9 @@ export function createGatewayEventDispatcher(deps: GatewayEventDispatcherDeps): 
           const completedTargetId = deps.toStoredSessionId(rawTargetId);
           if (completedTargetId) {
             const isFocused = completedTargetId === state.activeSessionId;
+            if (isFocused && wasNearBottomBeforeSettle) {
+              deps.setPendingScrollToBottom?.(true);
+            }
             deps.completeEntityTurn('session', deps.getActiveRunningSessionIds(), deps.getUnreadSessionIds(), completedTargetId, isFocused);
             if (isFocused) {
               deps.getSessionMessagesCache().set(completedTargetId, [...state.messages]);
@@ -392,6 +403,7 @@ export function createGatewayEventDispatcher(deps: GatewayEventDispatcherDeps): 
         }
 
         case 'turn-failed': {
+          const wasNearBottomBeforeFail = deps.isStreamNearBottom?.() ?? false;
           deps.getTokenCoalescer().flush();
           deps.stopRunningToolTimers();
           const pendingMsg = ctx.activeStreamingMessageId
@@ -403,6 +415,9 @@ export function createGatewayEventDispatcher(deps: GatewayEventDispatcherDeps): 
           const rawFailedId = action.sessionId || ctx.activeStreamingStoredSessionId;
           const failedTargetId = deps.toStoredSessionId(rawFailedId);
           if (failedTargetId) {
+            if (failedTargetId === state.activeSessionId && wasNearBottomBeforeFail) {
+              deps.setPendingScrollToBottom?.(true);
+            }
             applyTurnFailed(deps.getActiveRunningSessionIds(), failedTargetId);
             deps.getActivityTransitionTracker().clear('session', failedTargetId);
           }

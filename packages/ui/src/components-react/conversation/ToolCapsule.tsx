@@ -72,19 +72,75 @@ export function classifyTool(name: string): ToolPresentation {
 
 /**
  * 工具目标：统一走深度提取，兼容信封 args / JSON 字符串 / 纯文本。
- * 【防范的历史坑 (Pitfall)】直接取 args 第一行会把 `{"command":"..."}` 整段 JSON 显示出来。
+ * 【设计意图 (Why)】不在此处做 60 字符硬截断，改由 CSS `text-overflow: ellipsis` 随列宽自然截断，
+ *   避免宽屏下命令被提前截断、右侧大片留白（对标 OpenChamber ToolPart.tsx）。
  */
 function shortTarget(args: string): string {
   const target = extractToolTarget(args);
   if (!target) return '';
   const firstLine = target.split('\n')[0].trim();
-  return firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine;
+  return firstLine.length > 240 ? `${firstLine.slice(0, 240)}…` : firstLine;
 }
 
 function fileName(path: string): string {
   const normalized = path.replace(/\\/g, '/');
   const parts = normalized.split('/').filter(Boolean);
   return parts[parts.length - 1] || path;
+}
+
+/** 拆出目录前缀与文件名，用于路径双色分层渲染（目录柔暗、文件名高亮） */
+function renderSplitPath(path: string): React.ReactElement {
+  const normalized = path.replace(/\\/g, '/');
+  const slashIdx = normalized.lastIndexOf('/');
+  if (slashIdx < 0) {
+    return <span className="conv-row__path-file">{path}</span>;
+  }
+  const dir = normalized.slice(0, slashIdx + 1);
+  const file = normalized.slice(slashIdx + 1);
+  return (
+    <span className="conv-row__path">
+      <span className="conv-row__path-dir">{dir}</span>
+      <span className="conv-row__path-file">{file}</span>
+    </span>
+  );
+}
+
+/** 提取 Write / Edit 工具的增删行数，对标 OpenChamber +N / -M 统计徽章 */
+function extractDiffCounts(
+  kind: StreamRowKind,
+  args: string,
+  view: ReturnType<typeof normalizeToolOutput>
+): { added: number; removed: number } | null {
+  if (view.kind === 'diff' && view.diff) {
+    let added = 0;
+    let removed = 0;
+    for (const line of view.diff.split('\n')) {
+      if (line.startsWith('+') && !line.startsWith('+++')) added++;
+      else if (line.startsWith('-') && !line.startsWith('---')) removed++;
+    }
+    if (added > 0 || removed > 0) return { added, removed };
+  }
+  if (kind !== 'write' && kind !== 'edit') return null;
+  try {
+    const trimmed = args.trim();
+    if (!trimmed.startsWith('{')) return null;
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    if (kind === 'write') {
+      const content = parsed.content ?? parsed.code ?? parsed.text;
+      if (typeof content === 'string' && content.length > 0) {
+        return { added: content.split('\n').length, removed: 0 };
+      }
+    }
+    if (kind === 'edit') {
+      const oldStr = parsed.old_string ?? parsed.oldText ?? parsed.old;
+      const newStr = parsed.new_string ?? parsed.newText ?? parsed.new;
+      const removed = typeof oldStr === 'string' && oldStr.length > 0 ? oldStr.split('\n').length : 0;
+      const added = typeof newStr === 'string' && newStr.length > 0 ? newStr.split('\n').length : 0;
+      if (added > 0 || removed > 0) return { added, removed };
+    }
+  // gate-degrade: 工具 args 非 JSON 时跳过统计，属于可选视觉增强
+  } catch {}
+  return null;
 }
 
 export interface ToolCapsuleProps {
@@ -102,11 +158,18 @@ export function ToolCapsule({ tool, now }: ToolCapsuleProps): React.ReactElement
     tool.durationMs ??
     (tool.status === 'running' && tool.startedAt ? Math.max(0, (now ?? Date.now()) - tool.startedAt) : undefined);
   const duration = liveMs !== undefined ? `${(liveMs / 1000).toFixed(1)}s` : '';
-  const display = presentation.readOnly && target ? fileName(target) : target;
 
-  // 文件类工具：左侧直接显示文件类型图标，替代通用的工具形状图标
-  const showsFileIcon = Boolean(target) && ['read', 'write', 'edit'].includes(presentation.kind);
+  // 文件类工具：左侧直接显示文件类型图标，替代通用的工具形状图标；路径采用双色分层
+  const isFileTool = Boolean(target) && ['read', 'write', 'edit'].includes(presentation.kind);
+  const targetNode: React.ReactNode = isFileTool
+    ? renderSplitPath(target)
+    : target || undefined;
   const failedExit = view.exitCode !== undefined && view.exitCode !== 0;
+
+  const diffCounts = React.useMemo(
+    () => extractDiffCounts(presentation.kind, tool.args, view),
+    [presentation.kind, tool.args, view]
+  );
 
   const meta = duration || failedExit ? (
     <>
@@ -115,16 +178,25 @@ export function ToolCapsule({ tool, now }: ToolCapsuleProps): React.ReactElement
     </>
   ) : undefined;
 
+  const trailing = diffCounts ? (
+    <span className="conv-row__diff-stats">
+      {diffCounts.added > 0 ? <span className="conv-row__diff-add">+{diffCounts.added}</span> : null}
+      {diffCounts.added > 0 && diffCounts.removed > 0 ? <span className="conv-row__diff-sep">/</span> : null}
+      {diffCounts.removed > 0 ? <span className="conv-row__diff-del">-{diffCounts.removed}</span> : null}
+    </span>
+  ) : undefined;
+
   return (
     <StreamRow
       kind={presentation.kind}
       label={presentation.label}
-      target={display || undefined}
+      target={targetNode}
       meta={meta}
+      trailing={trailing}
       status={tool.status}
       expandable={hasToolOutput(view)}
       title={target}
-      iconOverride={showsFileIcon ? <FileTypeIcon filePath={target} /> : undefined}
+      iconOverride={isFileTool ? <FileTypeIcon filePath={target} /> : undefined}
     >
       <ToolOutput view={view} />
     </StreamRow>

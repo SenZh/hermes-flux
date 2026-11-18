@@ -935,22 +935,52 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
           return;
         }
         if (pinBottom) {
-          // 【三帧收敛 (Why)】React 19 的提交可能晚于本帧：单帧裸写只会写上旧高度，
-          // 内容随后长高就停在半途（实测差 193px，超过跟随阈值后流式彻底不再跟）。
+          // 【多帧防漂移收敛 (Why)】React 19 异步提交 + 虚拟窗口 ResizeObserver 重放可能晚于前 2 帧，
+          //   且提交瞬间替换 #msg-content-* 节点时 Blink `overflow-anchor: auto` 会把视口锚定到上方用户提示词。
+          //   因此在收敛期内临时关闭 overflow-anchor，并在 scrollHeight 连续 2 帧稳定（上限 8 帧）前持续贴底，
+          //   一旦检测到用户手势立即让权。
+          let pinCancelled = false;
+          let lastHeight = -1;
+          let stableFrames = 0;
+          let frameCount = 0;
+          const streamInitial = document.getElementById('conversation-stream');
+          const cancelPin = () => { pinCancelled = true; };
+          if (streamInitial) {
+            streamInitial.style.setProperty('overflow-anchor', 'none');
+            streamInitial.addEventListener?.('wheel', cancelPin, { passive: true, once: true });
+            streamInitial.addEventListener?.('pointerdown', cancelPin, { passive: true, once: true });
+            streamInitial.addEventListener?.('touchstart', cancelPin, { passive: true, once: true });
+          }
+          const cleanupPin = (el: HTMLElement | null) => {
+            if (!el) return;
+            el.style.removeProperty('overflow-anchor');
+            el.removeEventListener?.('wheel', cancelPin);
+            el.removeEventListener?.('pointerdown', cancelPin);
+            el.removeEventListener?.('touchstart', cancelPin);
+          };
           const pin = () => {
             const stream = document.getElementById('conversation-stream');
-            if (stream) {
-              stream.scrollTop = stream.scrollHeight;
-              if (deps.markProgrammaticScroll) {
-                deps.markProgrammaticScroll(stream);
-              } else {
-                deps.messageWindowManager.markProgrammaticScroll(stream);
-              }
+            if (!stream || pinCancelled) {
+              cleanupPin(stream);
+              return;
             }
+            stream.scrollTop = stream.scrollHeight;
+            if (deps.markProgrammaticScroll) {
+              deps.markProgrammaticScroll(stream);
+            } else {
+              deps.messageWindowManager.markProgrammaticScroll(stream);
+            }
+            const h = stream.scrollHeight;
+            stableFrames = h === lastHeight ? stableFrames + 1 : 0;
+            lastHeight = h;
+            frameCount += 1;
+            if ((stableFrames >= 2 && frameCount >= 3) || frameCount >= 8) {
+              cleanupPin(stream);
+              return;
+            }
+            requestAnimationFrame(pin);
           };
           pin();
-          requestAnimationFrame(pin);
-          requestAnimationFrame(() => requestAnimationFrame(pin));
         } else {
           deps.stabilizeStreamAnchor(streamAnchor);
         }

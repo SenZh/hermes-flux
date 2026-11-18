@@ -1,4 +1,4 @@
-export type ThemeMode = 'obsidian-gold' | 'jade-white' | 'warm-paper' | 'ayu-light' | 'ayu-dark' | 'cyber-matrix';
+export type ThemeMode = 'obsidian-gold' | 'jade-white' | 'warm-paper' | 'ayu-light' | 'ayu-dark';
 
 export interface UIState {
   theme: ThemeMode;

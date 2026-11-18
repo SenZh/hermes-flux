@@ -31,8 +31,10 @@ export interface StreamRowProps {
   label: string;
   /** 行内目标：命令、路径、摘要或 chips */
   target?: React.ReactNode;
-  /** 行尾元数据：耗时、状态等 */
+  /** 紧邻标签右侧的元数据：耗时、退出码等（对标 OpenChamber ToolPart 时序流） */
   meta?: React.ReactNode;
+  /** 行尾附加徽章：如 Write/Edit 的 +31 / -4 行数统计 */
+  trailing?: React.ReactNode;
   status?: 'running' | 'completed' | 'failed';
   /** 是否可展开；不可展开时渲染为静态行，行高与图标位保持一致 */
   expandable?: boolean;
@@ -45,8 +47,8 @@ export interface StreamRowProps {
 function icon(path: React.ReactNode): React.ReactElement {
   return (
     <svg
-      width="16"
-      height="16"
+      width="14"
+      height="14"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -126,8 +128,8 @@ function ExpandChevron(): React.ReactElement {
   return (
     <svg
       className="conv-row__expand"
-      width="16"
-      height="16"
+      width="14"
+      height="14"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -146,6 +148,7 @@ export function StreamRow({
   label,
   target,
   meta,
+  trailing,
   status,
   expandable,
   title,
@@ -157,12 +160,13 @@ export function StreamRow({
       <span className="conv-row__icon">{iconOverride ?? STREAM_ROW_ICONS[kind]}</span>
       {expandable ? <ExpandChevron /> : null}
       <span className="conv-row__label">{label}</span>
+      {meta ? <span className="conv-row__meta">{meta}</span> : null}
       {target ? (
         <span className="conv-row__target" title={title}>
           {target}
         </span>
       ) : null}
-      {meta ? <span className="conv-row__meta">{meta}</span> : null}
+      {trailing ? <span className="conv-row__trailing">{trailing}</span> : null}
     </>
   );
 

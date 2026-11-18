@@ -28,27 +28,27 @@
   --conv-gutter-x: clamp(16px, 2.5vw, 32px);
   --conv-gutter-top: 24px;
   --conv-gutter-bottom: 160px;
-  --conv-turn-gap: 24px;
-  --conv-item-gap: 8px;
+  --conv-turn-gap: 20px;
+  --conv-item-gap: 4px;
 
   /* 独立字体栈：优先西文无衬线与 Windows 高清中文字体，彻底根除宋体回退 */
   /* 与左侧栏同源：直接引用全局字体变量，界面字体改一处，对话区同步生效 */
   --conv-font-sans: var(--font-sans);
   --conv-font-mono: var(--font-mono);
 
-  /* 阅读尺度（对标 OpenChamber: 正文 15px / 行高 26px）
+  /* 阅读尺度（对标 OpenChamber: 正文 14px / 行高 23px / 段落 10px）
      【设计意图 (Why)】所有可读文字都必须挂在 --chat-text-* 语义 Token 上，
        否则用户在设置里调整字号时，只有正文变、执行轨迹不变。
      【约束与规则 (Rules)】本区块内禁止再引用 --fs-* 固定字阶；
        变量名必须带 chat- 前缀——--text-* 是 Tailwind 的字号命名空间，
        两者同名会让设置里调字号时把组件字阶一起改掉（历史缺陷，见 fontPreferences.ts 注释）。 */
   --conv-text-size: var(--chat-text-markdown);
-  --conv-text-lh: var(--chat-text-markdown-lh, 26px);
-  --conv-para-margin: 14px;
+  --conv-text-lh: var(--chat-text-markdown-lh, 23px);
+  --conv-para-margin: 10px;
   --conv-code-size: var(--chat-text-code);
-  --conv-code-lh: var(--chat-text-code-lh, 20px);
+  --conv-code-lh: var(--chat-text-code-lh, 18px);
   /* 执行轨迹行标签（思考 / Shell Command 等）与元数据、辅助文字 */
-  --conv-label-size: var(--chat-text-ui-label);
+  --conv-label-size: var(--chat-text-meta);
   --conv-meta-size: var(--chat-text-meta);
   --conv-micro-size: var(--chat-text-micro);
 
@@ -56,6 +56,19 @@
   --conv-code-pill-bg: color-mix(in oklab, var(--foreground) 7%, transparent);
   --conv-code-block-bg: color-mix(in oklab, var(--foreground) 4%, transparent);
   --conv-hover-bg: color-mix(in oklab, var(--foreground) 4%, transparent);
+}
+
+/* Ayu 主题行内代码专属色（对标 OpenChamber ayu-dark / ayu-light markdown.inlineCode） */
+[data-theme="ayu-dark"] .conversation-pod,
+[data-theme="ayu-dark"] .middle-conversation-pod,
+[data-theme="ayu-dark"] #conversation-stream {
+  --conv-inline-code-color: var(--hl-string);
+}
+
+[data-theme="ayu-light"] .conversation-pod,
+[data-theme="ayu-light"] .middle-conversation-pod,
+[data-theme="ayu-light"] #conversation-stream {
+  --conv-inline-code-color: color-mix(in oklab, var(--hl-string) 65%, var(--foreground));
 }
 
 /* 宽屏自适应：默认使用 OpenChamber 64rem（1024px）黄金宽屏列宽，居中对齐 */
@@ -231,33 +244,31 @@
   margin: 0;
 }
 
-/* 轨迹单行摘要条（32px 高度，温润微距悬停）
-   gap 取 6px：对标 OpenChamber 执行行的 gap-1.5，标签与摘要靠得更近。 */
+/* 轨迹单行摘要条（28px 紧凑高度，对标 OpenChamber ToolPart gap-1.5 py-1.5） */
 .conv-row__summary,
 .thinking-row__summary,
 .tool-row__summary {
   display: flex;
   align-items: center;
   gap: 6px;
-  min-height: 32px;
-  padding: 4px 8px;
-  margin: 0 -8px;
+  min-height: 28px;
+  padding: 3px 6px;
+  margin: 0 -6px;
   border-radius: var(--radius-inner);
   list-style: none;
   cursor: pointer;
   user-select: none;
   color: var(--secondary-foreground);
   font-family: var(--conv-font-sans);
-  /* 必须走可缩放的语义 Token：--fs-section 是固定字阶，用户调字号时不会跟着变 */
-  font-size: var(--conv-label-size);
+  font-size: var(--conv-meta-size);
   line-height: 20px;
-  transition: background 0.12s ease;
 }
 
+/* 对标 OpenChamber group/tool：hover 只把图标切为展开箭头，不给整行铺灰底 */
 .conv-row__summary:hover,
 .thinking-row__summary:hover,
 .tool-row__summary:hover {
-  background: var(--conv-hover-bg);
+  background: transparent;
 }
 
 .conv-row__summary::-webkit-details-marker,
@@ -266,11 +277,7 @@
   display: none;
 }
 
-/* 左侧 16px 矢量图标位 */
-/* 图标槽：所有执行行（含工具清单）共用同一套盒子。
-   【设计意图 (Why)】图标必须严格 16×16 且 flex 居中。缺了这套规则时 div 退化成 block，
-     行盒被 line-height 撑到 21.3px，16px 的 SVG 在里面居中后会向上偏 3px，看起来就是"错位"。
-   【约束与规则 (Rules)】任何新增的执行行图标都必须挂进这条选择器，禁止另写一套尺寸。 */
+/* 左侧 14px 矢量图标位（对标 OpenChamber h-3.5 w-3.5） */
 .conv-row__icon,
 .thinking-row__icon,
 .tool-row__icon,
@@ -280,9 +287,9 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 16px;
-  height: 16px;
-  line-height: 16px;
+  width: 14px;
+  height: 14px;
+  line-height: 14px;
   color: var(--muted-foreground);
 }
 
@@ -291,18 +298,12 @@
 .tool-row__icon svg,
 .conv-package__icon svg,
 .tool-package__icon svg {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   display: block;
-  /* 墨迹光学居中：图标 viewBox 的图形区并非满 24×24（实测 y 约 2~22），
-     直接用几何居中会让图标墨迹比文字基线低约 1.7px，看起来"图标偏下"。
-     这里上移 1px 补偿，使图标墨迹中心与中文字面中心对齐。 */
-  transform: translateY(-1px);
 }
 
-/* 可展开行：默认显示类型图标，悬停或展开时图标淡出、箭头淡入（对标 OpenChamber group-hover/tool）。
-   箭头叠放在图标槽的位置上，因此不占用额外布局宽度。
-   【约束与规则 (Rules)】箭头必须与 .conv-*-__icon 同尺寸同定位，否则 hover 时会有位移跳变。 */
+/* 可展开行：默认显示类型图标，悬停或展开时图标淡出、箭头淡入（对标 OpenChamber group-hover/tool）。 */
 .conv-row__summary,
 .conv-package__summary,
 .tool-package__summary {
@@ -321,24 +322,22 @@
 .conv-package__expand,
 .tool-package__expand {
   position: absolute;
-  left: 8px;
+  left: 6px;
   top: 50%;
-  margin-top: -8px;
+  margin-top: -7px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   color: var(--muted-foreground);
   opacity: 0;
-  /* 与图标同一位移量，保证 hover 切换时不出现上下跳动 */
-  transform: translateY(-1px) rotate(-90deg);
+  transform: rotate(-90deg);
   pointer-events: none;
   transition: opacity 0.12s ease, transform 0.12s ease;
 }
 
-/* 悬停 / 展开态：图标淡出、箭头淡入。
-   用 details 通用选择器同时覆盖执行行与工具清单，避免两套结构各写一遍而漂移。 */
+/* 悬停 / 展开态：图标淡出、箭头淡入。 */
 details > summary:hover > .conv-row__icon,
 details > summary:hover > .conv-package__icon,
 details > summary:hover > .tool-package__icon,
@@ -366,14 +365,10 @@ details[open] > summary > .tool-package__expand,
 details[open] > summary > .thinking-row__expand,
 details[open] > summary > .tool-row__expand {
   opacity: 1;
-  transform: translateY(-1px) rotate(0deg);
+  transform: rotate(0deg);
 }
 
-/* 动作标签（如「思考」、「Shell Command」） */
-/* 动作标签：次级前景灰，而非正文的纯前景色。
-   设计意图(Why)：标签是"动作名"不是"正文结论"，用灰色才能让正文成为唯一最重的字。
-     纯前景色的标签会和摘要抢视觉重量，整行看起来发黑、发闷。
-   约束与规则(Rules)：禁止改回 var(--foreground)；间距只由父级 gap 控制，禁止加 margin。 */
+/* 动作标签（如「思考」、「Shell Command」）：与 OpenChamber --tools-title 同级 */
 .conv-row__label,
 .thinking-row__label,
 .tool-row__label,
@@ -382,11 +377,11 @@ details[open] > summary > .tool-row__expand {
   font-weight: 500;
   letter-spacing: normal;
   color: var(--secondary-foreground);
-  font-size: var(--conv-label-size);
+  font-size: var(--conv-meta-size);
+  line-height: 20px;
 }
 
-/* 目标与摘要：与标签同字号（OpenChamber 两者都用 typography-meta），
-   只有真正的命令与文件路径才用等宽，避免中文摘要被等宽字形拉窄。 */
+/* 目标与摘要：与标签同字号（13px），紧跟耗时之后，CSS 自然省略 */
 .conv-row__target,
 .thinking-row__preview,
 .tool-row__target {
@@ -396,15 +391,50 @@ details[open] > summary > .tool-row__expand {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--conv-font-sans);
-  font-size: var(--conv-label-size);
+  font-size: var(--conv-meta-size);
   line-height: 20px;
   color: var(--muted-foreground);
 }
 
-/* 命令与文件路径是"标识符"，保留等宽以便逐个字符辨认 */
-.tool-row__target {
-  font-family: var(--conv-font-mono);
+/* 路径双色分层：目录柔和、文件名清晰亮色（对标 OpenChamber ToolPart） */
+.conv-row__path {
+  display: inline;
+}
+
+.conv-row__path-dir {
+  color: var(--muted-foreground);
+}
+
+.conv-row__path-file {
+  color: var(--foreground);
+}
+
+/* 行尾增删行数徽章（+31 / +12/-4） */
+.conv-row__trailing {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
   font-size: var(--conv-meta-size);
+  line-height: 20px;
+}
+
+.conv-row__diff-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  font-variant-numeric: tabular-nums;
+}
+
+.conv-row__diff-add {
+  color: var(--success);
+}
+
+.conv-row__diff-sep {
+  color: var(--muted-foreground);
+}
+
+.conv-row__diff-del {
+  color: var(--destructive);
 }
 
 /* ReadGroup 文件芯片与缩进分组容器 */
@@ -469,7 +499,7 @@ details[open] > summary > .tool-row__expand {
   opacity: 0.65;
 }
 
-/* 行尾耗时与元数据 */
+/* 耗时与元数据：紧跟在标签右侧（对标 OpenChamber Shell Command 21.3s 排版） */
 .conv-row__meta,
 .thinking-row__duration,
 .tool-row__duration {
@@ -477,30 +507,40 @@ details[open] > summary > .tool-row__expand {
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
-  margin-left: auto;
-  padding-left: 8px;
-  font-family: var(--conv-font-mono);
+  font-family: var(--conv-font-sans);
+  font-variant-numeric: tabular-nums;
   font-size: var(--conv-meta-size);
+  line-height: 20px;
   color: var(--muted-foreground);
 }
 
-/* 思考行展开主体
-   【设计意图 (Why)】展开内容的左侧竖线必须落在 summary 图标的中心线上（X+8px），
-     与展开箭头同轴；思考与工具清单若各写一套缩进，两条线就会一左一右错开。
-   【约束与规则 (Rules)】所有可展开行的主体统一 margin-left: 8px + padding-left: 12px，
-     禁止再出现 20px 之类的魔法缩进。 */
+/* 思考行展开主体：支持 Markdown 渲染、320px 限高滚动、柔和暗色文字 */
 .conv-row__thought,
 .thinking-row__body {
-  margin: 4px 0 6px 8px;
+  margin: 4px 0 6px 7px;
   padding-left: 12px;
   border-left: 1px solid var(--border-subtle);
+  max-height: 320px;
+  overflow-y: auto;
   font-family: var(--conv-font-sans);
-  font-size: var(--conv-code-size);
+  font-size: var(--conv-meta-size);
   line-height: 20px;
   color: var(--muted-foreground);
-  white-space: pre-wrap;
   word-break: normal;
   overflow-wrap: break-word;
+  --conv-para-margin: 6px;
+}
+
+.conv-row__thought p,
+.conv-row__thought li,
+.conv-row__thought strong,
+.conv-row__thought h1,
+.conv-row__thought h2,
+.conv-row__thought h3,
+.conv-row__thought h4 {
+  color: var(--muted-foreground);
+  font-size: var(--conv-meta-size);
+  line-height: 20px;
 }
 
 /* 工具行展开输出体 */
@@ -859,16 +899,16 @@ details[open] > summary > .tool-row__expand {
 
 .conv-markdown h1,
 .assistant-content.prose-block h1 {
-  font-size: 1.2em;
+  font-size: 1.15em;
   letter-spacing: -0.02em;
-  margin: 20px 0 8px;
+  margin: 16px 0 6px;
 }
 
 .conv-markdown h2,
 .assistant-content.prose-block h2 {
-  font-size: 1.1em;
+  font-size: 1.07em;
   letter-spacing: -0.015em;
-  margin: 16px 0 6px;
+  margin: 14px 0 6px;
 }
 
 .conv-markdown h3,
@@ -919,8 +959,8 @@ details[open] > summary > .tool-row__expand {
 
 .conv-markdown li,
 .assistant-content.prose-block li {
-  margin: 0 0 4px;
-  line-height: 24px;
+  margin: 0 0 3px;
+  line-height: 22px;
 }
 
 .conv-markdown li > p,
@@ -1032,7 +1072,7 @@ details[open] > summary > .tool-row__expand {
   padding: 0.15em 0.35em;
   border-radius: 4px;
   background: var(--conv-code-pill-bg);
-  color: var(--foreground);
+  color: var(--conv-inline-code-color, var(--foreground));
   border: none;
   word-break: break-word;
 }
@@ -1078,6 +1118,11 @@ details[open] > summary > .tool-row__expand {
 .md-codeblock__copy:hover {
   color: var(--foreground);
   background: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+
+.md-codeblock__copy[data-copied="true"] {
+  color: var(--success);
+  opacity: 1;
 }
 
 /* 代码块主体：右上角按钮需要呼吸空间，右侧留白略大于左侧 */

@@ -20,7 +20,7 @@ import type { NormalizedSession, AgentProfile, ModelDetail } from '../rpc/types.
 
 export interface UniversalAppState {
   platform: 'windows' | 'macos' | 'linux' | 'ios' | 'android' | 'web';
-  theme: 'obsidian-gold' | 'suet-jade' | 'jade-white' | 'warm-paper' | 'ayu-light' | 'ayu-dark' | 'cyber-matrix';
+  theme: 'obsidian-gold' | 'suet-jade' | 'jade-white' | 'warm-paper' | 'ayu-light' | 'ayu-dark';
   lang: 'zh' | 'en';
   isMaximized: boolean;
   leftRailCollapsed: boolean;

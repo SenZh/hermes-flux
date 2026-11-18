@@ -332,3 +332,39 @@ test('D6: gatewayEventDispatcher - handleInspectorEvent 解包工件、浏览器
   });
   assert.equal(state.gitDiffs.length, 1);
 });
+
+test('D6: gatewayEventDispatcher - turn-completed 前贴底时即使 finalReplace/flush 撑高容器也必须锁定贴底', () => {
+  // 1. 前置贴底：flush/setMessageContent 执行后容器变高导致 isNearBottom 变 false，仍须触发 setPendingScrollToBottom(true)
+  let nearBottom = true;
+  const pendingCalls = [];
+  const { deps, state } = createMockDispatcherDeps();
+  deps.isStreamNearBottom = () => nearBottom;
+  deps.setPendingScrollToBottom = (val) => pendingCalls.push(val);
+  deps.getTokenCoalescer = () => ({
+    push: () => {},
+    flush: () => { nearBottom = false; },
+    clear: () => {},
+  });
+  deps.setMessageContent = () => { nearBottom = false; };
+  state.activeSessionId = 'sess-1';
+  state.messages.push({ id: 'msg-1', role: 'assistant', content: 'hi', timestamp: '10:00' });
+  const dispatcher = createGatewayEventDispatcher(deps);
+
+  dispatcher.applyTurnActions([
+    { type: 'replace-content', messageId: 'msg-1', text: 'very long final response...' },
+    { type: 'turn-completed', sessionId: 'sess-1' },
+  ]);
+  assert.deepEqual(pendingCalls, [true], '流式结束前原本贴底时，必须锁定本次 render 的贴底意图');
+
+  // 2. 前置非贴底（用户正在向上回看历史）：绝不能强行拉回底部
+  nearBottom = false;
+  pendingCalls.length = 0;
+  dispatcher.applyTurnActions([{ type: 'turn-completed', sessionId: 'sess-1' }]);
+  assert.deepEqual(pendingCalls, [], '用户原本不在底部时不得触发贴底');
+
+  // 3. 后台非当前聚焦会话完成：不得触发当前视口贴底
+  nearBottom = true;
+  pendingCalls.length = 0;
+  dispatcher.applyTurnActions([{ type: 'turn-completed', sessionId: 'sess-other' }]);
+  assert.deepEqual(pendingCalls, [], '后台会话完成不得触发当前会话视口贴底');
+});

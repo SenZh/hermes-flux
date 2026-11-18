@@ -194,11 +194,11 @@ export function getUiFontSelectOptions(): readonly FontOption<UiFontId>[] {
 export const DEFAULT_UI_FONT: UiFontId = 'inter';
 export const DEFAULT_MONO_FONT: MonoFontId = 'jetbrains-mono';
 
-/** 字号语义档：正文、代码、界面标签、元数据、辅助文字。 */
+/** 字号语义档：正文、代码、界面标签、元数据、辅助文字（对标 OpenChamber design-system.css）。 */
 export const TYPOGRAPHY_TOKENS = {
-  markdown: '15px',
-  code: '13px',
-  uiLabel: '14px',
+  markdown: '14px',
+  code: '12px',
+  uiLabel: '13px',
   meta: '13px',
   micro: '12px',
   caption: '11px',

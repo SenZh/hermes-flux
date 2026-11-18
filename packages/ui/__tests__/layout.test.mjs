@@ -503,7 +503,7 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
 
     // Dark themes must transition to ayu-light
     assert.equal(getToggleTheme('obsidian-gold'), 'ayu-light');
-    assert.equal(getToggleTheme('cyber-matrix'), 'ayu-light');
+    assert.equal(getToggleTheme('ayu-dark'), 'ayu-light');
   });
 
   await t.test('Gate 4e: 长会话基准可执行性冒烟（预算判定见 test:perf）', async () => {

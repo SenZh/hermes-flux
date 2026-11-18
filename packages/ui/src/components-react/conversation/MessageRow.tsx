@@ -203,9 +203,12 @@ export const MessageRow = React.memo(function MessageRow({
           expandable
           title={thoughtSummary}
         >
-          <div className="conv-row__thought" id={`msg-thought-${message.id}`}>
-            {message.thought}
-          </div>
+          <MarkdownBlock
+            content={message.thought}
+            anchorId={`msg-thought-${message.id}`}
+            className="conv-row__thought"
+            knownFiles={knownFiles}
+          />
         </StreamRow>
       ) : null}
 

@@ -54,7 +54,7 @@ import { isStringArray, safeParseJson } from '../persistence/persistedJson.js';
 
 export interface AppState {
   platform: 'windows' | 'macos' | 'linux' | 'ios' | 'android' | 'web';
-  theme: 'obsidian-gold' | 'suet-jade' | 'jade-white' | 'warm-paper' | 'ayu-light' | 'ayu-dark' | 'cyber-matrix';
+  theme: 'obsidian-gold' | 'suet-jade' | 'jade-white' | 'warm-paper' | 'ayu-light' | 'ayu-dark';
   lang: 'zh' | 'en';
   isMaximized: boolean;
   leftRailCollapsed: boolean;

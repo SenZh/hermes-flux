@@ -38,7 +38,7 @@ const ICONS: Record<SettingsIconName, React.ComponentType<{ size?: number; class
 };
 
 /** 主题卡片顺序：与 SKINS 真值表一致，别名皮肤不单独成卡。 */
-const THEME_ORDER = ['obsidian-gold', 'ayu-dark', 'jade-white', 'warm-paper', 'ayu-light', 'cyber-matrix'] as const;
+const THEME_ORDER = ['obsidian-gold', 'ayu-dark', 'jade-white', 'warm-paper', 'ayu-light'] as const;
 
 const THEME_LABEL_KEY: Record<(typeof THEME_ORDER)[number], I18nKey> = {
   'obsidian-gold': 'common.theme.obsidianLabel',
@@ -46,7 +46,6 @@ const THEME_LABEL_KEY: Record<(typeof THEME_ORDER)[number], I18nKey> = {
   'jade-white': 'common.theme.jadeWhiteLabel',
   'warm-paper': 'common.theme.warmPaperLabel',
   'ayu-light': 'common.theme.ayuLightLabel',
-  'cyber-matrix': 'common.theme.cyberMatrixLabel',
 };
 
 /**

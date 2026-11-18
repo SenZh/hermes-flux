@@ -14,6 +14,11 @@
 import * as React from 'react';
 import { renderMarkdown } from '../../components/MiddlePod/MiddlePod.js';
 import { mountFileTypeSprite } from '../../lib/fileTypeIcons.js';
+import { handleCodeBlockCopyClick } from '../../lib/codeCopy.js';
+
+function handleMarkdownClick(event: React.MouseEvent<HTMLDivElement>): void {
+  void handleCodeBlockCopyClick(event.target);
+}
 
 export interface MarkdownBlockProps {
   content: string;
@@ -39,12 +44,13 @@ export function MarkdownBlock({ content, anchorId, className, knownFiles }: Mark
   // 既保住直写通道，又不产生任何可见空容器/块间距（89ca860 的意图不回潮）。
   if (!content.trim()) {
     if (!anchorId) return null;
-    return <div id={anchorId} className={`conv-markdown${className ? ` ${className}` : ''}`} style={{ display: 'none' }} />;
+    return <div id={anchorId} className={`conv-markdown${className ? ` ${className}` : ''}`} style={{ display: 'none' }} onClick={handleMarkdownClick} />;
   }
   return (
     <div
       id={anchorId}
       className={`conv-markdown${className ? ` ${className}` : ''}`}
+      onClick={handleMarkdownClick}
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );

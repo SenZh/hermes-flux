@@ -85,15 +85,11 @@ test('Design System Tokens & Architectural Invariant Guardrails (Gate 4)', async
     const lightSkin = SKINS['jade-white'];
     const ayuLight = SKINS['ayu-light'];
     const warmPaper = SKINS['warm-paper'];
-    const cyberMatrix = SKINS['cyber-matrix'];
 
     // Dark skin text should be light hex
     assert.match(darkSkin.slots['--foreground'], /^#(F|E|D)/i, 'Dark skin foreground must be light high-contrast color');
     // Dark skin window background should be dark hex
     assert.match(darkSkin.slots['--background'], /^#(0|1)/i, 'Dark skin background must be deep dark color');
-
-    assert.match(cyberMatrix.slots['--foreground'], /^#(F|E|D)/i, 'Cyber matrix foreground must be light high-contrast color');
-    assert.match(cyberMatrix.slots['--background'], /^#(0|1)/i, 'Cyber matrix background must be deep dark color');
 
     // Light skin text should be dark hex
     assert.match(lightSkin.slots['--foreground'], /^#(0|1|2)/i, 'Light skin foreground must be dark high-contrast color');
