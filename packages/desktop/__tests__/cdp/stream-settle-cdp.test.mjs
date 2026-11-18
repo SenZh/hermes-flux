@@ -14,8 +14,9 @@ import esbuild from 'esbuild';
  *   单测里的 DOM 桩无法证明两件关键事实：
  *   1. React 真实协调下，「流式空壳 + toolPatchQueue 直写 → 收口提交」会不会留下重复工具包
  *      （实测旧实现 `#msg-tools-*` 有 2 个子节点）；
- *   2. `--conv-intrinsic-median-height` 抬升时，真实内核会不会保持 scrollTop 不变而撑高文档
- *      （这正是用户看到的「视口跳上去」，ΔSh > 0 且 ΔSt = 0）。
+ *   2. `--conv-intrinsic-median-height` 抬升时，真实内核会不会撑高文档并把读者甩离底部
+ *      （Blink 滚动锚定只抵消约 4%，实测 ΔSh=+77,740px 而 ΔSt 仅 +3,180px）；
+ *   3. 生产类 `StreamViewportManager` 的视口中性补偿在真实内核里是否真的把距底漂移压到 2px 内。
  *   本用例在真实 Blink 内复现两者，并用「同 key 外壳」对照实验证明断言具备杀伤力。
  *
  * 【防范的历史坑 (Pitfall)】
@@ -31,6 +32,7 @@ import esbuild from 'esbuild';
 const EDGE_PATH = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const CDP_PORT = 9900 + Math.floor(Math.random() * 90);
 const BUNDLE_OUT = 'packages/desktop/__tests__/cdp/.tmp/react-entry.js';
+const VIEWPORT_BUNDLE_OUT = 'packages/desktop/__tests__/cdp/.tmp/viewport-entry.js';
 const HARNESS = '/packages/desktop/__tests__/cdp/stream-settle-harness.html';
 
 test('流式收口：工具包唯一性与占位高度漂移的真实 Blink 验证', async (t) => {
@@ -45,6 +47,20 @@ test('流式收口：工具包唯一性与占位高度漂移的真实 Blink 验�
     outfile: path.resolve(BUNDLE_OUT),
     bundle: true,
     format: 'iife',
+    platform: 'browser',
+    target: 'es2022',
+    define: { 'process.env.NODE_ENV': '"production"' },
+    logLevel: 'silent',
+  });
+
+  // 视口管理器必须是生产源码本体（含 core 的状态机与中位数估计器），不得手写替身：
+  // 补偿是本次缺陷的主修复，只有在真实类里跑才算证据。
+  await esbuild.build({
+    entryPoints: [path.resolve('packages/desktop/src/renderer/viewport/streamViewportManager.ts')],
+    outfile: path.resolve(VIEWPORT_BUNDLE_OUT),
+    bundle: true,
+    format: 'iife',
+    globalName: '__fluxViewport',
     platform: 'browser',
     target: 'es2022',
     define: { 'process.env.NODE_ENV': '"production"' },
@@ -179,6 +195,15 @@ test('流式收口：工具包唯一性与占位高度漂移的真实 Blink 验�
   }
   assert.ok(ready, 'Harness environment must be loaded and ready');
 
+  /** 场景结果统一收集，末尾落盘为物理证据（artifacts/ 被 gitignore，仅本地留档）。 */
+  const evidence = {
+    feature: 'stream-end-jump-up',
+    capturedAt: new Date().toISOString(),
+    browser: 'Microsoft Edge headless (CDP)',
+    viewport: { width: 1440, height: 900 },
+    scenarios: {},
+  };
+
   /** 在页面内执行异步场景并取回结构化结果。 */
   const runScenario = async (name) => {
     const res = await sendCdp('Runtime.evaluate', {
@@ -189,6 +214,7 @@ test('流式收口：工具包唯一性与占位高度漂移的真实 Blink 验�
     if (res.exceptionDetails) {
       throw new Error(`场景 ${name} 抛错: ${JSON.stringify(res.exceptionDetails)}`);
     }
+    evidence.scenarios[name] = res.result.value;
     return res.result.value;
   };
 
@@ -225,7 +251,7 @@ test('流式收口：工具包唯一性与占位高度漂移的真实 Blink 验�
     assert.equal(r.packageNodes, 2, '同 key 结构必然出现两份工具包，证明工具包唯一性断言具备杀伤力');
   });
 
-  await t.test('3. 占位高度抬升：真实内核确实按变量放大离屏回合占位（缺陷机制成立）', async () => {
+  await t.test('3. 占位高度抬升：真实内核只部分抵消位置，缺陷机制成立', async () => {
     const r = await runScenario('__runIntrinsicDrift');
     console.log('[stream-settle] intrinsic-drift', JSON.stringify(r));
     assert.ok(
@@ -236,10 +262,15 @@ test('流式收口：工具包唯一性与占位高度漂移的真实 Blink 验�
       r.deltaScrollHeight > 0,
       `抬升 --conv-intrinsic-median-height 必须撑高离屏回合占位（实际 ΔSh=${r.deltaScrollHeight}）`
     );
-    assert.equal(
-      r.after.scrollHeight - r.after.clientHeight - r.after.scrollTop,
-      r.after.dist,
-      '距离口径必须自洽（scrollHeight - scrollTop - clientHeight）'
+    // Blink 的滚动锚定只会抵消很小一部分（实测约 4%），绝大部分高度增长直接变成读者被甩开的距离。
+    // 这正是补偿必须写「绝对目标 scrollTop」而不是「增量」的原因。
+    assert.ok(
+      r.deltaScrollTop < r.deltaScrollHeight / 10,
+      `浏览器自发位置抵消必须远小于高度增长（ΔSt=${r.deltaScrollTop}，ΔSh=${r.deltaScrollHeight}）`
+    );
+    assert.ok(
+      r.distGrowth > r.deltaScrollHeight * 0.9,
+      `高度增长必须几乎全部转化为距底变远（实际 distGrowth=${r.distGrowth}）`
     );
   });
 
@@ -252,5 +283,41 @@ test('流式收口：工具包唯一性与占位高度漂移的真实 Blink 验�
       Math.abs(r.anchorShift) <= 48,
       `收口后可见行相对视口的位移必须限制在安全线内（实际 ${r.anchorShift}px）`
     );
+  });
+
+  await t.test('5. 生产类补偿：真实内核写入占位变量后读者距底几乎不变', async () => {
+    const r = await runScenario('__runCompensatedGrowth');
+    console.log('[stream-settle] compensated-growth', JSON.stringify(r));
+    assert.ok(r.sampleCount > 0, '必须采到真实已布局回合样本，否则变量不会写入、补偿不成立');
+    assert.notEqual(r.appliedVariable, '', '占位变量必须被真实写入');
+    assert.notEqual(
+      r.scrollHeightDelta,
+      0,
+      `写入变量必须真实改变文档高度，否则补偿断言无意义（实际 ΔSh=${r.scrollHeightDelta}）`
+    );
+    assert.ok(
+      Math.abs(r.distDelta) <= 2,
+      `补偿后距底漂移必须不超过 2px（实际 ${r.distDelta}px，未补偿时场景 3 实测甩出数万像素）`
+    );
+    assert.equal(
+      r.markCount > 0,
+      r.after.scrollTop !== r.before.scrollTop,
+      '只要补偿改写了 scrollTop，就必须登记程序化滚动'
+    );
+  });
+
+  await t.test('6. 物理证据落盘：真实渲染截图 + 指标 JSON（本地留档，artifacts/ 不入库）', async () => {
+    const dir = path.resolve('artifacts/verification/stream-end-jump-up');
+    fs.mkdirSync(dir, { recursive: true });
+    const shot = await sendCdp('Page.captureScreenshot', { format: 'png' });
+    const pngPath = path.join(dir, 'screenshot.png');
+    fs.writeFileSync(pngPath, Buffer.from(shot.data, 'base64'));
+    evidence.notes = [
+      '截图与指标由真实 Blink（Edge headless + CDP）采集，本地留档。',
+      'artifacts/ 已被 .gitignore 排除，不进仓库；npm run verify 不含 CDP 套件。',
+    ];
+    fs.writeFileSync(path.join(dir, 'evidence.json'), JSON.stringify(evidence, null, 2), 'utf8');
+    assert.ok(fs.statSync(pngPath).size > 1000, '截图必须真实落盘且非空图');
+    assert.ok(fs.existsSync(path.join(dir, 'evidence.json')), '指标 JSON 必须落盘');
   });
 });

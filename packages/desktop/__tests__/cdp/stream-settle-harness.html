@@ -31,6 +31,7 @@
   <div id="legacy-stream"><div id="legacy-host"></div></div>
 
   <!-- 由 CDP 测试用 esbuild 现场打包生成：内含 React 与真实对话组件 -->
+  <script src="/packages/desktop/__tests__/cdp/.tmp/viewport-entry.js"></script>
   <script src="/packages/desktop/__tests__/cdp/.tmp/react-entry.js"></script>
   <script>
     const { React, createRoot, ConversationMessageList } = window.__fluxReact;
@@ -82,6 +83,18 @@
 
     const nextFrame = () =>
       new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+    /** 离屏回合会因 content-visibility 补挂载持续改变 scrollHeight，必须等它稳定再取数。 */
+    const settleStreamHeight = async (stream) => {
+      let last = -1;
+      for (let i = 0; i < 24; i += 1) {
+        await nextFrame();
+        const next = stream.scrollHeight;
+        if (next === last) return next;
+        last = next;
+      }
+      return last;
+    };
 
     function readStreamMetrics() {
       const stream = document.getElementById('stream');
@@ -250,6 +263,50 @@
         anchorShift: anchorBefore && anchorAfter ? anchorAfter.offset - anchorBefore.offset : null,
         distDelta: after.dist - before.dist,
         scrollHeightDelta: after.scrollHeight - before.scrollHeight,
+      };
+    };
+
+    /**
+     * 场景 E：真实内核里的补偿效果（主修复的唯一物理证据）。
+     * 用生产类 StreamViewportManager 采样真实可见回合 → 写占位变量 → 由它自己做视口中性补偿，
+     * 断言读者距底几乎不变（未补偿时场景 C 已实测会甩出 7 万像素）。
+     */
+    window.__runCompensatedGrowth = async () => {
+      const stream = document.getElementById('stream');
+      document.documentElement.style.removeProperty('--conv-intrinsic-median-height');
+      stream.style.removeProperty('--conv-intrinsic-median-height');
+      renderAll(messages, false);
+      await settleStreamHeight(stream);
+      stream.scrollTop = stream.scrollHeight;
+      await settleStreamHeight(stream);
+
+      const before = readStreamMetrics();
+      const marks = [];
+      const manager = new window.__fluxViewport.StreamViewportManager({
+        getStreamElement: () => stream,
+        getActiveSessionId: () => 'sess-compensate',
+        getPresenceLayout: () => 'stage',
+        isPromptJumpSettling: () => false,
+        getMessageWindowEnd: () => messages.length,
+        getTotalMessages: () => messages.length,
+        layoutSignature: () => 'sig',
+        markProgrammaticScroll: (el) => { marks.push(el.scrollTop); },
+      });
+
+      const anchor = manager.captureStreamAnchor();
+      await settleStreamHeight(stream);
+      const after = readStreamMetrics();
+
+      return {
+        before,
+        after,
+        distDelta: after.dist - before.dist,
+        scrollHeightDelta: after.scrollHeight - before.scrollHeight,
+        markCount: marks.length,
+        anchorRawScrollTop: anchor.rawScrollTop,
+        sampleCount: manager.getMedianEstimator().sampleCount,
+        median: manager.getMedianEstimator().getMedian(),
+        appliedVariable: stream.style.getPropertyValue('--conv-intrinsic-median-height'),
       };
     };
 

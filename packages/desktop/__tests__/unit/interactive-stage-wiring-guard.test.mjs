@@ -71,4 +71,20 @@ test('交互区接线源码守卫（server-priority 消费 / armed 解除 / 单�
     const dockCancelBound = countMatches(/dockContainer\.addEventListener\(\s*['"]click['"][\s\S]*?rollback-cancel/);
     assert.ok(dockCancelBound >= 1, 'input-dock-container 必须建立 rollback-cancel 事件委托');
   });
+
+  await t.test('8. 重置流式态必须成对清空 token 合并器与工具补丁队列', () => {
+    assert.ok(
+      /tokenCoalescer\.clear\(\);\s*toolPatchQueue\.clear\(\);/.test(rendererSource),
+      'resetActiveStreamingState 必须同时清空两者，否则残留补丁会在收口后覆写 React 子树'
+    );
+  });
+
+  await t.test('9. 流式收口依赖必须真实委托到补丁队列与计时器，禁止传空实现', () => {
+    const clearers = countMatches(/clearToolPatchQueue:\s*\(\)\s*=>\s*toolPatchQueue\.clear\(\)/g);
+    assert.ok(clearers >= 2, `补丁队列清理必须至少装配到 2 处收口依赖（实得 ${clearers}）`);
+    const stoppers = countMatches(/stopRunningToolTimers:\s*\(\)\s*=>\s*stopRunningToolTimers\(\)/g);
+    assert.ok(stoppers >= 2, `工具计时器停止必须至少装配到 2 处收口依赖（实得 ${stoppers}）`);
+    const nearBottom = countMatches(/isStreamNearBottom:\s*\([^)]*\)\s*=>\s*isStreamNearBottom\(/g);
+    assert.ok(nearBottom >= 3, `贴底判定必须至少装配到 3 处依赖（实得 ${nearBottom}）`);
+  });
 });
