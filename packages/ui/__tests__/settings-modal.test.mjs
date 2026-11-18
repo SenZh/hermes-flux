@@ -142,17 +142,17 @@ test('图标必须是 lucide 描边 SVG，不得出现任何 emoji', () => {
   assert.equal(EMOJI.test(html), false, '设置页不得出现 emoji 图标（与全站图标语言冲突）');
 });
 
-test('外观页渲染真实皮肤真值表：五张皮肤卡，激活态互斥', () => {
+test('外观页渲染真实皮肤真值表：六张皮肤卡，激活态互斥', () => {
   setLocale('zh-CN');
   const html = render({ section: 'appearance', theme: 'ayu-light' });
-  for (const id of ['obsidian-gold', 'jade-white', 'warm-paper', 'ayu-light', 'cyber-matrix']) {
+  for (const id of ['obsidian-gold', 'ayu-dark', 'jade-white', 'warm-paper', 'ayu-light', 'cyber-matrix']) {
     assert.ok(html.includes(`data-theme-option="${id}"`), `缺少皮肤 ${id}`);
   }
   const active = html.match(/aria-checked="true" data-theme-option="([^"]+)"/);
   assert.ok(active, '必须恰好有一个皮肤被标记为选中');
   assert.equal(active[1], 'ayu-light');
   assert.equal((html.match(/aria-checked="true" data-theme-option=/g) || []).length, 1, '皮肤选中态必须互斥');
-  assert.equal((html.match(/aria-checked="false" data-theme-option=/g) || []).length, 4, '其余四张皮肤卡必须明确未选中');
+  assert.equal((html.match(/aria-checked="false" data-theme-option=/g) || []).length, 5, '其余五张皮肤卡必须明确未选中');
   assert.ok(html.includes('id="settings-ui-font"'));
   assert.ok(html.includes('id="settings-mono-font"'));
 });

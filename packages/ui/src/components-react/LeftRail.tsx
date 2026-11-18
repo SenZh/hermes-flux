@@ -403,12 +403,12 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
       className="flux-context-drawer flex min-w-0 flex-1 flex-col overflow-hidden bg-sidebar"
       {...drawerPresence.motionProps}
     >
-      <div className="flex flex-col gap-2 p-2.5 pb-1.5">
+      <div className="flex flex-col gap-2 p-2 pb-1">
         <label className="relative block">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/70" size={13} />
+          <Search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground/70" size={13} />
           <Input
             id="session-search-input"
-            className="h-8 rounded-card border border-border-subtle bg-panel/70 pl-8 pr-2.5 text-aux transition-colors placeholder:text-muted-foreground/50 hover:border-border focus:border-primary/40 focus:bg-panel"
+            className="h-8 rounded-card border border-border-subtle bg-panel/70 pl-7 pr-2 text-aux transition-colors placeholder:text-muted-foreground/50 hover:border-border focus:border-primary/40 focus:bg-panel"
             placeholder={t('rail.searchPlaceholder')}
             value={props.searchQuery}
             onChange={(event) => props.onSearchChange(event.currentTarget.value)}
@@ -445,18 +445,18 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
           />}
       </div>
 
-      <div className="session-scroll-area min-h-0 flex-1 overflow-y-auto px-1.5 pb-3 mr-[var(--geo-resize-handle)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" id="session-list-container">
+      <div className="session-scroll-area min-h-0 flex-1 overflow-y-auto px-2 pb-3 mr-[var(--geo-resize-handle)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" id="session-list-container">
         {model.error && <div id="session-list-error" role="alert" className="m-1 rounded-card border border-border-strong bg-panel p-2 text-aux text-foreground">{model.error}</div>}
 
         {model.visibleGroups.length > 0 && <section className="mb-2">
           {/* PR-3d 用户定案：header 字号行高放大一档，删 ⌄/› 文本箭头（折叠态由列表显隐与点击整行表达），
               右侧 + 为新建群聊入口；计数徽标沿用既有 visibleGroups.length，非新增数据面。 */}
           <div className="flex w-full items-center justify-between gap-1 px-2 py-1 text-muted-foreground hover:text-foreground transition-colors mb-1">
-            <button type="button" id="rail-groups-accordion-trigger" className="flex min-h-7 min-w-0 flex-1 items-center gap-2.5 text-left text-body font-semibold transition-colors" onClick={props.onToggleGroups}>
+            <button type="button" id="rail-groups-accordion-trigger" className="flex min-h-7 min-w-0 flex-1 items-center gap-2 text-left text-body font-semibold transition-colors" onClick={props.onToggleGroups}>
               <Users size={13} className="opacity-75 shrink-0" />
               <span>{t('rail.groups')}</span>
             </button>
-            <Button variant="ghost" size="icon" className="rail-new-group-btn relative size-6 shrink-0 rounded p-0 text-muted-foreground hover:bg-card-hover hover:text-foreground transition-colors after:absolute after:-inset-1.5 after:content-['']" title={t('rail.newGroup')} aria-label={t('rail.newGroup')} onClick={() => props.onNewChat('group')}>
+            <Button variant="ghost" size="icon" className="rail-new-group-btn relative size-6 shrink-0 rounded p-0 text-muted-foreground hover:bg-card-hover hover:text-foreground transition-colors after:absolute after:-inset-1 after:content-['']" title={t('rail.newGroup')} aria-label={t('rail.newGroup')} onClick={() => props.onNewChat('group')}>
               <Plus size={13} />
             </Button>
           </div>
@@ -480,11 +480,11 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
         <section className="mb-2">
           {/* 会话 header 同构：放大字号、删箭头、右侧 + 新建会话（复用 NewTaskModal solo 态）。 */}
           <div className="flex w-full items-center justify-between gap-1 px-2 py-1 text-muted-foreground hover:text-foreground transition-colors mb-1">
-            <button type="button" id="rail-sessions-accordion-trigger" className="flex min-h-7 min-w-0 flex-1 items-center gap-2.5 text-left text-body font-semibold transition-colors" onClick={props.onToggleSessions}>
+            <button type="button" id="rail-sessions-accordion-trigger" className="flex min-h-7 min-w-0 flex-1 items-center gap-2 text-left text-body font-semibold transition-colors" onClick={props.onToggleSessions}>
               <Layers size={13} className="opacity-75 shrink-0" />
               <span>{t('rail.conversations')}</span>
             </button>
-            <Button variant="ghost" size="icon" className="rail-new-session-btn relative size-6 shrink-0 rounded p-0 text-muted-foreground hover:bg-card-hover hover:text-foreground transition-colors after:absolute after:-inset-1.5 after:content-['']" title={t('rail.newChat')} aria-label={t('rail.newChat')} onClick={() => props.onNewChat('session')}>
+            <Button variant="ghost" size="icon" className="rail-new-session-btn relative size-6 shrink-0 rounded p-0 text-muted-foreground hover:bg-card-hover hover:text-foreground transition-colors after:absolute after:-inset-1 after:content-['']" title={t('rail.newChat')} aria-label={t('rail.newChat')} onClick={() => props.onNewChat('session')}>
               <Plus size={13} />
             </Button>
           </div>
@@ -508,8 +508,8 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
         </section>
 
         {model.archivedSessions.length > 0 && <section>
-          <div className="px-1.5 pb-0.5 pt-2 text-overline font-bold uppercase tracking-wide text-muted-foreground">{t('rail.archived')} ({model.archivedSessions.length})</div>
-          <div className="flex flex-col gap-0.5 opacity-65">
+          <div className="px-2 pb-1 pt-2 text-overline font-bold uppercase tracking-wide text-muted-foreground">{t('rail.archived')} ({model.archivedSessions.length})</div>
+          <div className="flex flex-col gap-1 opacity-65">
             {model.archivedSessions.map((session) => <RailEntityRow
               key={session.id}
               className="session-item"

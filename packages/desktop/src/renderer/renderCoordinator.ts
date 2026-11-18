@@ -543,11 +543,22 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
     const streamEl = document.getElementById('conversation-stream');
     const wasNearBottom = deps.isStreamNearBottom(streamEl);
 
-    document.documentElement.setAttribute('data-theme', state.theme);
-    document.documentElement.setAttribute(
-      'data-appearance',
-      SKINS[resolveSkinId(state.theme)]?.variant === 'light' ? 'light' : 'dark',
-    );
+    const rootEl = document.documentElement;
+    const nextAppearance = SKINS[resolveSkinId(state.theme)]?.variant === 'light' ? 'light' : 'dark';
+    if (rootEl.getAttribute?.('data-theme') !== state.theme) {
+      rootEl.classList?.add('oc-theme-switching');
+      rootEl.setAttribute('data-theme', state.theme);
+      rootEl.setAttribute('data-appearance', nextAppearance);
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => rootEl.classList?.remove('oc-theme-switching'));
+        });
+      } else {
+        rootEl.classList?.remove('oc-theme-switching');
+      }
+    } else {
+      rootEl.setAttribute('data-appearance', nextAppearance);
+    }
     document.documentElement.dataset.maximized = state.isMaximized ? 'true' : 'false';
 
     const currentLastMsg = state.messages.length > 0 ? state.messages[state.messages.length - 1] : null;

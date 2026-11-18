@@ -190,9 +190,9 @@ export function getUiFontSelectOptions(): readonly FontOption<UiFontId>[] {
   return [...UI_FONT_OPTIONS, ...MONO_FONT_OPTIONS];
 }
 
-/** 出厂默认：与用户实际偏好一致，界面字体与等宽字体都走系统栈。 */
-export const DEFAULT_UI_FONT: UiFontId = 'system';
-export const DEFAULT_MONO_FONT: MonoFontId = 'system-mono';
+/** 出厂默认：对标 OpenChamber 默认排版（Inter + JetBrains Mono，离线 woff2 已随包分发，缺失时回落系统栈）。 */
+export const DEFAULT_UI_FONT: UiFontId = 'inter';
+export const DEFAULT_MONO_FONT: MonoFontId = 'jetbrains-mono';
 
 /** 字号语义档：正文、代码、界面标签、元数据、辅助文字。 */
 export const TYPOGRAPHY_TOKENS = {

@@ -15,6 +15,6 @@ export const MenuContent = React.forwardRef<React.ElementRef<typeof MenuPrimitiv
 MenuContent.displayName = MenuPrimitive.Content.displayName;
 
 export const MenuItem = React.forwardRef<React.ElementRef<typeof MenuPrimitive.Item>, React.ComponentPropsWithoutRef<typeof MenuPrimitive.Item>>(
-  ({ className, ...props }, ref) => <MenuPrimitive.Item ref={ref} className={cn('relative flex cursor-default select-none items-center rounded-inner px-2 py-1.5 text-body outline-none focus:bg-accent focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50', className)} {...props} />
+  ({ className, ...props }, ref) => <MenuPrimitive.Item ref={ref} className={cn('relative flex cursor-default select-none items-center rounded-inner px-2 py-1 text-body outline-none focus:bg-accent focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50', className)} {...props} />
 );
 MenuItem.displayName = MenuPrimitive.Item.displayName;

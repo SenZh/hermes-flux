@@ -154,7 +154,7 @@ export const MessageRow = React.memo(function MessageRow({
             >
               <span className="conv-handoff-pill__dot" />
               <span>{t('conversation.contextCompacted')}</span>
-              <span style={{ opacity: 0.6 }}>
+              <span className="conv-handoff-pill__action">
                 {isCompactedOpen ? t('conversation.hideCompactedContext') : t('conversation.viewCompactedContext')}
               </span>
             </div>

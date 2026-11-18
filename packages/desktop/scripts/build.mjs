@@ -707,8 +707,11 @@ async function buildAll() {
   );
   let copiedFonts = 0;
   let missingFonts = 0;
+  const workspaceRoot = path.resolve(rootDir, '..', '..');
   for (const { packageName, filePrefix, weights } of fontManifest.sources) {
-    const filesDir = path.join(rootDir, 'node_modules', packageName, 'files');
+    const localFilesDir = path.join(rootDir, 'node_modules', packageName, 'files');
+    const hoistedFilesDir = path.join(workspaceRoot, 'node_modules', packageName, 'files');
+    const filesDir = fs.existsSync(localFilesDir) ? localFilesDir : hoistedFilesDir;
     for (const weight of weights) {
       const name = `${filePrefix}-latin-${weight}-normal.woff2`;
       const source = path.join(filesDir, name);

@@ -43,19 +43,19 @@ export function Titlebar({ platform, title, isMaximized, gatewayConnected, laten
     </div>
     <div className="titlebar-center">
       {activeAvatar?.kind === 'bot' && <span
-        className="titlebar-bot-avatar mr-1.5 inline-flex shrink-0 items-center justify-center overflow-hidden rounded-inner"
+        className="titlebar-bot-avatar inline-flex shrink-0 items-center justify-center overflow-hidden rounded-inner"
         aria-hidden="true"
         dangerouslySetInnerHTML={{ __html: renderBotAvatar(activeAvatar.name, activeAvatar.name, activeAvatar.avatar, 16) }}
       />}
       {activeAvatar?.kind === 'group' && <span
-        className="titlebar-group-avatar mr-1.5 inline-flex shrink-0 items-center justify-center overflow-hidden rounded-inner"
+        className="titlebar-group-avatar inline-flex shrink-0 items-center justify-center overflow-hidden rounded-inner"
         aria-hidden="true"
         dangerouslySetInnerHTML={{ __html: renderGroupCollageAvatar(activeAvatar.members, activeAvatar.profiles, 16) }}
       />}
       <span className="titlebar-session-title">{title}</span>
     </div>
     <div className="titlebar-right">
-      <div className="titlebar-connection-box flex items-center gap-1.5 px-1" title={gatewayConnected ? (showLatency ? `${t('titlebar.online')} (${latencyMs}ms)` : t('titlebar.online')) : t('titlebar.offline')}>
+      <div className="titlebar-connection-box flex items-center gap-1 px-1" title={gatewayConnected ? (showLatency ? `${t('titlebar.online')} (${latencyMs}ms)` : t('titlebar.online')) : t('titlebar.offline')}>
         <span className="titlebar-connection-indicator" data-connected={gatewayConnected} />
         {showLatency && <span className="titlebar-latency text-caption text-muted-foreground/60 font-code tabular-nums select-none tracking-tight">{latencyMs}ms</span>}
       </div>
