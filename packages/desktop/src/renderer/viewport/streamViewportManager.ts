@@ -189,6 +189,18 @@ export class StreamViewportManager {
 
   private readonly sessionScrollMemory = new SessionScrollMemory();
   private readonly medianEstimator = new AdaptiveMedianEstimator();
+  /**
+   * 【回合采样去重表 (Why)】每次非进入期 render() 都会调用 captureStreamAnchor()，
+   *   若重复采样同一批已落定 `.conv-turn`，中位数会被当前视口内的短/长回合反复刷权而漂移，
+   *   引发 `--conv-intrinsic-median-height` 震荡与离屏占位高度跳变。
+   * 【约束与规则 (Rules)】按 `${sessionId}:${turnId}` 去重并设 2000 条 FIFO 上限防内存无限增长；
+   *   无 `data-conv-turn` 属性的测试桩退化为 WeakSet 去重。
+   */
+  private static readonly MAX_SAMPLED_TURN_KEYS = 2000;
+  private readonly sampledTurnKeys = new Set<string>();
+  private readonly sampledTurnElements = new WeakSet<HTMLElement>();
+  private lastAppliedIntrinsicValue = '';
+  private lastAppliedIntrinsicStream: HTMLElement | null = null;
 
   private dockInsetObserver: ResizeObserver | null = null;
   private dockInsetTarget: HTMLElement | null = null;
@@ -202,6 +214,22 @@ export class StreamViewportManager {
 
   public getMedianEstimator(): AdaptiveMedianEstimator {
     return this.medianEstimator;
+  }
+
+  /**
+   * 回合采样去重表的当前键数量（诊断用）。
+   *
+   * 【设计意图 (Why)】去重表上限 2000 是「长会话不无限吃内存」的唯一实现，但集合大小
+   *   无法从外部观测；仅靠中位数断言在样本窗口已满时是恒真的，淘汰逻辑删掉也测不出来。
+   *   暴露只读计数后，可用 `2001 → 2000` 的支配性差值钉死淘汰分支。
+   */
+  public getSampledTurnKeyCount(): number {
+    return this.sampledTurnKeys.size;
+  }
+
+  /** 指定去重键是否仍在表内（诊断用，用于断言 FIFO 淘汰的是最老键而非最新键）。 */
+  public hasSampledTurnKey(key: string): boolean {
+    return this.sampledTurnKeys.has(key);
   }
 
   public isInitialBottomSettling(): boolean {
@@ -432,6 +460,16 @@ export class StreamViewportManager {
     });
   }
 
+  private recordSampledTurnKey(key: string): void {
+    if (this.sampledTurnKeys.size >= StreamViewportManager.MAX_SAMPLED_TURN_KEYS) {
+      const oldest = this.sampledTurnKeys.values().next().value;
+      if (typeof oldest === 'string') {
+        this.sampledTurnKeys.delete(oldest);
+      }
+    }
+    this.sampledTurnKeys.add(key);
+  }
+
   /**
    * 采样视口内「回合」的真实高度，写入 `.conv-turn` 占位高度变量。
    *
@@ -441,13 +479,19 @@ export class StreamViewportManager {
    *   真实值的 1/3（实测 241px → 80px），文档总高塌到 46%，切回视口只能落在
    *   "占位底部"——即用户报告的"飞在中间、很靠上"。
    *
+   * 【防范的历史坑 (Pitfall)】
+   *   1. 反复采样同一批已落定回合会让当前视口内局部回合反复刷权，导致中位数在每次
+   *      `messagesChanged=false` 渲染时漂移并撑大 `scrollHeight`；
+   *   2. 采样仍在流式增长的回合（`data-conv-streaming="true"`）会把未成形的中间高度写进中位数，
+   *      并在流式途中拉高文档高度冲毁 `isNearBottom`。
+   *
    * 【约束与规则 (Rules)】
-   *   1. 只采样与视口相交的回合：`content-visibility: auto` 下离屏回合返回的是占位值，
-   *      把它当样本会让中位数自我固化，估算器名义在跑、实际零贡献；
-   *   2. 样本数 > 0 才写变量，绝不用 0 覆盖 CSS 兜底；
-   *   3. 单测环境缺 `style.setProperty` 时安全跳过。
+   *   1. 跳过正在流式的回合（待其落定后再一次性采样）；
+   *   2. 每个已落定回合每会话仅采样一次（仅在通过所有布局与自锁守卫后记入去重表）；
+   *   3. 样本数 > 0 才写变量，绝不用 0 覆盖 CSS 兜底；
+   *   4. 单测桩缺失 `getAttribute` 时退化为 WeakSet 去重。
    */
-  private sampleTurnIntrinsicHeight(stream: HTMLElement, streamTop: number, streamBottom: number): void {
+  private sampleTurnIntrinsicHeight(stream: HTMLElement, activeSessionId: string): void {
     /**
      * 【判据：全列表 + 自锁打断 (Why)】
      *   1. 不能用几何特征识别占位替身——实测 160/160 个回合（含被 `content-visibility`
@@ -463,6 +507,17 @@ export class StreamViewportManager {
     const turns = stream.querySelectorAll<HTMLElement>(TURN_SELECTOR);
     for (let i = 0; i < turns.length; i += 1) {
       const turn = turns[i];
+      // 流式增长中的回合尚未定型，跳过采样直到其落定
+      const isStreaming =
+        typeof turn.getAttribute === 'function' && turn.getAttribute('data-conv-streaming') === 'true';
+      if (isStreaming) continue;
+
+      const turnId = typeof turn.getAttribute === 'function' ? (turn.getAttribute('data-conv-turn') || '') : '';
+      const dedupKey = turnId ? `${activeSessionId}:${turnId}` : '';
+      if (dedupKey ? this.sampledTurnKeys.has(dedupKey) : this.sampledTurnElements.has(turn)) {
+        continue;
+      }
+
       // 【只采真实已布局回合 (Rules)】优先使用 checkVisibility 过滤掉 content-visibility: auto 跳过的离屏占位回合；
       //   若环境缺失 checkVisibility，则退化为下面的「高度 ≈ 当前注入值」自锁打断。
       if (!this.isAnchorLaidOut(turn)) continue;
@@ -470,10 +525,14 @@ export class StreamViewportManager {
       if (rect.height <= 0) continue;
       // 自锁打断：占位替身的高度恒等于当前注入值，绝不能当样本
       if (current !== null && Math.abs(rect.height - current) < 0.5) continue;
+
       this.medianEstimator.addSample(rect.height);
+      if (dedupKey) {
+        this.recordSampledTurnKey(dedupKey);
+      } else {
+        this.sampledTurnElements.add(turn);
+      }
     }
-    void streamTop;
-    void streamBottom;
   }
 
   /**
@@ -489,7 +548,7 @@ export class StreamViewportManager {
   }
 
   /**
-   * 把当前估算的回合占位高度写进 CSS 变量。
+   * 把当前估算的回合占位高度写进 CSS 变量，并对因离屏占位高度变化引起的 scrollHeight 跳变做视口中性补偿。
    *
    * 【必须同时写根节点 (Why)】切会话时 React 会重建消息列表宿主，
    *   `#conversation-stream` 是一个**新元素**，其 inline style 随旧元素一起销毁，
@@ -499,18 +558,82 @@ export class StreamViewportManager {
    *   根节点不会被重建，写在那里可以跨会话切换存活；stream 自身仍写一份，
    *   保证既有单测与「变量就近可读」的语义不变。
    *
+   * 【防范的历史坑 (Pitfall)】
+   *   1. 流式结束或流式途中写入新 `--conv-intrinsic-median-height` 会同步改变离屏 `.conv-turn` 高度，
+   *      若只涨 `scrollHeight` 不补 `scrollTop`（dSh > 0, dSt = 0），视口会被瞬间顶离底部安全区；
+   *   2. 当新中位数变小导致 `scrollHeight` 收缩（dSh < 0）时，Blink 会自动向下夹紧 `scrollTop`，
+   *      若不登记 `markProgrammaticScroll`，滚动控制器会把浏览器夹紧误判为用户主动上滚。
+   *
    * 【约束与规则 (Rules)】
-   *   1. 样本数 > 0 才写，绝不用 0 或兜底值覆盖；
-   *   2. 目标元素缺 `setProperty` 时安全跳过（单测与旧内核）。
+   *   1. 样本数 > 0 才写，绝不用 0 或兜底值覆盖；值未变化时跳过写入实现零布局开销；
+   *   2. 仅当 `nextScrollHeight > clientHeight` 才允许写 `scrollTop`；
+   *   3. 贴底态保持原距离 `prevDist` 不变；非贴底态按 `anchorRow` 偏移量做中性补偿；
+   *   4. 凡最终 `stream.scrollTop !== prevScrollTop`（含浏览器负向夹紧）必须调用 `markProgrammaticScroll`；
+   *   5. 目标元素缺 `setProperty` / `getPropertyValue` 时安全跳过或退化到实例缓存比较。
    */
-  private applyIntrinsicHeightVariable(stream: HTMLElement): void {
+  private applyIntrinsicHeightVariable(
+    stream: HTMLElement,
+    context: {
+      wasNearBottom: boolean;
+      prevScrollHeight: number;
+      prevScrollTop: number;
+      prevDist: number;
+      anchorRow: HTMLElement | null;
+      anchorOffset: number;
+    }
+  ): void {
     if (this.medianEstimator.sampleCount === 0) return;
     const value = `${this.medianEstimator.getMedian()}px`;
-    if (typeof stream.style?.setProperty === 'function') {
+
+    const hasStreamGetter = typeof stream.style?.getPropertyValue === 'function';
+    const needsStreamWrite =
+      typeof stream.style?.setProperty === 'function' &&
+      (hasStreamGetter
+        ? stream.style.getPropertyValue('--conv-intrinsic-median-height') !== value
+        : this.lastAppliedIntrinsicStream !== stream || this.lastAppliedIntrinsicValue !== value);
+
+    const rootStyle = typeof document !== 'undefined' ? document.documentElement?.style : undefined;
+    const hasRootGetter = typeof rootStyle?.getPropertyValue === 'function';
+    const needsRootWrite =
+      typeof rootStyle?.setProperty === 'function' &&
+      (hasRootGetter
+        ? rootStyle.getPropertyValue('--conv-intrinsic-median-height') !== value
+        : this.lastAppliedIntrinsicValue !== value);
+
+    if (!needsStreamWrite && !needsRootWrite) return;
+
+    if (needsStreamWrite) {
       stream.style.setProperty('--conv-intrinsic-median-height', value);
     }
-    if (typeof document !== 'undefined' && typeof document.documentElement?.style?.setProperty === 'function') {
-      document.documentElement.style.setProperty('--conv-intrinsic-median-height', value);
+    if (needsRootWrite && rootStyle) {
+      rootStyle.setProperty('--conv-intrinsic-median-height', value);
+    }
+    this.lastAppliedIntrinsicValue = value;
+    this.lastAppliedIntrinsicStream = stream;
+
+    const nextScrollHeight = stream.scrollHeight;
+    if (nextScrollHeight === context.prevScrollHeight) return;
+
+    // 【跳转落定期只写变量、不动视口 (Why)】提示词跳转的落定计划由 runSessionEnterFrame 独占视口，
+    //   此处再写 scrollTop 会与它的多帧收敛互相拉扯；变量本身必须照写，否则离屏回合占位高度失真。
+    //   仍未变化的 scrollTop 由下方统一登记，避免浏览器负向夹紧被误判成用户上滚。
+    if (nextScrollHeight > stream.clientHeight && !this.host.isPromptJumpSettling()) {
+      if (context.wasNearBottom) {
+        const targetTop = Math.max(0, nextScrollHeight - stream.clientHeight - context.prevDist);
+        if (Math.abs(stream.scrollTop - targetTop) >= 1) {
+          stream.scrollTop = targetTop;
+        }
+      } else if (context.anchorRow) {
+        const nextOffset = context.anchorRow.getBoundingClientRect().top - stream.getBoundingClientRect().top;
+        const delta = nextOffset - context.anchorOffset;
+        if (Math.abs(delta) >= 1) {
+          stream.scrollTop += delta;
+        }
+      }
+    }
+
+    if (stream.scrollTop !== context.prevScrollTop) {
+      this.host.markProgrammaticScroll(stream);
     }
   }
 
@@ -564,9 +687,9 @@ export class StreamViewportManager {
     if (!stream) return { sessionId: activeSessionId, id: null, offset: 0, rawScrollTop: 0 };
     const streamRect = stream.getBoundingClientRect();
     const streamTop = streamRect.top;
-    const streamBottom = streamRect.bottom;
     const rows = stream.querySelectorAll<HTMLElement>(MESSAGE_ROW_SELECTOR);
     let anchorId: string | null = null;
+    let anchorRow: HTMLElement | null = null;
     let anchorOffset = 0;
     let anchorOffsetRatio = 0;
 
@@ -575,6 +698,7 @@ export class StreamViewportManager {
       const rect = row.getBoundingClientRect();
       if (anchorId === null && rect.bottom > streamTop) {
         anchorId = row.getAttribute('data-msg-id');
+        anchorRow = row;
         anchorOffset = rect.top - streamTop;
         anchorOffsetRatio = rect.height > 0 ? Math.max(0, Math.min(1, (streamTop - rect.top) / rect.height)) : 0;
       }
@@ -584,6 +708,8 @@ export class StreamViewportManager {
     const capturedScrollHeight = stream.scrollHeight;
     const capturedClientHeight = stream.clientHeight;
     const capturedReservePx = this.readBottomReservePx(stream);
+    const prevDist = capturedScrollHeight - capturedScrollTop - capturedClientHeight;
+    const wasNearBottom = prevDist <= Math.max(STICK_TO_BOTTOM_THRESHOLD_PX, capturedReservePx + 8);
 
     if (activeSessionId) {
       this.sessionScrollMemory.recordSnapshot({
@@ -604,15 +730,23 @@ export class StreamViewportManager {
     }
 
     // 【先读快照再写 CSS 变量 (Pitfall)】修改 --conv-intrinsic-median-height 会立即改变离屏占位高度，
-    //   绝不能在 recordSnapshot 之前写入，否则刚读到的 scrollHeight 会被新变量撑大而误判为非贴底。
-    this.sampleTurnIntrinsicHeight(stream, streamTop, streamBottom);
-    this.applyIntrinsicHeightVariable(stream);
+    //   绝不能在 recordSnapshot 之前写入，否则刚读到的 scrollHeight 会被新变量撑大而误判为非贴底；
+    //   写入后立刻按 prevDist / anchorRow 做视口中性补偿，并回传补偿后的 rawScrollTop。
+    this.sampleTurnIntrinsicHeight(stream, activeSessionId);
+    this.applyIntrinsicHeightVariable(stream, {
+      wasNearBottom,
+      prevScrollHeight: capturedScrollHeight,
+      prevScrollTop: capturedScrollTop,
+      prevDist,
+      anchorRow,
+      anchorOffset,
+    });
 
     return {
       sessionId: activeSessionId,
       id: anchorId,
       offset: anchorOffset,
-      rawScrollTop: capturedScrollTop,
+      rawScrollTop: stream.scrollTop,
     };
   }
 

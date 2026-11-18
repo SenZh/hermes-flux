@@ -368,3 +368,226 @@ test('D6: gatewayEventDispatcher - turn-completed 前贴底时即使 finalReplac
   dispatcher.applyTurnActions([{ type: 'turn-completed', sessionId: 'sess-other' }]);
   assert.deepEqual(pendingCalls, [], '后台会话完成不得触发当前会话视口贴底');
 });
+
+test('D6: gatewayEventDispatcher - turn-completed / turn-failed / disconnect 必须清空 toolPatchQueue，且 turn-failed 不双 render', () => {
+  let clearToolPatchCalls = 0;
+  let syncPresenceCalls = 0;
+  const pendingCalls = [];
+  const { deps, state, rendered } = createMockDispatcherDeps();
+  deps.clearToolPatchQueue = () => { clearToolPatchCalls += 1; };
+  deps.syncAgentPresence = () => { syncPresenceCalls += 1; };
+  deps.isStreamNearBottom = () => true;
+  deps.setPendingScrollToBottom = (val) => pendingCalls.push(val);
+  // 模拟真实 turnExecutionService.setTimedDockNotice：未传 skipRender 时会同步调用 render()
+  deps.setTimedDockNotice = (msg, _dur, opts) => {
+    state.dockNotice = msg;
+    if (!opts?.skipRender) {
+      deps.render();
+    }
+  };
+  const dispatcher = createGatewayEventDispatcher(deps);
+
+  // 1. turn-completed 清理工具补丁队列
+  dispatcher.applyTurnActions([{ type: 'turn-completed', sessionId: 'sess-1' }]);
+  assert.equal(clearToolPatchCalls, 1, 'turn-completed 必须清空 toolPatchQueue，防止迟到 rAF 覆写 React DOM');
+
+  // 2. turn-failed 清理队列且仅触发唯一一次 render()（消除双 render）
+  rendered.length = 0;
+  syncPresenceCalls = 0;
+  pendingCalls.length = 0;
+  state.isStreaming = true;
+  deps.setActiveStreamingContext({
+    activeStreamingMessageId: 'ast-1',
+    activeStreamingStoredSessionId: 'sess-1',
+    activeStreamingLiveId: 'live-1',
+  });
+  dispatcher.applyTurnActions([{ type: 'turn-failed', sessionId: 'sess-1', message: 'boom 500' }]);
+  assert.equal(clearToolPatchCalls, 2, 'turn-failed 必须清空 toolPatchQueue');
+  assert.equal(rendered.length, 1, 'turn-failed 必须只触发唯一一次 render()，严禁 setTimedDockNotice + needsRender 双渲染');
+  assert.equal(syncPresenceCalls, 1, 'turn-failed 仍须同步在场指示器');
+  assert.equal(state.dockNotice, 'boom 500', '错误提示仍须落盘至 dockNotice');
+  assert.deepEqual(pendingCalls, [true], 'turn-failed 前贴底时必须保留贴底意图');
+
+  // 3. disconnect 清理队列
+  dispatcher.disconnect();
+  assert.equal(clearToolPatchCalls, 3, 'disconnect 必须清空 toolPatchQueue');
+});
+
+test('D6: gatewayEventDispatcher - turn-completed / turn-failed 全链路收口变异杀伤（工具收敛/缓存持久化/会话置顶/Bot与后台态）', () => {
+  const flushCalls = [];
+  const stopTimerCalls = [];
+  const setContentCalls = [];
+  const completeCalls = [];
+  const persistTurnCalls = [];
+  const persistSessionsCalls = [];
+  const botActivityCalls = [];
+  const syncProfileCalls = [];
+  const turnStartedSessionCalls = [];
+  const clearPresenceCalls = [];
+  const trackerClears = [];
+  const pendingCalls = [];
+
+  const { deps, state } = createMockDispatcherDeps({
+    state: {
+      activeSessionId: 'sess-1',
+      activeFocus: { type: 'bot', botName: 'arch-bot' },
+      sessions: [
+        { id: 'sess-top', title: 'Top', botName: 'default', preview: 'old', timestamp: 100 },
+        { id: 'sess-1', title: 'Task 1', botName: 'arch-bot', preview: '', timestamp: 50 },
+        { id: 'sess-bg', title: 'Bg', botName: 'default', preview: '', timestamp: 20 },
+      ],
+      messages: [
+        { id: 'usr-1', role: 'user', content: 'hi', timestamp: '12:00:00' },
+        {
+          id: 'ast-1',
+          role: 'assistant',
+          content: 'draft',
+          timestamp: '12:00:01',
+          toolCalls: [
+            { id: 't1', name: 'read', status: 'running', startTime: Date.now() - 500 },
+            { id: 't2', name: 'fast', status: 'running', startTime: Date.now() - 5 },
+            { id: 't3', name: 'preset', status: 'running', startTime: Date.now() - 900, durationMs: 321 },
+            { id: 't4', name: 'err', status: 'failed', startTime: Date.now() - 900 },
+          ],
+        },
+      ],
+    },
+    activeStreamingContext: {
+      activeStreamingMessageId: 'ast-1',
+      activeStreamingStoredSessionId: 'sess-1',
+      activeStreamingLiveId: 'live-1',
+      activeStreamingBotName: 'arch-bot',
+    },
+  });
+
+  deps.getTokenCoalescer = () => ({ enqueue: () => {}, flush: () => flushCalls.push(1) });
+  deps.stopRunningToolTimers = () => stopTimerCalls.push(1);
+  deps.setMessageContent = (id, text) => {
+    setContentCalls.push([id, text]);
+    const m = state.messages.find((x) => x.id === id);
+    if (m) m.content = text;
+  };
+  deps.completeEntityTurn = (kind, _run, _unread, id, focused) => completeCalls.push({ kind, id, focused });
+  deps.persistTurnToCache = (sid, bot, msgs) => persistTurnCalls.push({ sid, bot, count: msgs.length });
+  deps.persistSessionsToCache = (sessions) => persistSessionsCalls.push(sessions.map((s) => s.id));
+  deps.getBotActivityStore = () => ({
+    updateLatestActivity: (bot, content) => botActivityCalls.push({ bot, content }),
+  });
+  deps.syncProfileLastMessages = () => syncProfileCalls.push(1);
+  deps.setTurnStartedSessionId = (id) => turnStartedSessionCalls.push(id);
+  deps.clearPresenceTerminal = () => clearPresenceCalls.push(1);
+  deps.getActivityTransitionTracker = () => ({ clear: (kind, id) => trackerClears.push([kind, id]) });
+  deps.setPendingScrollToBottom = (v) => pendingCalls.push(v);
+  deps.t = (k, p) => (p ? `${k}:${JSON.stringify(p)}` : k);
+  // 故意不注入 isStreamNearBottom，验证默认回落为 false（不得误触发贴底）
+  deps.isStreamNearBottom = undefined;
+
+  // 缓存含多条消息，确保 replace-content 按 id 精确匹配
+  const cachedSess1 = [
+    { id: 'usr-1', role: 'user', content: 'hi' },
+    { id: 'ast-1', role: 'assistant', content: 'draft' },
+  ];
+  deps.getSessionMessagesCache().set('sess-1', cachedSess1);
+
+  const dispatcher = createGatewayEventDispatcher(deps);
+  dispatcher.applyTurnActions([
+    { type: 'replace-content', messageId: 'ast-1', text: 'Final Answer' },
+    { type: 'turn-completed' }, // 缺 action.sessionId，必须回退到 ctx.activeStreamingStoredSessionId
+  ]);
+
+  assert.equal(flushCalls.length, 1);
+  assert.equal(stopTimerCalls.length, 1);
+  assert.deepEqual(setContentCalls, [['ast-1', 'Final Answer']]);
+  assert.equal(cachedSess1[0].content, 'hi', 'replace-content 严禁误改非目标缓存消息');
+  assert.equal(cachedSess1[1].content, 'Final Answer', 'replace-content 必须同步更新目标缓存消息');
+
+  const tcs = state.messages[1].toolCalls;
+  assert.equal(tcs[0].status, 'completed');
+  assert.ok(tcs[0].durationMs >= 400, '已运行 500ms 的工具 durationMs 应反映真实耗时');
+  assert.equal(tcs[1].status, 'completed');
+  assert.equal(tcs[1].durationMs, 100, '极短耗时工具 durationMs 应由 Math.max(100, ...) 兜底为 100');
+  assert.equal(tcs[2].durationMs, 321, '已有 durationMs 不得被覆写');
+  assert.equal(tcs[3].status, 'failed', '非 running 状态工具不得被改成 completed');
+
+  assert.deepEqual(pendingCalls, [], '未注入 isStreamNearBottom 时默认 false，不得触发贴底');
+  assert.deepEqual(completeCalls, [
+    { kind: 'session', id: 'sess-1', focused: true },
+    { kind: 'bot', id: 'arch-bot', focused: true },
+  ]);
+  assert.equal(persistTurnCalls.length, 1);
+  assert.equal(persistTurnCalls[0].sid, 'sess-1');
+  assert.equal(persistTurnCalls[0].count, 2);
+  assert.equal(state.sessions[0].id, 'sess-1', '完成会话必须置顶到 state.sessions[0]');
+  assert.equal(state.sessions[0].preview, 'Final Answer');
+  assert.deepEqual(persistSessionsCalls[0], ['sess-1', 'sess-top', 'sess-bg']);
+  assert.deepEqual(botActivityCalls, [{ bot: 'arch-bot', content: 'Final Answer' }]);
+  assert.equal(syncProfileCalls.length, 1);
+  assert.deepEqual(turnStartedSessionCalls, [null]);
+  assert.equal(clearPresenceCalls.length, 1);
+  assert.equal(deps.getActiveStreamingContext().activeStreamingBotName, null);
+
+  // 2. 后台非聚焦会话 + 后台 Bot 完成：从 sessionMessagesCache 取终答并更新 preview/botActivity
+  completeCalls.length = 0;
+  persistTurnCalls.length = 0;
+  botActivityCalls.length = 0;
+  deps.getSessionMessagesCache().set('sess-bg', [
+    { id: 'bg-u', role: 'user', content: 'bg q' },
+    { id: 'bg-a', role: 'assistant', content: 'Background Final' },
+  ]);
+  deps.setActiveStreamingContext({
+    activeStreamingMessageId: 'bg-a',
+    activeStreamingStoredSessionId: 'sess-bg',
+    activeStreamingLiveId: 'live-bg',
+    activeStreamingBotName: 'bg-bot',
+  });
+  dispatcher.applyTurnActions([{ type: 'turn-completed', sessionId: 'sess-bg' }]);
+  assert.equal(persistTurnCalls[0].sid, 'sess-bg');
+  assert.equal(state.sessions[0].id, 'sess-bg');
+  assert.equal(state.sessions[0].preview, 'Background Final');
+  assert.deepEqual(botActivityCalls, [{ bot: 'bg-bot', content: 'Background Final' }]);
+  assert.deepEqual(completeCalls, [
+    { kind: 'session', id: 'sess-bg', focused: false },
+    { kind: 'bot', id: 'bg-bot', focused: false },
+  ]);
+
+  // 3. turn-failed：空消息填充错误前缀、非空消息不覆盖、清理 runningSession/runningBot/tracker 与 activeStreamingContext
+  flushCalls.length = 0;
+  stopTimerCalls.length = 0;
+  syncProfileCalls.length = 0;
+  trackerClears.length = 0;
+  pendingCalls.length = 0;
+  state.messages.push({ id: 'ast-empty', role: 'assistant', content: '', timestamp: '12:00:02' });
+  deps.getActiveRunningSessionIds().add('sess-1');
+  deps.getActiveRunningBotNames().add('fail-bot');
+  deps.setActiveStreamingContext({
+    activeStreamingMessageId: 'ast-empty',
+    activeStreamingStoredSessionId: 'sess-1',
+    activeStreamingLiveId: 'live-1',
+    activeStreamingBotName: 'fail-bot',
+  });
+  dispatcher.applyTurnActions([{ type: 'turn-failed', message: 'net err' }]);
+  assert.equal(flushCalls.length, 1);
+  assert.equal(stopTimerCalls.length, 1);
+  assert.equal(syncProfileCalls.length, 1);
+  assert.ok(state.messages.find((m) => m.id === 'ast-empty').content.includes('net err'), '空正文必须回填错误文案');
+  assert.equal(deps.getActiveRunningSessionIds().has('sess-1'), false);
+  assert.equal(deps.getActiveRunningBotNames().has('fail-bot'), false);
+  assert.deepEqual(trackerClears, [['session', 'sess-1'], ['bot', 'fail-bot']]);
+  assert.equal(deps.getActiveStreamingContext().activeStreamingMessageId, null);
+  assert.equal(deps.getActiveStreamingContext().activeStreamingStoredSessionId, null);
+  assert.equal(deps.getActiveStreamingContext().activeStreamingBotName, null);
+  assert.deepEqual(pendingCalls, [], '未注入 isStreamNearBottom 时 turn-failed 默认 false，不得误触发贴底');
+
+  // 非空消息 fail 不得覆写已有正文，且后台会话 fail 即使贴底也不得触发当前视口贴底
+  deps.isStreamNearBottom = () => true;
+  state.messages.push({ id: 'ast-nonempty', role: 'assistant', content: 'Keep me', timestamp: '12:00:03' });
+  deps.setActiveStreamingContext({
+    activeStreamingMessageId: 'ast-nonempty',
+    activeStreamingStoredSessionId: 'sess-bg',
+    activeStreamingLiveId: 'live-bg',
+    activeStreamingBotName: null,
+  });
+  dispatcher.applyTurnActions([{ type: 'turn-failed', sessionId: 'sess-bg', message: 'bg err' }]);
+  assert.equal(state.messages.find((m) => m.id === 'ast-nonempty').content, 'Keep me', '非空正文不得被错误前缀覆盖');
+  assert.deepEqual(pendingCalls, [], '后台会话 turn-failed 不得触发当前会话视口贴底');
+});

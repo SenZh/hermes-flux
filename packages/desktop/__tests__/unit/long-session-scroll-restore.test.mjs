@@ -440,6 +440,7 @@ test('长会话滚动恢复全链路：红灯复现与门禁', async (t) => {
         setSuppressPinBottomOnce: () => {},
         setSettledLayoutSignature: () => {},
         layoutSignature: () => 'sig',
+        isPromptJumpSettling: () => false,
         markProgrammaticScroll: () => {},
       });
 

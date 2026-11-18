@@ -659,7 +659,17 @@ async function buildAll() {
     external: ['@hermes-flux/core', '@hermes-flux/ui'],
     sourcemap: true,
   });
-  console.log('  ✔ Batch 7 modules compiled (fileViewerService, titlebarController, appBootstrap, conversationStreamController, onboardingController, tokenStreamWriter)');
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/stream/streamDomOwnership.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/stream/streamDomOwnership.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+  console.log('  ✔ Batch 7 modules compiled (fileViewerService, titlebarController, appBootstrap, conversationStreamController, onboardingController, tokenStreamWriter, streamDomOwnership)');
   console.log('  ✔ Batch 6 services compiled (projectOperationService, groupOperationService, profileManagementService, settingsDataService)');
   console.log('  ✔ Batch 5 modules compiled (messageWindowManager, renderCoordinator, dropdownKeybindController)');
   console.log('  ✔ Transcript rows + slash catalog + desktop cache bridge + agent presence + prompt nav + cascade + viewport + leftrail + state + inspector + modal + inputDock + sessionOperation + messageLoading + turnExecution + gatewayEventDispatcher modules compiled');

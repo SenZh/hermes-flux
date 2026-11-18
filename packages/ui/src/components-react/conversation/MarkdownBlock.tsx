@@ -40,7 +40,7 @@ export function MarkdownBlock({ content, anchorId, className, knownFiles }: Mark
   // 纯工具消息没有正文时不要渲染空容器，否则会在 flex 布局里多占一个块间距。
   // 【流式锚点契约】但「有 anchorId」的行必须保住锚点：tokenStreamWriter 只 patch 已存在节点，
   // 它没有 render / mount 能力，流式首帧正文必然为空，此处 return null 会让后续每一帧直写空转。
-  // 锚点以 display:none 隐形存在、首帧直写时由 writer 的 none→flex 翻牌点亮：
+  // 锚点以 display:none 隐形存在、首帧直写时由 writer 的 none→block 翻牌点亮：
   // 既保住直写通道，又不产生任何可见空容器/块间距（89ca860 的意图不回潮）。
   if (!content.trim()) {
     if (!anchorId) return null;

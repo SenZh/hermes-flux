@@ -212,7 +212,7 @@ export const MessageRow = React.memo(function MessageRow({
         </StreamRow>
       ) : null}
 
-      <ToolSection messageId={message.id} tools={message.toolCalls ?? []} />
+      <ToolSection messageId={message.id} tools={message.toolCalls ?? []} isStreaming={isStreaming} />
 
       <MarkdownBlock content={message.content} anchorId={`msg-content-${message.id}`} className="conv-message__body" knownFiles={knownFiles} />
 

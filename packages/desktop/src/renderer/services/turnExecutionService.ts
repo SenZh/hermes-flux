@@ -136,6 +136,9 @@ export interface TurnExecutionDeps {
   readonly resolveAgentAvatar: (nameOrDisplayName?: string) => string;
   readonly scrollStreamToBottom: (reason: string) => void;
   readonly setPendingScrollToBottom: (val: boolean) => void;
+  readonly isStreamNearBottom?: () => boolean;
+  readonly clearToolPatchQueue?: () => void;
+  readonly stopRunningToolTimers?: () => void;
 
   readonly runSlashCommand: (command: string) => Promise<void>;
   readonly enqueueDraft: () => Promise<void>;
@@ -163,7 +166,7 @@ export interface TurnExecutionService {
   isStreamingActiveForCurrentSession(): boolean;
   clearPresenceTerminal(): void;
   armPresenceTerminal(terminal: NonNullable<AppState['presenceTerminal']>): void;
-  setTimedDockNotice(msg: string, durationMs?: number): void;
+  setTimedDockNotice(msg: string, durationMs?: number, options?: { skipRender?: boolean }): void;
   interruptTurn(): Promise<void>;
   sendGroupMessage(roomId: string, text: string): Promise<void>;
   syncGroupRoomLogsToState(roomId: string, logs: readonly GroupMessageEntry[]): void;
@@ -198,10 +201,18 @@ export function createTurnExecutionService(deps: TurnExecutionDeps): TurnExecuti
   function handleWatchdogTimeout(): void {
     const state = deps.getState();
     if (!state.isStreaming) return;
+    // 【贴底意图必须在 flush 改写 DOM 前捕获 (Why)】避免 flush 撑高容器后误判为非贴底，
+    // 导致超时收口 render 把视口锁回上方。
+    const wasNearBottomBeforeTimeout = deps.isStreamNearBottom?.() ?? false;
     deps.getTokenCoalescer().flush();
+    deps.clearToolPatchQueue?.();
+    deps.stopRunningToolTimers?.();
     const ctx = deps.getActiveStreamingContext();
     const timedOutSessionId = ctx.activeStreamingStoredSessionId;
     const timedOutBotName = ctx.activeStreamingBotName;
+    if (timedOutSessionId && timedOutSessionId === state.activeSessionId && wasNearBottomBeforeTimeout) {
+      deps.setPendingScrollToBottom(true);
+    }
     settleTurnTermination({
       runningSessionIds: deps.getActiveRunningSessionIds(),
       runningBotNames: deps.getActiveRunningBotNames(),
@@ -283,10 +294,12 @@ export function createTurnExecutionService(deps: TurnExecutionDeps): TurnExecuti
     safeUnref(presenceTerminalTimer);
   }
 
-  function setTimedDockNotice(msg: string, durationMs = 4000): void {
+  function setTimedDockNotice(msg: string, durationMs = 4000, options?: { skipRender?: boolean }): void {
     const state = deps.getState();
     state.dockNotice = msg;
-    deps.render();
+    if (!options?.skipRender) {
+      deps.render();
+    }
     if (dockNoticeDismissTimer) {
       clearTimeout(dockNoticeDismissTimer);
       dockNoticeDismissTimer = null;
@@ -432,7 +445,12 @@ export function createTurnExecutionService(deps: TurnExecutionDeps): TurnExecuti
     const targetLiveId = ctx.activeStreamingLiveId || state.activeLiveSessionId;
     const targetStoredId = ctx.activeStreamingStoredSessionId || state.activeSessionId;
 
+    // 【贴底意图必须在 flush / setMessageContent 改写 DOM 之前捕获 (Why)】
+    //   避免冲刷残留 token 或追加中断文案撑高容器后误判为非贴底，同时清理未执行的工具补丁队列与计时器。
+    const wasNearBottomBeforeInterrupt = deps.isStreamNearBottom?.() ?? false;
     deps.getTokenCoalescer().flush();
+    deps.clearToolPatchQueue?.();
+    deps.stopRunningToolTimers?.();
     disarmTurnWatchdog();
 
     const isCurrent = ctx.activeStreamingStoredSessionId === state.activeSessionId;
@@ -452,6 +470,35 @@ export function createTurnExecutionService(deps: TurnExecutionDeps): TurnExecuti
       if (target) {
         target.content = target.content ? target.content + deps.t('chat.interruptedSuffix') : deps.t('chat.interruptedEmpty');
       }
+    }
+
+    // 【收敛运行中工具态 (Pitfall)】中断后若 toolCall 仍停留在 running，ToolBlocks 会持续空转 useNow 秒脉冲与旋转指示器。
+    const settleRunningTools = (msgs: MessageViewModel[]): void => {
+      const now = Date.now();
+      for (const msg of msgs) {
+        if (!msg.toolCalls) continue;
+        for (const tc of msg.toolCalls) {
+          if (tc.status === 'running') {
+            tc.status = 'completed';
+            if (tc.startTime && !tc.durationMs) {
+              tc.durationMs = Math.max(100, now - tc.startTime);
+            }
+          }
+        }
+      }
+    };
+    if (isCurrent) {
+      settleRunningTools(state.messages);
+    }
+    if (targetStoredId) {
+      const cached = deps.getSessionMessagesCache().get(targetStoredId);
+      if (cached && cached !== state.messages) {
+        settleRunningTools(cached);
+      }
+    }
+
+    if (isCurrent && wasNearBottomBeforeInterrupt) {
+      deps.setPendingScrollToBottom(true);
     }
 
     const interruptedSessionId = ctx.activeStreamingStoredSessionId;
@@ -478,6 +525,8 @@ export function createTurnExecutionService(deps: TurnExecutionDeps): TurnExecuti
     }
 
     state.isStreaming = false;
+    state.turnStartedAt = undefined;
+    deps.setTurnStartedSessionId(null);
     // 【在场指示器】用户主动中断：落中断终态（TTL 8s 自动退场），让「已停手」被看见一次
     armPresenceTerminal({ kind: 'interrupted' });
     deps.setActiveStreamingContext({
@@ -487,8 +536,8 @@ export function createTurnExecutionService(deps: TurnExecutionDeps): TurnExecuti
       activeStreamingBotName: null,
     });
 
+    // setTimedDockNotice 内部已同步触发一次 render()，避免重复调用二次 render 提前消费贴底标记
     setTimedDockNotice(deps.t('chat.turnInterruptedNotice'));
-    deps.render();
 
     // 2. Notify remote gateway
     const client = deps.getGatewayClient();

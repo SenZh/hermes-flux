@@ -206,6 +206,13 @@ export function ToolCapsule({ tool, now }: ToolCapsuleProps): React.ReactElement
 export interface ToolSectionProps {
   messageId: string;
   tools: ConversationToolVM[];
+  /**
+   * 当前行是否处于流式生成态（默认 false）。
+   * 【设计意图 (Why)】流式期间 `#msg-tools-<id>` 由宿主 `toolPatchQueue` 直写 `innerHTML`，
+   *   流式态挂载空壳（`key="streaming"`）保证单一 DOM 所有者；收口态切换 `key="settled"`
+   *   让 React 在单次 commit 中原子替换外壳并挂载 `<ToolBlocks>`，杜绝 `toolsChildren: 2` 重复节点。
+   */
+  isStreaming?: boolean;
 }
 
 function ReadGroup({ tools, now }: { tools: ConversationToolVM[]; now?: number }): React.ReactElement {
@@ -357,13 +364,18 @@ export function ToolBlocks({ tools }: { tools: ConversationToolVM[] }): React.Re
  * 工具区块外壳：#msg-tools-<id> 锚点必须留在这一层。
  *
  * 【防范的历史坑 (Pitfall)】
- *   流式补丁通道直写该容器的 innerHTML，锚点若是 details 会把 summary 一起冲掉。
+ *   1. 流式补丁通道直写该容器的 innerHTML，锚点若是 details 会把 summary 一起冲掉；
+ *   2. 若流式态与收口态复用同一 DOM 节点 key，React 结束流式提交 <ToolBlocks> 时会把新子树
+ *      追加到 toolPatchQueue 残留的 DOM 节点旁（实测 toolsChildren === 2）或触发 removeChild 失配。
  * 【约束与规则 (Rules)】
- *   外壳只负责定位，不承载任何内容逻辑；内容一律走 ToolBlocks。
+ *   外壳只负责定位与流式/收口态所有权交接，不承载任何内容逻辑；内容一律走 ToolBlocks。
  */
-export function ToolSection({ messageId, tools }: ToolSectionProps): React.ReactElement {
+export function ToolSection({ messageId, tools, isStreaming = false }: ToolSectionProps): React.ReactElement {
+  if (isStreaming) {
+    return <div key="streaming" className="conv-tools" id={`msg-tools-${messageId}`} />;
+  }
   return (
-    <div className="conv-tools" id={`msg-tools-${messageId}`}>
+    <div key="settled" className="conv-tools" id={`msg-tools-${messageId}`}>
       <ToolBlocks tools={tools} />
     </div>
   );

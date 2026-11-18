@@ -19,7 +19,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { ConversationStage } from '../dist/components-react/conversation/index.js';
+import { ConversationStage, ToolSection } from '../dist/components-react/conversation/index.js';
 
 const base = { mode: 'scratchpad', connection: 'connected', messages: [], isStreaming: false };
 
@@ -98,4 +98,42 @@ test('流式态工具不聚合：各行的工具留在各自 #msg-tools-*（守 
   assert.ok(firstRow.includes('id="msg-tools-a1"'), 'a1 必须保留自己的工具锚点');
   assert.ok(secondRow.includes('id="msg-tools-a2"'), 'a2 必须保留自己的工具锚点');
   assert.ok(!firstRow.includes('write_file'), 'a1 不得持有 a2 的工具（一旦聚合，直写锚点会整体错位）');
+});
+
+test('ToolSection 流式→收口原子 key 交接：流式态空壳让权给 toolPatchQueue，收口态换 key 挂载唯一 ToolBlocks', () => {
+  const tools = [
+    { id: 't1', name: 'read_file', status: 'completed', args: '{"path":"a.ts"}', output: 'ok' },
+    { id: 't2', name: 'write_file', status: 'completed', args: '{"path":"b.ts"}', output: 'ok' },
+  ];
+
+  // 1. 直接验证 React Element key 切换与子节点所有权隔离
+  const streamingEl = ToolSection({ messageId: 'ast-swap', tools, isStreaming: true });
+  const settledEl = ToolSection({ messageId: 'ast-swap', tools, isStreaming: false });
+  assert.equal(streamingEl.key, 'streaming', '流式态外壳必须带 key="streaming"');
+  assert.equal(settledEl.key, 'settled', '收口态外壳必须带 key="settled"');
+  assert.notEqual(streamingEl.key, settledEl.key, 'key 变更才能保证 React 单次 commit 原子替换外壳，杜绝 toolsChildren=2');
+  assert.equal(streamingEl.props.id, 'msg-tools-ast-swap');
+  assert.equal(settledEl.props.id, 'msg-tools-ast-swap');
+  assert.equal(streamingEl.props.children, undefined, '流式态必须零 React 子 fiber，把 DOM 所有权完整让给 toolPatchQueue');
+  assert.ok(settledEl.props.children, '收口态必须挂载 ToolBlocks 子树');
+
+  // 2. 端到端通过 ConversationStage 验证流式态空壳 → 收口态唯一工具包
+  const streamingHtml = render({
+    isStreaming: true,
+    messages: [user(), assistant('ast-swap', { content: '正文', toolCalls: tools })],
+  });
+  assert.ok(
+    streamingHtml.includes('<div class="conv-tools" id="msg-tools-ast-swap"></div>'),
+    '流式末行在 ConversationStage 中必须产出空 #msg-tools-* 外壳',
+  );
+
+  const settledHtml = render({
+    isStreaming: false,
+    messages: [user(), assistant('ast-swap', { content: '正文', toolCalls: tools })],
+  });
+  assert.ok(settledHtml.includes('id="msg-tools-ast-swap"'), '收口态 #msg-tools-* 锚点必须仍在');
+  // 【为什么不在静态标记里数工具包 (Why)】renderToStaticMarkup 无协调、无 toolPatchQueue，
+  //   收口段 `.conv-package` 计数在任何实现下都恒为 1，属恒真断言（对删 key 无杀伤力）。
+  //   真实 DOM 级唯一性（旧实现实测 2 个子节点）由
+  //   packages/desktop/__tests__/cdp/stream-settle-cdp.test.mjs 在真实 Blink 中守护。
 });

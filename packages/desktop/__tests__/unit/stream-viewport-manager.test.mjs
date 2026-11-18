@@ -1522,6 +1522,406 @@ test('StreamViewportManager 核心视口与锚点行为单测', async (t) => {
     assert.equal(manager.getMedianEstimator().sampleCount, 0, '占位高度样本只认 .conv-turn；无回合时不得进入样本');
     assert.deepEqual(writes, [], '无回合样本时不得写入变量');
   });
+
+  await t.test('55. 回合采样按 sessionId:turnId 去重，且跳过流式中的回合直至其落定', () => {
+    let turn2Streaming = 'true';
+    let turn2Height = 120;
+    const rows = [
+      { getAttribute: () => 'row-1', getBoundingClientRect: () => ({ top: 0, bottom: 80, height: 80 }) },
+    ];
+    const turns = [
+      {
+        getAttribute: (name) => (name === 'data-conv-turn' ? 'turn-1' : name === 'data-conv-streaming' ? 'false' : null),
+        getBoundingClientRect: () => ({ top: 0, bottom: 260, height: 260 }),
+      },
+      {
+        getAttribute: (name) => (name === 'data-conv-turn' ? 'turn-2' : name === 'data-conv-streaming' ? turn2Streaming : null),
+        getBoundingClientRect: () => ({ top: 260, bottom: 260 + turn2Height, height: turn2Height }),
+      },
+    ];
+    const fakeStream = {
+      scrollTop: 0,
+      scrollHeight: 3000,
+      clientHeight: 800,
+      style: { setProperty: () => {} },
+      getBoundingClientRect: () => ({ top: 0, bottom: 800 }),
+      querySelectorAll: (selector) => (selector === '.conv-turn' ? turns : rows),
+    };
+    const host = createMockViewportHost({ streamElement: fakeStream, activeSessionId: 'sess-dedup' });
+    const manager = new StreamViewportManager(host);
+
+    // 第一次捕获：只采已落定的 turn-1，跳过流式中的 turn-2
+    manager.captureStreamAnchor();
+    assert.equal(manager.getMedianEstimator().sampleCount, 1, '流式中的回合不得进入样本');
+    assert.equal(manager.getMedianEstimator().getMedian(), 260);
+
+    // 重复捕获：turn-1 已采样过必须跳过，turn-2 仍在流式继续跳过
+    turn2Height = 200;
+    manager.captureStreamAnchor();
+    assert.equal(manager.getMedianEstimator().sampleCount, 1, '已落定回合不得重复刷权');
+
+    // turn-2 结束流式后落定为 400px：只采样一次
+    turn2Streaming = 'false';
+    turn2Height = 400;
+    manager.captureStreamAnchor();
+    assert.equal(manager.getMedianEstimator().sampleCount, 2, '流式回合落定后必须被采样一次');
+    assert.equal(manager.getMedianEstimator().getMedian(), 330);
+
+    // 再次捕获：两回合都已去重，样本数保持 2
+    manager.captureStreamAnchor();
+    assert.equal(manager.getMedianEstimator().sampleCount, 2, '落定后再次捕获不得重复追加样本');
+  });
+
+  await t.test('56. 中位数未变化时跳过 setProperty（零重复写入与布局开销）', () => {
+    const writes = [];
+    const rootWrites = [];
+    const rows = [
+      { getAttribute: () => 'row-1', getBoundingClientRect: () => ({ top: 0, bottom: 80, height: 80 }) },
+    ];
+    const turns = [
+      {
+        getAttribute: (name) => (name === 'data-conv-turn' ? 'turn-a' : 'false'),
+        getBoundingClientRect: () => ({ top: 0, bottom: 280, height: 280 }),
+      },
+    ];
+    const fakeStream = {
+      scrollTop: 0,
+      scrollHeight: 3000,
+      clientHeight: 800,
+      style: { setProperty: (name, value) => writes.push(`${name}:${value}`) },
+      getBoundingClientRect: () => ({ top: 0, bottom: 800 }),
+      querySelectorAll: (selector) => (selector === '.conv-turn' ? turns : rows),
+    };
+    const origDoc = globalThis.document;
+    globalThis.document = {
+      documentElement: { style: { setProperty: (name, value) => rootWrites.push(`${name}:${value}`) } },
+    };
+    try {
+      const host = createMockViewportHost({ streamElement: fakeStream, activeSessionId: 'sess-noop-write' });
+      const manager = new StreamViewportManager(host);
+
+      manager.captureStreamAnchor();
+      assert.equal(writes.length, 1);
+      assert.equal(rootWrites.length, 1);
+
+      // 第二次捕获中位数不变：0 次写入
+      manager.captureStreamAnchor();
+      assert.equal(writes.length, 1, '值未变化时 stream 不得重复 setProperty');
+      assert.equal(rootWrites.length, 1, '值未变化时 documentElement 不得重复 setProperty');
+    } finally {
+      if (origDoc === undefined) delete globalThis.document;
+      else globalThis.document = origDoc;
+    }
+  });
+
+  await t.test('57. 贴底态写入占位变量撑大 scrollHeight（dSh > 0）时等量补偿 scrollTop 并标记程序化滚动', () => {
+    const rows = [
+      { getAttribute: () => 'row-last', getBoundingClientRect: () => ({ top: 600, bottom: 760, height: 160 }) },
+    ];
+    const turns = [
+      {
+        getAttribute: (name) => (name === 'data-conv-turn' ? 'turn-grow' : 'false'),
+        getBoundingClientRect: () => ({ top: 500, bottom: 820, height: 320 }),
+      },
+    ];
+    const fakeStream = {
+      scrollTop: 9040, // dist = 10000 - 9040 - 800 = 160（贴底安全区内）
+      scrollHeight: 10000,
+      clientHeight: 800,
+      style: {
+        setProperty: (name) => {
+          if (name === '--conv-intrinsic-median-height') {
+            fakeStream.scrollHeight = 10528; // dSh = +528px
+          }
+        },
+      },
+      getBoundingClientRect: () => ({ top: 0, bottom: 800 }),
+      querySelectorAll: (selector) => (selector === '.conv-turn' ? turns : rows),
+    };
+    const origGcs = globalThis.getComputedStyle;
+    globalThis.getComputedStyle = () => ({ paddingBottom: '160px', getPropertyValue: () => '' });
+    try {
+      const host = createMockViewportHost({
+        streamElement: fakeStream,
+        activeSessionId: 'sess-grow',
+      });
+      const manager = new StreamViewportManager(host);
+
+      const anchor = manager.captureStreamAnchor();
+
+      assert.equal(fakeStream.scrollTop, 9568, 'scrollTop 必须按 dSh=+528 补偿，保持 dist=160px 不变');
+      assert.equal(anchor.rawScrollTop, 9568, '返回锚点必须携带补偿后的 scrollTop，防止回退覆盖');
+      assert.equal(host._programmaticScrolls.length, 1, '补偿写 scrollTop 必须标记程序化滚动');
+      assert.equal(manager.isNearBottom(fakeStream), true, '补偿后必须仍处于贴底安全区');
+    } finally {
+      globalThis.getComputedStyle = origGcs;
+    }
+  });
+
+  await t.test('58. 写入占位变量收缩 scrollHeight（dSh < 0）触发浏览器 clamp 时必须调用 markProgrammaticScroll', () => {
+    const rows = [
+      { getAttribute: () => 'row-1', getBoundingClientRect: () => ({ top: 0, bottom: 100, height: 100 }) },
+    ];
+    const turns = [
+      {
+        getAttribute: (name) => (name === 'data-conv-turn' ? 'turn-shrink' : 'false'),
+        getBoundingClientRect: () => ({ top: 0, bottom: 120, height: 120 }),
+      },
+    ];
+    const fakeStream = {
+      scrollTop: 4200, // 贴底（prevDist = 0）
+      scrollHeight: 5000,
+      clientHeight: 800,
+      style: {
+        setProperty: (name) => {
+          if (name === '--conv-intrinsic-median-height') {
+            // 模拟 Blink 收缩 scrollHeight 并自动向下夹紧 scrollTop（dSh = -2592）
+            fakeStream.scrollHeight = 2408;
+            fakeStream.scrollTop = 1608;
+          }
+        },
+      },
+      getBoundingClientRect: () => ({ top: 0, bottom: 800 }),
+      querySelectorAll: (selector) => (selector === '.conv-turn' ? turns : rows),
+    };
+    const origGcs = globalThis.getComputedStyle;
+    globalThis.getComputedStyle = () => ({ paddingBottom: '0px', getPropertyValue: () => '' });
+    try {
+      const host = createMockViewportHost({
+        streamElement: fakeStream,
+        activeSessionId: 'sess-shrink',
+      });
+      const manager = new StreamViewportManager(host);
+
+      const anchor = manager.captureStreamAnchor();
+
+      assert.equal(fakeStream.scrollTop, 1608);
+      assert.equal(anchor.rawScrollTop, 1608);
+      assert.equal(host._programmaticScrolls.length, 1, '即使由 Blink 原生 clamp 改写了 scrollTop，也必须登记程序化滚动避免误判用户上滚');
+    } finally {
+      globalThis.getComputedStyle = origGcs;
+    }
+  });
+
+  await t.test('59. 非贴底回溯态：上方离屏回合撑高时按 anchorRow 补偿 scrollTop；仅下方变化时不漂移', () => {
+    let anchorTop = 120;
+    const anchorRow = {
+      getAttribute: () => 'row-mid',
+      getBoundingClientRect: () => ({ top: anchorTop, bottom: anchorTop + 100, height: 100 }),
+    };
+    let currentTurns = [
+      {
+        getAttribute: (name) => (name === 'data-conv-turn' ? 'turn-above-1' : 'false'),
+        getBoundingClientRect: () => ({ top: 100, bottom: 400, height: 300 }),
+      },
+    ];
+    let shiftMode = 'above';
+    const fakeStream = {
+      scrollTop: 2000, // dist = 10000 - 2000 - 800 = 7200（明确处于非贴底回溯态）
+      scrollHeight: 10000,
+      clientHeight: 800,
+      style: {
+        setProperty: (name) => {
+          if (name === '--conv-intrinsic-median-height') {
+            if (shiftMode === 'above') {
+              // 模拟视口上方离屏回合膨胀 240px，把 anchorRow 下推 240px
+              fakeStream.scrollHeight += 240;
+              anchorTop += 240;
+            } else {
+              // 仅视口下方离屏回合膨胀：scrollHeight 增加但 anchorRow 的视口相对位置不变
+              fakeStream.scrollHeight += 300;
+            }
+          }
+        },
+      },
+      getBoundingClientRect: () => ({ top: 0, bottom: 800 }),
+      querySelectorAll: (selector) => (selector === '.conv-turn' ? currentTurns : [anchorRow]),
+    };
+    const origGcs = globalThis.getComputedStyle;
+    globalThis.getComputedStyle = () => ({ paddingBottom: '0px', getPropertyValue: () => '' });
+    try {
+      const host = createMockViewportHost({
+        streamElement: fakeStream,
+        activeSessionId: 'sess-scrollup',
+      });
+      const manager = new StreamViewportManager(host);
+
+      // 场景 1：上方离屏回合膨胀 240px -> scrollTop += 240
+      const anchor1 = manager.captureStreamAnchor();
+      assert.equal(fakeStream.scrollTop, 2240, '上方离屏回合膨胀必须等量补偿 scrollTop 锁住阅读锚点');
+      assert.equal(anchor1.rawScrollTop, 2240);
+      assert.equal(host._programmaticScrolls.length, 1);
+
+      // 场景 2：仅下方离屏回合膨胀（新样本改变中位数但 anchorTop 不变）-> scrollTop 不动
+      shiftMode = 'below';
+      anchorTop = 120;
+      currentTurns = [
+        {
+          getAttribute: (name) => (name === 'data-conv-turn' ? 'turn-below-2' : 'false'),
+          getBoundingClientRect: () => ({ top: 100, bottom: 600, height: 500 }),
+        },
+      ];
+      manager.captureStreamAnchor();
+      assert.equal(fakeStream.scrollTop, 2240, '仅视口下方离屏回合变化时不得移动 scrollTop');
+      assert.equal(host._programmaticScrolls.length, 1, 'scrollTop 未变化时不得多余登记程序化滚动');
+    } finally {
+      globalThis.getComputedStyle = origGcs;
+    }
+  });
+
+  await t.test('59b. 提示词跳转落定期：占位变量照写，但绝不改写 scrollTop（视口由落定计划独占）', () => {
+    const rows = [
+      { getAttribute: () => 'row-last', getBoundingClientRect: () => ({ top: 600, bottom: 760, height: 160 }) },
+    ];
+    const turns = [
+      {
+        getAttribute: (name) => (name === 'data-conv-turn' ? 'turn-grow' : 'false'),
+        getBoundingClientRect: () => ({ top: 500, bottom: 820, height: 320 }),
+      },
+    ];
+    const streamProps = new Map();
+    const fakeStream = {
+      scrollTop: 9040, // dist = 160（贴底安全区内），若非跳转期必被补偿到 9568
+      scrollHeight: 10000,
+      clientHeight: 800,
+      style: {
+        setProperty: (name, value) => {
+          streamProps.set(name, value);
+          if (name === '--conv-intrinsic-median-height') fakeStream.scrollHeight = 10528;
+        },
+      },
+      getBoundingClientRect: () => ({ top: 0, bottom: 800 }),
+      querySelectorAll: (selector) => (selector === '.conv-turn' ? turns : rows),
+    };
+    const origGcs = globalThis.getComputedStyle;
+    globalThis.getComputedStyle = () => ({ paddingBottom: '160px', getPropertyValue: () => '' });
+    try {
+      const host = createMockViewportHost({
+        streamElement: fakeStream,
+        activeSessionId: 'sess-jump',
+        isPromptJumpSettling: true,
+      });
+      const manager = new StreamViewportManager(host);
+
+      manager.captureStreamAnchor();
+
+      assert.equal(
+        streamProps.get('--conv-intrinsic-median-height'),
+        '320px',
+        '跳转落定期占位变量仍必须写，否则离屏回合占位高度失真',
+      );
+      assert.equal(fakeStream.scrollTop, 9040, '跳转落定期不得改写 scrollTop，视口由落定计划独占');
+      assert.equal(host._programmaticScrolls.length, 0, '未发生位移时不得登记程序化滚动');
+    } finally {
+      globalThis.getComputedStyle = origGcs;
+    }
+  });
+
+  await t.test('60. sampledTurnKeys 超出 2000 上限时 FIFO 淘汰最老键，且 rootStyle 与非可滚容器分支均受保护', () => {
+    const streamProps = new Map();
+    const rootProps = new Map();
+    const streamWrites = [];
+    const rootWrites = [];
+    let currentTurns = [];
+
+    const fakeStream = {
+      scrollHeight: 600,
+      clientHeight: 800,
+      scrollTop: 0,
+      style: {
+        getPropertyValue: (name) => streamProps.get(name) ?? '',
+        setProperty: (name, val) => {
+          streamProps.set(name, val);
+          streamWrites.push(val);
+        },
+      },
+      getBoundingClientRect: () => ({ top: 0, bottom: 800 }),
+      querySelectorAll: (selector) => (selector === '.conv-turn' ? currentTurns : []),
+    };
+
+    const origDocument = globalThis.document;
+    const origGcs = globalThis.getComputedStyle;
+    globalThis.document = {
+      documentElement: {
+        style: {
+          getPropertyValue: (name) => rootProps.get(name) ?? '',
+          setProperty: (name, val) => {
+            rootProps.set(name, val);
+            rootWrites.push(val);
+          },
+        },
+      },
+    };
+    globalThis.getComputedStyle = () => ({ paddingBottom: '0px', getPropertyValue: () => '' });
+
+    try {
+      const host = createMockViewportHost({
+        streamElement: fakeStream,
+        activeSessionId: 'sess-fifo',
+      });
+      const manager = new StreamViewportManager(host);
+
+      // 1. 一次灌入 2001 个不同 turnId，触发 MAX_SAMPLED_TURN_KEYS(2000) 的 FIFO 淘汰；
+      // 同时容器 scrollHeight <= clientHeight，验证非可滚容器绝不改写 scrollTop
+      currentTurns = Array.from({ length: 2001 }, (_, idx) => ({
+        getAttribute: (name) => (name === 'data-conv-turn' ? `turn-${idx}` : 'false'),
+        getBoundingClientRect: () => ({ top: 0, bottom: 210, height: 210 }),
+      }));
+      manager.captureStreamAnchor();
+      assert.equal(streamWrites.length, 1, '首次写入 stream 样式变量');
+      assert.equal(rootWrites.length, 1, '首次同步写入 documentElement 样式变量');
+      assert.equal(fakeStream.scrollTop, 0, 'scrollHeight <= clientHeight 时不得修改 scrollTop');
+
+      // 2. 再次采样相同的 turn-1..2000（仍在去重集合内）且样式未变 -> 零新增写入
+      currentTurns = [
+        {
+          getAttribute: (name) => (name === 'data-conv-turn' ? 'turn-2000' : 'false'),
+          getBoundingClientRect: () => ({ top: 0, bottom: 420, height: 420 }),
+        },
+      ];
+      manager.captureStreamAnchor();
+      assert.equal(streamWrites.length, 1, '仍在去重表内的回合与未变值不得重复写入 stream');
+      assert.equal(rootWrites.length, 1, '未变值不得重复写入 documentElement');
+
+      // 3. 去重表必须精确停在 2000 上限：2001 个不同 turnId 只能淘汰最老的一个
+      assert.equal(
+        manager.getSampledTurnKeyCount(),
+        2000,
+        '2001 个不同回合键必须被 FIFO 淘汰夹在 2000 上限（删除淘汰分支会变成 2001）',
+      );
+      assert.equal(manager.hasSampledTurnKey('sess-fifo:turn-0'), false, 'FIFO 必须淘汰最老键');
+      assert.equal(manager.hasSampledTurnKey('sess-fifo:turn-2000'), true, '最新键必须留在去重表内');
+
+      // 4. 被淘汰的键重新出现时必须重新入样并重新记账（否则去重表会永久拒绝该回合）
+      currentTurns = [
+        {
+          getAttribute: (name) => (name === 'data-conv-turn' ? 'turn-0' : 'false'),
+          getBoundingClientRect: () => ({ top: 0, bottom: 320, height: 320 }),
+        },
+      ];
+      manager.captureStreamAnchor();
+      assert.equal(
+        manager.hasSampledTurnKey('sess-fifo:turn-0'),
+        true,
+        '淘汰后重新出现的回合必须被再次接纳（恒拒绝等于漏采）',
+      );
+      assert.equal(manager.getSampledTurnKeyCount(), 2000, '重新入样后仍被上限夹住');
+
+      // 5. 连续喂入 30 个 320px 使中位数由 210 -> 320，且只清 rootProps 保留 streamProps 覆盖双侧独立判断分支
+      currentTurns = Array.from({ length: 30 }, (_, i) => ({
+        getAttribute: (name) => (name === 'data-conv-turn' ? `turn-hi-${i}` : 'false'),
+        getBoundingClientRect: () => ({ top: 0, bottom: 320, height: 320 }),
+      }));
+      manager.captureStreamAnchor();
+      assert.equal(streamProps.get('--conv-intrinsic-median-height'), '320px');
+      assert.equal(rootProps.get('--conv-intrinsic-median-height'), '320px');
+      assert.equal(streamWrites.length, 2);
+      assert.equal(rootWrites.length, 2);
+    } finally {
+      globalThis.document = origDocument;
+      globalThis.getComputedStyle = origGcs;
+    }
+  });
 });
 
 /**
@@ -2268,5 +2668,230 @@ test('会话进入计划 beginSessionEnter / settleSessionEnter', async (t) => {
 
     assert.equal(stream.getTop(), 320, '熔断后必须按记忆里的标量基准有界降级，而不是永久 armed');
     assert.equal(manager.isSessionEnterPending(), false, '熔断后必须收口，否则滚动记忆被永久冻结');
+  });
+});
+
+test('StreamViewportManager 占位高度采样去重与中性补偿变异杀伤矩阵', async (t) => {
+  await t.test('A. 跨 DOM 重建按 sessionId:turnId 去重、无 id 走 WeakSet、跳过未布局/零高/自锁替身', () => {
+    const savedGcs = globalThis.getComputedStyle;
+    const savedDoc = globalThis.document;
+    t.after(() => {
+      globalThis.getComputedStyle = savedGcs;
+      globalThis.document = savedDoc;
+    });
+
+    let computedIntrinsic = '200px';
+    let computedPaddingBottom = '0px';
+    globalThis.getComputedStyle = () => ({
+      getPropertyValue: (name) => (name === '--conv-intrinsic-median-height' ? computedIntrinsic : ''),
+      paddingBottom: computedPaddingBottom,
+    });
+
+    const rootProps = new Map();
+    let rootSetCount = 0;
+    globalThis.document = {
+      documentElement: {
+        style: {
+          getPropertyValue: (k) => rootProps.get(k) ?? '',
+          setProperty: (k, v) => { rootSetCount += 1; rootProps.set(k, v); },
+        },
+      },
+    };
+
+    const makeTurn = ({ id, height, laidOut = true }) => ({
+      getAttribute: (attr) => (attr === 'data-conv-turn' ? id : null),
+      checkVisibility: (opts) => (opts?.contentVisibilityAuto === true ? laidOut : true),
+      getBoundingClientRect: () => ({ top: 0, bottom: height, height }),
+    });
+
+    const weakTurn = makeTurn({ id: null, height: 260 });
+    let activeTurns = [
+      makeTurn({ id: 't-1', height: 220 }),
+      makeTurn({ id: 't-unlaid', height: 999, laidOut: false }),
+      makeTurn({ id: 't-zero', height: 0 }),
+      makeTurn({ id: 't-selflock', height: 200.2 }),
+      makeTurn({ id: 't-boundary', height: 200.5 }), // |200.5 - 200| === 0.5 必须纳入采样
+      weakTurn,
+    ];
+
+    const streamProps = new Map();
+    let streamSetCount = 0;
+    const streamEl = {
+      scrollTop: 500,
+      scrollHeight: 1500,
+      clientHeight: 600,
+      style: {
+        getPropertyValue: (k) => streamProps.get(k) ?? '',
+        setProperty: (k, v) => { streamSetCount += 1; streamProps.set(k, v); },
+      },
+      getBoundingClientRect: () => ({ top: 42, bottom: 642, height: 600 }),
+      querySelectorAll: (sel) => (sel === '.conv-turn' ? activeTurns : []),
+    };
+
+    const host = createMockViewportHost({ streamElement: streamEl, activeSessionId: 'sess-A' });
+    const manager = new StreamViewportManager(host);
+
+    manager.captureStreamAnchor();
+    // 有效样本应仅包含 220, 200.5, 260（3 个），中位数 220
+    assert.equal(manager.getMedianEstimator().sampleCount, 3, '未布局/零高/自锁替身必须全部过滤，边界 0.5 必须采入');
+    assert.equal(streamProps.get('--conv-intrinsic-median-height'), '220px');
+    assert.equal(rootProps.get('--conv-intrinsic-median-height'), '220px');
+    assert.equal(streamSetCount, 1);
+    assert.equal(rootSetCount, 1);
+
+    // 1. 跨 DOM 重建：全新元素但同 data-conv-turn="t-1"，且 weakTurn 同引用高度改写，均不得二次采样
+    weakTurn.getBoundingClientRect = () => ({ top: 0, bottom: 900, height: 900 });
+    activeTurns = [
+      makeTurn({ id: 't-1', height: 888 }),
+      weakTurn,
+    ];
+    manager.captureStreamAnchor();
+    assert.equal(manager.getMedianEstimator().sampleCount, 3, '同 sessionId:turnId 的新 DOM 节点与同引用无 id 节点均必须命中去重');
+    assert.equal(streamSetCount, 1, '值未变化时 stream 不得重复写');
+    assert.equal(rootSetCount, 1, '值未变化时 root 不得重复写');
+
+    // 2. stream 已有正确值而 root 被重置时，仅写 root 不重写 stream
+    rootProps.clear();
+    manager.captureStreamAnchor();
+    assert.equal(streamSetCount, 1, 'stream 已是最新值时不得重写');
+    assert.equal(rootSetCount, 2, 'root 缺值时必须仅补写 root');
+
+    // 3. root 已有正确值而 stream 被重置时，仅写 stream 不重写 root
+    streamProps.clear();
+    manager.captureStreamAnchor();
+    assert.equal(streamSetCount, 2, 'stream 缺值时必须补写 stream');
+    assert.equal(rootSetCount, 2, 'root 已是最新值时不得重写');
+
+    // 4. getComputedStyle 返回 0px / auto 时 readIntrinsicHeightVariable 与 readBottomReservePx 安全回落
+    computedIntrinsic = '0px';
+    computedPaddingBottom = 'auto';
+    activeTurns = [makeTurn({ id: 't-low', height: 0.2 })];
+    manager.captureStreamAnchor();
+    assert.equal(manager.getMedianEstimator().sampleCount, 4, 'current=0px 不可解析时返回 null，不误触发自锁打断');
+  });
+
+  await t.test('B. 无 getPropertyValue 的新 stream 切换写入、贴底/非贴底 >=1px 边界与非零 stream.top 锚点补偿', () => {
+    const savedDoc = globalThis.document;
+    t.after(() => { globalThis.document = savedDoc; });
+    globalThis.document = undefined;
+
+    // 1. 无 getPropertyValue 时切换新 stream 元素，即便值未变也必须写入新 stream
+    const makeBareStream = (opts) => {
+      let setCalls = 0;
+      let scrollTopWrites = 0;
+      let _scrollTop = opts.scrollTop;
+      let _scrollHeight = opts.scrollHeight;
+      const el = {
+        clientHeight: opts.clientHeight,
+        get scrollTop() { return _scrollTop; },
+        set scrollTop(v) { scrollTopWrites += 1; _scrollTop = v; },
+        get scrollHeight() { return _scrollHeight; },
+        style: {
+          setProperty: (_k, _v) => {
+            setCalls += 1;
+            if (opts.onSetProperty) opts.onSetProperty((h) => { _scrollHeight = h; });
+          },
+        },
+        getBoundingClientRect: () => ({ top: opts.streamTop ?? 0, bottom: (opts.streamTop ?? 0) + opts.clientHeight, height: opts.clientHeight }),
+        querySelectorAll: (sel) => (sel === '.conv-turn' ? (opts.turns || []) : (opts.rows || [])),
+      };
+      return {
+        el,
+        getSetCalls: () => setCalls,
+        getScrollTopWrites: () => scrollTopWrites,
+      };
+    };
+
+    const s1 = makeBareStream({
+      scrollTop: 0,
+      scrollHeight: 600,
+      clientHeight: 600, // nextScrollHeight === clientHeight 边界：禁止写 scrollTop
+      turns: [{ getAttribute: () => 't1', getBoundingClientRect: () => ({ top: 0, bottom: 240, height: 240 }) }],
+      onSetProperty: (setH) => setH(600),
+    });
+    const host1 = createMockViewportHost({ streamElement: s1.el, activeSessionId: 's-bare' });
+    const manager = new StreamViewportManager(host1);
+    manager.captureStreamAnchor();
+    assert.equal(s1.getSetCalls(), 1);
+    assert.equal(s1.getScrollTopWrites(), 0, 'nextScrollHeight === clientHeight 时不得写 scrollTop');
+
+    // 同值换新 stream 元素（无 getPropertyValue）必须仍触发 setProperty
+    const s2 = makeBareStream({
+      scrollTop: 390,
+      scrollHeight: 1000,
+      clientHeight: 600, // prevDist = 10, nearBottom = true
+      turns: [],
+      onSetProperty: (setH) => setH(1000.5), // |targetTop - scrollTop| = 0.5 < 1，不得写 scrollTop
+    });
+    host1.getStreamElement = () => s2.el;
+    manager.captureStreamAnchor();
+    assert.equal(s2.getSetCalls(), 1, '更换 stream 元素后即使中位数不变也必须写入新 stream');
+    assert.equal(s2.getScrollTopWrites(), 0, '贴底差值 < 1px 时不得多余改写 scrollTop');
+
+    // 2. 贴底差值正好 === 1px 时必须精确补偿并 markProgrammaticScroll
+    const s3 = makeBareStream({
+      scrollTop: 390,
+      scrollHeight: 1000,
+      clientHeight: 600, // prevDist = 10
+      turns: [],
+      onSetProperty: (setH) => setH(1001), // targetTop = 391, diff === 1
+    });
+    host1.getStreamElement = () => s3.el;
+    manager.captureStreamAnchor();
+    assert.equal(s3.el.scrollTop, 391, '贴底差值正好 1px 时必须执行中性补偿');
+    assert.equal(s3.getScrollTopWrites(), 1);
+
+    // 3. 非贴底 + 非零 streamTop = 42 + anchorRow 偏移正好 delta === 1px vs 0.5px
+    let anchorTop = 100; // prevOffset = 100 - 42 = 58
+    const anchorRow = {
+      getAttribute: () => 'msg-a',
+      getBoundingClientRect: () => ({ top: anchorTop, bottom: anchorTop + 80, height: 80 }),
+    };
+    const s4 = makeBareStream({
+      scrollTop: 100,
+      scrollHeight: 2000,
+      clientHeight: 600, // dist = 1300, wasNearBottom = false
+      streamTop: 42,
+      rows: [anchorRow],
+      turns: [],
+      onSetProperty: (setH) => {
+        setH(2001);
+        anchorTop = 101; // nextOffset = 101 - 42 = 59, delta = +1
+      },
+    });
+    host1.getStreamElement = () => s4.el;
+    manager.captureStreamAnchor();
+    assert.equal(s4.el.scrollTop, 101, '非贴底且 streamTop=42 时，anchorRow 偏移 +1px 必须精确补偿 +1px');
+
+    // 4. 非贴底 + delta === 0.5px 不得写入；以及 anchorRow === null 时安全空转不抛错
+    anchorTop = 100;
+    const s5 = makeBareStream({
+      scrollTop: 100,
+      scrollHeight: 2000,
+      clientHeight: 600,
+      streamTop: 42,
+      rows: [anchorRow],
+      turns: [],
+      onSetProperty: (setH) => {
+        setH(2000.5);
+        anchorTop = 100.5; // delta = 0.5 < 1
+      },
+    });
+    host1.getStreamElement = () => s5.el;
+    manager.captureStreamAnchor();
+    assert.equal(s5.getScrollTopWrites(), 0, '非贴底锚点偏移 < 1px 时不得改写 scrollTop');
+
+    const s6 = makeBareStream({
+      scrollTop: 100,
+      scrollHeight: 2000,
+      clientHeight: 600,
+      streamTop: 42,
+      rows: [], // anchorRow === null
+      turns: [],
+      onSetProperty: (setH) => setH(2200),
+    });
+    host1.getStreamElement = () => s6.el;
+    manager.captureStreamAnchor();
+    assert.equal(s6.getScrollTopWrites(), 0, '非贴底无可见锚点行时不得抛错或乱写 scrollTop');
   });
 });

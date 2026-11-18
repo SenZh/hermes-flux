@@ -11,8 +11,8 @@
  * 【防范的历史坑 (Pitfall)】
  * 1. 贴底判定必须在内容变动前测量（follow-or-not is decided BEFORE content mutates），
  *    读者向上回溯阅读时，绝不能被新涌入的 token 强制拖拽回底部；
- * 2. 消息内容容器必须显式锁定 flexDirection = 'column'，
- *    严禁 flex 默认的 row 布局将多个 Markdown 段落横向排成多列；
+ * 2. 正文容器初始为 display:none 隐形锚点，首写时须切回 display:block（与 .conv-markdown 默认块级布局一致），
+ *    严禁改写为 flex/flexDirection，避免流式结束 React 清理内联样式时触发 flex→block 边距折叠导致高度突变；
  * 3. 后台会话的流式块必须持续回填至 sessionMessagesCache，切会话时才不会丢失最新内容。
  *
  * 【约束与规则 (Rules)】
@@ -132,10 +132,7 @@ export function createTokenStreamWriter(deps: TokenStreamWriterDeps): TokenStrea
             logStream?.trace('stream-anchor-miss', { id: targetMsg.id });
           } else {
             if (contentEl.style.display === 'none') {
-              contentEl.style.display = 'flex';
-            }
-            if (contentEl.style.flexDirection !== 'column') {
-              contentEl.style.flexDirection = 'column';
+              contentEl.style.display = 'block';
             }
             contentEl.innerHTML = renderMarkdown(targetMsg.content);
           }

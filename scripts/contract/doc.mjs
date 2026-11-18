@@ -432,7 +432,11 @@ function main() {
   }
 
   for (const [file, content] of outputs) {
-    fs.writeFileSync(file, content, 'utf8');
+    // 【行尾跟随原文件 (Why)】Windows 检出为 CRLF；若生成端恒写 LF，内容未变的文档也会被
+    //   git status 标成已修改（纯行尾噪声），评审时无法区分真实契约变化与换行抖动。
+    const existing = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+    const eol = existing && existing.includes('\r\n') ? '\r\n' : '\n';
+    fs.writeFileSync(file, eol === '\n' ? content : content.replace(/\n/g, '\r\n'), 'utf8');
   }
   console.log(`[contract:doc] 已生成 ${outputs.size} 个文档到 docs/gateway/`);
   console.log(`[contract:doc] 索引：docs/gateway/README.md`);

@@ -16,6 +16,7 @@ import {
 import { createFileViewerService } from './services/fileViewerService.js';
 import { createConversationStreamController } from './events/conversationStreamController.js';
 import { createTokenStreamWriter } from './stream/tokenStreamWriter.js';
+import { revealStreamingContentDisplay, shouldPatchStreamingTools } from './stream/streamDomOwnership.js';
 import { type StreamAnchor, type StreamViewportManager, STICK_TO_BOTTOM_THRESHOLD_PX } from './viewport/streamViewportManager.js';
 import { createDesktopStreamViewport, streamSettleState } from './viewport/desktopStreamViewport.js';
 import { PromptNavigatorManager } from './navigation/promptNavigatorManager.js';
@@ -432,6 +433,8 @@ const toolPatchQueue = createToolPatchQueue({
     return msg ? renderToolCapsuleSlot(msg) : '';
   },
   patchElement: (messageId, html) => {
+    // 单所有者守卫：仅活跃流式消息允许直写，防止迟到 rAF 覆写 React <ToolBlocks>；跳过视为已处理
+    if (!shouldPatchStreamingTools({ isStreamingActive: isStreamingActiveForCurrentSession(), activeStreamingMessageId, messageId })) return true;
     const el = document.getElementById(`msg-tools-${messageId}`);
     if (!el) return false;
     el.innerHTML = html;
@@ -733,8 +736,9 @@ sessionOperationService = createSessionOperationService({
   persistSessionsToCache: (s) => persistSessionsToCache(s),
   forgetOlderCursorState: (id) => messageLoadingService.forgetOlderCursorState(id),
   sessionListGeneration, getActiveStreamingStoredSessionId: () => activeStreamingStoredSessionId,
+  getActiveStreamingMessageId: () => activeStreamingMessageId, scheduleToolPatch: (mid) => scheduleToolPatch(mid),
   resetActiveStreamingState: () => {
-    tokenCoalescer.clear(); disarmTurnWatchdog();
+    tokenCoalescer.clear(); toolPatchQueue.clear(); disarmTurnWatchdog();
     activeStreamingMessageId = null; activeStreamingStoredSessionId = null;
     activeStreamingLiveId = null; activeStreamingBotName = null; state.isStreaming = false;
   },
@@ -872,7 +876,8 @@ const turnExecutionService = createTurnExecutionService({
   setMessageContent: (mid, content) => setMessageContent(mid, content),
   syncActiveGroupSpeakerFromMessages: () => syncActiveGroupSpeakerFromMessages(),
   resolveAgentAvatar: (name) => resolveAgentAvatar(name), scrollStreamToBottom: (reason) => scrollStreamToBottom(reason),
-  setPendingScrollToBottom: (val) => renderCoordinator.setPendingScrollToBottom(val), runSlashCommand: (cmd) => inputDockController.runSlashCommand(cmd),
+  setPendingScrollToBottom: (val) => renderCoordinator.setPendingScrollToBottom(val), isStreamNearBottom: () => isStreamNearBottom(document.getElementById('conversation-stream')),
+  clearToolPatchQueue: () => toolPatchQueue.clear(), stopRunningToolTimers: () => stopRunningToolTimers(), runSlashCommand: (cmd) => inputDockController.runSlashCommand(cmd),
   enqueueDraft: () => inputDockController.enqueueDraft(), handleQueueAction: (action, id) => inputDockController.handleQueueAction(action, id),
   setMessageWindowUserExpanded: (val) => messageWindowManager.setMessageWindowUserExpanded(val), ensureMessageWindow: (total) => ensureMessageWindow(total),
   render: () => render(), t, logStream,
@@ -909,18 +914,15 @@ const gatewayEventDispatcher = createGatewayEventDispatcher({
   },
   scheduleSessionsRefresh: () => scheduleSessionsRefresh(), persistTurnToCache: (sid, bot, msgs) => persistTurnToCache(sid, bot, msgs),
   persistSessionsToCache: (sessions) => persistSessionsToCache(sessions), syncProfileLastMessages: () => syncProfileLastMessages(),
-  syncAgentPresence: () => syncAgentPresence(), scheduleToolPatch: (mid) => scheduleToolPatch(mid),
+  syncAgentPresence: () => syncAgentPresence(), scheduleToolPatch: (mid) => scheduleToolPatch(mid), clearToolPatchQueue: () => toolPatchQueue.clear(),
   stopRunningToolTimers: () => stopRunningToolTimers(), setMessageContent: (mid, content) => setMessageContent(mid, content),
   toStoredSessionId: (id) => toStoredSessionId(id), applyColdStartFocus: () => applyColdStartFocus(),
   fetchProfiles: () => fetchProfiles(), fetchSessions: () => fetchSessions(),
   fetchGroupRooms: () => fetchGroupRooms(), fetchModelOptions: () => fetchModelOptions(),
   fetchProjects: () => fetchProjects(), prefetchSlashCatalog: () => inputCompletion.prefetchSlashCatalog(),
-  armTurnWatchdog: () => turnExecutionService.armTurnWatchdog(),
-  feedTurnWatchdog: () => turnExecutionService.feedTurnWatchdog(),
-  disarmTurnWatchdog: () => turnExecutionService.disarmTurnWatchdog(),
-  clearPresenceTerminal: () => turnExecutionService.clearPresenceTerminal(),
-  armPresenceTerminal: (terminal) => turnExecutionService.armPresenceTerminal(terminal),
-  setTimedDockNotice: (msg, dur) => turnExecutionService.setTimedDockNotice(msg, dur), isStreamNearBottom: () => isStreamNearBottom(document.getElementById('conversation-stream')), setPendingScrollToBottom: (val) => renderCoordinator.setPendingScrollToBottom(val),
+  armTurnWatchdog: () => turnExecutionService.armTurnWatchdog(), feedTurnWatchdog: () => turnExecutionService.feedTurnWatchdog(), disarmTurnWatchdog: () => turnExecutionService.disarmTurnWatchdog(),
+  clearPresenceTerminal: () => turnExecutionService.clearPresenceTerminal(), armPresenceTerminal: (terminal) => turnExecutionService.armPresenceTerminal(terminal),
+  setTimedDockNotice: (msg, dur, opts) => turnExecutionService.setTimedDockNotice(msg, dur, opts), isStreamNearBottom: () => isStreamNearBottom(document.getElementById('conversation-stream')), setPendingScrollToBottom: (val) => renderCoordinator.setPendingScrollToBottom(val),
   render: () => render(), t,
 });
 
@@ -962,8 +964,7 @@ function setMessageContent(messageId: string, text: string): void {
   target.content = text;
   const el = document.getElementById(`msg-content-${messageId}`);
   if (el) {
-    if (el.style.display === 'none') el.style.display = 'flex';
-    if (el.style.flexDirection !== 'column') el.style.flexDirection = 'column';
+    revealStreamingContentDisplay(el.style);
     el.innerHTML = renderMarkdown(text);
   }
 }

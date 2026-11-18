@@ -236,4 +236,103 @@ test('SessionOperationService - 核心生命周期与状态切换测试', async 
     const restored = deps.sessionMessagesCache.get('sess-current');
     assert.equal(restored?.length, 1, '快照必须被安全恢复到原会话缓存中');
   });
+
+  await t.test('8. selectSession: 切回仍在流式运行且包含工具调用的会话时自动补排 scheduleToolPatch', async () => {
+    const patchedIds = [];
+    const { deps, state } = createMockDeps({
+      getActiveStreamingStoredSessionId: () => 'sess-next',
+      getActiveStreamingMessageId: () => 'ast-stream-1',
+      scheduleToolPatch: (mid) => { patchedIds.push(mid); },
+      loadMessages: async () => {
+        state.messages = [
+          {
+            id: 'ast-stream-1',
+            role: 'assistant',
+            content: 'working...',
+            toolCalls: [{ id: 'tc-1', name: 'terminal', status: 'running', args: '{}' }],
+          },
+        ];
+      },
+    });
+    const service = createSessionOperationService(deps);
+
+    await service.selectSession('sess-next');
+    assert.equal(state.isStreaming, true);
+    assert.deepEqual(patchedIds, ['ast-stream-1'], '切回流式运行且带工具调用的会话必须补刷 toolPatch');
+
+    // 切回流式运行但无工具调用的会话：不得多余调度 scheduleToolPatch
+    patchedIds.length = 0;
+    const { deps: depsNoTools, state: stateNoTools } = createMockDeps({
+      getActiveStreamingStoredSessionId: () => 'sess-next',
+      getActiveStreamingMessageId: () => 'ast-stream-2',
+      scheduleToolPatch: (mid) => { patchedIds.push(mid); },
+      loadMessages: async () => {
+        stateNoTools.messages = [{ id: 'ast-stream-2', role: 'assistant', content: 'plain' }];
+      },
+    });
+    const serviceNoTools = createSessionOperationService(depsNoTools);
+    await serviceNoTools.selectSession('sess-next');
+    assert.deepEqual(patchedIds, [], '无工具调用时不触发 scheduleToolPatch');
+
+    // 非流式会话（活跃流式会话是别的 id）即使存在带工具的活跃消息，也不得调度
+    patchedIds.length = 0;
+    const { deps: depsIdle, state: stateIdle } = createMockDeps({
+      getActiveStreamingStoredSessionId: () => 'sess-other',
+      getActiveStreamingMessageId: () => 'ast-idle-1',
+      scheduleToolPatch: (mid) => { patchedIds.push(mid); },
+      loadMessages: async () => {
+        stateIdle.messages = [
+          {
+            id: 'ast-idle-1',
+            role: 'assistant',
+            content: 'done',
+            toolCalls: [{ id: 'tc-9', name: 'terminal', status: 'completed', args: '{}' }],
+          },
+        ];
+      },
+    });
+    const serviceIdle = createSessionOperationService(depsIdle);
+    await serviceIdle.selectSession('sess-next');
+    assert.equal(stateIdle.isStreaming, false, '活跃流式会话是其它 id 时本会话必须判为非流式');
+    assert.deepEqual(patchedIds, [], '非流式会话选择不得调度 scheduleToolPatch（否则会覆写 React 已收口子树）');
+
+    // 流式会话但活跃消息 ID 缺失：不得调度
+    patchedIds.length = 0;
+    const { deps: depsNoId, state: stateNoId } = createMockDeps({
+      getActiveStreamingStoredSessionId: () => 'sess-next',
+      getActiveStreamingMessageId: () => null,
+      scheduleToolPatch: (mid) => { patchedIds.push(mid); },
+      loadMessages: async () => {
+        stateNoId.messages = [{ id: 'ast-x', role: 'assistant', content: 'x' }];
+      },
+    });
+    await createSessionOperationService(depsNoId).selectSession('sess-next');
+    assert.deepEqual(patchedIds, [], '无活跃流式消息 ID 时不得调度');
+
+    // 流式会话且活跃消息 ID 指向不存在的消息：不得调度
+    patchedIds.length = 0;
+    const { deps: depsMiss, state: stateMiss } = createMockDeps({
+      getActiveStreamingStoredSessionId: () => 'sess-next',
+      getActiveStreamingMessageId: () => 'ast-missing',
+      scheduleToolPatch: (mid) => { patchedIds.push(mid); },
+      loadMessages: async () => {
+        stateMiss.messages = [{ id: 'ast-x', role: 'assistant', content: 'x' }];
+      },
+    });
+    await createSessionOperationService(depsMiss).selectSession('sess-next');
+    assert.deepEqual(patchedIds, [], '活跃消息不在当前消息列表时不得调度');
+
+    // 流式会话且工具数组为空：不得调度
+    patchedIds.length = 0;
+    const { deps: depsEmpty, state: stateEmpty } = createMockDeps({
+      getActiveStreamingStoredSessionId: () => 'sess-next',
+      getActiveStreamingMessageId: () => 'ast-empty',
+      scheduleToolPatch: (mid) => { patchedIds.push(mid); },
+      loadMessages: async () => {
+        stateEmpty.messages = [{ id: 'ast-empty', role: 'assistant', content: 'x', toolCalls: [] }];
+      },
+    });
+    await createSessionOperationService(depsEmpty).selectSession('sess-next');
+    assert.deepEqual(patchedIds, [], '工具数组为空时不得调度');
+  });
 });

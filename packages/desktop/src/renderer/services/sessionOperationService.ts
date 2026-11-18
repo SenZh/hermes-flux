@@ -98,6 +98,8 @@ export interface SessionOperationDeps {
 
   // 流式管理相关
   readonly getActiveStreamingStoredSessionId: () => string | null;
+  readonly getActiveStreamingMessageId?: () => string | null;
+  readonly scheduleToolPatch?: (messageId: string) => void;
   readonly resetActiveStreamingState: () => void;
 
   // 视口与滚动控制
@@ -532,6 +534,18 @@ export class SessionOperationService {
 
     // 【竞态守卫 (Rules)】等待历史期间用户可能已经切走：迟到的会话绝对不得把草稿与焦点写进新会话的输入框。
     if (state.activeSessionId !== id) return;
+
+    // 【流式切回工具补刷 (Why)】流式态的 ToolSection 渲染空壳把 DOM 所有权交给 toolPatchQueue；
+    // 若用户切离后再切回仍在流式运行的会话，需要补排一次 toolPatch，把已存在的 toolCalls 刷进新挂载的空壳。
+    if (state.isStreaming) {
+      const streamingMsgId = this.deps.getActiveStreamingMessageId?.();
+      if (streamingMsgId) {
+        const streamingMsg = state.messages.find((m) => m.id === streamingMsgId);
+        if (streamingMsg?.toolCalls && streamingMsg.toolCalls.length > 0) {
+          this.deps.scheduleToolPatch?.(streamingMsgId);
+        }
+      }
+    }
 
     // Restore draft for incoming session without clobbering live typing
     const restoredCurrent = this.getInputValue();

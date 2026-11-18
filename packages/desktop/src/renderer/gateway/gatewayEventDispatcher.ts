@@ -93,6 +93,7 @@ export interface GatewayEventDispatcherDeps {
   readonly syncProfileLastMessages: () => void;
   readonly syncAgentPresence: () => void;
   readonly scheduleToolPatch: (messageId: string) => void;
+  readonly clearToolPatchQueue?: () => void;
   readonly stopRunningToolTimers: () => void;
   readonly setMessageContent: (messageId: string, content: string) => void;
   readonly toStoredSessionId: (id: string | null | undefined) => string | null;
@@ -110,7 +111,7 @@ export interface GatewayEventDispatcherDeps {
   readonly disarmTurnWatchdog: () => void;
   readonly clearPresenceTerminal: () => void;
   readonly armPresenceTerminal: (terminal: NonNullable<AppState['presenceTerminal']>) => void;
-  readonly setTimedDockNotice: (msg: string, durationMs?: number) => void;
+  readonly setTimedDockNotice: (msg: string, durationMs?: number, options?: { skipRender?: boolean }) => void;
 
   readonly isStreamNearBottom?: () => boolean;
   readonly setPendingScrollToBottom?: (val: boolean) => void;
@@ -325,6 +326,8 @@ export function createGatewayEventDispatcher(deps: GatewayEventDispatcherDeps): 
           //   从而把视口锁回上方的用户提示词位置。
           const wasNearBottomBeforeSettle = deps.isStreamNearBottom?.() ?? false;
           deps.getTokenCoalescer().flush();
+          // 【清理未执行的工具补丁 rAF (Pitfall)】防止回合结束后迟到 rAF 覆写 React 接管的 #msg-tools-*
+          deps.clearToolPatchQueue?.();
           deps.stopRunningToolTimers();
           if (finalReplace) {
             const replacement = finalReplace;
@@ -405,6 +408,7 @@ export function createGatewayEventDispatcher(deps: GatewayEventDispatcherDeps): 
         case 'turn-failed': {
           const wasNearBottomBeforeFail = deps.isStreamNearBottom?.() ?? false;
           deps.getTokenCoalescer().flush();
+          deps.clearToolPatchQueue?.();
           deps.stopRunningToolTimers();
           const pendingMsg = ctx.activeStreamingMessageId
             ? state.messages.find((m) => m.id === ctx.activeStreamingMessageId)
@@ -434,7 +438,10 @@ export function createGatewayEventDispatcher(deps: GatewayEventDispatcherDeps): 
             activeStreamingStoredSessionId: null,
             activeStreamingLiveId: null,
           });
-          deps.setTimedDockNotice(action.message);
+          // 【消除同步双 render (Pitfall)】setTimedDockNotice 默认会立即调用 render()，
+          // 会提前消费 pendingScrollToBottom 并让批末 deps.render() 落在 messagesChanged=false 路径；
+          // 传 skipRender: true 仅落盘通知与倒计时，由批末统一执行唯一一次 render()。
+          deps.setTimedDockNotice(action.message, undefined, { skipRender: true });
           deps.disarmTurnWatchdog();
           needsRender = true;
           break;
@@ -689,6 +696,7 @@ export function createGatewayEventDispatcher(deps: GatewayEventDispatcherDeps): 
       deps.setGatewayClient(null);
     }
     deps.getTokenCoalescer().clear();
+    deps.clearToolPatchQueue?.();
     deps.disarmTurnWatchdog();
     deps.stopAllGroupPollers();
     deps.getActivityTransitionTracker().clearAll();

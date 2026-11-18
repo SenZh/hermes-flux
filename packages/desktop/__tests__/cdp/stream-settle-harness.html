@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="obsidian-gold">
+<head>
+  <meta charset="UTF-8">
+  <title>Hermes Flux 流式收口锚定 CDP Harness</title>
+  <!-- 必须加载生产同一份样式：占位高度变量与 content-visibility 只由 CSS 生效，React 组件只出类名 -->
+  <link rel="stylesheet" href="/packages/desktop/src/renderer/styles.css">
+  <link rel="stylesheet" href="/packages/ui/src/styles/conversation.css">
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--background);
+      color: var(--foreground);
+      font-family: var(--font-sans);
+    }
+    #stream {
+      height: 800px;
+      overflow-y: auto;
+      padding-bottom: 16px;
+      box-sizing: border-box;
+    }
+    #legacy-stream {
+      height: 200px;
+      overflow: hidden;
+    }
+  </style>
+</head>
+<body>
+  <div id="stream"><div id="host"></div></div>
+  <div id="legacy-stream"><div id="legacy-host"></div></div>
+
+  <!-- 由 CDP 测试用 esbuild 现场打包生成：内含 React 与真实对话组件 -->
+  <script src="/packages/desktop/__tests__/cdp/.tmp/react-entry.js"></script>
+  <script>
+    const { React, createRoot, ConversationMessageList } = window.__fluxReact;
+
+    const TURN_COUNT = 300;
+
+    /** 构造一段可滚动的长会话：末条助手行带运行中的工具，即真实流式末行形态。 */
+    function buildMessages(turnCount) {
+      const messages = [];
+      for (let i = 0; i < turnCount; i += 1) {
+        messages.push({
+          id: `u${i}`,
+          rowId: i * 2 + 1,
+          role: 'user',
+          content: `第 ${i} 轮提问：请读取并说明该模块的职责。`,
+        });
+        const isLast = i === turnCount - 1;
+        messages.push({
+          id: `a${i}`,
+          rowId: i * 2 + 2,
+          role: 'assistant',
+          content: `第 ${i} 轮回答：` + '该模块负责把流式增量安全地写进已存在的锚点容器。'.repeat(3),
+          toolCalls: isLast
+            ? [
+                { id: 'tool-last-1', name: 'read_file', status: 'running', args: '{"path":"packages/core/src/index.ts"}' },
+                { id: 'tool-last-2', name: 'terminal', status: 'running', args: '{"cmd":"npm test"}' },
+              ]
+            : [],
+        });
+      }
+      return messages;
+    }
+
+    const messages = buildMessages(TURN_COUNT);
+    const root = createRoot(document.getElementById('host'));
+
+    function renderAll(msgs, isStreaming) {
+      root.render(
+        React.createElement(ConversationMessageList, {
+          snapshot: {
+            mode: 'scratchpad',
+            connection: 'connected',
+            messages: msgs,
+            isStreaming,
+          },
+        })
+      );
+    }
+
+    const nextFrame = () =>
+      new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+    function readStreamMetrics() {
+      const stream = document.getElementById('stream');
+      return {
+        scrollHeight: stream.scrollHeight,
+        scrollTop: stream.scrollTop,
+        clientHeight: stream.clientHeight,
+        dist: stream.scrollHeight - stream.scrollTop - stream.clientHeight,
+      };
+    }
+
+    /**
+     * 场景 A：流式态直写工具补丁 → 收口提交。
+     * 返回收口后 #msg-tools-* 的直接子元素数（旧实现为 2，修复后必须为 1）。
+     */
+    window.__runToolSwap = async () => {
+      renderAll(messages, true);
+      await nextFrame();
+      const ids = { last: messages[messages.length - 1].id };
+      const el = document.getElementById(`msg-tools-${ids.last}`);
+      const result = { shellFound: Boolean(el) };
+      if (!el) return result;
+      result.childrenBefore = el.children.length;
+
+      const patch = document.createElement('div');
+      patch.className = 'conv-package';
+      patch.dataset.patched = 'true';
+      el.appendChild(patch);
+      result.childrenAfterWrite = el.children.length;
+
+      renderAll(messages, false);
+      await nextFrame();
+
+      const settled = document.getElementById(`msg-tools-${ids.last}`);
+      result.shellStillMounted = Boolean(settled);
+      result.childrenAfterSettle = settled ? settled.children.length : -1;
+      result.packageNodes = settled ? settled.querySelectorAll('.conv-package').length : -1;
+      result.patchNodeSurvived = Boolean(
+        settled && settled.querySelector(':scope > [data-patched="true"]')
+      );
+      return result;
+    };
+
+    /**
+     * 场景 B：同 key 外壳的对照实验。
+     * 复刻修复前的结构（零子 fiber → 外部直写 → 收口挂子节点），证明 React 会保留旧节点并追加新节点。
+     */
+    window.__runLegacySwap = async () => {
+      const legacyRoot = createRoot(document.getElementById('legacy-host'));
+      const Shell = ({ settled }) =>
+        React.createElement(
+          'div',
+          { key: 'tools', id: 'legacy-tools', className: 'conv-tools' },
+          settled ? React.createElement('div', { className: 'conv-package' }) : null
+        );
+      legacyRoot.render(React.createElement(Shell, { settled: false }));
+      await nextFrame();
+
+      const el = document.getElementById('legacy-tools');
+      if (!el) return { shellFound: false };
+      const patch = document.createElement('div');
+      patch.className = 'conv-package';
+      patch.dataset.patched = 'true';
+      el.appendChild(patch);
+
+      legacyRoot.render(React.createElement(Shell, { settled: true }));
+      await nextFrame();
+      return {
+        shellFound: true,
+        childrenAfterSettle: el.children.length,
+        packageNodes: el.querySelectorAll('.conv-package').length,
+      };
+    };
+
+    /**
+     * 场景 C：真实 Blink 下的占位高度漂移事实。
+     * 长列表滚到底后把 --conv-intrinsic-median-height 从 140px 抬到 320px：
+     * 若 scrollHeight 增长而 scrollTop 不动，就是用户看到的「视口被顶上去」。
+     */
+    window.__runIntrinsicDrift = async () => {
+      const stream = document.getElementById('stream');
+      renderAll(messages, true);
+      await nextFrame();
+      stream.scrollTop = stream.scrollHeight;
+      // 滚到底后高度会因 content-visibility 补挂载而继续变化，必须等它稳定再取基准
+      const stableHeight = async () => {
+        let last = -1;
+        for (let i = 0; i < 16; i += 1) {
+          await nextFrame();
+          const next = stream.scrollHeight;
+          if (next === last) return next;
+          last = next;
+        }
+        return last;
+      };
+      await stableHeight();
+      stream.scrollTop = stream.scrollHeight;
+      await stableHeight();
+
+      const before = readStreamMetrics();
+      document.documentElement.style.setProperty('--conv-intrinsic-median-height', '320px');
+      stream.style.setProperty('--conv-intrinsic-median-height', '320px');
+      await stableHeight();
+      const after = readStreamMetrics();
+
+      const turns = stream.querySelectorAll('.conv-turn');
+      return {
+        before,
+        after,
+        deltaScrollHeight: after.scrollHeight - before.scrollHeight,
+        deltaScrollTop: after.scrollTop - before.scrollTop,
+        distGrowth: after.dist - before.dist,
+        renderedTurns: turns.length,
+        firstTurnHeights: [...turns].slice(0, 5).map((turn) => turn.getBoundingClientRect().height),
+      };
+    };
+
+    /** 场景 D：收口一帧后视口是否仍停在底部安全区。 */
+    window.__runSettleAnchor = async () => {
+      const stream = document.getElementById('stream');
+      // 场景间共享同一容器：先把占位变量清回 CSS 兜底，避免上一场景的 320px 污染基准
+      document.documentElement.style.removeProperty('--conv-intrinsic-median-height');
+      stream.style.removeProperty('--conv-intrinsic-median-height');
+      renderAll(messages, true);
+      await nextFrame();
+      const settleHeight = async () => {
+        let last = -1;
+        for (let i = 0; i < 16; i += 1) {
+          await nextFrame();
+          const next = stream.scrollHeight;
+          if (next === last) return next;
+          last = next;
+        }
+        return last;
+      };
+      await settleHeight();
+      stream.scrollTop = stream.scrollHeight;
+      await settleHeight();
+      const streamTopOf = () => stream.getBoundingClientRect().top;
+      const firstVisibleRow = () => {
+        const rows = [...stream.querySelectorAll('[data-msg-id]')];
+        const top = streamTopOf();
+        const row = rows.find((r) => r.getBoundingClientRect().bottom > top);
+        return row
+          ? { id: row.getAttribute('data-msg-id'), offset: row.getBoundingClientRect().top - top }
+          : null;
+      };
+
+      const anchorBefore = firstVisibleRow();
+      const before = readStreamMetrics();
+
+      renderAll(messages, false);
+      await settleHeight();
+      const after = readStreamMetrics();
+      const anchorAfter = (() => {
+        if (!anchorBefore) return null;
+        const row = stream.querySelector(`[data-msg-id="${anchorBefore.id}"]`);
+        return row ? { id: anchorBefore.id, offset: row.getBoundingClientRect().top - streamTopOf() } : null;
+      })();
+
+      return {
+        before,
+        after,
+        anchorBefore,
+        anchorAfter,
+        anchorShift: anchorBefore && anchorAfter ? anchorAfter.offset - anchorBefore.offset : null,
+        distDelta: after.dist - before.dist,
+        scrollHeightDelta: after.scrollHeight - before.scrollHeight,
+      };
+    };
+
+    window.__stageReady = true;
+  </script>
+</body>
+</html>

@@ -78,4 +78,75 @@ export const MUTATION_DOMAINS = {
     buildCommand: 'npm run build:ui',
     minScore: 80,
   },
+  streamWriter: {
+    title: '流式 Token 写入与贴底跟随 (Token Stream Writer)',
+    mutate: ['packages/desktop/src/renderer/stream/tokenStreamWriter.ts'],
+    testFiles: ['packages/desktop/__tests__/unit/tokenStreamWriter.test.mjs'],
+    buildCommand: 'node scripts/gates/build-desktop-unit.mjs src/renderer/stream/tokenStreamWriter.ts',
+    // 实测 185 mutant / 157 killed / 23 survived / 5 noCov = 84.86%（2026-11-18）
+    minScore: 80,
+  },
+  streamViewport: {
+    title: '流视口占位高度去重与中性补偿 (Stream Viewport Intrinsic)',
+    // 分段必须覆盖本次逻辑的全部输入与输出契约：
+    // 190-215 上限常量、455-540 淘汰与采样去重、570-760 变量写入/中性补偿/锚点采集
+    mutate: [
+      'packages/desktop/src/renderer/viewport/streamViewportManager.ts:190-215',
+      'packages/desktop/src/renderer/viewport/streamViewportManager.ts:455-540',
+      'packages/desktop/src/renderer/viewport/streamViewportManager.ts:570-760',
+    ],
+    testFiles: ['packages/desktop/__tests__/unit/stream-viewport-manager.test.mjs'],
+    buildCommand:
+      'node scripts/gates/build-desktop-unit.mjs src/renderer/viewport/streamViewportManager.ts',
+    // 实测 249 mutant / 217 killed / 25 survived / 7 noCov = 87.15%（2026-11-18，含 FIFO 淘汰与补偿输入契约）
+    minScore: 85,
+  },
+  renderCoordinatorPin: {
+    title: '渲染协调提交后单在途贴底锚定 (Render Coordinator Pin)',
+    mutate: [
+      'packages/desktop/src/renderer/renderCoordinator.ts:245-308',
+      'packages/desktop/src/renderer/renderCoordinator.ts:702-720',
+      'packages/desktop/src/renderer/renderCoordinator.ts:805-820',
+      'packages/desktop/src/renderer/renderCoordinator.ts:1005-1062',
+    ],
+    testFiles: ['packages/desktop/__tests__/unit/render-coordinator.test.mjs'],
+    buildCommand:
+      'node scripts/gates/build-desktop-unit.mjs src/renderer/renderCoordinator.ts src/renderer/viewport/postCommitPinObservers.ts',
+    // 实测 180 mutant / 151 killed / 3 timeout / 26 survived / 0 noCov = 85.56%（2026-11-18）
+    minScore: 80,
+  },
+  turnSettlement: {
+    title: '流式回合收口与中断超时保底 (Turn Settlement)',
+    mutate: [
+      'packages/desktop/src/renderer/gateway/gatewayEventDispatcher.ts:322-448',
+      'packages/desktop/src/renderer/services/turnExecutionService.ts:201-238',
+      'packages/desktop/src/renderer/services/turnExecutionService.ts:297-317',
+      'packages/desktop/src/renderer/services/turnExecutionService.ts:442-540',
+    ],
+    testFiles: [
+      'packages/desktop/__tests__/unit/gatewayEventDispatcher.test.mjs',
+      'packages/desktop/__tests__/unit/turnExecutionService.test.mjs',
+    ],
+    buildCommand:
+      'node scripts/gates/build-desktop-unit.mjs src/renderer/gateway/gatewayEventDispatcher.ts src/renderer/services/turnExecutionService.ts',
+    // 实测 361 mutant / 304 killed / 57 survived / 0 noCov = 84.21%（2026-11-18）
+    minScore: 80,
+  },
+  sessionSelectToolPatch: {
+    title: '会话切回流式工具补刷 (Session Select Tool Patch)',
+    mutate: ['packages/desktop/src/renderer/services/sessionOperationService.ts:539-550'],
+    testFiles: ['packages/desktop/__tests__/unit/sessionOperationService.test.mjs'],
+    buildCommand:
+      'node scripts/gates/build-desktop-unit.mjs src/renderer/services/sessionOperationService.ts',
+    // 实测 20 mutant / 16 killed / 4 survived / 0 noCov = 80.00%（2026-11-18）
+    minScore: 70,
+  },
+  toolSection: {
+    title: '工具区块流式/收口原子交接 (ToolSection Key Swap)',
+    mutate: ['packages/ui/src/components-react/conversation/ToolCapsule.tsx:373-382'],
+    testFiles: ['packages/ui/__tests__/streaming-anchor-contract.test.mjs'],
+    buildCommand: 'npm run build:ui',
+    // 实测 7 mutant / 6 killed / 0 survived / 1 noCov = 85.71%（覆盖分 100%）（2026-11-18）
+    minScore: 70,
+  },
 };

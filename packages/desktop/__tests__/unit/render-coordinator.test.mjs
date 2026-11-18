@@ -567,6 +567,415 @@ test('RenderCoordinator - 渲染装配与协调管线领域纯行为测试', asy
     }
   });
 
+  await t.test('19. overflow-anchor: none 必须在 mountReactShellComponents 之前同步武装，且不误清 sessionEnter 保护', () => {
+    const dom = installDomStub();
+    const rafQueue = [];
+    const origRaf = globalThis.requestAnimationFrame;
+    globalThis.requestAnimationFrame = (cb) => { rafQueue.push(cb); return rafQueue.length; };
+    try {
+      const stream = dom.elements.get('conversation-stream');
+      stream.scrollHeight = 2000;
+      stream.clientHeight = 800;
+      stream.scrollTop = 1200;
+      const props = new Map();
+      const events = [];
+      const listeners = new Map();
+      stream.style = {
+        setProperty: (name, val) => {
+          props.set(name, val);
+          events.push(`set:${name}=${val}`);
+        },
+        getPropertyValue: (name) => props.get(name) ?? '',
+        removeProperty: (name) => {
+          props.delete(name);
+          events.push(`remove:${name}`);
+        },
+      };
+      stream.addEventListener = (type, fn) => {
+        if (!listeners.has(type)) listeners.set(type, new Set());
+        listeners.get(type).add(fn);
+      };
+      stream.removeEventListener = (type, fn) => {
+        listeners.get(type)?.delete(fn);
+      };
+
+      let enterPending = false;
+      const { coordinator, state } = createHarness({
+        isSessionEnterPending: () => enterPending,
+        isStreamNearBottom: () => true,
+        // syncReactSettings 就在 mountReactShellComponents() 内、syncReactMessageList() 前一行执行，
+        // 足以精确观测 overflow-anchor 是否已在 React 提交前同步武装。
+        syncReactSettings: () => {
+          events.push(`mount:overflow-anchor=${props.get('overflow-anchor') ?? ''}`);
+        },
+      });
+
+      // 分支 1（首次全量渲染）：overflow-anchor 必须在 mountReactShellComponents 之前武装
+      coordinator.render();
+      const setIdx1 = events.indexOf('set:overflow-anchor=none');
+      const mountIdx1 = events.indexOf('mount:overflow-anchor=none');
+      assert.ok(setIdx1 >= 0 && mountIdx1 > setIdx1, '全量分支必须在 mountReactShellComponents 前同步设置 overflow-anchor: none');
+
+      // 向下滚轮（deltaY > 0）不得取消 pin；推进 3 帧后正常收尾移除 overflow-anchor
+      for (const fn of listeners.get('wheel') ?? []) fn({ deltaY: 40 });
+      assert.equal(props.get('overflow-anchor'), 'none', '向下滚轮不得取消贴底收敛');
+      let guard = 0;
+      while (rafQueue.length > 0 && guard < 10) {
+        rafQueue.shift()();
+        guard += 1;
+      }
+      assert.equal(props.has('overflow-anchor'), false, '非 enterPending 收尾后应恢复 overflow-anchor');
+
+      // 分支 2（增量更新渲染）：若收敛途中进入 isSessionEnterPending()，cleanup 不得移除 overflow-anchor
+      events.length = 0;
+      state.messages.push({ id: 'm-new', role: 'assistant', content: 'next' });
+      coordinator.render();
+      assert.ok(events.includes('mount:overflow-anchor=none'), '增量分支同样必须在 mountReactShellComponents 前同步武装 overflow-anchor: none');
+      enterPending = true;
+      // 向上滚轮（deltaY < 0）取消 pin，但因为 enterPending=true，不得剥离 overflow-anchor
+      for (const fn of listeners.get('wheel') ?? []) fn({ deltaY: -30 });
+      while (rafQueue.length > 0 && guard < 20) {
+        rafQueue.shift()();
+        guard += 1;
+      }
+      assert.equal(props.get('overflow-anchor'), 'none', 'isSessionEnterPending 为 true 时 post-render pin 收尾不得剥离 overflow-anchor');
+    } finally {
+      globalThis.requestAnimationFrame = origRaf;
+      dom.restore();
+    }
+  });
+
+  await t.test('20. 重叠的两次 pinBottom 渲染：第二次必须作废第一次循环，防止循环 1 提前剥离循环 2 的 overflow-anchor', () => {
+    const dom = installDomStub();
+    const rafQueue = [];
+    const origRaf = globalThis.requestAnimationFrame;
+    globalThis.requestAnimationFrame = (cb) => { rafQueue.push(cb); return rafQueue.length; };
+    // 预置 data-theme，避免换肤过渡向 rafQueue 插入额外的 oc-theme-switching 清理帧
+    globalThis.document.documentElement.getAttribute = (name) => (name === 'data-theme' ? 'obsidian-gold' : null);
+    try {
+      const stream = dom.elements.get('conversation-stream');
+      stream.scrollHeight = 2000;
+      stream.clientHeight = 800;
+      stream.scrollTop = 1200;
+      const props = new Map();
+      stream.style = {
+        setProperty: (name, val) => props.set(name, val),
+        getPropertyValue: (name) => props.get(name) ?? '',
+        removeProperty: (name) => props.delete(name),
+      };
+
+      const { coordinator, state } = createHarness({
+        isSessionEnterPending: () => false,
+        isStreamNearBottom: () => true,
+      });
+
+      // 渲染 1 启动 pin #1，只推进 1 帧（尚未收尾）
+      coordinator.render();
+      assert.equal(props.get('overflow-anchor'), 'none');
+      assert.equal(rafQueue.length, 1);
+      rafQueue.shift()(); // 执行外层 rAF -> pin #1 第 1 帧，排队 pin #1 第 2 帧
+      assert.equal(rafQueue.length, 1);
+
+      // 渲染 2 在 pin #1 仍在进行时触发，武装 pin #2 并作废 pin #1
+      state.messages.push({ id: 'm-overlap', role: 'assistant', content: 'overlap' });
+      coordinator.render();
+      assert.equal(props.get('overflow-anchor'), 'none', '渲染 2 必须重新武装 overflow-anchor: none');
+      assert.equal(rafQueue.length, 2, '队列中含已作废的 pin #1 帧与新的 pin #2 外层帧');
+
+      // 执行 pin #1 的残余帧：必须静默退出，绝不能剥离 pin #2 的 overflow-anchor
+      rafQueue.shift()();
+      assert.equal(props.get('overflow-anchor'), 'none', '已作废的 pin #1 绝不能清除 pin #2 持有的 overflow-anchor: none');
+      assert.equal(rafQueue.length, 1, 'pin #1 作废后不得继续自排下一帧');
+
+      // 跑完 pin #2 直到正常收敛，再恢复 overflow-anchor
+      let steps = 0;
+      while (rafQueue.length > 0 && steps < 10) {
+        rafQueue.shift()();
+        steps += 1;
+      }
+      assert.equal(props.has('overflow-anchor'), false, 'pin #2 正常收敛后应移除 overflow-anchor');
+    } finally {
+      globalThis.requestAnimationFrame = origRaf;
+      dom.restore();
+    }
+  });
+
+  await t.test('21. pointerdown/touchstart、非贴底消息变更、enterPending 切换与 dispose 均会正确取消在途 post-render pin', () => {
+    const dom = installDomStub();
+    const rafQueue = [];
+    const origRaf = globalThis.requestAnimationFrame;
+    globalThis.requestAnimationFrame = (cb) => { rafQueue.push(cb); return rafQueue.length; };
+    globalThis.document.documentElement.getAttribute = (name) => (name === 'data-theme' ? 'obsidian-gold' : null);
+    try {
+      const stream = dom.elements.get('conversation-stream');
+      stream.scrollHeight = 700; // <= clientHeight (800)，验证非可滚容器不写 scrollTop
+      stream.clientHeight = 800;
+      stream.scrollTop = 0;
+      const props = new Map();
+      const listeners = new Map();
+      stream.style = {
+        setProperty: (name, val) => props.set(name, val),
+        getPropertyValue: (name) => props.get(name) ?? '',
+        removeProperty: (name) => props.delete(name),
+      };
+      stream.addEventListener = (type, fn) => {
+        if (!listeners.has(type)) listeners.set(type, new Set());
+        listeners.get(type).add(fn);
+      };
+      stream.removeEventListener = (type, fn) => {
+        listeners.get(type)?.delete(fn);
+      };
+
+      let nearBottom = true;
+      let enterPending = false;
+      const { coordinator, state } = createHarness({
+        isSessionEnterPending: () => enterPending,
+        isStreamNearBottom: () => nearBottom,
+      });
+
+      // 1. pointerdown 触发 onPointerOrTouch -> 取消 pin，且非可滚容器 scrollTop 保持 0
+      coordinator.render();
+      assert.equal(props.get('overflow-anchor'), 'none');
+      for (const fn of listeners.get('pointerdown') ?? []) fn();
+      while (rafQueue.length > 0) rafQueue.shift()();
+      assert.equal(props.has('overflow-anchor'), false, 'pointerdown 取消后应恢复 overflow-anchor');
+      assert.equal(stream.scrollTop, 0, 'scrollHeight <= clientHeight 时 pin 不得写 scrollTop');
+
+      // 2. 启动新 pin 后发生非贴底消息变更（messagesChanged && !pinBottom）-> 立即取消旧 pin
+      stream.scrollHeight = 2000;
+      state.messages.push({ id: 'm-pin-2', role: 'assistant', content: 'pin2' });
+      coordinator.render();
+      assert.equal(props.get('overflow-anchor'), 'none');
+      nearBottom = false;
+      state.messages.push({ id: 'm-nonpin', role: 'assistant', content: 'nonpin' });
+      coordinator.render();
+      assert.equal(props.has('overflow-anchor'), false, '非贴底消息变动必须立刻取消旧在途 pin');
+      while (rafQueue.length > 0) rafQueue.shift()();
+
+      // 3. 启动新 pin 后调用 dispose() -> 清理在途 pin 与 overflow-anchor
+      nearBottom = true;
+      state.messages.push({ id: 'm-pin-3', role: 'assistant', content: 'pin3' });
+      coordinator.render();
+      assert.equal(props.get('overflow-anchor'), 'none');
+      coordinator.dispose();
+      assert.equal(props.has('overflow-anchor'), false, 'dispose() 必须释放仍在途的 post-render pin');
+      while (rafQueue.length > 0) rafQueue.shift()();
+
+      // 4. 启动新 pin 后切入 enterPending -> 取消旧 pin 但不得剥离 overflow-anchor
+      state.messages.push({ id: 'm-pin-4', role: 'assistant', content: 'pin4' });
+      coordinator.render();
+      assert.equal(props.get('overflow-anchor'), 'none');
+      enterPending = true;
+      coordinator.render();
+      assert.equal(props.get('overflow-anchor'), 'none', '进入 enterPending 时取消旧 pin 不得剥离 overflow-anchor');
+    } finally {
+      globalThis.requestAnimationFrame = origRaf;
+      dom.restore();
+    }
+  });
+
+  await t.test('22. post-render pin 滚轮方向/手势让权、收敛帧边界(3/8帧)、markProgrammaticScroll 与监听清理变异杀伤', () => {
+    const dom = installDomStub();
+    const rafQueue = [];
+    const origRaf = globalThis.requestAnimationFrame;
+    globalThis.requestAnimationFrame = (cb) => { rafQueue.push(cb); return rafQueue.length; };
+    globalThis.document.documentElement.getAttribute = (name) => (name === 'data-theme' ? 'obsidian-gold' : null);
+    try {
+      const attachObservableStream = (el, initialHeight, clientHeight) => {
+        const props = new Map();
+        const listeners = new Map();
+        const addedOpts = new Map();
+        let _scrollTop = 100;
+        let scrollTopWrites = 0;
+        el.scrollHeight = initialHeight;
+        el.clientHeight = clientHeight;
+        Object.defineProperty(el, 'scrollTop', {
+          configurable: true,
+          get: () => _scrollTop,
+          set: (v) => { scrollTopWrites += 1; _scrollTop = v; },
+        });
+        el.style = {
+          setProperty: (k, v) => props.set(k, v),
+          getPropertyValue: (k) => props.get(k) ?? '',
+          removeProperty: (k) => props.delete(k),
+        };
+        el.addEventListener = (type, fn, opts) => {
+          if (!listeners.has(type)) listeners.set(type, new Set());
+          listeners.get(type).add(fn);
+          addedOpts.set(type, opts);
+        };
+        el.removeEventListener = (type, fn) => {
+          listeners.get(type)?.delete(fn);
+        };
+        return {
+          props,
+          listeners,
+          addedOpts,
+          getScrollTopWrites: () => scrollTopWrites,
+          resetWrites: () => { scrollTopWrites = 0; _scrollTop = 100; },
+        };
+      };
+
+      const stream = dom.elements.get('conversation-stream');
+      const obs = attachObservableStream(stream, 2000, 800);
+      const directMarks = [];
+      const traces = [];
+
+      const { coordinator, state } = createHarness({
+        isSessionEnterPending: () => false,
+        isStreamNearBottom: () => true,
+        markProgrammaticScroll: (el) => directMarks.push(el),
+        logStream: { trace: (name, meta) => traces.push([name, meta]) },
+      });
+
+      // 1. 恒定高度 + deltaY === 0 / > 0 向下滚轮不得取消：精确跑 3 帧收口并全部写 scrollTop & markProgrammaticScroll
+      coordinator.render();
+      assert.deepEqual(obs.addedOpts.get('wheel'), { passive: true });
+      assert.deepEqual(obs.addedOpts.get('pointerdown'), { passive: true, once: true });
+      assert.deepEqual(obs.addedOpts.get('touchstart'), { passive: true, once: true });
+      for (const fn of obs.listeners.get('wheel') ?? []) fn({ deltaY: 0 });
+      for (const fn of obs.listeners.get('wheel') ?? []) fn({ deltaY: 25 });
+      let frames = 0;
+      while (rafQueue.length > 0 && frames < 15) {
+        rafQueue.shift()();
+        frames += 1;
+      }
+      assert.equal(frames, 3, '恒定高度下应精确在第 3 帧（stableFrames>=2 && frameCount>=3）收敛');
+      assert.equal(stream.scrollTop, 2000, '向下滚轮不得取消贴底，必须将 scrollTop 写至 scrollHeight');
+      assert.equal(obs.getScrollTopWrites(), 3, '3 帧内每帧都应写 scrollTop');
+      assert.equal(directMarks.length, 3, '注入 deps.markProgrammaticScroll 时必须优先调用它');
+      assert.equal(obs.listeners.get('wheel').size, 0, '收尾必须移除 wheel 监听');
+      assert.equal(obs.listeners.get('pointerdown').size, 0, '收尾必须移除 pointerdown 监听');
+      assert.equal(obs.listeners.get('touchstart').size, 0, '收尾必须移除 touchstart 监听');
+
+      // 2. 向上滚轮（deltaY < 0）、无事件对象、pointerdown、touchstart 必须在第 1 帧就让权，0 次写入 scrollTop
+      for (const trigger of [
+        () => { for (const fn of obs.listeners.get('wheel') ?? []) fn({ deltaY: -1 }); },
+        () => { for (const fn of obs.listeners.get('wheel') ?? []) fn(undefined); },
+        () => { for (const fn of obs.listeners.get('wheel') ?? []) fn({ deltaY: 'bad' }); },
+        () => { for (const fn of obs.listeners.get('pointerdown') ?? []) fn(); },
+        () => { for (const fn of obs.listeners.get('touchstart') ?? []) fn(); },
+      ]) {
+        obs.resetWrites();
+        directMarks.length = 0;
+        state.messages.push({ id: `m-cancel-${Math.random()}`, role: 'assistant', content: 'x' });
+        coordinator.render();
+        trigger();
+        let steps = 0;
+        while (rafQueue.length > 0 && steps < 10) {
+          rafQueue.shift()();
+          steps += 1;
+        }
+        assert.equal(steps, 1, '取消后首帧即应退出，不得继续排后续帧');
+        assert.equal(obs.getScrollTopWrites(), 0, '手势让权后严禁再写 scrollTop');
+        assert.equal(directMarks.length, 0);
+        assert.equal(obs.props.has('overflow-anchor'), false, '让权退出必须清理 overflow-anchor');
+      }
+
+      // 3. 高度每帧递增：必须持续到 8 帧硬上限才收口，并在 8 帧都执行贴底
+      obs.resetWrites();
+      directMarks.length = 0;
+      stream.scrollHeight = 2000;
+      state.messages.push({ id: 'm-grow', role: 'assistant', content: 'grow' });
+      coordinator.render();
+      let growFrames = 0;
+      while (rafQueue.length > 0 && growFrames < 15) {
+        stream.scrollHeight += 50;
+        rafQueue.shift()();
+        growFrames += 1;
+      }
+      assert.equal(growFrames, 8, '高度持续变化时必须在 8 帧硬上限收口');
+      assert.equal(obs.getScrollTopWrites(), 8);
+      assert.equal(obs.props.has('overflow-anchor'), false);
+
+      // 4. 高度先变一次再稳定：必须在第 4 帧收敛（第 1 帧 2100 -> 第 2 帧 2200 重置 stableFrames -> 第 3/4 帧稳定）
+      obs.resetWrites();
+      stream.scrollHeight = 2100;
+      state.messages.push({ id: 'm-grow-once', role: 'assistant', content: 'grow-once' });
+      coordinator.render();
+      let onceFrames = 0;
+      while (rafQueue.length > 0 && onceFrames < 15) {
+        if (onceFrames === 1) stream.scrollHeight = 2200;
+        rafQueue.shift()();
+        onceFrames += 1;
+      }
+      assert.equal(onceFrames, 4, '高度变化一次后应重置 stableFrames 并在第 4 帧收敛');
+
+      // 5. scrollHeight === clientHeight 边界：不得写 scrollTop 或 markProgrammaticScroll
+      obs.resetWrites();
+      directMarks.length = 0;
+      stream.scrollHeight = 800;
+      stream.clientHeight = 800;
+      state.messages.push({ id: 'm-eq-h', role: 'assistant', content: 'eq' });
+      coordinator.render();
+      while (rafQueue.length > 0) rafQueue.shift()();
+      assert.equal(obs.getScrollTopWrites(), 0, 'scrollHeight === clientHeight 时绝不得写 scrollTop');
+      assert.equal(directMarks.length, 0);
+
+      // 6. 中途替换 #conversation-stream DOM：cleanup 必须同时清理旧 boundStream 与新 currentStream
+      const stream2 = dom.elements.get('conversation-stream');
+      const replacementStream = {
+        id: 'conversation-stream',
+        querySelector: () => null,
+        querySelectorAll: () => [],
+      };
+      const obs2 = attachObservableStream(replacementStream, 2000, 800);
+      stream2.scrollHeight = 2000;
+      state.messages.push({ id: 'm-swap', role: 'assistant', content: 'swap' });
+      coordinator.render();
+      assert.equal(obs.props.get('overflow-anchor'), 'none');
+      replacementStream.style.setProperty('overflow-anchor', 'none');
+      dom.elements.set('conversation-stream', replacementStream);
+      coordinator.dispose();
+      assert.equal(obs.props.has('overflow-anchor'), false, 'cleanup 必须清理旧 boundStream 的 overflow-anchor');
+      assert.equal(obs2.props.has('overflow-anchor'), false, 'cleanup 必须同步清理新 currentStream 的 overflow-anchor');
+      assert.equal(obs.listeners.get('wheel').size, 0);
+
+      // 7. 未注入 deps.markProgrammaticScroll 时回落到 messageWindowManager.markProgrammaticScroll，且非贴底消息变更触发 stabilizeStreamAnchor
+      const fallbackMarks = [];
+      const stabilized = [];
+      dom.elements.set('conversation-stream', stream);
+      stream.scrollHeight = 2000;
+      let h2NearBottom = true;
+      const h2 = createHarness({
+        state: { activeSessionId: '' },
+        isSessionEnterPending: () => false,
+        isStreamNearBottom: () => h2NearBottom,
+        stabilizeStreamAnchor: (anchor) => stabilized.push(anchor),
+        messageWindowManager: {
+          ensureMessageWindow: () => {},
+          resetMessageWindow: () => {},
+          markProgrammaticScroll: (el) => fallbackMarks.push(el),
+          getState: () => ({ start: 0, end: 100, userExpanded: false }),
+          syncWindowRange: () => {},
+        },
+      });
+      h2.coordinator.render();
+      while (rafQueue.length > 0) rafQueue.shift()();
+      assert.equal(fallbackMarks.length, 3, '未注入 deps.markProgrammaticScroll 时必须回落到 messageWindowManager.markProgrammaticScroll');
+      h2NearBottom = false;
+      h2.state.messages.push({ id: 'm-stab', role: 'assistant', content: 'stab' });
+      h2.coordinator.render();
+      while (rafQueue.length > 0) rafQueue.shift()();
+      assert.equal(stabilized.length, 1, '非贴底消息变更时 rAF 必须调用 stabilizeStreamAnchor 稳定视口');
+
+      // 8. dispose() 时即使 document 已被销毁（undefined），cleanup 也不得抛错
+      state.messages.push({ id: 'm-nodoc', role: 'assistant', content: 'nodoc' });
+      coordinator.render();
+      const savedDoc = globalThis.document;
+      globalThis.document = undefined;
+      try {
+        coordinator.dispose();
+      } finally {
+        globalThis.document = savedDoc;
+      }
+      assert.equal(obs.props.has('overflow-anchor'), false);
+    } finally {
+      globalThis.requestAnimationFrame = origRaf;
+      dom.restore();
+    }
+  });
+
   function installDomStub() {    const saved = {
       document: globalThis.document,
       window: globalThis.window,

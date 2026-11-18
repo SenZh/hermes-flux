@@ -234,6 +234,80 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
   let inspectorMotionController: ReturnType<typeof attachMotionController> | null = null;
 
   /**
+   * 【单在途渲染后贴底句柄 (Why)】
+   *   每次 `messagesChanged && pinBottom` 的渲染都会挂起多帧贴底收敛，
+   *   旧实现用局部闭包各自收尾：连续两次渲染相隔不足 8 帧时，前一次的 cleanupPin
+   *   会提前移除 `overflow-anchor: none`，甚至误清 `beginSessionEnter()` 正在使用的属性。
+   * 【约束与规则 (Rules)】
+   *   1. 任意时刻最多只有一个在途 post-render pin；启动新 pin、进入 enterPending、
+   *      非贴底消息变动或 dispose() 时必须立刻取消旧句柄；
+   *   2. cleanup 仅在 `!deps.isSessionEnterPending()` 时才移除 `overflow-anchor`。
+   */
+  let activePostRenderPinCleanup: (() => void) | null = null;
+  let postRenderPinToken = 0;
+
+  function cancelActivePostRenderPin(): void {
+    const cleanup = activePostRenderPinCleanup;
+    if (!cleanup) return;
+    activePostRenderPinCleanup = null;
+    cleanup();
+  }
+
+  function armPostRenderPinAnchor(): { token: number; isCancelled: () => boolean; cleanup: () => void } {
+    cancelActivePostRenderPin();
+    const token = ++postRenderPinToken;
+    let cancelled = false;
+    let cleaned = false;
+    const boundStream = document.getElementById('conversation-stream');
+
+    const onWheel = (event?: Event) => {
+      const wheelEvent = event as WheelEvent | undefined;
+      // 仅在向上滚轮（或无 deltaY 桩事件）时让权，向下滚轮不中断贴底收敛
+      if (!wheelEvent || typeof wheelEvent.deltaY !== 'number' || wheelEvent.deltaY < 0) {
+        cancelled = true;
+      }
+    };
+    const onPointerOrTouch = () => {
+      cancelled = true;
+    };
+
+    if (boundStream) {
+      boundStream.style?.setProperty?.('overflow-anchor', 'none');
+      boundStream.addEventListener?.('wheel', onWheel, { passive: true });
+      boundStream.addEventListener?.('pointerdown', onPointerOrTouch, { passive: true, once: true });
+      boundStream.addEventListener?.('touchstart', onPointerOrTouch, { passive: true, once: true });
+    }
+
+    const cleanup = (): void => {
+      if (cleaned) return;
+      cleaned = true;
+      cancelled = true;
+      const currentStream = typeof document !== 'undefined' ? document.getElementById('conversation-stream') : null;
+      const targets = new Set<HTMLElement>();
+      if (boundStream) targets.add(boundStream);
+      if (currentStream) targets.add(currentStream);
+      for (const el of targets) {
+        if (!deps.isSessionEnterPending()) {
+          el.style?.removeProperty?.('overflow-anchor');
+        }
+        el.removeEventListener?.('wheel', onWheel);
+        el.removeEventListener?.('pointerdown', onPointerOrTouch);
+        el.removeEventListener?.('touchstart', onPointerOrTouch);
+      }
+      if (activePostRenderPinCleanup === cleanup) {
+        activePostRenderPinCleanup = null;
+      }
+    };
+
+    activePostRenderPinCleanup = cleanup;
+    return {
+      token,
+      isCancelled: () => cancelled || token !== postRenderPinToken,
+      cleanup,
+    };
+  }
+
+  /**
    * 【提交后驱动 (Why)】React 的提交时机与 rAF 推进帧无固定先后：提交晚于推进帧时，
    *   单靠 render() 里的推进永远看不到真实末行（实测停在半空差 7958px）。
    *   观察器生命周期已剥离为 `viewport/postCommitPinObservers` 独立单元，
@@ -635,6 +709,11 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
       hasRaf: typeof requestAnimationFrame !== 'undefined',
     });
     const pinBottom = scrollDecision.pinBottom;
+    const shouldArmPostRenderPin = scrollDecision.advanceSessionEnter && pinBottom;
+    if (!scrollDecision.capture || (messagesChanged && !pinBottom)) {
+      cancelActivePostRenderPin();
+    }
+    let armedPostRenderPin: ReturnType<typeof armPostRenderPinAnchor> | null = null;
     const fallbackAnchor: StreamAnchor = { sessionId: state.activeSessionId, id: null, offset: 0, rawScrollTop: 0 };
     const streamAnchor = chooseViewportAnchor(scrollDecision, () => deps.captureStreamAnchor(), fallbackAnchor);
     // 单点 apply：三个渲染分支共用同一判定，避免分支漂移。
@@ -723,12 +802,20 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
       `;
 
       root.innerHTML = html;
+      // 【同步关闭 overflow-anchor (Pitfall)】mountReactShellComponents() 会立即调用 syncReactMessageList()，
+      // 必须在 React 19 提交前同步关闭 overflow-anchor，防止替换 #msg-content-* 时被 Blink 锚回上方。
+      if (shouldArmPostRenderPin) {
+        armedPostRenderPin = armPostRenderPinAnchor();
+      }
       mountReactShellComponents();
       lastMessagesSnapshot = currentMessagesSnapshot;
       lastInputDockSnapshot = currentDockSnapshot;
       applyAnchorAfterDom();
     } else {
       // 2. High-performance Subtree/Section Isolation Update
+      if (shouldArmPostRenderPin) {
+        armedPostRenderPin = armPostRenderPinAnchor();
+      }
       mountReactShellComponents();
 
       const inspectEl = (root.querySelector('#flux-inspector-pod') ||
@@ -934,48 +1021,35 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
           );
           return;
         }
-        if (pinBottom) {
+        if (armedPostRenderPin) {
           // 【多帧防漂移收敛 (Why)】React 19 异步提交 + 虚拟窗口 ResizeObserver 重放可能晚于前 2 帧，
           //   且提交瞬间替换 #msg-content-* 节点时 Blink `overflow-anchor: auto` 会把视口锚定到上方用户提示词。
-          //   因此在收敛期内临时关闭 overflow-anchor，并在 scrollHeight 连续 2 帧稳定（上限 8 帧）前持续贴底，
-          //   一旦检测到用户手势立即让权。
-          let pinCancelled = false;
+          //   overflow-anchor: none 已在 mountReactShellComponents() 前同步武装；此处复用单在途句柄，
+          //   在 scrollHeight 连续 2 帧稳定（上限 8 帧）前持续贴底，一旦检测到用户向上手势或被新 pin 接管立即让权。
+          const pinHandle = armedPostRenderPin;
           let lastHeight = -1;
           let stableFrames = 0;
           let frameCount = 0;
-          const streamInitial = document.getElementById('conversation-stream');
-          const cancelPin = () => { pinCancelled = true; };
-          if (streamInitial) {
-            streamInitial.style.setProperty('overflow-anchor', 'none');
-            streamInitial.addEventListener?.('wheel', cancelPin, { passive: true, once: true });
-            streamInitial.addEventListener?.('pointerdown', cancelPin, { passive: true, once: true });
-            streamInitial.addEventListener?.('touchstart', cancelPin, { passive: true, once: true });
-          }
-          const cleanupPin = (el: HTMLElement | null) => {
-            if (!el) return;
-            el.style.removeProperty('overflow-anchor');
-            el.removeEventListener?.('wheel', cancelPin);
-            el.removeEventListener?.('pointerdown', cancelPin);
-            el.removeEventListener?.('touchstart', cancelPin);
-          };
           const pin = () => {
             const stream = document.getElementById('conversation-stream');
-            if (!stream || pinCancelled) {
-              cleanupPin(stream);
+            if (!stream || pinHandle.isCancelled()) {
+              pinHandle.cleanup();
               return;
             }
-            stream.scrollTop = stream.scrollHeight;
-            if (deps.markProgrammaticScroll) {
-              deps.markProgrammaticScroll(stream);
-            } else {
-              deps.messageWindowManager.markProgrammaticScroll(stream);
+            if (stream.scrollHeight > stream.clientHeight) {
+              stream.scrollTop = stream.scrollHeight;
+              if (deps.markProgrammaticScroll) {
+                deps.markProgrammaticScroll(stream);
+              } else {
+                deps.messageWindowManager.markProgrammaticScroll(stream);
+              }
             }
             const h = stream.scrollHeight;
             stableFrames = h === lastHeight ? stableFrames + 1 : 0;
             lastHeight = h;
             frameCount += 1;
             if ((stableFrames >= 2 && frameCount >= 3) || frameCount >= 8) {
-              cleanupPin(stream);
+              pinHandle.cleanup();
               return;
             }
             requestAnimationFrame(pin);
@@ -1002,6 +1076,7 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
   }
 
   function dispose(): void {
+    cancelActivePostRenderPin();
     postCommitPinObservers?.dispose();
     if (inspectorMotionController) {
       inspectorMotionController.detach();
