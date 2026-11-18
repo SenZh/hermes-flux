@@ -508,7 +508,10 @@ const groupOperationService = createGroupOperationService({
   getCurrentLoadMessagesGeneration: () => activeLoadMessagesGeneration, logSession,
   setPendingScrollToBottom: (p) => renderCoordinator.setPendingScrollToBottom(p),
   captureStreamAnchor: () => captureStreamAnchor(),
-  beginSessionEnter: (id, opts) => streamViewportManager.beginSessionEnter(id, opts),
+  beginSessionEnter: (id, opts) => streamViewportManager.beginSessionEnter(id, {
+    ...opts,
+    phase: opts?.forcePinToBottom ? 'ready' : (gatewayClient ? 'loading' : 'ready'),
+  }),
 });
 
 const hostedRoomIds = groupOperationService.hostedRoomIds as Set<string>;
@@ -587,17 +590,12 @@ const INITIAL_RENDER_WINDOW = 24;
 const RENDER_WINDOW_STEP = 40;
 const MESSAGE_WINDOW_CAPACITY = 120;
 
-let messageWindowStart = 0;
-let messageWindowEnd = 0;
-let messageWindowUserExpanded = false;
-let averageRowHeightPx = 80;
 let streamScrollCooldown = 0;
 let lastStreamScrollTop = 0;
 let programmaticScrollTarget: number | null = null;
 let programmaticScrollIgnoreUntil = 0; // performance.now() 域，与 conversationStreamController 的比较同域
 let layoutDriftUntil = 0;
 let readerScrolledSessionId: string | null = null;
-let sessionSwitchPending = false;
 
 const messageWindowManager = createMessageWindowManager({
   getState: () => state, render: () => render(),
@@ -605,7 +603,7 @@ const messageWindowManager = createMessageWindowManager({
   scrollStreamToContentBottom: (stream, inset) => scrollStreamToContentBottom(stream, inset),
   settleInitialBottom: () => settleInitialBottom(), syncPromptNavigatorFromScroll: () => syncPromptNavigatorFromScroll(),
   setCanvasStructureDirty: (val) => { canvasStructureDirty = val; }, setSuppressPinBottomOnce: (val) => renderCoordinator.setSuppressPinBottomOnce(val),
-  setSessionSwitchPending: (val) => { sessionSwitchPending = val; }, setSettleMinFrames: (val) => { streamSettleState.settleMinFrames = val; },
+  setSessionSwitchPending: (val) => renderCoordinator.setSessionSwitchPending(val), setSettleMinFrames: (val) => { streamSettleState.settleMinFrames = val; },
   setInitialBottomSettling: (val) => { streamSettleState.initialBottomSettling = val; }, setSettledLayoutSignature: (val) => { streamSettleState.settledLayoutSignature = val; },
   setLastStreamScrollTop: (val) => { lastStreamScrollTop = val; },
   setStreamScrollCooldown: (val) => { streamScrollCooldown = val ? Date.now() + 180 : 0; },
@@ -613,13 +611,10 @@ const messageWindowManager = createMessageWindowManager({
 });
 
 function syncWindowLocalState(): void {
-  messageWindowStart = messageWindowManager.getMessageWindowStart();
-  messageWindowEnd = messageWindowManager.getMessageWindowEnd();
-  messageWindowUserExpanded = messageWindowManager.isMessageWindowUserExpanded();
-  averageRowHeightPx = messageWindowManager.getAverageRowHeightPx();
+  // 窗口状态已收敛至 messageWindowManager 单一真值源，保留空函数以兼容既有调用点
 }
 
-const layoutSignature = (): string => `${state.activeSessionId ?? ''}:${state.messages.length}:${messageWindowStart}:${messageWindowEnd}`;
+const layoutSignature = (): string => `${state.activeSessionId ?? ''}:${state.messages.length}:${messageWindowManager.getMessageWindowStart()}:${messageWindowManager.getMessageWindowEnd()}`;
 function markProgrammaticScroll(stream: HTMLElement): void {
   programmaticScrollTarget = Math.round(stream.scrollTop);
   programmaticScrollIgnoreUntil = (typeof performance !== 'undefined' ? performance.now() : Date.now()) + 180;
@@ -642,7 +637,7 @@ const isGroupConversationActive = (sessionId = state.activeSessionId): boolean =
 const promptNavigatorManager = new PromptNavigatorManager({
   getActiveSessionId: () => state.activeSessionId, getMessages: () => state.messages, getLang: () => state.lang,
   hasOlderMessages: () => state.hasOlderMessages, isLoadingOlder: () => state.isLoadingOlder,
-  isGroupConversationActive: () => isGroupConversationActive(), getAverageRowHeightPx: () => averageRowHeightPx,
+  isGroupConversationActive: () => isGroupConversationActive(), getAverageRowHeightPx: () => messageWindowManager.getAverageRowHeightPx(),
   isAverageRowHeightLocked: () => messageWindowManager.isAverageRowHeightLocked(),
   getStreamElement: () => document.getElementById('conversation-stream'),
   relocateMessageWindowToIndex: (idx) => relocateMessageWindowToIndex(idx),
@@ -668,7 +663,7 @@ streamViewportManager = createDesktopStreamViewport({
   layoutSignature: () => layoutSignature(),
   markProgrammaticScroll: (stream) => markProgrammaticScroll(stream),
   isPromptJumpSettling: () => promptNavigatorManager.isJumpSettling(),
-  getWindowGeom: () => ({ start: messageWindowStart, end: messageWindowEnd, averageRowHeightPx }),
+  getWindowGeom: () => ({ start: messageWindowManager.getMessageWindowStart(), end: messageWindowManager.getMessageWindowEnd(), averageRowHeightPx: messageWindowManager.getAverageRowHeightPx() }),
 });
 
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
@@ -706,9 +701,9 @@ const messageLoadingService = createMessageLoadingService({
   scrollStreamToBottom: (r) => scrollStreamToBottom(r ?? ''), setPendingScrollToBottom: (v) => renderCoordinator.setPendingScrollToBottom(v),
   isStreamNearBottom: (el) => isStreamNearBottom(el), captureStreamAnchor: () => captureStreamAnchor(),
   applyStreamAnchor: (a, m) => applyStreamAnchor(a as StreamAnchor, m ?? false),
-  getMessageWindowStart: () => messageWindowStart, setMessageWindowStart: (v) => { messageWindowStart = v; },
-  getMessageWindowEnd: () => messageWindowEnd, setMessageWindowEnd: (v) => { messageWindowEnd = v; },
-  setMessageWindowUserExpanded: (v) => { messageWindowUserExpanded = v; },
+  getMessageWindowStart: () => messageWindowManager.getMessageWindowStart(), setMessageWindowStart: (v) => messageWindowManager.setMessageWindowStart(v),
+  getMessageWindowEnd: () => messageWindowManager.getMessageWindowEnd(), setMessageWindowEnd: (v) => messageWindowManager.setMessageWindowEnd(v),
+  setMessageWindowUserExpanded: (v) => messageWindowManager.setMessageWindowUserExpanded(v),
   setCanvasStructureDirty: (v) => { canvasStructureDirty = v; }, setSuppressPinBottomOnce: (v) => renderCoordinator.setSuppressPinBottomOnce(v),
   isGroupConversationActive: (id) => isGroupConversationActive(id), hostedRoomIds, formatSessionTime, formatTimestamp: (ts) => formatTimestamp(ts),
   botActivityStore, botForeverChatCache, sessionPreviewCache,
@@ -744,9 +739,12 @@ sessionOperationService = createSessionOperationService({
     activeStreamingLiveId = null; activeStreamingBotName = null; state.isStreaming = false;
   },
   setPendingScrollToBottom: (v) => renderCoordinator.setPendingScrollToBottom(v),
-  setLastMessagesSnapshot: (v) => { lastMessagesSnapshot = v as RenderMessagesSnapshot | null; },
+  setLastMessagesSnapshot: (v) => renderCoordinator.setLastMessagesSnapshot(v as RenderMessagesSnapshot | null),
   captureStreamAnchor: () => captureStreamAnchor(),
-  beginSessionEnter: (id, opts) => streamViewportManager.beginSessionEnter(id, opts),
+  beginSessionEnter: (id, opts) => streamViewportManager.beginSessionEnter(id, {
+    ...opts,
+    phase: opts?.forcePinToBottom ? 'ready' : (gatewayClient ? 'loading' : 'ready'),
+  }),
   loadMessages: (id, bot) => loadMessages(id, bot), openBotChat: (bot) => openBotChat(bot),
   ensureLiveSessionId: () => ensureLiveSessionId(),
   incrementActiveLoadMessagesGeneration: () => {
@@ -876,7 +874,7 @@ const turnExecutionService = createTurnExecutionService({
   resolveAgentAvatar: (name) => resolveAgentAvatar(name), scrollStreamToBottom: (reason) => scrollStreamToBottom(reason),
   setPendingScrollToBottom: (val) => renderCoordinator.setPendingScrollToBottom(val), runSlashCommand: (cmd) => inputDockController.runSlashCommand(cmd),
   enqueueDraft: () => inputDockController.enqueueDraft(), handleQueueAction: (action, id) => inputDockController.handleQueueAction(action, id),
-  setMessageWindowUserExpanded: (val) => { messageWindowUserExpanded = val; }, ensureMessageWindow: (total) => ensureMessageWindow(total),
+  setMessageWindowUserExpanded: (val) => messageWindowManager.setMessageWindowUserExpanded(val), ensureMessageWindow: (total) => ensureMessageWindow(total),
   render: () => render(), t, logStream,
 });
 
@@ -979,7 +977,6 @@ const captureStreamAnchor = (): StreamAnchor => streamViewportManager.captureStr
 const applyStreamAnchor = (anchor: StreamAnchor, pin: boolean) => streamViewportManager.applyStreamAnchor(anchor, pin);
 const stabilizeStreamAnchor = (anchor: StreamAnchor) => streamViewportManager.stabilizeStreamAnchor(anchor);
 
-let lastMessagesSnapshot: RenderMessagesSnapshot | null = null;
 let lastInputDockSnapshot: RenderInputDockSnapshot | null = null;
 
 function snapshotFingerprint(value: unknown): string {
@@ -1114,6 +1111,7 @@ const renderCoordinator = createRenderCoordinator({
   settleInitialBottom: () => settleInitialBottom(), bindEvents: () => bindEvents(),
   // React 提交后驱动：提交后重新对齐 armed 计划（观察器合并到一帧），语义见 streamViewportManager.reassertActivePin。
   isSessionEnterPending: () => streamViewportManager.isSessionEnterPending(), settleSessionEnter: (probe, sessionId, phase, count, authoritativeReady) => streamViewportManager.settleSessionEnter(probe, sessionId, phase, count, authoritativeReady), reassertActivePin: () => streamViewportManager?.reassertActivePin(),
+  markProgrammaticScroll: (stream) => markProgrammaticScroll(stream),
   syncComposerPoppers: () => syncComposerPoppers(), logRender,
 });
 
@@ -1290,9 +1288,9 @@ const conversationStreamController = createConversationStreamController({
   expandMessageWindow: () => expandMessageWindow(), settleInitialBottom: () => settleInitialBottom(),
   scrollStreamToBottom: (reason) => scrollStreamToBottom(reason), scheduleStreamBottomInset: () => scheduleStreamBottomInset(),
   layoutSignature: () => layoutSignature(), ensureLiveSessionId: () => ensureLiveSessionId(),
-  getMessageWindowStart: () => messageWindowStart, getMessageWindowEnd: () => messageWindowEnd,
-  isMessageWindowUserExpanded: () => messageWindowUserExpanded, setMessageWindowUserExpanded: (val) => { messageWindowUserExpanded = val; },
-  getAverageRowHeightPx: () => averageRowHeightPx, isInitialBottomSettling: () => streamSettleState.initialBottomSettling,
+  getMessageWindowStart: () => messageWindowManager.getMessageWindowStart(), getMessageWindowEnd: () => messageWindowManager.getMessageWindowEnd(),
+  isMessageWindowUserExpanded: () => messageWindowManager.isMessageWindowUserExpanded(), setMessageWindowUserExpanded: (val) => messageWindowManager.setMessageWindowUserExpanded(val),
+  getAverageRowHeightPx: () => messageWindowManager.getAverageRowHeightPx(), isInitialBottomSettling: () => streamSettleState.initialBottomSettling,
   setInitialBottomSettling: (val) => { streamSettleState.initialBottomSettling = val; }, getStreamScrollCooldown: () => streamScrollCooldown > Date.now(),
   setStreamScrollCooldown: (val) => { streamScrollCooldown = val ? Date.now() + 180 : 0; },
   getLastStreamScrollTop: () => lastStreamScrollTop, setLastStreamScrollTop: (val) => { lastStreamScrollTop = val; },
@@ -1300,6 +1298,7 @@ const conversationStreamController = createConversationStreamController({
   getProgrammaticScrollIgnoreUntil: () => programmaticScrollIgnoreUntil, getLayoutDriftUntil: () => layoutDriftUntil,
   getReaderScrolledSessionId: () => readerScrolledSessionId ?? '', setReaderScrolledSessionId: (val) => { readerScrolledSessionId = val || null; },
   setSettledLayoutSignature: (val) => { streamSettleState.settledLayoutSignature = val; },
+  isSessionEnterPending: () => streamViewportManager?.isSessionEnterPending() ?? false,
   cancelSessionEnter: () => streamViewportManager?.cancelSessionEnter(),
   STICK_TO_BOTTOM_THRESHOLD_PX, MESSAGE_WINDOW_CAPACITY,
 });

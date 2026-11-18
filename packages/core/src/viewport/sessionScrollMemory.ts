@@ -55,6 +55,18 @@ export type RecordSnapshotInput = {
   anchorOffsetRatio?: number;
   capturedAt?: number;
   now?: number;
+  /**
+   * 贴底安全区在几何距离上的额外余量（px），即输入舱遮挡的那段 gutter。
+   *
+   * 【设计意图 (Why)】贴底落点由宿主按「输入舱安全线」对齐：
+   *   `scrollTop = scrollHeight - clientHeight - paddingBottom`，因此用户视觉上明明停在
+   *   最新消息处，几何距离却恒等于 gutter（实测 160px）。若判据只认 48px，这条会话会被
+   *   记成「正在回溯历史」，切回时按陈旧绝对位置/锚点恢复，长会话里直接飞到中间。
+   *
+   * 【约束与规则 (Rules)】只能放宽阈值（`max(阈值, reserve + 8)`），绝不允许收窄；
+   *   非法值（NaN / 负数 / 非数值）一律按未传处理，退回既有 48px 语义。
+   */
+  nearBottomReservePx?: number;
 }
 
 export class SessionScrollMemory {
@@ -69,6 +81,10 @@ export class SessionScrollMemory {
 
   /**
    * 记录离开会话时的视口物理快照。
+   *
+   * 【贴底判据必须与实际贴底落点同源 (Rules)】见 `RecordSnapshotInput.nearBottomReservePx`：
+   *   宿主按输入舱安全线贴底时，几何距离恒等于 gutter；只认 48px 会把「在最底部」记成
+   *   「在回溯历史」，切回即按陈旧位置恢复，长会话表现为飞到中间。
    */
   public recordSnapshot(snapshot: RecordSnapshotInput): void {
     const { sessionId, scrollTop, scrollHeight, clientHeight, anchorMessageId, anchorOffsetRatio } = snapshot;
@@ -78,9 +94,9 @@ export class SessionScrollMemory {
     const normalizedScrollHeight = Math.max(0, scrollHeight);
     const normalizedClientHeight = Math.max(0, clientHeight);
 
-    // 计算是否处于贴底安全区
+    // 计算是否处于贴底安全区（阈值可被宿主的安全线余量放宽，但绝不收窄）
     const distanceToBottom = normalizedScrollHeight - (normalizedScrollTop + normalizedClientHeight);
-    const isNearBottom = distanceToBottom <= this.nearBottomThresholdPx;
+    const isNearBottom = distanceToBottom <= this.resolveNearBottomThreshold(snapshot.nearBottomReservePx);
 
     // LRU 淘汰维护
     if (this.cache.has(sessionId)) {
@@ -102,6 +118,18 @@ export class SessionScrollMemory {
         : undefined,
       capturedAt: snapshot.now ?? Date.now(),
     });
+  }
+
+  /**
+   * 推导本次快照的贴底阈值。
+   * 【约束与规则 (Rules)】只放宽、不收窄；非法 reserve 一律忽略并退回构造期阈值。
+   *   放宽量与宿主的 `isNearBottom` 保持同一公式（`padding + 8`），两处判据不得漂移。
+   */
+  private resolveNearBottomThreshold(reservePx?: number): number {
+    if (typeof reservePx !== 'number' || !Number.isFinite(reservePx) || reservePx <= 0) {
+      return this.nearBottomThresholdPx;
+    }
+    return Math.max(this.nearBottomThresholdPx, reservePx + 8);
   }
 
   /**

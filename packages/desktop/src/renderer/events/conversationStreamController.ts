@@ -89,6 +89,7 @@ export interface ConversationStreamControllerDeps {
   getReaderScrolledSessionId: () => string;
   setReaderScrolledSessionId: (val: string) => void;
   setSettledLayoutSignature: (val: string) => void;
+  isSessionEnterPending?: () => boolean;
   cancelSessionEnter?: () => void;
   STICK_TO_BOTTOM_THRESHOLD_PX: number;
   MESSAGE_WINDOW_CAPACITY: number;
@@ -155,6 +156,25 @@ export function createConversationStreamController(
   } = deps;
 
   let runningToolTimerHandle: number | undefined;
+
+  const USER_SCROLL_INPUT_WINDOW_MS = 400;
+  let lastUserScrollInputAt = 0;
+  let promptNavSyncScheduled = false;
+  const markUserScrollInput = (): void => {
+    lastUserScrollInputAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  };
+  const schedulePromptNavigatorSync = (): void => {
+    if (typeof requestAnimationFrame !== 'function') {
+      syncPromptNavigatorFromScroll();
+      return;
+    }
+    if (promptNavSyncScheduled) return;
+    promptNavSyncScheduled = true;
+    requestAnimationFrame(() => {
+      promptNavSyncScheduled = false;
+      syncPromptNavigatorFromScroll();
+    });
+  };
 
   function stopRunningToolTimers(): void {
     if (runningToolTimerHandle !== undefined) {
@@ -356,10 +376,24 @@ export function createConversationStreamController(
     const streamEl = document.getElementById('conversation-stream');
 
     if (streamEl) {
+      if (streamEl.dataset && streamEl.dataset.scrollInputBound !== 'true' && typeof streamEl.addEventListener === 'function') {
+        streamEl.dataset.scrollInputBound = 'true';
+        streamEl.addEventListener('pointerdown', () => markUserScrollInput(), { passive: true });
+        streamEl.addEventListener('touchmove', () => markUserScrollInput(), { passive: true });
+        streamEl.addEventListener('keydown', (e: KeyboardEvent) => {
+          if (['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown', ' '].includes(e.key)) {
+            markUserScrollInput();
+          }
+        }, { passive: true });
+      }
+
       streamEl.onscroll = () => {
-        syncPromptNavigatorFromScroll();
+        schedulePromptNavigatorSync();
 
         const progTarget = getProgrammaticScrollTarget();
+        const enterPending = deps.isSessionEnterPending?.() ?? false;
+        const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        const hasRecentUserInput = (now - lastUserScrollInputAt) <= USER_SCROLL_INPUT_WINDOW_MS;
         /**
          * 【判定程序化滚动 (Why)】忽略窗口内必须把 scrollTop 的「向下回退」也视为程序化：
          *   布局 clamp（内容高度收缩 / 末行重排）会让 scrollTop 变小，若沿用
@@ -369,22 +403,32 @@ export function createConversationStreamController(
          *   贴底写入后 180ms 窗口内读者向上滚动也被吞掉，视口随即被 reassertActivePin 拽回底部，
          *   最坏情况在 armed 的 600 帧窗口内（约 10 秒）无法回溯历史。
          *   因此窗口内只豁免「小幅回退（布局 clamp）」，向上超过阈值的位移仍是读者手势。
+         * 【进入期被动排版豁免 (Pitfall)】在 enterPending 期间，Blink 的 content-visibility: auto
+         *   解除跳过与 overflow-anchor: auto 会产生数百像素的被动 scrollTop 突变；
+         *   此时若没有真实用户输入手势（wheel / touchmove / pointerdown / keydown），
+         *   绝不能把被动重排误判为用户手势而取消进入计划。
          * 【同一时基 (Rules)】忽略截止由 markProgrammaticScroll 以 performance.now() 写入，
          *   这里的比较必须同域，禁止混用 Date.now()。
          * 【取样顺序 (Rules)】previousTop 必须先于判定取值：它同时是方向判别的基准与后续手势判据。
          */
         const previousTop = getLastStreamScrollTop();
-        const inIgnoreWindow = performance.now() <= getProgrammaticScrollIgnoreUntil();
+        const inIgnoreWindow = now <= getProgrammaticScrollIgnoreUntil();
         const isLayoutClamp = inIgnoreWindow && streamEl.scrollTop >= previousTop - 8;
         const isProgrammatic =
           (progTarget !== null && Math.abs(streamEl.scrollTop - progTarget) <= 2)
           || isLayoutClamp;
 
-        if (progTarget !== null && Math.abs(streamEl.scrollTop - progTarget) <= 2) {
+        if (!enterPending && progTarget !== null && Math.abs(streamEl.scrollTop - progTarget) <= 2) {
           setProgrammaticScrollTarget(null);
         }
 
-        if (!isProgrammatic && performance.now() > getLayoutDriftUntil() && Math.abs(streamEl.scrollTop - previousTop) > 4) {
+        const isRealUserGestureDuringEnter = !enterPending || hasRecentUserInput;
+        if (
+          !isProgrammatic
+          && isRealUserGestureDuringEnter
+          && now > getLayoutDriftUntil()
+          && Math.abs(streamEl.scrollTop - previousTop) > 4
+        ) {
           setInitialBottomSettling(false);
           deps.cancelSessionEnter?.();
           if (streamEl.scrollTop < previousTop - 4) {
@@ -394,7 +438,7 @@ export function createConversationStreamController(
         }
         setLastStreamScrollTop(streamEl.scrollTop);
 
-        if (isInitialBottomSettling()) return;
+        if (enterPending || isInitialBottomSettling()) return;
 
         const distanceToBottom = streamEl.scrollHeight - streamEl.scrollTop - streamEl.clientHeight;
         const isNearBottomNow = distanceToBottom <= STICK_TO_BOTTOM_THRESHOLD_PX;
@@ -423,6 +467,7 @@ export function createConversationStreamController(
         const msgWindowEnd = getMessageWindowEnd();
         const msgWindowStart = getMessageWindowStart();
         const avgRowHeight = getAverageRowHeightPx();
+        const isNativeFullWindow = !virtualWindowEl && msgWindowStart === 0 && msgWindowEnd >= state.messages.length;
 
         // 1. 获取当前挂载窗口的实际物理几何（优先取 DOM 实测高度，回退取切片名义估算）
         const virtualWindowTop = Math.round(msgWindowStart * avgRowHeight);
@@ -437,74 +482,84 @@ export function createConversationStreamController(
         const distanceToWindowEnd = currentWindowBottom - currentViewportBottom;
         const isAtTail = msgWindowEnd >= state.messages.length;
 
-        // 3. 【向下平滑滑窗 (Why)】当未到尾部且视口底边自然接近当前窗口底边时（在下沿预取带内），顺畅向前滑动窗口。
-        //   若整个视口已深度跌出当前窗口之外（<-clientHeight * 0.5），则属于拖拽滚动条跨越式寻址，必须放行至下面的 outside 分支直接重定位。
-        const isNearWindowBottomEdge = distanceToWindowEnd < viewportPrefetch
-          && distanceToWindowEnd >= -streamEl.clientHeight * 0.5;
+        if (!isNativeFullWindow) {
+          // 3. 【向下平滑滑窗 (Why)】当未到尾部且视口底边自然接近当前窗口底边时（在下沿预取带内），顺畅向前滑动窗口。
+          //   若整个视口已深度跌出当前窗口之外（<-clientHeight * 0.5），则属于拖拽滚动条跨越式寻址，必须放行至下面的 outside 分支直接重定位。
+          const isNearWindowBottomEdge = distanceToWindowEnd < viewportPrefetch
+            && distanceToWindowEnd >= -streamEl.clientHeight * 0.5;
 
-        if (!isAtTail && isNearWindowBottomEdge) {
-          setStreamScrollCooldown(true);
-          slideMessageWindowForward();
-          if (typeof requestAnimationFrame !== 'undefined') {
-            requestAnimationFrame(() => { setStreamScrollCooldown(false); });
-          } else {
-            setStreamScrollCooldown(false);
+          if (!isAtTail && isNearWindowBottomEdge) {
+            setStreamScrollCooldown(true);
+            slideMessageWindowForward();
+            if (typeof requestAnimationFrame !== 'undefined') {
+              requestAnimationFrame(() => { setStreamScrollCooldown(false); });
+            } else {
+              setStreamScrollCooldown(false);
+            }
+            return;
           }
-          return;
-        }
 
-        if (state.messages.length > MESSAGE_WINDOW_CAPACITY) {
-          // 【对齐真实物理底边 (Pitfall)】出界上限必须结合 realWindowBottom，防范包含万级像素巨型工具块时
-          //   因名义 virtualBottom 远小于实际内容而误判出界提前卸载 DOM；下界扣除 clientHeight 消除死区空白。
-          const realWindowBottom = Math.max(Math.round(msgWindowEnd * avgRowHeight), currentWindowBottom);
-          const outside = streamEl.scrollTop < virtualWindowTop - streamEl.clientHeight * 1.5
-            || streamEl.scrollTop > realWindowBottom + streamEl.clientHeight * 0.5;
-          if (outside) {
-            // 【解耦滚动条拖拽直接寻址 (Why)】当读者直接拖动滚动条跨越式跳转（Seek）时，这是显式定位意图，
-            //   无条件放行 relocateMessageWindowToIndex，严禁退化回 scrollStreamToBottom 强行把滚动条踢到底部。
-            const targetIndex = Math.floor(streamEl.scrollTop / Math.max(1, avgRowHeight));
-            if (relocateMessageWindowToIndex(targetIndex)) {
-              setStreamScrollCooldown(true);
-              render();
-              const handoffToFetch =
-                msgWindowStart === 0
-                && streamEl.scrollTop < expandPrefetch
-                && state.hasOlderMessages
-                && getReaderScrolledSessionId() === state.activeSessionId;
-              if (!handoffToFetch) {
+          if (state.messages.length > MESSAGE_WINDOW_CAPACITY) {
+            // 【对齐真实物理底边 (Pitfall)】出界上限必须结合 realWindowBottom，防范包含万级像素巨型工具块时
+            //   因名义 virtualBottom 远小于实际内容而误判出界提前卸载 DOM；下界扣除 clientHeight 消除死区空白。
+            const realWindowBottom = Math.max(Math.round(msgWindowEnd * avgRowHeight), currentWindowBottom);
+            const outside = streamEl.scrollTop < virtualWindowTop - streamEl.clientHeight * 1.5
+              || streamEl.scrollTop > realWindowBottom + streamEl.clientHeight * 0.5;
+            if (outside) {
+              // 【解耦滚动条拖拽直接寻址 (Why)】当读者直接拖动滚动条跨越式跳转（Seek）时，这是显式定位意图，
+              //   无条件放行 relocateMessageWindowToIndex，严禁退化回 scrollStreamToBottom 强行把滚动条踢到底部。
+              const targetIndex = Math.floor(streamEl.scrollTop / Math.max(1, avgRowHeight));
+              if (relocateMessageWindowToIndex(targetIndex)) {
+                setStreamScrollCooldown(true);
+                render();
+                const handoffToFetch =
+                  msgWindowStart === 0
+                  && streamEl.scrollTop < expandPrefetch
+                  && state.hasOlderMessages
+                  && getReaderScrolledSessionId() === state.activeSessionId;
+                if (!handoffToFetch) {
+                  if (typeof requestAnimationFrame !== 'undefined') {
+                    requestAnimationFrame(() => {
+                      syncScrollTopToWindow('scrollbar jump');
+                      setStreamScrollCooldown(false);
+                    });
+                  } else {
+                    syncScrollTopToWindow('scrollbar jump');
+                    setStreamScrollCooldown(false);
+                  }
+                  return;
+                }
                 if (typeof requestAnimationFrame !== 'undefined') {
                   requestAnimationFrame(() => {
                     syncScrollTopToWindow('scrollbar jump');
-                    setStreamScrollCooldown(false);
                   });
                 } else {
                   syncScrollTopToWindow('scrollbar jump');
-                  setStreamScrollCooldown(false);
                 }
-                return;
-              }
-              if (typeof requestAnimationFrame !== 'undefined') {
-                requestAnimationFrame(() => {
-                  syncScrollTopToWindow('scrollbar jump');
-                });
-              } else {
-                syncScrollTopToWindow('scrollbar jump');
               }
             }
           }
         }
 
-        const upwardAction = planUpwardScrollAction({
-          sessionId: state.activeSessionId,
-          readerScrolledSessionId: getReaderScrolledSessionId(),
-          total: state.messages.length,
-          capacity: MESSAGE_WINDOW_CAPACITY,
-          windowStart: msgWindowStart,
-          hasOlderMessages: state.hasOlderMessages,
-          scrollTop: streamEl.scrollTop,
-          virtualWindowTopPx: virtualWindowTop,
-          expandPrefetchPx: expandPrefetch,
-        });
+        const upwardAction = isNativeFullWindow
+          ? (
+            state.hasOlderMessages
+            && streamEl.scrollTop < expandPrefetch
+            && getReaderScrolledSessionId() === state.activeSessionId
+              ? 'fetch-older-remote'
+              : 'none'
+          )
+          : planUpwardScrollAction({
+            sessionId: state.activeSessionId,
+            readerScrolledSessionId: getReaderScrolledSessionId(),
+            total: state.messages.length,
+            capacity: MESSAGE_WINDOW_CAPACITY,
+            windowStart: msgWindowStart,
+            hasOlderMessages: state.hasOlderMessages,
+            scrollTop: streamEl.scrollTop,
+            virtualWindowTopPx: virtualWindowTop,
+            expandPrefetchPx: expandPrefetch,
+          });
 
         if (upwardAction === 'none') return;
         if (state.activeFocus.type === 'group') return;
@@ -558,6 +613,7 @@ export function createConversationStreamController(
        *   `deltaY` 缺失（合成事件 / 旧内核）按读者手势处理，绝不静默吞掉取消。
        */
       streamEl.onwheel = (e: WheelEvent) => {
+        markUserScrollInput();
         const isDownwardWheel = Boolean(e && e.deltaY >= 0);
         if (!isDownwardWheel) deps.cancelSessionEnter?.();
         if (e && e.deltaY >= 0 || getStreamScrollCooldown() || state.isLoadingOlder) return;

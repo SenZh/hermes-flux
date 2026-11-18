@@ -78,6 +78,64 @@ test('StreamViewportManager 核心视口与锚点行为单测', async (t) => {
     assert.equal(manager.isNearBottom(streamFar), false);
   });
 
+  await t.test('44. 内容尚未提交（scrollHeight 未撑出视口）时贴底不得把视口写到 0', () => {
+    /**
+     * 【真实场景】切回长会话时，React 尚未提交消息行，容器还是空的
+     * （`scrollHeight === clientHeight === 762`）。此时 `scrollTop = scrollHeight`
+     * 会被浏览器夹到 0；随后真实内容提交、`content-visibility` 只展开视口附近行，
+     * 文档高度远小于真实值，视口就永久停在会话顶部/中部（实测 scrollTop=0、
+     * scrollHeight 从 83994 塌到 36338）。
+     *
+     * 【约束与规则 (Rules)】容器不具备可滚动余量时，贴底必须是无副作用的 no-op：
+     * 既不写 scrollTop、也不留「已落定」痕迹，等真实内容提交后再由提交后驱动对齐。
+     */
+    const fakeStream = {
+      scrollTop: 0,
+      scrollHeight: 762,
+      clientHeight: 762,
+      getBoundingClientRect: () => ({ top: 0, bottom: 762 }),
+    };
+    const host = createMockViewportHost({ streamElement: fakeStream });
+    const manager = new StreamViewportManager(host);
+
+    manager.scrollStreamToContentBottom(fakeStream, 160);
+
+    assert.equal(fakeStream.scrollTop, 0, '空容器贴底不得产生写入');
+    assert.equal(host._programmaticScrolls.length, 0, '空容器贴底不得登记程序化滚动（会污染手势判别）');
+  });
+
+  await t.test('45. 内容未提交时的多帧落定必须保持 no-op，不得逐帧写 0', () => {
+    const writes = [];
+    const fakeStream = {
+      scrollTop: 0,
+      scrollHeight: 400,
+      clientHeight: 762,
+      getBoundingClientRect: () => ({ top: 0, bottom: 762 }),
+    };
+    Object.defineProperty(fakeStream, 'scrollTop', {
+      get: () => 0,
+      set: (v) => writes.push(v),
+    });
+    const pendingFrames = [];
+    let settling = true;
+    const host = createMockViewportHost({ streamElement: fakeStream });
+    host.requestAnimationFrame = (cb) => { pendingFrames.push(cb); return 1; };
+    host.getInitialBottomSettling = () => settling;
+    host.setInitialBottomSettling = (v) => { settling = v; };
+    host.getSettleMinFrames = () => 0;
+    host.setSettleMinFrames = () => {};
+
+    const manager = new StreamViewportManager(host);
+    manager.settleInitialBottom();
+    let guard = 0;
+    while (pendingFrames.length > 0 && guard < 100) {
+      pendingFrames.shift()();
+      guard += 1;
+    }
+
+    assert.deepEqual(writes, [], '内容不足一屏时落定期不得写入任何 scrollTop');
+  });
+
   await t.test('2. scrollStreamToContentBottom 窗口覆盖末尾时按窗口底边对齐', () => {
     const fakeStream = {
       scrollTop: 500,
@@ -397,11 +455,17 @@ test('StreamViewportManager 核心视口与锚点行为单测', async (t) => {
   });
 
   await t.test('13. applyStreamAnchor 贴底分支：按 paddingBottom 精确贴底并写 trace', () => {
+    /**
+     * 【夹具必须是可滚动容器 (Rules)】原夹具 `scrollHeight === clientHeight === 1000`
+     * 是退化场景：真实浏览器里 `scrollTop = 1000` 会被夹到 0，"贴到内容底"在该几何下
+     * 与"什么都不做"不可区分。贴底写入只在存在可滚动余量时才有意义，因此这里给出
+     * 真实余量（内容 1000 / 视口 500），断言写入落在内容底。
+     */
     const fakeStream = {
       scrollTop: 0,
       scrollHeight: 1000,
-      clientHeight: 1000,
-      getBoundingClientRect: () => ({ top: 0, bottom: 1000 }),
+      clientHeight: 500,
+      getBoundingClientRect: () => ({ top: 0, bottom: 500 }),
     };
     const host = createMockViewportHost({ streamElement: fakeStream, windowEnd: 5, totalMessages: 5 });
     const manager = new StreamViewportManager(host);
@@ -543,7 +607,7 @@ test('StreamViewportManager 核心视口与锚点行为单测', async (t) => {
         },
       },
       getBoundingClientRect: () => ({ top: 0, bottom: 500 }),
-      querySelectorAll: () => rows,
+      querySelectorAll: (selector) => (selector === '.conv-turn' ? [] : rows),
     };
     const host = createMockViewportHost({ streamElement: fakeStream, activeSessionId: 'sess-42' });
     const manager = new StreamViewportManager(host);
@@ -554,7 +618,7 @@ test('StreamViewportManager 核心视口与锚点行为单测', async (t) => {
     assert.equal(anchor.offset, -30, 'offset 必须是该行顶边相对视口顶边的距离（部分露出时为负）');
     assert.equal(anchor.rawScrollTop, 640);
     assert.equal(anchor.sessionId, 'sess-42');
-    assert.equal(cssVarVal, '--conv-intrinsic-median-height:58px', '中位数必须取真实渲染行（55/60）的均值并四舍五入');
+    assert.equal(cssVarVal, '', '占位高度样本只认 .conv-turn；没有回合时不得写入变量');
   });
 
   await t.test('22. captureStreamAnchor 全部行都滚出视口时返回空锚点', () => {
@@ -567,7 +631,7 @@ test('StreamViewportManager 核心视口与锚点行为单测', async (t) => {
       clientHeight: 500,
       style: { setProperty: () => {} },
       getBoundingClientRect: () => ({ top: 0, bottom: 500 }),
-      querySelectorAll: () => rows,
+      querySelectorAll: (selector) => (selector === '.conv-turn' ? [] : rows),
     };
     const host = createMockViewportHost({ streamElement: fakeStream, activeSessionId: 'sess-7' });
     const manager = new StreamViewportManager(host);
@@ -951,7 +1015,7 @@ test('StreamViewportManager 核心视口与锚点行为单测', async (t) => {
       clientHeight: 500,
       style: { setProperty: (name, value) => writes.push({ name, value }) },
       getBoundingClientRect: () => ({ top: 0, bottom: 500 }),
-      querySelectorAll: () => rows,
+      querySelectorAll: (selector) => (selector === '.conv-turn' ? [] : rows),
     };
     const host = createMockViewportHost({ streamElement: fakeStream, activeSessionId: 'sess-zero' });
     const manager = new StreamViewportManager(host);
@@ -978,13 +1042,13 @@ test('StreamViewportManager 核心视口与锚点行为单测', async (t) => {
       clientHeight: 500,
       style: {},
       getBoundingClientRect: () => ({ top: 0, bottom: 500 }),
-      querySelectorAll: () => rows,
+      querySelectorAll: (selector) => (selector === '.conv-turn' ? [] : rows),
     };
     const host = createMockViewportHost({ streamElement: fakeStream, activeSessionId: 'sess-no-style' });
     const manager = new StreamViewportManager(host);
 
     assert.doesNotThrow(() => manager.captureStreamAnchor(), '宿主元素缺少 setProperty 时不得抛错中断锚点捕获');
-    assert.equal(manager.getMedianEstimator().sampleCount, 1, '有效行高仍必须进入样本');
+    assert.equal(manager.getMedianEstimator().sampleCount, 0, '占位高度样本只认 .conv-turn；没有回合时不得进入样本');
   });
 
   await t.test('36. captureStreamAnchor 无活跃会话时只返回锚点，不写跨会话记忆', () => {
@@ -997,7 +1061,7 @@ test('StreamViewportManager 核心视口与锚点行为单测', async (t) => {
       clientHeight: 500,
       style: { setProperty: () => {} },
       getBoundingClientRect: () => ({ top: 0, bottom: 500 }),
-      querySelectorAll: () => rows,
+      querySelectorAll: (selector) => (selector === '.conv-turn' ? [] : rows),
     };
     const host = createMockViewportHost({ streamElement: fakeStream, activeSessionId: '' });
     const manager = new StreamViewportManager(host);
@@ -1056,13 +1120,13 @@ test('StreamViewportManager 核心视口与锚点行为单测', async (t) => {
       scrollHeight: 2000,
       clientHeight: 500,
       getBoundingClientRect: () => ({ top: 0, bottom: 500 }),
-      querySelectorAll: () => rows,
+      querySelectorAll: (selector) => (selector === '.conv-turn' ? [] : rows),
     };
     const host = createMockViewportHost({ streamElement: fakeStream, activeSessionId: 'sess-bare' });
     const manager = new StreamViewportManager(host);
 
     assert.doesNotThrow(() => manager.captureStreamAnchor(), '无 style 对象时不得抛错');
-    assert.equal(manager.getMedianEstimator().sampleCount, 1, '行高样本与变量注入是两条独立通路');
+    assert.equal(manager.getMedianEstimator().sampleCount, 0, '占位高度样本只认 .conv-turn；无回合时样本恒为 0');
   });
 
   await t.test('39. applyStreamAnchor 锚点与会话都为空时按当前会话回落，且不改写位置', () => {
@@ -1113,7 +1177,7 @@ test('StreamViewportManager 核心视口与锚点行为单测', async (t) => {
       clientHeight: 500,
       style: { setProperty: () => {} },
       getBoundingClientRect: () => ({ top: 0, bottom: 500 }),
-      querySelectorAll: () => rows,
+      querySelectorAll: (selector) => (selector === '.conv-turn' ? [] : rows),
     };
     const host = createMockViewportHost({ streamElement: fakeStream, activeSessionId: 'sess-partial' });
     const manager = new StreamViewportManager(host);
@@ -1135,7 +1199,7 @@ test('StreamViewportManager 核心视口与锚点行为单测', async (t) => {
       clientHeight: 500,
       style: { setProperty: () => {} },
       getBoundingClientRect: () => ({ top: 0, bottom: 500 }),
-      querySelectorAll: () => rows,
+      querySelectorAll: (selector) => (selector === '.conv-turn' ? [] : rows),
     };
     const host = createMockViewportHost({ streamElement: fakeStream, activeSessionId: 'sess-below' });
     const manager = new StreamViewportManager(host);
@@ -1145,6 +1209,295 @@ test('StreamViewportManager 核心视口与锚点行为单测', async (t) => {
     const snapshot = manager.getSessionScrollMemory().getSnapshot('sess-below');
     assert.equal(snapshot?.anchorOffsetRatio, 0, '行顶边在视口内时比例必须是 0，负比例会让恢复跳到更上方');
     assert.equal(snapshot?.anchorMessageId, 'row-below');
+  });
+
+  await t.test('46. 占位高度样本必须取自 .conv-turn 回合，而不是消息行（量纲一致性）', () => {
+    /**
+     * 【真实缺陷】`--conv-intrinsic-median-height` 的唯一消费方是 `.conv-turn` 的
+     *   `contain-intrinsic-size`。若样本取自行容器 `[data-msg-id]`，量纲就错了一个层级：
+     *   实测真实平均回合高 241px、平均行高 158px，注入 80px 后离屏回合占位只有真实值的
+     *   1/3，整篇文档 scrollHeight 塌到真实的 46%，切回时浏览器只能把视口夹在
+     *   "占位高度"底部 —— 用户看到的就是"飞在中间、很靠上"。
+     *
+     * 【断言杀伤力】夹具让两种选择器返回**不同**集合与不同高度：
+     *   行 = 3 × 80px，回合 = 3 × 240px。只有真正按 `.conv-turn` 采样才能得到 240px。
+     */
+    const writes = [];
+    const rows = [
+      { getAttribute: () => 'row-a', getBoundingClientRect: () => ({ top: 0, bottom: 80, height: 80 }) },
+      { getAttribute: () => 'row-b', getBoundingClientRect: () => ({ top: 80, bottom: 160, height: 80 }) },
+      { getAttribute: () => 'row-c', getBoundingClientRect: () => ({ top: 160, bottom: 240, height: 80 }) },
+    ];
+    const turns = [
+      { getBoundingClientRect: () => ({ top: 0, bottom: 240, height: 240 }), firstElementChild: { getBoundingClientRect: () => ({ top: 0, bottom: 240, height: 240, width: 700 }) } },
+      { getBoundingClientRect: () => ({ top: 240, bottom: 480, height: 240 }), firstElementChild: { getBoundingClientRect: () => ({ top: 240, bottom: 480, height: 240, width: 700 }) } },
+    ];
+    const fakeStream = {
+      scrollTop: 0,
+      scrollHeight: 3000,
+      clientHeight: 500,
+      style: { setProperty: (name, value) => writes.push(`${name}:${value}`) },
+      getBoundingClientRect: () => ({ top: 0, bottom: 500 }),
+      querySelectorAll: (selector) => (selector === '.conv-turn' ? turns : rows),
+    };
+    const host = createMockViewportHost({ streamElement: fakeStream, activeSessionId: 'sess-turn-sample' });
+    const manager = new StreamViewportManager(host);
+
+    manager.captureStreamAnchor();
+
+    assert.equal(manager.getMedianEstimator().sampleCount, 2, '样本必须来自 2 个回合，而不是 3 条消息行');
+    assert.equal(
+      writes[0],
+      '--conv-intrinsic-median-height:240px',
+      '注入值必须是回合高度（240px），不是消息行高（80px）'
+    );
+  });
+
+  await t.test('47. 采样窗口为视口上下各半屏：窗口内回合全部计入样本', () => {
+    /**
+     * 【判据依据】`content-visibility: auto` 只跳过远离视口的子树，视口及上下各半屏
+     *   一定被真实布局。因此采样窗口取 `[top - ch/2, bottom + ch/2]`，窗口内回合都是
+     *   可信样本。窗口外的回合必然是占位替身，见用例 51。
+     */
+    const writes = [];
+    const rows = [
+      { getAttribute: () => 'row-a', getBoundingClientRect: () => ({ top: 0, bottom: 80, height: 80 }) },
+    ];
+    const turns = [
+      { getBoundingClientRect: () => ({ top: 0, bottom: 300, height: 300 }) },
+      { getBoundingClientRect: () => ({ top: 300, bottom: 600, height: 300 }) },
+    ];
+    const fakeStream = {
+      scrollTop: 0,
+      scrollHeight: 4000,
+      clientHeight: 500,
+      style: { setProperty: (name, value) => writes.push(`${name}:${value}`) },
+      getBoundingClientRect: () => ({ top: 0, bottom: 500 }),
+      querySelectorAll: (selector) => (selector === '.conv-turn' ? turns : rows),
+    };
+    const host = createMockViewportHost({ streamElement: fakeStream, activeSessionId: 'sess-turn-fold' });
+    const manager = new StreamViewportManager(host);
+
+    manager.captureStreamAnchor();
+
+    assert.equal(manager.getMedianEstimator().sampleCount, 2, '全列表回合都必须进入样本，否则中位数被少数短回合拉低');
+    assert.equal(writes[0], '--conv-intrinsic-median-height:300px');
+  });
+
+  await t.test('49. 采样判据不得依赖子元素几何（真实 Blink 下恒真）', () => {
+    /**
+     * 【平台事实】`content-visibility: auto` 跳过的回合，其子元素 `getBoundingClientRect()`
+     *   在真实 Blink 里**仍返回占位几何而非 0**（实测 160/160 全部非零）。因此任何
+     *   「子元素有几何就算真实渲染」的判据都是恒真式，采样会被当前变量值自我固化。
+     *   本用例锁住：两个回合的几何形态不同，但都落在采样窗口内，都必须进入样本
+     *   ——采样判据只认「视口窗口 + 非自锁值」，不再假装能识别占位替身。
+     */
+    const writes = [];
+    const rows = [
+      { getAttribute: () => 'row-a', getBoundingClientRect: () => ({ top: 0, bottom: 80, height: 80 }) },
+    ];
+    const turns = [
+      {
+        getBoundingClientRect: () => ({ top: 0, bottom: 300, height: 300 }),
+        firstElementChild: { getBoundingClientRect: () => ({ top: 0, bottom: 300, height: 300, width: 700 }) },
+      },
+      {
+        getBoundingClientRect: () => ({ top: 300, bottom: 600, height: 300 }),
+        firstElementChild: { getBoundingClientRect: () => ({ top: 0, bottom: 0, height: 0, width: 0 }) },
+      },
+    ];
+    const fakeStream = {
+      scrollTop: 0,
+      scrollHeight: 4000,
+      clientHeight: 1000,
+      style: { setProperty: (name, value) => writes.push(`${name}:${value}`) },
+      getBoundingClientRect: () => ({ top: 0, bottom: 1000 }),
+      querySelectorAll: (selector) => (selector === '.conv-turn' ? turns : rows),
+    };
+    const originalGcs = globalThis.getComputedStyle;
+    globalThis.getComputedStyle = () => ({ paddingBottom: '0px', getPropertyValue: () => '' });
+    try {
+      const host = createMockViewportHost({ streamElement: fakeStream, activeSessionId: 'sess-turn-skipped' });
+      const manager = new StreamViewportManager(host);
+
+      manager.captureStreamAnchor();
+
+      assert.equal(manager.getMedianEstimator().sampleCount, 2, '采样判据不得依赖子元素几何');
+      assert.equal(writes[0], '--conv-intrinsic-median-height:300px');
+    } finally {
+      globalThis.getComputedStyle = originalGcs;
+    }
+  });
+
+  await t.test('48. 没有任何回合样本时不得写入占位高度变量', () => {    const writes = [];
+    const rows = [
+      { getAttribute: () => 'row-a', getBoundingClientRect: () => ({ top: 0, bottom: 80, height: 80 }) },
+    ];
+    const fakeStream = {
+      scrollTop: 0,
+      scrollHeight: 3000,
+      clientHeight: 500,
+      style: { setProperty: (name, value) => writes.push(`${name}:${value}`) },
+      getBoundingClientRect: () => ({ top: 0, bottom: 500 }),
+      querySelectorAll: (selector) => (selector === '.conv-turn' ? [] : rows),
+    };
+    const host = createMockViewportHost({ streamElement: fakeStream, activeSessionId: 'sess-turn-none' });
+    const manager = new StreamViewportManager(host);
+
+    manager.captureStreamAnchor();
+
+    assert.equal(manager.getMedianEstimator().sampleCount, 0);
+    assert.deepEqual(writes, [], '无回合样本时必须保持 CSS 兜底，不得用 0 覆盖');
+  });
+
+  await t.test('50. 占位高度样本必须排除「高度恰等于当前注入值」的自锁替身', () => {
+    /**
+     * 【自锁缺陷】占位替身的高度恒等于当前注入的 CSS 变量值。若不排除，
+     *   采样把变量值当成新样本写回，中位数永远停在不动点（实测 140px），
+     *   真实平均回合高 241px 永远学不到。
+     *
+     * 【断言杀伤力】两个回合都在采样窗口内：A 高 300px（真实）、B 高 140px（等于当前值）。
+     *   删除自锁打断后样本数变 2、中位数为 220px，写入值随之改变 → 必红。
+     */
+    const writes = [];
+    const rows = [
+      { getAttribute: () => 'row-a', getBoundingClientRect: () => ({ top: 0, bottom: 80, height: 80 }) },
+    ];
+    const turns = [
+      { getBoundingClientRect: () => ({ top: 0, bottom: 300, height: 300 }) },
+      { getBoundingClientRect: () => ({ top: 300, bottom: 440, height: 140 }) },
+    ];
+    const fakeStream = {
+      scrollTop: 0,
+      scrollHeight: 4000,
+      clientHeight: 800,
+      style: { setProperty: (name, value) => writes.push(`${name}:${value}`) },
+      getBoundingClientRect: () => ({ top: 0, bottom: 800 }),
+      querySelectorAll: (selector) => (selector === '.conv-turn' ? turns : rows),
+    };
+    const originalGcs = globalThis.getComputedStyle;
+    globalThis.getComputedStyle = () => ({
+      paddingBottom: '0px',
+      getPropertyValue: (name) => (name === '--conv-intrinsic-median-height' ? '140px' : ''),
+    });
+    try {
+      const host = createMockViewportHost({ streamElement: fakeStream, activeSessionId: 'sess-self-lock' });
+      const manager = new StreamViewportManager(host);
+
+      manager.captureStreamAnchor();
+
+      assert.equal(manager.getMedianEstimator().sampleCount, 1, '等于当前注入值的占位替身不得进入样本');
+      assert.equal(writes[0], '--conv-intrinsic-median-height:300px', '中位数必须来自真实回合高');
+    } finally {
+      globalThis.getComputedStyle = originalGcs;
+    }
+  });
+
+  await t.test('52. 占位高度变量必须同时写入根节点，才能跨 React 重建存活', () => {
+    const writes = [];
+    const rootWrites = [];
+    const rows = [
+      { getAttribute: () => 'row-a', getBoundingClientRect: () => ({ top: 0, bottom: 80, height: 80 }) },
+    ];
+    const turns = [
+      { getBoundingClientRect: () => ({ top: 0, bottom: 260, height: 260 }) },
+    ];
+    const fakeStream = {
+      scrollTop: 0,
+      scrollHeight: 4000,
+      clientHeight: 800,
+      style: { setProperty: (name, value) => writes.push(`${name}:${value}`) },
+      getBoundingClientRect: () => ({ top: 0, bottom: 800 }),
+      querySelectorAll: (selector) => (selector === '.conv-turn' ? turns : rows),
+    };
+    const originalGcs = globalThis.getComputedStyle;
+    const originalDocument = globalThis.document;
+    globalThis.getComputedStyle = () => ({ paddingBottom: '0px', getPropertyValue: () => '' });
+    globalThis.document = { documentElement: { style: { setProperty: (name, value) => rootWrites.push(`${name}:${value}`) } } };
+    try {
+      const host = createMockViewportHost({ streamElement: fakeStream, activeSessionId: 'sess-root-var' });
+      const manager = new StreamViewportManager(host);
+
+      manager.captureStreamAnchor();
+
+      assert.deepEqual(writes, ['--conv-intrinsic-median-height:260px'], 'stream 自身仍写一份，保持既有语义');
+      assert.deepEqual(rootWrites, ['--conv-intrinsic-median-height:260px'], '根节点必须同步写入，否则切会话重建后变量丢失');
+    } finally {
+      globalThis.getComputedStyle = originalGcs;
+      if (originalDocument === undefined) delete globalThis.document;
+      else globalThis.document = originalDocument;
+    }
+  });
+
+  await t.test('53. 没有样本时根节点也不得被写入（不得用兜底值污染全局）', () => {
+    const rootWrites = [];
+    const rows = [
+      { getAttribute: () => 'row-a', getBoundingClientRect: () => ({ top: 0, bottom: 80, height: 80 }) },
+    ];
+    const fakeStream = {
+      scrollTop: 0,
+      scrollHeight: 4000,
+      clientHeight: 800,
+      style: { setProperty: () => {} },
+      getBoundingClientRect: () => ({ top: 0, bottom: 800 }),
+      querySelectorAll: (selector) => (selector === '.conv-turn' ? [] : rows),
+    };
+    const originalGcs = globalThis.getComputedStyle;
+    const originalDocument = globalThis.document;
+    globalThis.getComputedStyle = () => ({ paddingBottom: '0px', getPropertyValue: () => '' });
+    globalThis.document = { documentElement: { style: { setProperty: (name, value) => rootWrites.push(`${name}:${value}`) } } };
+    try {
+      const host = createMockViewportHost({ streamElement: fakeStream, activeSessionId: 'sess-root-empty' });
+      const manager = new StreamViewportManager(host);
+
+      manager.captureStreamAnchor();
+
+      assert.deepEqual(rootWrites, [], '无样本时不得写根节点，否则全局变量被兜底值永久中毒');
+    } finally {
+      globalThis.getComputedStyle = originalGcs;
+      if (originalDocument === undefined) delete globalThis.document;
+      else globalThis.document = originalDocument;
+    }
+  });
+
+  await t.test('54. 视觉贴底端到端：gutter 必须传进记忆状态机并推导出 pin-to-bottom', () => {
+    /**
+     * 【根因 3 接线】贴底落点按输入舱安全线对齐，几何距离恒等于 paddingBottom（160px）。
+     *   若 captureStreamAnchor 不把实测 gutter 传给 recordSnapshot，会话会被记成回溯态，
+     *   切回时按陈旧锚点恢复 —— 用户看到"位置不对"。
+     *
+     * 【断言杀伤力】删掉 `nearBottomReservePx: this.readBottomReservePx(stream)` 一行，
+     *   阈值退回 48px，distance=160 会被判为非贴底 → planSessionEnter 返回 restore-anchor → 必红。
+     */
+    const rows = [
+      { getAttribute: () => 'row-a', getBoundingClientRect: () => ({ top: 0, bottom: 300, height: 300 }) },
+    ];
+    const fakeStream = {
+      scrollTop: 19080,
+      scrollHeight: 20000,
+      clientHeight: 760,
+      style: { setProperty: () => {} },
+      getBoundingClientRect: () => ({ top: 0, bottom: 760 }),
+      querySelectorAll: (selector) => (selector === '.conv-turn' ? [] : rows),
+    };
+    const originalGcs = globalThis.getComputedStyle;
+    globalThis.getComputedStyle = () => ({ paddingBottom: '160px', getPropertyValue: () => '' });
+    try {
+      const host = createMockViewportHost({ streamElement: fakeStream, activeSessionId: 'sess-gutter' });
+      const manager = new StreamViewportManager(host);
+
+      manager.captureStreamAnchor();
+
+      const snapshot = manager.getSessionScrollMemory().getSnapshot('sess-gutter');
+      assert.equal(snapshot?.isNearBottom, true, 'gutter 内的几何距离必须判为贴底');
+      assert.deepEqual(
+        manager.getSessionScrollMemory().planSessionEnter('sess-gutter'),
+        { type: 'pin-to-bottom', reason: 'was-near-bottom' },
+        '视觉贴底的会话切回时必须贴底，而不是按旧锚点恢复'
+      );
+    } finally {
+      globalThis.getComputedStyle = originalGcs;
+    }
   });
 
   await t.test('43. captureStreamAnchor 视口下方的离屏行不得进入中位数', () => {
@@ -1159,15 +1512,15 @@ test('StreamViewportManager 核心视口与锚点行为单测', async (t) => {
       clientHeight: 500,
       style: { setProperty: (name, value) => writes.push(`${name}:${value}`) },
       getBoundingClientRect: () => ({ top: 0, bottom: 500 }),
-      querySelectorAll: () => rows,
+      querySelectorAll: (selector) => (selector === '.conv-turn' ? [] : rows),
     };
     const host = createMockViewportHost({ streamElement: fakeStream, activeSessionId: 'sess-below-fold' });
     const manager = new StreamViewportManager(host);
 
     manager.captureStreamAnchor();
 
-    assert.equal(manager.getMedianEstimator().sampleCount, 1, '视口下方的行拿到的是占位高度，同样不得喂给估算器');
-    assert.equal(writes[0], '--conv-intrinsic-median-height:60px', '中位数只能来自视口内的真实渲染行');
+    assert.equal(manager.getMedianEstimator().sampleCount, 0, '占位高度样本只认 .conv-turn；无回合时不得进入样本');
+    assert.deepEqual(writes, [], '无回合样本时不得写入变量');
   });
 });
 
@@ -1299,7 +1652,7 @@ test('会话进入计划 beginSessionEnter / settleSessionEnter', async (t) => {
     assert.equal(manager.isSessionEnterPending(), false);
   });
 
-  await t.test('6. restore-anchor：占位高度导致超大 delta 时退回 fallback 并继续迭代', () => {
+  await t.test('6. restore-anchor：超大 delta 时按真实锚点步进，绝不退回旧 fallback 造成闪屏与丢位', () => {
     const stream = makeStream({ rows: [{ id: 'm1', baseTop: 1900, height: 100 }] });
     const host = createMockViewportHost({ streamElement: stream.el, activeSessionId: 's1' });
     const manager = new StreamViewportManager(host);
@@ -1311,8 +1664,8 @@ test('会话进入计划 beginSessionEnter / settleSessionEnter', async (t) => {
     manager.beginSessionEnter('s1');
     manager.settleSessionEnter('');
 
-    assert.equal(stream.getTop(), 300, '失真时必须退回记忆里的标量基准');
-    assert.equal(manager.isSessionEnterPending(), false, '30 帧熔断后必须收口');
+    assert.equal(stream.getTop(), 1200, '锚点已在 DOM 时必须按 delta 步进到目标位置（受 maxScroll 夹紧），绝不退回旧 fallback');
+    assert.equal(manager.isSessionEnterPending(), false, '收口后必须释放进入计划');
   });
 
   await t.test('7. restore-anchor：锚点行已不在当前序列时走 fallback', () => {

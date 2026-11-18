@@ -132,6 +132,7 @@ export interface RenderCoordinatorDeps {
   settleInitialBottom: () => void;
   isSessionEnterPending: SessionEnterPendingProbe;
   settleSessionEnter: SessionEnterSettleProbe;
+  markProgrammaticScroll?: (stream: HTMLElement) => void;
   /**
    * React 提交后重新对齐 armed 的贴底意图（幂等、无参）。
    * 可选：旧调用方（单测/迁移期）不提供时，提交后驱动降级为不动作。
@@ -162,6 +163,7 @@ export interface RenderCoordinator {
   setPendingScrollToBottom(val: boolean): void;
   getSessionSwitchPending(): boolean;
   setSessionSwitchPending(val: boolean): void;
+  setLastMessagesSnapshot(snapshot: RenderMessagesSnapshot | null): void;
   getLastInputDockSnapshot(): RenderInputDockSnapshot | null;
   setLastInputDockSnapshot(snapshot: RenderInputDockSnapshot | null): void;
   dispose(): void;
@@ -928,7 +930,11 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
             const stream = document.getElementById('conversation-stream');
             if (stream) {
               stream.scrollTop = stream.scrollHeight;
-              deps.messageWindowManager.markProgrammaticScroll(stream);
+              if (deps.markProgrammaticScroll) {
+                deps.markProgrammaticScroll(stream);
+              } else {
+                deps.messageWindowManager.markProgrammaticScroll(stream);
+              }
             }
           };
           pin();
@@ -981,6 +987,7 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
     setPendingScrollToBottom: (val: boolean) => { pendingScrollToBottom = val; },
     getSessionSwitchPending: () => sessionSwitchPending,
     setSessionSwitchPending: (val: boolean) => { sessionSwitchPending = val; },
+    setLastMessagesSnapshot: (snapshot: RenderMessagesSnapshot | null) => { lastMessagesSnapshot = snapshot; },
     getLastInputDockSnapshot: () => lastInputDockSnapshot,
     setLastInputDockSnapshot: (snapshot: RenderInputDockSnapshot | null) => { lastInputDockSnapshot = snapshot; },
     dispose,

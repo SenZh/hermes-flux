@@ -87,7 +87,7 @@ test('渲染层接线守卫：旧毒缓存只可在远端权威响应成功后�
   assert.ok(wsFallbackBlock.includes('untrustedOrderCacheSessions.delete(sessionId)'));
   assert.ok(wsFallbackBlock.includes('await cacheService.dropChannel(cacheRef)'));
 
-  // 翻页两处窗口起点与边界异常均接入纯函数
-  assert.equal((rendererSource.match(/computeOlderBatchWindowStart\(/g) || []).length >= 2, true);
+  // 翻页两处窗口均维持纯原生流全量窗口 [0, state.messages.length]，且边界异常接入纯函数
+  assert.equal((rendererSource.match(/setMessageWindowEnd\(state\.messages\.length\)/g) || []).length >= 2, true);
   assert.ok(rendererSource.includes('shouldTreatOlderDropAsExhausted(added, batch.length, mergeResult.droppedCount)'));
 });

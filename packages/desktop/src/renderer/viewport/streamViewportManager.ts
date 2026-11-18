@@ -36,6 +36,16 @@ export const STICK_TO_BOTTOM_THRESHOLD_PX = 48;
 export const MESSAGE_ROW_SELECTOR = '[data-msg-id]:not(.msg-action-btn)';
 
 /**
+ * 回合容器选择器。
+ * 【设计意图 (Why)】`.conv-turn` 是 `content-visibility: auto` 与
+ *   `contain-intrinsic-size` 的承载者（conversation.css:136-142），
+ *   因此「离屏占位高度」的样本必须取自它，而不是消息行。
+ * 【约束与规则 (Rules)】凡为 `--conv-intrinsic-median-height` 采集样本处，
+ *   一律使用本常量；消息行选择器只用于锚点定位与行高统计。
+ */
+export const TURN_SELECTOR = '.conv-turn';
+
+/**
  * 把消息 id 转义成可安全拼进 `[data-msg-id="..."]` 的属性选择器值。
  *
  * 【设计意图 (Why)】行 id 由网关下发，可能含引号或反斜杠；直接拼接会让
@@ -67,14 +77,16 @@ export type PinIntent = 'none' | 'pin-to-bottom' | 'restore-anchor' | 'restore-s
 const SESSION_ENTER_ALIGN_TOLERANCE_PX = 2;
 /** 对齐连续稳定帧数：单帧贴合可能是占位高度的假象。 */
 const SESSION_ENTER_ALIGNED_STABLE_FRAMES = 2;
-/** 内容高度连续稳定帧数：Blink 逐帧展开真实高度期间严禁提前收口。 */
-const SESSION_ENTER_HEIGHT_STABLE_FRAMES = 3;
+/** 内容高度连续稳定帧数：Blink 逐帧展开真实高度及首屏字体/布局落定期间严禁提前收口。 */
+const SESSION_ENTER_HEIGHT_STABLE_FRAMES = 5;
 /** 等 React 提交期间的帧轮询上限：超过后交给 MutationObserver 驱动，避免空转占满合成器。 */
 const SESSION_ENTER_WAIT_FRAME_LIMIT = 90;
 /** pin 计划的硬上限兜底帧数：防止永久 armed 把滚动记忆永久冻结。 */
 const SESSION_ENTER_HARD_CAP_FRAMES = 600;
 /** 回溯类计划（restore-anchor / restore-scroll-top）的熔断帧数，语义与旧实现保持一致。 */
 const RESTORE_PLAN_HARD_CAP_FRAMES = 30;
+/** 锚点行尚未被真实布局时允许等待的宽限帧数：超过后接受当前几何，避免被推向会话末尾。 */
+const SESSION_ENTER_LAYOUT_GRACE_FRAMES = 8;
 
 /** 一次「会话进入」的挂起计划（内部状态，不对外暴露）。 */
 interface SessionEnterPlan {
@@ -150,6 +162,8 @@ export class StreamViewportManager {
    *   保证 reassertActivePin() 在取消后是纯 no-op，也保证新旧计划绝不串台。
    */
   private armedFrames = 0;
+  private loadingWaitFrames = 0;
+  private readyFrames = 0;
   private alignedStableFrames = 0;
   private scrollHeightStableFrames = 0;
   private armedHeightChangedSinceArm = false;
@@ -245,8 +259,21 @@ export class StreamViewportManager {
 
   /**
    * 贴底：窗口覆盖末尾时把窗口真实底边对齐到「输入舱上方安全线」，否则滚到 scrollHeight。
+   *
+   * 【内容未提交时必须是 no-op (Why)】切回长会话的第一帧，React 尚未提交消息行，
+   *   容器还是空的（`scrollHeight === clientHeight`）。此时 `scrollTop = scrollHeight`
+   *   会被浏览器夹到 0，而后续内容提交时 `content-visibility: auto` 只展开视口附近的行，
+   *   文档高度远小于真实值，视口就永久停在会话顶部（实测 scrollTop=0、
+   *   scrollHeight 从 83994 塌到 36338，用户看到的就是"飞在中间"）。
+   *   正确语义：没有可滚动余量时不写视口、不登记程序化滚动，
+   *   等真实内容提交后由 `reassertActivePin` / `settleInitialBottom` 重新对齐。
+   *
+   * 【约束与规则 (Rules)】只有 `scrollHeight > clientHeight` 才允许写 `scrollTop`；
+   *   这条守卫对「内容确实不足一屏」与「内容尚未提交」一视同仁——两者都不需要滚动。
    */
   public scrollStreamToContentBottom(stream: HTMLElement, reservePx: number): void {
+    if (stream.scrollHeight <= stream.clientHeight) return;
+
     const virtualWindow = this.host.getVirtualWindowElement
       ? this.host.getVirtualWindowElement()
       : document.querySelector<HTMLElement>('.conv-virtual-window');
@@ -374,8 +401,10 @@ export class StreamViewportManager {
         const prev = stream.style.getPropertyValue('--conv-gutter-bottom');
         if (next !== prev) {
           stream.style.setProperty('--conv-gutter-bottom', next);
-          this.setInitialBottomSettling(true);
-          this.settleInitialBottom();
+          if (!this.isSessionEnterPending()) {
+            this.setInitialBottomSettling(true);
+            this.settleInitialBottom();
+          }
         }
       }
     }
@@ -404,7 +433,130 @@ export class StreamViewportManager {
   }
 
   /**
+   * 采样视口内「回合」的真实高度，写入 `.conv-turn` 占位高度变量。
+   *
+   * 【设计意图 (Why)】`--conv-intrinsic-median-height` 唯一消费方是 `.conv-turn` 的
+   *   `contain-intrinsic-size`，所以样本必须来自回合容器本身。用一个回合的实测高度去
+   *   估算另一个未渲染回合的高度，量纲才一致；拿消息行高去估回合，会把离屏回合压到
+   *   真实值的 1/3（实测 241px → 80px），文档总高塌到 46%，切回视口只能落在
+   *   "占位底部"——即用户报告的"飞在中间、很靠上"。
+   *
+   * 【约束与规则 (Rules)】
+   *   1. 只采样与视口相交的回合：`content-visibility: auto` 下离屏回合返回的是占位值，
+   *      把它当样本会让中位数自我固化，估算器名义在跑、实际零贡献；
+   *   2. 样本数 > 0 才写变量，绝不用 0 覆盖 CSS 兜底；
+   *   3. 单测环境缺 `style.setProperty` 时安全跳过。
+   */
+  private sampleTurnIntrinsicHeight(stream: HTMLElement, streamTop: number, streamBottom: number): void {
+    /**
+     * 【判据：全列表 + 自锁打断 (Why)】
+     *   1. 不能用几何特征识别占位替身——实测 160/160 个回合（含被 `content-visibility`
+     *      跳过的）都返回非零几何，任何几何判据都是恒真式；
+     *   2. 也不能只采视口窗口——窗口内可能全是占位替身，样本数归零，变量永远停在兜底值
+     *      （实测窗口判据下变量始终 140px）；
+     *   3. 唯一可靠的识别是**值本身**：占位替身的高度恒等于当前注入的 CSS 变量值。
+     *      因此全列表扫描 + 跳过「高度 ≈ 当前值」的样本。真实渲染过的回合（视口附近、
+     *      以及 `contain-intrinsic-size: auto` 记住的历史高度）与当前值不等，会正常进入样本。
+     */
+    const current = this.readIntrinsicHeightVariable(stream);
+
+    const turns = stream.querySelectorAll<HTMLElement>(TURN_SELECTOR);
+    for (let i = 0; i < turns.length; i += 1) {
+      const turn = turns[i];
+      // 【只采真实已布局回合 (Rules)】优先使用 checkVisibility 过滤掉 content-visibility: auto 跳过的离屏占位回合；
+      //   若环境缺失 checkVisibility，则退化为下面的「高度 ≈ 当前注入值」自锁打断。
+      if (!this.isAnchorLaidOut(turn)) continue;
+      const rect = turn.getBoundingClientRect();
+      if (rect.height <= 0) continue;
+      // 自锁打断：占位替身的高度恒等于当前注入值，绝不能当样本
+      if (current !== null && Math.abs(rect.height - current) < 0.5) continue;
+      this.medianEstimator.addSample(rect.height);
+    }
+    void streamTop;
+    void streamBottom;
+  }
+
+  /**
+   * 读取当前生效的回合占位高度（px）。
+   * 【约束与规则 (Rules)】`getComputedStyle` 缺失或值不可解析时返回 null，
+   *   此时自锁打断退化为「不判」，采样仍受视口窗口约束。
+   */
+  private readIntrinsicHeightVariable(stream: HTMLElement): number | null {
+    if (typeof getComputedStyle !== 'function') return null;
+    const raw = getComputedStyle(stream).getPropertyValue('--conv-intrinsic-median-height');
+    const parsed = Number.parseFloat(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  /**
+   * 把当前估算的回合占位高度写进 CSS 变量。
+   *
+   * 【必须同时写根节点 (Why)】切会话时 React 会重建消息列表宿主，
+   *   `#conversation-stream` 是一个**新元素**，其 inline style 随旧元素一起销毁，
+   *   变量立刻回落到 CSS 兜底 140px。而真实平均回合高实测 241px，于是切回后
+   *   离屏回合的占位高度只剩真实值的 58%，整篇文档 `scrollHeight` 从 32460 塌到 29632，
+   *   同一个 `scrollTop` 指向了完全不同的内容——用户看到的就是"位置不对、飞在中间"。
+   *   根节点不会被重建，写在那里可以跨会话切换存活；stream 自身仍写一份，
+   *   保证既有单测与「变量就近可读」的语义不变。
+   *
+   * 【约束与规则 (Rules)】
+   *   1. 样本数 > 0 才写，绝不用 0 或兜底值覆盖；
+   *   2. 目标元素缺 `setProperty` 时安全跳过（单测与旧内核）。
+   */
+  private applyIntrinsicHeightVariable(stream: HTMLElement): void {
+    if (this.medianEstimator.sampleCount === 0) return;
+    const value = `${this.medianEstimator.getMedian()}px`;
+    if (typeof stream.style?.setProperty === 'function') {
+      stream.style.setProperty('--conv-intrinsic-median-height', value);
+    }
+    if (typeof document !== 'undefined' && typeof document.documentElement?.style?.setProperty === 'function') {
+      document.documentElement.style.setProperty('--conv-intrinsic-median-height', value);
+    }
+  }
+
+  /**
+   * 判定锚点元素是否已真实布局（而非 `content-visibility: auto` 的占位替身）。
+   *
+   * 【判据为什么只能用 checkVisibility (Why)】占位替身的几何与真实布局同为非零
+   *   （实测 160/160 个回合都返回非零几何），因此任何基于 `getBoundingClientRect()`
+   *   的判据都是恒真式。`checkVisibility({ contentVisibilityAuto: true })` 是唯一
+   *   能区分「被 content-visibility 跳过」的标准 API。
+   *
+   * 【约束与规则 (Rules)】API 缺失（旧内核 / 单测）时退化为 true，
+   *   保持旧调用方语义不变；同时用于锚点收敛与真实回合采样。
+   */
+  private isAnchorLaidOut(target: HTMLElement): boolean {
+    const probe = target as HTMLElement & {
+      checkVisibility?: (options?: { contentVisibilityAuto?: boolean }) => boolean;
+    };
+    if (typeof probe.checkVisibility !== 'function') return true;
+    return probe.checkVisibility({ contentVisibilityAuto: true });
+  }
+
+  /**
+   * 读取贴底安全线（输入舱遮挡的那段 gutter）实测像素。
+   *
+   * 【设计意图 (Why)】`isNearBottom` 与 `scrollStreamToContentBottom` 都以它为基准，
+   *   跨会话记忆的贴底判定必须同源，否则同一屏会同时被判成「贴底」和「回溯」。
+   *
+   * 【约束与规则 (Rules)】`getComputedStyle` 缺失或解析失败时回落 0，
+   *   让记忆状态机退回 48px 既有语义（旧内核与单测环境不因此改变行为）。
+   */
+  private readBottomReservePx(stream: HTMLElement): number {
+    if (typeof getComputedStyle !== 'function') return 0;
+    const parsed = parseFloat(getComputedStyle(stream).paddingBottom);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  }
+
+  /**
    * 捕获当前视口第一条可见消息的相对偏移作为锚点。
+   *
+   * 【占位高度必须按「回合」采样 (Why)】`--conv-intrinsic-median-height` 的消费方是
+   *   `.conv-turn`（回合容器）的 `contain-intrinsic-size`，而锚点扫描的是
+   *   `[data-msg-id]`（消息行）。一个回合通常含提问 + 工具 + 终答 3 行，实测真实平均
+   *   回合高 241px、平均行高 158px。若把行高当回合高注入，离屏回合占位只有真实值的
+   *   1/3，整篇文档 `scrollHeight` 被压到真实的 46%，切回时浏览器只能把视口夹在
+   *   "占位高度"的底部 —— 用户看到的就是"飞在中间、很靠上"。
    */
   public captureStreamAnchor(): StreamAnchor {
     const activeSessionId = this.host.getActiveSessionId();
@@ -421,16 +573,6 @@ export class StreamViewportManager {
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const rect = row.getBoundingClientRect();
-      /**
-       * 【只采样真实渲染行 (Rules)】`content-visibility: auto` 下离屏行的
-       * `getBoundingClientRect()` 返回的是 `contain-intrinsic-size` 占位高度（恒等于兜底值）。
-       * 若把占位值一并喂给估算器，中位数会被同一个常量淹没，CSS 变量永远等于兜底值，
-       * 估算器名义上在跑、实际对滚动条抖动零贡献。
-       */
-      const intersectsViewport = rect.bottom > streamTop && rect.top < streamBottom;
-      if (intersectsViewport && rect.height > 0) {
-        this.medianEstimator.addSample(rect.height);
-      }
       if (anchorId === null && rect.bottom > streamTop) {
         anchorId = row.getAttribute('data-msg-id');
         anchorOffset = rect.top - streamTop;
@@ -438,26 +580,39 @@ export class StreamViewportManager {
       }
     }
 
-    if (this.medianEstimator.sampleCount > 0 && typeof stream.style?.setProperty === 'function') {
-      stream.style.setProperty('--conv-intrinsic-median-height', `${this.medianEstimator.getMedian()}px`);
-    }
+    const capturedScrollTop = stream.scrollTop;
+    const capturedScrollHeight = stream.scrollHeight;
+    const capturedClientHeight = stream.clientHeight;
+    const capturedReservePx = this.readBottomReservePx(stream);
 
     if (activeSessionId) {
       this.sessionScrollMemory.recordSnapshot({
         sessionId: activeSessionId,
-        scrollTop: stream.scrollTop,
-        scrollHeight: stream.scrollHeight,
-        clientHeight: stream.clientHeight,
+        scrollTop: capturedScrollTop,
+        scrollHeight: capturedScrollHeight,
+        clientHeight: capturedClientHeight,
         anchorMessageId: anchorId || undefined,
         anchorOffsetRatio,
+        /**
+         * 【贴底判据必须与贴底落点同源 (Rules)】贴底由 `scrollStreamToContentBottom` 按
+         *   输入舱安全线对齐，几何距离恒等于 `paddingBottom`（实测 160px）。把实测值一并
+         *   交给记忆状态机，才能让「用户就在最底部」被判成贴底而不是回溯态；否则切回时
+         *   按陈旧锚点恢复，长会话表现为飞到中间。
+         */
+        nearBottomReservePx: capturedReservePx,
       });
     }
+
+    // 【先读快照再写 CSS 变量 (Pitfall)】修改 --conv-intrinsic-median-height 会立即改变离屏占位高度，
+    //   绝不能在 recordSnapshot 之前写入，否则刚读到的 scrollHeight 会被新变量撑大而误判为非贴底。
+    this.sampleTurnIntrinsicHeight(stream, streamTop, streamBottom);
+    this.applyIntrinsicHeightVariable(stream);
 
     return {
       sessionId: activeSessionId,
       id: anchorId,
       offset: anchorOffset,
-      rawScrollTop: stream.scrollTop,
+      rawScrollTop: capturedScrollTop,
     };
   }
 
@@ -469,7 +624,10 @@ export class StreamViewportManager {
    * 【规则】必须在 `state.activeSessionId` 已经切到目标会话、且目标会话记忆已由离开侧写入之后调用；
    *   本方法只读记忆，不读 DOM，因此不受「DOM 尚未替换」的时序影响。
    */
-  public beginSessionEnter(sessionId: string, options: { forcePinToBottom?: boolean } = {}): void {
+  public beginSessionEnter(
+    sessionId: string,
+    options: { forcePinToBottom?: boolean; phase?: string } = {}
+  ): void {
     if (!sessionId) {
       this.clearSessionEnter();
       return;
@@ -486,7 +644,7 @@ export class StreamViewportManager {
       sessionId,
       plan,
       probeMessageId: '',
-      phase: 'ready',
+      phase: options.phase ?? 'ready',
     };
     this.resetArmedState();
     // 回溯类计划必须关闭落底门禁，否则 settleInitialBottom 会把它拽回底部。
@@ -555,6 +713,8 @@ export class StreamViewportManager {
 
   private resetArmedState(): void {
     this.armedFrames = 0;
+    this.loadingWaitFrames = 0;
+    this.readyFrames = 0;
     this.alignedStableFrames = 0;
     this.scrollHeightStableFrames = 0;
     this.armedHeightChangedSinceArm = false;
@@ -569,6 +729,10 @@ export class StreamViewportManager {
   private clearSessionEnter(): void {
     this.pendingSessionEnter = null;
     this.resetArmedState();
+    const stream = this.host.getStreamElement();
+    if (stream && typeof stream.style?.removeProperty === 'function') {
+      stream.style.removeProperty('overflow-anchor');
+    }
   }
 
   /**
@@ -648,6 +812,7 @@ export class StreamViewportManager {
     this.lastSeenScrollHeight = 0;
     this.scrollHeightStableFrames = 0;
     this.alignedStableFrames = 0;
+    this.readyFrames = 0;
   }
 
   /**
@@ -692,6 +857,13 @@ export class StreamViewportManager {
       return false;
     }
 
+    // 【防顶沿锚定下推 (Why)】pin-to-bottom armed 期间临时关闭 overflow-anchor，
+    //   防止 Blink 选中视口顶沿回合为锚点、将新解锁的底部回合向下推离视口；
+    //   计划结束或取消时在 clearSessionEnter 中成对 removeProperty 恢复。
+    if (stream.style && stream.style.overflowAnchor !== 'none') {
+      stream.style.overflowAnchor = 'none';
+    }
+
     // 贴底地基：pin 意图绝不向上回退，先把视口压到当前可滚动底部。
     if (Math.abs(stream.scrollTop - maxScroll) > SESSION_ENTER_ALIGN_TOLERANCE_PX) {
       stream.scrollTop = maxScroll;
@@ -717,7 +889,9 @@ export class StreamViewportManager {
        *   2. 末行底边不在安全线下方（deltaAfter <= 2）：落在安全线上方属于「内容不足一屏」，
        *      此时再向上搬移只会破坏贴底，故不要求精确贴合。
        */
-      aligned = Math.abs(stream.scrollTop - maxScroll) <= SESSION_ENTER_ALIGN_TOLERANCE_PX
+      const lastRowLaidOut = this.isAnchorLaidOut(lastRow) || this.readyFrames >= SESSION_ENTER_LAYOUT_GRACE_FRAMES;
+      aligned = lastRowLaidOut
+        && Math.abs(stream.scrollTop - maxScroll) <= SESSION_ENTER_ALIGN_TOLERANCE_PX
         && deltaAfter <= SESSION_ENTER_ALIGN_TOLERANCE_PX;
     } else {
       /**
@@ -805,6 +979,9 @@ export class StreamViewportManager {
     }
     this.alignedStableFrames = aligned ? this.alignedStableFrames + 1 : 0;
     this.armedFrames += 1;
+    if (this.isAuthoritativeReady(pending)) {
+      this.readyFrames += 1;
+    }
   }
 
   /**
@@ -840,6 +1017,13 @@ export class StreamViewportManager {
     }
 
     const advance = mode === 'advance';
+
+    // 【防锚定推走 (Why)】无论是贴底还是回溯恢复，armed 期间都必须临时关闭 overflow-anchor，
+    //   防止 Blink 选中视口顶沿回合为锚点、将目标锚点或新解锁回合推离视口；
+    //   计划结束或取消时在 clearSessionEnter 中成对 removeProperty 恢复。
+    if (stream.style && stream.style.overflowAnchor !== 'none') {
+      stream.style.overflowAnchor = 'none';
+    }
 
     if (pending.plan.type === 'pin-to-bottom') {
       this.runPinFrame(stream, pending, ticket, advance);
@@ -896,12 +1080,27 @@ export class StreamViewportManager {
          * `contain-intrinsic-size` 占位高度，锚点行坐标可能与真实排版差出上千像素。
          * 偏差超过 0.6 屏即视为估算失真：先退回标量基准，并**继续迭代**而不是就地收敛，
          * 等布局稳定后若 delta 落回可信域再做精确校正；熔断时停在 fallback。
+         *
+         * 【占位布局不得收敛 (Why)】锚点行即便已在 DOM 里，也可能仍处于
+         *   `content-visibility: auto` 的跳过状态：此时它只是占位替身，坐标与真实排版
+         *   相差可达数千像素，`delta` 却可能恰好很小，于是 errorPx 被误判为 0、两帧后
+         *   计划收口，用户切回后落在错误的行上（实测锚点 20222 漂到 20250）。
+         *   判据必须落在**锚点元素自身**的布局状态上，且只推进不裁决。
+         *
+         * 【必须有硬上限兜底 (Pitfall)】`checkVisibility` 对长会话里大部分行都返回 false，
+         *   若仅凭它阻止收敛，计划会一直 armed 到熔断帧数，期间视口被反复推向底部
+         *   （实测位置比 100%）。因此「未布局」只阻止**提前**收敛，
+         *   超过宽限帧数仍未被布局就接受当前几何，避免把用户推到会话末尾。
          */
-        if (Math.abs(delta) > stream.clientHeight * 0.6) {
-          stream.scrollTop = fallback;
+        // 【直达目标锚点，杜绝 fallback 乒乓闪屏 (Why)】只要目标锚点已在 DOM 中，
+        //   即使离屏回合失去记忆高度导致 delta > 0.6 屏，也必须按 delta 步进把锚点拉入视口；
+        //   旧实现退回 fallback 会导致「fallback ⇄ target」来回跳变闪屏，并在 30 帧熔断后停在错误位置。
+        if (Math.abs(delta) >= 1) {
+          stream.scrollTop = Math.max(0, Math.min(max, stream.scrollTop + delta));
+        }
+        if (!this.isAnchorLaidOut(target) && this.armedFrames < SESSION_ENTER_LAYOUT_GRACE_FRAMES) {
           errorPx = Number.POSITIVE_INFINITY;
         } else {
-          if (Math.abs(delta) >= 1) stream.scrollTop += delta;
           errorPx = Math.abs(delta);
         }
       }
@@ -918,13 +1117,24 @@ export class StreamViewportManager {
       return;
     }
 
+    // 【权威就绪门控 (Rules)】loading 相位（REST 未返回前）绝不提前收口，也不消耗 30 帧回溯熔断配额；
+    //   仅以 600 帧外层上限兜底，避免 REST 返回后把半途位置写回 SessionScrollMemory。
+    if (!this.isAuthoritativeReady(pending)) {
+      this.alignedStableFrames = 0;
+      this.loadingWaitFrames += 1;
+      if (this.loadingWaitFrames >= SESSION_ENTER_HARD_CAP_FRAMES) {
+        this.finishPinPlan();
+        return;
+      }
+      this.schedulePinFrame(ticket);
+      return;
+    }
+
     this.armedFrames += 1;
     this.alignedStableFrames = errorPx <= SESSION_ENTER_ALIGN_TOLERANCE_PX ? this.alignedStableFrames + 1 : 0;
 
     if ((this.alignedStableFrames >= 2 && this.armedFrames >= 2) || this.armedFrames >= RESTORE_PLAN_HARD_CAP_FRAMES) {
-      this.setInitialBottomSettling(false);
-      this.setSettledLayoutSignature(this.host.layoutSignature());
-      this.clearSessionEnter();
+      this.finishPinPlan();
       return;
     }
     this.schedulePinFrame(ticket);

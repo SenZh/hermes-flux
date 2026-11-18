@@ -244,6 +244,78 @@ test('SessionScrollMemory Unit & Invariants Tests', async (t) => {
     assert.equal(memory.size, 3);
   });
 
+  await t.test('17. 视觉贴底（末行对齐输入舱安全线）必须记为贴底，不得记成回溯态', () => {
+    const memory = new SessionScrollMemory({ nearBottomThresholdPx: 48 });
+    memory.recordSnapshot({
+      sessionId: 'ses-visual-bottom',
+      scrollTop: 19080,
+      scrollHeight: 20000,
+      clientHeight: 760,
+      anchorMessageId: 'msg-mid',
+      anchorOffsetRatio: 0.5,
+      nearBottomReservePx: 160,
+    });
+
+    assert.equal(memory.getSnapshot('ses-visual-bottom')?.isNearBottom, true, 'gutter 内必须判定为贴底');
+    assert.deepEqual(memory.planSessionEnter('ses-visual-bottom'), {
+      type: 'pin-to-bottom',
+      reason: 'was-near-bottom',
+    });
+  });
+
+  await t.test('18. 未传 reserve 时保持既有 48px 语义（旧调用方不得被改变）', () => {
+    const memory = new SessionScrollMemory({ nearBottomThresholdPx: 48 });
+    memory.recordSnapshot({
+      sessionId: 'ses-legacy',
+      scrollTop: 19080,
+      scrollHeight: 20000,
+      clientHeight: 760,
+      anchorMessageId: 'msg-mid',
+    });
+
+    assert.equal(memory.getSnapshot('ses-legacy')?.isNearBottom, false, '缺省 reserve 时必须沿用 48px 判据');
+    assert.equal(memory.planSessionEnter('ses-legacy').type, 'restore-anchor');
+  });
+
+  await t.test('19. reserve 只能放宽阈值，不得收窄；非法 reserve 一律忽略', () => {
+    const memory = new SessionScrollMemory({ nearBottomThresholdPx: 48 });
+    // 距离 60px：reserve=0 时阈值仍是 48，必须判为非贴底
+    memory.recordSnapshot({
+      sessionId: 'ses-narrow',
+      scrollTop: 0,
+      scrollHeight: 1060,
+      clientHeight: 1000,
+      nearBottomReservePx: 0,
+    });
+    assert.equal(memory.getSnapshot('ses-narrow')?.isNearBottom, false, 'reserve 不得把阈值压到 48 以下');
+
+    // 距离 60px + reserve=160 ⇒ 阈值 max(48, 168)=168，必须判为贴底
+    memory.recordSnapshot({
+      sessionId: 'ses-wide',
+      scrollTop: 0,
+      scrollHeight: 1060,
+      clientHeight: 1000,
+      nearBottomReservePx: 160,
+    });
+    assert.equal(memory.getSnapshot('ses-wide')?.isNearBottom, true);
+
+    // 非法 reserve（NaN / 负数 / 字符串）必须按未传处理，退回 48px
+    for (const bad of [Number.NaN, -100, '160']) {
+      memory.recordSnapshot({
+        sessionId: `ses-bad-${String(bad)}`,
+        scrollTop: 0,
+        scrollHeight: 1060,
+        clientHeight: 1000,
+        nearBottomReservePx: bad,
+      });
+      assert.equal(
+        memory.getSnapshot(`ses-bad-${String(bad)}`)?.isNearBottom,
+        false,
+        `非法 reserve=${String(bad)} 必须被忽略，退回 48px 判据`
+      );
+    }
+  });
+
   await t.test('16. 非数值比例必须被丢弃，不得被隐式转成数字', () => {
     const memory = new SessionScrollMemory();
     memory.recordSnapshot({

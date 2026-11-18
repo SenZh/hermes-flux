@@ -220,17 +220,58 @@ export class PromptNavigatorManager {
 
     let messageIndex = -1;
     const streamTop = stream.getBoundingClientRect().top;
-    const rows = stream.querySelectorAll<HTMLElement>('[data-msg-id]');
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      const rect = row.getBoundingClientRect();
-      if (rect.bottom > streamTop + PROMPT_READ_LINE_PX) {
-        const id = row.getAttribute('data-msg-id');
-        if (id) {
-          const found = messages.findIndex((m) => m.id === id);
-          if (found >= 0) {
-            messageIndex = found;
-            break;
+    const readLineTop = streamTop + PROMPT_READ_LINE_PX;
+    const turns = stream.querySelectorAll<HTMLElement>('.conv-turn');
+    if (turns.length > 0 && typeof turns[0]?.querySelectorAll === 'function') {
+      // 【二分查找 .conv-turn (Why)】content-visibility: auto 下子消息可能尚未布局，
+      //   而 .conv-turn 容器盒在 .conv-canvas 中严格单调递增；先二分定位首个越过读线的回合，
+      //   再只扫描该回合内的 1~3 个消息节点，将每次滚动的布局读取从 O(N) 降至 O(log N)。
+      let lo = 0;
+      let hi = turns.length - 1;
+      let firstVisibleTurnIdx = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const turnRect = turns[mid].getBoundingClientRect();
+        if (turnRect.bottom > readLineTop) {
+          firstVisibleTurnIdx = mid;
+          hi = mid - 1;
+        } else {
+          lo = mid + 1;
+        }
+      }
+      if (firstVisibleTurnIdx >= 0) {
+        for (let t = firstVisibleTurnIdx; t < turns.length && messageIndex < 0; t++) {
+          const turnRows = turns[t].querySelectorAll<HTMLElement>('[data-msg-id]:not(.msg-action-btn)');
+          for (let i = 0; i < turnRows.length; i++) {
+            const rect = turnRows[i].getBoundingClientRect();
+            if (rect.bottom > readLineTop) {
+              const id = turnRows[i].getAttribute('data-msg-id');
+              if (id) {
+                const found = messages.findIndex((m) => m.id === id);
+                if (found >= 0) {
+                  messageIndex = found;
+                  break;
+                }
+              }
+            }
+          }
+          // 若当前可见回合内部全为无匹配行，仅向后多探 1 个回合避免退化回 O(N)
+          if (t > firstVisibleTurnIdx) break;
+        }
+      }
+    } else {
+      const rows = stream.querySelectorAll<HTMLElement>('[data-msg-id]:not(.msg-action-btn)');
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const rect = row.getBoundingClientRect();
+        if (rect.bottom > readLineTop) {
+          const id = row.getAttribute('data-msg-id');
+          if (id) {
+            const found = messages.findIndex((m) => m.id === id);
+            if (found >= 0) {
+              messageIndex = found;
+              break;
+            }
           }
         }
       }

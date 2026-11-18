@@ -95,6 +95,7 @@
   box-sizing: border-box;
   scroll-behavior: auto;
   overscroll-behavior: contain;
+  will-change: scroll-position;
   /* 内核原生滚动锚定的初始值就是 auto；这里显式声明是为了钉死契约：
      任何后续 reset 或第三方样式把本容器或其任一祖先设为 none，都必须先改到这一行，
      而不是静默丢掉锚定。 */
@@ -127,6 +128,7 @@
   pointer-events: none;
   background: linear-gradient(to top, var(--panel) 15%, transparent 100%);
   z-index: 10;
+  transform: translateZ(0);
 }
 
 /* 回合容器：历史回放会把「每次思考 / 每次工具调用」落成独立消息行，

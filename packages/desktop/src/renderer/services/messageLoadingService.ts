@@ -49,16 +49,11 @@ import {
 } from '../transcriptRows.js';
 import {
   hasLegacyUnorderedCacheRows,
-  computeOlderBatchWindowStart,
-  windowEndFor,
   computeHasOlderMessages,
   planOlderZeroMessagesAction,
   shouldTreatOlderDropAsExhausted,
   shouldKeepOlderMessagesAfterLoop,
 } from '../messageWindow.js';
-import {
-  shiftWindowStartForPrepend,
-} from '../promptNavigator.js';
 import {
   takeServerPriority,
   planSessionLoadMerge,
@@ -611,19 +606,14 @@ export class MessageLoadingService {
             state.messages = planOlderBatchPrependMerge(cachedBatch, state.messages, { timelineSessionId: sessionId, fallbackSessionId: sessionId });
             const added = state.messages.length - before;
             if (added > 0) {
-              let start = this.deps.getMessageWindowStart();
-              if (preserveViewportWindow) {
-                start = shiftWindowStartForPrepend(start, added, state.messages.length, MESSAGE_WINDOW_CAPACITY);
-                if (!wasNearBottomBeforeLoad) {
-                  this.deps.setMessageWindowUserExpanded(true);
-                }
-              } else {
-                start = computeOlderBatchWindowStart(added, localOlderRows.length < 100, MESSAGE_WINDOW_CAPACITY);
+              // 【纯原生流全量窗口 (Why)】messageWindowManager 已收敛为 [0, total] 全量挂载，
+              //   若此处仍按 100 条截断 windowEnd，会导致 getMessageWindowEnd() < state.messages.length
+              //   恒成立，滑回底部也无法清除 readerScrolledSessionId。
+              if (!preserveViewportWindow || !wasNearBottomBeforeLoad) {
                 this.deps.setMessageWindowUserExpanded(true);
               }
-              this.deps.setMessageWindowStart(start);
-              const end = windowEndFor(start, state.messages.length, MESSAGE_WINDOW_CAPACITY, INITIAL_RENDER_WINDOW);
-              this.deps.setMessageWindowEnd(end);
+              this.deps.setMessageWindowStart(0);
+              this.deps.setMessageWindowEnd(state.messages.length);
               this.deps.sessionMessagesCache.set(sessionId, state.messages);
               state.hasOlderMessages = true;
               batchAppended = true;
@@ -758,23 +748,12 @@ export class MessageLoadingService {
             continue;
           }
 
-          let start = this.deps.getMessageWindowStart();
-          if (preserveViewportWindow) {
-            start = shiftWindowStartForPrepend(start, added, state.messages.length, MESSAGE_WINDOW_CAPACITY);
-            if (!wasNearBottomBeforeLoad) {
-              this.deps.setMessageWindowUserExpanded(true);
-            }
-          } else {
-            start = computeOlderBatchWindowStart(
-              added,
-              returned < OLDER_BATCH_PAGE_SIZE,
-              MESSAGE_WINDOW_CAPACITY,
-            );
+          // 【纯原生流全量窗口 (Why)】保持 [0, state.messages.length] 全量窗口，与 messageWindowManager 对齐
+          if (!preserveViewportWindow || !wasNearBottomBeforeLoad) {
             this.deps.setMessageWindowUserExpanded(true);
           }
-          this.deps.setMessageWindowStart(start);
-          const end = windowEndFor(start, state.messages.length, MESSAGE_WINDOW_CAPACITY, INITIAL_RENDER_WINDOW);
-          this.deps.setMessageWindowEnd(end);
+          this.deps.setMessageWindowStart(0);
+          this.deps.setMessageWindowEnd(state.messages.length);
           this.deps.sessionMessagesCache.set(sessionId, state.messages);
 
           if (targetId === sessionId) {
