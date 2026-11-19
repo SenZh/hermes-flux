@@ -148,3 +148,41 @@ test('预览放大必须用 zoom 而不是 transform: scale（后者不参与 fl
   assert.equal(/transform:\s*scale/.test(block), false, '预览不得用 transform: scale，放大后会与文字列重叠');
   assert.ok(block.includes('.flux-cloud-label'), '预览必须显式处理运行态状态词，避免与变体名连读');
 });
+
+/**
+ * 「不密集」是一条完整口径，横跨 TSX 与样式表两半边：
+ *   TSX 决定颗数/直径（已有几何守卫），样式表决定雾层与呼吸峰值。
+ * 只改一侧达不成观感，而样式表被改回时此前完全静默——这里把那一半钉住。
+ */
+test('稀疏云团与两套点阵的样式半边：雾层内缩、峰值收敛、颗粒直径锁定', () => {
+  const css = fs.readFileSync(path.join(ROOT, 'src/styles/conversation.css'), 'utf8');
+
+  const blockOf = (marker) => {
+    const start = css.indexOf(marker);
+    assert.ok(start > -1, `样式表缺少 ${marker}`);
+    const end = css.indexOf('@keyframes', start + marker.length);
+    const nextRule = css.indexOf('\n.', start + marker.length);
+    const cut = [end === -1 ? css.length : end, nextRule === -1 ? css.length : nextRule].sort((a, b) => a - b)[0];
+    return css.slice(start, cut === undefined ? css.length : cut);
+  };
+
+  const fogRule = blockOf('.flux-cloud-fog {');
+  assert.match(fogRule, /inset:\s*3px 2px/, '雾层必须内缩，铺满整块 19×14 画布会把 13 颗点糊回一团');
+  assert.match(fogRule, /animation:\s*fluxCloudFogBreathe/, '雾层必须保留慢速呼吸（内缩后仍靠明度起伏提供体积感）');
+
+  const breathe = blockOf('@keyframes fluxCloudFogBreathe');
+  assert.match(breathe, /50%\s*\{[^}]*opacity:\s*0\.62/, '雾层呼吸峰值必须收敛到 0.62（旧 0.95 在稀疏点阵上会糊成蓝/白光斑）');
+
+  const drift = blockOf('@keyframes fluxCloudDrift');
+  assert.match(drift, /50%\s*\{[^}]*opacity:\s*0\.92/, '颗粒漂移峰值必须收敛到 0.92（纯白点 0.98 偏刺眼）');
+
+  const synapseGrid = blockOf('.flux-motif-synapse {');
+  assert.match(synapseGrid, /grid-template-columns:\s*repeat\(4,\s*2px\)/, '突触网格列宽必须与颗粒直径同档');
+  const synapseCell = blockOf('.flux-synapse-cell {');
+  assert.match(synapseCell, /width:\s*2px/, '突触颗粒直径必须为 2px');
+  assert.match(synapseCell, /height:\s*2px/, '突触颗粒必须正圆');
+
+  const matrixDot = blockOf('.flux-matrix-dot {');
+  assert.match(matrixDot, /width:\s*1\.8px/, '旋涡颗粒直径必须为 1.8px');
+  assert.match(matrixDot, /height:\s*1\.8px/, '旋涡颗粒必须正圆');
+});

@@ -95,9 +95,16 @@
   --duration-fast: 140ms;
   --duration-normal: 240ms;
 
-  --flux-activity-blue: #60A5FA;
-  --flux-activity-blue-done: #3B82F6;
-  --flux-activity-blue-soft: rgba(96, 165, 250, 0.16);
+  /* 左轨活动指示器色（深色皮肤取亮白，浅色皮肤在下方覆盖块里回落为蓝）。
+     设计意图(Why)：深色底上亮蓝点阵与低饱和界面互抢，且十几颗纯色点读起来像告警；
+     改亮白后与界面主色（--primary）同源，只靠明度呼吸表达"在跑"。
+     约束与规则(Rules)：命名取 ink（墨色）而非具体色相，因为值随主题极性在
+     白/蓝之间切换；新增消费方只准引用这四个变量，禁止再写字面色值。
+     label 单独一档：运行状态词比颗粒低一档明度，避免 10px 白字抢过会话标题。 */
+  --flux-activity-ink: #FFFFFF;
+  --flux-activity-ink-done: rgba(255, 255, 255, 0.64);
+  --flux-activity-ink-soft: rgba(255, 255, 255, 0.06);
+  --flux-activity-ink-label: rgba(255, 255, 255, 0.88);
 
   /* 4pt 空间阶梯与半透明交互叠加态（对标 OpenChamber） */
   --space-0: 0px;
@@ -870,9 +877,10 @@ html[data-rail-resizing] webview {
 [data-theme="warm-paper"],
 [data-theme="jade-white"],
 [data-theme="ayu-light"] {
-  --flux-activity-blue: #2563EB;
-  --flux-activity-blue-done: #1D4ED8;
-  --flux-activity-blue-soft: rgba(37, 99, 235, 0.14);
+  --flux-activity-ink: #2563EB;
+  --flux-activity-ink-done: #1D4ED8;
+  --flux-activity-ink-soft: rgba(37, 99, 235, 0.14);
+  --flux-activity-ink-label: #2563EB;
 }
 
 /* jadePulse 已删除：唯一消费者是已移除的左舵模板；其无休止 CSS 动画与集中时钟军规冲突，

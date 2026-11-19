@@ -222,7 +222,7 @@ test('左轨组件：会话行形态与关键交互契约', async (t) => {
     const running = render({ sessions: [{ id: 's-1', title: '跑', timestamp: NOW, activityState: 'running' }] });
     assert.ok(running.includes('activity-pulse-indicator'));
     assert.ok(running.includes('flux-cloud-indicator--running'));
-    assert.equal((running.match(/class="flux-cloud-dot"/g) || []).length, 24);
+    assert.equal((running.match(/class="flux-cloud-dot"/g) || []).length, 13);
     assert.ok(running.includes('执行中'));
     assert.equal(running.includes('activity-unread-badge'), false);
     const runningRow = running.slice(running.indexOf('data-id="s-1"'), running.indexOf('</button>', running.indexOf('data-id="s-1"')));
@@ -231,7 +231,7 @@ test('左轨组件：会话行形态与关键交互契约', async (t) => {
     const unread = render({ sessions: [{ id: 's-1', title: '未读', timestamp: NOW, activityState: 'unread' }] });
     assert.ok(unread.includes('activity-unread-badge'));
     assert.ok(unread.includes('flux-cloud-indicator--unread'));
-    assert.equal((unread.match(/class="flux-cloud-dot"/g) || []).length, 24);
+    assert.equal((unread.match(/class="flux-cloud-dot"/g) || []).length, 13);
     assert.ok(unread.includes('已完成'));
     assert.equal(unread.includes('activity-pulse-indicator'), false);
     const unreadRow = unread.slice(unread.indexOf('data-id="s-1"'), unread.indexOf('</button>', unread.indexOf('data-id="s-1"')));
@@ -452,7 +452,7 @@ test('静态渲染快照同样携带变体，避免服务端/测试链路恒为�
   assert.ok(fallback.includes('data-variant="cloud"'), '快照缺省时必须回落默认变体');
 });
 
-test('ActivityIndicator 统一原语：placement、entityKind、24 颗云朵点阵与静态 read 零节点', () => {
+test('ActivityIndicator 统一原语：placement、entityKind、13 颗稀疏云朵点阵与静态 read 零节点', () => {
   const cornerRunning = renderToStaticMarkup(React.createElement(ActivityIndicator, {
     state: 'running',
     placement: 'corner',
@@ -487,7 +487,7 @@ test('ActivityIndicator 统一原语：placement、entityKind、24 颗云朵点�
   assert.ok(inlineRunningSession.includes('flux-cloud-indicator--running'));
   assert.ok(inlineRunningSession.includes('flux-cloud-canvas'));
   assert.ok(inlineRunningSession.includes('flux-cloud-fog'));
-  assert.equal((inlineRunningSession.match(/class="flux-cloud-dot"/g) || []).length, 24);
+  assert.equal((inlineRunningSession.match(/class="flux-cloud-dot"/g) || []).length, 13);
   assert.ok(inlineRunningSession.includes('执行中'));
   assert.equal(inlineRunningSession.includes('<svg'), false);
 
@@ -497,7 +497,7 @@ test('ActivityIndicator 统一原语：placement、entityKind、24 颗云朵点�
     entityKind: 'bot',
   }));
   assert.ok(inlineRunningBot.includes('思考中'));
-  assert.equal((inlineRunningBot.match(/class="flux-cloud-dot"/g) || []).length, 24);
+  assert.equal((inlineRunningBot.match(/class="flux-cloud-dot"/g) || []).length, 13);
 
   const inlineRunningGroup = renderToStaticMarkup(React.createElement(ActivityIndicator, {
     state: 'running',
@@ -505,7 +505,7 @@ test('ActivityIndicator 统一原语：placement、entityKind、24 颗云朵点�
     entityKind: 'group',
   }));
   assert.ok(inlineRunningGroup.includes('协作中'));
-  assert.equal((inlineRunningGroup.match(/class="flux-cloud-dot"/g) || []).length, 24);
+  assert.equal((inlineRunningGroup.match(/class="flux-cloud-dot"/g) || []).length, 13);
 
   const inlineUnreadStatic = renderToStaticMarkup(React.createElement(ActivityIndicator, {
     state: 'unread',
@@ -515,9 +515,9 @@ test('ActivityIndicator 统一原语：placement、entityKind、24 颗云朵点�
   assert.ok(inlineUnreadStatic.includes('flux-cloud-indicator--unread'));
   assert.ok(inlineUnreadStatic.includes('data-transition="none"'));
   assert.ok(inlineUnreadStatic.includes('data-placement="inline"'));
-  assert.equal((inlineUnreadStatic.match(/class="flux-cloud-dot"/g) || []).length, 24);
+  assert.equal((inlineUnreadStatic.match(/class="flux-cloud-dot"/g) || []).length, 13);
   assert.equal((inlineUnreadStatic.match(/data-on="1"/g) || []).length, 7);
-  assert.equal((inlineUnreadStatic.match(/data-on="0"/g) || []).length, 17);
+  assert.equal((inlineUnreadStatic.match(/data-on="0"/g) || []).length, 6);
   assert.ok(inlineUnreadStatic.includes('已完成'));
   assert.equal(inlineUnreadStatic.includes('flux-cloud-ripple'), false);
   assert.equal(inlineUnreadStatic.includes('ring-sidebar'), false);
@@ -599,4 +599,81 @@ test('ActivityIndicator 统一原语：placement、entityKind、24 颗云朵点�
     }));
     assert.equal(readMarkup, '', `variant ${v} 在静态 read 态必须返回空`);
   }
+});
+
+/**
+ * 几何守卫：会话行里的云团是"用户直接看到的密度"。
+ *
+ * 【为什么需要】2026-11-19 会话行内 24 颗 2.0~2.6px 点铺满 19×14px，颗粒首尾相抵，
+ *   读起来是一块密点而非云；只把每颗点改小不解决观感，必须同时约束颗数与最小间距。
+ *   这条测试挡的正是"把点阵加密回去"与"命中偏移算错导致逐颗偏心"两类静默回退。
+ *
+ * 【阈值依据】当前 13 颗最近中心距 ≈3.25px（相邻层最小水平错位 1.8 view 单位，实测）；旧 24 颗版
+ *   实测 ≈2.07px，"同列对位"的 13 颗版 ≈2.62px——3.1px 下限把这两种密度都拦在门外，
+ *   只给美术留 ±0.15px 微调余量。
+ */
+test('云点几何守卫：13 颗、正圆、命中偏移成对、直径上限、最小间距与对勾 step 唯一', () => {
+  const html = renderToStaticMarkup(React.createElement(ActivityIndicator, { state: 'running', placement: 'inline' }));
+  const dots = html.match(/<i class="flux-cloud-dot"[^>]*>/g) || [];
+  assert.equal(dots.length, 13, '稀疏云团必须恒为 13 颗；加回 24 颗会重新糊成一整块密点');
+
+  const readNum = (tag, prop, unit) => {
+    const style = tag.match(/style="([^"]*)"/)?.[1] ?? '';
+    const decl = style.split(';').map((s) => s.trim()).find((s) => s.startsWith(`${prop}:`));
+    return decl ? Number.parseFloat(decl.slice(prop.length + 1).replace(unit, '')) : Number.NaN;
+  };
+
+  const centers = [];
+  dots.forEach((tag, i) => {
+    const w = readNum(tag, 'width', 'px');
+    const h = readNum(tag, 'height', 'px');
+    assert.equal(w, h, `第 ${i} 颗点必须正圆（width=${w} height=${h}）`);
+    assert.ok(w > 0 && w <= 2.3, `第 ${i} 颗点直径 ${w}px 必须落在 (0, 2.3]，回到设计稿 2.4px+ 会重新变密`);
+    assert.ok(Math.abs(readNum(tag, 'margin-left', 'px') + w / 2) < 0.011, `第 ${i} 颗点 margin-left 必须等于 -width/2，否则偏心`);
+    assert.ok(Math.abs(readNum(tag, 'margin-top', 'px') + h / 2) < 0.011, `第 ${i} 颗点 margin-top 必须等于 -height/2，否则偏心`);
+    centers.push({
+      x: (readNum(tag, 'left', '%') * 19) / 100,
+      y: (readNum(tag, 'top', '%') * 14) / 100,
+    });
+  });
+
+  let minGap = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < centers.length; i += 1) {
+    for (let j = i + 1; j < centers.length; j += 1) {
+      const gap = Math.hypot(centers[i].x - centers[j].x, centers[i].y - centers[j].y);
+      if (gap < minGap) minGap = gap;
+    }
+  }
+  assert.ok(minGap >= 3.1, `最近两颗点中心距 ${minGap.toFixed(2)}px 必须 ≥ 3.1px，否则会话行内会粘连成密集点阵`);
+
+  // 未读态把 7 颗 on 点飞到对勾锚点：step 必须 0..6 各一次，且锚点沿 x 单调、y 先增后减成 V，
+  // 否则聚拢动画会错序/同帧，或勾形塌成一条斜线——这两类回归此前的守卫完全看不见。
+  const unreadHtml = renderToStaticMarkup(React.createElement(ActivityIndicator, { state: 'unread', placement: 'inline' }));
+  const onDots = unreadHtml.match(/<i class="flux-cloud-dot"[^>]*data-on="1"[^>]*>/g) || [];
+  assert.equal(onDots.length, 7, '未读对勾必须恒为 7 颗');
+  const byStep = [...onDots].sort((a, b) => readNum(a, '--step', '') - readNum(b, '--step', ''));
+  assert.deepEqual(
+    byStep.map((tag) => readNum(tag, '--step', '')),
+    [0, 1, 2, 3, 4, 5, 6],
+    '对勾 7 颗必须各自消费唯一 step（0..6），交换或重复会让聚拢动画错序/同帧',
+  );
+  const xs = byStep.map((tag) => readNum(tag, 'left', '%'));
+  const ys = byStep.map((tag) => readNum(tag, 'top', '%'));
+  assert.deepEqual(xs, [...xs].sort((a, b) => a - b), '对勾锚点必须沿 x 单调递增（step 越大越靠右）');
+  // 单调断言挡不住"两个锚点 x 相同"：排序后仍相等，勾臂会竖直对位叠点。必须另断互不相同。
+  assert.equal(new Set(xs).size, xs.length, '对勾 7 个锚点 x 必须互不相同，同列会对位叠点、勾臂读作一坨');
+  const bottom = ys.indexOf(Math.max(...ys));
+  assert.ok(bottom > 0 && bottom < ys.length - 1, '对勾必须存在唯一最低点，否则不是 V 形而是一条斜杠');
+  assert.deepEqual(ys.slice(0, bottom + 1), [...ys.slice(0, bottom + 1)].sort((a, b) => a - b), '对勾左臂必须随 step 单调下探');
+  assert.deepEqual(ys.slice(bottom), [...ys.slice(bottom)].sort((a, b) => b - a), '对勾右臂必须随 step 单调上扬');
+
+  // 飞行位移：上界防"横穿画布的长飞行"，逐点下界防 `--from-x/--from-y` 被置零
+  // （完成态聚拢退化为瞬移；只看最大值时，非最大点丢失位移仍会绿）。
+  const flights = onDots.map((tag) => Math.hypot(readNum(tag, '--from-x', 'px'), readNum(tag, '--from-y', 'px')));
+  const maxFlight = Math.max(...flights);
+  assert.ok(maxFlight <= 3.3, `对勾载体最大飞行位移 ${maxFlight.toFixed(2)}px 必须 ≤3.3px，否则完成瞬间是横穿画面的长距离飞行`);
+  assert.ok(
+    flights.every((distance) => distance >= 0.3),
+    `每颗对勾载体的飞行位移都必须 ≥0.3px（实测 ${flights.map((d) => d.toFixed(2)).join(' / ')}），任一颗归零即动画退化为瞬移`,
+  );
 });

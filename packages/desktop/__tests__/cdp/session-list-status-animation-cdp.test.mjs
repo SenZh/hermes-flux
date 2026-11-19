@@ -18,7 +18,7 @@ function parseRgb(rgbStr) {
   return m ? { r: Number(m[1]), g: Number(m[2]), b: Number(m[3]) } : null;
 }
 
-test('session-list-status-animation: 亮蓝色云朵 A 点阵、头像简洁角标、纯合成层动效与双肤出图', async (t) => {
+test('session-list-status-animation: 稀疏云朵 A 点阵、头像简洁角标、纯合成层动效与双肤出图', async (t) => {
   const browserPath = BROWSER_CANDIDATES.find((p) => fs.existsSync(p));
   if (!browserPath) {
     t.skip('未找到 Edge/Chrome');
@@ -253,7 +253,7 @@ test('session-list-status-animation: 亮蓝色云朵 A 点阵、头像简洁角�
   assert.equal(lightMetrics.hasAllRunning, true, '三类列表与微轨 Bot 必须全部渲染 running 指示器');
   assert.equal(lightMetrics.hasUnread, true, '历史未读必须渲染已完成指示器');
   assert.equal(lightMetrics.readHasZeroDots, true, '静态已读会话与群聊必须零特殊状态节点');
-  assert.equal(lightMetrics.cloudDotCount, 24, '云朵 A 必须精确渲染 24 颗微粒');
+  assert.equal(lightMetrics.cloudDotCount, 13, '云朵 A 必须精确渲染 13 颗稀疏微粒');
   assert.equal(lightMetrics.doneCheckDotCount, 7, '云朵 A 完成态必须精确点亮 7 颗对勾核心晶粒');
   assert.equal(lightMetrics.sessRunHasSvg, false, '普通会话行内严禁出现 <svg> 标签');
   assert.equal(lightMetrics.cornerIsSimple, true, '头像角标必须保持简洁圆点，不含云朵画布');
@@ -297,7 +297,14 @@ test('session-list-status-animation: 亮蓝色云朵 A 点阵、头像简洁角�
     return dot ? getComputedStyle(dot).backgroundColor : null;
   })()`);
   const darkRgb = parseRgb(darkBlue);
-  assert.ok(darkRgb && darkRgb.b > darkRgb.g && darkRgb.b > darkRgb.r, `深色模式下云朵微粒仍须为透亮天蓝色系，实测 ${darkBlue}`);
+  // 深色皮肤的活动态取亮白（与 --primary 同源），浅色皮肤仍是蓝；判据必须跟着主题极性走。
+  assert.ok(
+    darkRgb
+      && Math.abs(darkRgb.r - darkRgb.g) <= 2
+      && Math.abs(darkRgb.g - darkRgb.b) <= 2
+      && darkRgb.r >= 200,
+    `深色模式下活动指示器必须为亮白色系，实测 ${darkBlue}`,
+  );
 
   const darkShot = await send('Page.captureScreenshot', { format: 'png' });
   fs.writeFileSync(path.join(verifyDir, 'session-status-dark.png'), Buffer.from(darkShot.data, 'base64'));

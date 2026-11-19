@@ -3940,7 +3940,7 @@ html[data-app-hidden="true"] .conv-presence *::after {
 
 .flux-activity-dot--running {
   --activity-ring-scale: 1.85;
-  background: var(--flux-activity-blue);
+  background: var(--flux-activity-ink);
 }
 
 .flux-activity-dot--running[data-placement="corner"] {
@@ -3952,7 +3952,7 @@ html[data-app-hidden="true"] .conv-presence *::after {
   position: absolute;
   inset: 0;
   box-sizing: border-box;
-  border: 1.5px solid var(--flux-activity-blue);
+  border: 1.5px solid var(--flux-activity-ink);
   border-radius: var(--radius-pill, 9999px);
   pointer-events: none;
   /* gate-perf-allow: 微轨角标脉冲环仅作用于活跃执行中的小圆点，纯 GPU 合成层动画且页面隐藏时暂停 */
@@ -3971,7 +3971,7 @@ html[data-app-hidden="true"] .conv-presence *::after {
 }
 
 .flux-activity-dot--unread {
-  background: var(--flux-activity-blue-done);
+  background: var(--flux-activity-ink-done);
 }
 
 .flux-activity-dot--unread[data-transition="just-completed"] {
@@ -3983,7 +3983,7 @@ html[data-app-hidden="true"] .conv-presence *::after {
   position: absolute;
   inset: 0;
   box-sizing: border-box;
-  border: 1.5px solid var(--flux-activity-blue-done);
+  border: 1.5px solid var(--flux-activity-ink-done);
   border-radius: var(--radius-pill, 9999px);
   pointer-events: none;
   animation: fluxActivityUnreadHalo var(--duration-normal, 240ms) var(--ease-spring) 1 both;
@@ -4012,7 +4012,7 @@ html[data-app-hidden="true"] .conv-presence *::after {
 }
 
 .flux-activity-dot--settle {
-  background: var(--flux-activity-blue);
+  background: var(--flux-activity-ink);
   animation: fluxActivitySettle var(--duration-fast, 140ms) var(--ease-spring) 1 forwards;
 }
 
@@ -4054,21 +4054,22 @@ html[data-app-hidden="true"] .conv-presence *::after {
 
 .flux-cloud-fog {
   position: absolute;
-  inset: 0;
+  /* 内缩：点阵稀疏后雾层若仍铺满整块画布，会把 13 颗点糊成一团蓝雾，视觉上重新变"密"。 */
+  inset: 3px 2px;
   border-radius: var(--radius-pill, 9999px);
-  background: radial-gradient(closest-side, var(--flux-activity-blue-soft) 0%, transparent 100%);
+  background: radial-gradient(closest-side, var(--flux-activity-ink-soft) 0%, transparent 100%);
   pointer-events: none;
-  /* gate-perf-allow: 柔蓝云雾底衬仅随运行中会话挂载，4s 慢速呼吸且页面隐藏时自动暂停 */
+  /* gate-perf-allow: 柔云雾底衬仅随运行中会话挂载，4s 慢速呼吸且页面隐藏时自动暂停 */
   animation: fluxCloudFogBreathe 4s ease-in-out infinite;
 }
 
 @keyframes fluxCloudFogBreathe {
   0%, 100% {
-    opacity: 0.55;
+    opacity: 0.34;
     transform: scale(0.96);
   }
   50% {
-    opacity: 0.95;
+    opacity: 0.62;
     transform: scale(1.04);
   }
 }
@@ -4077,28 +4078,28 @@ html[data-app-hidden="true"] .conv-presence *::after {
   position: absolute;
   display: block;
   border-radius: var(--radius-pill, 9999px);
-  background: var(--flux-activity-blue);
+  background: var(--flux-activity-ink);
   pointer-events: none;
 }
 
 .flux-cloud-indicator--running .flux-cloud-dot {
-  /* gate-perf-allow: 24 颗云朵微粒仅在活跃执行态挂载，纯 GPU transform+opacity 且页面隐藏时暂停 */
+  /* gate-perf-allow: 13 颗稀疏云朵微粒仅在活跃执行态挂载，纯 GPU transform+opacity 且页面隐藏时暂停 */
   animation: fluxCloudDrift 3.8s ease-in-out var(--d, 0ms) infinite;
 }
 
 @keyframes fluxCloudDrift {
   0%, 100% {
-    opacity: 0.42;
+    opacity: 0.3;
     transform: translate3d(0, 0, 0) scale(0.88);
   }
   50% {
-    opacity: 0.98;
+    opacity: 0.92;
     transform: translate3d(var(--dx, 0px), var(--dy, 0px), 0) scale(1.12);
   }
 }
 
 .flux-cloud-indicator--unread .flux-cloud-dot {
-  background: var(--flux-activity-blue-done);
+  background: var(--flux-activity-ink-done);
 }
 
 .flux-cloud-indicator--unread .flux-cloud-dot[data-on="1"] {
@@ -4146,7 +4147,7 @@ html[data-app-hidden="true"] .conv-presence *::after {
   margin-left: -7px;
   margin-top: -7px;
   box-sizing: border-box;
-  border: 1.5px solid var(--flux-activity-blue-done);
+  border: 1.5px solid var(--flux-activity-ink-done);
   border-radius: var(--radius-pill, 9999px);
   pointer-events: none;
   animation: fluxCloudRipple 600ms var(--ease-spring) 1 forwards;
@@ -4175,7 +4176,7 @@ html[data-app-hidden="true"] .conv-presence *::after {
   position: absolute;
   display: block;
   border-radius: var(--radius-pill, 9999px);
-  background: var(--flux-activity-blue);
+  background: var(--flux-activity-ink);
   pointer-events: none;
   animation: fluxCloudSettleDot 260ms var(--ease-spring) 1 forwards;
 }
@@ -4209,7 +4210,7 @@ html[data-app-hidden="true"] .conv-presence *::after {
 }
 
 .flux-cloud-label--running {
-  color: var(--flux-activity-blue);
+  color: var(--flux-activity-ink-label);
   /* gate-perf-allow: 呼吸状态字仅作用于活跃运行会话，纯 GPU opacity 动画且页面隐藏时自动暂停 */
   animation: fluxCloudLabelPulse 3s ease-in-out infinite;
 }
@@ -4224,7 +4225,7 @@ html[data-app-hidden="true"] .conv-presence *::after {
 }
 
 .flux-cloud-label--done {
-  color: var(--flux-activity-blue-done);
+  color: var(--flux-activity-ink-done);
 }
 
 .flux-cloud-indicator--unread[data-transition="just-completed"] .flux-cloud-label--done {
@@ -4282,7 +4283,7 @@ html[data-app-hidden="true"] .conv-presence *::after {
 
 /* ════════════════════════════════════════════════════════════════════════
    六套会话指示器变体（gyro / orbit / synapse / spring / matrix）纯合成层动效
-   所有变体零 <svg>、零硬编码色值，纯蓝调 + 白色，支持页面隐藏暂停与减弱动效降级
+   所有变体零 <svg>、零硬编码色值，色相全走 --flux-activity-ink*（深色亮白 / 浅色蓝），支持页面隐藏暂停与减弱动效降级
    ════════════════════════════════════════════════════════════════════════ */
 
 /* 1. gyro（方案 4 · 陀螺仪三轴谐振环） */
@@ -4305,15 +4306,15 @@ html[data-app-hidden="true"] .conv-presence *::after {
 }
 
 .flux-gyro-ring--a {
-  border-top-color: var(--flux-activity-blue);
-  border-left-color: var(--flux-activity-blue-soft);
+  border-top-color: var(--flux-activity-ink);
+  border-left-color: var(--flux-activity-ink-soft);
   /* gate-perf-allow: 陀螺仪谐振环仅作用于活跃执行态，纯 GPU 合成层 3D 旋转动画且页面隐藏时暂停 */
   animation: fluxGyroOrbitA 1.6s linear infinite;
 }
 
 .flux-gyro-ring--b {
-  border-top-color: var(--flux-activity-blue);
-  border-right-color: var(--flux-activity-blue-soft);
+  border-top-color: var(--flux-activity-ink);
+  border-right-color: var(--flux-activity-ink-soft);
   /* gate-perf-allow: 陀螺仪谐振环仅作用于活跃执行态，纯 GPU 合成层 3D 旋转动画且页面隐藏时暂停 */
   animation: fluxGyroOrbitB 1.6s linear infinite;
 }
@@ -4356,8 +4357,8 @@ html[data-app-hidden="true"] .conv-presence *::after {
   width: 12px;
   height: 12px;
   border-radius: var(--radius-pill, 9999px);
-  border: 1.25px solid var(--flux-activity-blue-done);
-  background: var(--flux-activity-blue-soft);
+  border: 1.25px solid var(--flux-activity-ink-done);
+  background: var(--flux-activity-ink-soft);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4366,8 +4367,8 @@ html[data-app-hidden="true"] .conv-presence *::after {
 .flux-gyro-tick {
   width: 5.5px;
   height: 3.2px;
-  border-left: 1.5px solid var(--flux-activity-blue-done);
-  border-bottom: 1.5px solid var(--flux-activity-blue-done);
+  border-left: 1.5px solid var(--flux-activity-ink-done);
+  border-bottom: 1.5px solid var(--flux-activity-ink-done);
   transform: rotate(-45deg) translate(0.4px, -0.4px);
 }
 
@@ -4395,7 +4396,7 @@ html[data-app-hidden="true"] .conv-presence *::after {
   position: absolute;
   inset: 1px;
   border-radius: var(--radius-pill, 9999px);
-  border: 1px dashed var(--flux-activity-blue-soft);
+  border: 1px dashed var(--flux-activity-ink-soft);
   /* gate-perf-allow: 虚线星轨自转仅作用于活跃执行态，页面隐藏时自动暂停 */
   animation: fluxOrbitTrackSpin 4.5s linear infinite;
 }
@@ -4441,7 +4442,7 @@ html[data-app-hidden="true"] .conv-presence *::after {
   height: 2.2px;
   margin-top: -1.1px;
   border-radius: var(--radius-pill, 9999px);
-  background: var(--flux-activity-blue);
+  background: var(--flux-activity-ink);
   opacity: 0.8;
 }
 
@@ -4468,7 +4469,7 @@ html[data-app-hidden="true"] .conv-presence *::after {
   width: 8px;
   height: 8px;
   border-radius: 2px;
-  background: var(--flux-activity-blue-done);
+  background: var(--flux-activity-ink-done);
   transform: rotate(45deg);
   position: relative;
 }
@@ -4493,7 +4494,7 @@ html[data-app-hidden="true"] .conv-presence *::after {
 /* 3. synapse（方案 6 · 4×4 神经突触变形阵） */
 .flux-motif-synapse {
   display: inline-grid;
-  grid-template-columns: repeat(4, 2.5px);
+  grid-template-columns: repeat(4, 2px);
   gap: 1.2px;
   width: 14px;
   height: 14px;
@@ -4504,10 +4505,10 @@ html[data-app-hidden="true"] .conv-presence *::after {
 
 .flux-synapse-cell {
   display: block;
-  width: 2.5px;
-  height: 2.5px;
+  width: 2px;
+  height: 2px;
   border-radius: var(--radius-pill, 9999px);
-  background: var(--flux-activity-blue);
+  background: var(--flux-activity-ink);
   opacity: 0.18;
   transform: scale(0.75);
 }
@@ -4525,13 +4526,13 @@ html[data-app-hidden="true"] .conv-presence *::after {
 }
 
 .flux-motif-synapse--done .flux-synapse-cell {
-  background: var(--flux-activity-blue-done);
+  background: var(--flux-activity-ink-done);
 }
 
 .flux-motif-synapse--done .flux-synapse-cell[data-on="1"] {
   opacity: 0.98;
   transform: scale(1.1);
-  box-shadow: 0 0 0 0.5px var(--flux-activity-blue-done);
+  box-shadow: 0 0 0 0.5px var(--flux-activity-ink-done);
 }
 
 .flux-motif-synapse--done .flux-synapse-cell[data-on="0"] {
@@ -4567,15 +4568,15 @@ html[data-app-hidden="true"] .conv-presence *::after {
 
 .flux-spring-arc--outer {
   inset: 0.5px;
-  border-top-color: var(--flux-activity-blue);
-  border-right-color: var(--flux-activity-blue-soft);
+  border-top-color: var(--flux-activity-ink);
+  border-right-color: var(--flux-activity-ink-soft);
   /* gate-perf-allow: 机械游丝外弧仅作用于活跃执行态，页面隐藏时自动暂停 */
   animation: fluxSpringFastSlow 1.3s cubic-bezier(0.72, 0.08, 0.28, 0.92) infinite;
 }
 
 .flux-spring-arc--inner {
   inset: 3.5px;
-  border-bottom-color: var(--flux-activity-blue);
+  border-bottom-color: var(--flux-activity-ink);
   /* gate-perf-allow: 机械游丝内弧仅作用于活跃执行态，页面隐藏时自动暂停 */
   animation: fluxSpringFastSlow 1.3s cubic-bezier(0.72, 0.08, 0.28, 0.92) -0.45s infinite reverse;
 }
@@ -4606,7 +4607,7 @@ html[data-app-hidden="true"] .conv-presence *::after {
   width: 12px;
   height: 12px;
   border-radius: var(--radius-pill, 9999px);
-  border: 1.3px solid var(--flux-activity-blue-done);
+  border: 1.3px solid var(--flux-activity-ink-done);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4615,8 +4616,8 @@ html[data-app-hidden="true"] .conv-presence *::after {
 .flux-spring-tick {
   width: 5.5px;
   height: 3.2px;
-  border-left: 1.5px solid var(--flux-activity-blue-done);
-  border-bottom: 1.5px solid var(--flux-activity-blue-done);
+  border-left: 1.5px solid var(--flux-activity-ink-done);
+  border-bottom: 1.5px solid var(--flux-activity-ink-done);
   transform: rotate(-45deg) translate(0.4px, -0.4px);
 }
 
@@ -4635,10 +4636,10 @@ html[data-app-hidden="true"] .conv-presence *::after {
 .flux-matrix-dot {
   position: absolute;
   display: block;
-  width: 2.2px;
-  height: 2.2px;
+  width: 1.8px;
+  height: 1.8px;
   border-radius: var(--radius-pill, 9999px);
-  background: var(--flux-activity-blue);
+  background: var(--flux-activity-ink);
   opacity: 0.2;
 }
 
@@ -4654,7 +4655,7 @@ html[data-app-hidden="true"] .conv-presence *::after {
 }
 
 .flux-motif-matrix--done .flux-matrix-dot {
-  background: var(--flux-activity-blue-done);
+  background: var(--flux-activity-ink-done);
 }
 
 .flux-motif-matrix--done .flux-matrix-dot[data-on="1"] {

@@ -79,36 +79,50 @@ function buildCloudANodes(specs: readonly CloudANodeSpec[]): readonly CloudANode
       fromY: `${fromYVal.toFixed(2)}px`,
       settleToX: `${settleXVal.toFixed(2)}px`,
       settleToY: `${settleYVal.toFixed(2)}px`,
-      offsetPx: `${(-node.size / 2).toFixed(2)}px`,
+      // 命中偏移取直径之半：除以 2 不产生新舍入，圆点恒以 (left,top) 为圆心，避免逐颗偏心。
+      offsetPx: `${-(node.size / 2)}px`,
     };
   });
 }
 
+/**
+ * 积雨流云点阵（稀疏版）。
+ *
+ * 【设计意图 Why】原 24 颗点阵铺在 19×14px 画布上，会话行内显示时点与点首尾相抵，
+ *   视觉密度过高（密集恐惧观感），且雾底衬把细点糊成一团。改为 13 颗：层间竖直 2.8~3.0px、
+ *   同层相邻 3.5~4.0px（view 坐标 4.2~4.8），颗粒之间留出明显空隙，才读得出"云 + 落雨"的形状。
+ *
+ * 【防范的历史坑 Pitfall】`on` 的 7 颗是"未读态收拢成对勾"的载体，不是构图上的勾选点：
+ *   完成时它们会带着 `--from-x/--from-y` 位移飞到 `tx/ty`（对勾轨迹 0~6 号锚点）。
+ *   因此 `on` 必须保持 7 颗，且每个载体到其锚点的位移都必须 ≥0.3px 且 ≤3.3px（实测 0.51~2.85px）——
+ *   超过画布宽度的 ~15% 会变成横穿画面的长距离飞行，而位移归零则聚拢动画退化为瞬移。
+ *
+ * 【约束 Rules】
+ *   1. `size` 即最终渲染直径（px），画布为 19×14，禁止把颗粒改回 2.4px 以上或增加颗数；
+ *   2. 圆心由 left/top 百分比定位，`offsetPx` 恒等于 -size/2，改尺寸必须同步；
+ *   3. 未读数必须恒为 7（对勾 7 锚点），改数量会破坏已完成态的图形语义；
+ *   4. 【密度红线】相邻两层必须水平错位 ≥1.8（view 坐标），竖直堆叠会形成 2.8px 的
+ *      贴点竖链——减颗数解决不了它，会话行里仍是"密密一列"，几何守卫有最小间距断言；
+ *   5. 【飞行红线】改勾锚点或载体位置后必须复算位移，几何守卫逐点断言位移落在 [0.3, 3.3]px。
+ */
 const CLOUD_A_NODES: readonly CloudANode[] = buildCloudANodes([
-  { x: 2.6, y: 11.8, size: 2.1, dx: -0.9, dy: 0.4, delayMs: 0, on: false },
-  { x: 5.5, y: 12.0, size: 2.3, dx: -0.6, dy: 0.5, delayMs: 160, on: false },
-  { x: 8.4, y: 12.1, size: 2.4, dx: -0.3, dy: 0.4, delayMs: 320, on: true, tx: 7.4, ty: 12.2, step: 2 },
-  { x: 11.3, y: 12.1, size: 2.4, dx: 0.2, dy: 0.5, delayMs: 480, on: false },
-  { x: 14.2, y: 12.0, size: 2.3, dx: 0.5, dy: 0.4, delayMs: 640, on: false },
-  { x: 17.1, y: 11.9, size: 2.2, dx: 0.8, dy: 0.4, delayMs: 800, on: false },
-  { x: 19.9, y: 11.6, size: 2.0, dx: 1.0, dy: 0.3, delayMs: 960, on: false },
-  { x: 1.9, y: 9.5, size: 2.1, dx: -1.1, dy: 0.2, delayMs: 120, on: false },
-  { x: 4.4, y: 9.2, size: 2.4, dx: -0.7, dy: -0.3, delayMs: 280, on: true, tx: 3.8, ty: 8.8, step: 0 },
-  { x: 6.9, y: 9.4, size: 2.5, dx: -0.4, dy: 0.3, delayMs: 440, on: true, tx: 5.5, ty: 10.5, step: 1 },
-  { x: 9.5, y: 9.1, size: 2.6, dx: 0.0, dy: -0.3, delayMs: 600, on: true, tx: 9.6, ty: 10.0, step: 3 },
-  { x: 12.2, y: 9.2, size: 2.5, dx: 0.4, dy: 0.3, delayMs: 760, on: false },
-  { x: 14.9, y: 9.1, size: 2.4, dx: 0.6, dy: -0.2, delayMs: 920, on: false },
-  { x: 17.6, y: 9.2, size: 2.3, dx: 0.9, dy: 0.2, delayMs: 1080, on: false },
-  { x: 20.6, y: 9.4, size: 2.0, dx: 1.1, dy: 0.3, delayMs: 1240, on: false },
-  { x: 4.2, y: 6.5, size: 2.2, dx: -0.8, dy: -0.5, delayMs: 240, on: false },
-  { x: 7.3, y: 6.1, size: 2.5, dx: -0.4, dy: -0.6, delayMs: 420, on: false },
-  { x: 10.7, y: 6.0, size: 2.6, dx: 0.1, dy: -0.6, delayMs: 620, on: true, tx: 11.8, ty: 7.7, step: 4 },
-  { x: 14.0, y: 6.0, size: 2.4, dx: 0.5, dy: -0.5, delayMs: 820, on: true, tx: 14.1, ty: 5.4, step: 5 },
-  { x: 17.4, y: 6.4, size: 2.2, dx: 0.8, dy: -0.4, delayMs: 1020, on: false },
-  { x: 6.3, y: 3.6, size: 2.2, dx: -0.5, dy: -0.7, delayMs: 360, on: false },
-  { x: 9.0, y: 2.8, size: 2.4, dx: 0.0, dy: -0.8, delayMs: 560, on: false },
-  { x: 11.9, y: 3.3, size: 2.3, dx: 0.4, dy: -0.7, delayMs: 740, on: false },
-  { x: 15.5, y: 3.9, size: 2.2, dx: 0.7, dy: -0.6, delayMs: 940, on: true, tx: 16.6, ty: 3.1, step: 6 },
+  // 落雨层（最低，四点错开云腹层）
+  { x: 4.2, y: 12.4, size: 2.0, dx: -0.7, dy: 0.4, delayMs: 0, on: false },
+  { x: 8.6, y: 12.4, size: 2.2, dx: -0.4, dy: 0.5, delayMs: 180, on: true, tx: 7.4, ty: 12.2, step: 2 },
+  { x: 13.0, y: 12.4, size: 2.2, dx: 0.2, dy: 0.5, delayMs: 360, on: false },
+  { x: 17.4, y: 12.4, size: 2.0, dx: 0.7, dy: 0.4, delayMs: 540, on: false },
+  // 云腹层
+  { x: 2.2, y: 9.2, size: 2.0, dx: -0.9, dy: 0.2, delayMs: 90, on: true, tx: 3.8, ty: 8.8, step: 0 },
+  { x: 6.4, y: 9.2, size: 2.1, dx: -0.5, dy: 0.3, delayMs: 270, on: true, tx: 5.5, ty: 10.5, step: 1 },
+  { x: 10.8, y: 9.2, size: 2.3, dx: 0.1, dy: 0.3, delayMs: 450, on: true, tx: 9.6, ty: 10.0, step: 3 },
+  { x: 15.6, y: 9.2, size: 2.0, dx: 0.8, dy: 0.2, delayMs: 630, on: false },
+  // 云肩层
+  { x: 4.4, y: 6.2, size: 2.1, dx: -0.7, dy: -0.4, delayMs: 180, on: false },
+  { x: 8.8, y: 6.2, size: 2.3, dx: 0.0, dy: -0.5, delayMs: 360, on: true, tx: 11.8, ty: 7.7, step: 4 },
+  { x: 13.6, y: 6.2, size: 2.1, dx: 0.6, dy: -0.4, delayMs: 540, on: true, tx: 14.1, ty: 5.4, step: 5 },
+  // 云顶层（左肩一点 + 右端一点，右端同时是勾末载体，位移仅 0.50px）
+  { x: 6.6, y: 3.2, size: 2.0, dx: -0.4, dy: -0.6, delayMs: 360, on: false },
+  { x: 16.0, y: 3.2, size: 2.0, dx: 0.4, dy: -0.6, delayMs: 540, on: true, tx: 16.6, ty: 3.1, step: 6 },
 ]);
 
 const CLOUD_CORE_NODES = CLOUD_A_NODES.filter((node) => node.on);
@@ -158,8 +172,8 @@ const CORNER_DOT_BASE_CLASS = 'absolute right-0 top-0 inline-flex size-2 items-c
  * 统一三态活动指示器原语 (ActivityIndicator)。
  *
  * 设计意图 (Why)：
- *   微轨头像角标（corner）保持简洁亮蓝圆点，抽屉列表行（inline）在时间前方呈现
- *   纯 HTML/CSS 驱动的 24 颗积雨流云点阵与流光状态词，兼顾辨识度与零 SVG 约束。
+ *   微轨头像角标（corner）保持简洁的高对比圆点（深色亮白 / 浅色蓝），抽屉列表行（inline）
+ *   在时间前方呈现纯 HTML/CSS 驱动的 13 颗稀疏积雨流云点阵与流光状态词，兼顾辨识度与零 SVG 约束。
  *
  * 防范的历史坑 (Pitfall)：
  *   1. 抽屉重挂载时静态 unread 不可播放跃迁动画，必须由 `transition === 'just-completed'` 门控；
