@@ -36,7 +36,7 @@ import {
   applyTurnFailed,
   applySessionTitle,
 } from '@hermes-flux/core';
-import type { I18nKey, MessageViewModel } from '@hermes-flux/ui';
+import { safeSetItem, type I18nKey, type MessageViewModel, type StorageWriteFailure } from '@hermes-flux/ui';
 import { bindTurnRowIds } from '../rollbackTransaction.js';
 import type { ActiveStreamingContext } from '../services/turnExecutionService.js';
 import { formatTimestamp } from '../services/turnExecutionService.js';
@@ -535,15 +535,30 @@ export function createGatewayEventDispatcher(deps: GatewayEventDispatcherDeps): 
       return;
     }
 
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('hermes_flux_gateway_url', state.gatewayUrl);
-      localStorage.setItem('hermes_flux_username', state.username);
-      localStorage.setItem('hermes_flux_password', state.password);
-      localStorage.setItem('hermes_flux_profile', state.profileName);
-      localStorage.setItem('hermes_aura_gateway_url', state.gatewayUrl);
-      localStorage.setItem('hermes_aura_username', state.username);
-      localStorage.setItem('hermes_aura_password', state.password);
-      localStorage.setItem('hermes_aura_profile', state.profileName);
+    // 连接成功后回写配置（P-032）：写盘失败只影响下次启动的记忆，不得中断连接流程。
+    // 该路径是连接成功的副作用而非用户主动保存，失败只记日志、不弹窗打扰。
+    let persistFailure: StorageWriteFailure = { ok: true };
+    const persistedEntries: ReadonlyArray<readonly [string, string]> = [
+      ['hermes_flux_gateway_url', state.gatewayUrl],
+      ['hermes_flux_username', state.username],
+      ['hermes_flux_password', state.password],
+      ['hermes_flux_profile', state.profileName],
+      ['hermes_aura_gateway_url', state.gatewayUrl],
+      ['hermes_aura_username', state.username],
+      ['hermes_aura_password', state.password],
+      ['hermes_aura_profile', state.profileName],
+    ];
+    for (const [key, value] of persistedEntries) {
+      const result = safeSetItem(key, value);
+      if (!result.ok && persistFailure.ok) persistFailure = result;
+      // 与 settingsDataService.writeGatewayDraft 同策略：SecurityError 不可恢复，首个失败即短路。
+      if (!result.ok && result.reason === 'security') break;
+    }
+    if (!persistFailure.ok && persistFailure.reason !== 'unavailable') {
+      console.warn('[gateway] failed to persist connection config; memory state is still active', {
+        reason: persistFailure.reason,
+        error: String(persistFailure.error),
+      });
     }
 
     state.gatewayConnecting = true;

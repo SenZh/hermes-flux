@@ -312,6 +312,17 @@
 | 守卫 | ① `BotManagerView` 渲染 exitPrompt 三出路（取消 / 保留草稿 / 放弃修改）并注册 dirty guard；② 壳层 `requestSettingsExit` 统一承接关闭与切导航，`pendingBotExit` 单值挂起；③ `settings-modal.test` 断言确认框三条出路与"不得复用保存二次确认横幅" |
 | 复现命令 | `node --test packages/ui/__tests__/settings-modal.test.mjs` |
 
+## P-032 隐私模式/禁用站点数据下 localStorage 写入抛错，整次界面刷新被截断
+
+| 项目 | 内容 |
+|---|---|
+| 症状 | 开启隐私模式、禁用站点数据或 opaque origin 后，点「连接/测试连接」「切主题」「切语言」「切模型」界面毫无反应；重启后设置回退，日志无任何线索 |
+| 根因 | 两条变量：① `localStorage.setItem` 抛 `SecurityError` / `QuotaExceededError`；② 隐私模式下求值 `typeof localStorage` 的 getter 本身抛错，守卫获取若在 try 外同样截断。写入点位于 `deps.render()` 之前且无 try：`settingsDataService`（网关草稿 8 + 主题 2 + 语言 1）、`gatewayEventDispatcher`（连接回写 8）、`sessionOperationService`（最近模型 2）。异常冒泡直接跳过本次 render |
+| 识别特征 | 内存态已变（`state.theme` / `state.lang` / `state.gatewayUrl` 已是新值）但界面不变；仅隐私/无痕/禁用 cookie 环境复现；`bootLog` 无任何记录 |
+| 守卫 | ① `packages/ui/src/lib/safeStorage.ts` 的 `safeSetItem` 返回结构化失败，禁止静默成 void，且 `typeof localStorage` 必须在 try 内；② `safe-storage.test.mjs` 覆盖正常/不可用/安全/配额/getter 抛错五路径；③ `settingsDataService` 与 `gatewayEventDispatcher` 单测注入抛错 localStorage，`sessionOperationService` 同时覆盖「注入 storage 抛错」与「未注入 + getter 抛错」两条路径，均断言 `doesNotThrow` + 内存态已更新 + render 递增；④ 降级必须落 bootLog/console.warn，网关草稿失败额外 showToast |
+| 复现命令 | DevTools → Application → 勾选「阻止所有 Cookie」或隐身窗口，点切主题 |
+| 范围 | 本条覆盖 21 处交互期写入（3 文件）；其余写入点（onboardingController、index.ts、appBootstrap、profileManagementService、titlebarController、inputDockController、dropdownKeybindController、botActivityStore 等）按风险分级分批迁移到 `safeSetItem`；`DesktopCacheStore` 的探测写入属正确设计，不纳入 |
+
 ## 守卫总览
 
 | 守卫 | 命令 | 拦住的坑 |
@@ -343,3 +354,4 @@
 | 在场指示器单一快照与跨 Bot 隔离守卫 | `npm test`（presenceController + agent-presence-manager + agent-presence-wiring #15） | P-028 |
 | 模态层单一实现守卫 | `npm test`（settings-modal 弹窗族源码断言 + primitives-consumption Dialog 转正） | P-029、P-030 |
 | BOT 离场拦截守卫 | `npm test`（settings-modal 离场确认三出路 + 壳层 requestSettingsExit 接线） | P-031 |
+| 存储写入降级守卫 | `npm test`（safe-storage 五路径 + 三服务抛错注入） | P-032 |

@@ -45,7 +45,7 @@ import {
   preserveRunningActivity,
   SessionListGeneration,
 } from '@hermes-flux/core';
-import type { I18nKey, MessageViewModel } from '@hermes-flux/ui';
+import { safeSetItem, type I18nKey, type MessageViewModel, type StorageWriteFailure } from '@hermes-flux/ui';
 import { planRollbackLeaveRestore } from '../rollbackTransaction.js';
 import type { SessionDraftStore } from '../persistence/sessionDrafts.js';
 
@@ -600,10 +600,20 @@ export class SessionOperationService {
 
     // Update recent models list (keep top 8, persist in localStorage)
     state.recentModels = [model, ...state.recentModels.filter((m) => m !== model)].slice(0, 8);
-    const storage = this.getStorage();
-    if (storage) {
-      storage.setItem('hermes_flux_recent_models', JSON.stringify(state.recentModels));
-      storage.setItem('hermes_aura_recent_models', JSON.stringify(state.recentModels));
+    // 最近模型落盘（P-032）：写盘失败只影响下次启动的记忆，不得中断后续 render 与 config.set。
+    // 不预取 getStorage()：`typeof localStorage` 在隐私模式下会随 getter 抛错，
+    // 参数求值早于 safeSetItem 的 try，会把异常漏到 render 之前。直接把注入值交给原语。
+    const recentPayload = JSON.stringify(state.recentModels);
+    let recentFailure: StorageWriteFailure = { ok: true };
+    for (const key of ['hermes_flux_recent_models', 'hermes_aura_recent_models'] as const) {
+      const result = safeSetItem(key, recentPayload, this.deps.storage);
+      if (!result.ok && recentFailure.ok) recentFailure = result;
+    }
+    if (!recentFailure.ok && recentFailure.reason !== 'unavailable') {
+      const meta = { reason: recentFailure.reason, error: String(recentFailure.error) };
+      const message = '[session] failed to persist recent models; memory state is still active';
+      if (this.deps.logSessionWarn) this.deps.logSessionWarn(message, meta);
+      else console.warn(message, meta);
     }
 
     this.deps.render();

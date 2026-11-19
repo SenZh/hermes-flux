@@ -220,6 +220,83 @@ test('SessionOperationService - 核心生命周期与状态切换测试', async 
     assert.equal(state.reasoningLevel, 'high', '客户端思考级别状态仍应正确记录');
   });
 
+  await t.test('6b. switchModel 落盘抛错不得中断 render 与模型切换（P-032）', async () => {
+    // 【杀伤力】把 safeSetItem 换回裸 storage.setItem，QuotaExceededError 会冒泡并跳过 render。
+    const { deps, state, rendered } = createMockDeps();
+    state.activeFocus = { type: 'group', roomId: 'room-123' };
+    deps.storage.setItem = () => {
+      const error = new Error('denied');
+      error.name = 'QuotaExceededError';
+      throw error;
+    };
+    const service = createSessionOperationService(deps);
+
+    await assert.doesNotReject(
+      () => service.switchModel('claude-3-5-sonnet'),
+      '写盘失败不得让 switchModel 抛错',
+    );
+    assert.equal(state.selectedModel, 'claude-3-5-sonnet', '内存态必须已生效');
+    assert.ok(rendered.length > 0, 'render 必须仍被调用（「点了没反应」的根因）');
+  });
+
+  await t.test('6c. switchModel 无可用存储时静默降级且不记日志（P-032）', async () => {
+    const { deps, state, rendered } = createMockDeps();
+    state.activeFocus = { type: 'group', roomId: 'room-123' };
+    deps.storage = undefined;
+    const logWarns = [];
+    deps.logSessionWarn = (...args) => logWarns.push(args);
+    const hadStorage = 'localStorage' in globalThis;
+    const savedStorage = globalThis.localStorage;
+    const savedWarn = console.warn;
+    const warns = [];
+    try {
+      delete globalThis.localStorage;
+      console.warn = (...args) => warns.push(args);
+      const service = createSessionOperationService(deps);
+      await assert.doesNotReject(() => service.switchModel('claude-3-5-sonnet'));
+      assert.equal(logWarns.length, 0, 'unavailable 不属降级，不得调用注入 logger');
+      assert.equal(warns.length, 0, 'unavailable 不属降级，不记日志');
+      assert.ok(rendered.length > 0, 'render 必须仍被调用');
+    } finally {
+      console.warn = savedWarn;
+      if (hadStorage) globalThis.localStorage = savedStorage;
+      else delete globalThis.localStorage;
+    }
+  });
+
+  await t.test('6d. switchModel 生产接线（未注入 storage + getter 抛错）不得中断 render（P-032）', async () => {
+    // 【杀伤力】把 safeSetItem 的第三个参数改回 this.getStorage()，本用例立刻抛 SecurityError 变红。
+    const { deps, state, rendered } = createMockDeps();
+    state.activeFocus = { type: 'group', roomId: 'room-123' };
+    deps.storage = undefined;
+    const warns = [];
+    deps.logSessionWarn = (message, meta) => warns.push([message, meta]);
+    const hadStorage = 'localStorage' in globalThis;
+    const savedStorage = globalThis.localStorage;
+    try {
+      Object.defineProperty(globalThis, 'localStorage', {
+        configurable: true,
+        get() {
+          const error = new Error('denied');
+          error.name = 'SecurityError';
+          throw error;
+        },
+      });
+      const service = createSessionOperationService(deps);
+
+      await assert.doesNotReject(
+        () => service.switchModel('claude-3-5-sonnet'),
+        'localStorage getter 抛错不得让 switchModel 抛错',
+      );
+      assert.ok(rendered.length > 0, 'render 必须仍被调用（「点了没反应」的根因）');
+      assert.ok(warns.length > 0, '降级必须可观测');
+      assert.equal(warns.at(-1)[1].reason, 'security');
+    } finally {
+      delete globalThis.localStorage;
+      if (hadStorage) globalThis.localStorage = savedStorage;
+    }
+  });
+
   await t.test('7. disarmRollbackOnLeave: 离开会话时回滚快照安全恢复到原会话缓存', async () => {
     const { deps, state } = createMockDeps();
     state.rollbackArmed = {

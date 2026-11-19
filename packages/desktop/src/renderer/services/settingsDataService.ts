@@ -55,9 +55,11 @@ import {
   applyConversationWidthMode,
   resolveConversationWidthMode,
   saveConversationWidthMode,
+  safeSetItem,
   setLocale,
   messageKeyForVerdict,
 } from '@hermes-flux/ui';
+import type { StorageWriteFailure } from '@hermes-flux/ui';
 import { createProviderAdminRest } from '../providerAdminRest.js';
 import { createProviderAdminController, planDeleteTarget } from '../providerAdminController.js';
 import { createSettingsController, resolveGatewayPassword } from '../settingsController.js';
@@ -582,22 +584,63 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
     }
   }
 
+  /**
+   * 落盘失败的可观测策略（P-032）。
+   *
+   * 【设计意图】隐私模式/禁用站点数据下 `setItem` 抛 `SecurityError`，配额满抛
+   *   `QuotaExceededError`。写入点位于 `deps.render()` 之前，异常冒泡会跳过整次刷新，
+   *   用户可见后果是「点了没反应」。此处统一降级并记录，保证 render 必定执行。
+   *
+   * 【约束与规则】
+   *   1. `unavailable` 表示非浏览器环境（单测 / SSR），不属降级，静默；
+   *   2. 网关草稿是用户主动输入并点击保存的配置，任何非 unavailable 失败都必须提示一次；
+   *   3. 主题 / 语言 / 最近模型有即时视觉反馈，且重启才回退一次，弹窗遮挡收益为负 → 只记日志。
+   */
+  const reportStorageFailure = (scope: 'gateway' | 'theme' | 'locale', failure: StorageWriteFailure): void => {
+    if (failure.ok || failure.reason === 'unavailable') return;
+    deps.bootLog.warn('settings persist failed', {
+      scope,
+      reason: failure.reason,
+      error: String(failure.error),
+    });
+    if (scope === 'gateway') {
+      deps.showToast(deps.t('settings.gatewayDraftPersistFailed'), 5000);
+    }
+  };
+
+  /**
+   * 网关草稿落盘（P-032）：8 个 key 聚合上报，避免重复 toast 与重复日志。
+   * `SecurityError` 不可恢复，首个失败即短路，避免无意义的后续重复尝试。
+   */
+  const writeGatewayDraft = (state: AppState): void => {
+    const entries: ReadonlyArray<readonly [string, string]> = [
+      ['hermes_flux_gateway_url', state.gatewayUrl],
+      ['hermes_aura_gateway_url', state.gatewayUrl],
+      ['hermes_flux_username', state.username],
+      ['hermes_aura_username', state.username],
+      ['hermes_flux_password', state.password],
+      ['hermes_aura_password', state.password],
+      ['hermes_flux_profile', state.profileName],
+      ['hermes_aura_profile', state.profileName],
+    ];
+    let failure: StorageWriteFailure = { ok: true };
+    for (const [key, value] of entries) {
+      const result = safeSetItem(key, value);
+      if (result.ok) continue;
+      if (failure.ok) failure = result;
+      if (result.reason === 'security') break;
+    }
+    reportStorageFailure('gateway', failure);
+  };
+
   function applyGatewayDraft(draft: GatewayDraft): void {
     const state = deps.getState();
     state.gatewayUrl = draft.url.trim();
     state.username = draft.username;
     state.password = resolveGatewayPassword(draft.password, state.password);
     state.profileName = draft.profileName.trim() || 'default';
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('hermes_flux_gateway_url', state.gatewayUrl);
-      localStorage.setItem('hermes_aura_gateway_url', state.gatewayUrl);
-      localStorage.setItem('hermes_flux_username', state.username);
-      localStorage.setItem('hermes_aura_username', state.username);
-      localStorage.setItem('hermes_flux_password', state.password);
-      localStorage.setItem('hermes_aura_password', state.password);
-      localStorage.setItem('hermes_flux_profile', state.profileName);
-      localStorage.setItem('hermes_aura_profile', state.profileName);
-    }
+    // 内存态已更新：落盘失败不得中断后续 runBusy / connect（P-032）。
+    writeGatewayDraft(state);
   }
 
   function createSettingsActions(): SettingsActions {
@@ -613,10 +656,10 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
       },
       onThemeChange: (theme) => {
         state.theme = deps.resolveSkinId(theme);
-        if (typeof localStorage !== 'undefined') {
-          localStorage.setItem('hermes_flux_theme', state.theme);
-          localStorage.setItem('hermes_aura_theme', state.theme);
-        }
+        // 主题已在内存生效：写盘失败只影响下次启动的记忆，必须继续 render（P-032）。
+        const primary = safeSetItem('hermes_flux_theme', state.theme);
+        const legacy = safeSetItem('hermes_aura_theme', state.theme);
+        reportStorageFailure('theme', primary.ok ? legacy : primary);
         deps.render();
       },
       onPresenceLayoutChange: (layout) => {
@@ -627,9 +670,8 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
       },
       onLocaleChange: (locale) => {
         state.lang = locale === 'en' ? 'en' : 'zh';
-        if (typeof localStorage !== 'undefined') {
-          localStorage.setItem('hermes_flux_lang', state.lang);
-        }
+        // 语言已在内存生效：写盘失败只影响下次启动的记忆，必须继续 syncLocale + render（P-032）。
+        reportStorageFailure('locale', safeSetItem('hermes_flux_lang', state.lang));
         syncLocale();
         deps.render();
       },

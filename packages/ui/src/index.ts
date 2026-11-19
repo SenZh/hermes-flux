@@ -55,6 +55,7 @@ export {
   type ActivityIndicatorVariant,
 } from './tokens/activityIndicator.js';
 export * from './tokens/conversationWidth.js';
+export * from './lib/safeStorage.js';
 export * from './components/InputDock/InputDock.js';
 export * from './components/InspectionPod/InspectionPod.js';
 export * from './components/StatusBar/StatusBar.js';

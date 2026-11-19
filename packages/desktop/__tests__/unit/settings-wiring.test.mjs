@@ -81,7 +81,10 @@ test('设置岛宿主不得被任何 innerHTML/outerHTML 覆写（否则输入�
 test('语言切换必须真正落到 i18n 单例，而不是只改高亮', () => {
   assert.ok(source.includes('syncLocale()'), '启动与切换都必须同步 i18n locale');
   assert.ok(/onLocaleChange:[\s\S]{0,400}setLocale|onLocaleChange:[\s\S]{0,400}syncLocale/.test(source), '语言动作必须写回 i18n');
-  assert.ok(source.includes(".setItem('hermes_flux_lang'"), '语言偏好必须持久化');
+  assert.ok(
+    source.includes(".setItem('hermes_flux_lang'") || source.includes("safeSetItem('hermes_flux_lang'"),
+    '语言偏好必须持久化',
+  );
 });
 
 test('设置页的网关调用必须是真实契约方法，且参数在契约白名单内', () => {

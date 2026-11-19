@@ -6,6 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createSettingsDataService } from '../../dist/renderer/services/settingsDataService.mjs';
+import { setLocale } from '@hermes-flux/ui';
 
 function createMockSettingsDeps(overrides = {}) {
   let renderCount = 0;
@@ -193,6 +194,141 @@ test('settingsDataService: onConversationWidthChange 持久化偏好并写入根
     else delete globalThis.localStorage;
     if (hadDocument) globalThis.document = savedDocument;
     else delete globalThis.document;
+  }
+});
+
+test('settingsDataService: 隐私模式下主题/语言/网关草稿写盘失败不得中断 render（P-032）', () => {
+  // 【杀伤力】把 safeSetItem 换回裸 localStorage.setItem，三条 doesNotThrow 立刻抛 SecurityError 变红。
+  const hadStorage = 'localStorage' in globalThis;
+  const savedStorage = globalThis.localStorage;
+  const warns = [];
+  const toasts = [];
+  try {
+    globalThis.localStorage = {
+      getItem: () => null,
+      setItem: () => {
+        const error = new Error('denied');
+        error.name = 'SecurityError';
+        throw error;
+      },
+    };
+    const deps = createMockSettingsDeps();
+    deps.bootLog = { warn: (...args) => warns.push(args) };
+    deps.showToast = (...args) => toasts.push(args);
+    const service = createSettingsDataService(deps);
+    const actions = service.createSettingsActions();
+
+    assert.doesNotThrow(() => actions.onThemeChange('obsidian-gold'), '主题写盘失败不得外抛');
+    assert.equal(deps.getState().theme, 'obsidian-gold', '内存态必须已生效');
+    assert.equal(deps.getRenderCount(), 1, 'render 必须仍被调用（「点了没反应」的根因）');
+    assert.equal(warns.length, 1, '主题两次写入只聚合一条降级日志');
+    assert.equal(toasts.length, 0, '主题切换有即时视觉反馈，不弹窗');
+
+    assert.doesNotThrow(() => actions.onLocaleChange('en'), '语言写盘失败不得外抛');
+    assert.equal(deps.getState().lang, 'en');
+    assert.equal(deps.getRenderCount(), 2);
+
+    assert.doesNotThrow(
+      () => actions.onConnectGateway({ url: 'http://x:1', username: 'u', password: 'p', profileName: 'd' }),
+      '网关草稿写盘失败不得中断连接流程',
+    );
+    assert.equal(deps.getState().gatewayUrl, 'http://x:1', '内存态必须已生效');
+    assert.equal(toasts.length, 1, '网关配置是用户主动保存，失败必须提示一次');
+    assert.equal(warns.at(-1)[1].scope, 'gateway');
+    assert.equal(warns.at(-1)[1].reason, 'security');
+  } finally {
+    if (hadStorage) globalThis.localStorage = savedStorage;
+    else delete globalThis.localStorage;
+    setLocale('zh-CN');
+  }
+});
+
+test('settingsDataService: 配额写满时网关草稿必须提示，主题仍只记日志（P-032）', () => {
+  const hadStorage = 'localStorage' in globalThis;
+  const savedStorage = globalThis.localStorage;
+  const warns = [];
+  const toasts = [];
+  try {
+    globalThis.localStorage = {
+      getItem: () => null,
+      setItem: () => {
+        const error = new Error('full');
+        error.name = 'QuotaExceededError';
+        throw error;
+      },
+    };
+    const deps = createMockSettingsDeps();
+    deps.bootLog = { warn: (...args) => warns.push(args) };
+    deps.showToast = (...args) => toasts.push(args);
+    const actions = createSettingsDataService(deps).createSettingsActions();
+
+    actions.onThemeChange('obsidian-gold');
+    assert.equal(toasts.length, 0, '主题切换不弹窗');
+
+    actions.onConnectGateway({ url: 'http://x:2', username: 'u', password: 'p', profileName: 'd' });
+    assert.equal(toasts.length, 1, '配额写满会让全部设置静默不保存，必须提示');
+    assert.equal(warns.at(-1)[1].reason, 'quota');
+  } finally {
+    if (hadStorage) globalThis.localStorage = savedStorage;
+    else delete globalThis.localStorage;
+  }
+});
+
+test('settingsDataService: 无 localStorage 环境（单测/SSR）静默降级且不弹窗（P-032）', () => {
+  const hadStorage = 'localStorage' in globalThis;
+  const savedStorage = globalThis.localStorage;
+  const warns = [];
+  const toasts = [];
+  try {
+    delete globalThis.localStorage;
+    const deps = createMockSettingsDeps();
+    deps.bootLog = { warn: (...args) => warns.push(args) };
+    deps.showToast = (...args) => toasts.push(args);
+    const actions = createSettingsDataService(deps).createSettingsActions();
+
+    assert.doesNotThrow(() => actions.onThemeChange('obsidian-gold'));
+    assert.doesNotThrow(
+      () => actions.onConnectGateway({ url: 'http://x:3', username: 'u', password: 'p', profileName: 'd' }),
+    );
+    assert.equal(warns.length, 0, 'unavailable 不属降级，不记日志');
+    assert.equal(toasts.length, 0, 'unavailable 不属降级，不弹窗');
+  } finally {
+    if (hadStorage) globalThis.localStorage = savedStorage;
+    else delete globalThis.localStorage;
+  }
+});
+
+test('settingsDataService: 正常存储时主题切换成功且不产生降级日志（P-032 成功路径）', () => {
+  const hadStorage = 'localStorage' in globalThis;
+  const savedStorage = globalThis.localStorage;
+  const writes = [];
+  const warns = [];
+  const toasts = [];
+  try {
+    globalThis.localStorage = {
+      getItem: () => null,
+      setItem: (key, value) => writes.push([key, value]),
+    };
+    const deps = createMockSettingsDeps();
+    deps.bootLog = { warn: (...args) => warns.push(args) };
+    deps.showToast = (...args) => toasts.push(args);
+    const actions = createSettingsDataService(deps).createSettingsActions();
+
+    actions.onThemeChange('obsidian-gold');
+    assert.deepEqual(writes, [
+      ['hermes_flux_theme', 'obsidian-gold'],
+      ['hermes_aura_theme', 'obsidian-gold'],
+    ]);
+    assert.equal(warns.length, 0, '成功路径不得产生降级日志');
+    assert.equal(toasts.length, 0);
+
+    actions.onConnectGateway({ url: 'http://x:9', username: 'u', password: 'p', profileName: 'd' });
+    assert.equal(writes.filter(([key]) => key === 'hermes_flux_gateway_url').length, 1, '网关草稿必须落盘');
+    assert.equal(warns.length, 0, '网关草稿成功时不得产生降级日志');
+    assert.equal(toasts.length, 0);
+  } finally {
+    if (hadStorage) globalThis.localStorage = savedStorage;
+    else delete globalThis.localStorage;
   }
 });
 

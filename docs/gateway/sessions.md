@@ -5,7 +5,7 @@
 
 | 方法 | 入参（契约） | 出参（契约） | 调用点 | 真实探针 |
 | --- | --- | --- | --- | --- |
-| `config.set` | `profile` `key` `value` `session_id` `scope` `confirm_expensive_model` | `key` `value` `warning` `confirm_required` `confirm_message` `scope` `deferred` `tool_progress` `cwd` `branch` `history_reset` `info` | `packages/desktop/src/renderer/services/sessionOperationService.ts:578`<br>`packages/desktop/src/renderer/services/sessionOperationService.ts:632`<br>`packages/desktop/src/renderer/services/sessionOperationService.ts:673`<br>`packages/desktop/src/renderer/services/sessionOperationService.ts:703` | ✅ 0.22.5 |
+| `config.set` | `profile` `key` `value` `session_id` `scope` `confirm_expensive_model` | `key` `value` `warning` `confirm_required` `confirm_message` `scope` `deferred` `tool_progress` `cwd` `branch` `history_reset` `info` | `packages/desktop/src/renderer/services/sessionOperationService.ts:578`<br>`packages/desktop/src/renderer/services/sessionOperationService.ts:642`<br>`packages/desktop/src/renderer/services/sessionOperationService.ts:683`<br>`packages/desktop/src/renderer/services/sessionOperationService.ts:713` | ✅ 0.22.5 |
 | `session.archive` | `session_id` `session_key` `archived` `profile` | `archived` `session_key` | `packages/desktop/src/renderer/services/sessionOperationService.ts:481` | ✅ 0.22.5 |
 | `session.branch_whole` | `session_id` `profile` `name` `idempotency_key` | `session_id` `stored_session_id` `title` `parent` `message_count` `messages_omitted` `info` | `packages/core/src/session/handoffService.ts:91` | ✅ 0.22.5 |
 | `session.close` | `session_id` `profile` | `closed` `messages` | `packages/core/src/session/SessionLifecycleService.ts:40` | ✅ 0.22.5 |
@@ -26,9 +26,9 @@
 - 真实探针：已通过（网关 0.22.5，录制于 2026-11-01T01:59:35.303Z）
 - 调用点：
   - `packages/desktop/src/renderer/services/sessionOperationService.ts:578`
-  - `packages/desktop/src/renderer/services/sessionOperationService.ts:632`
-  - `packages/desktop/src/renderer/services/sessionOperationService.ts:673`
-  - `packages/desktop/src/renderer/services/sessionOperationService.ts:703`
+  - `packages/desktop/src/renderer/services/sessionOperationService.ts:642`
+  - `packages/desktop/src/renderer/services/sessionOperationService.ts:683`
+  - `packages/desktop/src/renderer/services/sessionOperationService.ts:713`
 
 ### `session.archive`
 

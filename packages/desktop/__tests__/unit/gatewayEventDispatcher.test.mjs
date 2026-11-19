@@ -170,6 +170,68 @@ function createMockDispatcherDeps(overrides = {}) {
   };
 }
 
+test('D6: gatewayEventDispatcher - 隐私模式下连接回写配置失败不得中断连接流程（P-032）', async () => {
+  // 【杀伤力】把 safeSetItem 换回裸 localStorage.setItem，connect() 会抛 SecurityError 且跳过 render。
+  const hadStorage = 'localStorage' in globalThis;
+  const savedStorage = globalThis.localStorage;
+  const savedWarn = console.warn;
+  const warns = [];
+  try {
+    globalThis.localStorage = {
+      getItem: () => null,
+      setItem: () => {
+        const error = new Error('denied');
+        error.name = 'SecurityError';
+        throw error;
+      },
+    };
+    console.warn = (...args) => warns.push(args);
+
+    const { deps, rendered, state } = createMockDispatcherDeps();
+    // 让 testConnection 直接返回失败，避免在 Node 里创建真实 WebSocket 客户端。
+    deps.testConnection = async () => ({ ok: false, latency: 0, message: 'denied' });
+    const dispatcher = createGatewayEventDispatcher(deps);
+
+    await assert.doesNotReject(() => dispatcher.connect(), '写盘失败不得让 connect 抛错');
+    assert.equal(state.gatewayUrl, 'http://127.0.0.1:8080', '内存态必须已生效');
+    assert.ok(rendered.length >= 1, '连接流程必须继续并触发 render');
+    assert.ok(
+      warns.some((args) => String(args[0]).includes('failed to persist connection config')),
+      '写盘失败必须可观测（Failure Is Not Empty）',
+    );
+  } finally {
+    console.warn = savedWarn;
+    if (hadStorage) globalThis.localStorage = savedStorage;
+    else delete globalThis.localStorage;
+  }
+});
+
+test('D6: gatewayEventDispatcher - 正常存储与无 localStorage 时回写不产生降级日志（P-032）', async () => {
+  for (const mode of ['normal', 'absent']) {
+    const hadStorage = 'localStorage' in globalThis;
+    const savedStorage = globalThis.localStorage;
+    const savedWarn = console.warn;
+    const warns = [];
+    try {
+      if (mode === 'normal') {
+        globalThis.localStorage = { getItem: () => null, setItem: () => {} };
+      } else {
+        delete globalThis.localStorage;
+      }
+      console.warn = (...args) => warns.push(args);
+
+      const { deps } = createMockDispatcherDeps();
+      deps.testConnection = async () => ({ ok: false, latency: 0, message: 'denied' });
+      await assert.doesNotReject(() => createGatewayEventDispatcher(deps).connect());
+      assert.equal(warns.length, 0, `${mode} 场景不得产生降级日志`);
+    } finally {
+      console.warn = savedWarn;
+      if (hadStorage) globalThis.localStorage = savedStorage;
+      else delete globalThis.localStorage;
+    }
+  }
+});
+
 test('D6: gatewayEventDispatcher - 120 FPS 双轨分流：高频 delta 严禁触发 render()', () => {
   const { deps, rendered, pushedTokens } = createMockDispatcherDeps();
   const dispatcher = createGatewayEventDispatcher(deps);
