@@ -11,6 +11,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
@@ -521,7 +522,13 @@ test('顶部拉取历史：接线、文案 i18n 与方案 1 刻度脉冲流样�
     '状态行内容节点必须保活，不得在 isLoadingOlder 置假时卸载导致退场动画断头'
   );
 
-  const i18n = fs.readFileSync(new URL('../src/i18n/index.ts', import.meta.url), 'utf8');
+  const i18nDir = path.resolve(import.meta.dirname, '../src/i18n');
+  const i18n = fs
+    .readdirSync(i18nDir, { recursive: true })
+    .map(String)
+    .filter((f) => f.endsWith('.ts'))
+    .map((f) => fs.readFileSync(path.join(i18nDir, f), 'utf8'))
+    .join('\n');
   assert.match(i18n, /'conversation\.promptNavigator\.querying':\s*'正在查询数据'/);
   assert.match(i18n, /'conversation\.promptNavigator\.querying':\s*'Querying data'/);
 

@@ -213,7 +213,7 @@ test('Gate 4b i18n 规则', async (t) => {
   });
 
   await t.test('字典权威源文件必须豁免', () => {
-    const v = scan('packages/ui/src/i18n/index.ts', "export const zhDict = { a: '已连接' };\n");
+    const v = scan('packages/ui/src/i18n/messages/chrome.ts', "export const zhDict = { a: '已连接' };\n");
     assert.equal(v.length, 0, '字典本身必须允许中文');
   });
 

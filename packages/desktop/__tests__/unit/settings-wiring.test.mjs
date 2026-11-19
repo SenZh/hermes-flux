@@ -243,7 +243,13 @@ test('设置页禁止再出现任何竞品/占位文案与硬编码提供商', (
   for (const banned of ['OPENCHAMBER', 'jev', 'agnes-ai', 'magpie', 'ipraft', 'vpi', 'tunnels']) {
     assert.equal(source.includes(banned), false, `renderer 不得残留 ${banned}`);
   }
-  const i18n = fs.readFileSync(path.resolve(import.meta.dirname, '../../../ui/src/i18n/index.ts'), 'utf8');
+  const i18nDir = path.resolve(import.meta.dirname, '../../../ui/src/i18n');
+  const i18n = fs
+    .readdirSync(i18nDir, { recursive: true })
+    .map(String)
+    .filter((f) => f.endsWith('.ts'))
+    .map((f) => fs.readFileSync(path.join(i18nDir, f), 'utf8'))
+    .join('\n');
   for (const banned of ['OPENCHAMBER', 'groupOpencode', 'providerJev', 'navTunnels', 'moduleWip']) {
     assert.equal(i18n.includes(banned), false, `i18n 字典不得残留 ${banned}`);
   }

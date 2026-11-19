@@ -45,7 +45,6 @@ export const FILE_LINE_LIMIT = 1500;
  */
 export const KNOWN_OVERSIZE = {
   'packages/core/src/rpc/contracts/gateway-contract.generated.ts': { max: 7515, generated: true },
-  'packages/ui/src/i18n/index.ts': { max: 1905 },
   'scripts/verify/control-flux.mjs': { max: 1701 },
   'packages/core/src/rpc/client.ts': { max: 1035 },
   'packages/core/src/rpc/types.ts': { max: 998 },

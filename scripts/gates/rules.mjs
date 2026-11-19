@@ -202,7 +202,6 @@ const themeRules = {
 
 /** 允许出现中文字面量的文件（权威字典本身） */
 const I18N_EXEMPT = [
-  'packages/ui/src/i18n/index.ts',
   'packages/ui/src/tokens/themeRegistry.ts', // 皮肤显示名属于数据而非文案
   'packages/ui/src/tokens/tokens.ts',
 ];
