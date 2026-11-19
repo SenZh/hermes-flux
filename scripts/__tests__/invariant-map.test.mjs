@@ -18,32 +18,46 @@ import { spawnSync } from 'node:child_process';
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
 const JSON_PATH = path.join(REPO_ROOT, 'docs/invariants.json');
-const MD_PATH = path.join(REPO_ROOT, 'docs/invariants.md');
 
-/** 读取真实映射表作为基底 */
+/** 读取真实映射表作为基底（只读，绝不写回） */
 function baseData() {
   return JSON.parse(fs.readFileSync(JSON_PATH, 'utf8'));
 }
 
 /**
- * 在真实仓库上跑探针，但在跑之前把 JSON 换成变体，跑完立刻还原。
- * 【为什么不用临时目录】探针里的 test/source 路径都是相对仓库根的，
- * 搬到临时目录后所有路径都会失效，反而测不出目标规则。
+ * 在临时副本上跑探针。
+ *
+ * 【设计意图 (Why)】
+ *   探针校验 `test` / `source` 时以 REPO_ROOT 为基准拼路径，因此变体只需替换被读取的
+ *   JSON 与 Markdown 位置，仓库锚点校验语义不受影响。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   旧实现直接改写仓库 docs/invariants.json 再在 finally 还原。实测一次 Windows 瞬时
+ *   IO 失败（UNKNOWN: unknown error, open）打断还原，变体
+ *   `does-not-exist.test.mjs` 被永久写入仓库文件，导致 6 个用例与 gates:invariants 连环失败。
+ *   证伪测试自身绝不允许污染被它守护的真值源。
+ *
+ * 【约束与规则 (Rules)】
+ *   每个用例使用独立的 mkdtemp 目录，跑完立即删除；仓库文件只读不写。
  */
 function runWith(data, args = []) {
-  const orig = fs.readFileSync(JSON_PATH, 'utf8');
-  const origMd = fs.readFileSync(MD_PATH, 'utf8');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flux-invariant-map-'));
+  const jsonPath = path.join(dir, 'invariants.json');
+  const mdPath = path.join(dir, 'invariants.md');
   try {
-    fs.writeFileSync(JSON_PATH, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
-    const r = spawnSync(process.execPath, ['scripts/verify/invariant-map.mjs', ...args], {
-      cwd: REPO_ROOT,
-      encoding: 'utf8',
-      timeout: 120000,
-    });
+    fs.writeFileSync(jsonPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+    const r = spawnSync(
+      process.execPath,
+      ['scripts/verify/invariant-map.mjs', '--json', jsonPath, '--md', mdPath, ...args],
+      {
+        cwd: REPO_ROOT,
+        encoding: 'utf8',
+        timeout: 120000,
+      },
+    );
     return { status: r.status, out: `${r.stdout}\n${r.stderr}` };
   } finally {
-    fs.writeFileSync(JSON_PATH, orig, 'utf8');
-    fs.writeFileSync(MD_PATH, origMd, 'utf8');
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 }
 

@@ -28,8 +28,44 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '../..');
-const JSON_PATH = path.join(REPO_ROOT, 'docs/invariants.json');
-const MD_PATH = path.join(REPO_ROOT, 'docs/invariants.md');
+const DEFAULT_JSON_PATH = path.join(REPO_ROOT, 'docs/invariants.json');
+const DEFAULT_MD_PATH = path.join(REPO_ROOT, 'docs/invariants.md');
+
+/**
+ * 解析读写路径覆盖参数。
+ *
+ * 【设计意图 (Why)】
+ *   证伪测试需要把"变体映射表"喂给探针逐条验证规则会红。若探针只认仓库固定路径，
+ *   测试就必须写穿真实 docs/invariants.json，再靠 finally 还原。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   实测事故（2026-11-19）：全量测试期间一次 Windows 瞬时 IO 失败
+ *   （UNKNOWN: unknown error, open）打断还原路径，变体
+ *   `does-not-exist.test.mjs` 被永久留在仓库文件里，随后 invariant-map 6 个用例
+ *   与 gates:invariants 连环失败，并把"脏状态"伪装成业务代码问题。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. `--json` / `--md` 只改变读写位置，`test` 与 `source` 的相对路径校验
+ *      仍以 REPO_ROOT 为基准，因此规则语义完全不变；
+ *   2. 缺省（不传参）必须仍是仓库内 docs/invariants.json 与 docs/invariants.md，
+ *      保证 npm scripts 与门禁调用零改动。
+ */
+function parseArgs(argv) {
+  const options = {
+    jsonPath: DEFAULT_JSON_PATH,
+    mdPath: DEFAULT_MD_PATH,
+    render: false,
+    check: false,
+  };
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === '--render') options.render = true;
+    else if (arg === '--check') options.check = true;
+    else if (arg === '--json') options.jsonPath = path.resolve(argv[i + 1] ?? '');
+    else if (arg === '--md') options.mdPath = path.resolve(argv[i + 1] ?? '');
+  }
+  return options;
+}
 
 const C = {
   reset: '\u001b[0m',
@@ -43,8 +79,8 @@ const C = {
 
 const ID_PATTERN = /^INV-[A-Z]+-\d{2}$/;
 
-function load() {
-  const raw = fs.readFileSync(JSON_PATH, 'utf8');
+function load(jsonPath) {
+  const raw = fs.readFileSync(jsonPath, 'utf8');
   const data = JSON.parse(raw);
   if (!Array.isArray(data.invariants)) throw new Error('invariants.json 缺少 invariants 数组');
   return data;
@@ -175,7 +211,8 @@ function render(data) {
 }
 
 function main() {
-  const data = load();
+  const options = parseArgs(process.argv.slice(2));
+  const data = load(options.jsonPath);
   const problems = validate(data);
 
   console.log(`${C.cyan}${C.bold}不变量映射表探针${C.reset}`);
@@ -190,18 +227,18 @@ function main() {
   console.log(`${C.green}✔${C.reset} 映射表结构合格：id 唯一、测试真实存在且含 fc.assert、锚点无重复`);
 
   const rendered = render(data);
-  const isRender = process.argv.includes('--render');
-  const isCheck = process.argv.includes('--check');
+  const isRender = options.render;
+  const isCheck = options.check;
 
   if (isRender) {
-    fs.writeFileSync(MD_PATH, rendered, 'utf8');
-    console.log(`${C.green}✔${C.reset} 已生成 docs/invariants.md（${rendered.split('\n').length} 行）`);
+    fs.writeFileSync(options.mdPath, rendered, 'utf8');
+    console.log(`${C.green}✔${C.reset} 已生成 ${path.relative(REPO_ROOT, options.mdPath) || options.mdPath}（${rendered.split('\n').length} 行）`);
     process.exitCode = 0;
     return;
   }
 
   if (isCheck) {
-    const current = fs.existsSync(MD_PATH) ? fs.readFileSync(MD_PATH, 'utf8') : '';
+    const current = fs.existsSync(options.mdPath) ? fs.readFileSync(options.mdPath, 'utf8') : '';
     const normalize = (t) => t.replace(/\r\n/g, '\n');
     if (normalize(current) !== normalize(rendered)) {
       console.log(`${C.red}✘ docs/invariants.md 与 invariants.json 不一致${C.reset}`);
