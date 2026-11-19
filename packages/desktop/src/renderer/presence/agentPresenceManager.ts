@@ -68,6 +68,20 @@ function snapshotFingerprint(value: unknown): string {
   }
 }
 
+function groupIdentityMemberKey(member: string, profiles: ReadonlyArray<{ name: string; displayName?: string; avatar?: string }>): string {
+  const lower = member.toLowerCase();
+  const hit = profiles.find((p) => p.name.toLowerCase() === lower || (p.displayName ?? '').toLowerCase() === lower);
+  return `${member}=${hit?.displayName ?? ''}:${hit?.avatar ?? ''}`;
+}
+
+function formatPresenceIdentityKey(identity: AgentPresenceSnapshot['identity']): string {
+  if (identity.kind === 'group') {
+    const memberKeys = identity.members.map((member) => groupIdentityMemberKey(member, identity.profiles)).join(',');
+    return `group:${identity.speaker ?? '-'}:${identity.members.length}:${memberKeys}`;
+  }
+  return `solo:${identity.name}:${identity.displayName ?? ''}:${identity.avatar ?? ''}`;
+}
+
 /**
  * 在场快照指纹。
  *
@@ -92,10 +106,7 @@ function agentPresenceFingerprint(snapshot: AgentPresenceSnapshot): string {
           ? `failed:${presence.message}`
           : presence.kind;
 
-  const identityKey =
-    identity.kind === 'group'
-      ? `group:${identity.speaker ?? '-'}:${identity.members.length}:${identity.members.join(',')}:${identity.profiles.length}`
-      : `solo:${identity.name}:${identity.displayName ?? ''}:${identity.avatar ?? ''}`;
+  const identityKey = formatPresenceIdentityKey(identity);
 
   return snapshotFingerprint({
     kind: presence.kind,
@@ -147,7 +158,36 @@ function ensurePresenceTicker(
   return currentTimer;
 }
 
-/** 当前会话所属 Agent 的展示身份。 */
+function findMatchingProfile(profiles: readonly AgentProfile[], lowerName: string): AgentProfile | undefined {
+  return profiles.find((p) => p.name.toLowerCase() === lowerName || Boolean(p.displayName && p.displayName.toLowerCase() === lowerName));
+}
+
+function resolveSoloAvatar(host: AgentPresenceHost, name: string, profile: AgentProfile | undefined, matchingSession: NormalizedSession | undefined): string | undefined {
+  if (profile?.avatar) return profile.avatar;
+  const byName = host.resolveAgentAvatar(name);
+  if (byName) return byName;
+  if (profile?.displayName) {
+    const byDisplayName = host.resolveAgentAvatar(profile.displayName);
+    if (byDisplayName) return byDisplayName;
+  }
+  return matchingSession?.botAvatar || undefined;
+}
+
+/**
+ * 当前会话所属 Agent 的展示身份。
+ *
+ * 【设计意图 (Why)】
+ *   确保在场指示器头像与左轨、标题栏保持同一 Agent 真值源。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   1. 当 `activeFocus` 已切到专职 Bot B，但 `activeSessionId` 仍指向 Bot A 会话（或 Bot B 尚无
+ *      `profile.avatar`）时，若无条件读取 `activeSession?.botAvatar` 并排在 `resolveAgentAvatar(name)`
+ *      之前，Bot A 的会话头像会直接泄漏并覆盖 Bot B 头像；
+ *   2. 专职 Bot 焦点下只允许匹配同一 Bot 的会话元数据，且以 `host.resolveAgentAvatar` 为优先回退。
+ *
+ * 【约束与规则 (Rules)】
+ *   - `focus.type === 'bot'` 时，非同名会话的 `botAvatar` 与 `botDisplayName` 严禁参与回退。
+ */
 function resolvePresenceSoloIdentity(host: AgentPresenceHost): {
   name: string;
   displayName?: string;
@@ -161,16 +201,16 @@ function resolvePresenceSoloIdentity(host: AgentPresenceHost): {
     host.profileName ||
     'default';
 
-  const profile = host.profiles.find(
-    (p) =>
-      p.name.toLowerCase() === name.toLowerCase() ||
-      (p.displayName && p.displayName.toLowerCase() === name.toLowerCase()),
-  );
+  const lowerName = name.toLowerCase();
+  const profile = findMatchingProfile(host.profiles, lowerName);
+  const sessionMatchesBot = typeof activeSession?.botName === 'string' && activeSession.botName.toLowerCase() === lowerName;
+  const matchingSession = focus.type !== 'bot' || sessionMatchesBot ? activeSession : undefined;
+  const avatar = resolveSoloAvatar(host, name, profile, matchingSession);
 
   return {
     name,
-    displayName: profile?.displayName || activeSession?.botDisplayName || undefined,
-    avatar: profile?.avatar || activeSession?.botAvatar || host.resolveAgentAvatar(name) || undefined,
+    displayName: profile?.displayName || matchingSession?.botDisplayName || undefined,
+    avatar,
   };
 }
 

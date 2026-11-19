@@ -9,9 +9,14 @@
  * 【防范的历史坑 (Pitfall)】
  *   1. 必须使用 ensureAgentPresenceHost 的返回值，避免模板空宿主覆盖真值；
  *   2. 网关断连或 host 销毁时必须主动卸载并停止节拍器，杜绝每秒空转；
- *   3. 构造快照与推送指纹共用同一份 pendingSnapshot，规避跨语气档时指纹与内容不一致。
+ *   3. 构造快照与推送指纹共用同一份 pendingSnapshot，规避跨语气档时指纹与内容不一致；
+ *   4. Batch 7 抽离曾在本控制器内复制出 `pendingPresenceSnapshot` 与 `lastAgentPresenceFingerprint` 影子字段：
+ *      `syncAgentPresence()` 只更新 manager 侧快照，而 `getSnapshot()` 优先返回控制器侧过期快照，
+ *      导致切 Bot 时只要宿主节点未被重建（dock 未重绘或处于 stage 布局），在场指示器头像就会永久停留在旧 Bot。
  *
  * 【约束与规则 (Rules)】
+ *   - `AgentPresenceManager` 是 `pendingPresenceSnapshot` 与 `lastAgentPresenceFingerprint` 的唯一真值源，
+ *     本控制器严禁持有或缓存影子快照字段；
  *   - 0 TS 报错，严禁 as any；
  *   - 单向依赖注入，不反向 import index.ts。
  */
@@ -44,8 +49,6 @@ export class PresenceController {
   private updateReactAgentPresence: (() => void) | null = null;
   private presenceMountHandle: ConversationMount | null = null;
   private agentPresenceHost: HTMLElement | null = null;
-  private pendingPresenceSnapshot: AgentPresenceSnapshot | null = null;
-  private lastAgentPresenceFingerprint = '';
 
   constructor(deps: PresenceControllerDeps) {
     this.deps = deps;
@@ -76,12 +79,17 @@ export class PresenceController {
   }
 
   resetPresenceHost(): void {
+    this.presenceMountHandle?.unmount();
+    this.presenceMountHandle = null;
+    this.updateReactAgentPresence = null;
     this.agentPresenceHost = null;
-    this.lastAgentPresenceFingerprint = '';
+    this.manager.pendingPresenceSnapshot = null;
+    this.manager.lastAgentPresenceFingerprint = '';
+    this.manager.ensurePresenceTicker('idle');
   }
 
   getSnapshot(): AgentPresenceSnapshot {
-    return this.pendingPresenceSnapshot ?? this.manager.getAgentPresenceSnapshot();
+    return this.manager.getAgentPresenceSnapshot();
   }
 
   ensureGroupTurnClock(groupRoomId: string | null, isRunning: boolean): void {
@@ -101,18 +109,20 @@ export class PresenceController {
     this.presenceMountHandle = null;
     this.updateReactAgentPresence = null;
     this.agentPresenceHost = presenceHost;
-    this.lastAgentPresenceFingerprint = '';
+    this.manager.pendingPresenceSnapshot = null;
+    this.manager.lastAgentPresenceFingerprint = '';
 
     if (presenceHost) {
       const initialDomain = this.manager.resolvePresenceDomain();
       this.manager.ensureGroupTurnClock(initialDomain.groupRoomId, initialDomain.isRunning);
-      this.pendingPresenceSnapshot = this.manager.buildAgentPresenceSnapshot();
+      const initialSnapshot = this.manager.buildAgentPresenceSnapshot();
+      this.manager.pendingPresenceSnapshot = initialSnapshot;
+      this.manager.lastAgentPresenceFingerprint = agentPresenceFingerprint(initialSnapshot);
       this.presenceMountHandle = this.deps.mountAgentPresence(presenceHost, () => this.getSnapshot());
       this.updateReactAgentPresence = this.presenceMountHandle.update;
-      this.lastAgentPresenceFingerprint = agentPresenceFingerprint(this.pendingPresenceSnapshot);
+      this.manager.ensurePresenceTicker(initialSnapshot.presence.kind);
     } else {
       this.manager.ensurePresenceTicker('idle');
-      this.pendingPresenceSnapshot = null;
     }
   }
 

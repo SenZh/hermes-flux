@@ -162,4 +162,160 @@ test('AgentPresenceManager 领域状态机行为单测套件', async (t) => {
     assert.equal(reactRenderCount, 1, '指纹相同不得重复触发 React 渲染');
     mgr.dispose();
   });
+
+  await t.test('7. 跨 Bot 会话隔离与头像回退优先级：不得借用上一 Bot 会话头像，优先走 resolveAgentAvatar', () => {
+    // 场景 A: 切到暂无头像的 bot-beta，activeSessionId 仍指向 bot-alpha 的会话
+    const mgrA = new AgentPresenceManager(createMockHost({
+      activeFocus: { type: 'bot', botName: 'bot-beta' },
+      activeSessionId: 'ses-1',
+      profiles: [
+        { name: 'bot-alpha', displayName: '阿尔法', avatar: 'alpha.png' },
+        { name: 'bot-beta', displayName: '贝塔' },
+      ],
+      sessions: [
+        { id: 'ses-1', botName: 'bot-alpha', botDisplayName: '阿尔法', botAvatar: 'alpha.png' },
+      ],
+      resolveAgentAvatar: () => undefined,
+    }));
+    const idA = mgrA.resolvePresenceSoloIdentity();
+    assert.equal(idA.name, 'bot-beta');
+    assert.equal(idA.displayName, '贝塔');
+    assert.equal(idA.avatar, undefined, '专职 Bot B 绝不得泄漏 Bot A 会话的 botAvatar');
+
+    // 场景 B: 未知 Bot（不在 profiles），且旧会话缺少 botName 但带陈旧 botAvatar / botDisplayName
+    const mgrB = new AgentPresenceManager(createMockHost({
+      activeFocus: { type: 'bot', botName: 'bot-gamma' },
+      activeSessionId: 'ses-legacy',
+      profiles: [{ name: 'bot-alpha', avatar: 'alpha.png' }],
+      sessions: [{ id: 'ses-legacy', botDisplayName: '旧名字', botAvatar: 'stale.png' }],
+      resolveAgentAvatar: () => undefined,
+    }));
+    const idB = mgrB.resolvePresenceSoloIdentity();
+    assert.equal(idB.name, 'bot-gamma');
+    assert.equal(idB.displayName, undefined);
+    assert.equal(idB.avatar, undefined, '非同名会话的陈旧元信息不得泄漏到新 Bot');
+
+    // 场景 C: bot-beta 的 profile.avatar 为空，但 resolveAgentAvatar(name) 命中，必须压过旧会话头像
+    const mgrC = new AgentPresenceManager(createMockHost({
+      activeFocus: { type: 'bot', botName: 'bot-beta' },
+      activeSessionId: 'ses-1',
+      profiles: [{ name: 'bot-beta', displayName: '贝塔' }],
+      sessions: [{ id: 'ses-1', botName: 'bot-alpha', botAvatar: 'alpha.png' }],
+      resolveAgentAvatar: (key) => (key === 'bot-beta' ? 'cache-beta.png' : undefined),
+    }));
+    assert.equal(mgrC.resolvePresenceSoloIdentity().avatar, 'cache-beta.png');
+
+    // 场景 D: 通过 displayName 命中 resolveAgentAvatar
+    const mgrD = new AgentPresenceManager(createMockHost({
+      activeFocus: { type: 'bot', botName: 'bot-beta' },
+      activeSessionId: 'ses-1',
+      profiles: [{ name: 'bot-beta', displayName: '贝塔' }],
+      sessions: [{ id: 'ses-1', botName: 'bot-alpha', botAvatar: 'alpha.png' }],
+      resolveAgentAvatar: (key) => (key === '贝塔' ? 'display-beta.png' : ''),
+    }));
+    assert.equal(mgrD.resolvePresenceSoloIdentity().avatar, 'display-beta.png');
+
+    // 场景 E: 同 Bot 的主工位会话回退（profile 与 resolveAgentAvatar 均无头像，但同名会话有 botAvatar）
+    const mgrE = new AgentPresenceManager(createMockHost({
+      activeFocus: { type: 'bot', botName: 'bot-beta' },
+      activeSessionId: 'ses-beta',
+      profiles: [{ name: 'bot-beta' }],
+      sessions: [{ id: 'ses-beta', botName: 'bot-beta', botDisplayName: '贝塔会话', botAvatar: 'sess-beta.png' }],
+      resolveAgentAvatar: () => undefined,
+    }));
+    const idE = mgrE.resolvePresenceSoloIdentity();
+    assert.equal(idE.displayName, '贝塔会话');
+    assert.equal(idE.avatar, 'sess-beta.png');
+
+    // 场景 F: 普通会话（type: 'session'）允许从会话回退，且按 displayName 匹配 profile（含前序无 displayName 档案）
+    const mgrF = new AgentPresenceManager(createMockHost({
+      activeFocus: { type: 'session' },
+      activeSessionId: 'ses-2',
+      profiles: [
+        { name: 'no-display-bot' },
+        { name: 'bot-delta', displayName: '德尔塔', avatar: 'delta.png' },
+      ],
+      sessions: [{ id: 'ses-2', botName: 'bot-only-sess', botDisplayName: '仅会话名', botAvatar: 'sess-only.png' }],
+      resolveAgentAvatar: () => undefined,
+    }));
+    const idF = mgrF.resolvePresenceSoloIdentity();
+    assert.equal(idF.name, 'bot-only-sess');
+    assert.equal(idF.displayName, '仅会话名');
+    assert.equal(idF.avatar, 'sess-only.png');
+
+    const mgrG = new AgentPresenceManager(createMockHost({
+      activeFocus: { type: 'bot', botName: '德尔塔' },
+      activeSessionId: 'ses-none',
+      profiles: [
+        { name: 'no-display-bot' },
+        { name: 'bot-other', displayName: '其他' },
+        { name: 'bot-delta', displayName: '德尔塔', avatar: 'delta.png' },
+      ],
+      sessions: [],
+      resolveAgentAvatar: () => undefined,
+    }));
+    assert.equal(mgrG.resolvePresenceSoloIdentity().avatar, 'delta.png');
+  });
+
+  await t.test('8. 群聊指纹敏感性：成员延迟头像到达或说话者变更必须改变指纹', () => {
+    const baseGroup = {
+      presence: { kind: 'idle' },
+      identity: {
+        kind: 'group',
+        members: ['bot-alpha', '贝塔', 'unknown-bot'],
+        speaker: null,
+        profiles: [
+          { name: 'bot-alpha', avatar: 'alpha.png' },
+          { name: 'bot-beta', displayName: '贝塔' },
+        ],
+      },
+      locale: 'zh',
+      layout: 'stage',
+    };
+    const fpBefore = agentPresenceFingerprint(baseGroup);
+
+    const withLateAvatar = {
+      ...baseGroup,
+      identity: {
+        ...baseGroup.identity,
+        speaker: 'bot-alpha',
+        profiles: [
+          { name: 'bot-alpha', displayName: '阿尔法', avatar: 'alpha.png' },
+          { name: 'bot-beta', displayName: '贝塔', avatar: 'beta-late.png' },
+        ],
+      },
+    };
+    const fpAfter = agentPresenceFingerprint(withLateAvatar);
+    assert.notEqual(fpBefore, fpAfter, '群聊成员头像异步到达后指纹必须变化，否则群拼排不刷新');
+
+    // 仅头像从 undefined 变为有值（speaker 与长度不变）也必须改变指纹
+    const sameSpeakerWithAvatar = {
+      ...baseGroup,
+      identity: {
+        ...baseGroup.identity,
+        profiles: [
+          { name: 'bot-alpha', avatar: 'alpha.png' },
+          { name: 'bot-beta', displayName: '贝塔', avatar: 'beta-only.png' },
+        ],
+      },
+    };
+    assert.notEqual(fpBefore, agentPresenceFingerprint(sameSpeakerWithAvatar));
+
+    // 仅成员 displayName 变更（speaker 与 avatar 均不变）也必须改变指纹
+    const onlyDisplayNameChanged = {
+      ...sameSpeakerWithAvatar,
+      identity: {
+        ...sameSpeakerWithAvatar.identity,
+        profiles: [
+          { name: 'bot-alpha', displayName: '新阿尔法', avatar: 'alpha.png' },
+          { name: 'bot-beta', displayName: '贝塔', avatar: 'beta-only.png' },
+        ],
+      },
+    };
+    assert.notEqual(
+      agentPresenceFingerprint(sameSpeakerWithAvatar),
+      agentPresenceFingerprint(onlyDisplayNameChanged),
+      '仅成员 displayName 变更时群聊指纹也必须变化',
+    );
+  });
 });

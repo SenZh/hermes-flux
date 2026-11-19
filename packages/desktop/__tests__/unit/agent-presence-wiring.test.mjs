@@ -281,4 +281,59 @@ test('在场指示器宿主接线守卫', async (t) => {
       '禁止在 ensure 之后再次 getElementById：模板静态空宿主会让未连接守卫失效',
     );
   });
+
+  await t.test('15. PresenceController 禁止持有影子快照/指纹，必须以 AgentPresenceManager 为唯一真值源', () => {
+    const controllerSrc = read('packages/desktop/src/renderer/events/presenceController.ts');
+    const code = controllerSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
+
+    // 剥离 class PresenceController { ... } 中从 class 声明到 constructor 之间的字段声明区
+    const classStart = code.indexOf('export class PresenceController');
+    assert.ok(classStart >= 0, '必须存在 PresenceController 类');
+    const ctorStart = code.indexOf('constructor(', classStart);
+    assert.ok(ctorStart > classStart, '必须存在 constructor');
+    const fieldSection = code.slice(classStart, ctorStart);
+
+    assert.doesNotMatch(
+      fieldSection,
+      /\bpendingPresenceSnapshot\b/,
+      'PresenceController 禁止声明影子字段 pendingPresenceSnapshot（会导致切 Bot 后 getSnapshot() 返回过期快照）',
+    );
+    assert.doesNotMatch(
+      fieldSection,
+      /\blastAgentPresenceFingerprint\b/,
+      'PresenceController 禁止声明影子字段 lastAgentPresenceFingerprint',
+    );
+
+    const getSnapStart = code.indexOf('getSnapshot():');
+    assert.ok(getSnapStart >= 0, '必须存在 getSnapshot');
+    const getSnapBody = code.slice(getSnapStart, code.indexOf('\n  }', getSnapStart));
+    assert.match(
+      getSnapBody,
+      /return this\.manager\.getAgentPresenceSnapshot\(\);/,
+      'getSnapshot() 必须直接委托给 this.manager.getAgentPresenceSnapshot()',
+    );
+
+    const syncHostStart = code.indexOf('syncAgentPresenceHost():');
+    assert.ok(syncHostStart >= 0, '必须存在 syncAgentPresenceHost');
+    const syncHostBody = code.slice(syncHostStart, code.indexOf('\n  syncAgentPresence():', syncHostStart));
+    assert.match(
+      syncHostBody,
+      /this\.manager\.pendingPresenceSnapshot\s*=/,
+      'syncAgentPresenceHost 必须同步写入 this.manager.pendingPresenceSnapshot',
+    );
+    assert.match(
+      syncHostBody,
+      /this\.manager\.lastAgentPresenceFingerprint\s*=/,
+      'syncAgentPresenceHost 必须同步写入 this.manager.lastAgentPresenceFingerprint',
+    );
+
+    const resetStart = code.indexOf('resetPresenceHost():');
+    assert.ok(resetStart >= 0, '必须存在 resetPresenceHost');
+    const resetBody = code.slice(resetStart, code.indexOf('\n  }', resetStart));
+    assert.match(resetBody, /this\.presenceMountHandle\?\.unmount\(\)/, 'resetPresenceHost 必须卸载挂载体');
+    assert.match(resetBody, /this\.updateReactAgentPresence\s*=\s*null/, 'resetPresenceHost 必须置空 React 更新句柄');
+    assert.match(resetBody, /this\.manager\.pendingPresenceSnapshot\s*=\s*null/, 'resetPresenceHost 必须清理 manager 快照');
+    assert.match(resetBody, /this\.manager\.lastAgentPresenceFingerprint\s*=\s*''/, 'resetPresenceHost 必须清理 manager 指纹');
+    assert.match(resetBody, /this\.manager\.ensurePresenceTicker\('idle'\)/, 'resetPresenceHost 必须停止节拍器');
+  });
 });

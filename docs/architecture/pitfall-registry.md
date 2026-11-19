@@ -272,6 +272,16 @@
 | 守卫 | ① `mergeProviderViews` 固定"运行时目录优先、端点声明兜底"；② `providerViews.test` 用 cpa/fn 的真实响应形状钉死优先级；③ 切默认时 `resolveBindingDefaultModel` 只从运行时目录里挑模型 |
 | 复现命令 | 对同一 profile 同时取 `/api/providers/custom-endpoints` 与 `/api/model/options?explicit_only=true`，比较同名 provider 的 `models` |
 
+## P-028 控制器影子快照过期，切 Bot 后对话区头像偶现停留在旧 Bot
+
+| 项目 | 内容 |
+|---|---|
+| 症状 | 从 Bot A 切换到 Bot B 后，偶现顶栏与左轨已切到 Bot B，但对话区在场指示器（`AgentPresence`）头像仍显示 Bot A |
+| 根因 | ① `PresenceController` 复制了 `pendingPresenceSnapshot` 与 `lastAgentPresenceFingerprint` 影子字段：`syncAgentPresence()` 只更新 `AgentPresenceManager` 的快照，而 `getSnapshot()` 优先返回控制器侧过期快照；dock 未因模型变化而 `outerHTML` 重建（或处于 `stage` 布局）时，宿主节点未被替换，画面永久停在 Bot A；② `resolvePresenceSoloIdentity` 无条件读取 `activeSession?.botAvatar` 并排在 `resolveAgentAvatar(name)` 之前，切到暂无 `profile.avatar` 的 Bot B 时可能借用旧会话头像 |
+| 识别特征 | 仅当两 Bot 共享同款 dock 快照（不触发 `existingDock.outerHTML` 重建）或使用 `stage` 布局时必现；切换模型触发 dock 重建后又突然恢复 |
+| 守卫 | ① 删除 `PresenceController` 影子字段，`getSnapshot()` / `syncAgentPresenceHost()` / `resetPresenceHost()` 统一以 `AgentPresenceManager` 为唯一真值源；② `resolvePresenceSoloIdentity` 在 `focus.type === 'bot'` 时严格按 `botName` 隔离会话元数据并优先走 `resolveAgentAvatar`，`agentPresenceFingerprint` 纳入群成员头像；③ `presenceController.test.mjs`、`agent-presence-manager.test.mjs` 与 `agent-presence-wiring.test.mjs` 第 15 条 |
+| 复现命令 | `node --test packages/desktop/__tests__/unit/presenceController.test.mjs packages/desktop/__tests__/unit/agent-presence-manager.test.mjs packages/desktop/__tests__/unit/agent-presence-wiring.test.mjs` |
+
 ## 守卫总览
 
 | 守卫 | 命令 | 拦住的坑 |
@@ -300,3 +310,4 @@
 | 模板辅助函数归类守卫 | `npm run gates`（ui/no-new-template-export） | P-025 |
 | 绑定默认模型守卫 | `npm test`（providerBinding attach 形状 + resolveBindingDefaultModel）+ 真网关 CDP | P-026 |
 | 运行时模型目录优先守卫 | `npm test`（providerViews 优先级用例）+ `/api/model/options` 对比 | P-027 |
+| 在场指示器单一快照与跨 Bot 隔离守卫 | `npm test`（presenceController + agent-presence-manager + agent-presence-wiring #15） | P-028 |
