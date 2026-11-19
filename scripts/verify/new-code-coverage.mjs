@@ -312,12 +312,17 @@ function buildSrcLineCoverage(records) {
   const srcCovered = new Map();
   /** src 相对路径 -> Set<可映射行>（用于区分"没跑到"与"没有可执行代码"） */
   const srcMapped = new Map();
-  /** src 相对路径 -> Map<行号, number>（该行分支总数） */
-  const srcBranchTotal = new Map();
-  /** src 相对路径 -> Map<行号, number>（该行命中分支数） */
-  const srcBranchHit = new Map();
-  /** src 相对路径 -> Set<存在未覆盖分支的行号> */
-  const srcBranchUncovered = new Map();
+  /**
+   * src 相对路径 -> Map<行号, Map<产物路径, { total, hit }>>
+   *
+   * 【设计意图 (Why)】同一源文件可能被编译进多份产物（tsc 单文件产物 + esbuild bundle），
+   *   每份产物都会为同一源行上报分支记录。
+   * 【防范的历史坑 (Pitfall)】原先直接按产物累加 total/hit，任一产物未走到的分支都会把
+   *   已完整覆盖的源行误判为未覆盖（实测：appState.ts 新增 try/catch 在 bundle 正常路径下
+   *   不执行，把新增分支覆盖率虚低到 91.7%，而单文件产物已 100%）。
+   * 【约束与规则 (Rules)】先按产物分组，再以「任一产物完整覆盖该行全部分支」为准聚合。
+   */
+  const srcBranchByArtifact = new Map();
 
   let mappedRecords = 0;
 
@@ -360,17 +365,37 @@ function buildSrcLineCoverage(records) {
       const abs = path.resolve(REPO_ROOT, mapDir, hit.source);
       const rel = path.relative(REPO_ROOT, abs).split(path.sep).join('/');
 
-      if (!srcBranchTotal.has(rel)) srcBranchTotal.set(rel, new Map());
-      const totalMap = srcBranchTotal.get(rel);
-      totalMap.set(hit.line, (totalMap.get(hit.line) ?? 0) + 1);
+      if (!srcBranchByArtifact.has(rel)) srcBranchByArtifact.set(rel, new Map());
+      const lineMap = srcBranchByArtifact.get(rel);
+      if (!lineMap.has(hit.line)) lineMap.set(hit.line, new Map());
+      const perArtifact = lineMap.get(hit.line);
+      const stat = perArtifact.get(sf) ?? { total: 0, hit: 0 };
+      stat.total += 1;
+      if (b.taken > 0) stat.hit += 1;
+      perArtifact.set(sf, stat);
+    }
+  }
 
+  // 聚合：同一源行的分支只要在任一产物里被完整覆盖，即视为该行分支闭环。
+  const srcBranchTotal = new Map();
+  const srcBranchHit = new Map();
+  const srcBranchUncovered = new Map();
+  for (const [rel, lineMap] of srcBranchByArtifact) {
+    for (const [line, perArtifact] of lineMap) {
+      let widest = null;
+      let fullyCovered = false;
+      for (const stat of perArtifact.values()) {
+        if (!widest || stat.total > widest.total) widest = stat;
+        if (stat.total > 0 && stat.hit === stat.total) fullyCovered = true;
+      }
+      if (!widest) continue;
+      if (!srcBranchTotal.has(rel)) srcBranchTotal.set(rel, new Map());
+      srcBranchTotal.get(rel).set(line, widest.total);
       if (!srcBranchHit.has(rel)) srcBranchHit.set(rel, new Map());
-      const hitMap = srcBranchHit.get(rel);
-      if (b.taken > 0) {
-        hitMap.set(hit.line, (hitMap.get(hit.line) ?? 0) + 1);
-      } else {
+      srcBranchHit.get(rel).set(line, fullyCovered ? widest.total : widest.hit);
+      if (!fullyCovered) {
         if (!srcBranchUncovered.has(rel)) srcBranchUncovered.set(rel, new Set());
-        srcBranchUncovered.get(rel).add(hit.line);
+        srcBranchUncovered.get(rel).add(line);
       }
     }
   }

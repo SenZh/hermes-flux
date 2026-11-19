@@ -52,6 +52,9 @@ import {
   type FontPreferences,
   type ActivityIndicatorVariant,
   type SkinId,
+  applyConversationWidthMode,
+  resolveConversationWidthMode,
+  saveConversationWidthMode,
   setLocale,
   messageKeyForVerdict,
 } from '@hermes-flux/ui';
@@ -532,6 +535,7 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
       locale: state.lang === 'en' ? 'en' : 'zh',
       fontPrefs: deps.getFontPreferences(),
       activityVariant: deps.getActivityIndicatorVariant(),
+      conversationWidth: state.conversationWidth,
       profiles: state.settingsProfiles,
       bots: botRoster(),
       botManagement: getBotManagementSnapshot(),
@@ -638,6 +642,13 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
         const activityIndicatorVariant = deps.resolveActivityIndicatorVariant(variant);
         deps.saveActivityIndicatorVariant(activityIndicatorVariant);
         deps.setActivityIndicatorVariant(activityIndicatorVariant);
+        deps.render();
+      },
+      onConversationWidthChange: (width) => {
+        const nextWidth = resolveConversationWidthMode(width);
+        state.conversationWidth = nextWidth;
+        saveConversationWidthMode(nextWidth);
+        applyConversationWidthMode(nextWidth);
         deps.render();
       },
       onRefreshProfiles: () => { void getBotManagementController().loadRoster(true); },

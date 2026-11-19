@@ -201,6 +201,10 @@ function AppearancePanel({
                 { value: 'small', label: t('settings.sizeSmall') },
                 { value: 'medium', label: t('settings.sizeMedium') },
                 { value: 'large', label: t('settings.sizeLarge') },
+              ]} /></SettingRow><SettingRow label={t('settings.conversationWidth')} anchorId="conversation-width"><SegmentedControl ariaLabel={t('settings.conversationWidth')} value={snapshot.conversationWidth} onChange={actions.onConversationWidthChange} options={[
+                { value: 'narrow', label: t('settings.conversationWidthNarrow') },
+                { value: 'wide', label: t('settings.conversationWidthWide') },
+                { value: 'full', label: t('settings.conversationWidthFull') },
               ]}
             />
           </SettingRow>

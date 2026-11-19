@@ -22,6 +22,7 @@
 import type { I18nKey } from '../../i18n/index.js';
 import type { FontPreferences } from '../../tokens/fontPreferences.js';
 import type { ActivityIndicatorVariant } from '../../tokens/activityIndicator.js';
+import type { ConversationWidthMode } from '../../tokens/conversationWidth.js';
 import type { SkinId } from '../../tokens/skins.js';
 import type {
   McpServerRow,
@@ -113,6 +114,7 @@ export const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = Object.fr
   { id: 'ui-font', sectionId: 'appearance', labelKey: 'settings.uiFont' },
   { id: 'code-font', sectionId: 'appearance', labelKey: 'settings.codeFont' },
   { id: 'font-size', sectionId: 'appearance', labelKey: 'settings.textSize' },
+  { id: 'conversation-width', sectionId: 'appearance', labelKey: 'settings.conversationWidth' },
   { id: 'presence-layout', sectionId: 'appearance', labelKey: 'settings.presenceLayout' },
   { id: 'language', sectionId: 'appearance', labelKey: 'settings.languageLabel' },
   { id: 'providers-list', sectionId: 'providers', labelKey: 'settings.sectionProviders' },
@@ -264,6 +266,8 @@ export interface SettingsSnapshot {
   fontPrefs: FontPreferences;
   /** 左轨活动指示器动效变体（设置页卡片即真实预览，点击立即生效）。 */
   activityVariant: ActivityIndicatorVariant;
+  /** 对话区列宽档位：narrow (48rem) / wide (72rem) / full (100%)。 */
+  conversationWidth: ConversationWidthMode;
   profiles: SettingsLoadable<SettingsProfileRow[]>;
   mcp: SettingsLoadable<McpServerRow[]>;
   skills: SettingsLoadable<SkillRow[]>;
@@ -412,6 +416,9 @@ export interface ToggleProviderAgentResult extends SettingsActionResult {
   confirmRequired?: boolean;
 }
 
+/** 对话区列宽切换回调类型。 */
+export type ConversationWidthChangeHandler = (width: ConversationWidthMode) => void;
+
 /** 设置弹窗的全部副作用出口。壳层实现，组件只调用。 */
 export interface SettingsActions {
   onClose: () => void;
@@ -421,6 +428,8 @@ export interface SettingsActions {
   onFontPrefsChange: (prefs: FontPreferences) => void;
   /** 切换左轨活动指示器动效变体；壳层负责持久化并向左轨推新快照。 */
   onActivityVariantChange: (variant: ActivityIndicatorVariant) => void;
+  /** 切换对话区列宽档位；壳层负责持久化并写入根节点样式与属性。 */
+  onConversationWidthChange: ConversationWidthChangeHandler;
   /**
    * 切换 Agent 状态指示器的位置。
    *

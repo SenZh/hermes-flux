@@ -28,6 +28,72 @@ test('AppState 领域状态模型测试', async (t) => {
     assert.equal(state.activeSessionId, '');
     assert.equal(state.messages.length, 0);
     assert.equal(state.isStreaming, false);
+    assert.equal(state.conversationWidth, 'wide');
+  });
+
+  await t.test('1b. conversationWidth 冷启动确实经 localStorage 偏好加载并收敛脏值', () => {
+    // 【杀伤力】若 createInitialState 把 conversationWidth 写成常量 'wide'，
+    // 下面注入 narrow/full 的两条断言立刻变红。
+    const hadStorage = 'localStorage' in globalThis;
+    const savedStorage = globalThis.localStorage;
+    const installStorage = (raw) => {
+      globalThis.localStorage = {
+        getItem: (key) => (key === 'hermes_flux_conversation_width' ? raw : null),
+        setItem() {},
+      };
+    };
+    try {
+      delete globalThis.localStorage;
+      assert.equal(createInitialState({ platform: 'windows' }).conversationWidth, 'wide', '无 localStorage 必须回落默认 wide');
+
+      installStorage('narrow');
+      assert.equal(createInitialState({ platform: 'windows' }).conversationWidth, 'narrow');
+      assert.equal(readPresenceLayout(), 'stage', '宽度偏好注入不得影响其它偏好键的默认回退');
+
+      installStorage('full');
+      assert.equal(createInitialState({ platform: 'windows' }).conversationWidth, 'full');
+
+      installStorage('bogus-width');
+      assert.equal(createInitialState({ platform: 'windows' }).conversationWidth, 'wide', '脏值必须收敛为 wide');
+    } finally {
+      if (hadStorage) globalThis.localStorage = savedStorage;
+      else delete globalThis.localStorage;
+    }
+  });
+
+  await t.test('1c. localStorage 访问抛错时初始化降级为默认值而非中断', () => {
+    // 【杀伤力】去掉 getStorage 的 try/catch，createInitialState 会直接抛 Error: denied，本用例必红。
+    const hadStorage = 'localStorage' in globalThis;
+    const savedStorage = globalThis.localStorage;
+    const savedWarn = console.warn;
+    const warns = [];
+    try {
+      globalThis.localStorage = {
+        getItem() { throw new Error('denied'); },
+        setItem() { throw new Error('denied'); },
+      };
+      console.warn = (...args) => { warns.push(args); };
+
+      let state;
+      assert.doesNotThrow(() => { state = createInitialState({ platform: 'windows' }); }, '存储被禁用不得阻断冷启动');
+
+      assert.equal(state.theme, 'obsidian-gold');
+      assert.equal(state.lang, 'zh');
+      assert.equal(state.profileName, 'default');
+      assert.equal(state.gatewayUrl, '');
+      assert.equal(state.gatewayConnecting, false);
+      assert.equal(state.username, '');
+      assert.equal(state.password, '');
+      assert.deepEqual(state.favoriteModels, []);
+      assert.deepEqual(state.recentModels, []);
+      assert.equal(state.presenceLayout, 'stage');
+      assert.equal(state.conversationWidth, 'wide');
+      assert.ok(warns.length > 0, '降级必须可观测，禁止静默吞掉失败');
+    } finally {
+      console.warn = savedWarn;
+      if (hadStorage) globalThis.localStorage = savedStorage;
+      else delete globalThis.localStorage;
+    }
   });
 
   await t.test('2. readPresenceLayout 默认 stage 并支持 dock', () => {

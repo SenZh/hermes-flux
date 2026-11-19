@@ -33,6 +33,7 @@ test('RenderCoordinator - 渲染装配与协调管线领域纯行为测试', asy
       fileWordWrap: false, inspectorCollapsed: true, inspectorFullscreen: false, isMaximized: false,
       isSettingsOpen: false, leftRailCollapsed: false, mentionPopperOpen: false, modelMenuOpen: false,
       modelSearchQuery: '', selectedModel: 'auto', reasoningLevel: 'medium', settingsSection: 'appearance',
+      conversationWidth: 'wide',
       slashPopperOpen: false, theme: 'obsidian-gold', username: '', gatewayUrl: 'http://localhost', modelCatalogHash: '',
     };
 
@@ -976,6 +977,39 @@ test('RenderCoordinator - 渲染装配与协调管线领域纯行为测试', asy
     }
   });
 
+  /**
+   * 每次 render() 必须把 state.conversationWidth 同步到根节点（data-chat-layout + --chat-column-max）。
+   * 【杀伤力】删掉 renderCoordinator 里的 applyConversationWidthMode 调用，
+   * rootAttrs/rootProps 将保持空 Map，首条断言必红；删掉脏值收敛则最后两条必红。
+   */
+  await t.test('23. render() 按 state.conversationWidth 同步根节点宽度契约', () => {
+    const dom = installDomStub();
+    try {
+      const { coordinator, state } = createHarness({ isSessionEnterPending: () => false });
+
+      coordinator.render();
+      assert.equal(dom.rootAttrs.get('data-chat-layout'), 'wide', '首帧必须按 state 写入 data-chat-layout');
+      assert.equal(dom.rootProps.get('--chat-column-max'), '72rem', 'wide 档必须写 72rem');
+
+      state.conversationWidth = 'full';
+      coordinator.render();
+      assert.equal(dom.rootAttrs.get('data-chat-layout'), 'full');
+      assert.equal(dom.rootProps.get('--chat-column-max'), '100%');
+
+      state.conversationWidth = 'narrow';
+      coordinator.render();
+      assert.equal(dom.rootAttrs.get('data-chat-layout'), 'narrow');
+      assert.equal(dom.rootProps.get('--chat-column-max'), '48rem');
+
+      state.conversationWidth = 'bogus-width';
+      coordinator.render();
+      assert.equal(dom.rootAttrs.get('data-chat-layout'), 'wide', '非法档位必须收敛为 wide');
+      assert.equal(dom.rootProps.get('--chat-column-max'), '72rem');
+    } finally {
+      dom.restore();
+    }
+  });
+
   function installDomStub() {    const saved = {
       document: globalThis.document,
       window: globalThis.window,
@@ -1019,6 +1053,8 @@ test('RenderCoordinator - 渲染装配与协调管线领域纯行为测试', asy
       bodyProbeCount += 1;
       return bodyProbeCount > 1 ? bodyContainer : null;
     };
+    const rootAttrs = new Map();
+    const rootProps = new Map();
     globalThis.document = {
       getElementById: (id) => elements.get(id) ?? null,
       querySelector: () => null,
@@ -1026,7 +1062,18 @@ test('RenderCoordinator - 渲染装配与协调管线领域纯行为测试', asy
       createElement: (tag) => makeEl(tag),
       addEventListener() {},
       removeEventListener() {},
-      documentElement: { style: { setProperty() {} }, dataset: {}, setAttribute() {}, getAttribute: () => null },
+      documentElement: {
+        style: {
+          setProperty(name, value) { rootProps.set(name, value); },
+          getPropertyValue: () => '',
+          removeProperty() {},
+        },
+        dataset: {},
+        classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+        setAttribute(name, value) { rootAttrs.set(name, value); },
+        getAttribute: () => null,
+        removeAttribute() {},
+      },
       body: makeEl('body'),
       head: makeEl('head'),
     };
@@ -1039,6 +1086,8 @@ test('RenderCoordinator - 渲染装配与协调管线领域纯行为测试', asy
     globalThis.getComputedStyle = () => ({ paddingBottom: '0px', getPropertyValue: () => '' });
     return {
       elements,
+      rootAttrs,
+      rootProps,
       restore: () => {
         globalThis.document = saved.document;
         globalThis.window = saved.window;

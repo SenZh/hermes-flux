@@ -19,6 +19,7 @@ import {
   resolveSettingsSection,
 } from '../dist/components-react/settings/settingsModel.js';
 import { setLocale, t } from '../dist/i18n/index.js';
+import { CONVERSATION_WIDTH_MODES } from '../dist/tokens/conversationWidth.js';
 import { cn } from '../dist/lib/tw-merge.js';
 import { createJumpScheduler } from '../dist/components-react/settings/jumpScheduler.js';
 
@@ -60,6 +61,7 @@ function snapshot(overrides = {}) {
     locale: 'zh',
     fontPrefs: { uiFont: 'geist-sans', monoFont: 'jetbrains-mono', sizeScale: 'medium' },
     activityVariant: 'cloud',
+    conversationWidth: 'wide',
     providers: { status: 'idle' },
     profiles: { status: 'idle' },
     bots: [],
@@ -94,6 +96,7 @@ const noopActions = {
   onLocaleChange() {},
   onFontPrefsChange() {},
   onActivityVariantChange() {},
+  onConversationWidthChange() {},
   onPresenceLayoutChange() {},
   onRefreshProviders() {},
   onSaveProviderKey: async () => ({ ok: true }),
@@ -605,6 +608,49 @@ test('BOT 状态位置：外观分区渲染两个选项，选中态与快照一�
   assert.equal(pressedOf(stageHtml, '输入框上方'), 'false');
   assert.equal(pressedOf(dockHtml, '输入框上方'), 'true', 'dock 快照下必须选中输入框上方');
   assert.equal(pressedOf(dockHtml, '对话区顶部'), 'false');
+});
+
+test('对话区宽度：外观分区渲染窄/较宽/全宽三档选项，选中态与快照一致', () => {
+  const pressedOf = (html, label) => {
+    const match = new RegExp(`aria-pressed="(true|false)"[^>]*>${label}`).exec(html);
+    return match?.[1] ?? null;
+  };
+
+  setLocale('zh-CN');
+  const narrowHtml = render({ section: 'appearance', conversationWidth: 'narrow' });
+  const wideHtml = render({ section: 'appearance', conversationWidth: 'wide' });
+  const fullHtml = render({ section: 'appearance', conversationWidth: 'full' });
+
+  assert.ok(wideHtml.includes('对话区宽度'), '必须渲染「对话区宽度」标签');
+  assert.equal(pressedOf(narrowHtml, '窄'), 'true');
+  assert.equal(pressedOf(narrowHtml, '较宽'), 'false');
+  assert.equal(pressedOf(narrowHtml, '全宽'), 'false');
+
+  assert.equal(pressedOf(wideHtml, '窄'), 'false');
+  assert.equal(pressedOf(wideHtml, '较宽'), 'true');
+  assert.equal(pressedOf(wideHtml, '全宽'), 'false');
+
+  assert.equal(pressedOf(fullHtml, '窄'), 'false');
+  assert.equal(pressedOf(fullHtml, '较宽'), 'false');
+  assert.equal(pressedOf(fullHtml, '全宽'), 'true');
+
+  setLocale('en-US');
+  const enHtml = render({ section: 'appearance', locale: 'en', conversationWidth: 'full' });
+  assert.ok(enHtml.includes('Conversation width'));
+  assert.equal(pressedOf(enHtml, 'Narrow'), 'false');
+  assert.equal(pressedOf(enHtml, 'Wide'), 'false');
+  assert.equal(pressedOf(enHtml, 'Full'), 'true');
+
+  // 【真值表一致性】UI 档位必须与 CONVERSATION_WIDTH_MODES 同序同集：
+  // 未来新增第 4 档而 SettingsModal 硬编码未跟随时，这里必红（当前仅 3 档时不会误报）。
+  const renderedModes = (label, html) => {
+    const group = new RegExp(`aria-label="${label}"[^>]*>([\\s\\S]*?)</div>`).exec(html)?.[1] ?? '';
+    return [...group.matchAll(/data-segmented-value="([^"]+)"/g)].map((match) => match[1]);
+  };
+  assert.deepEqual(renderedModes('对话区宽度', wideHtml), [...CONVERSATION_WIDTH_MODES], 'zh 档位必须与真值表同序同集');
+  assert.deepEqual(renderedModes('Conversation width', enHtml), [...CONVERSATION_WIDTH_MODES], 'en 档位必须与真值表同序同集');
+
+  setLocale('zh-CN');
 });
 
 test('语言切换是真实生效的：同一份快照在两种 locale 下文案不同', () => {
@@ -1668,6 +1714,7 @@ test('设置项检索：真实配置项名可命中，且空查询不干扰导�
   const hitsOf = (query) => filterSettingsEntries(SETTINGS_SEARCH_ENTRIES, query, (key) => t(key)).map((entry) => entry.id);
 
   assert.deepEqual(hitsOf('字号'), ['font-size'], '「字号」必须命中文字大小');
+  assert.deepEqual(hitsOf('对话区宽度'), ['conversation-width'], '「对话区宽度」必须命中对话区宽度');
   assert.deepEqual(hitsOf('密码'), ['gateway-password'], '「密码」必须命中登录密码');
   assert.deepEqual(hitsOf('语言'), ['language']);
   assert.deepEqual(hitsOf('SOUL'), ['bot-soul'], '大小写无关');
@@ -1681,6 +1728,11 @@ test('设置项检索：真实配置项名可命中，且空查询不干扰导�
     filterSettingsEntries(SETTINGS_SEARCH_ENTRIES, 'password', (key) => t(key)).map((entry) => entry.id),
     ['gateway-password'],
     '英文查询同样命中',
+  );
+  assert.deepEqual(
+    filterSettingsEntries(SETTINGS_SEARCH_ENTRIES, 'Conversation width', (key) => t(key)).map((entry) => entry.id),
+    ['conversation-width'],
+    '英文查询必须命中对话区宽度',
   );
   setLocale('zh-CN');
 });

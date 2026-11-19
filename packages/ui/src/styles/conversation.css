@@ -17,13 +17,16 @@
    1. 局部作用域设计变量（Scoped Tokens，对标 OpenChamber design-system.css）
    ========================================================================== */
 
+:root,
 .conversation-pod,
 .middle-conversation-pod,
 #conversation-stream {
-  /* 基础列宽与宽屏自适应（严格 100% 对标 OpenChamber .chat-message-column / .wide-chat-layout） */
+  /* 基础列宽与三档可调列宽（窄 48rem / 较宽 72rem / 全宽 100%） */
+  --conv-column-narrow: 48rem;
   --conv-column-normal: 48rem;
-  --conv-column-wide: 64rem;
-  --conv-column-max: var(--conv-column-wide);
+  --conv-column-wide: 72rem;
+  --conv-column-full: 100%;
+  --conv-column-max: var(--chat-column-max, var(--conv-column-wide));
 
   --conv-gutter-x: clamp(16px, 2.5vw, 32px);
   --conv-gutter-top: 24px;
@@ -71,10 +74,33 @@
   --conv-inline-code-color: color-mix(in oklab, var(--hl-string) 65%, var(--foreground));
 }
 
-/* 宽屏自适应：默认使用 OpenChamber 64rem（1024px）黄金宽屏列宽，居中对齐 */
+/* 对话区列宽三档切换：窄 (48rem) / 较宽 (72rem) / 全宽 (100%)，默认较宽居中 */
+:root[data-chat-layout="narrow"],
+[data-chat-layout="narrow"],
+:root[data-chat-layout="narrow"] .conversation-pod,
+:root[data-chat-layout="narrow"] .middle-conversation-pod,
+:root[data-chat-layout="narrow"] #conversation-stream {
+  --chat-column-max: 48rem;
+  --conv-column-max: var(--conv-column-narrow);
+}
+
 .wide-chat-layout,
-[data-chat-layout="wide"] {
-  --conv-column-max: var(--conv-column-wide) !important;
+:root[data-chat-layout="wide"],
+[data-chat-layout="wide"],
+:root[data-chat-layout="wide"] .conversation-pod,
+:root[data-chat-layout="wide"] .middle-conversation-pod,
+:root[data-chat-layout="wide"] #conversation-stream {
+  --chat-column-max: 72rem;
+  --conv-column-max: var(--conv-column-wide);
+}
+
+:root[data-chat-layout="full"],
+[data-chat-layout="full"],
+:root[data-chat-layout="full"] .conversation-pod,
+:root[data-chat-layout="full"] .middle-conversation-pod,
+:root[data-chat-layout="full"] #conversation-stream {
+  --chat-column-max: 100%;
+  --conv-column-max: var(--conv-column-full);
 }
 
 /* ==========================================================================

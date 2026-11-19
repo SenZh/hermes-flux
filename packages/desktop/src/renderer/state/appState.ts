@@ -38,7 +38,9 @@ import {
   type DataPhase,
   MessageViewModel,
   resolveSkinId,
+  loadConversationWidthMode,
 } from '@hermes-flux/ui';
+import type { ConversationWidthMode } from '@hermes-flux/ui';
 
 import {
   type NormalizedSession,
@@ -113,6 +115,7 @@ export interface AppState {
   isSettingsOpen: boolean;
   settingsSection: SettingsSectionId;
   presenceLayout: 'stage' | 'dock';
+  conversationWidth: ConversationWidthMode;
   settingsProfiles: SettingsLoadable<SettingsProfileRow[]>;
   botManagementStatus: BotManagementStatus;
   botManagementActiveBotId: string;
@@ -204,7 +207,19 @@ export interface InitialStateParams {
 }
 
 export function createInitialState(params: InitialStateParams): AppState {
-  const getStorage = (k: string) => (typeof localStorage !== 'undefined' ? localStorage.getItem(k) : null);
+  // 【设计意图】冷启动读取外观/网关偏好，任何单键失败都必须降级为默认值而非中断初始化。
+  // 【防范历史坑】Chromium/Electron 在站点数据被禁用或 opaque origin 下访问 localStorage 会抛
+  //   SecurityError；原实现把 typeof 判断也放在 try 之外，导致整个 App 白屏。
+  // 【约束】catch 必须记录日志（Failure Is Not Empty），不得静默吞成空值。
+  function getStorage(k: string): string | null {
+    try {
+      return typeof localStorage === 'undefined' ? null : localStorage.getItem(k);
+    // gate-degrade: 存储被策略禁用时读取抛错，偏好回落默认值属可选增强失败，不得阻塞启动
+    } catch (error) {
+      console.warn('[app-state] failed to read storage preference; falling back to default', k, error);
+      return null;
+    }
+  }
 
   const savedTheme = getStorage('hermes_flux_theme') || getStorage('hermes_aura_theme');
   const savedLang = getStorage('hermes_flux_lang') || getStorage('hermes_aura_lang');
@@ -274,6 +289,7 @@ export function createInitialState(params: InitialStateParams): AppState {
     isSettingsOpen: false,
     settingsSection: 'appearance',
     presenceLayout: readPresenceLayout(),
+    conversationWidth: loadConversationWidthMode(),
     settingsProfiles: { status: 'idle' },
     botManagementStatus: { status: 'uninitialized' },
     botManagementActiveBotId: '',

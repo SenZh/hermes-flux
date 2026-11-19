@@ -39,6 +39,7 @@ import {
   type DataPhase,
   resolveSkinId,
   SKINS,
+  applyConversationWidthMode,
   attachMotionController,
   type PromptNavigatorSnapshot,
   type PromptNavigatorActions,
@@ -634,6 +635,7 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
       rootEl.setAttribute('data-appearance', nextAppearance);
     }
     document.documentElement.dataset.maximized = state.isMaximized ? 'true' : 'false';
+    applyConversationWidthMode(state.conversationWidth, rootEl);
 
     const currentLastMsg = state.messages.length > 0 ? state.messages[state.messages.length - 1] : null;
     const currentMessagesSnapshot: RenderMessagesSnapshot = {

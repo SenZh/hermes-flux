@@ -47,6 +47,7 @@ function createMockSettingsDeps(overrides = {}) {
     appVersion: '1.0.0',
     platform: 'desktop',
     presenceLayout: 'dock',
+    conversationWidth: 'wide',
     confirmModal: null,
     ...(overrides.state || {}),
   };
@@ -125,7 +126,74 @@ test('settingsDataService: getSettingsSnapshot constructs snapshot with active s
   assert.equal(snapshot.gateway.url, 'http://127.0.0.1:8080');
   assert.equal(snapshot.gateway.status, 'connected');
   assert.equal(snapshot.locale, 'zh');
+  assert.equal(snapshot.conversationWidth, 'wide');
   assert.equal(snapshot.bots.length, 1);
+});
+
+test('settingsDataService: onConversationWidthChange updates state, snapshot and triggers render', () => {
+  const deps = createMockSettingsDeps();
+  const service = createSettingsDataService(deps);
+  const actions = service.createSettingsActions();
+
+  actions.onConversationWidthChange('full');
+  assert.equal(deps.getState().conversationWidth, 'full');
+  assert.equal(service.getSettingsSnapshot().conversationWidth, 'full');
+  assert.equal(deps.getRenderCount(), 1);
+
+  actions.onConversationWidthChange('narrow');
+  assert.equal(deps.getState().conversationWidth, 'narrow');
+  assert.equal(service.getSettingsSnapshot().conversationWidth, 'narrow');
+  assert.equal(deps.getRenderCount(), 2);
+});
+
+test('settingsDataService: onConversationWidthChange 持久化偏好并写入根节点宽度契约', () => {
+  // 【杀伤力】删掉 saveConversationWidthMode 或 applyConversationWidthMode 调用，
+  // writes / data-chat-layout / --chat-column-max 三条断言会立刻变红。
+  const hadStorage = 'localStorage' in globalThis;
+  const savedStorage = globalThis.localStorage;
+  const hadDocument = 'document' in globalThis;
+  const savedDocument = globalThis.document;
+  try {
+    const writes = [];
+    globalThis.localStorage = {
+      getItem: () => null,
+      setItem: (key, value) => { writes.push([key, value]); },
+    };
+    const attrs = new Map();
+    const props = new Map();
+    globalThis.document = {
+      documentElement: {
+        setAttribute: (name, value) => { attrs.set(name, value); },
+        style: { setProperty: (name, value) => { props.set(name, value); } },
+      },
+    };
+
+    const deps = createMockSettingsDeps();
+    const service = createSettingsDataService(deps);
+    const actions = service.createSettingsActions();
+
+    actions.onConversationWidthChange('narrow');
+    assert.deepEqual(writes, [['hermes_flux_conversation_width', 'narrow']]);
+    assert.equal(attrs.get('data-chat-layout'), 'narrow');
+    assert.equal(props.get('--chat-column-max'), '48rem');
+    assert.equal(deps.getState().conversationWidth, 'narrow');
+
+    actions.onConversationWidthChange('full');
+    assert.deepEqual(writes.at(-1), ['hermes_flux_conversation_width', 'full']);
+    assert.equal(attrs.get('data-chat-layout'), 'full');
+    assert.equal(props.get('--chat-column-max'), '100%');
+
+    actions.onConversationWidthChange('bogus-width');
+    assert.deepEqual(writes.at(-1), ['hermes_flux_conversation_width', 'wide'], '非法值必须收敛为 wide 后持久化');
+    assert.equal(attrs.get('data-chat-layout'), 'wide');
+    assert.equal(props.get('--chat-column-max'), '72rem');
+    assert.equal(deps.getState().conversationWidth, 'wide');
+  } finally {
+    if (hadStorage) globalThis.localStorage = savedStorage;
+    else delete globalThis.localStorage;
+    if (hadDocument) globalThis.document = savedDocument;
+    else delete globalThis.document;
+  }
 });
 
 test('settingsDataService: createSettingsActions provides working section switcher', () => {
