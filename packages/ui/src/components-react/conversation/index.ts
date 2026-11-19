@@ -11,7 +11,8 @@ export { TurnGroup, groupTurns } from './TurnGroup.js';
 export { selectVisibleMessages } from './visibility.js';
 export { useStreamFollow, STREAM_FOLLOW_THRESHOLD_PX } from './useStreamFollow.js';
 export { PromptNavigatorRail, type PromptNavigatorRailProps } from './PromptNavigatorRail.js';
-export { mountConversation, mountMessageList, mountPromptNavigator, mountAgentPresence, type ConversationMount } from './mount.js';
+export { mountConversation, mountMessageList, mountPromptNavigator, mountAgentPresence, mountScrollToEndButton, type ConversationMount } from './mount.js';
+export { ScrollToEndButton, type ScrollToEndButtonProps } from './ScrollToEndButton.js';
 export {
   AgentPresence,
   type AgentPresenceSnapshot,

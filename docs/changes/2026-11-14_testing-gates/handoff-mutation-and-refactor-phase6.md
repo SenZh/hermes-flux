@@ -36,7 +36,7 @@
 | **消息加载服务** | `services/messageLoadingService.ts` | 893 | 消息加载/缓存优先恢复、历史向上分页、血缘追溯、游标重试、副标题反哺 |
 | **回合执行服务** | `services/turnExecutionService.ts` | 838 | 消息发送路由分发、单聊发送与 rowId 绑定、BTW 旁路路由分流、群聊专属发送、看门狗定时器与中断 |
 | **网关事件分派** | `gateway/gatewayEventDispatcher.ts` | 686 | 连接生命周期、代际隔离防污染、120 FPS 流式双轨分流（高频 delta 零 render 直通）、下行事件解包 |
-| **虚拟窗口管理** | `messageWindowManager.ts` | 369 | 滑动窗口规划、行高锁定、变矮豁免、虚拟坐标换算 |
+| **窗口管理**（虚拟窗口已于 2026-11-16 废弃，当前为纯原生流） | `messageWindowManager.ts` | 369 | 纯原生流下仅保留行高锁定与视口校正 |
 | **渲染装配协调** | `renderCoordinator.ts` | 836 | 视图模型 WeakMap 缓存映射、React 消息列表增量挂载与收敛、主 render 协调 |
 | **下拉热键控制** | `dropdownKeybindController.ts` | 453 | 模型搜索过滤、Provider 分组折叠、键盘导航与级联定位、全局快捷键绑定 |
 | **数字员工管理** | `services/profileManagementService.ts` | 366 | Profile 与数字员工管理、主工位秒开、自动轮询与切换 |

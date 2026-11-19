@@ -57,6 +57,8 @@ export function ConversationMessageList({ snapshot }: { snapshot: ConversationSn
     return () => clearTimeout(timer);
   }, [snapshot.isLoadingOlder]);
 
+  // 【已废弃 (Deprecated)】宿主自 2026-11-16 起切换为纯原生流，computeVirtualHeightPx() 恒返回 0，
+  // 本分支与 .conv-virtual-window 永远不会渲染。保留仅为兼容旧快照类型，禁止再按虚拟窗口实现新逻辑。
   const virtualHeight = snapshot.virtualHeightPx && snapshot.virtualHeightPx > 0 ? snapshot.virtualHeightPx : 0;
   const offset = snapshot.contentOffsetPx && snapshot.contentOffsetPx > 0 ? snapshot.contentOffsetPx : 0;
 

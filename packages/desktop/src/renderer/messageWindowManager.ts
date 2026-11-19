@@ -1,5 +1,10 @@
 /**
- * 对话流虚拟窗口管理服务 (Message Window Manager)
+ * 对话流窗口管理服务 (Message Window Manager)
+ *
+ * 【当前事实 (2026-11-16 起)】已切换为「方案 1 纯原生流」：
+ *   `messageWindowStart = 0`、`messageWindowEnd = total`、`computeVirtualHeightPx() = 0`，
+ *   DOM 中不存在 `.conv-virtual-window`。历史文档里的「虚拟窗口」描述全部废弃，
+ *   新逻辑必须按纯原生流 + `content-visibility: auto` 设计，禁止据此恢复切片窗口。
  *
  * 【设计意图 (Why)】
  *   将长会话（实测上千条消息）的窗口切片规划、平均行高锁定、占位高度计算、

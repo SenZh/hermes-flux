@@ -1,0 +1,770 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Scroll to end · 可交互原型</title>
+<style>
+  :root {
+    --fx-canvas: var(--code-background, #0e0f13);
+    --fx-panel: var(--background, #16171d);
+    --fx-card: var(--card, #1b1c23);
+    --fx-hover: var(--secondary, #22242d);
+    --fx-border: var(--border, rgba(255,255,255,.12));
+    --fx-border-subtle: var(--border-subtle, rgba(255,255,255,.07));
+    --fx-fg: var(--foreground, #f3f4f6);
+    --fx-muted: var(--muted-foreground, #7c8291);
+    --fx-ease-out: cubic-bezier(.16, 1, .3, 1);
+    --fx-ease-in: cubic-bezier(.4, 0, 1, 1);
+    --fx-sans: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif);
+    --fx-mono: var(--font-mono, "JetBrains Mono", Consolas, monospace);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    font-family: var(--fx-sans);
+    color: var(--fx-fg);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .shell {
+    padding: 16px;
+    background: var(--fx-canvas);
+    border-radius: var(--radius, 12px);
+  }
+
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+    font-size: 11px;
+    color: var(--fx-muted);
+  }
+  .toolbar__hint { margin-left: auto; }
+  .seg {
+    display: inline-flex;
+    padding: 2px;
+    gap: 2px;
+    border: 1px solid var(--fx-border);
+    border-radius: 8px;
+    background: var(--fx-card);
+  }
+  .seg button {
+    appearance: none;
+    border: 0;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font: inherit;
+    font-size: 11px;
+    color: var(--fx-muted);
+    background: transparent;
+    cursor: pointer;
+    transition: color 120ms ease, background 120ms ease;
+  }
+  .seg button:hover { color: var(--fx-fg); }
+  .seg button[aria-pressed="true"] {
+    color: var(--fx-fg);
+    background: var(--fx-hover);
+  }
+  .toolbar__btn {
+    appearance: none;
+    border: 1px solid var(--fx-border);
+    border-radius: 8px;
+    padding: 5px 10px;
+    font: inherit;
+    font-size: 11px;
+    color: var(--fx-muted);
+    background: var(--fx-card);
+    cursor: pointer;
+    transition: color 120ms ease, border-color 120ms ease;
+  }
+  .toolbar__btn:hover { color: var(--fx-fg); border-color: var(--fx-fg); }
+
+  .wb-block + .wb-block { margin-top: 20px; }
+  .wb-caption {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 0 0 8px 2px;
+    font-size: 11px;
+    color: var(--fx-muted);
+  }
+  .wb-caption strong {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--fx-fg);
+  }
+
+  .workbench {
+    position: relative;
+    height: 560px;
+    overflow: hidden;
+    border: 1px solid var(--fx-border);
+    border-radius: 12px;
+    background: var(--fx-panel);
+  }
+
+  .stream {
+    position: absolute;
+    inset: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 24px 32px 188px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--fx-border) transparent;
+  }
+  .stream::-webkit-scrollbar { width: 8px; }
+  .stream::-webkit-scrollbar-thumb {
+    background: var(--fx-border);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  /* 底部渐变遮罩：防止消息正文直接撞进输入舱 */
+  .dock-scrim {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 240px;
+    z-index: 10;
+    pointer-events: none;
+    background: linear-gradient(to top, var(--fx-panel) 0%, var(--fx-panel) 66%, transparent 100%);
+  }
+
+  /* stage 形态下给顶部图腾让出安全区，避免首条消息被压住 */
+  .workbench[data-layout="stage"] .stream { padding-top: 132px; }
+
+  .column { width: 100%; max-width: 740px; margin: 0 auto; }
+
+  .msg { display: flex; flex-direction: column; gap: 10px; margin-bottom: 26px; }
+  .msg--user { align-items: flex-end; }
+
+  .bubble {
+    max-width: 78%;
+    padding: 10px 14px;
+    border: 1px solid var(--fx-border-subtle);
+    border-radius: 12px;
+    background: var(--fx-card);
+    font-size: 13px;
+    line-height: 21px;
+    color: var(--fx-fg);
+  }
+  .msg--user .bubble {
+    border-color: var(--fx-border);
+    background: var(--fx-hover);
+  }
+
+  .assistant-line {
+    font-size: 13px;
+    line-height: 21px;
+    color: var(--fx-fg);
+  }
+  .assistant-line strong { font-weight: 600; }
+
+  .tool-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    margin-left: -8px;
+    border-radius: 6px;
+    font-size: 12px;
+    color: var(--fx-muted);
+    font-family: var(--fx-mono);
+  }
+  .tool-row__icon {
+    display: grid;
+    place-items: center;
+    width: 14px;
+    height: 14px;
+  }
+  .tool-row__meta { margin-left: auto; font-size: 11px; }
+
+  .code-block {
+    border: 1px solid var(--fx-border-subtle);
+    border-radius: 8px;
+    background: var(--fx-canvas);
+    padding: 10px 12px;
+    font-family: var(--fx-mono);
+    font-size: 12px;
+    line-height: 20px;
+    color: var(--fx-muted);
+    white-space: pre;
+    overflow-x: auto;
+  }
+
+  /* ── 顶部在场指示器：仅 stage 形态显示 ────────────────────── */
+  .stage-presence {
+    position: absolute;
+    top: 24px;
+    left: 50%;
+    z-index: 12;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    width: min(420px, calc(100% - 96px));
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+  .workbench[data-layout="stage"] .stage-presence { display: flex; }
+
+  .face {
+    position: relative;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--fx-card);
+    border: 2px solid var(--fx-panel);
+  }
+  .face--lg { width: 56px; height: 56px; }
+  .face--sm { width: 28px; height: 28px; border-width: 1px; }
+  .face svg { display: block; width: 100%; height: 100%; }
+
+  .face--lg::after {
+    content: "";
+    position: absolute;
+    inset: -5px;
+    border-radius: 50%;
+    padding: 1.5px;
+    background: conic-gradient(from 0deg, transparent 0deg, transparent 186deg, var(--fx-fg) 292deg, transparent 356deg);
+    -webkit-mask: linear-gradient(black 0 0) content-box, linear-gradient(black 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(black 0 0) content-box, linear-gradient(black 0 0);
+    mask-composite: exclude;
+    animation: presence-spin 2400ms linear infinite;
+    pointer-events: none;
+  }
+  @keyframes presence-spin { to { transform: rotate(360deg); } }
+
+  .presence-capsule {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    max-width: 100%;
+    padding: 4px 12px;
+    border: 1px solid var(--fx-border);
+    border-radius: 9999px;
+    background: var(--fx-card);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--fx-fg);
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .presence-capsule__verb { flex: 0 0 auto; }
+  .presence-capsule__target {
+    flex: 0 1 auto;
+    min-width: 0;
+    font-family: var(--fx-mono);
+    font-size: 11px;
+    color: var(--fx-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ── 输入舱上沿操作带 ─────────────────────────────────────── */
+  .dock-zone {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 20px;
+    padding: 0 24px;
+    z-index: 40;
+    pointer-events: none;
+  }
+  .dock-inner {
+    position: relative;
+    width: 100%;
+    max-width: 740px;
+    margin: 0 auto;
+  }
+  .actionband {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: calc(100% + 8px);
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0;
+    height: 32px;
+    pointer-events: none;
+  }
+
+  /* ── 回到底部按钮：绝对定位，不占流；头像用 margin 让位 ── */
+  .scroll-end {
+    position: absolute;
+    left: 0;
+    top: 0;
+    pointer-events: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    flex: 0 0 auto;
+    min-width: 0;
+    height: 32px;
+    padding: 0;
+    border: 1px solid var(--fx-border);
+    border-radius: 9999px;
+    background: var(--fx-card);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+    color: var(--fx-muted);
+    cursor: pointer;
+    overflow: hidden;
+    font: inherit;
+    transition:
+      opacity 120ms var(--fx-ease-out),
+      transform 80ms ease-out,
+      background 120ms ease,
+      border-color 120ms ease,
+      color 120ms ease,
+      visibility 0s linear 0s;
+  }
+  .scroll-end:hover {
+    color: var(--fx-fg);
+    background: var(--fx-hover);
+    border-color: var(--fx-fg);
+  }
+  .scroll-end:active { transform: scale(.96); }
+  .scroll-end:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--fx-fg) 60%, transparent);
+  }
+
+  .workbench[data-layout="dock"] .scroll-end { width: 32px; }
+  .workbench[data-layout="stage"] .scroll-end { width: auto; padding: 0 12px 0 8px; }
+
+  .scroll-end__icon {
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    transition: transform 80ms ease-out;
+  }
+  .scroll-end__icon svg { display: block; }
+  .scroll-end:hover .scroll-end__icon { transform: translateY(1px); }
+
+  .scroll-end__label {
+    display: block;
+    max-width: 0;
+    opacity: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    font-size: 11px;
+    line-height: 16px;
+    letter-spacing: .01em;
+    transition:
+      max-width 160ms var(--fx-ease-out),
+      opacity 120ms var(--fx-ease-out);
+  }
+  .workbench[data-layout="stage"] .scroll-end__label {
+    max-width: 140px;
+    opacity: 1;
+  }
+
+  /* 隐藏态：按钮绝对定位直接淡出，不占流；头像 margin 归零平滑贴边 */
+  .workbench[data-at-bottom="true"] .scroll-end {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition:
+      opacity 200ms var(--fx-ease-in),
+      visibility 0s linear 200ms;
+  }
+  .workbench[data-at-bottom="true"] .dock-presence {
+    margin-left: 0;
+    transition: margin-left 200ms var(--fx-ease-in);
+  }
+
+  /* ── 右侧在场指示器：仅 dock 形态显示 ─────────────────────── */
+  .dock-presence {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-left: 40px;
+    height: 32px;
+    pointer-events: none;
+    transition: margin-left 120ms var(--fx-ease-out);
+  }
+  .workbench[data-layout="dock"] .dock-presence { display: flex; }
+
+  .dock-presence .presence-capsule {
+    font-size: 11px;
+    line-height: 16px;
+    padding: 4px 8px;
+  }
+  .dock-presence .presence-capsule__target { font-size: 11px; }
+
+  /* ── 输入舱本体 ──────────────────────────────────────────── */
+  .composer {
+    pointer-events: auto;
+    width: 100%;
+    border: 1px solid var(--fx-border);
+    border-radius: 12px;
+    background: var(--fx-canvas);
+  }
+  .composer__editor {
+    display: flex;
+    align-items: flex-start;
+    padding: 16px 16px 0;
+    min-height: 66px;
+    font-size: 13px;
+    line-height: 22px;
+    color: var(--fx-muted);
+  }
+  .composer__footer {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 12px 8px;
+  }
+  .composer-chip {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    color: var(--fx-muted);
+    font-size: 13px;
+    line-height: 1;
+  }
+  .composer__spacer { flex: 1; }
+  .composer-model { font-size: 11px; color: var(--fx-muted); padding: 0 8px; }
+  .composer-send {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--fx-fg);
+    color: var(--fx-panel);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  @media (max-width: 560px) {
+    .stream { padding: 20px 16px 168px; }
+    .dock-zone { padding: 0 16px; }
+    .toolbar__hint { display: none; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .scroll-end,
+    .scroll-end__label,
+    .scroll-end__icon { transition-duration: 1ms !important; }
+    .scroll-end:hover .scroll-end__icon,
+    .scroll-end:active { transform: none; }
+    .face--lg::after { animation: none; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="toolbar">
+    <div class="seg" role="group" aria-label="语言">
+      <button type="button" data-set-lang="zh" aria-pressed="true">中文</button>
+      <button type="button" data-set-lang="en" aria-pressed="false">EN</button>
+    </div>
+    <button type="button" class="toolbar__btn" id="demo">演示动效</button>
+    <span class="toolbar__hint">滚到底部，按钮退场；向上滚动，按钮进场</span>
+  </div>
+
+  <!-- Dock 形态 -->
+  <div class="wb-block">
+    <p class="wb-caption"><strong>Dock</strong> 输入舱上沿：箭头 + 头像 + 状态，整组靠左对齐</p>
+    <div class="workbench" data-wb data-layout="dock" data-lang="zh" data-at-bottom="false">
+      <div class="stream">
+        <div class="column">
+          <div class="msg msg--user">
+            <div class="bubble" data-i18n="q1">会话流往上翻的时候，底部加一个回到底部的入口。</div>
+          </div>
+          <div class="msg">
+            <div class="tool-row">
+              <span class="tool-row__icon">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              </span>
+              <span>Search</span>
+              <span class="tool-row__meta">0.4s</span>
+            </div>
+            <div class="assistant-line" data-i18n="a1">现有滚动跟随的唯一入口是 <strong>#conversation-stream</strong> 的 onscroll，里面已经算出了 <strong>distanceToBottom</strong>，按钮显隐直接复用这个真值。</div>
+            <div class="code-block">const isNearBottomNow =
+  distanceToBottom &lt;= STICK_TO_BOTTOM_THRESHOLD_PX;</div>
+          </div>
+          <div class="msg msg--user">
+            <div class="bubble" data-i18n="q2">按钮不要推动头像，两端各锚各的。</div>
+          </div>
+          <div class="msg">
+            <div class="assistant-line" data-i18n="a2">箭头、头像、状态整组靠输入舱左边框排；按钮隐藏时宽度收缩归零、不保留占位，头像随之平滑回到左边框。</div>
+            <div class="tool-row">
+              <span class="tool-row__icon">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              </span>
+              <span>Read</span>
+              <span class="tool-row__meta">2.1s</span>
+            </div>
+            <div class="assistant-line" data-i18n="a3">Dock 形态保持纯图标圆钮；进场 120ms、退场 200ms，两条曲线分开声明。</div>
+          </div>
+          <div class="msg msg--user">
+            <div class="bubble" data-i18n="q3">点击之后平滑滚动，不要写死 scroll-behavior。</div>
+          </div>
+          <div class="msg">
+            <div class="assistant-line" data-i18n="a4">用一次性的 <strong>scrollTo({ behavior: 'smooth' })</strong>，滚动期间标记为程序化滚动；用户滚轮或触摸立即接管。</div>
+            <div class="code-block">stream.scrollTo({
+  top: stream.scrollHeight,
+  behavior: 'smooth'
+});</div>
+          </div>
+        </div>
+      </div>
+      <div class="dock-scrim" aria-hidden="true"></div>
+      <div class="dock-zone">
+        <div class="dock-inner">
+          <div class="actionband">
+            <button type="button" class="scroll-end" aria-hidden="false" tabindex="0">
+              <span class="scroll-end__icon" aria-hidden="true">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="4" x2="12" y2="20"/><polyline points="5 13 12 20 19 13"/></svg>
+              </span>
+              <span class="scroll-end__label" data-i18n="label">回到底部</span>
+            </button>
+            <div class="dock-presence" aria-hidden="true">
+              <span class="face face--sm">
+                <svg viewBox="0 0 56 56" aria-hidden="true">
+                  <circle cx="21" cy="24" r="3" fill="var(--fx-fg)" />
+                  <circle cx="35" cy="24" r="3" fill="var(--fx-fg)" />
+                  <path d="M21 34c3.6 3.4 10.4 3.4 14 0" stroke="var(--fx-fg)" stroke-width="2.4" fill="none" stroke-linecap="round" />
+                </svg>
+              </span>
+              <span class="presence-capsule">
+                <span class="presence-capsule__verb" data-i18n="thinking">正在读取</span>
+                <span class="presence-capsule__target">conversation.css</span>
+              </span>
+            </div>
+          </div>
+          <div class="composer">
+            <div class="composer__editor"><span data-i18n="placeholder">给 Hermes 发消息…</span></div>
+            <div class="composer__footer">
+              <span class="composer-chip">+</span>
+              <span class="composer-chip">@</span>
+              <span class="composer__spacer"></span>
+              <span class="composer-model">DeepSeek-V4.1</span>
+              <span class="composer-send">↑</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stage 形态 -->
+  <div class="wb-block">
+    <p class="wb-caption"><strong>Stage</strong> 顶部图腾保持只读；输入舱左端箭头带文案</p>
+    <div class="workbench" data-wb data-layout="stage" data-lang="zh" data-at-bottom="false">
+      <div class="stage-presence" aria-hidden="true">
+        <span class="face face--lg">
+          <svg viewBox="0 0 56 56" aria-hidden="true">
+            <circle cx="21" cy="24" r="2.6" fill="var(--fx-fg)" />
+            <circle cx="35" cy="24" r="2.6" fill="var(--fx-fg)" />
+            <path d="M22 34c3.4 3.2 8.6 3.2 12 0" stroke="var(--fx-fg)" stroke-width="2.2" fill="none" stroke-linecap="round" />
+          </svg>
+        </span>
+        <span class="presence-capsule">
+          <span class="presence-capsule__verb" data-i18n="thinking">正在读取</span>
+          <span class="presence-capsule__target">conversation.css</span>
+        </span>
+      </div>
+      <div class="stream">
+        <div class="column">
+          <div class="msg msg--user">
+            <div class="bubble" data-i18n="q1">会话流往上翻的时候，底部加一个回到底部的入口。</div>
+          </div>
+          <div class="msg">
+            <div class="assistant-line" data-i18n="a1b">Stage 形态下，大图腾仍在对话区顶部居中；滚动入口留在输入舱左端，两者分属不同层，不互相污染。</div>
+            <div class="tool-row">
+              <span class="tool-row__icon">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              </span>
+              <span>Search</span>
+              <span class="tool-row__meta">0.4s</span>
+            </div>
+            <div class="assistant-line" data-i18n="a5">按钮从 32px 圆钮展开为「箭头 + 文案」胶囊，文案走 i18n 字典，中文「回到底部」、英文「Scroll to end」。</div>
+          </div>
+          <div class="msg msg--user">
+            <div class="bubble" data-i18n="q2">按钮不要推动头像，两端各锚各的。</div>
+          </div>
+          <div class="msg">
+            <div class="assistant-line" data-i18n="a6">Stage 下右端留空，箭头与文案仍在输入舱左边框上；按钮出现或消失都不改变输入舱几何。</div>
+            <div class="code-block">conversation.scrollToEnd
+  zh-CN: 回到底部
+  en-US: Scroll to end</div>
+          </div>
+          <div class="msg msg--user">
+            <div class="bubble" data-i18n="q3">点击之后平滑滚动，不要写死 scroll-behavior。</div>
+          </div>
+          <div class="msg">
+            <div class="assistant-line" data-i18n="a4">用一次性的 <strong>scrollTo({ behavior: 'smooth' })</strong>，滚动期间标记为程序化滚动；用户滚轮或触摸立即接管。</div>
+          </div>
+        </div>
+      </div>
+      <div class="dock-scrim" aria-hidden="true"></div>
+      <div class="dock-zone">
+        <div class="dock-inner">
+          <div class="actionband">
+            <button type="button" class="scroll-end" aria-hidden="false" tabindex="0">
+              <span class="scroll-end__icon" aria-hidden="true">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="4" x2="12" y2="20"/><polyline points="5 13 12 20 19 13"/></svg>
+              </span>
+              <span class="scroll-end__label" data-i18n="label">回到底部</span>
+            </button>
+          </div>
+          <div class="composer">
+            <div class="composer__editor"><span data-i18n="placeholder">给 Hermes 发消息…</span></div>
+            <div class="composer__footer">
+              <span class="composer-chip">+</span>
+              <span class="composer-chip">@</span>
+              <span class="composer__spacer"></span>
+              <span class="composer-model">DeepSeek-V4.1</span>
+              <span class="composer-send">↑</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var I18N = {
+      zh: {
+        label: '回到底部',
+        aria: '滚动到会话末尾',
+        thinking: '正在读取',
+        placeholder: '给 Hermes 发消息…',
+        q1: '会话流往上翻的时候，底部加一个回到底部的入口。',
+        q2: '按钮不要推动头像，两端各锚各的。',
+        q3: '点击之后平滑滚动，不要写死 scroll-behavior。',
+        a1: '现有滚动跟随的唯一入口是 #conversation-stream 的 onscroll，里面已经算出了 distanceToBottom，按钮显隐直接复用这个真值。',
+        a1b: 'Stage 形态下，大图腾仍在对话区顶部居中；滚动入口留在输入舱左端，两者分属不同层，不互相污染。',
+        a2: '箭头、头像、状态整组靠输入舱左边框排；按钮隐藏时宽度收缩归零、不保留占位，头像随之平滑回到左边框。',
+        a3: 'Dock 形态保持纯图标圆钮；进场 120ms、退场 200ms，两条曲线分开声明。',
+        a4: '用一次性的 scrollTo({ behavior: "smooth" })，滚动期间标记为程序化滚动；用户滚轮或触摸立即接管。',
+        a5: '按钮从 32px 圆钮展开为「箭头 + 文案」胶囊，文案走 i18n 字典，中文「回到底部」、英文「Scroll to end」。',
+        a6: 'Stage 下右端留空，箭头与文案仍在输入舱左边框上；按钮出现或消失都不改变输入舱几何。'
+      },
+      en: {
+        label: 'Scroll to end',
+        aria: 'Scroll to end of conversation',
+        thinking: 'Reading',
+        placeholder: 'Message Hermes…',
+        q1: 'Add a way back to the bottom when I scroll up.',
+        q2: 'The button must not push the avatar around.',
+        q3: 'Scroll smoothly on click, without hardcoding scroll-behavior.',
+        a1: 'The only scroll entry is onscroll on #conversation-stream, which already computes distanceToBottom. Reuse that truth for the button.',
+        a1b: 'In the stage layout the large totem stays at the top center; the scroll control stays at the left edge of the composer. Different layers, no interference.',
+        a2: 'Arrow, avatar and status align to the composer left border. When hidden, the button collapses to zero width with no reserved slot, so the avatar glides back to the left border.',
+        a3: 'Dock keeps a pure icon circle; 120ms enter and 200ms exit are declared separately.',
+        a4: 'Use a one-shot scrollTo({ behavior: "smooth" }) and mark it programmatic while scrolling; wheel or touch takes over immediately.',
+        a5: 'The button expands from a 32px circle into an arrow + label pill. The label lives in i18n: 回到底部 for zh-CN, Scroll to end for en-US.',
+        a6: 'Stage leaves the right side empty; the arrow and label still align to the composer left border. Showing or hiding never changes composer geometry.'
+      }
+    };
+
+    var lang = 'zh';
+    var THRESHOLD = 48;
+
+    function applyI18n() {
+      var dict = I18N[lang];
+      document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+      document.querySelectorAll('[data-i18n]').forEach(function (node) {
+        var key = node.getAttribute('data-i18n');
+        if (dict[key]) node.textContent = dict[key];
+      });
+      document.querySelectorAll('.scroll-end').forEach(function (button) {
+        button.setAttribute('aria-label', dict.aria);
+      });
+    }
+
+    function initWorkbench(wb) {
+      var stream = wb.querySelector('.stream');
+      var button = wb.querySelector('.scroll-end');
+      var ticking = false;
+
+      function update() {
+        var distance = stream.scrollHeight - stream.scrollTop - stream.clientHeight;
+        var atBottom = distance <= THRESHOLD;
+        wb.setAttribute('data-at-bottom', atBottom ? 'true' : 'false');
+        button.setAttribute('aria-hidden', atBottom ? 'true' : 'false');
+        button.setAttribute('tabindex', atBottom ? '-1' : '0');
+      }
+
+      function onScroll() {
+        if (ticking) return;
+        ticking = true;
+        requestAnimationFrame(function () {
+          ticking = false;
+          update();
+        });
+      }
+
+      function scrollToEnd() {
+        stream.scrollTo({ top: stream.scrollHeight, behavior: 'smooth' });
+      }
+
+      stream.addEventListener('scroll', onScroll, { passive: true });
+      button.addEventListener('click', scrollToEnd);
+
+      // 初始停在底部上方 80px：按钮可见，且底部内容落在操作带之上。
+      // 字体加载会改变 scrollHeight，必须在校正一次，否则内容底部会滑到输入舱背后。
+      function snap() {
+        var max = stream.scrollHeight - stream.clientHeight;
+        stream.scrollTop = Math.max(0, max - 80);
+        update();
+      }
+      setTimeout(snap, 60);
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(function () { setTimeout(snap, 30); });
+      }
+
+      wb.__demo = function () {
+        stream.scrollTop = 0;
+        update();
+        setTimeout(scrollToEnd, 900);
+      };
+    }
+
+    document.querySelectorAll('[data-wb]').forEach(initWorkbench);
+
+    document.querySelectorAll('[data-set-lang]').forEach(function (node) {
+      node.addEventListener('click', function () {
+        lang = node.getAttribute('data-set-lang');
+        applyI18n();
+        document.querySelectorAll('[data-set-lang]').forEach(function (peer) {
+          peer.setAttribute('aria-pressed', String(peer === node));
+        });
+      });
+    });
+
+    document.getElementById('demo').addEventListener('click', function () {
+      document.querySelectorAll('[data-wb]').forEach(function (wb) {
+        if (wb.__demo) wb.__demo();
+      });
+    });
+
+    applyI18n();
+  })();
+</script>
+</body>
+</html>

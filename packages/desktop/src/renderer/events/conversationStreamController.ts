@@ -91,6 +91,10 @@ export interface ConversationStreamControllerDeps {
   setSettledLayoutSignature: (val: string) => void;
   isSessionEnterPending?: () => boolean;
   cancelSessionEnter?: () => void;
+  /** 「回到底部」控件显隐同步（幂等，内部去重） */
+  syncScrollToEndVisibility?: () => void;
+  /** 平滑回底会话是否在跑：并入 isProgrammatic，避免减速末段被误判为用户手势 */
+  isSmoothScrollActive?: () => boolean;
   STICK_TO_BOTTOM_THRESHOLD_PX: number;
   MESSAGE_WINDOW_CAPACITY: number;
 }
@@ -388,6 +392,7 @@ export function createConversationStreamController(
       }
 
       streamEl.onscroll = () => {
+        deps.syncScrollToEndVisibility?.();
         schedulePromptNavigatorSync();
 
         const progTarget = getProgrammaticScrollTarget();
@@ -415,7 +420,8 @@ export function createConversationStreamController(
         const inIgnoreWindow = now <= getProgrammaticScrollIgnoreUntil();
         const isLayoutClamp = inIgnoreWindow && streamEl.scrollTop >= previousTop - 8;
         const isProgrammatic =
-          (progTarget !== null && Math.abs(streamEl.scrollTop - progTarget) <= 2)
+          Boolean(deps.isSmoothScrollActive?.())
+          || (progTarget !== null && Math.abs(streamEl.scrollTop - progTarget) <= 2)
           || isLayoutClamp;
 
         if (!enterPending && progTarget !== null && Math.abs(streamEl.scrollTop - progTarget) <= 2) {
@@ -458,6 +464,7 @@ export function createConversationStreamController(
         if (getStreamScrollCooldown() || state.isLoadingOlder) return;
 
         const viewportPrefetch = Math.max(800, streamEl.clientHeight * 1.0);
+        // 【历史兜底 (Deprecated)】纯原生流下恒为 null；保留仅为兼容旧测试。
         const virtualWindowEl = document.querySelector<HTMLElement>('.conv-virtual-window');
         const expandPrefetch = computeExpandPrefetchPx(
           streamEl.clientHeight,

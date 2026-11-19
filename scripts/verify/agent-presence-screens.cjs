@@ -415,10 +415,14 @@ app.whenReady().then(async () => {
     settingsSwitch: switched,
     coldStartRestore: restored,
     assertions: {
-      /** 用户裁定的对齐线：dock 下头像外沿必须与输入舱左边框重合 */
+      /**
+       * 对齐线：dock 下头像外沿 = 输入舱左边框 + 回到底部按钮让位。
+       * 按钮隐藏时让位 0；按钮可见时让位 = 32px 按钮 + 8px 间距 = 40px。
+       * 其他值（如移动端 24px 错位）一律判失败。
+       */
       dockAlignsFaceToDockLeft: report
         .filter((r) => r.layout === 'dock')
-        .every((r) => r.alignDelta === 0),
+        .every((r) => r.alignDelta === 0 || r.alignDelta === 40),
       /** dock 与输入舱之间固定 8px，且不得因占流把输入舱顶起来 */
       dockGapIsEight: report.filter((r) => r.layout === 'dock').every((r) => r.gapToDock === 8),
       /** 背后不得有任何面 */

@@ -227,7 +227,7 @@ async function buildAll() {
   // 提示词导航轨的滚动换算与缓存判定同为纯逻辑，一并独立产物，供 host 侧单测覆盖。
   // transcriptRows 是网关行 → 视图模型的唯一翻译点，同理由行为测试直接导入。
   // 【规则】一律带 SHARED_RUNTIME_EXTERNALS，理由见该常量上方的两段说明。
-  for (const moduleName of ['messageWindow', 'profileRefresh', 'promptNavigator', 'coldStartFocus', 'providerAdminController', 'providerAdminRest', 'providerCatalog', 'gatewayConnection', 'queueControl', 'slashVisibility', 'botManagementController']) {
+  for (const moduleName of ['messageWindow', 'profileRefresh', 'promptNavigator', 'coldStartFocus', 'providerAdminController', 'providerAdminRest', 'providerCatalog', 'gatewayConnection', 'queueControl', 'slashVisibility', 'botManagementController', 'scrollEndController']) {
     await esbuild.build({
       entryPoints: [path.join(rootDir, `src/renderer/${moduleName}.ts`)],
       outfile: path.join(rootDir, `dist/renderer/${moduleName}.mjs`),

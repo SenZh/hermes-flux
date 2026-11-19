@@ -19,6 +19,7 @@ import { ConversationStage } from './ConversationStage.js';
 import { ConversationMessageList } from './ConversationMessageList.js';
 import { PromptNavigatorRail } from './PromptNavigatorRail.js';
 import { AgentPresence, type AgentPresenceSnapshot } from '../AgentPresence.js';
+import { ScrollToEndButton } from './ScrollToEndButton.js';
 import type { ConversationActions, ConversationSnapshot } from './types.js';
 import type { PromptNavigatorActions, PromptNavigatorSnapshot } from '../../lib/promptNavigator.js';
 
@@ -129,6 +130,35 @@ export function mountMessageList(
 
   const update = (): void => {
     root.render(<ConversationMessageList snapshot={getSnapshot()} />);
+  };
+
+  update();
+  return {
+    update,
+    unmount: () => root.unmount(),
+  };
+}
+
+/**
+ * 「回到底部」按钮挂载：宿主只推快照，按钮结构稳定。
+ *
+ * 【约束与规则 (Rules)】同一 host 只允许一个 root；宿主要求已连接；
+ *   显隐与无障碍态不走 React，由 scrollEndController 直接写 dataset。
+ */
+export function mountScrollToEndButton(
+  host: HTMLElement,
+  getSnapshot: () => {
+    label: string;
+    ariaLabel: string;
+    onClick: () => void;
+    onCommit?: () => void;
+  }
+): ConversationMount {
+  if (!host.isConnected) throw new Error('Scroll-to-end host must be connected before mounting');
+  const root: Root = createRoot(host);
+
+  const update = (): void => {
+    root.render(<ScrollToEndButton {...getSnapshot()} />);
   };
 
   update();

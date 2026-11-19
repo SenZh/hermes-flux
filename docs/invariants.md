@@ -25,7 +25,7 @@ JSON 版本强制每条给出唯一 `id`、被测源码 `source`、`symbol` 与�
 | `source` 为真实源码路径 | 违者 FAIL |
 | `source`+`symbol` 组合唯一 | 违者 FAIL |
 
-## 总览（41 条，覆盖 11 个领域）
+## 总览（43 条，覆盖 11 个领域）
 
 ### ATTACH（5 条）
 
@@ -114,7 +114,7 @@ JSON 版本强制每条给出唯一 `id`、被测源码 `source`、`symbol` 与�
 |---|---|---|---|---|
 | `INV-TURN-01` | 看门狗时序参数恒满足夹取与单调（含空时钟回落） | `packages/core/src/turn/slidingWatchdog.ts` → `constructor#clamp` | `sliding-watchdog-formal.test.mjs` | 时钟注入为 null 时回合一开始就崩在熔断器；或上下限倒挂把 30 分钟保险丝缩成几秒 |
 
-### VIEW（4 条）
+### VIEW（6 条）
 
 | 编号 | 主题 | 源码锚点 | 守护测试 | 失效模式 |
 |---|---|---|---|---|
@@ -122,6 +122,8 @@ JSON 版本强制每条给出唯一 `id`、被测源码 `source`、`symbol` 与�
 | `INV-VIEW-02` | 会话记忆容量有界且最新会话必留 | `packages/core/src/viewport/sessionScrollMemory.ts` → `recordSnapshot#lru` | `session-scroll-memory-formal.test.mjs` | 记忆无限增长吃内存；或刚离开的会话被淘汰，切回即丢位置 |
 | `INV-VIEW-03` | 基准行高中位数恒被夹在有效区间内 | `packages/core/src/viewport/adaptiveMedianEstimator.ts` → `addSample#median-clamp` | `viewport-estimator-formal.test.mjs` | 离屏占位高度或超大代码块把基准行高拉偏，长会话滚动条滑块剧烈缩放 |
 | `INV-VIEW-04` | 渲染期视口裁决忠实于进入计划与常规两条语义 | `packages/core/src/viewport/renderScrollDecision.ts` → `decideViewportPin` | `render-scroll-decision-formal.test.mjs` | 进入期误捕获旧 DOM 把上一会话位置写进新会话记忆；或回溯态被误判贴底，切回即跳到最新消息 |
+| `INV-VIEW-05` | 回到底部按钮显隐只由离底距离与门控决定 | `packages/core/src/viewport/scrollEndMachine.ts` → `decideScrollEndVisibility` | `scroll-end-machine-formal.test.mjs` | 平滑末段按钮闪烁；或已到底仍显示按钮 |
+| `INV-VIEW-06` | 切会话/断连取消平滑会话且不写 instant | `packages/core/src/viewport/scrollEndMachine.ts` → `reduceSmoothScrollSession` | `scroll-end-machine-formal.test.mjs` | 切回会话位置飞到半路；旧流残留滚动事件污染新会话进入计划 |
 
 ## 尚未覆盖的领域（刻意登记为空）
 

@@ -147,6 +147,10 @@ export interface StreamViewportHost {
   readonly setSettleMinFrames?: (val: number) => void;
   readonly getSettledLayoutSignature?: () => string;
   readonly setSettledLayoutSignature?: (val: string) => void;
+  /** beginSessionEnter 入口最先触发：用于取消上一会话的平滑回底（禁写 instant） */
+  readonly onBeforeSessionEnter?: () => void;
+  /** finishPinPlan / settleInitialBottom / 底部内边距变化后触发显隐重校 */
+  readonly onViewportSettled?: () => void;
 }
 
 export class StreamViewportManager {
@@ -302,6 +306,8 @@ export class StreamViewportManager {
   public scrollStreamToContentBottom(stream: HTMLElement, reservePx: number): void {
     if (stream.scrollHeight <= stream.clientHeight) return;
 
+    // 【历史兜底 (Deprecated)】纯原生流下 .conv-virtual-window 恒不存在，此处必然为 null；
+    //   保留仅为兼容旧测试，禁止据此恢复切片窗口逻辑。
     const virtualWindow = this.host.getVirtualWindowElement
       ? this.host.getVirtualWindowElement()
       : document.querySelector<HTMLElement>('.conv-virtual-window');
@@ -346,6 +352,21 @@ export class StreamViewportManager {
         residualDrift: Math.round(drift),
       });
     });
+  }
+
+  /**
+   * 一次性平滑回底。
+   * 【规则】只负责发起原生平滑；收敛、续滚、超时与打断由 scrollEndController 管理。
+   *   不修改容器 scroll-behavior，写入后标记程序化滚动。
+   */
+  public scrollStreamToEndSmooth(targetScrollHeight?: number): boolean {
+    const stream = this.host.getStreamElement();
+    if (!stream) return false;
+    if (stream.scrollHeight <= stream.clientHeight) return false;
+    const target = Math.max(0, (targetScrollHeight ?? stream.scrollHeight) - stream.clientHeight);
+    stream.scrollTo({ top: target, behavior: 'smooth' });
+    this.host.markProgrammaticScroll(stream);
+    return true;
   }
 
   /**
@@ -429,6 +450,7 @@ export class StreamViewportManager {
         const prev = stream.style.getPropertyValue('--conv-gutter-bottom');
         if (next !== prev) {
           stream.style.setProperty('--conv-gutter-bottom', next);
+          this.host.onViewportSettled?.();
           if (!this.isSessionEnterPending()) {
             this.setInitialBottomSettling(true);
             this.settleInitialBottom();
@@ -762,6 +784,7 @@ export class StreamViewportManager {
     sessionId: string,
     options: { forcePinToBottom?: boolean; phase?: string } = {}
   ): void {
+    this.host.onBeforeSessionEnter?.();
     if (!sessionId) {
       this.clearSessionEnter();
       return;
@@ -1135,6 +1158,7 @@ export class StreamViewportManager {
     this.setInitialBottomSettling(false);
     this.setSettledLayoutSignature(this.host.layoutSignature());
     this.clearSessionEnter();
+    this.host.onViewportSettled?.();
   }
 
   private runSessionEnterFrame(ticket: number, mode: 'advance' | 'sync' = 'advance'): void {

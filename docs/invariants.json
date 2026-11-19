@@ -320,6 +320,22 @@
       "failure": "进入期误捕获旧 DOM 把上一会话位置写进新会话记忆；或回溯态被误判贴底，切回即跳到最新消息"
     },
     {
+      "id": "INV-VIEW-05",
+      "topic": "回到底部按钮显隐只由离底距离与门控决定",
+      "source": "packages/core/src/viewport/scrollEndMachine.ts",
+      "symbol": "decideScrollEndVisibility",
+      "test": "packages/core/__tests__/formal/scroll-end-machine-formal.test.mjs",
+      "failure": "平滑末段按钮闪烁；或已到底仍显示按钮"
+    },
+    {
+      "id": "INV-VIEW-06",
+      "topic": "切会话/断连取消平滑会话且不写 instant",
+      "source": "packages/core/src/viewport/scrollEndMachine.ts",
+      "symbol": "reduceSmoothScrollSession",
+      "test": "packages/core/__tests__/formal/scroll-end-machine-formal.test.mjs",
+      "failure": "切回会话位置飞到半路；旧流残留滚动事件污染新会话进入计划"
+    },
+    {
       "id": "INV-TURN-01",
       "topic": "看门狗时序参数恒满足夹取与单调（含空时钟回落）",
       "source": "packages/core/src/turn/slidingWatchdog.ts",

@@ -44,6 +44,8 @@ export interface DesktopStreamViewportDeps {
   readonly markProgrammaticScroll: (stream: HTMLElement) => void;
   readonly isPromptJumpSettling: () => boolean;
   readonly getWindowGeom: () => { start: number; end: number; averageRowHeightPx: number };
+  readonly onBeforeSessionEnter?: () => void;
+  readonly onViewportSettled?: () => void;
 }
 
 /**
@@ -73,5 +75,7 @@ export function createDesktopStreamViewport(deps: DesktopStreamViewportDeps): St
     setSettleMinFrames: (val) => { settle.settleMinFrames = val; },
     getSettledLayoutSignature: () => settle.settledLayoutSignature,
     setSettledLayoutSignature: (val) => { settle.settledLayoutSignature = val; },
+    onBeforeSessionEnter: deps.onBeforeSessionEnter,
+    onViewportSettled: deps.onViewportSettled,
   });
 }

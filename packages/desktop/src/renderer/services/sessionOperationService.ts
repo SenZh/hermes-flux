@@ -107,6 +107,8 @@ export interface SessionOperationDeps {
   beginSessionEnter?: SessionEnterBeginHook;
   readonly setLastMessagesSnapshot: (val: unknown) => void;
   captureStreamAnchor?: SessionAnchorCapturer;
+  /** 切会话离开时、captureStreamAnchor 之前调用：取消平滑回底且禁写 instant */
+  readonly cancelSmoothScrollOnLeave?: () => void;
 
   // 跨服务联动
   readonly loadMessages: (sessionId: string, targetBotName?: string) => Promise<void>;
@@ -498,6 +500,7 @@ export class SessionOperationService {
     // Preserve draft & message snapshot for outgoing session
     const currentInputVal = this.getInputValue();
     if (state.activeSessionId && state.activeSessionId !== id) {
+      this.deps.cancelSmoothScrollOnLeave?.();
       this.deps.captureStreamAnchor?.();
       if (currentInputVal !== undefined) {
         this.deps.sessionDrafts.set(state.activeSessionId, currentInputVal);

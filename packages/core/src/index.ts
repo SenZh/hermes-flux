@@ -54,5 +54,6 @@ export * from './session/displayKind.js';
 export * from './viewport/sessionScrollMemory.js';
 export * from './viewport/adaptiveMedianEstimator.js';
 export * from './viewport/renderScrollDecision.js';
+export * from './viewport/scrollEndMachine.js';
 export * from './turn/slidingWatchdog.js';
 export type { AttachedImageResult, PromptSubmitResult, CommandDispatchResult, SlashExecResult, CompleteSlashResult, CompletePathParams, CompletionItemsResult, SessionHistoryResult, GroupsSendResult } from './rpc/contracts/gateway-contract.generated.js';

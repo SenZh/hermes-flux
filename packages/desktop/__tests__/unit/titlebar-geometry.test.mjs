@@ -98,9 +98,15 @@ test('微轨真值：组件 fallback 必须与 styles.css 的 :root 定义完全
 test('展开态真值：LeftRail 的 --rail-w-left fallback 必须等于 LEFT_RAIL_WIDTH.defaultValue', () => {
   const rail = read('packages/ui/src/components-react/LeftRail.tsx');
   const renderer = read('packages/desktop/src/renderer/index.ts');
+  const bootstrap = read('packages/desktop/src/renderer/bootstrap/appBootstrap.ts');
 
-  const defaultValue = /LEFT_RAIL_WIDTH\s*=\s*\{[^}]*defaultValue:\s*(\d+)/.exec(renderer)?.[1];
-  assert.ok(defaultValue, 'renderer 必须保留 LEFT_RAIL_WIDTH 单一真值源');
+  const defaultValue = /LEFT_RAIL_WIDTH\s*=\s*\{[^}]*defaultValue:\s*(\d+)/.exec(bootstrap)?.[1];
+  assert.ok(defaultValue, 'appBootstrap 必须保留 LEFT_RAIL_WIDTH 单一真值源');
+  assert.match(
+    renderer,
+    /LEFT_RAIL_WIDTH[\s\S]*from '\.\/bootstrap\/appBootstrap\.js'/,
+    'renderer 必须从 appBootstrap 导入该真值，禁止本地重复定义',
+  );
   assert.ok(
     rail.includes(`var(--rail-w-left, ${defaultValue}px)`),
     `展开态 fallback 必须与 LEFT_RAIL_WIDTH.defaultValue（${defaultValue}px）一致`,

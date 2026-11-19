@@ -425,19 +425,30 @@ test('在场指示器 · 14 条表现层契约', async (t) => {
     );
     assert.ok(/position:\s*static/.test(dockBlock), 'dock 变体不得再绝对定位（位置由宿主决定）');
 
-    // 【不占流 (Rules)】宿主用 bottom: calc(100% + 8px) 贴在输入舱上沿；
-    //   任何 margin/padding 让位的写法都会把输入舱顶起来，输入舱高度一变就上下跳。
-    const hostBlock = /#react-conv-presence-host\.presence-host--dock \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
-    assert.ok(hostBlock, '必须存在 dock 宿主定位规则');
+    // 【新结构 (Rules)】dock 宿主嵌套在 `.dock-actionbar` 内：操作带承担上沿定位，
+    //   宿主改为 static；让位值必须由 32 + 8 推导，且隐藏态归零。
+    const actionbarBlock = /\.input-dock-container > \.dock-actionbar \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
+    assert.ok(actionbarBlock, '必须存在 dock 操作带定位规则');
     assert.ok(
-      /bottom:\s*calc\(100% \+ 8px\)/.test(hostBlock),
-      'dock 宿主必须绝对贴在输入舱上沿，禁止参与 flex 流',
+      /bottom:\s*calc\(100% \+ 8px\)/.test(actionbarBlock),
+      'dock 操作带必须绝对贴在输入舱上沿，禁止参与 flex 流',
     );
-    assert.ok(/pointer-events:\s*none/.test(hostBlock), 'dock 宿主必须只读，不得拦截输入舱点击');
+    assert.ok(/pointer-events:\s*none/.test(actionbarBlock), '整条操作带不得拦截消息流点击');
+    assert.ok(/z-index:\s*1/.test(actionbarBlock), '操作带必须低于输入舱 popper / 审批菜单');
+
+    const hostBlock = /\.dock-actionbar #react-conv-presence-host\.presence-host--dock \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
+    assert.ok(hostBlock, '必须存在 actionbar 内的 dock 宿主规则');
+    assert.ok(/position:\s*static/.test(hostBlock), '嵌套后宿主不得再次绝对定位');
     assert.ok(
-      !/padding:\s*0 24px/.test(hostBlock),
-      '宿主不得复制 .input-dock-container 的 gutter（双写真值会让对齐静默失效）',
+      /margin-left:\s*calc\(var\(--scroll-end-size\) \+ var\(--scroll-end-gap\)\)/.test(hostBlock),
+      '让位值必须由箭头尺寸 + 间距推导，禁止孤立魔法数',
     );
+    assert.ok(/flex:\s*1 1 auto/.test(hostBlock), '宿主必须可伸缩，避免长工具路径顶破右缘');
+    assert.ok(/min-width:\s*0/.test(hostBlock), '宿主必须允许收缩，否则省略号失效');
+
+    const hiddenHostBlock = /\.dock-actionbar\[data-at-bottom="true"\] #react-conv-presence-host\.presence-host--dock \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
+    assert.ok(hiddenHostBlock, '必须存在按钮隐藏时的头像让位归零规则');
+    assert.ok(/margin-left:\s*0/.test(hiddenHostBlock), '隐藏态头像必须回到输入舱左边框');
 
     // 空闲轮播的两个钩子必须在样式里落地，否则文案换了但头像不动
     assert.ok(

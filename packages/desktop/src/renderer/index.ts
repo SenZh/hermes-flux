@@ -24,13 +24,22 @@ import { createLeftRailController } from './events/leftRailController.js';
 import { createPresenceController } from './events/presenceController.js';
 import { createOnboardingController } from './events/onboardingController.js';
 import { createTitlebarController } from './titlebarController.js';
-import { createAppBootstrap } from './bootstrap/appBootstrap.js';
+import {
+  createAppBootstrap,
+  LEFT_RAIL_WIDTH,
+  beginLeftRailResize,
+  bindRailResizeEvents,
+  clampLeftRailWidth,
+  resetLeftRailWidth,
+} from './bootstrap/appBootstrap.js';
+import { createScrollEndController } from './scrollEndController.js';
 import {
   type SettingsSectionId, type SettingsSnapshot, type SettingsActions,
   renderMarkdown, escapeHtml, MessageViewModel, type LeftRailGroupRoom,
   type LeftRailSession, type LeftRailProfile, t, type RenderInputDockSnapshot,
   resolveSkinId, type LeftRailActions, type LeftRailSnapshot, type TitlebarSnapshot,
   mountAgentPresence, type AgentPresenceSnapshot, type PromptNavigatorSnapshot,
+  mountScrollToEndButton,
   type PromptNavigatorActions, type ConversationMount, type ConversationSnapshot,
   type ConversationMessageVM, loadFontPreferences, applyFontPreferences,
   loadActivityIndicatorVariant, saveActivityIndicatorVariant, resolveActivityIndicatorVariant,
@@ -163,13 +172,6 @@ addLogSink((entry) => {
 });
 
 const LOG_LEVEL_STORAGE_KEY = 'hermes_flux_log_level';
-const LEFT_RAIL_WIDTH = { min: 264, max: 480, defaultValue: 264 } as const;
-
-function clampLeftRailWidth(raw: string | null): number {
-  const parsed = raw ? Number.parseFloat(raw) : Number.NaN;
-  if (!Number.isFinite(parsed)) return LEFT_RAIL_WIDTH.defaultValue;
-  return Math.round(Math.max(LEFT_RAIL_WIDTH.min, Math.min(LEFT_RAIL_WIDTH.max, parsed)));
-}
 
 function resolveInitialLogLevel(): LogLevel {
   try {
@@ -667,6 +669,8 @@ streamViewportManager = createDesktopStreamViewport({
   markProgrammaticScroll: (stream) => markProgrammaticScroll(stream),
   isPromptJumpSettling: () => promptNavigatorManager.isJumpSettling(),
   getWindowGeom: () => ({ start: messageWindowManager.getMessageWindowStart(), end: messageWindowManager.getMessageWindowEnd(), averageRowHeightPx: messageWindowManager.getAverageRowHeightPx() }),
+  onBeforeSessionEnter: () => scrollEndController.cancelSmoothScroll({ stopNativeSmooth: false, hideImmediately: true }),
+  onViewportSettled: () => scrollEndController.syncVisibility(),
 });
 
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
@@ -743,6 +747,7 @@ sessionOperationService = createSessionOperationService({
     activeStreamingLiveId = null; activeStreamingBotName = null; state.isStreaming = false;
   },
   setPendingScrollToBottom: (v) => renderCoordinator.setPendingScrollToBottom(v),
+  cancelSmoothScrollOnLeave: () => scrollEndController.cancelSmoothScroll({ stopNativeSmooth: false, hideImmediately: true }),
   setLastMessagesSnapshot: (v) => renderCoordinator.setLastMessagesSnapshot(v as RenderMessagesSnapshot | null),
   captureStreamAnchor: () => captureStreamAnchor(),
   beginSessionEnter: (id, opts) => streamViewportManager.beginSessionEnter(id, {
@@ -1156,7 +1161,7 @@ function ensureAgentPresenceHost(layout: 'stage' | 'dock'): HTMLElement | null {
       host.id = 'react-conv-presence-host';
     }
     host.classList.add('presence-host--dock');
-    if (host.parentElement !== dock || dock.firstElementChild !== host) {
+    if (!host.closest('.dock-actionbar') && (host.parentElement !== dock || dock.firstElementChild !== host)) {
       dock.insertBefore(host, dock.firstElementChild);
     }
     return host;
@@ -1176,6 +1181,20 @@ function ensureAgentPresenceHost(layout: 'stage' | 'dock'): HTMLElement | null {
 }
 
 let turnStartedSessionId: string | null = null;
+const scrollEndController = createScrollEndController({
+  isGatewayConnected: () => state.gatewayConnected,
+  getPresenceLayout: () => state.presenceLayout,
+  getLang: () => state.lang,
+  t: (key) => t(key),
+  getStreamElement: () => document.getElementById('conversation-stream'),
+  getDockElement: () => document.querySelector<HTMLElement>('.input-dock-container'),
+  isSessionEnterPending: () => streamViewportManager.isSessionEnterPending(),
+  isInitialBottomSettling: () => streamSettleState.initialBottomSettling,
+  scrollStreamToEndSmooth: (target) => streamViewportManager.scrollStreamToEndSmooth(target),
+  scrollStreamToBottomFallback: (reason) => scrollStreamToBottom(reason),
+  mountButton: (host, getSnapshot) => mountScrollToEndButton(host, getSnapshot),
+});
+
 const presenceController = createPresenceController({
   getState: () => state,
   resolveAgentAvatar: (name) => resolveAgentAvatar(name),
@@ -1189,6 +1208,7 @@ const presenceController = createPresenceController({
 function syncAgentPresenceHost(): void {
   const presenceHost = ensureAgentPresenceHost(state.presenceLayout);
   presenceController.syncAgentPresenceHost();
+  scrollEndController.syncHost();
 }
 
 function syncAgentPresence(): void {
@@ -1220,6 +1240,7 @@ const settingsDataService = createSettingsDataService({
   resolveSkinId: (theme) => resolveSkinId(theme), writePresenceLayout: (layout) => writePresenceLayout(layout === 'dock' ? 'dock' : 'stage'),
   onPresenceLayoutChanged: () => {
     agentPresenceHost = null; lastAgentPresenceFingerprint = ''; presenceController.resetPresenceHost();
+    scrollEndController.syncHost();
   },
   profileAvatarCache, persistAvatarCache: () => persistAvatarCache(),
 });
@@ -1234,7 +1255,10 @@ const getSettingsSnapshot = () => settingsDataService.getSettingsSnapshot();
 const ensureSettingsSectionData = (section: SettingsSectionId, force = false) => settingsDataService.ensureSettingsSectionData(section, force);
 const createSettingsActions = (): SettingsActions => settingsDataService.createSettingsActions();
 const syncReactSettings = () => settingsDataService.syncReactSettings();
-const syncLocale = () => setLocale(state.lang === 'en' ? 'en-US' : 'zh-CN');
+const syncLocale = () => {
+  setLocale(state.lang === 'en' ? 'en-US' : 'zh-CN');
+  scrollEndController.syncHost();
+};
 const mountReactShellComponents = () => renderCoordinator.mountReactShellComponents();
 const render = () => renderCoordinator.render();
 
@@ -1279,6 +1303,8 @@ function bindEvents(): void {
 
 const conversationStreamController = createConversationStreamController({
   getState: () => state, render: () => render(), safeCopyText: (text) => safeCopyText(text),
+  syncScrollToEndVisibility: () => scrollEndController.syncVisibility(),
+  isSmoothScrollActive: () => scrollEndController.isSmoothScrollActive(),
   setTimedDockNotice: (msg, dur) => setTimedDockNotice(msg, dur), isStreamingActiveForCurrentSession: () => isStreamingActiveForCurrentSession(),
   t: (key) => t(key), getGatewayClient: () => gatewayClient, getRpcCaller: () => rpcCaller,
   getInteractiveService: () => interactiveService, selectSession: (id) => selectSession(id),
@@ -1323,94 +1349,6 @@ if (typeof window !== 'undefined') {
 const stopRunningToolTimers = () => conversationStreamController.stopRunningToolTimers();
 const updateRunningToolTimers = () => conversationStreamController.updateRunningToolTimers();
 
-function beginLeftRailResize(event: React.PointerEvent<HTMLDivElement>): void {
-  if (event.button !== 0) return;
-  event.preventDefault(); event.stopPropagation();
-  const handle = event.currentTarget; const startX = event.clientX; const cssVar = '--rail-w-left';
-  const startWidth = clampLeftRailWidth(getComputedStyle(document.documentElement).getPropertyValue(cssVar) || String(LEFT_RAIL_WIDTH.defaultValue));
-  // gate-degrade: 指针捕获失败安全忽略
-  try { handle.setPointerCapture(event.pointerId); } catch {}
-  document.documentElement.setAttribute('data-rail-resizing', 'left');
-  let currentW = startWidth; let rafId = 0;
-  const onPointerMove = (moveEv: PointerEvent) => {
-    currentW = clampLeftRailWidth(String(startWidth + (moveEv.clientX - startX)));
-    if (!rafId) {
-      rafId = requestAnimationFrame(() => {
-        document.documentElement.style.setProperty(cssVar, `${currentW}px`);
-        rafId = 0;
-      });
-    }
-  };
-  const onPointerUp = () => {
-    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
-    // gate-degrade: 释放指针捕获失败安全忽略
-    try { handle.releasePointerCapture(event.pointerId); } catch {}
-    window.removeEventListener('pointermove', onPointerMove);
-    window.removeEventListener('pointerup', onPointerUp);
-    window.removeEventListener('pointercancel', onPointerUp);
-    const settled = clampLeftRailWidth(String(currentW));
-    document.documentElement.style.setProperty(cssVar, `${settled}px`);
-    localStorage.setItem('hermes_flux_rail_w_left', String(settled));
-    requestAnimationFrame(() => document.documentElement.removeAttribute('data-rail-resizing'));
-  };
-  window.addEventListener('pointermove', onPointerMove, { passive: true });
-  window.addEventListener('pointerup', onPointerUp);
-  window.addEventListener('pointercancel', onPointerUp);
-}
-
-function resetLeftRailWidth(): void {
-  document.documentElement.style.setProperty('--rail-w-left', `${LEFT_RAIL_WIDTH.defaultValue}px`);
-  localStorage.setItem('hermes_flux_rail_w_left', String(LEFT_RAIL_WIDTH.defaultValue));
-}
-
-function bindRailResizeEvents(): void {
-  document.querySelectorAll<HTMLElement>('.rail-resize-handle').forEach((handle) => {
-    if (handle.dataset.railHandle === 'left') {
-      handle.ondblclick = (e) => { e.stopPropagation(); resetLeftRailWidth(); };
-      return;
-    }
-    const cssVar = '--rail-w-right';
-    const minW = 260; const maxW = Math.round(window.innerWidth * 0.85); const defaultW = 420;
-    const storageKey = 'hermes_flux_rail_w_right';
-
-    handle.ondblclick = (e) => {
-      e.stopPropagation();
-      document.documentElement.style.setProperty(cssVar, `${defaultW}px`);
-      localStorage.setItem(storageKey, String(defaultW));
-    };
-
-    handle.onpointerdown = (ev: PointerEvent) => {
-      if (ev.button !== 0) return;
-      ev.preventDefault(); ev.stopPropagation();
-      // gate-degrade: 右轨指针捕获失败安全忽略
-      try { handle.setPointerCapture(ev.pointerId); } catch {}
-      const startX = ev.clientX;
-      const startWidth = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(cssVar)) || defaultW;
-      document.documentElement.setAttribute('data-rail-resizing', 'right');
-      let currentW = startWidth; let rafId = 0;
-      const onPointerMove = (moveEv: PointerEvent) => {
-        const delta = (moveEv.clientX - startX) * -1;
-        currentW = Math.max(minW, Math.min(maxW, startWidth + delta));
-        if (!rafId) {
-          rafId = requestAnimationFrame(() => {
-            document.documentElement.style.setProperty(cssVar, `${currentW}px`);
-            rafId = 0;
-          });
-        }
-      };
-      const onPointerUp = (upEv: PointerEvent) => {
-        if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
-        // gate-degrade: 右轨释放指针捕获失败安全忽略
-        try { handle.releasePointerCapture(upEv.pointerId); } catch {}
-        window.removeEventListener('pointermove', onPointerMove); window.removeEventListener('pointerup', onPointerUp); window.removeEventListener('pointercancel', onPointerUp);
-        document.documentElement.style.setProperty(cssVar, `${Math.round(currentW)}px`);
-        localStorage.setItem(storageKey, String(Math.round(currentW)));
-        requestAnimationFrame(() => document.documentElement.removeAttribute('data-rail-resizing'));
-      };
-      window.addEventListener('pointermove', onPointerMove, { passive: true }); window.addEventListener('pointerup', onPointerUp); window.addEventListener('pointercancel', onPointerUp);
-    };
-  });
-}
 
 const dropdownKeybindController = createDropdownKeybindController({
   getState: () => state, render: () => render(),
