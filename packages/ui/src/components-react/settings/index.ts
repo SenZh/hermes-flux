@@ -12,8 +12,13 @@ export {
 } from './providerAttachOrchestration.js';
 export {
   SETTINGS_SECTIONS,
+  SETTINGS_SEARCH_ENTRIES,
+  buildModelSelectGroups,
+  filterSettingsEntries,
   filterSettingsSections,
+  isGatewayTestStale,
   resolveSettingsSection,
+  type SettingsSearchEntry,
   type SettingsActions,
   type SettingsActionResult,
   type ToggleProviderAgentOptions,
@@ -25,6 +30,7 @@ export {
   type SettingsSnapshot,
   type SettingsProfileRow,
   type SettingsBotRow,
+  type BotExitTarget,
   type CustomEndpointRow,
   type OauthProviderRow,
   type ProviderView,

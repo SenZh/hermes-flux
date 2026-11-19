@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 设置中心的域模型（纯数据，零 DOM / 零网络）。
  *
  * 【设计意图 (Why)】
@@ -86,6 +86,69 @@ export function filterSettingsSections(
     const haystack = `${translate(section.titleKey)} ${translate(section.descKey)}`.toLowerCase();
     return haystack.includes(needle);
   });
+}
+
+/**
+ * 设置项检索索引（唯一真值）。
+ *
+ * 【设计意图 (Why)】只按一级分类名过滤时，输入「字号」「密码」「版本」「SOUL」全部落空，
+ *   用户明明知道有这项设置却搜不到。索引把每个真实设置项登记为
+ *   `{ 锚点 id, 分区, 标题 key }`，检索直接命中条目并可跳转定位。
+ *
+ * 【防范的历史坑 (Pitfall)】索引与控件各写一套文案会导致"搜到了但跳过去没有这一项"；
+ *   这里的 `id` 必须与控件上的 `data-settings-anchor` 逐字一致（测试会校验）。
+ *
+ * 【约束与规则 (Rules)】只登记真实存在、可跳转的设置项；不登记纯说明文字与动态列表行。
+ */
+export interface SettingsSearchEntry {
+  /** 与控件 `data-settings-anchor` 逐字一致的锚点 id。 */
+  id: string;
+  sectionId: SettingsSectionId;
+  labelKey: I18nKey;
+}
+
+export const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = Object.freeze([
+  { id: 'theme', sectionId: 'appearance', labelKey: 'settings.themeTitle' },
+  { id: 'activity', sectionId: 'appearance', labelKey: 'settings.activityTitle' },
+  { id: 'ui-font', sectionId: 'appearance', labelKey: 'settings.uiFont' },
+  { id: 'code-font', sectionId: 'appearance', labelKey: 'settings.codeFont' },
+  { id: 'font-size', sectionId: 'appearance', labelKey: 'settings.textSize' },
+  { id: 'presence-layout', sectionId: 'appearance', labelKey: 'settings.presenceLayout' },
+  { id: 'language', sectionId: 'appearance', labelKey: 'settings.languageLabel' },
+  { id: 'providers-list', sectionId: 'providers', labelKey: 'settings.sectionProviders' },
+  { id: 'bot-id', sectionId: 'agents', labelKey: 'bot.idLabel' },
+  { id: 'bot-name', sectionId: 'agents', labelKey: 'bot.nameLabel' },
+  { id: 'bot-model', sectionId: 'agents', labelKey: 'bot.modelBinding' },
+  { id: 'bot-desc', sectionId: 'agents', labelKey: 'bot.descLabel' },
+  { id: 'bot-default', sectionId: 'agents', labelKey: 'bot.setDefault' },
+  { id: 'bot-soul', sectionId: 'agents', labelKey: 'bot.soulTitle' },
+  { id: 'bot-toolsets', sectionId: 'agents', labelKey: 'bot.toolsetsTitle' },
+  { id: 'bot-skills', sectionId: 'agents', labelKey: 'bot.skillsTitle' },
+  { id: 'bot-mcp', sectionId: 'agents', labelKey: 'bot.mcpTitle' },
+  { id: 'bot-memory', sectionId: 'agents', labelKey: 'bot.memoryTitle' },
+  { id: 'ext-mcp', sectionId: 'extensions', labelKey: 'settings.mcpTitle' },
+  { id: 'ext-skills', sectionId: 'extensions', labelKey: 'settings.skillsTitle' },
+  { id: 'gateway-url', sectionId: 'connection', labelKey: 'settings.gatewayUrl' },
+  { id: 'gateway-username', sectionId: 'connection', labelKey: 'settings.gatewayUsername' },
+  { id: 'gateway-password', sectionId: 'connection', labelKey: 'settings.gatewayPassword' },
+  { id: 'gateway-profile', sectionId: 'connection', labelKey: 'settings.gatewayProfile' },
+  { id: 'about-version', sectionId: 'about', labelKey: 'settings.aboutVersion' },
+  { id: 'about-platform', sectionId: 'about', labelKey: 'settings.aboutPlatform' },
+  { id: 'about-protocol', sectionId: 'about', labelKey: 'settings.aboutProtocol' },
+] as const);
+
+/**
+ * 按当前语言过滤设置项索引。空查询返回空数组（不干扰导航的"全量"语义）。
+ * 【规则】匹配是大小写无关的包含；不引入模糊匹配与拼音，避免"搜啥都有"。
+ */
+export function filterSettingsEntries(
+  entries: readonly SettingsSearchEntry[],
+  query: string,
+  translate: (key: I18nKey) => string,
+): SettingsSearchEntry[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [];
+  return entries.filter((entry) => translate(entry.labelKey).toLowerCase().includes(needle));
 }
 
 /** 网关数据的三态：显式区分"没数据"与"加载失败"。 */export type SettingsLoadable<T> =
@@ -262,6 +325,69 @@ export interface GatewayDraft {
   username: string;
   password: string;
   profileName: string;
+}
+
+/**
+ * 连接测试结论是否已被草稿修改作废。
+ *
+ * 【设计意图 (Why)】`testStatus` 由壳层持有，组件无权回写；把"点测试时的草稿指纹"与
+ *   当前草稿比较，就能在不改快照结构的前提下让旧结论立即失效。
+ * 【约束与规则】`tested === null` 表示本组件没发起过测试（结论可能来自连接流程），
+ *   此时不得把结论判为过期。
+ */
+export function isGatewayTestStale(tested: GatewayDraft | null, draft: GatewayDraft): boolean {
+  if (!tested) return false;
+  return (
+    tested.url !== draft.url ||
+    tested.username !== draft.username ||
+    tested.password !== draft.password ||
+    tested.profileName !== draft.profileName
+  );
+}
+
+/** 模型下拉的分组输入（文案由调用方翻译，本函数零 i18n 依赖）。 */
+export interface ModelSelectGroupsInput {
+  /** 按 Provider 归并后的可选模型。 */
+  groups: ReadonlyArray<{ name: string; models: ReadonlyArray<{ id: string; name: string }> }>;
+  currentModel: string;
+  currentModelOffline: boolean;
+  labels: {
+    offline: string;
+    unbound: string;
+    catalogUnavailable: string;
+  };
+}
+
+/**
+ * 构造 BOT 模型下拉的分组数据。
+ *
+ * 【设计意图 (Why)】离线项、未绑定、目录不可用这三种"占位项"必须排在真实目录之前，
+ *   且一律 disabled —— 它们只负责让用户看见当前绑定，不允许通过它们改写 provider。
+ * 【约束与规则】纯函数，零 React / 零 i18n；文案全部由 labels 传入，可直接单测。
+ */
+export function buildModelSelectGroups(
+  input: ModelSelectGroupsInput,
+): Array<{ label: string; options: Array<{ value: string; label: string; disabled?: boolean }> }> {
+  const { groups, currentModel, currentModelOffline, labels } = input;
+  const result: Array<{ label: string; options: Array<{ value: string; label: string; disabled?: boolean }> }> = [];
+
+  /*
+   * 三个占位分支必须互斥。
+   * 【为什么】`groups.length === 0` 与 `!currentModel` 可以同时成立；若各 push 一次，
+   *   会产生两个 `value: ''` 的重复占位与两个空 label 分组（React 重复 key）。
+   * 【优先级】目录不可用 > 未绑定 > 离线：目录都读不到时，"未绑定"没有可操作性。
+   */
+  if (groups.length === 0) {
+    result.push({ label: '', options: [{ value: currentModel, label: labels.catalogUnavailable, disabled: true }] });
+  } else if (!currentModel) {
+    result.push({ label: '', options: [{ value: '', label: labels.unbound, disabled: true }] });
+  } else if (currentModelOffline) {
+    result.push({ label: '', options: [{ value: currentModel, label: labels.offline, disabled: true }] });
+  }
+  for (const group of groups) {
+    result.push({ label: group.name, options: group.models.map((model) => ({ value: model.id, label: model.name })) });
+  }
+  return result;
 }
 
 /** 单次行级操作的结局：失败必须带原因；用户主动取消不算错误。 */

@@ -1416,7 +1416,7 @@ const dropdownKeybindController = createDropdownKeybindController({
   getState: () => state, render: () => render(),
   switchModel: (model, provider) => switchModel(model, provider), switchReasoning: (level) => switchReasoning(level),
   modalInteractionController, ensureSettingsSectionData: (section) => ensureSettingsSectionData(section),
-  getLastInputDockSnapshot: () => renderCoordinator.getLastInputDockSnapshot(),
+  requestSettingsExit: () => settingsDataService.requestSettingsExit(), getLastInputDockSnapshot: () => renderCoordinator.getLastInputDockSnapshot(),
   setLastInputDockSnapshot: (snapshot) => renderCoordinator.setLastInputDockSnapshot(snapshot),
 });
 

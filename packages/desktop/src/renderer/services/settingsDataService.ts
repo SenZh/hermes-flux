@@ -45,6 +45,7 @@ import {
   type SettingsSectionId,
   type SettingsSnapshot,
   type SettingsActions,
+  type BotExitTarget,
   type GatewayDraft,
   type ToggleProviderAgentResult,
   type I18nKey,
@@ -107,6 +108,8 @@ export interface SettingsDataService {
   getSettingsSnapshot(): SettingsSnapshot;
   ensureSettingsSectionData(section: SettingsSectionId, force?: boolean): void;
   createSettingsActions(): SettingsActions;
+  /** 关闭设置中心的唯一出口（含脏稿拦截）；全局快捷键与标题栏都必须走这里。 */
+  requestSettingsExit(target?: BotExitTarget): void;
   syncReactSettings(): void;
   getSettingsController(): ReturnType<typeof createSettingsController>;
   getProviderAdminController(): ReturnType<typeof createProviderAdminController>;
@@ -121,6 +124,18 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
   let settingsController: ReturnType<typeof createSettingsController> | null = null;
   let providerAdminController: ReturnType<typeof createProviderAdminController> | null = null;
   let botManagementController: ReturnType<typeof createBotManagementController> | null = null;
+
+  /**
+   * 宿主级脏检查与待执行离场目标。
+   *
+   * 【设计意图】草稿池由控制器持有，但"离场前是否确认"属于宿主导航职责：
+   *   由 BOT 面板注册一个只读探针，切导航 / 关弹窗 / Esc 统一走 requestSettingsExit，
+   *   命中脏稿时把目标挂起，等用户在确认框里选「保留 / 放弃 / 取消」。
+   * 【规则】目标只允许一个（后一次离场请求覆盖前一次），确认后必须立即清空，
+   *   否则下一次打开设置会凭空弹出上一轮的确认框。
+   */
+  let botDirtyGuard: (() => boolean) | null = null;
+  let pendingBotExit: BotExitTarget | null = null;
 
   const inFlightProviderBindings = new Map<
     string,
@@ -381,8 +396,52 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
     return botManagementController;
   }
 
+  /**
+   * 离场请求的唯一入口：切导航、关闭弹窗、Esc 全部经过这里。
+   *
+   * 【规则】
+   *   1. 只有当前停在 agents 域时才询问脏稿——离开其它域不可能丢 BOT 草稿；
+   *   2. 命中脏稿时只挂起目标、不改任何导航状态，等确认框裁决；
+   *   3. 用户取消必须清空挂起目标，否则下一次请求会复用过期目标。
+   */
+  function requestSettingsExit(target: BotExitTarget = { kind: 'close' }): void {
+    const state = deps.getState();
+    if (state.settingsSection === 'agents' && hasUnsavedBotDrafts()) {
+      pendingBotExit = target;
+      deps.render();
+      return;
+    }
+    performSettingsExit(target);
+  }
+
+  /**
+   * 是否存在未保存的 BOT 草稿（跨全池，不只看当前选中的那个）。
+   *
+   * 【为什么必须看全池】草稿池是 `Record<botId, BotDraftState>`，切换 BOT 不会清理上一个；
+   *   只看 active bot 会出现「改 A → 切到 B → 关设置」完全无提示，A 的修改被悄悄留在本地。
+   * 【规则】面板注册的守卫作为补充信号（表单本地未落池的改动），任一为真即视为脏。
+   */
+  function hasUnsavedBotDrafts(): boolean {
+    const state = deps.getState();
+    return botDirtyGuard?.() === true || Object.keys(state.botDrafts).length > 0;
+  }
+
+  function performSettingsExit(target: BotExitTarget): void {
+    const state = deps.getState();
+    pendingBotExit = null;
+    if (target.kind === 'close') {
+      state.isSettingsOpen = false;
+    } else {
+      state.settingsSection = target.section;
+      ensureSettingsSectionData(target.section);
+    }
+    deps.render();
+  }
+
   function openBotSettings(botId: string): void {
     const state = deps.getState();
+    // 显式打开某个 BOT 是一次新的入场：上一轮挂起的离场目标不得残留。
+    pendingBotExit = null;
     state.isSettingsOpen = true;
     state.settingsSection = 'agents';
     state.botManagementActiveBotId = botId;
@@ -453,7 +512,7 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
         },
         busy: false,
       },
-      exitPrompt: null,
+      exitPrompt: pendingBotExit ? { target: pendingBotExit } : null,
       errorBanner: state.botManagementError,
       confirmPending: state.botManagementConfirm,
       highlightBotId: undefined,
@@ -463,6 +522,9 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
 
   function getSettingsSnapshot(): SettingsSnapshot {
     const state = deps.getState();
+    // 兜底：任何路径把设置页关掉（含未来新增的入口）后，挂起的离场目标都必须失效，
+    // 否则下一次打开会凭空弹出上一轮的确认框。
+    if (!state.isSettingsOpen) pendingBotExit = null;
     return {
       isOpen: state.isSettingsOpen,
       section: state.settingsSection,
@@ -538,13 +600,12 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
     const state = deps.getState();
     return {
       onClose: () => {
-        state.isSettingsOpen = false;
-        deps.render();
+        requestSettingsExit({ kind: 'close' });
       },
       onSelectSection: (section) => {
-        state.settingsSection = section;
-        ensureSettingsSectionData(section);
-        deps.render();
+        // 点当前项不构成离场，不做脏检查，避免误弹确认框。
+        if (deps.getState().settingsSection === section) return;
+        requestSettingsExit({ kind: 'section', section });
       },
       onThemeChange: (theme) => {
         state.theme = deps.resolveSkinId(theme);
@@ -867,9 +928,27 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
       onRetryBotList: () => { void getBotManagementController().loadRoster(true); },
       onDismissBotError: () => getBotManagementController().dismissError(),
       onDismissBotConfirm: () => getBotManagementController().dismissConfirm(),
-      onConfirmBotExit: () => {},
-      onCancelBotExit: () => {},
-      onRegisterBotDirtyGuard: () => {},
+      onConfirmBotExit: (choice) => {
+        const target = pendingBotExit;
+        if (!target) return;
+        if (choice === 'discard') {
+          // 放弃修改必须清空整个草稿池：只清 active bot 会把其它 BOT 的未保存修改留在本地，
+          // 而用户刚刚确认的是"放弃这些编辑"。
+          const ids = Object.keys(deps.getState().botDrafts);
+          if (ids.length > 0) {
+            const controller = getBotManagementController();
+            for (const id of ids) controller.resetDraft(id);
+          }
+        }
+        performSettingsExit(target);
+      },
+      onCancelBotExit: () => {
+        pendingBotExit = null;
+        deps.render();
+      },
+      onRegisterBotDirtyGuard: (guard) => {
+        botDirtyGuard = guard;
+      },
       onOpenAgent: (name) => {
         openBotSettings(name);
       },
@@ -926,6 +1005,7 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
     getSettingsSnapshot,
     ensureSettingsSectionData,
     createSettingsActions,
+    requestSettingsExit,
     syncReactSettings,
     getSettingsController,
     getProviderAdminController,

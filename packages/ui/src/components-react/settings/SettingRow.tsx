@@ -27,19 +27,38 @@ export function SettingRow({
   label,
   hint,
   htmlFor,
+  onLabelActivate,
+  anchorId,
   children,
 }: {
   label: string;
   hint?: string;
   htmlFor?: string;
+  /**
+   * 控件不是原生表单元素（如 Radix Switch 渲染为 button）时的整行激活回调。
+   * 【为什么需要】`label[for]` 只对 labelable 元素生效，对 `button[role=switch]` 无效，
+   *   不给回调时点标签没有任何反应，热区只剩行尾那个 32px 的开关。
+   */
+  onLabelActivate?: () => void;
+  /** 检索跳转锚点；设置中心按此定位并做一次性高亮。 */
+  anchorId?: string;
   children: React.ReactNode;
 }): React.ReactElement {
   return (
-    <div className="flex items-start justify-between gap-6 border-b border-border-subtle py-3 last:border-b-0">
+    <div
+      data-settings-anchor={anchorId}
+      className="flex items-start justify-between gap-6 border-b border-border-subtle py-3 last:border-b-0"
+    >
       <div className="min-w-0">
-        <label htmlFor={htmlFor} className="block text-body text-foreground">
-          {label}
-        </label>
+        {onLabelActivate ? (
+          <button type="button" onClick={onLabelActivate} className="block text-left text-body text-foreground">
+            {label}
+          </button>
+        ) : (
+          <label htmlFor={htmlFor} className="block text-body text-foreground">
+            {label}
+          </label>
+        )}
         {hint ? <p className="mt-1 text-caption text-muted-foreground">{hint}</p> : null}
       </div>
       <div className="flex shrink-0 items-center gap-2">{children}</div>
@@ -51,14 +70,17 @@ export function SettingRow({
 export function SettingField({
   label,
   htmlFor,
+  anchorId,
   children,
 }: {
   label: string;
   htmlFor?: string;
+  /** 检索跳转锚点；设置中心按此定位并做一次性高亮。 */
+  anchorId?: string;
   children: React.ReactNode;
 }): React.ReactElement {
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2" data-settings-anchor={anchorId}>
       <label htmlFor={htmlFor} className="text-aux text-muted-foreground">
         {label}
       </label>
@@ -70,13 +92,19 @@ export function SettingField({
 /** 设置大区容器：自带底部微距发丝分割线与 24px 呼吸留白。 */
 export function SettingSection({
   className,
+  anchorId,
   children,
 }: {
   className?: string;
+  /** 检索跳转锚点；设置中心按此定位并做一次性高亮。 */
+  anchorId?: string;
   children: React.ReactNode;
 }): React.ReactElement {
   return (
-    <section className={cn('flex flex-col gap-3 border-b border-border-subtle pb-6 last:border-b-0', className)}>
+    <section
+      data-settings-anchor={anchorId}
+      className={cn('flex flex-col gap-3 border-b border-border-subtle pb-6 last:border-b-0', className)}
+    >
       {children}
     </section>
   );

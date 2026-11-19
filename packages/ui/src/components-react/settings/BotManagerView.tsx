@@ -1,4 +1,4 @@
-import * as React from 'react';
+﻿import * as React from 'react';
 import { Bot as BotIcon, ChevronDown, Copy, X } from 'lucide-react';
 import {
   draftFromDetail,
@@ -10,10 +10,17 @@ import { t, type I18nKey } from '../../i18n/index.js';
 import { AvatarProcessingError, cropAvatarToDataUrl } from '../../utils/cropAvatar.js';
 import { ActivityIndicator } from '../primitives/ActivityIndicator.js';
 import { Button } from '../primitives/Button.js';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../primitives/Dialog.js';
 import { Input } from '../primitives/Input.js';
+import { Select, type SelectGroup } from '../primitives/Select.js';
 import { Skeleton } from '../primitives/Skeleton.js';
 import { Switch } from '../primitives/Switch.js';
+import { Textarea } from '../primitives/Textarea.js';
 import { BotHeroCarousel } from './BotHeroCarousel.js';
+import { CapabilitySection } from './BotCapabilityList.js';
+import { ModelOptionRow, ModelVendorIcon } from './ModelPicker.js';
+import { SettingField, SettingInset, SettingRow, SettingTwoColumn } from './SettingRow.js';
+import { buildModelSelectGroups } from './settingsModel.js';
 import type { SettingsActions, SettingsSnapshot } from './settingsModel.js';
 
 /** SOUL.md 软上限：64KB（UTF-8 字节）。超出只警告，不阻断保存。 */
@@ -35,18 +42,21 @@ function BotSection({
   id,
   title,
   hint,
+  anchorId,
   defaultOpen = false,
   children,
 }: {
   id: string;
   title: string;
   hint?: string;
+  /** 检索跳转锚点；与设置项索引的 id 逐字一致。 */
+  anchorId?: string;
   defaultOpen?: boolean;
   children: React.ReactNode;
 }): React.ReactElement {
   const [open, setOpen] = React.useState(defaultOpen);
   return (
-    <section className="shrink-0 border-t border-border-subtle" data-bot-section={id}>
+    <section className="shrink-0 border-t border-border-subtle" data-bot-section={id} data-settings-anchor={anchorId}>
       <button
         type="button"
         aria-expanded={open}
@@ -82,118 +92,6 @@ function BotSection({
         </div>
       </div>
     </section>
-  );
-}
-
-/** 能力清单的一行：整行可点（label 关联 Switch），名称 + 说明 + 开关。 */
-function CapabilityRow({
-  id,
-  label,
-  detail,
-  checked,
-  disabled,
-  status,
-  onToggle,
-  toggleLabel,
-}: {
-  id: string;
-  label: string;
-  detail?: string;
-  checked: boolean;
-  disabled: boolean;
-  status?: { text: string; tone: 'success' | 'muted' };
-  onToggle: (next: boolean) => void;
-  toggleLabel: string;
-}): React.ReactElement {
-  const switchId = `bot-capability-${id}`;
-  return (
-    // label 关联 Switch：整行可点符合触控直觉；行级 hover 与真实可点区域一致，
-    // 不再是"整行高亮却只有行尾能点"的假可点。
-    <label
-      htmlFor={switchId}
-      className={`-mx-2 flex cursor-pointer items-start justify-between gap-3 rounded-inner px-2 py-2 transition-colors hover:bg-card-hover ${
-        disabled ? 'cursor-not-allowed opacity-60' : ''
-      }`}
-    >
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-body text-foreground" title={label}>
-            {label}
-          </span>
-          {status ? (
-            <span
-              className={`shrink-0 text-micro ${
-                status.tone === 'success' ? 'text-success' : 'text-muted-foreground'
-              }`}
-            >
-              {status.text}
-            </span>
-          ) : null}
-        </div>
-        {detail ? <p className="mt-1 break-words text-caption text-muted-foreground">{detail}</p> : null}
-      </div>
-      <Switch
-        id={switchId}
-        checked={checked}
-        disabled={disabled}
-        aria-label={toggleLabel}
-        data-bot-capability={id}
-        onCheckedChange={onToggle}
-      />
-    </label>
-  );
-}
-
-/** 一类能力清单的完整区块：权威性提示 + 空态 + 逐项开关。 */
-function CapabilitySection({
-  list,
-  enabledIds,
-  locked,
-  toggleKey,
-  renderDetail,
-  onToggle,
-  statusOf,
-}: {
-  list: BotCapabilityList;
-  enabledIds: readonly string[];
-  locked: boolean;
-  /** 权威清单为空 → 「未配置任何条目」；非权威清单为空 → 「网关没返回该清单」。 */
-  toggleKey: I18nKey;
-  renderDetail?: (id: string) => string | undefined;
-  onToggle: (id: string, next: boolean) => void;
-  statusOf?: (id: string) => { text: string; tone: 'success' | 'muted' } | undefined;
-}): React.ReactElement {
-  const enabled = new Set(enabledIds);
-  const listLocked = locked || !list.authoritative;
-  if (list.rows.length === 0) {
-    return (
-      <div className="-mx-2 flex flex-col gap-1 px-2 py-2">
-        {!list.authoritative ? <p className="text-caption text-warning">{t('bot.capabilityReadonly')}</p> : null}
-        <p className="text-caption text-muted-foreground">
-          {list.authoritative ? t('bot.capabilityNone') : t('bot.capabilityEmpty')}
-        </p>
-      </div>
-    );
-  }
-  return (
-    <div className="flex flex-col">
-      {!list.authoritative ? (
-        <p className="-mx-2 mb-1 px-2 text-caption text-warning">{t('bot.capabilityReadonly')}</p>
-      ) : null}
-      {list.rows.map((row) => (
-        <CapabilityRow
-          key={row.id}
-          id={row.id}
-          label={row.label}
-          detail={renderDetail?.(row.id)}
-          checked={enabled.has(row.id)}
-          disabled={listLocked}
-          status={statusOf?.(row.id)}
-          toggleLabel={t(toggleKey, { name: row.label })}
-          onToggle={(next) => onToggle(row.id, next)}
-        />
-      ))}
-    </div>
   );
 }
 
@@ -264,6 +162,19 @@ export function BotManagerView({
     bootstrapRequestedRef.current = true;
     actions.onSelectBotSettle(activeId);
   }, [status.status, activeDetail, activeId, actions]);
+
+  /**
+   * 宿主级脏检查：切导航 / 关弹窗 / Esc 前由壳层调用。
+   *
+   * 【设计意图】草稿池跨挂载存活，但"有未保存修改"必须让用户在离场前看见，
+   *   否则关掉设置页后用户以为已保存，实际草稿留在本地且不再有提示。
+   * 【规则】dirty 每次变化都重新注册，闭包必须捕获最新值；
+   *   卸载时注销，避免离开 agents 页后仍拦截其它域的退出。
+   */
+  React.useEffect(() => {
+    actions.onRegisterBotDirtyGuard(() => dirty);
+    return () => actions.onRegisterBotDirtyGuard(null);
+  }, [actions, dirty]);
 
   const patchDraft = (patch: Partial<BotDraftState>): void => {
     if (!activeId || locked) return;
@@ -412,6 +323,29 @@ export function BotManagerView({
   );
   const soulOverLimit = soulBytes > SOUL_SOFT_LIMIT_BYTES;
 
+  /** 模型 ID → 厂商展示名（下拉与触发器的图标判定同源）。 */
+  const providerNameOf = (modelId: string): string =>
+    view.availableModels.find((option) => option.id === modelId)?.providerName ?? '';
+
+  /**
+   * 模型下拉的分组数据（纯函数构造，便于单测离线置顶与占位禁用）。
+   * 【规则】离线项 / 未绑定 / 目录不可用只是不可选的占位，绝不允许通过它们改写 provider。
+   */
+  const modelSelectGroups = React.useMemo<SelectGroup[]>(
+    () =>
+      buildModelSelectGroups({
+        groups: modelGroups,
+        currentModel: draft?.model ?? '',
+        currentModelOffline,
+        labels: {
+          offline: t('bot.modelOffline', { model: draft?.model ?? '' }),
+          unbound: t('bot.modelUnbound'),
+          catalogUnavailable: t('bot.modelCatalogUnavailable'),
+        },
+      }),
+    [draft?.model, currentModelOffline, modelGroups],
+  );
+
   /** 在光标处插入变量/模板；不做整段替换，避免毁掉用户已经写好的内容。 */
   const insertSoulText = (text: string): void => {
     if (!draft || locked) return;
@@ -455,7 +389,19 @@ export function BotManagerView({
             onRequestAvatarUpload={handleRequestAvatarUpload}
           />
 
-          <div className="flex shrink-0 items-center justify-end border-b border-border-subtle bg-panel px-6 py-2">
+          <div className="flex shrink-0 items-center justify-end gap-2 border-b border-border-subtle bg-panel px-6 py-2">
+            {/* 头像两个动作必须同时可见：更换此前只藏在 Hero 的 hover 遮罩里（鼠标用户才能发现），
+                恢复默认又独占一行；现在两者并列常驻，Hero 遮罩保留为快捷入口。 */}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={locked || !activeId}
+              title={t('bot.avatarUpload')}
+              onClick={() => handleRequestAvatarUpload(activeId)}
+            >
+              {t('bot.avatarUpload')}
+            </Button>
             <Button
               type="button"
               variant="outline"
@@ -476,15 +422,17 @@ export function BotManagerView({
           className="mx-6 mt-3 flex shrink-0 items-start justify-between gap-3 rounded-card border border-destructive bg-panel px-3 py-2"
         >
           <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-caption text-destructive">{errorBanner}</p>
-          <button
+          <Button
+            variant="ghost"
+            size="icon-xs"
             type="button"
             aria-label={t('bot.errorBannerDismiss')}
             title={t('bot.errorBannerDismiss')}
             onClick={actions.onDismissBotError}
-            className="flex size-6 shrink-0 items-center justify-center rounded-inner text-muted-foreground hover:bg-card-hover hover:text-foreground"
+            className="shrink-0"
           >
             <X aria-hidden="true" className="size-3" />
-          </button>
+          </Button>
         </div>
       ) : null}
 
@@ -595,99 +543,107 @@ export function BotManagerView({
       {showForm && draft && activeDetail ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           <div className="flex flex-col gap-4 px-6 py-4">
-            <div className="flex flex-col gap-1">
-              <label htmlFor="bot-id" className="text-aux text-secondary-foreground">
-                {t('bot.idLabel')}
-              </label>
-              <div className="flex items-center gap-2">
-                <Input id="bot-id" value={activeId} readOnly className="font-code" aria-readonly="true" />
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="shrink-0"
-                  disabled={copying || !activeId}
-                  title={t('bot.copyId')}
-                  onClick={() => {
-                    void handleCopyId();
-                  }}
-                >
-                  <Copy aria-hidden="true" className="size-3" />
-                  {copyDone ? t('bot.copied') : t('bot.copyId')}
-                </Button>
-              </div>
-            </div>
+            <SettingTwoColumn>
+              <SettingField label={t('bot.idLabel')} htmlFor="bot-id" anchorId="bot-id">
+                <div className="flex items-center gap-2">
+                  <Input id="bot-id" value={activeId} readOnly className="font-code" aria-readonly="true" />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                    disabled={copying || !activeId}
+                    title={t('bot.copyId')}
+                    onClick={() => {
+                      void handleCopyId();
+                    }}
+                  >
+                    <Copy aria-hidden="true" className="size-3" />
+                    {copyDone ? t('bot.copied') : t('bot.copyId')}
+                  </Button>
+                </div>
+              </SettingField>
+              <SettingField label={t('bot.nameLabel')} htmlFor="bot-display-name" anchorId="bot-name">
+                <Input
+                  id="bot-display-name"
+                  value={draft.displayName}
+                  placeholder={t('bot.namePlaceholder')}
+                  disabled={locked}
+                  onChange={(event) => patchDraft({ displayName: event.target.value })}
+                />
+              </SettingField>
+            </SettingTwoColumn>
 
-            <div className="flex flex-col gap-1">
-              <label htmlFor="bot-display-name" className="text-aux text-secondary-foreground">
-                {t('bot.nameLabel')}
-              </label>
-              <Input
-                id="bot-display-name"
-                value={draft.displayName}
-                placeholder={t('bot.namePlaceholder')}
-                disabled={locked}
-                onChange={(event) => patchDraft({ displayName: event.target.value })}
-              />
-            </div>
-
-          <div className="flex flex-col gap-1">
-              <label htmlFor="bot-model" className="text-aux text-secondary-foreground">
-                {t('bot.modelBinding')}
-              </label>
-              {/* 原生 select 与设置页字体选择器同构（同一 Token 组合），不另造第三套下拉形态；
-                  需要分组标题所以用 optgroup，这是 Menu 原语当前的缺口。 */}
-              <select
+            <SettingField label={t('bot.modelBinding')} anchorId="bot-model">
+              {/* 模型下拉走 Select 原语：深色皮肤下不再弹系统白色列表，且能承载厂商图标与分组标题。 */}
+              <Select
                 id="bot-model"
                 value={draft.model}
+                ariaLabel={t('bot.modelBinding')}
                 disabled={locked || modelGroups.length === 0}
-                onChange={(event) => {
-                  const model = event.target.value;
+                groups={modelSelectGroups}
+                onChange={(model) => {
                   const option = view.availableModels.find((item) => item.id === model);
                   // 离线项/未绑定项只是占位：选不中目录里的真实项时不得改写 provider。
                   if (!option) return;
                   patchDraft({ model, provider: option.provider });
                 }}
-                className="h-9 w-full rounded-card border border-border bg-input px-3 text-body text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {draft.model && currentModelOffline ? (
-                  <option value={draft.model}>{t('bot.modelOffline', { model: draft.model })}</option>
-                ) : null}
-                {!draft.model ? <option value="">{t('bot.modelUnbound')}</option> : null}
-                {modelGroups.length === 0 ? (
-                  <option value={draft.model}>{t('bot.modelCatalogUnavailable')}</option>
-                ) : null}
-                {modelGroups.map((group) => (
-                  <optgroup key={group.id} label={group.name}>
-                    {group.models.map((model) => (
-                      <option key={`${group.id}\u0000${model.id}`} value={model.id}>
-                        {model.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
+                renderOption={(option) => (
+                  <ModelOptionRow
+                    modelId={option.value}
+                    providerName={providerNameOf(option.value)}
+                    selected={option.value === draft.model}
+                  />
+                )}
+                renderValue={(value, current) => {
+                  if (!value) {
+                    return <span className="min-w-0 flex-1 truncate text-body text-muted-foreground">{t('bot.modelUnbound')}</span>;
+                  }
+                  return (
+                    <>
+                      <ModelVendorIcon modelId={value} providerName={providerNameOf(value)} />
+                      <span className="min-w-0 flex-1 truncate text-body text-foreground">{current?.label ?? value}</span>
+                    </>
+                  );
+                }}
+              />
               {modelGroups.length === 0 ? (
                 <p className="text-caption text-muted-foreground">{t('bot.modelCatalogHint')}</p>
               ) : null}
-            </div>
+            </SettingField>
 
-            <div className="flex flex-col gap-1">
-              <label htmlFor="bot-description" className="text-aux text-secondary-foreground">
-                {t('bot.descLabel')}
-              </label>
-              <textarea
+            <SettingField label={t('bot.descLabel')} htmlFor="bot-description" anchorId="bot-desc">
+              <Textarea
                 id="bot-description"
                 rows={4}
                 value={draft.description}
                 placeholder={t('bot.descPlaceholder')}
                 disabled={locked}
                 onChange={(event) => patchDraft({ description: event.target.value })}
-                className="min-h-24 w-full resize-none rounded-card border border-border bg-input px-3 py-2 text-body text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
               />
-            </div>
+            </SettingField>
+
+            {/* i18n 早已定义这两条文案，但表单从未渲染：用户无法在这里改变工作区默认 BOT。
+                用 SettingInset 承载，保持与上方字段同一条 16px 节奏（SettingRow 自带 py-3）。 */}
+            <SettingInset>
+              <SettingRow
+                label={t('bot.setDefault')}
+                hint={t('bot.setDefaultHint')}
+                anchorId="bot-default"
+                onLabelActivate={() => patchDraft({ isDefault: !draft.isDefault })}
+              >
+                <Switch
+                  id="bot-set-default"
+                  checked={draft.isDefault}
+                  disabled={locked}
+                  aria-label={t('bot.setDefault')}
+                  onCheckedChange={(next) => patchDraft({ isDefault: next })}
+                />
+              </SettingRow>
+            </SettingInset>
           </div>
 
-          <BotSection id="soul" title={t('bot.soulTitle')} hint={t('bot.soulHint')}>
+          <BotSection id="soul" anchorId="bot-soul" title={t('bot.soulTitle')} hint={t('bot.soulHint')}>
             <div className="flex flex-wrap items-center gap-2 pb-2">
               <Button type="button" variant="outline" size="sm" disabled={locked} onClick={() => insertSoulText('{{user_name}}')}>
                 {t('bot.soulInsertUserName')}
@@ -714,7 +670,7 @@ export function BotManagerView({
                 {t('bot.soulTemplateReviewer')}
               </Button>
             </div>
-            <textarea
+            <Textarea
               id="bot-soul"
               ref={soulRef}
               aria-label={t('bot.soulEditorLabel')}
@@ -723,7 +679,7 @@ export function BotManagerView({
               disabled={locked}
               spellCheck={false}
               onChange={(event) => patchDraft({ soul: event.target.value })}
-              className="min-h-32 w-full resize-y rounded-card border border-border px-3 py-2 font-code text-body leading-relaxed text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+              className="min-h-32 resize-y font-code"
               style={{ backgroundColor: 'var(--code)' }}
             />
             <div className="mt-1 flex items-center justify-between gap-3">
@@ -738,7 +694,7 @@ export function BotManagerView({
             </div>
           </BotSection>
 
-          <BotSection id="toolsets" title={t('bot.toolsetsTitle')} hint={t('bot.toolsetsHint')}>
+          <BotSection id="toolsets" anchorId="bot-toolsets" title={t('bot.toolsetsTitle')} hint={t('bot.toolsetsHint')}>
             <CapabilitySection
               list={activeDetail.toolsets}
               enabledIds={draft.enabledToolsets}
@@ -760,7 +716,7 @@ export function BotManagerView({
             />
           </BotSection>
 
-          <BotSection id="skills" title={t('bot.skillsTitle')} hint={t('bot.skillsHint')}>
+          <BotSection id="skills" anchorId="bot-skills" title={t('bot.skillsTitle')} hint={t('bot.skillsHint')}>
             <CapabilitySection
               list={activeDetail.skills}
               // 草稿存"已关闭"集合；展示时折算成"启用集合"交给通用行组件。
@@ -778,7 +734,7 @@ export function BotManagerView({
             />
           </BotSection>
 
-          <BotSection id="mcp" title={t('bot.mcpTitle')} hint={t('bot.mcpHint')}>
+          <BotSection id="mcp" anchorId="bot-mcp" title={t('bot.mcpTitle')} hint={t('bot.mcpHint')}>
             <CapabilitySection
               list={activeDetail.mcpServers}
               enabledIds={draft.enabledMcpServers}
@@ -809,7 +765,7 @@ export function BotManagerView({
             />
           </BotSection>
 
-          <BotSection id="memory" title={t('bot.memoryTitle')}>
+          <BotSection id="memory" anchorId="bot-memory" title={t('bot.memoryTitle')}>
             {/* 长期记忆只能由该 BOT 的终身主工位写入；配置中枢不提供跨上下文编辑入口。 */}
             <p className="rounded-card border border-border-subtle bg-panel px-3 py-2 text-caption leading-relaxed text-muted-foreground">
               {t('bot.memoryNotice')}
@@ -858,6 +814,42 @@ export function BotManagerView({
           void handleFileChange(event);
         }}
       />
+
+      {/*
+        离场确认：壳层在切导航 / 关弹窗 / Esc 前调用已注册的脏检查，命中后把待执行目标
+        写进 exitPrompt，由这里渲染。三条出路互斥且都有明确后果：
+        取消（留在当前）、保留草稿并离开、放弃修改并离开。
+      */}
+      {view.exitPrompt ? (
+        <Dialog
+          open
+          onOpenChange={(next) => {
+            if (!next) actions.onCancelBotExit();
+          }}
+        >
+          <DialogContent portal={false} className="flex w-full max-w-md flex-col gap-0 overflow-hidden rounded-window p-0">
+            <div className="border-b border-border-subtle px-4 py-3">
+              <DialogTitle className="text-section font-medium text-foreground">{t('bot.discardConfirmTitle')}</DialogTitle>
+            </div>
+            <div className="px-4 py-3">
+              <DialogDescription className="text-caption leading-relaxed text-muted-foreground">
+                {t('bot.discardConfirmBody')}
+              </DialogDescription>
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-border-subtle px-4 py-3">
+              <Button variant="ghost" size="sm" type="button" onClick={actions.onCancelBotExit}>
+                {t('settings.cancel')}
+              </Button>
+              <Button variant="outline" size="sm" type="button" onClick={() => actions.onConfirmBotExit('keep')}>
+                {t('bot.keepDraftBtn')}
+              </Button>
+              <Button variant="destructive" size="sm" type="button" onClick={() => actions.onConfirmBotExit('discard')}>
+                {t('bot.discardBtn')}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </div>
   );
 }

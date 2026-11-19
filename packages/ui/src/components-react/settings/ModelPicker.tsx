@@ -4,6 +4,7 @@ import { t } from '../../i18n/index.js';
 import { describeModelVendorIcon } from '../../lib/vendorIcon.js';
 import { presentModel, type ModelPresentation } from '../../lib/modelPresentation.js';
 import { Button } from '../primitives/Button.js';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../primitives/Dialog.js';
 import { Input } from '../primitives/Input.js';
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '../primitives/Menu.js';
 
@@ -152,7 +153,8 @@ export function ModelPickerField({
           placeholder={placeholder}
           aria-label={ariaLabel}
           onChange={(event) => onChange(event.target.value)}
-          className="h-8 font-code text-caption"
+          size="sm"
+          className="font-code"
         />
         <p className="text-micro text-muted-foreground">{t('settings.providerModelListHint')}</p>
       </div>
@@ -168,7 +170,8 @@ export function ModelPickerField({
           aria-label={ariaLabel}
           autoFocus
           onChange={(event) => onChange(event.target.value)}
-          className="h-8 flex-1 font-code text-caption"
+          size="sm"
+          className="flex-1 font-code"
         />
         <Button
           variant="outline"
@@ -189,7 +192,7 @@ export function ModelPickerField({
         <button
           type="button"
           aria-label={ariaLabel}
-          className="flex h-8 w-full items-center gap-2 rounded-inner border border-border bg-input px-2 text-left transition-colors hover:bg-card-hover"
+          className="flex h-8 w-full items-center gap-2 rounded-card border border-border bg-input px-3 text-left text-body text-foreground transition-colors hover:bg-card-hover"
         >
           {selected ? (
             <>
@@ -204,8 +207,8 @@ export function ModelPickerField({
           <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
         </button>
       </MenuTrigger>
-      {/* gate-theme-allow: 设置中心整体是 z-[1000]，下拉经 Radix Portal 挂到 body，必须抬到它之上 */}
-      <MenuContent className="z-[1200] w-80 p-1" align="start">
+      {/* 下拉经 Radix Portal 挂到 body，用语义档位 z-menu 高于设置弹窗宿主 */}
+      <MenuContent className="z-menu w-80 p-1" align="start">
         <div className="max-h-64 overflow-y-auto">
           {models.map((model) => (
             <MenuItem
@@ -292,21 +295,13 @@ export function ModelPickerDialog({
   const [pending, setPending] = React.useState(false);
   const [warning, setWarning] = React.useState('');
   const [error, setError] = React.useState('');
-  const dialogRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
-    if (!open) {
-      setPendingModel('');
-      setPending(false);
-      setWarning('');
-      setError('');
-      return;
-    }
-    // 弹框打开后必须把焦点收进来：否则 Esc 的事件源仍在行内按钮上，
-    // 会冒泡到设置中心的 window 监听，一次 Esc 直接把整个设置页关掉。
-    const previous = document.activeElement as HTMLElement | null;
-    dialogRef.current?.focus();
-    return () => { previous?.focus?.(); };
+    if (open) return;
+    setPendingModel('');
+    setPending(false);
+    setWarning('');
+    setError('');
   }, [open]);
 
   if (!open) return null;
@@ -332,27 +327,20 @@ export function ModelPickerDialog({
   const confirmPending = warning && pendingModel;
 
   return (
-    <div
-      ref={dialogRef}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-backdrop/60 p-4"
-      role="dialog"
-      aria-modal="true"
-      tabIndex={-1}
-      onKeyDown={(event) => {
-        // 焦点已收进弹框；这里只关当前这一层，不再冒泡到设置中心的 window 监听。
-        if (event.key === 'Escape') {
-          event.stopPropagation();
-          onClose();
-        }
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose();
       }}
-      aria-label={title}
     >
-      {/* gate-theme-allow: 模型多时必须相对视口有界并内部滚动 */}
-      <div className="flex max-h-[min(560px,calc(100vh-96px))] w-full max-w-lg flex-col overflow-hidden rounded-window border border-border bg-popover shadow-window">
+      <DialogContent
+        portal={false}
+        className="flex max-h-modal-sm w-full max-w-lg flex-col gap-0 overflow-hidden rounded-window p-0"
+      >
         <div className="flex items-start justify-between gap-3 border-b border-border-subtle px-4 py-3">
           <div className="min-w-0">
-            <h3 className="truncate text-section font-medium text-foreground">{title}</h3>
-            <p className="mt-1 text-caption text-muted-foreground">{subtitle}</p>
+            <DialogTitle className="truncate text-section font-medium text-foreground">{title}</DialogTitle>
+            <DialogDescription className="mt-1 text-caption text-muted-foreground">{subtitle}</DialogDescription>
           </div>
           <Button variant="ghost" size="sm" type="button" onClick={onClose}>
             {t('settings.close')}
@@ -408,7 +396,7 @@ export function ModelPickerDialog({
             </Button>
           </div>
         ) : null}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

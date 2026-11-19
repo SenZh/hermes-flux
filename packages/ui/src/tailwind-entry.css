@@ -288,6 +288,53 @@
 }
 
 /*
+ * 模态层高度上限（语义档位）。
+ *
+ * 设计意图(Why)：二级弹窗必须相对视口有界并内部滚动，但 `max-h-[min(560px,calc(100vh-96px))]`
+ *   属于任意值类，会绕过 Token 审计；写成内联 style 更是直接落进审计盲区。
+ *   把两档高度收敛成具名 utility 后，业务只声明「这是哪一档」，尺寸真值只在这里维护。
+ * 约束与规则(Rules)：新增档位必须先在本文件登记，禁止在业务里回到 `max-h-[...]` 或内联 maxHeight。
+ */
+@utility max-h-modal-sm {
+  max-height: min(560px, calc(100vh - 96px));
+}
+
+@utility max-h-modal-md {
+  max-height: min(680px, calc(100vh - 96px));
+}
+
+/*
+ * 浮层菜单层级（z-index 语义档位）。
+ *
+ * 设计意图(Why)：设置弹窗宿主是 z-50；下拉菜单经 Radix Portal 挂到 body，
+ *   必须高于宿主才能不被遮挡。把 1200 收敛成语义类后，业务只声明"这是浮层菜单"，
+ *   不再各自写 `z-[1200]` 这类任意值（那会持续抬高门禁豁免敞口）。
+ * 约束与规则(Rules)：新增层级必须先在此登记；禁止在业务里回到任意值 z-index。
+ */
+@utility z-menu {
+  z-index: 1200;
+}
+
+/*
+ * 浮起表面（surface-raised）。
+ *
+ * 设计意图(Why)：全部 5 个皮肤里 `--card` 与 `--popover` 完全同值，任何"换一个现有底色档"
+ *   的卡片化方案（bg-panel / bg-card-hover / bg-background）对比度都只有 1.03~1.11:1，
+ *   在浅色皮肤下更是白卡压白底。这里从既有 token 派生一个新色调：
+ *   深色皮肤提亮 = 浮起，浅色皮肤压暗 = 内凹，两种都是标准卡片语言。
+ * 防范的历史坑(Pitfall)：直接改 skins.ts 的 --card/--popover 会同时影响全站卡片与浮层，
+ *   且浅色皮肤白色无法再提亮，属不可逆的全局视觉变更。
+ * 约束与规则(Rules)：
+ *   1. 只允许通过本 utility 使用派生色，业务禁止自行写 color-mix；
+ *   2. 必须保留第一条 `var(--card)` 兜底：不支持 color-mix 的环境退化为原卡片色，
+ *      而不是透明（透明会让卡片在浮层里彻底消失）。
+ */
+@utility surface-raised {
+  background-color: var(--card);
+  background-color: color-mix(in oklab, var(--card) 92%, var(--foreground) 8%);
+}
+
+/*
  * 顶部 1px 受光线（specular-top）。
  *
  * 设计意图(Why)：深色皮肤下卡片与面板的边界几乎不可见，顶部一条 1px 受光线是区分层级的关键

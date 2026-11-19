@@ -21,14 +21,16 @@
 import * as React from 'react';
 import { cn } from '../../lib/utils.js';
 
-/** 表面层级：panel=主面板（最贴近底图）、card=内容卡片、popover=浮层。 */
-export type SurfaceLevel = 'panel' | 'card' | 'popover';
+/** 表面层级：panel=主面板（最贴近底图）、card=内容卡片、raised=浮起卡片（与浮层拉开一档）、popover=浮层。 */
+export type SurfaceLevel = 'panel' | 'card' | 'raised' | 'popover';
 /** 内边距档位：none=0 / tight=8px / normal=12px / loose=16px，全部为 4px 网格整数倍。 */
 export type SurfacePadding = 'none' | 'tight' | 'normal' | 'loose';
 
 const LEVEL_CLASS: Record<SurfaceLevel, string> = {
   panel: 'bg-panel',
   card: 'bg-card',
+  // 与 --card 同源但派生一档明度：card 与 popover 同值的皮肤下，靠这一档建立层级。
+  raised: 'surface-raised',
   popover: 'bg-popover',
 };
 

@@ -31,6 +31,13 @@ export interface DropdownKeybindControllerDeps {
     closeContextMenuIfClickedOutside: (target: Node | null) => void;
   };
   ensureSettingsSectionData: (section: SettingsSectionId) => void;
+  /**
+   * 关闭设置中心的唯一出口。
+   *
+   * 【为什么必须走这里】设置页可能停在 agents 域且有未保存草稿；全局快捷键（Ctrl/Cmd+,）
+   *   与全局 Esc 若直接改写 `isSettingsOpen`，会绕过脏稿拦截，用户以为已保存。
+   */
+  requestSettingsExit: () => void;
   getLastInputDockSnapshot: () => RenderInputDockSnapshot | null;
   setLastInputDockSnapshot: (snapshot: RenderInputDockSnapshot | null) => void;
 }
@@ -416,17 +423,25 @@ export function createDropdownKeybindController(
       }
       if ((e.ctrlKey || e.metaKey) && e.key === ',') {
         e.preventDefault();
-        state.isSettingsOpen = !state.isSettingsOpen;
-        if (state.isSettingsOpen) deps.ensureSettingsSectionData(state.settingsSection);
+        if (state.isSettingsOpen) {
+          // 关闭方向必须经过脏稿拦截；直接置 false 会让未保存的 BOT 草稿静默丢失。
+          deps.requestSettingsExit();
+          return;
+        }
+        state.isSettingsOpen = true;
+        deps.ensureSettingsSectionData(state.settingsSection);
         deps.render();
+        return;
       }
       if (e.key === 'Escape') {
+        // Radix 弹窗层已消费这次 Esc（preventDefault）时，全局不得再动任何状态：
+        // 一次 Esc 只关最上面那一层，否则二级弹窗会把整个设置页一起带走（P-029）。
+        if (e.defaultPrevented) return;
         if (deps.modalInteractionController.handleGlobalEscape()) {
           return;
         }
         if (state.isSettingsOpen) {
-          state.isSettingsOpen = false;
-          deps.render();
+          deps.requestSettingsExit();
         } else if (state.modelMenuOpen) {
           closeModelMenu();
         }

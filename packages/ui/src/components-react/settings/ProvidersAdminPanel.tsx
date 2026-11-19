@@ -1,4 +1,4 @@
-import * as React from 'react';
+﻿import * as React from 'react';
 import {
   deriveEndpointId,
   draftFromEndpoint,
@@ -21,11 +21,15 @@ import {
 } from '@hermes-flux/core';
 import { t } from '../../i18n/index.js';
 import { Button } from '../primitives/Button.js';
+import { Dialog, DialogContent, DialogTitle } from '../primitives/Dialog.js';
 import { Input } from '../primitives/Input.js';
+import { Select } from '../primitives/Select.js';
 import { BotAvatarGrid, BotAvatarToggle, type BotAvatarState } from './BotAvatarToggle.js';
 import { FanOutMemberList } from './FanOutMemberList.js';
 import { InlineStrip } from './InlineStrip.js';
 import { LoadBoundary } from './LoadBoundary.js';
+import { LoginPanel, type LoginState } from './LoginPanel.js';
+import { Surface } from '../primitives/Surface.js';
 import { ModelPickerDialog, ModelPickerField } from './ModelPicker.js';
 import {
   pickProviderViewsState,
@@ -314,7 +318,7 @@ export function AgentBindingGrid({
                     value={keyForm.draftKey}
                     disabled={attachBusy}
                     onChange={(event) => onEditAttachKey(event.target.value)}
-                    className="h-7 w-56 font-code text-aux"
+                    size="xs" className="w-56 font-code"
                   />
                   <Button
                     size="xs"
@@ -461,10 +465,7 @@ function ProviderRow({
         : t('settings.providerNoModels');
 
   return (
-    <div
-      className="border-b border-border-subtle py-3 last:border-b-0"
-      data-provider-key={view.key}
-    >
+    <Surface level="raised" padding="normal" elevated className="flex flex-col" data-provider-key={view.key}>
       {/* 标题与动作单独占一条；成员网格必须横跨整行，否则动作按钮越多，网格越窄，
           同一份名单会在两行里排出不同的列数（用户实测 4 列 / 5 列不一致）。 */}
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
@@ -501,7 +502,7 @@ function ProviderRow({
             {t('settings.providerModelsExpand')}
           </Button>
           {isSubscription ? (
-            <Button variant="ghost" size="sm" type="button" disabled={busy || pending} onClick={onLogout}>
+            <Button variant="ghost" size="sm" type="button" className="text-destructive hover:text-destructive" disabled={busy || pending} onClick={onLogout}>
               {t('settings.providerLogout')}
             </Button>
           ) : (
@@ -513,6 +514,7 @@ function ProviderRow({
                 variant="ghost"
                 size="sm"
                 type="button"
+                className="text-destructive hover:text-destructive"
                 disabled={busy || pending || hasActive}
                 title={hasActive ? t('settings.providerDeleteBlockedShort') : undefined}
                 onClick={onDelete}
@@ -556,7 +558,7 @@ function ProviderRow({
         busy={busy || pending}
         onPick={onActivateModel}
       />
-    </div>
+    </Surface>
   );
 }
 
@@ -775,7 +777,7 @@ function EndpointForm({
         <Input
           value={draft.name}
           onChange={(event) => dispatch({ type: 'field', patch: { name: event.target.value } })}
-          className="h-8 text-body"
+          size="sm"
         />
       </SettingField>
       <SettingField label={t('settings.customEndpointUrl')}>
@@ -783,7 +785,7 @@ function EndpointForm({
           value={draft.baseUrl}
           placeholder="https://llm.internal/v1"
           onChange={(event) => dispatch({ type: 'field', patch: { baseUrl: event.target.value } })}
-          className="h-8 font-code text-caption"
+          size="sm" className="font-code"
         />
       </SettingField>
       <SettingField label={t('settings.customEndpointKey')}>
@@ -807,7 +809,7 @@ function EndpointForm({
                 patch: { apiKey: event.target.value ? { kind: 'set', value: event.target.value } : { kind: 'keep' } },
               })
             }
-            className="h-8 font-code"
+            size="sm" className="font-code"
           />
           {hasStoredKey && draft.apiKey.kind !== 'clear' ? (
             <Button
@@ -830,7 +832,7 @@ function EndpointForm({
           title={!showFanOut ? t('settings.customEndpointIdLocked') : undefined}
           placeholder={derivedId || 'internal-gateway'}
           onChange={(event) => dispatch({ type: 'field', patch: { id: event.target.value } })}
-          className={`h-8 font-code text-caption ${!showFanOut ? 'cursor-not-allowed text-muted-foreground' : ''}`}
+          size="sm" className={`font-code ${!showFanOut ? 'cursor-not-allowed text-muted-foreground' : ''}`}
         />
         {!showFanOut ? (
           <p className="text-micro text-muted-foreground">{t('settings.customEndpointIdLocked')}</p>
@@ -918,73 +920,6 @@ function EndpointForm({
 /* -------------------------------------------------------------------------- */
 /* 登录会话（设备码）                                                           */
 /* -------------------------------------------------------------------------- */
-
-interface LoginState {
-  providerId: string;
-  sessionId: string;
-  userCode: string;
-  verificationUrl: string;
-  status: 'pending' | 'approved' | 'failed' | 'cancelled';
-  message: string;
-  pending: boolean;
-}
-
-/**
- * 一次设备码登录的可见状态。
- * 【规则】只有 `approved` 是成功；`pending` 必须持续显示验证码与地址，让用户知道去哪完成。
- */
-function LoginPanel({
-  state,
-  onCancel,
-  onCopy,
-}: {
-  state: LoginState;
-  onCancel: () => void;
-  onCopy: (text: string) => void;
-}): React.ReactElement {
-  if (state.status === 'approved') {
-    return (
-      <p className="text-caption text-success" role="status">
-        {t('settings.loginApproved')}
-      </p>
-    );
-  }
-  if (state.status === 'failed' || state.status === 'cancelled') {
-    return (
-      <p className="text-caption text-destructive" role="alert">
-        {state.status === 'cancelled' ? t('settings.loginCancelled') : t('settings.loginFailed')}
-        {state.message ? ` · ${state.message}` : ''}
-      </p>
-    );
-  }
-  return (
-    <InlineStrip label={t('settings.loginCode')} busy={state.pending}>
-      <p className="text-caption text-muted-foreground">{t('settings.loginCode')}</p>
-      <div className="flex flex-wrap items-center gap-2">
-        <code className="rounded-inner bg-input px-2 py-1 font-code text-body text-foreground">{state.userCode}</code>
-        <Button variant="ghost" size="sm" type="button" onClick={() => onCopy(state.userCode)}>
-          {t('settings.loginCopyCommand')}
-        </Button>
-      </div>
-      {state.verificationUrl ? (
-        <a
-          className="truncate font-code text-caption text-secondary-foreground underline decoration-border-strong underline-offset-2"
-          href={state.verificationUrl}
-          target="_blank"
-          rel="noreferrer noopener"
-        >
-          {state.verificationUrl}
-        </a>
-      ) : null}
-      <div className="flex items-center gap-2">
-        <span className="text-caption text-muted-foreground">{t('settings.loginPending')}</span>
-        <Button variant="ghost" size="sm" type="button" onClick={onCancel}>
-          {t('settings.cancel')}
-        </Button>
-      </div>
-    </InlineStrip>
-  );
-}
 
 /* -------------------------------------------------------------------------- */
 /* 添加提供商：按钮 + 弹框                                                      */
@@ -1088,26 +1023,20 @@ function AddProviderDialog({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-backdrop/40 p-4"
-      role="dialog"
-      aria-modal="true"
-      tabIndex={-1}
-      onKeyDown={(event) => {
-        // 宿主的设置中心在 window 上监听 Escape；不拦住的话一次 Esc 会把整个设置页关掉，已填表单全丢。
-        if (event.key === 'Escape') {
-          event.stopPropagation();
-          closeWithCleanup();
-        }
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) closeWithCleanup();
       }}
-      aria-label={editing ? t('settings.editTitle') : t('settings.addTitle')}
     >
-      {/* gate-theme-allow: 弹窗高度必须相对视口有界；h-dock 在主题里未定义，沿用宿主 SettingsModal 的 min() 写法 */}
-      <div className="flex max-h-[min(680px,calc(100vh-96px))] w-full max-w-2xl flex-col overflow-hidden rounded-window border border-border bg-popover shadow-window">
+      <DialogContent
+        portal={false}
+        className="flex max-h-modal-md w-full max-w-2xl flex-col gap-0 overflow-hidden rounded-window p-0"
+      >
         <div className="flex items-center justify-between gap-3 border-b border-border-subtle px-4 py-3">
-          <h3 className="text-section font-medium text-foreground">
+          <DialogTitle className="text-section font-medium text-foreground">
             {editing ? t('settings.editTitle') : t('settings.addTitle')}
-          </h3>
+          </DialogTitle>
           <Button variant="ghost" size="sm" type="button" onClick={closeWithCleanup}>
             {t('settings.close')}
           </Button>
@@ -1215,8 +1144,8 @@ function AddProviderDialog({
             </div>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1421,6 +1350,21 @@ export function ProvidersAdminPanel({
         <div className="flex items-center justify-between gap-3">
           <SettingsSectionHeading title={t('settings.providersTitle')} hint={t('settings.providersHint')} />
           <div className="flex shrink-0 items-center gap-2 pb-2">
+            {/* 作用域显性化：删除 / 设为默认 / 登录都作用于这里选中的 BOT，不再靠隐式快照。 */}
+            <Select
+              size="sm"
+              className="w-44"
+              ariaLabel={t('settings.viewByBot')}
+              placeholder={t('settings.viewByBot')}
+              value={scoped}
+              groups={[
+                {
+                  label: '',
+                  options: bots.map((bot) => ({ value: bot.profile, label: bot.displayName || bot.profile })),
+                },
+              ]}
+              onChange={(profile) => actions.onScopeProfileChange(profile)}
+            />
             <Button size="sm" type="button" onClick={openAdd}>
               {t('settings.providerAdd')}
             </Button>
@@ -1432,7 +1376,7 @@ export function ProvidersAdminPanel({
           onChange={(event) => setQuery(event.target.value)}
           placeholder={t('settings.providersSearch')}
           aria-label={t('settings.providersSearch')}
-          className="mb-2 h-8 text-caption"
+          size="sm" className="mb-2"
         />
 
         <p className="mb-2 text-caption text-secondary-foreground">{t('settings.providerBindingLegend')}</p>
@@ -1460,7 +1404,7 @@ export function ProvidersAdminPanel({
               return <p className="py-6 text-body text-muted-foreground">{t('settings.providersNoMatch')}</p>;
             }
             return (
-              <div className="flex flex-col">
+              <div className="flex flex-col gap-2">
                 {visible.map((view) => {
                   const rowAttachFlow = activeFlow?.providerKey === view.key ? activeFlow : null;
                   const pending =

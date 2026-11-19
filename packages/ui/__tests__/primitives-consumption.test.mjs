@@ -23,12 +23,22 @@ const PRIMITIVES_DIR = path.join(UI_SRC, 'components-react/primitives');
  */
 const CONSUMPTION = {
   ActivityIndicator: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/settings/BotManagerView.tsx'] },
-  Button: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/settings/LoadBoundary.tsx', 'components-react/settings/ProvidersAdminPanel.tsx', 'components-react/settings/ModelPicker.tsx', 'components-react/settings/BotManagerView.tsx', 'components-react/gallery/Gallery.tsx'] },
+  Button: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/settings/LoadBoundary.tsx', 'components-react/settings/ProvidersAdminPanel.tsx', 'components-react/settings/ModelPicker.tsx', 'components-react/settings/BotManagerView.tsx', 'components-react/settings/LoginPanel.tsx', 'components-react/gallery/Gallery.tsx'] },
   Input: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/settings/ProvidersAdminPanel.tsx', 'components-react/settings/ModelPicker.tsx', 'components-react/settings/BotManagerView.tsx'] },
+  Select: { state: 'consumed', consumers: ['components-react/settings/SettingsModal.tsx', 'components-react/settings/BotManagerView.tsx', 'components-react/settings/ProvidersAdminPanel.tsx'] },
+  Textarea: { state: 'consumed', consumers: ['components-react/settings/BotManagerView.tsx'] },
   Badge: { state: 'consumed', consumers: ['components-react/settings/SettingsModal.tsx', 'components-react/settings/BotHeroCarousel.tsx', 'components-react/gallery/Gallery.tsx'] },
-  Dialog: { state: 'pending', target: 'SettingsModal / Modal 族迁移 PR（波③）' },
+  Dialog: {
+    state: 'consumed',
+    consumers: [
+      'components-react/settings/SettingsModal.tsx',
+      'components-react/settings/ModelPicker.tsx',
+      'components-react/settings/ProvidersAdminPanel.tsx',
+      'components-react/settings/BotManagerView.tsx',
+    ],
+  },
   Menu: { state: 'consumed', consumers: ['components-react/settings/ModelPicker.tsx'] },
-  Switch: { state: 'consumed', consumers: ['components-react/settings/BotManagerView.tsx'] },
+  Switch: { state: 'consumed', consumers: ['components-react/settings/BotManagerView.tsx', 'components-react/settings/BotCapabilityList.tsx'] },
   /**
    * 业务原子（Surface / ListRow / Toolbar / Stat）。
    *
@@ -41,7 +51,7 @@ const CONSUMPTION = {
    * 约束与规则 (Rules)：
    *   后续业务视图接入时，必须把新消费者补进本清单（测试会强制枚举，禁止隐式消费）。
    */
-  Surface: { state: 'consumed', consumers: ['components-react/gallery/Gallery.tsx'] },
+  Surface: { state: 'consumed', consumers: ['components-react/gallery/Gallery.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/settings/ProvidersAdminPanel.tsx'] },
   ListRow: { state: 'consumed', consumers: ['components-react/gallery/Gallery.tsx'] },
   Toolbar: { state: 'consumed', consumers: ['components-react/gallery/Gallery.tsx'] },
   Stat: { state: 'consumed', consumers: ['components-react/gallery/Gallery.tsx'] },
@@ -101,7 +111,8 @@ test('primitives 消费守卫：登记表结构完整且状态合法', async (t)
     assert.ok(consumed.length >= 3, `已消费 primitives 不得少于 3 个，当前 ${consumed.length}`);
     // 冻结当前消费集合：删除任何一项都必须先解释清楚，不能悄悄发生
     // 2026-11-13：BOT 能力矩阵接入逐项开关，Switch 由 pending 转正为 consumed。
-    assert.deepEqual(consumed, ['ActivityIndicator', 'Badge', 'Button', 'Input', 'ListRow', 'Menu', 'Skeleton', 'Stat', 'Surface', 'Switch', 'Toolbar'], '已消费集合只增不减；若确有迁移请同步更新本断言并在 PR 里说明');
+    // 2026-11-19：设置中心三处弹窗收编 primitives/Dialog（焦点陷阱 + Esc 分层），Dialog 由 pending 转正。
+    assert.deepEqual(consumed, ['ActivityIndicator', 'Badge', 'Button', 'Dialog', 'Input', 'ListRow', 'Menu', 'Select', 'Skeleton', 'Stat', 'Surface', 'Switch', 'Textarea', 'Toolbar'], '已消费集合只增不减；若确有迁移请同步更新本断言并在 PR 里说明');
   });
 });
 

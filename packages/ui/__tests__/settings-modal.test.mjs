@@ -1,5 +1,7 @@
-import test from 'node:test';
+﻿import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { SettingsModal } from '../dist/components-react/settings/SettingsModal.js';
@@ -9,10 +11,16 @@ import { ModelOptionRow, ModelPickerDialog, ModelPickerField, resolveModelPick }
 import { renderModelVendorIcon } from '../dist/lib/vendorIcon.js';
 import {
   SETTINGS_SECTIONS,
+  SETTINGS_SEARCH_ENTRIES,
+  buildModelSelectGroups,
+  filterSettingsEntries,
   filterSettingsSections,
+  isGatewayTestStale,
   resolveSettingsSection,
 } from '../dist/components-react/settings/settingsModel.js';
 import { setLocale, t } from '../dist/i18n/index.js';
+import { cn } from '../dist/lib/tw-merge.js';
+import { createJumpScheduler } from '../dist/components-react/settings/jumpScheduler.js';
 
 const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/u;
 
@@ -204,6 +212,8 @@ test('扩展页分别渲染 MCP 运行态与技能清单', () => {
   assert.ok(html.includes('github'));
   assert.ok(html.includes('code-review'));
   assert.ok(html.includes(t('settings.mcpToolCount', { count: 7 })));
+  assert.ok(html.includes('data-skill-group="builtin"'), '技能必须按 category 分组，不能混排成一堆徽标');
+  assert.ok(html.includes('data-atom="surface"'), 'MCP 行必须走 Surface 原子，与其他工作台卡片同一物理层级');
 });
 
 /** 构造 BOT 面板详情：能力清单显式标为非权威，避免测试把"没返回"当成"空配置"。 */
@@ -380,13 +390,23 @@ test('BOT 模型绑定：按 Provider 分组，当前模型离线时置顶保留
     }),
   });
   assert.ok(html.includes('id="bot-model"'), '必须有模型下拉');
-  assert.equal((html.match(/<optgroup/g) || []).length, 2, '必须按 Provider 分组');
-  assert.ok(html.includes(t('bot.modelOffline', { model: 'legacy/retired-model' })), '离线模型必须置顶并标注');
-  assert.ok(
-    html.includes('value="legacy/retired-model" selected') || html.includes('selected="" value="legacy/retired-model"'),
-    '离线模型必须保持选中，不能静默清空',
-  );
-  assert.ok(html.includes('Claude Opus 4.8'));
+  // 离线模型必须显示在触发器上（Select 的选项列表在 Portal 中，SSR 不渲染）。
+  assert.ok(html.includes(t('bot.modelOffline', { model: 'legacy/retired-model' })), '离线模型必须保留并标注，不能静默清空');
+
+  // 分组数据由纯函数构造，可直接断言：离线占位置顶且不可选，真实目录按 Provider 分组。
+  const groups = buildModelSelectGroups({
+    groups: [
+      { name: 'Anthropic', models: [{ id: 'claude-opus-4.8', name: 'Claude Opus 4.8' }, { id: 'claude-sonnet-5', name: 'Claude Sonnet 5' }] },
+      { name: 'OpenAI', models: [{ id: 'gpt-5.6', name: 'GPT-5.6' }] },
+    ],
+    currentModel: 'legacy/retired-model',
+    currentModelOffline: true,
+    labels: { offline: 'OFFLINE', unbound: 'UNBOUND', catalogUnavailable: 'NO_CATALOG' },
+  });
+  assert.equal(groups[0].options[0].value, 'legacy/retired-model', '离线项必须置顶');
+  assert.equal(groups[0].options[0].disabled, true, '离线占位不可选，禁止借它改写 provider');
+  assert.equal(groups.filter((group) => group.label).length, 2, '必须按 Provider 分组');
+  assert.deepEqual(groups.filter((group) => group.label).map((group) => group.label), ['Anthropic', 'OpenAI']);
 });
 
 test('BOT SOUL：等宽编辑器、字节计数、超 64KB 提示与变量/模板胶囊', () => {
@@ -559,7 +579,7 @@ test('BOT 横幅互斥：确认态存在时不得同时渲染错误横幅（避�
   assert.equal(html.includes('gateway 500'), false, '错误横幅与确认横幅不得同时出现');
 });
 
-test('Agent 状态位置：外观分区渲染两个选项，选中态与快照一致', () => {
+test('BOT 状态位置：外观分区渲染两个选项，选中态与快照一致', () => {
   setLocale('zh-CN');
   const stageHtml = render({ section: 'appearance', presenceLayout: 'stage' });
 
@@ -570,7 +590,7 @@ test('Agent 状态位置：外观分区渲染两个选项，选中态与快照�
    * 于是「文案丢了」这种用户立刻能看见的缺陷在全绿里藏住。
    * 硬编码期望值让测试独立于字典，字典缺 key 时这里必然红。
    */
-  assert.ok(stageHtml.includes('Agent 状态'), '必须渲染「Agent 状态」段（字典缺失时这里会红）');
+  assert.ok(stageHtml.includes('BOT 状态'), '必须渲染「BOT 状态」段（字典缺失时这里会红）');
   assert.ok(stageHtml.includes('对话区顶部'), '必须渲染「对话区顶部」选项');
   assert.ok(stageHtml.includes('输入框上方'), '必须渲染「输入框上方」选项');
 
@@ -1499,4 +1519,489 @@ test('设置中心弹窗尺寸：按主窗口视口自适应放大，不再写�
   assert.equal(dialogTag.includes('min(680px, calc(100vh - 96px))'), false, '不得保留旧版 680px 固定高度上限');
   assert.equal(/width:\s*900px/.test(dialogTag), false, '不得保留旧版 900px 固定宽度');
   assert.ok(html.includes('class="flex w-56 shrink-0 flex-col border-r border-border-subtle bg-sidebar"'), '左侧导航栏应使用 8pt 对齐的 w-56 (224px)');
+});
+
+/* -------------------------------------------------------------------------- */
+/* P0：弹窗族收编 primitives/Dialog 后的回归守卫                                */
+/* -------------------------------------------------------------------------- */
+
+const SETTINGS_SRC_DIR = path.resolve(import.meta.dirname, '../src/components-react/settings');
+const DIALOG_FAMILY = ['SettingsModal.tsx', 'ModelPicker.tsx', 'ProvidersAdminPanel.tsx', 'BotManagerView.tsx'];
+
+function readSettingsSource(file) {
+  return fs.readFileSync(path.join(SETTINGS_SRC_DIR, file), 'utf8');
+}
+
+test('弹窗族遮罩只有一档：不得再手写 40% / 60% 遮罩或自拼 fixed 遮罩容器', () => {
+  for (const file of DIALOG_FAMILY) {
+    const source = readSettingsSource(file);
+    assert.equal(source.includes('bg-backdrop/40'), false, `${file} 不得再手写 40% 遮罩（全族只有 /80 一档）`);
+    assert.equal(source.includes('bg-backdrop/60'), false, `${file} 不得再手写 60% 遮罩（全族只有 /80 一档）`);
+    assert.equal(
+      source.includes('fixed inset-0 z-50 flex items-center justify-center bg-backdrop'),
+      false,
+      `${file} 不得自拼遮罩容器，必须使用 primitives/Dialog 的 DialogContent`,
+    );
+  }
+  // 正向：主弹窗确实走 Dialog 原语，而不是只把字符串删干净。
+  const modal = readSettingsSource('SettingsModal.tsx');
+  assert.ok(modal.includes("from '../primitives/Dialog.js'"), 'SettingsModal 必须 import Dialog 原语');
+  assert.ok(modal.includes('<DialogContent'), 'SettingsModal 必须渲染 DialogContent');
+});
+
+test('Esc 归属单一层栈：弹窗族不得再自持 window keydown 或手写 Escape 分支', () => {
+  for (const file of DIALOG_FAMILY) {
+    const source = readSettingsSource(file);
+    assert.equal(
+      /window\.addEventListener\(\s*['"]keydown['"]/.test(source),
+      false,
+      `${file} 不得自持 window keydown：同层多个监听会让 Esc 一次关掉两层`,
+    );
+    assert.equal(
+      /if \(event\.key === ['"]Escape['"]\)/.test(source),
+      false,
+      `${file} 不得手写 Escape 分支，Esc 分层由 Radix DismissableLayer 栈负责`,
+    );
+  }
+  // 正向：IME 保护仍然保留在 Dialog 的 onEscapeKeyDown 上，不能连它一起删。
+  const modal = readSettingsSource('SettingsModal.tsx');
+  assert.ok(modal.includes('onEscapeKeyDown'), '设置主弹窗必须保留输入法 Esc 保护钩子');
+  assert.ok(modal.includes('isComposing'), 'Esc 保护必须识别输入法组合态');
+});
+
+test('关闭入口归位：左栏不再承担关闭职责，关闭按钮只出现在右侧顶栏', () => {
+  setLocale('zh-CN');
+  const html = render();
+  const aside = html.match(/<aside[\s\S]*?<\/aside>/);
+  assert.ok(aside, '必须渲染左侧导航栏');
+  assert.equal(
+    aside[0].includes(`aria-label="${t('settings.close')}"`),
+    false,
+    '左栏标题旁不得再放关闭按钮（与二级弹窗的右上角关闭习惯相悖）',
+  );
+  const sectionStart = html.indexOf('<section');
+  assert.ok(sectionStart > 0, '必须渲染右侧内容区');
+  assert.ok(
+    html.slice(sectionStart).includes(`aria-label="${t('settings.close')}"`),
+    '右侧顶栏必须有明确的关闭入口',
+  );
+});
+
+test('BOT 离场确认：脏稿拦截命中时给出取消 / 保留草稿 / 放弃修改三条出路', () => {
+  setLocale('zh-CN');
+  const html = render({
+    section: 'agents',
+    botManagement: botManagement({
+      status: { status: 'idle', activeBotId: 'arch' },
+      activeBotId: 'arch',
+      roster: [{ id: 'arch', displayName: '架构老王', model: '', isDefault: false, hasDraft: true }],
+      activeDetail: botDetail({ id: 'arch', displayName: '架构老王', isDefault: false }),
+      exitPrompt: { target: { kind: 'close' } },
+    }),
+  });
+  assert.ok(html.includes(t('bot.discardConfirmTitle')), '离场确认必须有标题');
+  assert.ok(html.includes(t('bot.discardConfirmBody')), '离场确认必须说明两种后果');
+  assert.ok(html.includes(t('bot.discardBtn')), '必须有「放弃修改」出路');
+  assert.ok(html.includes(t('bot.keepDraftBtn')), '必须有「保留草稿并离开」出路');
+  assert.ok(html.includes(t('settings.cancel')), '必须有「取消」留在当前');
+  assert.equal(html.includes('data-bot-confirm="true"'), false, '离场确认与保存二次确认是两件事，不得复用同一横幅');
+});
+
+test('BOT 表单：设为默认开关双向绑定草稿 isDefault', () => {
+  setLocale('zh-CN');
+  const build = (isDefault) =>
+    render({
+      section: 'agents',
+      botManagement: botManagement({
+        status: { status: 'idle', activeBotId: 'arch' },
+        activeBotId: 'arch',
+        roster: [{ id: 'arch', displayName: '架构老王', model: '', isDefault, hasDraft: false }],
+        activeDetail: botDetail({ id: 'arch', displayName: '架构老王', isDefault }),
+      }),
+    });
+
+  const onHtml = build(true);
+  assert.ok(onHtml.includes(t('bot.setDefault')), '表单必须渲染设为默认开关');
+  assert.ok(onHtml.includes(t('bot.setDefaultHint')), '开关必须解释其作用范围');
+  assert.ok(onHtml.includes('id="bot-set-default"'), '开关必须有可关联的 id');
+  assert.ok(
+    /role="switch"[^>]*aria-checked="true"/.test(onHtml) || /aria-checked="true"[^>]*role="switch"/.test(onHtml),
+    '开启态必须来自草稿 isDefault',
+  );
+
+  // 反向用例：硬编码 checked={true} 会在这里变红。
+  const offHtml = build(false);
+  assert.ok(
+    /role="switch"[^>]*aria-checked="false"/.test(offHtml) || /aria-checked="false"[^>]*role="switch"/.test(offHtml),
+    '关闭态必须渲染 aria-checked="false"，开关必须真实双向绑定',
+  );
+});
+
+test('连接测试结论失效判定：四个字段任一变更即作废，未测试过不作废', () => {
+  const base = { url: 'http://127.0.0.1:9119', username: 'u', password: '', profileName: 'default' };
+  assert.equal(isGatewayTestStale(null, base), false, '未点过测试时不得把外部产生的结论判为过期');
+  assert.equal(isGatewayTestStale(base, { ...base }), false, '草稿未变时结论继续有效');
+  for (const patch of [{ url: 'http://other:9119' }, { username: 'v' }, { password: 'p' }, { profileName: 'other' }]) {
+    assert.equal(
+      isGatewayTestStale(base, { ...base, ...patch }),
+      true,
+      `字段 ${Object.keys(patch)[0]} 变更后旧结论必须作废`,
+    );
+  }
+});
+
+test('连接表单草稿归属弹窗层：面板不得再自持 useState，测试指纹与草稿同生命周期', () => {
+  const modal = readSettingsSource('SettingsModal.tsx');
+  assert.ok(modal.includes('const [gatewayDraft, setGatewayDraft] = React.useState<GatewayDraft>'), '草稿必须提升到常驻的 SettingsModal');
+  assert.ok(modal.includes('const [testedGatewayDraft, setTestedGatewayDraft]'), '测试指纹必须与草稿一起提升');
+  assert.ok(modal.includes('testedDraft: testedGatewayDraft'), '测试指纹必须随绑定传入面板');
+  const panelStart = modal.indexOf('function ConnectionPanel(');
+  const panelEnd = modal.indexOf('function AboutPanel(');
+  assert.ok(panelStart > 0 && panelEnd > panelStart, '必须能定位 ConnectionPanel 实现');
+  const panel = modal.slice(panelStart, panelEnd);
+  assert.equal(/React\.useState<GatewayDraft>/.test(panel), false, 'ConnectionPanel 不得再自持草稿 state（切 Tab 会卸载并丢失）');
+  assert.ok(panel.includes('isGatewayTestStale(testedDraft, draft)'), '失效判定必须走纯函数，不能只留标识符');
+});
+
+test('设置项检索：真实配置项名可命中，且空查询不干扰导航', () => {
+  setLocale('zh-CN');
+  const hitsOf = (query) => filterSettingsEntries(SETTINGS_SEARCH_ENTRIES, query, (key) => t(key)).map((entry) => entry.id);
+
+  assert.deepEqual(hitsOf('字号'), ['font-size'], '「字号」必须命中文字大小');
+  assert.deepEqual(hitsOf('密码'), ['gateway-password'], '「密码」必须命中登录密码');
+  assert.deepEqual(hitsOf('语言'), ['language']);
+  assert.deepEqual(hitsOf('SOUL'), ['bot-soul'], '大小写无关');
+  assert.deepEqual(hitsOf('版本'), ['about-version']);
+  assert.deepEqual(hitsOf('soul'), ['bot-soul']);
+  assert.equal(hitsOf('').length, 0, '空查询不返回条目（导航仍显示全量分区）');
+  assert.equal(hitsOf('不存在的设置项').length, 0);
+
+  setLocale('en-US');
+  assert.deepEqual(
+    filterSettingsEntries(SETTINGS_SEARCH_ENTRIES, 'password', (key) => t(key)).map((entry) => entry.id),
+    ['gateway-password'],
+    '英文查询同样命中',
+  );
+  setLocale('zh-CN');
+});
+
+test('Select 必须使用单选语义：MenuRadioGroup + MenuRadioItem，禁止手绘选中图标', () => {
+  const select = fs.readFileSync(path.resolve(import.meta.dirname, '../src/components-react/primitives/Select.tsx'), 'utf8');
+  assert.ok(select.includes('MenuRadioGroup'), '必须用 RadioGroup 提供 role="menuitemradio" 语义');
+  assert.ok(select.includes('MenuRadioItem'), '选项必须是 RadioItem，屏幕阅读器才能读到 aria-checked');
+  assert.equal(/<Check\b/.test(select), false, '选中态不得由业务手绘 Check：ItemIndicator 负责指示器');
+  const menu = fs.readFileSync(path.resolve(import.meta.dirname, '../src/components-react/primitives/Menu.tsx'), 'utf8');
+  // 必须断言底层真的用了 Radix RadioItem：只查 ItemIndicator 时，把 RadioItem 换成 Item 仍然全绿。
+  assert.ok(menu.includes('<MenuPrimitive.RadioItem'), '底层必须是 Radix RadioItem，否则 role/aria-checked 全丢');
+  assert.ok(menu.includes('MenuPrimitive.ItemIndicator'), 'RadioItem 必须自带 ItemIndicator');
+});
+
+test('检索索引与锚点双向一致：索引项都能跳到，面板锚点也都可被搜到', () => {
+  const allSource = [
+    readSettingsSource('SettingsModal.tsx'),
+    readSettingsSource('BotManagerView.tsx'),
+    readSettingsSource('ProvidersAdminPanel.tsx'),
+    readSettingsSource('ModelPicker.tsx'),
+  ].join('\n');
+  const entryIds = new Set(SETTINGS_SEARCH_ENTRIES.map((entry) => entry.id));
+
+  // 正向：每个索引项都能在面板里找到字面量锚点。
+  for (const entry of SETTINGS_SEARCH_ENTRIES) {
+    const hasAnchor =
+      allSource.includes(`anchorId="${entry.id}"`) || allSource.includes(`data-settings-anchor="${entry.id}"`);
+    assert.ok(hasAnchor, `索引条目 ${entry.id} 找不到对应锚点：用户会搜到却跳不过去`);
+  }
+
+  // 反向：面板里每个字面量锚点都必须登记进索引，否则用户永远搜不到它。
+  const literalAnchors = new Set(
+    // 只接受字面量 id（小写字母/数字/连字符）：排除 `data-settings-anchor="${entry.id}"` 这类模板表达式。
+    Array.from(allSource.matchAll(/(?:anchorId|data-settings-anchor)="([a-z0-9-]+)"/g)).map((match) => match[1]),
+  );
+  assert.ok(literalAnchors.size > 0, '必须能提取到锚点（防止正则失效后空循环假绿）');
+  for (const anchor of literalAnchors) {
+    assert.ok(entryIds.has(anchor), `锚点 ${anchor} 未登记进检索索引，用户搜不到它`);
+  }
+});
+
+test('跳转调度器：每次 schedule 都登记，dispose 后全部取消且幂等', () => {
+  const timers = new Map();
+  const cleared = [];
+  let nextId = 1;
+  const scheduler = createJumpScheduler({
+    setTimeout: (fn) => {
+      const id = nextId++;
+      timers.set(id, fn);
+      return id;
+    },
+    clearTimeout: (id) => {
+      cleared.push(id);
+      timers.delete(id);
+    },
+  });
+
+  scheduler.schedule(() => {}, 60);
+  scheduler.schedule(() => {}, 1600);
+  assert.equal(scheduler.pending(), 2, '每个 schedule 都必须登记句柄');
+
+  scheduler.dispose();
+  assert.deepEqual(cleared.sort((a, b) => a - b), [1, 2], 'dispose 必须取消全部已登记句柄');
+  assert.equal(scheduler.pending(), 0);
+
+  scheduler.dispose();
+  assert.equal(cleared.length, 2, 'dispose 必须幂等：重复调用不得再次取消');
+});
+
+test('跳转调度器：已执行的回调自行出队，不会被重复取消', () => {
+  const timers = new Map();
+  const cleared = [];
+  let nextId = 1;
+  const scheduler = createJumpScheduler({
+    setTimeout: (fn) => {
+      const id = nextId++;
+      timers.set(id, fn);
+      return id;
+    },
+    clearTimeout: (id) => cleared.push(id),
+  });
+
+  let ran = 0;
+  scheduler.schedule(() => {
+    ran += 1;
+  }, 10);
+  const pendingFn = timers.get(1);
+  assert.equal(typeof pendingFn, 'function');
+  pendingFn();
+
+  assert.equal(ran, 1);
+  assert.equal(scheduler.pending(), 0, '执行后必须出队');
+  scheduler.dispose();
+  assert.deepEqual(cleared, [], '已执行句柄不得再被取消');
+});
+
+test('设置弹窗不得绕过调度器直接使用 window.setTimeout', () => {
+  const modal = readSettingsSource('SettingsModal.tsx');
+  assert.ok(modal.includes('createJumpScheduler'), '跳转定时器必须走可清理的调度器');
+  assert.equal(
+    /window\.setTimeout\(\(\) => scrollToAnchor/.test(modal),
+    false,
+    '递归重试不得绕过 schedule 封装',
+  );
+
+  /*
+   * 按括号配平切出每个 useEffect 块，逐块断言。
+   * 【为什么不用正则窗口】`[\s\S]{0,200}?` 会从卸载 effect 的空壳一路扫到下一个
+   *   关闭 effect 的 dispose()，使"保留空壳、删掉 dispose"这种半吊子改动逃逸。
+   */
+  const blocks = [];
+  for (let i = modal.indexOf('React.useEffect('); i >= 0; i = modal.indexOf('React.useEffect(', i + 1)) {
+    let depth = 0;
+    for (let j = i + 'React.useEffect'.length; j < modal.length; j += 1) {
+      if (modal[j] === '(') depth += 1;
+      else if (modal[j] === ')' && (depth -= 1) === 0) {
+        blocks.push(modal.slice(i, j + 1));
+        break;
+      }
+    }
+  }
+  assert.ok(blocks.length >= 2, '必须能切出 effect 块（防止解析失效后空循环假绿）');
+
+  const unmountEffect = blocks.find((block) => /\(\) => \(\) => \{/.test(block));
+  assert.ok(unmountEffect, '必须存在卸载清理 effect');
+  assert.ok(unmountEffect.includes('jumpSchedulerRef.current?.dispose()'), '卸载 effect 必须调用 dispose');
+
+  const closeEffect = blocks.find((block) => /if \(!snapshot\.isOpen\)/.test(block) && block.includes('jumpSchedulerRef'));
+  assert.ok(closeEffect, '必须存在关闭清理 effect');
+  assert.ok(closeEffect.includes('jumpSchedulerRef.current?.dispose()'), '关闭 effect 必须调用 dispose');
+});
+
+test('连点两次检索结果只保留最后一次跳转', () => {
+  const modal = readSettingsSource('SettingsModal.tsx');
+  assert.ok(
+    /const scheduler = jumpSchedulerRef\.current;[\s\S]{0,120}?scheduler\.dispose\(\);/.test(modal),
+    'jumpToEntry 必须先 dispose 上一轮，否则两次 scrollIntoView 会互相竞争',
+  );
+});
+
+test('模型下拉占位互斥：空目录与未绑定叠加时只保留一个占位', () => {
+  const labels = { offline: 'OFFLINE', unbound: 'UNBOUND', catalogUnavailable: 'NO_CATALOG' };
+
+  const emptyAll = buildModelSelectGroups({ groups: [], currentModel: '', currentModelOffline: false, labels });
+  assert.equal(emptyAll.length, 1, '空目录 + 未绑定只能产生一个分组，否则出现重复 key 与重复占位');
+  assert.equal(emptyAll[0].options.length, 1);
+  assert.equal(emptyAll[0].options[0].label, 'NO_CATALOG', '目录不可用优先于未绑定');
+  assert.equal(emptyAll[0].options[0].disabled, true);
+
+  const offline = buildModelSelectGroups({
+    groups: [{ name: 'Anthropic', models: [{ id: 'claude-sonnet-5', name: 'Claude Sonnet 5' }] }],
+    currentModel: 'legacy/retired',
+    currentModelOffline: true,
+    labels,
+  });
+  assert.equal(offline.length, 2, '离线占位 + 一个真实分组');
+  assert.equal(offline[0].options[0].value, 'legacy/retired');
+  assert.equal(offline[0].options[0].disabled, true);
+  assert.equal(offline[1].options[0].value, 'claude-sonnet-5');
+
+  // 目录正常但未绑定模型（新建 BOT 的默认态）：只能出 UNBOUND 占位，不得出 catalogUnavailable。
+  const unbound = buildModelSelectGroups({
+    groups: [{ name: 'Anthropic', models: [{ id: 'claude-sonnet-5', name: 'Claude Sonnet 5' }] }],
+    currentModel: '',
+    currentModelOffline: false,
+    labels,
+  });
+  assert.equal(unbound.length, 2);
+  assert.equal(unbound[0].options[0].label, 'UNBOUND');
+  assert.equal(unbound[0].options[0].disabled, true);
+  assert.equal(unbound[1].options[0].value, 'claude-sonnet-5');
+});
+
+test('提供商页作用域显性化：顶部提供「作用 BOT」切换器并消费花名册', () => {
+  setLocale('zh-CN');
+  const html = render({
+    section: 'providers',
+    providerViews: { status: 'ready', data: [] },
+    bots: [
+      { profile: 'arch', displayName: '架构老王' },
+      { profile: 'ops', displayName: '运维老李' },
+    ],
+    scopedProfile: 'arch',
+  });
+  assert.ok(html.includes(`aria-label="${t('settings.viewByBot')}"`), '必须有作用域切换器，明确删除/设为默认作用于哪个 BOT');
+  assert.ok(html.includes('架构老王'), '选项必须来自 BOT 花名册（当前作用域可见）');
+});
+
+test('卡片层级：提供商行与 MCP 行必须消费 Surface，主题卡靠受光线与投影撑层级', () => {
+  const providers = readSettingsSource('ProvidersAdminPanel.tsx');
+  assert.ok(
+    providers.includes('<Surface level="raised" padding="normal" elevated'),
+    'ProviderRow 必须消费 Surface 原子并使用 raised 档（card 与 popover 同值时靠派生色建立层级）',
+  );
+  assert.equal(
+    providers.includes('specular-top rounded-card border border-border-subtle bg-card'),
+    false,
+    '禁止手写 Surface 同构串（双标实现）',
+  );
+
+  const modal = readSettingsSource('SettingsModal.tsx');
+  assert.ok(
+    modal.includes('specular-top shadow-card'),
+    '主题卡必须带受光线与投影：默认皮肤下 card 与 popover 同色，只靠边框无法撑起层级',
+  );
+  assert.ok(modal.includes('xl:grid-cols-3'), '三列必须用 xl 断点，避免 1024~1280 视口下每列被压到 204px');
+  assert.ok(
+    modal.includes("classList.add('outline-2', 'outline-primary', 'outline-offset-2')"),
+    '跳转高亮必须用 outline：ring 走 box-shadow，会覆盖 Surface 的 shadow-card',
+  );
+  assert.equal(/classList\.add\('ring-2'/.test(modal), false, '禁止用 ring 做高亮（阴影会闪失一次）');
+  assert.equal(
+    /node\.classList\.add\('ring-2', 'ring-primary', 'rounded-card'\)/.test(modal),
+    false,
+    '跳转高亮不得改圆角（会触发一次重排）',
+  );
+
+  // 派生表面：card 与 popover 同值的皮肤下，唯一不触碰全局色值的层级解法。
+  const css = fs.readFileSync(path.resolve(import.meta.dirname, '../src/tailwind-entry.css'), 'utf8');
+  assert.ok(css.includes('@utility surface-raised'), '派生表面必须在 Token 入口登记');
+  assert.ok(
+    css.includes('color-mix(in oklab, var(--card) 92%, var(--foreground) 8%)'),
+    '派生色必须由既有 token 计算，不得写死色值',
+  );
+  assert.ok(
+    /@utility surface-raised \{\s*background-color: var\(--card\);/.test(css),
+    '必须保留 var(--card) 兜底：旧环境退化为原卡片色，而不是透明',
+  );
+
+  // surface-raised 与 bg-* 同属背景色，必须能被 cn 按书写顺序正确合并。
+  assert.equal(cn('bg-primary-subtle', 'surface-raised'), 'surface-raised', '后写的派生表面必须胜出');
+  assert.equal(cn('surface-raised', 'bg-primary-subtle'), 'bg-primary-subtle', '反向书写时后者同样胜出');
+  assert.ok(
+    modal.includes("'border-border-subtle surface-raised hover:bg-card-hover'"),
+    '主题卡未选中态必须使用派生表面（浅色皮肤下 bg-card 与浮层同值）',
+  );
+});
+
+test('术语基准：设置中心统一 BOT / Bot，技能与 MCP 服务器不再中英混用', () => {
+  setLocale('zh-CN');
+  // 硬编码期望值：与组件同时调 t() 会形成循环自证，字典丢 key 时两边一起退化。
+  assert.equal(t('settings.presenceTitle'), 'BOT 状态');
+  assert.equal(t('settings.providerScopeAll'), '所有 BOT 都在用');
+  assert.equal(t('settings.providerBindingLegend'), '绿环 = 该 BOT 当前默认模型所属的提供商');
+  assert.equal(t('settings.gatewayProfile'), '默认配置');
+  assert.equal(t('settings.sectionProvidersDesc'), '提供商、密钥与可用模型');
+  assert.equal(t('bot.skillsTitle'), '技能');
+  assert.equal(t('bot.segment.skills'), '技能');
+  assert.equal(t('bot.mcpTitle'), 'MCP 服务器');
+  assert.equal(t('bot.segment.mcp_servers'), 'MCP 服务器');
+  assert.equal(t('rail.pinnedBots'), 'BOT');
+
+  setLocale('en-US');
+  assert.equal(t('settings.presenceTitle'), 'BOT status');
+  assert.equal(t('settings.providerScopeAll'), 'Used by every BOT');
+  assert.equal(t('bot.skillsTitle'), 'Skills');
+  assert.equal(t('bot.mcpTitle'), 'MCP servers');
+  assert.equal(t('rail.pinnedBots'), 'Bots');
+  setLocale('zh-CN');
+});
+
+test('设置中心组件不得硬编码实体称谓（必须全部走 t()）', () => {
+  for (const file of ['SettingsModal.tsx', 'BotManagerView.tsx', 'ProvidersAdminPanel.tsx', 'ModelPicker.tsx', 'BotCapabilityList.tsx']) {
+    const source = readSettingsSource(file);
+    // 只看 JSX 文本节点：>Agent< / >智能体< / >Bot< 这类直出文案。
+    assert.equal(/>\s*(Agent|智能体|Bot)\s*</.test(source), false, `${file} 不得硬编码实体称谓，必须走 t()`);
+  }
+});
+
+test('全局 Esc 不得越过弹窗层：已消费的 Esc 必须早退，关闭设置页走脏稿出口', () => {
+  const globalKeybinds = fs.readFileSync(
+    path.resolve(import.meta.dirname, '../../desktop/src/renderer/dropdownKeybindController.ts'),
+    'utf8',
+  );
+  assert.ok(
+    globalKeybinds.includes('if (e.defaultPrevented) return;'),
+    'Radix 已在 capture 阶段消费的 Esc 必须早退，否则一次 Esc 会同时关掉二级弹窗与整个设置页',
+  );
+  assert.equal(
+    /state\.isSettingsOpen\s*=\s*false/.test(globalKeybinds),
+    false,
+    '全局快捷键不得直接关闭设置页，必须经过 requestSettingsExit 的脏稿拦截',
+  );
+  assert.ok(globalKeybinds.includes('deps.requestSettingsExit()'), 'Ctrl/Cmd+, 与全局 Esc 的关闭方向都必须走唯一出口');
+});
+
+test('配置内容必须自适应填满可用宽度：禁止限宽居中留白', () => {
+  const modal = readSettingsSource('SettingsModal.tsx');
+  assert.equal(/max-w-3xl|max-w-4xl|max-w-5xl/.test(modal), false, '内容区不得限宽：宽屏下必须填满可用宽度');
+  assert.equal(/mx-auto/.test(modal), false, '不得用 mx-auto 居中留白');
+
+  const bot = readSettingsSource('BotManagerView.tsx');
+  assert.equal(/max-w-4xl|mx-auto/.test(bot), false, 'BOT 面板同样必须自适应，不能单独限宽');
+
+  // 正向：内容容器仍是 flex-1 + 可滚动，收窄窗口时跟随父级收缩。
+  assert.ok(modal.includes("'flex-1 overflow-y-auto px-6 py-4'"), '内容区必须保留 flex-1 自适应与滚动兜底');
+});
+
+test('二级弹窗高度收敛为语义档位：不得用任意值类或内联 maxHeight 规避审计', () => {
+  for (const file of ['ModelPicker.tsx', 'ProvidersAdminPanel.tsx']) {
+    const source = readSettingsSource(file);
+    assert.equal(source.includes('max-h-['), false, `${file} 不得使用任意值 max-h-[...]`);
+    assert.equal(/maxHeight:\s*'min\(/.test(source), false, `${file} 不得用内联 maxHeight 规避任意值审计`);
+  }
+  assert.ok(readSettingsSource('ModelPicker.tsx').includes('max-h-modal-sm'), '模型弹窗必须使用 max-h-modal-sm 语义档位');
+  assert.ok(readSettingsSource('ProvidersAdminPanel.tsx').includes('max-h-modal-md'), '提供商弹窗必须使用 max-h-modal-md 语义档位');
+
+  const css = fs.readFileSync(path.resolve(import.meta.dirname, '../src/tailwind-entry.css'), 'utf8');
+  assert.ok(css.includes('@utility max-h-modal-sm'), '语义档位必须在 Token 入口登记（禁止散落在业务里）');
+  assert.ok(css.includes('@utility max-h-modal-md'), '语义档位必须在 Token 入口登记（禁止散落在业务里）');
+  // 值也必须守护：只断言类名存在时，把档位改成 100vh 仍然全绿。
+  assert.ok(css.includes('max-height: min(560px, calc(100vh - 96px));'), 'max-h-modal-sm 必须相对视口有界并留出安全边距');
+  assert.ok(css.includes('max-height: min(680px, calc(100vh - 96px));'), 'max-h-modal-md 必须相对视口有界并留出安全边距');
+
+  // 新档位必须同时在 tw-merge 登记，否则 `max-h-64 max-h-modal-sm` 会退化为 CSS 顺序决定。
+  assert.equal(cn('max-h-64', 'max-h-modal-sm'), 'max-h-modal-sm', '语义档位必须能在 cn() 中覆盖原生 max-h');
+  assert.equal(cn('max-h-modal-sm', 'max-h-modal-md'), 'max-h-modal-md', '两个语义档位之间也必须可覆盖');
+
+  // 浮层菜单层级同样收敛为语义档位，禁止业务回到 z-[1200] 任意值。
+  assert.ok(css.includes('@utility z-menu'), '浮层菜单层级必须在 Token 入口登记');
+  assert.ok(css.includes('z-index: 1200;'), 'z-menu 取值必须高于设置弹窗宿主（z-50）');
+  assert.equal(cn('z-50', 'z-menu'), 'z-menu', 'z-menu 必须能覆盖原生 z-50');
 });

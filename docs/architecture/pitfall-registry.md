@@ -282,6 +282,36 @@
 | 守卫 | ① 删除 `PresenceController` 影子字段，`getSnapshot()` / `syncAgentPresenceHost()` / `resetPresenceHost()` 统一以 `AgentPresenceManager` 为唯一真值源；② `resolvePresenceSoloIdentity` 在 `focus.type === 'bot'` 时严格按 `botName` 隔离会话元数据并优先走 `resolveAgentAvatar`，`agentPresenceFingerprint` 纳入群成员头像；③ `presenceController.test.mjs`、`agent-presence-manager.test.mjs` 与 `agent-presence-wiring.test.mjs` 第 15 条 |
 | 复现命令 | `node --test packages/desktop/__tests__/unit/presenceController.test.mjs packages/desktop/__tests__/unit/agent-presence-manager.test.mjs packages/desktop/__tests__/unit/agent-presence-wiring.test.mjs` |
 
+## P-029 二级弹窗 Esc 穿透，一次按键把整个设置页关掉
+
+| 项目 | 内容 |
+|---|---|
+| 症状 | 在「添加提供商」「查看模型」二级弹窗里按 Esc，二级弹窗与整个设置中心同时关闭，已填写的端点表单全部丢失 |
+| 根因 | 二级弹窗只在自身容器上 `onKeyDown` 拦 Esc，而宿主设置中心在 `window` 上挂原生监听。焦点停在触发按钮（不在二级容器内）时事件根本不经过二级容器；即使经过，React 合成事件的 `stopPropagation` 也拦不住同 target 的原生监听。两层各自手写 Esc，没有任何"谁是最上层"的概念 |
+| 识别特征 | 只在焦点不在二级弹窗内部时复现；点一下弹窗内部再按 Esc 只关一层 |
+| 守卫 | ① 设置族全部收编 `primitives/Dialog`（Radix DismissableLayer 栈：`index === layers.length - 1` 才注册 keydown，`onDismiss` 内 `preventDefault`）；② `settings-modal.test` 断言弹窗族不得再出现 `window.addEventListener('keydown'` 与手写 `if (event.key === 'Escape')`；③ `primitives-consumption` 把 Dialog 由 pending 转正 |
+| 复现命令 | `node --test packages/ui/__tests__/settings-modal.test.mjs packages/ui/__tests__/primitives-consumption.test.mjs` |
+
+## P-030 模态层遮罩三档分裂且无焦点陷阱
+
+| 项目 | 内容 |
+|---|---|
+| 症状 | 同一屏三个弹窗的遮罩分别是 80% / 60% / 40%；键盘 Tab 能把焦点送出弹窗外落到主界面 |
+| 根因 | 每个弹窗各自手写 `fixed inset-0 bg-backdrop/NN` 与内容框，模态的物理属性（遮罩档、焦点陷阱、滚动锁、焦点归还）没有被收敛到唯一实现 |
+| 识别特征 | 截图对比三层遮罩深浅不一；Tab 遍历出现弹窗外元素 |
+| 守卫 | `primitives/Dialog` 成为唯一实现（overlay 固定 `bg-backdrop/80` + FocusScope）；`settings-modal.test` 断言设置族源码不得再出现 `bg-backdrop/40`、`bg-backdrop/60` 与自拼 `fixed inset-0 ... bg-backdrop` 容器 |
+| 复现命令 | `node --test packages/ui/__tests__/settings-modal.test.mjs` |
+
+## P-031 BOT 未保存草稿离场静默丢失
+
+| 项目 | 内容 |
+|---|---|
+| 症状 | 在 BOT 页改了显示名 / SOUL，直接切左侧导航或按 Esc 关设置，没有任何提示；用户以为已保存 |
+| 根因 | i18n 与快照字段（`exitPrompt`、`onRegisterBotDirtyGuard`、`onConfirmBotExit`）早已定义，但面板从未渲染确认框，壳层三个动作是空函数，`exitPrompt` 恒为 `null`——整条离场拦截链路只有类型没有实现 |
+| 识别特征 | 有草稿时切换导航无任何拦截；`grep "onConfirmBotExit: () => {}"` 命中空实现 |
+| 守卫 | ① `BotManagerView` 渲染 exitPrompt 三出路（取消 / 保留草稿 / 放弃修改）并注册 dirty guard；② 壳层 `requestSettingsExit` 统一承接关闭与切导航，`pendingBotExit` 单值挂起；③ `settings-modal.test` 断言确认框三条出路与"不得复用保存二次确认横幅" |
+| 复现命令 | `node --test packages/ui/__tests__/settings-modal.test.mjs` |
+
 ## 守卫总览
 
 | 守卫 | 命令 | 拦住的坑 |
@@ -311,3 +341,5 @@
 | 绑定默认模型守卫 | `npm test`（providerBinding attach 形状 + resolveBindingDefaultModel）+ 真网关 CDP | P-026 |
 | 运行时模型目录优先守卫 | `npm test`（providerViews 优先级用例）+ `/api/model/options` 对比 | P-027 |
 | 在场指示器单一快照与跨 Bot 隔离守卫 | `npm test`（presenceController + agent-presence-manager + agent-presence-wiring #15） | P-028 |
+| 模态层单一实现守卫 | `npm test`（settings-modal 弹窗族源码断言 + primitives-consumption Dialog 转正） | P-029、P-030 |
+| BOT 离场拦截守卫 | `npm test`（settings-modal 离场确认三出路 + 壳层 requestSettingsExit 接线） | P-031 |

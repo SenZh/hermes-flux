@@ -35,6 +35,7 @@ test('DropdownKeybindController - 模型下拉与全局热键领域纯行为测�
       ensuredSection: null,
       escapedModal: false,
       enteredModal: false,
+      settingsExit: 0,
     };
 
     const controller = createDropdownKeybindController({
@@ -56,13 +57,29 @@ test('DropdownKeybindController - 模型下拉与全局热键领域纯行为测�
       ensureSettingsSectionData: (sec) => {
         sideEffects.ensuredSection = sec;
       },
+      // 关闭设置页的唯一出口：测试只观察它是否被调用，不复制脏稿判定。
+      requestSettingsExit: () => {
+        sideEffects.settingsExit += 1;
+      },
       getLastInputDockSnapshot: () => lastDock,
       setLastInputDockSnapshot: (snapshot) => {
         lastDock = snapshot;
       },
     });
 
-    return { state, controller, sideEffects, getLastDock: () => lastDock };
+    /** 绑定全局 keydown 并取回 handler；每个用例独立绑定，避免用例间串味。 */
+    const bindGlobalKeyHandler = () => {
+      let handler = null;
+      controller.setupGlobalKeybinds({
+        addEventListener: (type, fn) => {
+          if (type === 'keydown') handler = fn;
+        },
+        removeEventListener: () => {},
+      });
+      return handler;
+    };
+
+    return { state, controller, sideEffects, getLastDock: () => lastDock, bindGlobalKeyHandler };
   }
 
   await t.test('1. pickReasoningLevel 校验白名单并分发合法思考等级', () => {
@@ -149,5 +166,50 @@ test('DropdownKeybindController - 模型下拉与全局热键领域纯行为测�
     assert.doesNotThrow(() => {
       controller.dispose();
     });
+  });
+
+  await t.test('6. Esc 已被弹窗层消费时全局必须早退（一次 Esc 只关一层）', () => {
+    const { state, controller, sideEffects, bindGlobalKeyHandler } = createHarness();
+    const keyHandler = bindGlobalKeyHandler();
+    state.isSettingsOpen = true;
+
+    keyHandler({ key: 'Escape', defaultPrevented: true });
+
+    assert.equal(sideEffects.settingsExit, 0, 'Radix 已消费的 Esc 不得再触发设置页离场');
+    assert.equal(state.isSettingsOpen, true, '设置页必须保持打开，只关掉最上层弹窗');
+  });
+
+  await t.test('7. Esc 未被消费时关闭设置页必须走脏稿出口，不得直接改状态', () => {
+    const { state, controller, sideEffects, bindGlobalKeyHandler } = createHarness();
+    const keyHandler = bindGlobalKeyHandler();
+    state.isSettingsOpen = true;
+
+    keyHandler({ key: 'Escape', defaultPrevented: false });
+
+    assert.equal(sideEffects.settingsExit, 1, '关闭设置页必须经过 requestSettingsExit（脏稿拦截）');
+    assert.equal(state.isSettingsOpen, true, '全局监听不得直接置 false，最终状态由出口裁决');
+  });
+
+  await t.test('8. Ctrl/Cmd+, 的关闭方向同样走脏稿出口', () => {
+    const { state, controller, sideEffects, bindGlobalKeyHandler } = createHarness();
+    const keyHandler = bindGlobalKeyHandler();
+    state.isSettingsOpen = true;
+
+    keyHandler({ ctrlKey: true, key: ',', preventDefault: () => {} });
+
+    assert.equal(sideEffects.settingsExit, 1, '快捷键关闭不得绕过脏稿拦截');
+    assert.equal(state.isSettingsOpen, true);
+  });
+
+  await t.test('9. Ctrl/Cmd+, 的打开方向直接置真并装载分区', () => {
+    const { state, controller, sideEffects, bindGlobalKeyHandler } = createHarness();
+    const keyHandler = bindGlobalKeyHandler();
+    state.isSettingsOpen = false;
+
+    keyHandler({ ctrlKey: true, key: ',', preventDefault: () => {} });
+
+    assert.equal(state.isSettingsOpen, true);
+    assert.equal(sideEffects.ensuredSection, 'general');
+    assert.equal(sideEffects.settingsExit, 0, '打开方向不得触发离场出口');
   });
 });
