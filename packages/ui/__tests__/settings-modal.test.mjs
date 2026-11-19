@@ -1485,3 +1485,18 @@ test('订阅默认对所有 Agent 生效：格子只读，不能逐 Agent 取消
   const absent = agentCell(html, 'aura');
   assert.ok(absent.includes('disabled'), '订阅格子一律只读');
 });
+
+test('设置中心弹窗尺寸：按主窗口视口自适应放大，不再写死 900×680 小窗', () => {
+  setLocale('zh-CN');
+  const html = render();
+  const dialogTagMatch = html.match(/<div[^>]*data-testid="settings-dialog"[^>]*>/);
+  assert.ok(dialogTagMatch, '必须渲染 settings-dialog 容器');
+  const dialogTag = dialogTagMatch[0];
+  assert.ok(dialogTag.includes('clamp(900px, 88vw, 1440px)'), '弹窗宽度必须使用视口自适应 clamp(900px, 88vw, 1440px)');
+  assert.ok(dialogTag.includes('clamp(620px, 86vh, 960px)'), '弹窗高度必须使用视口自适应 clamp(620px, 86vh, 960px)');
+  assert.ok(dialogTag.includes('calc(100vw - 48px)'), '弹窗最大宽度必须约束在主窗口安全边距内');
+  assert.ok(dialogTag.includes('calc(100vh - 48px)'), '弹窗最大高度必须约束在主窗口安全边距内');
+  assert.equal(dialogTag.includes('min(680px, calc(100vh - 96px))'), false, '不得保留旧版 680px 固定高度上限');
+  assert.equal(/width:\s*900px/.test(dialogTag), false, '不得保留旧版 900px 固定宽度');
+  assert.ok(html.includes('class="flex w-56 shrink-0 flex-col border-r border-border-subtle bg-sidebar"'), '左侧导航栏应使用 8pt 对齐的 w-56 (224px)');
+});

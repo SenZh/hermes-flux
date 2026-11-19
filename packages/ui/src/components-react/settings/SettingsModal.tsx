@@ -535,9 +535,14 @@ export function SettingsModal({
         ref={dialogRef}
         tabIndex={-1}
         className="flex overflow-hidden rounded-window border border-border bg-popover text-foreground shadow-window"
-        style={{ height: 'min(680px, calc(100vh - 96px))', width: '900px', maxWidth: '94vw' }}
+        style={{
+          width: 'clamp(900px, 88vw, 1440px)',
+          maxWidth: 'calc(100vw - 48px)',
+          height: 'clamp(620px, 86vh, 960px)',
+          maxHeight: 'calc(100vh - 48px)',
+        }}
       >
-        <aside className="flex w-53 shrink-0 flex-col border-r border-border-subtle bg-sidebar">
+        <aside className="flex w-56 shrink-0 flex-col border-r border-border-subtle bg-sidebar">
           <div className="flex items-center justify-between px-4 pb-2 pt-4">
             <h2 id="settings-dialog-title" className="text-title text-foreground">
               {t('settings.title')}
