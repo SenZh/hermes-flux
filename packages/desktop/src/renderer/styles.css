@@ -77,7 +77,18 @@
   /* 几何单源。设计意图(Why)：微轨/抽屉/检查舱/状态栏的尺寸被 TS(DIMENSIONS)、CSS fallback
      与组件 utility 三处引用；不定义真值就会永远走 fallback，改一处不生效。
      约束与规则(Rules)：本段是 CSS 侧唯一定义面，数值必须与 tokens.ts 的 DIMENSIONS 一致。 */
-  --geo-titlebar: 42px;
+  /* 顶栏内容高。用户 2026-11-20 裁决：42px 过高，收紧为 36px。
+     36px 可容纳 28px 图标按钮并保留上下各 4px 呼吸；再往下需同步复核
+     .win-cap-btn 高度与 macOS 交通灯 y 坐标。 */
+  --geo-titlebar: 36px;
+  /* 顶栏左段几何拆成两个正交量：
+     content = 折叠态需要容纳的按钮宽度（☰ 28px）
+     inset   = 左侧让位（Windows 8px / macOS 88px 给系统交通灯）
+     折叠态宽度 = content + inset。border-box 下二者相加才不会被 padding 钳死。 */
+  --geo-titlebar-left-content: 28px;
+  --geo-titlebar-left-inset: 8px;
+  /* macOS 系统交通灯让位宽度。真值抄自 openchamber 源码 Header.tsx:1051 的硬编码 88px。 */
+  --geo-titlebar-left-inset-macos: 88px;
   --geo-micro-rail: clamp(58px, 4.2vw, 72px);
   /* 仅被 .flux-context-drawer 的 width/min-width 声明引用，实际被 Tailwind flex-1/min-w-0 覆盖 */
   --geo-context-drawer: 244px;
@@ -600,6 +611,10 @@
    吃掉内容区，窗控三键与图标相对整栏视觉中心发生 1px 垂直偏心。
    约束与规则 (Rules)：内部元素 height: 100% 精准对应 42px；含边框的外围总高为
    calc(var(--geo-titlebar) + 1px)，所有依赖顶栏高度的 fixed 定位必须同步该表达式。 */
+/* 设计意图(Why)：底边横线不得横穿左栏上方——那会把左栏切成上下两段，破坏"左栏顶天立地"的整体感。
+   历史坑(Pitfall)：曾用 border-bottom 通栏画线，左栏上方也有一条，视觉上左栏被拦腰截断。
+   约束与规则(Rules)：border-bottom 保留 1px 但透明，仅用于维持 43px 总高；
+   可见横线由 ::after 只画在左栏右边界右侧；左侧竖线由 .titlebar-left 的 border-right 从 y=0 贯穿。 */
 .flux-titlebar {
   height: calc(var(--geo-titlebar) + 1px + env(safe-area-inset-top, 0px));
   min-height: calc(var(--geo-titlebar) + 1px + env(safe-area-inset-top, 0px));
@@ -608,17 +623,99 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid transparent;
   background: var(--sidebar);
   user-select: none;
   -webkit-app-region: drag;
   position: relative;
   z-index: 50;
 }
+/* 顶栏底边横线：只在左栏右边界之后可见，左栏上方留空 */
+.flux-titlebar::after {
+  content: '';
+  position: absolute;
+  left: var(--rail-w-left, 264px);
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--border-subtle);
+  pointer-events: none;
+  z-index: 3;
+}
+.flux-titlebar[data-left-rail-collapsed="true"]::after {
+  left: max(calc(var(--geo-micro-rail, clamp(58px, 4.2vw, 72px)) + 1px), calc(var(--geo-titlebar-left-content, 28px) + var(--geo-titlebar-left-inset, 8px)));
+}
 .titlebar-left, .titlebar-right { display: flex; align-items: center; gap: 8px; height: 100%; }
-.titlebar-left { flex: 1; min-width: 0; padding-left: 8px; }
+/* 展开态：顶栏左段宽度严格等于左栏宽度，两者共用 --rail-w-left 单一真值源。
+   设计意图(Why)：左段与左栏同宽同色（同为 --sidebar），使左栏底色从窗口顶端贯通到底，
+     形成"左栏顶天立地"的视觉，而非"顶栏 + 左栏"两层皮。
+   防范的历史坑(Pitfall)：曾用 flex:1 弹性占满，拖宽左栏时左段宽度与左栏脱钩；
+     折叠态若用 flex:0 0 auto，flex-basis 无法从 264px 插值到 auto，会与左栏 200ms
+     过渡撕裂（左栏平滑、左段瞬跳）。
+   约束与规则(Rules)：宽度必须直接引用 --rail-w-left，禁止写字面量或二次计算；
+     折叠态切换只经 .flux-titlebar[data-left-rail-collapsed]，禁止另写媒体查询分支。 */
+.titlebar-left {
+  flex: 0 0 var(--rail-w-left, 264px);
+  min-width: 0;
+  padding-left: var(--geo-titlebar-left-inset, 8px);
+  /* 竖线从这里起，从窗口顶端（y=0）贯穿到顶栏底部，与左栏的 border-right 接成一条线 */
+  border-right: 1px solid var(--border-subtle);
+  transition: flex-basis var(--duration-exit) var(--ease-spring);
+}
+/* 展开方向：与左栏同用 enter 时长（120ms），否则展开时左栏 120ms 到位、左段 200ms 未到，中间出现错位窗口 */
+.flux-titlebar:not([data-left-rail-collapsed="true"]) .titlebar-left {
+  transition-duration: var(--duration-enter);
+}
+/* 折叠态：窗口/Linux 取左栏宽度（微轨+1px）以保持竖线连续；macOS 因系统交通灯必须更宽。
+   max() 保证：内容容量永远放得下 ☰，同时尽量与左栏对齐。 */
+.flux-titlebar[data-left-rail-collapsed="true"] .titlebar-left {
+  flex: 0 0 max(calc(var(--geo-micro-rail, clamp(58px, 4.2vw, 72px)) + 1px), calc(var(--geo-titlebar-left-content, 28px) + var(--geo-titlebar-left-inset, 8px)));
+}
+/* macOS：系统交通灯让位。
+   真值来源：openchamber 实测源码 Header.tsx:1047-1052 —— macOS 桌面应用非全屏时
+     硬编码 padding-left: 88px（未使用 getWindowButtonPosition()，因该 API 只回显
+     传入坐标、不返回按钮组宽度）。
+   展开态与折叠态都要让位——删除 DOM 自绘交通灯后，展开态 ☰ 起始 x=8 同样落在交通灯区间内。 */
+html[data-platform="macos"] {
+  --geo-titlebar-left-inset: var(--geo-titlebar-left-inset-macos, 88px);
+}
 .titlebar-right { justify-content: flex-end; flex-shrink: 0; z-index: 2; }
-.titlebar-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 8px; max-width: calc(100% - 320px); pointer-events: none; z-index: 1; }
+/* 标题居中基准 = 对话区中心，而非窗口中心。
+   设计意图(Why)：标题应与对话内容对齐，避免被右侧检查舱拉偏。
+   防范的历史坑(Pitfall)：
+     ① 曾固定 left:50% 居中于整窗，检查舱展开时标题视觉重心偏向检查舱一侧；
+     ② 曾直接用 --rail-w-right 计算，但该变量恒为 420（检查舱折叠时 flex-basis:0
+        并不会改写它），导致出厂默认（检查舱折叠）下标题恒定偏左 210px。
+   约束与规则(Rules)：右侧让位只读 --geo-titlebar-right-offset——它由
+     data-inspector-collapsed 驱动，折叠时为 0。禁止直接引用 --rail-w-right。 */
+.flux-titlebar {
+  --geo-titlebar-right-offset: 0px;
+}
+.flux-titlebar[data-inspector-collapsed="false"] {
+  --geo-titlebar-right-offset: var(--rail-w-right, 420px);
+}
+.titlebar-center {
+  position: absolute;
+  left: calc((var(--rail-w-left, 264px) + 100% - var(--geo-titlebar-right-offset, 0px)) / 2);
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* 两端都要避开：左侧 macOS ☰ (88+28) / Windows (8+28)，右侧窗控与全局开关。
+     border-box 语义下用 rail 变量而非字面量 320px，随左栏拖宽自动让位。 */
+  max-width: calc(100% - var(--rail-w-left, 264px) - var(--geo-titlebar-right-offset, 0px) - 48px);
+  pointer-events: none;
+  z-index: 1;
+  transition: left var(--duration-exit) var(--ease-spring);
+}
+.flux-titlebar:not([data-left-rail-collapsed="true"]) .titlebar-center {
+  transition-duration: var(--duration-enter);
+}
+/* 折叠态：左栏宽度切换为微轨 + 1px 边框补偿 */
+.flux-titlebar[data-left-rail-collapsed="true"] .titlebar-center {
+  left: calc((calc(var(--geo-micro-rail, clamp(58px, 4.2vw, 72px)) + 1px) + 100% - var(--geo-titlebar-right-offset, 0px)) / 2);
+}
 .titlebar-session-title {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -635,12 +732,9 @@
 .win-cap-close:hover { background: var(--destructive); color: var(--foreground); }
 .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; flex: 0 0 auto; border: 1px solid transparent; border-radius: var(--radius-card); background: transparent; color: var(--secondary-foreground); cursor: pointer; -webkit-app-region: no-drag; transition: background-color var(--duration-fast) ease, color var(--duration-fast) ease; }
 .icon-btn:hover { background: var(--card-hover); color: var(--foreground); }
-/* gate-theme-allow: macOS traffic-light controls use the platform-standard fixed control colors. */
-.mac-traffic-lights { display: flex; align-items: center; gap: 7px; padding-left: 12px; -webkit-app-region: no-drag; }
-.traffic-btn { width: 12px; height: 12px; padding: 0; border: 0; border-radius: 50%; cursor: pointer; }
-.traffic-close { background: #FF5F56; }
-.traffic-min { background: #FFBD2E; }
-.traffic-max { background: #27C93F; }
+/* 自绘 macOS 交通灯样式已随 B-i 裁决删除（系统原生三键由 titleBarStyle 绘制）。
+   防范的历史坑(Pitfall)：这些规则一旦残留，随时可能被重新挂上 DOM，导致系统三键与自绘三键
+   同时出现、屏幕上 6 个圆点错位重叠。禁止恢复。 */
 .titlebar-connection-indicator { width: 7px; height: 7px; border-radius: 50%; background: var(--muted-foreground); }
 /* 连接态由 data-connected 属性驱动：文案(title)随语言切换，用它做选择器会在英文界面直接失效。 */
 .titlebar-connection-indicator[data-connected="true"] { background: var(--success); }
@@ -699,6 +793,20 @@ html[data-maximized="true"] #flux-app-root {
   display: flex;
   position: relative;
   overflow: hidden;
+}
+
+/* 右主块容器：包裹对话舱与检查舱，使检查舱全屏（position:absolute; inset:0）
+   只作用于本层，不再覆盖左栏。
+   设计意图(Why)：用户裁决检查舱全屏只覆盖右主块，左栏必须保留可见可交互。
+   防范的历史坑(Pitfall)：检查舱全屏曾直接以 .flux-body-container 为定位容器，
+     注释原文"covers middle stream and left rail completely"，全屏时左栏被完全遮挡。
+   约束与规则(Rules)：本层必须是 position:relative，作为检查舱全屏的唯一定位基准；
+     禁止把检查舱移出本层。 */
+.flux-main-block {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  position: relative;
 }
 
 /* Long conversations keep real layout heights.
@@ -808,7 +916,11 @@ html[data-maximized="true"] #flux-app-root {
 html[data-rail-resizing] #flux-left-rail,
 html[data-rail-resizing] .flux-left-rail,
 html[data-rail-resizing] #flux-inspector-pod,
-html[data-rail-resizing] .flux-inspector-pod {
+html[data-rail-resizing] .flux-inspector-pod,
+html[data-rail-resizing] .titlebar-left,
+/* 标题的 left 直接消费 --rail-w-left / --rail-w-right，拖拽期每帧变化；
+   若不关过渡，标题会以 120/200ms 弹簧追帧，与瞬时跟随的栏边界持续错位。 */
+html[data-rail-resizing] .titlebar-center {
   transition: none !important;
   will-change: auto;
 }
@@ -969,6 +1081,27 @@ button {
   /* 移动端视口安全区全局注入 */
   body {
     padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* 顶栏左段复位：移动端左栏是 position:fixed 浮层、不占布局宽度，
+     若仍继承桌面 --rail-w-left(264px) 锁定，390px 视口下
+     264 + 右段约 160 = 424 > 390，右侧检查舱按钮溢出屏幕不可点。
+     设计意图(Why)：移动端顶栏左段只按内容取宽，与浮层左栏解耦。 */
+  .titlebar-left {
+    flex: 0 0 auto !important;
+    padding-left: 8px !important;
+  }
+
+  /* 标题居中复位：移动端左栏是浮层、检查舱是全屏 Sheet，对话区即全宽，
+     不得沿用桌面的「左栏 + 检查舱」对称补偿（390px 下会偏左 78px）。 */
+  .titlebar-center {
+    left: 50% !important;
+    max-width: calc(100% - 120px) !important;
+  }
+
+  /* 移动端左栏是浮层不占布局，顶栏底边横线必须通栏（否则左栏区域缺一段线）。 */
+  .flux-titlebar::after {
+    left: 0 !important;
   }
 
   /* 移动端左侧会话轨默认收纳为滑出抽屉悬浮覆盖，严禁在常规流中横向挤压对话流 */

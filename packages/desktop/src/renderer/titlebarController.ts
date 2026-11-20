@@ -85,6 +85,8 @@ export function createTitlebarController(deps: TitlebarControllerDeps): Titlebar
       }),
       isMaximized: state.isMaximized,
       gatewayConnected: state.gatewayConnected,
+      leftRailCollapsed: state.leftRailCollapsed,
+      inspectorCollapsed: state.inspectorCollapsed,
       latencyMs: state.gatewayLatencyMs,
       activeAvatar: resolveTitlebarAvatar({
         activeFocus: state.activeFocus,

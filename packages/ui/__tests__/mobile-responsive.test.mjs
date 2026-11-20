@@ -121,14 +121,14 @@ test('Mobile & Cross-Platform Responsive Layout Invariants', async (t) => {
     assert.ok(winHtml.includes('id="win-max-btn"'), 'Windows 平台必须包含 win-max-btn');
     assert.ok(winHtml.includes('id="win-close-btn"'), 'Windows 平台必须包含 win-close-btn');
 
-    // macOS 平台必须包含 macControls
+    // macOS 平台严禁自绘交通灯：主进程 titleBarStyle:'hiddenInset' 已由系统绘制三键
     const macHtml = renderTitlebar({
       platform: 'macos',
       title: 'Hermes Flux macOS',
       gatewayConnected: true,
       isMaximized: false,
     });
-    assert.ok(macHtml.includes('mac-traffic-lights'), 'macOS 平台必须渲染 mac-traffic-lights');
+    assert.ok(!macHtml.includes('mac-traffic-lights'), 'macOS 平台严禁自绘交通灯（系统原生已绘制，双绘会重叠成 6 个圆点）');
     assert.equal(macHtml.includes('win-caption-controls'), false, 'macOS 平台不应渲染 win-caption-controls');
   });
 

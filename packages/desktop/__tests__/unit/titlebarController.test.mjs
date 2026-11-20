@@ -80,6 +80,25 @@ test('TitlebarController: getTitlebarSnapshot 正确提取快照与平台状态'
   assert.ok(snapshot.title.length > 0);
 });
 
+test('TitlebarController: 快照必须透传左栏与检查舱折叠态（顶栏几何的唯一驱动源）', () => {
+  const { deps, state } = createMockDeps();
+  const controller = createTitlebarController(deps);
+
+  // 这两项驱动顶栏左段宽度与标题居中基准；一旦漏传，Titlebar 会按默认值渲染，
+  // 展开态标题偏右 210px、折叠态左段宽度失真，且任何测试都不会变红。
+  state.leftRailCollapsed = true;
+  state.inspectorCollapsed = false;
+  const snapshot = controller.getTitlebarSnapshot();
+  assert.equal(snapshot.leftRailCollapsed, true, '必须透传 leftRailCollapsed');
+  assert.equal(snapshot.inspectorCollapsed, false, '必须透传 inspectorCollapsed');
+
+  state.leftRailCollapsed = false;
+  state.inspectorCollapsed = true;
+  const next = controller.getTitlebarSnapshot();
+  assert.equal(next.leftRailCollapsed, false);
+  assert.equal(next.inspectorCollapsed, true);
+});
+
 test('TitlebarController: 窗口最小化与关闭委托给 desktopApi', () => {
   const { deps, isMinimized, isClosed } = createMockDeps();
   const controller = createTitlebarController(deps);

@@ -14,6 +14,8 @@ export interface TitlebarProps {
   projectPath?: string;
   isMaximized: boolean;
   gatewayConnected: boolean;
+  /** 检查舱折叠态：驱动标题居中基准（与 React 版语义一致，缺省视为折叠）。 */
+  inspectorCollapsed?: boolean;
   gatewayLatencyMs?: number;
   theme?: string;
   profileName?: string;
@@ -29,17 +31,12 @@ export interface TitlebarProps {
 
 export function renderTitlebar(props: TitlebarProps): string {
   const isWin = props.platform === 'windows';
-  const isMac = props.platform === 'macos';
   const isMobile = props.platform === 'ios' || props.platform === 'android';
   const isWeb = props.platform === 'web';
 
-  const macControls = `
-    <div class="mac-traffic-lights" style="-webkit-app-region: no-drag; display: flex; gap: 7px; align-items: center; padding-left: 12px;">
-      <span class="traffic-btn traffic-close" title="关闭" style="width: 12px; height: 12px; border-radius: 50%; background: #FF5F56; display: inline-block; cursor: pointer;"></span>
-      <span class="traffic-btn traffic-min" title="最小化" style="width: 12px; height: 12px; border-radius: 50%; background: #FFBD2E; display: inline-block; cursor: pointer;"></span>
-      <span class="traffic-btn traffic-max" title="全屏" style="width: 12px; height: 12px; border-radius: 50%; background: #27C93F; display: inline-block; cursor: pointer;"></span>
-    </div>
-  `;
+  /* macOS 交通灯由系统原生绘制（主进程 titleBarStyle: 'hiddenInset'）。
+     防范的历史坑(Pitfall)：此处曾再画一套 12px 圆点，与系统三键重叠错位，
+     屏幕上出现 6 个圆点。现已删除，严禁恢复。 */
 
   const winControls = `
     <div class="win-caption-controls" style="-webkit-app-region: no-drag; display: flex; align-items: center; height: 100%;">
@@ -69,9 +66,9 @@ export function renderTitlebar(props: TitlebarProps): string {
   const displayTitle = props.title || (props.gatewayConnected ? 'Hermes Flux — 请选择或新建会话' : '未连接网关');
 
   return `
-    <header class="flux-titlebar" style="
-      height: calc(var(--geo-titlebar, 42px) + 1px + env(safe-area-inset-top, 0px));
-      min-height: calc(var(--geo-titlebar, 42px) + 1px + env(safe-area-inset-top, 0px));
+    <header class="flux-titlebar" data-left-rail-collapsed="false" data-inspector-collapsed="${props.inspectorCollapsed === false ? 'false' : 'true'}" style="
+      height: calc(var(--geo-titlebar, 36px) + 1px + env(safe-area-inset-top, 0px));
+      min-height: calc(var(--geo-titlebar, 36px) + 1px + env(safe-area-inset-top, 0px));
       padding-top: env(safe-area-inset-top, 0px);
       padding-left: env(safe-area-inset-left, 0px);
       padding-right: env(safe-area-inset-right, 0px);
@@ -87,8 +84,7 @@ export function renderTitlebar(props: TitlebarProps): string {
       z-index: 50;
     ">
       <!-- Left Wing: Collapser & Platform Controls -->
-      <div class="titlebar-left" style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;">
-        ${isMac ? macControls : ''}
+      <div class="titlebar-left" style="display: flex; align-items: center; gap: 8px; min-width: 0;">
         <button id="toggle-left-rail-btn" class="icon-btn" title="${t('titlebar.toggleLeftRail')}" style="
           -webkit-app-region: no-drag;
           margin-left: ${isWin ? '12px' : '6px'};
@@ -111,17 +107,17 @@ export function renderTitlebar(props: TitlebarProps): string {
         </button>
       </div>
 
-      <!-- Center Title (Strict Absolute Centering & Overflow Isolation) -->
+      <!-- Center Title：位置与宽度交由 styles.css 的 .titlebar-center 单一真值控制
+           （居中于对话区、随左栏/检查舱状态补偿）。此处内联 left/max-width 会覆盖 CSS 规则，
+           形成第二真值面，故仅保留布局骨架声明。 -->
       <div class="titlebar-center" style="
         position: absolute;
-        left: 50%;
         top: 50%;
         transform: translate(-50%, -50%);
         display: flex;
         align-items: center;
         justify-content: center;
         gap: 8px;
-        max-width: calc(100% - 320px);
         pointer-events: none;
         z-index: 1;
       ">

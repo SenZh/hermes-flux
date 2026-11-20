@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font-sans); }
+
+  .wrap { display: flex; flex-direction: column; gap: 24px; padding-bottom: 16px; }
+
+  .hd { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .hd .no {
+    font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+    padding: 1px 6px; border-radius: 3px;
+    background: var(--primary); color: var(--background);
+  }
+  .hd .no.bad { background: var(--destructive); }
+  .hd .tt { font-size: 13px; font-weight: 600; }
+  .hd .sub { font-size: 11px; opacity: .5; }
+
+  /* 真实色值：取自 styles.css 的 obsidian 皮肤 */
+  .win {
+    position: relative;
+    width: 100%;
+    height: 200px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    overflow: hidden;
+    /* L0 Canvas */
+    background: #0E0F13;
+    font-size: 10px;
+  }
+  /* 顶栏：L1 Sidebar #131419 */
+  .tb {
+    height: 34px;
+    background: #131419;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    display: flex;
+    align-items: center;
+    position: relative;
+    z-index: 2;
+  }
+  /* 顶栏左段：注意——没有背景，没有边框 */
+  .tb-left {
+    display: flex; align-items: center; gap: 6px;
+    padding-left: 6px;
+    height: 100%;
+    /* 唯一的声明：宽度 */
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+  .d1 { background: #FF5F56; } .d2 { background: #FFBD2E; } .d3 { background: #27C93F; }
+  .ic {
+    width: 18px; height: 18px; border-radius: 3px;
+    background: #F3F4F6; opacity: .35; flex: 0 0 auto;
+  }
+
+  /* 主体 */
+  .bd { height: calc(100% - 34px); display: flex; position: relative; }
+
+  /* 左栏：L1 Sidebar #131419 */
+  .rail {
+    background: #131419;
+    border-right: 1px solid rgba(255,255,255,0.07);
+    display: flex; flex-direction: column; gap: 5px;
+    padding: 6px;
+    flex: 0 0 auto;
+  }
+  .ag { width: 26px; height: 26px; border-radius: 6px; background: #1B1C23; flex: 0 0 auto; }
+
+  /* 对话区：L2 Panel #16171D */
+  .conv {
+    flex: 1;
+    background: #16171D;
+    position: relative;
+    padding: 8px;
+    display: flex; flex-direction: column; gap: 5px;
+  }
+  .ln { height: 4px; border-radius: 2px; background: #F3F4F6; opacity: .1; }
+  .ln.w7 { width: 70%; } .ln.w5 { width: 50%; } .ln.w4 { width: 40%; }
+
+  /* 检查舱：L1 Sidebar */
+  .insp {
+    flex: 0 0 90px;
+    background: #131419;
+    border-left: 1px solid rgba(255,255,255,0.07);
+    padding: 6px;
+    display: flex; flex-direction: column; gap: 5px;
+  }
+
+  /* 标注层 */
+  .mark {
+    position: absolute;
+    font-family: var(--font-mono);
+    font-size: 8.5px;
+    padding: 1px 3px;
+    border-radius: 2px;
+    white-space: nowrap;
+    z-index: 10;
+    pointer-events: none;
+  }
+  .mark.p { background: var(--primary); color: var(--background); }
+  .mark.d { background: var(--destructive); color: #fff; }
+  .mark.g { background: var(--success); color: #0E0F13; }
+
+  .vline {
+    position: absolute; top: 0; bottom: 0; width: 0;
+    border-left: 1px dashed var(--primary);
+    z-index: 9; pointer-events: none;
+  }
+
+  /* 放大镜：把 x∈[50,95] 区域放大 6 倍 */
+  .zoom {
+    margin-top: 8px;
+    display: flex; gap: 10px; align-items: flex-start;
+  }
+  .zoom-box {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    height: 66px;
+    position: relative;
+    flex: 0 0 auto;
+  }
+  .zoom-box .inner {
+    position: absolute;
+    left: 0; top: 0;
+    transform-origin: top left;
+    transform: scale(6);
+  }
+  .zoom-cap {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    opacity: .55;
+    margin-top: 4px;
+    line-height: 1.5;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { font-size: 9.5px; letter-spacing: .06em; text-transform: uppercase; opacity: .42; font-weight: 500; }
+  td:first-child { font-family: var(--font-mono); white-space: nowrap; opacity: .9; }
+  code { font-family: var(--font-mono); font-size: 10.5px; padding: 1px 4px; border-radius: 3px; background: var(--secondary); }
+
+  .verdict {
+    font-size: 11.5px; line-height: 1.75; opacity: .75;
+    padding: 10px 12px;
+    border-left: 2px solid var(--primary);
+    background: var(--secondary);
+    border-radius: 0 4px 4px 0;
+  }
+  .verdict b { opacity: 1; }
+  .verdict .k { color: var(--success); font-weight: 600; }
+  .verdict .n { color: var(--destructive); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ═══ 场景 1：折叠态，顶栏左段 84px，左栏 59px ═══ -->
+  <section>
+    <div class="hd">
+      <span class="no">实测</span>
+      <span class="tt">折叠态 · 顶栏左段 84px / 左栏 59px</span>
+      <span class="sub">真实色值，无标注修饰</span>
+    </div>
+
+    <div class="win">
+      <div class="tb">
+        <div class="tb-left" style="width:84px;">
+          <span class="ic"></span>
+        </div>
+      </div>
+      <div class="bd">
+        <div class="rail" style="width:59px;">
+          <div class="ag"></div>
+          <div class="ag"></div>
+          <div class="ag"></div>
+        </div>
+        <div class="vline" style="left:59px;"></div>
+        <div class="conv">
+          <div class="ln w7"></div>
+          <div class="ln w5"></div>
+          <div class="ln w4"></div>
+        </div>
+        <div class="insp">
+          <div class="ln w7"></div>
+          <div class="ln w5"></div>
+        </div>
+      </div>
+      <div class="mark p" style="left:60px; bottom:6px;">x=59 左栏右边界（虚线）</div>
+      <div class="mark g" style="left:86px; top:38px;">x=84 顶栏左段右边界 → 此处无任何可见线</div>
+    </div>
+
+    <div class="zoom">
+      <div>
+        <div class="zoom-box" style="width:270px;">
+          <div class="inner" style="width:45px;height:11px;">
+            <div style="width:45px;height:11px;background:#131419;position:relative;">
+              <div style="position:absolute;left:0;top:0;width:59px;height:11px;background:#131419;"></div>
+              <div style="position:absolute;left:59px;top:0;width:1px;height:11px;background:rgba(255,255,255,0.07);"></div>
+              <div style="position:absolute;left:60px;top:0;width:24px;height:11px;background:#16171D;"></div>
+            </div>
+          </div>
+        </div>
+        <div class="zoom-cap">↑ y&gt;34 区域，x∈[50,95] 放大 6×<br>左栏(131419) → 1px线 → 对话区(16171D)</div>
+      </div>
+      <div style="flex:1; min-width:0;">
+        <div class="verdict" style="margin-top:0;">
+          放大后可以看到：<b>x=59 处只有「左栏底色 → 1px 发丝线 → 对话区底色」这一条正常分界</b>。<br>
+          <b>x=84 处什么都没有</b> —— 因为 <code>.titlebar-left</code> 没有背景、没有边框，它只是一条看不见的宽度约束。
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 场景 2：审查描述的"25px 凸角" ═══ -->
+  <section>
+    <div class="hd">
+      <span class="no bad">审查描述</span>
+      <span class="tt">审查声称的"25px 凸角 / 顶栏探出"</span>
+      <span class="sub">这个形态在代码里不存在</span>
+    </div>
+
+    <div class="win">
+      <div class="tb">
+        <div class="tb-left" style="width:84px;">
+          <span class="ic"></span>
+        </div>
+      </div>
+      <div class="bd">
+        <div class="rail" style="width:59px;">
+          <div class="ag"></div>
+          <div class="ag"></div>
+        </div>
+        <!-- 审查认为 x∈[59,84] 会是 sidebar 色（凸角） -->
+        <div style="position:absolute;left:59px;top:0;width:25px;bottom:0;background:#131419;border-right:1px solid rgba(255,255,255,0.07);"></div>
+        <div class="conv" style="padding-left:33px;">
+          <div class="ln w7"></div>
+          <div class="ln w5"></div>
+        </div>
+        <div class="insp">
+          <div class="ln w7"></div>
+        </div>
+      </div>
+      <div class="mark d" style="left:62px; bottom:6px;">← 审查以为这里有 25px sidebar 色块</div>
+    </div>
+
+    <div class="verdict" style="margin-top:10px;">
+      审查认为 <code>x∈[59,84]</code> 会被 sidebar 色填充，形成"顶栏探出的凸角"。<br>
+      <b class="n">但这段代码不存在</b>：没有任何规则给 <code>.titlebar-left</code> 或其下方区域铺背景。左侧唯一的背景源是 <code>.flux-titlebar</code>（y&lt;43，全宽）和 <code>#flux-left-rail</code>（x&lt;59，全高）。
+    </div>
+  </section>
+
+  <!-- ═══ 决定性对比 ═══ -->
+  <section>
+    <div class="hd">
+      <span class="no">决定性</span>
+      <span class="tt">两个方案的像素级对比</span>
+    </div>
+
+    <div class="win" style="height:120px;">
+      <div style="display:flex;height:100%;">
+        <!-- 左：现状 84 -->
+        <div style="flex:1;position:relative;border-right:2px solid var(--border);">
+          <div class="tb" style="height:26px;"><div class="tb-left" style="width:52px;"><span class="ic" style="width:14px;height:14px;"></span></div></div>
+          <div class="bd" style="height:calc(100% - 26px);">
+            <div class="rail" style="width:38px;padding:4px;"><div class="ag" style="width:18px;height:18px;"></div></div>
+            <div class="conv" style="padding:5px;"><div class="ln w7"></div><div class="ln w5"></div></div>
+            <div class="insp" style="flex:0 0 56px;padding:4px;"><div class="ln w7"></div></div>
+          </div>
+          <div class="mark p" style="left:4px; bottom:3px;">左段 84px / 左栏 59px</div>
+        </div>
+        <!-- 右：左栏也 84 -->
+        <div style="flex:1;position:relative;">
+          <div class="tb" style="height:26px;"><div class="tb-left" style="width:52px;"><span class="ic" style="width:14px;height:14px;"></span></div></div>
+          <div class="bd" style="height:calc(100% - 26px);">
+            <div class="rail" style="width:52px;padding:4px;"><div class="ag" style="width:18px;height:18px;"></div></div>
+            <div class="conv" style="padding:5px;"><div class="ln w7"></div><div class="ln w5"></div></div>
+            <div class="insp" style="flex:0 0 56px;padding:4px;"><div class="ln w7"></div></div>
+          </div>
+          <div class="mark g" style="left:4px; bottom:3px;">左段 84px / 左栏 84px</div>
+        </div>
+      </div>
+    </div>
+
+    <table style="margin-top:10px;">
+      <tr>
+        <th>对比项</th>
+        <th>左段 84 / 左栏 59</th>
+        <th>左段 84 / 左栏 84</th>
+      </tr>
+      <tr>
+        <td>y&gt;43 处 x=59 的竖线</td>
+        <td>存在（左栏右边框）</td>
+        <td>存在（左栏右边框，位置右移 25px）</td>
+      </tr>
+      <tr>
+        <td>x=84 处是否可见</td>
+        <td><span style="color:var(--success)">不可见</span>（无背景无边框）</td>
+        <td>不可见（正好与左栏边框重合）</td>
+      </tr>
+      <tr>
+        <td>微轨图标两侧留白</td>
+        <td>8px（现状，正常）</td>
+        <td><span style="color:var(--warning)">20.5px（明显变空）</span></td>
+      </tr>
+      <tr>
+        <td>rail-geometry.mjs 守卫</td>
+        <td><span style="color:var(--success)">通过</span></td>
+        <td><span style="color:var(--destructive)">失败</span>（不再引用 --geo-micro-rail）</td>
+      </tr>
+      <tr>
+        <td>对话区宽度</td>
+        <td>更宽</td>
+        <td>少 25px</td>
+      </tr>
+      <tr>
+        <td>用户可见差异</td>
+        <td colspan="2" style="opacity:.7;">仅「微轨变宽 25px + 对话区窄 25px」，<b>没有任何一处出现"凸角"或"色块"</b></td>
+      </tr>
+    </table>
+  </section>
+
+  <!-- ═══ 结论 ═══ -->
+  <div class="verdict">
+    <b>结论：C-1 与 C-2 都是伪选择。</b><br><br>
+    审查把「顶栏左段宽度」当成了「视觉色块宽度」，因此认为差值 25px 必须有东西填色。但
+    <code>.titlebar-left</code> 全仓只有两条声明（<code>styles.css:618-619</code>），<b>既无 background 也无 border</b>。<br><br>
+    它的宽度只决定一件事：<b>折叠态顶栏里能放下几个控件</b>。它不产生任何可见边界，所以不存在"谁来填色"的问题——
+    <span class="k">那里本来就没有色块</span>。<br><br>
+    因此 A1（84px 不跟随微轨）在视觉上是<span class="k">零代价</span>的。真正需要你决定的仍然是
+    <b>前置 A（要不要制造视觉表达）</b>，而不是"填色方式"。
+  </div>
+
+</div>
+</body>
+</html>

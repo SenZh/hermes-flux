@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font-sans); }
+
+  .wrap { display: flex; flex-direction: column; gap: 26px; padding-bottom: 20px; }
+
+  .sec-hd {
+    display: flex; align-items: baseline; gap: 8px;
+    margin-bottom: 9px;
+  }
+  .sec-hd .no {
+    font-family: var(--font-mono); font-size: 10px;
+    padding: 1px 5px; border-radius: 3px;
+    background: var(--primary); color: var(--background);
+    font-weight: 600;
+  }
+  .sec-hd .tt { font-size: 12.5px; font-weight: 600; }
+  .sec-hd .sub { font-size: 11px; opacity: .5; }
+
+  /* ══════════ 通用应用外壳 ══════════ */
+  .app {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    font-size: 11px;
+    color: var(--foreground);
+  }
+  .app.a { height: 470px; }
+  .app.b { height: 300px; }
+
+  /* 顶栏（通栏） */
+  .tb {
+    flex: 0 0 43px;
+    height: 43px;
+    display: flex;
+    align-items: stretch;
+    background: var(--muted);
+    border-bottom: 1px solid var(--border);
+    position: relative;
+  }
+  .tb-l, .tb-m, .tb-r {
+    display: flex; align-items: center; gap: 5px;
+    padding: 0 8px;
+    min-width: 0;
+  }
+  .tb-l { flex: 0 0 var(--rail-w); border-right: 1px solid transparent; }
+  .tb-m { flex: 1; justify-content: flex-start; }
+  .tb-r { flex: 0 0 auto; justify-content: flex-end; }
+
+  .lights { display: flex; gap: 5px; margin-right: 3px; flex: 0 0 auto; }
+  .light { width: 9px; height: 9px; border-radius: 50%; }
+  .l1 { background: #FF5F56; } .l2 { background: #FFBD2E; } .l3 { background: #27C93F; }
+
+  .ib {
+    width: 20px; height: 20px; flex: 0 0 auto;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 4px; opacity: .6;
+  }
+  .ib:hover { background: var(--secondary); opacity: 1; }
+  .ib svg { display: block; }
+  .grow { flex: 1; }
+
+  .ttl {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 11.5px; font-weight: 500;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    opacity: .9;
+  }
+  .ttl .av { width: 13px; height: 13px; border-radius: 4px; background: var(--primary); opacity: .7; flex: 0 0 auto; }
+  .conn { display: flex; align-items: center; gap: 4px; opacity: .5; font-family: var(--font-mono); font-size: 10px; flex: 0 0 auto; }
+  .conn .d { width: 5px; height: 5px; border-radius: 50%; background: var(--success); }
+  .wc { display: flex; flex: 0 0 auto; }
+  .wc i { width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; opacity: .45; }
+
+  /* 主体 */
+  .bd { flex: 1; display: flex; min-height: 0; position: relative; }
+
+  /* 左栏 */
+  .rail {
+    flex: 0 0 var(--rail-w);
+    width: var(--rail-w);
+    display: flex;
+    background: var(--muted);
+    border-right: 1px solid var(--border);
+    min-height: 0;
+    overflow: hidden;
+  }
+  .micro {
+    flex: 0 0 42px; width: 42px;
+    display: flex; flex-direction: column; align-items: center;
+    gap: 6px; padding: 8px 0;
+    border-right: 1px solid var(--border);
+  }
+  .ag {
+    width: 28px; height: 28px; border-radius: 7px;
+    background: var(--secondary); color: var(--foreground);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9.5px; font-weight: 600; opacity: .72; flex: 0 0 auto;
+  }
+  .ag.on { background: var(--primary); color: var(--background); opacity: 1; }
+  .drw { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; padding: 7px 6px; overflow: hidden; }
+  .srch {
+    display: flex; align-items: center; gap: 4px;
+    height: 22px; padding: 0 6px;
+    border: 1px solid var(--border); border-radius: 5px;
+    background: var(--background); opacity: .55; flex: 0 0 auto;
+  }
+  .sc { font-size: 9px; letter-spacing: .06em; opacity: .4; padding: 1px 2px 0; flex: 0 0 auto; }
+  .rw {
+    display: flex; align-items: center; gap: 5px;
+    height: 22px; padding: 0 5px; border-radius: 5px;
+    white-space: nowrap; overflow: hidden; flex: 0 0 auto;
+  }
+  .rw.on { background: var(--secondary); }
+  .rw .dt { width: 5px; height: 5px; border-radius: 50%; background: var(--primary); flex: 0 0 auto; }
+  .rw .nm { overflow: hidden; text-overflow: ellipsis; opacity: .8; }
+  .rw .tm { margin-left: auto; font-size: 8.5px; opacity: .35; font-family: var(--font-mono); flex: 0 0 auto; }
+
+  /* 主区 */
+  .mn { flex: 1; min-width: 0; display: flex; background: var(--background); min-height: 0; }
+
+  .st {
+    flex: 1; min-width: 0; position: relative;
+    display: flex; flex-direction: column; gap: 9px;
+    padding: 12px 11px 0; overflow: hidden;
+  }
+  .bu {
+    align-self: flex-end; max-width: 76%;
+    padding: 6px 9px; border-radius: 7px;
+    background: var(--secondary); opacity: .78; flex: 0 0 auto;
+  }
+  .ln { height: 5px; border-radius: 3px; background: var(--foreground); opacity: .11; flex: 0 0 auto; }
+  .ln.w85 { width: 85%; } .ln.w65 { width: 65%; } .ln.w45 { width: 45%; }
+  .cap {
+    display: flex; align-items: center; gap: 4px;
+    height: 18px; padding: 0 7px;
+    border: 1px solid var(--border); border-radius: 5px;
+    font-size: 9px; opacity: .55; align-self: flex-start;
+    font-family: var(--font-mono); flex: 0 0 auto;
+  }
+  .dw { position: absolute; left: 0; right: 0; bottom: 9px; display: flex; justify-content: center; padding: 0 11px; }
+  .dk {
+    width: 100%; max-width: 330px;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--card); padding: 7px 8px 6px;
+    display: flex; flex-direction: column; gap: 7px;
+    box-shadow: 0 -5px 18px rgba(0,0,0,.25);
+  }
+  .dk .ph { font-size: 10px; opacity: .3; }
+  .dkb { display: flex; align-items: center; gap: 4px; }
+  .ch { font-size: 8.5px; padding: 2px 5px; border-radius: 4px; background: var(--secondary); opacity: .58; white-space: nowrap; }
+  .snd { margin-left: auto; width: 17px; height: 17px; border-radius: 4px; background: var(--primary); color: var(--background); display: flex; align-items: center; justify-content: center; }
+
+  /* 检查舱 */
+  .insp {
+    flex: 0 0 190px; width: 190px;
+    display: flex; background: var(--muted);
+    border-left: 1px solid var(--border);
+    min-height: 0;
+  }
+  .iw { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .itabs {
+    flex: 0 0 24px; height: 24px;
+    display: flex; align-items: stretch; gap: 1px;
+    padding: 0 3px; border-bottom: 1px solid var(--border);
+  }
+  .it { display: flex; align-items: center; padding: 0 5px; font-size: 9px; opacity: .42; border-bottom: 1.5px solid transparent; white-space: nowrap; }
+  .it.on { opacity: .95; border-bottom-color: var(--primary); }
+  .ib2 { flex: 1; min-height: 0; padding: 8px 8px 0; display: flex; flex-direction: column; gap: 6px; overflow: hidden; }
+  .ih { font-size: 9px; opacity: .42; font-family: var(--font-mono); flex: 0 0 auto; }
+  .irail {
+    flex: 0 0 24px; width: 24px;
+    border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; align-items: center;
+    gap: 9px; padding: 8px 0;
+  }
+  .irail .q { width: 14px; height: 14px; border-radius: 3px; background: var(--foreground); opacity: .14; flex: 0 0 auto; }
+  .irail .q.on { background: var(--primary); opacity: .8; }
+
+  /* 折叠态 */
+  .app.b { --rail-w: 42px; }
+  .app.b .drw { display: none; }
+  .app.b .tb-l { padding: 0 5px; gap: 3px; }
+  .app.b .tb-l .lights { display: none; }
+  .app.b .tb-l .hidewhencollapsed { display: none; }
+
+  /* 标注 */
+  .anno {
+    display: flex; align-items: flex-start; gap: 7px;
+    font-size: 10.5px; line-height: 1.65; opacity: .62;
+    margin-top: 7px;
+  }
+  .anno::before {
+    content: ''; flex: 0 0 auto;
+    width: 12px; height: 1px; background: currentColor; margin-top: 8px;
+  }
+  .anno b { color: var(--primary); opacity: .95; font-weight: 600; }
+  .anno code { font-family: var(--font-mono); font-size: 10px; padding: 0 3px; border-radius: 2px; background: var(--secondary); }
+
+  /* 对比表 */
+  table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { font-size: 9.5px; letter-spacing: .06em; text-transform: uppercase; opacity: .42; font-weight: 500; }
+  td:first-child { white-space: nowrap; opacity: .85; }
+  td:nth-child(2), td:nth-child(3) { font-size: 11px; }
+  .yes { color: var(--success); }
+  .no { color: var(--destructive); }
+  .mid { color: var(--warning); }
+  code { font-family: var(--font-mono); font-size: 10.5px; padding: 1px 4px; border-radius: 3px; background: var(--secondary); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ══════════ 方案 A ══════════ -->
+  <section>
+    <div class="sec-hd">
+      <span class="no">A</span>
+      <span class="tt">openchamber 式 · 通栏顶栏 + 左栏同色穿透</span>
+      <span class="sub">推荐 · 展开态</span>
+    </div>
+
+    <div class="app a" style="--rail-w:172px;">
+      <div class="tb">
+        <div class="tb-l">
+          <div class="lights"><i class="light l1"></i><i class="light l2"></i><i class="light l3"></i></div>
+          <span class="ib"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></span>
+          <span class="ib"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg></span>
+          <span class="grow"></span>
+          <span class="ib"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="6" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18" cy="12" r="1.2"/></svg></span>
+        </div>
+        <div class="tb-m">
+          <span class="ttl"><span class="av"></span>Q4 跨境供应链智能对账引擎开发</span>
+          <span class="grow"></span>
+          <span class="conn"><span class="d"></span>21ms</span>
+          <span class="ib"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/></svg></span>
+          <span class="ib"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="15" y1="4" x2="15" y2="20"/></svg></span>
+        </div>
+        <div class="tb-r">
+          <div class="wc">
+            <i><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><line x1="4" y1="12" x2="20" y2="12"/></svg></i>
+            <i><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><rect x="4" y="4" width="16" height="16" rx="1"/></svg></i>
+            <i><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg></i>
+          </div>
+        </div>
+      </div>
+
+      <div class="bd">
+        <aside class="rail">
+          <div class="micro">
+            <div class="ag on">总</div><div class="ag">研</div><div class="ag">写</div><div class="ag">运</div><div class="ag">数</div>
+          </div>
+          <div class="drw">
+            <div class="srch">
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.5" y2="16.5"/></svg>
+              <span style="font-size:9.5px;">搜索</span>
+            </div>
+            <div class="sc">群聊</div>
+            <div class="rw"><span class="dt"></span><span class="nm">架构评审室</span><span class="tm">12:04</span></div>
+            <div class="sc">排查会话</div>
+            <div class="rw on"><span class="nm">Q4 跨境对账引擎</span><span class="tm">刚刚</span></div>
+            <div class="rw"><span class="nm">Apollo 配置未生效</span><span class="tm">2h</span></div>
+            <div class="rw"><span class="nm">Pod 重启根因</span><span class="tm">昨天</span></div>
+            <div class="rw"><span class="nm">绑定数据不一致</span><span class="tm">11/18</span></div>
+          </div>
+        </aside>
+
+        <main class="mn">
+          <div class="st">
+            <div class="bu">把对账引擎的幂等键设计梳理一遍，重点看跨区重复消费</div>
+            <div class="ln w85"></div><div class="ln w65"></div><div class="ln w45"></div>
+            <div class="cap">
+              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><polyline points="9 18 15 12 9 6"/></svg>
+              read_file · fence.ts
+            </div>
+            <div class="ln w85"></div><div class="ln w65"></div>
+            <div class="dw">
+              <div class="dk">
+                <div class="ph">向 Agent 提问，或键入 / 唤出命令…</div>
+                <div class="dkb">
+                  <span class="ch">Hermes-3 70B ▾</span><span class="ch">思考 中</span><span class="ch">审批 自动</span>
+                  <span class="snd"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <aside class="insp">
+            <div class="iw">
+              <div class="itabs">
+                <span class="it on">成果物</span><span class="it">浏览器</span><span class="it">Git</span><span class="it">记忆</span>
+              </div>
+              <div class="ib2">
+                <div class="ih">fence.ts · 128 行</div>
+                <div class="ln w85"></div><div class="ln w65"></div><div class="ln w85"></div><div class="ln w45"></div><div class="ln w65"></div>
+              </div>
+            </div>
+            <div class="irail">
+              <span class="q on"></span><span class="q"></span><span class="q"></span><span class="q"></span>
+            </div>
+          </aside>
+        </main>
+      </div>
+    </div>
+
+    <div class="anno">
+      <span><b>顶栏是一条独立横带</b>，左段宽度锁死 <code>= --rail-w-left</code>；左栏底色 <code>--sidebar</code> 与顶栏同色 → 竖线在顶栏区<b>不存在</b>，视觉上左栏从窗口顶端开始。检查舱顶边正好落在顶栏下沿。</span>
+    </div>
+  </section>
+
+  <!-- ══════════ 折叠态 ══════════ -->
+  <section>
+    <div class="sec-hd">
+      <span class="no">A′</span>
+      <span class="tt">同一方案 · 折叠态（Ctrl+B）</span>
+      <span class="sub">顶栏零位移</span>
+    </div>
+
+    <div class="app b">
+      <div class="tb">
+        <div class="tb-l">
+          <span class="ib"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></span>
+          <span class="ib hidewhencollapsed"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg></span>
+        </div>
+        <div class="tb-m">
+          <span class="ttl"><span class="av"></span>Q4 跨境供应链智能对账引擎开发</span>
+          <span class="grow"></span>
+          <span class="conn"><span class="d"></span>21ms</span>
+          <span class="ib"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/></svg></span>
+          <span class="ib"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="15" y1="4" x2="15" y2="20"/></svg></span>
+        </div>
+        <div class="tb-r">
+          <div class="wc">
+            <i><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><line x1="4" y1="12" x2="20" y2="12"/></svg></i>
+            <i><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><rect x="4" y="4" width="16" height="16" rx="1"/></svg></i>
+            <i><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg></i>
+          </div>
+        </div>
+      </div>
+
+      <div class="bd">
+        <aside class="rail">
+          <div class="micro">
+            <div class="ag on">总</div><div class="ag">研</div><div class="ag">写</div><div class="ag">运</div><div class="ag">数</div>
+          </div>
+        </aside>
+
+        <main class="mn">
+          <div class="st">
+            <div class="bu">把对账引擎的幂等键设计梳理一遍，重点看跨区重复消费</div>
+            <div class="ln w85"></div><div class="ln w65"></div><div class="ln w45"></div>
+            <div class="dw">
+              <div class="dk">
+                <div class="ph">向 Agent 提问，或键入 / 唤出命令…</div>
+                <div class="dkb">
+                  <span class="ch">Hermes-3 70B ▾</span><span class="ch">思考 中</span><span class="ch">审批 自动</span>
+                  <span class="snd"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <aside class="insp">
+            <div class="iw">
+              <div class="itabs"><span class="it on">成果物</span><span class="it">浏览器</span><span class="it">Git</span><span class="it">记忆</span></div>
+              <div class="ib2"><div class="ih">fence.ts · 128 行</div><div class="ln w85"></div><div class="ln w65"></div><div class="ln w85"></div></div>
+            </div>
+            <div class="irail"><span class="q on"></span><span class="q"></span><span class="q"></span></div>
+          </aside>
+        </main>
+      </div>
+    </div>
+
+    <div class="anno">
+      <span>左栏收到 <code>42px</code> 微轨，<b>顶栏高度、交通灯位置、会话标题、窗控全部不动</b>；只有顶栏左段的宽度跟随收窄，☰ 留在原位可再次展开。检查舱宽度同样不变。</span>
+    </div>
+  </section>
+
+  <!-- ══════════ 方案 B 对照 ══════════ -->
+  <section>
+    <div class="sec-hd">
+      <span class="no">B</span>
+      <span class="tt">真两列式 · 各自顶栏</span>
+      <span class="sub">不推荐 · 仅作对照</span>
+    </div>
+
+    <div class="app b" style="--rail-w:42px;">
+      <div class="bd">
+        <aside style="flex:0 0 150px;width:150px;display:flex;flex-direction:column;background:var(--muted);border-right:1px solid var(--border);">
+          <div class="tb" style="flex:0 0 43px;">
+            <div class="tb-l" style="flex:1;border-right:none;padding:0 6px;">
+              <div class="lights"><i class="light l1"></i><i class="light l2"></i><i class="light l3"></i></div>
+              <span class="grow"></span>
+              <span class="ib"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></span>
+            </div>
+          </div>
+          <div class="drw" style="flex:1;">
+            <div class="srch"><span style="font-size:9.5px;">搜索</span></div>
+            <div class="sc">排查会话</div>
+            <div class="rw on"><span class="nm">Q4 跨境对账引擎</span></div>
+            <div class="rw"><span class="nm">Apollo 配置未生效</span></div>
+            <div class="rw"><span class="nm">Pod 重启根因</span></div>
+          </div>
+        </aside>
+
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
+          <div class="tb" style="flex:0 0 43px;">
+            <div class="tb-m" style="flex:1;padding:0 8px;">
+              <span class="ttl"><span class="av"></span>Q4 跨境供应链智能对账引擎开发</span>
+              <span class="grow"></span>
+              <span class="conn"><span class="d"></span>21ms</span>
+            </div>
+            <div class="tb-r">
+              <div class="wc">
+                <i><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><line x1="4" y1="12" x2="20" y2="12"/></svg></i>
+                <i><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><rect x="4" y="4" width="16" height="16" rx="1"/></svg></i>
+                <i><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg></i>
+              </div>
+            </div>
+          </div>
+          <div style="flex:1;display:flex;min-height:0;">
+            <div class="st" style="flex:1;">
+              <div class="ln w85"></div><div class="ln w65"></div><div class="ln w45"></div>
+            </div>
+            <aside class="insp" style="flex:0 0 150px;width:150px;">
+              <div class="iw">
+                <div class="itabs"><span class="it on">成果物</span><span class="it">浏览器</span></div>
+                <div class="ib2"><div class="ih">fence.ts</div><div class="ln w85"></div><div class="ln w65"></div></div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="anno">
+      <span>两条顶栏被中间竖线<b>切断成两段</b>；折叠时左块顶栏宽度必须从 <code>264</code> 跳到 <code>84</code>，<b>交通灯无处安放</b>（系统钉死约 70px），所以折叠态被迫保底 84px 而不能收到 42px 微轨。这是它不如 A 的硬伤。</span>
+    </div>
+  </section>
+
+  <!-- ══════════ 对比表 ══════════ -->
+  <section>
+    <div class="sec-hd">
+      <span class="no">≡</span>
+      <span class="tt">取舍对照</span>
+    </div>
+    <table>
+      <tr><th>维度</th><th>A 通栏穿透</th><th>B 真两列</th></tr>
+      <tr><td>折叠到微轨</td><td class="yes">✓ 顶栏零位移，可收到 42px</td><td class="no">✗ 顶栏宽度跳变，交通灯放不下，保底 84px</td></tr>
+      <tr><td>代码改动量</td><td class="yes">✓ 极小：现有 column 骨架已是此结构，只需顶栏内部分三段</td><td class="no">✗ 根容器改 row，新增第二个顶栏宿主，Titlebar 拆两个组件</td></tr>
+      <tr><td>视觉是否"左栏顶天立地"</td><td class="yes">✓ 同色穿透，效果一致</td><td class="yes">✓ 结构上真实成立</td></tr>
+      <tr><td>竖线穿透顶栏</td><td>否（顶栏区无竖线）</td><td>是（竖线顶到底）</td></tr>
+      <tr><td>检查舱全屏覆盖 B 块内部</td><td class="yes">✓ 天然满足（舱在 body 容器内 inset:0）</td><td class="mid">~ 需在 B 块内部再建定位容器</td></tr>
+      <tr><td>顶栏控件归属清晰度</td><td class="mid">~ 靠分段边界表达"左段属于左栏"</td><td class="yes">✓ 物理上各归各块，语义最清晰</td></tr>
+      <tr><td>拖拽改宽时竖线</td><td class="yes">✓ 顶栏左段同步，无缝</td><td class="yes">✓ 同步</td></tr>
+    </table>
+  </section>
+
+</div>
+</body>
+</html>

@@ -5,7 +5,7 @@
  */
 
 export const DIMENSIONS = {
-  titlebarHeight: 42,
+  titlebarHeight: 36,
   leftRailWidth: 264,
   inspectorWidth: 410,
   inspectorRailWidth: 62,

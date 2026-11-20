@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font-sans); }
+
+  .wrap { display: flex; flex-direction: column; gap: 30px; padding-bottom: 16px; }
+
+  .hd { display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; }
+  .hd .no {
+    font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+    padding: 1px 6px; border-radius: 3px;
+    background: var(--primary); color: var(--background);
+  }
+  .hd .no.bad { background: var(--destructive); }
+  .hd .tt { font-size: 13px; font-weight: 600; }
+  .hd .sub { font-size: 11px; opacity: .5; }
+
+  .row { display: flex; gap: 14px; align-items: flex-start; }
+
+  .cell { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+  .cell-hd {
+    display: flex; align-items: baseline; gap: 5px;
+    font-size: 10px; font-family: var(--font-mono);
+  }
+  .cell-hd .st { opacity: .45; }
+  .cell-hd .w { opacity: .75; }
+
+  /* ══════ 迷你窗口 ══════ */
+  .win {
+    position: relative;
+    height: 168px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    overflow: hidden;
+    background: var(--background);
+    font-size: 8.5px;
+  }
+
+  /* 顶栏 */
+  .tbar {
+    position: relative;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    background: var(--muted);
+    border-bottom: 1px solid var(--border);
+    z-index: 3;
+  }
+  /* 顶栏左段：宽度 = 左栏宽度 */
+  .tbar-seg {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    display: flex; align-items: center; gap: 3px;
+    padding: 0 5px;
+    border-right: 1px solid transparent;
+  }
+  .ic {
+    width: 11px; height: 11px; border-radius: 2.5px;
+    background: var(--foreground); opacity: .38;
+    flex: 0 0 auto;
+  }
+  .ic.hi { background: var(--primary); opacity: .95; }
+  .tl {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    font-size: 8px; opacity: .62; white-space: nowrap;
+    display: flex; align-items: center; gap: 3px;
+  }
+  .tl .av { width: 8px; height: 8px; border-radius: 2px; background: var(--primary); opacity: .7; }
+
+  /* 主体 */
+  .body { position: relative; display: flex; height: calc(168px - 31px); }
+
+  .rail {
+    position: relative;
+    display: flex;
+    background: var(--muted);
+    border-right: 1px solid var(--border);
+    flex: 0 0 auto;
+  }
+  .micro {
+    flex: 0 0 18px; width: 18px;
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; align-items: center;
+    gap: 3px; padding: 4px 0;
+  }
+  .ag {
+    width: 12px; height: 12px; border-radius: 3px;
+    background: var(--secondary); flex: 0 0 auto;
+  }
+  .ag.on { background: var(--primary); }
+  .drawer {
+    flex: 1; min-width: 0;
+    display: flex; flex-direction: column; gap: 4px;
+    padding: 4px 3px;
+  }
+  .dl { height: 4px; border-radius: 2px; background: var(--foreground); opacity: .13; }
+  .dl.s { width: 55%; } .dl.m { width: 78%; }
+
+  .main { flex: 1; min-width: 0; display: flex; }
+  .stream {
+    flex: 1; min-width: 0;
+    display: flex; flex-direction: column; gap: 4px;
+    padding: 5px 5px 0;
+  }
+  .bub {
+    align-self: flex-end; width: 45%; height: 9px;
+    border-radius: 3px; background: var(--secondary);
+  }
+  .insp {
+    flex: 0 0 42px; width: 42px;
+    background: var(--muted);
+    border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; gap: 3px;
+    padding: 4px 4px;
+  }
+
+  /* ★ 贯穿参考线：标出"顶栏左段右边界" */
+  .guide-top {
+    position: absolute; top: 0; bottom: 0;
+    width: 0;
+    border-left: 1.5px dashed var(--primary);
+    z-index: 9;
+    pointer-events: none;
+  }
+  /* ★ 贯穿参考线：标出"左栏右边界" */
+  .guide-bot {
+    position: absolute; top: 0; bottom: 0;
+    width: 0;
+    border-left: 1.5px dashed var(--success);
+    z-index: 8;
+    pointer-events: none;
+  }
+
+  .tag {
+    position: absolute; font-family: var(--font-mono);
+    font-size: 7.5px; padding: 0 2px; border-radius: 2px;
+    background: var(--background); white-space: nowrap; z-index: 10;
+  }
+  .tag.t { color: var(--primary); }
+  .tag.b { color: var(--success); }
+
+  /* 错位台阶标注 */
+  .step {
+    position: absolute;
+    background: var(--destructive);
+    z-index: 7;
+  }
+  .step.lbl {
+    font-family: var(--font-mono); font-size: 7.5px;
+    color: var(--destructive);
+    background: transparent;
+    white-space: nowrap;
+  }
+
+  .verdict {
+    display: flex; align-items: flex-start; gap: 6px;
+    font-size: 10.5px; line-height: 1.6; opacity: .68;
+  }
+  .verdict::before {
+    content: ''; flex: 0 0 auto;
+    width: 10px; height: 1px; background: currentColor; margin-top: 8px;
+  }
+  .verdict b { opacity: 1; }
+  .verdict .ok { color: var(--success); font-weight: 600; }
+  .verdict .bad { color: var(--destructive); font-weight: 600; }
+  code { font-family: var(--font-mono); font-size: 9.5px; padding: 0 3px; border-radius: 2px; background: var(--secondary); }
+
+  .legend {
+    display: flex; gap: 16px; flex-wrap: wrap;
+    font-size: 10.5px; opacity: .6;
+    padding: 9px 11px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .legend span { display: flex; align-items: center; gap: 5px; }
+  .legend i { display: inline-block; width: 14px; height: 0; border-top: 1.5px dashed currentColor; }
+  .legend .p { color: var(--primary); }
+  .legend .s { color: var(--success); }
+  .legend .d { color: var(--destructive); }
+
+  .note {
+    font-size: 11px; line-height: 1.75; opacity: .62;
+    padding-left: 11px; border-left: 2px solid var(--border);
+  }
+  .note b { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ══════════ 方案 A：对齐 ══════════ -->
+  <section>
+    <div class="hd">
+      <span class="no">A</span>
+      <span class="tt">顶栏左段宽度 = 左栏宽度（对齐）</span>
+      <span class="sub">顶栏左段是左栏的纵向延伸段，共享同一宽度真值源</span>
+    </div>
+
+    <div class="row">
+
+      <!-- 展开 264 -->
+      <div class="cell">
+        <div class="cell-hd"><span class="st">展开</span><span class="w">264px</span></div>
+        <div class="win">
+          <div class="tbar">
+            <div class="tbar-seg" style="width:88px;">
+              <span class="ic hi"></span><span class="ic"></span><span class="ic"></span>
+            </div>
+            <div class="tl"><span class="av"></span>会话标题</div>
+          </div>
+          <div class="guide-top" style="left:88px;"><span class="tag t" style="top:1px; left:2px;">顶栏左段</span></div>
+          <div class="body">
+            <div class="rail" style="width:88px;">
+              <div class="micro"><span class="ag on"></span><span class="ag"></span><span class="ag"></span></div>
+              <div class="drawer"><div class="dl m"></div><div class="dl"></div><div class="dl s"></div><div class="dl"></div></div>
+            </div>
+            <div class="guide-bot" style="left:88px;"><span class="tag b" style="bottom:2px; left:2px;">左栏右边界</span></div>
+            <div class="main">
+              <div class="stream"><div class="bub"></div><div class="dl m"></div><div class="dl s"></div></div>
+              <div class="insp"><div class="dl"></div><div class="dl m"></div><div class="dl s"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 拖宽 400 -->
+      <div class="cell">
+        <div class="cell-hd"><span class="st">拖宽</span><span class="w">400px</span></div>
+        <div class="win">
+          <div class="tbar">
+            <div class="tbar-seg" style="width:126px;">
+              <span class="ic hi"></span><span class="ic"></span><span class="ic"></span>
+            </div>
+            <div class="tl" style="left:auto; right:6px; transform:none;">会话标题</div>
+          </div>
+          <div class="guide-top" style="left:126px;"><span class="tag t" style="top:1px; left:2px;">顶栏左段 ↑同步变宽</span></div>
+          <div class="body">
+            <div class="rail" style="width:126px;">
+              <div class="micro"><span class="ag on"></span><span class="ag"></span><span class="ag"></span></div>
+              <div class="drawer"><div class="dl m"></div><div class="dl"></div><div class="dl s"></div><div class="dl"></div><div class="dl m"></div></div>
+            </div>
+            <div class="guide-bot" style="left:126px;"><span class="tag b" style="bottom:2px; left:2px;">左栏右边界 ↑同步</span></div>
+            <div class="main">
+              <div class="stream"><div class="bub"></div><div class="dl m"></div><div class="dl s"></div></div>
+              <div class="insp"><div class="dl"></div><div class="dl m"></div><div class="dl s"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 折叠 42 -->
+      <div class="cell">
+        <div class="cell-hd"><span class="st">折叠</span><span class="w">42px 微轨</span></div>
+        <div class="win">
+          <div class="tbar">
+            <div class="tbar-seg" style="width:30px; justify-content:center; padding:0;">
+              <span class="ic hi"></span>
+            </div>
+            <div class="tl" style="left:auto; right:6px; transform:none;">会话标题</div>
+          </div>
+          <div class="guide-top" style="left:30px;"><span class="tag t" style="top:1px; left:2px;">左段收窄</span></div>
+          <div class="body">
+            <div class="rail" style="width:30px;">
+              <div class="micro" style="width:30px; border-right:none;"><span class="ag on"></span><span class="ag"></span><span class="ag"></span></div>
+            </div>
+            <div class="guide-bot" style="left:30px;"></div>
+            <div class="main">
+              <div class="stream"><div class="bub"></div><div class="dl m"></div><div class="dl s"></div></div>
+              <div class="insp"><div class="dl"></div><div class="dl m"></div><div class="dl s"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="verdict" style="margin-top:11px;">
+      <span>三种状态下，<b>紫色虚线（顶栏左段右边界）与绿色虚线（左栏右边界）始终重合为一条直线</b>。顶栏左段像左栏的帽子，随左栏一起伸缩，图标永远坐在左栏正上方 → <span class="ok">视觉上左栏从窗口顶端贯通到底</span>。</span>
+    </div>
+  </section>
+
+  <!-- ══════════ 方案 B：不对齐 ══════════ -->
+  <section>
+    <div class="hd">
+      <span class="no bad">B</span>
+      <span class="tt">顶栏左段宽度固定（不对齐）</span>
+      <span class="sub">顶栏图标按自己的节奏排布，与左栏宽度脱钩</span>
+    </div>
+
+    <div class="row">
+
+      <!-- 展开 264 -->
+      <div class="cell">
+        <div class="cell-hd"><span class="st">展开</span><span class="w">264px</span></div>
+        <div class="win">
+          <div class="tbar">
+            <div class="tbar-seg" style="width:64px;">
+              <span class="ic hi"></span><span class="ic"></span><span class="ic"></span>
+            </div>
+            <div class="tl"><span class="av"></span>会话标题</div>
+          </div>
+          <div class="guide-top" style="left:64px;"></div>
+          <div class="body">
+            <div class="rail" style="width:88px;">
+              <div class="micro"><span class="ag on"></span><span class="ag"></span><span class="ag"></span></div>
+              <div class="drawer"><div class="dl m"></div><div class="dl"></div><div class="dl s"></div><div class="dl"></div></div>
+            </div>
+            <div class="guide-bot" style="left:88px;"></div>
+            <div class="main">
+              <div class="stream"><div class="bub"></div><div class="dl m"></div><div class="dl s"></div></div>
+              <div class="insp"><div class="dl"></div><div class="dl m"></div><div class="dl s"></div></div>
+            </div>
+          </div>
+          <div class="step" style="left:64px; top:30px; width:24px; height:1.5px; opacity:.85;"></div>
+          <div class="step lbl" style="left:66px; top:34px;">错位 24px</div>
+        </div>
+      </div>
+
+      <!-- 拖宽 400 -->
+      <div class="cell">
+        <div class="cell-hd"><span class="st">拖宽</span><span class="w">400px</span></div>
+        <div class="win">
+          <div class="tbar">
+            <div class="tbar-seg" style="width:64px;">
+              <span class="ic hi"></span><span class="ic"></span><span class="ic"></span>
+            </div>
+            <div class="tl" style="left:auto; right:6px; transform:none;">会话标题</div>
+          </div>
+          <div class="guide-top" style="left:64px;"></div>
+          <div class="body">
+            <div class="rail" style="width:126px;">
+              <div class="micro"><span class="ag on"></span><span class="ag"></span><span class="ag"></span></div>
+              <div class="drawer"><div class="dl m"></div><div class="dl"></div><div class="dl s"></div><div class="dl"></div><div class="dl m"></div></div>
+            </div>
+            <div class="guide-bot" style="left:126px;"></div>
+            <div class="main">
+              <div class="stream"><div class="bub"></div><div class="dl m"></div><div class="dl s"></div></div>
+              <div class="insp"><div class="dl"></div><div class="dl m"></div><div class="dl s"></div></div>
+            </div>
+          </div>
+          <div class="step" style="left:64px; top:30px; width:62px; height:1.5px; opacity:.85;"></div>
+          <div class="step lbl" style="left:66px; top:34px;">错位扩大到 62px</div>
+        </div>
+      </div>
+
+      <!-- 折叠 42 -->
+      <div class="cell">
+        <div class="cell-hd"><span class="st">折叠</span><span class="w">42px 微轨</span></div>
+        <div class="win">
+          <div class="tbar">
+            <div class="tbar-seg" style="width:64px;">
+              <span class="ic hi"></span><span class="ic"></span><span class="ic"></span>
+            </div>
+            <div class="tl" style="left:auto; right:6px; transform:none;">会话标题</div>
+          </div>
+          <div class="guide-top" style="left:64px;"></div>
+          <div class="body">
+            <div class="rail" style="width:30px;">
+              <div class="micro" style="width:30px; border-right:none;"><span class="ag on"></span><span class="ag"></span><span class="ag"></span></div>
+            </div>
+            <div class="guide-bot" style="left:30px;"></div>
+            <div class="main">
+              <div class="stream"><div class="bub"></div><div class="dl m"></div><div class="dl s"></div></div>
+              <div class="insp"><div class="dl"></div><div class="dl m"></div><div class="dl s"></div></div>
+            </div>
+          </div>
+          <div class="step" style="left:30px; top:30px; width:34px; height:1.5px; opacity:.85;"></div>
+          <div class="step lbl" style="left:32px; top:34px;">反超错位</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="verdict" style="margin-top:11px;">
+      <span>顶栏左段固定 64px，左栏却在 88 / 126 / 30 之间变。两条虚线<b>永不重合</b>：展开时顶栏图标缩在左栏左半边，拖宽后错位从 24px 涨到 62px，折叠时顶栏左段反而比左栏还宽、图标悬在会话流上方 → <span class="bad">左栏顶部出现台阶，顶天立地感破裂</span>。</span>
+    </div>
+  </section>
+
+  <!-- ══════════ 图例 ══════════ -->
+  <div class="legend">
+    <span class="p"><i></i>顶栏左段右边界</span>
+    <span class="s"><i></i>左栏右边界</span>
+    <span class="d"><i></i>错位量（两线水平距离）</span>
+  </div>
+
+  <div class="note">
+    <b>为什么必须对齐：</b>顶栏左段承载的是左栏专属控件（交通灯 / 折叠按钮 / 侧栏开关 / 更多），它们语义上属于左栏。<br>
+    若左段宽度与左栏脱钩，折叠或拖拽时图标会与下方栏位错位，用户在视觉上读到的就不再是"一整列左栏"，而是"顶栏 + 左栏"两层皮。<br>
+    <b>实现约束：</b>顶栏左段宽度必须直接引用 <code>--rail-w-left</code> 与折叠态的 <code>--geo-micro-rail</code>，禁止写字面量或二次计算。
+  </div>
+
+</div>
+</body>
+</html>

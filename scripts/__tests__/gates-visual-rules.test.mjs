@@ -1,8 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { RULES, visualRules } from '../gates/rules.mjs';
 import { stripComments } from '../gates/lib/scanner.mjs';
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 /**
  * Gate 4e「视觉契约」规则组单测
@@ -262,8 +267,14 @@ test('visual/token-fallback-drift：兜底值与 :root 真值不一致必须阻�
 test('visual/token-fallback-drift：未定义 Token 与复合值不归本规则管（避免与 ghost-token 抢活）', () => {
   assertHits('visual/token-fallback-drift', '.x { border-radius: var(--not-defined-token, 6px); }', 0, CSS_UI);
   assertHits('visual/token-fallback-drift', '.x { width: var(--geo-titlebar, calc(1px + 2px)); }', 0, CSS_UI);
-  // 与真值一致的几何 Token 同样放行
-  assertHits('visual/token-fallback-drift', '.x { height: var(--geo-titlebar, 42px); }', 0, CSS_UI);
+  // 与真值一致的几何 Token 同样放行。真值从 styles.css 的 :root 实时读取，
+  // 禁止在此硬编码——否则调整几何常量会制造与本规则无关的假失败。
+  const css = fs.readFileSync(path.join(REPO_ROOT, 'packages/desktop/src/renderer/styles.css'), 'utf8');
+  const titlebarTruth = /--geo-titlebar:\s*(\d+)px/.exec(css)?.[1];
+  assert.ok(titlebarTruth, ':root 必须定义 --geo-titlebar');
+  assertHits('visual/token-fallback-drift', `.x { height: var(--geo-titlebar, ${titlebarTruth}px); }`, 0, CSS_UI);
+  // 反例：fallback 与真值不一致必须被抓
+  assertHits('visual/token-fallback-drift', '.x { height: var(--geo-titlebar, 42px); }', Number(titlebarTruth) === 42 ? 0 : 1, CSS_UI);
 });
 
 /* ================================================================== *

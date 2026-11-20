@@ -619,6 +619,13 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
     const wasNearBottom = deps.isStreamNearBottom(streamEl);
 
     const rootEl = document.documentElement;
+    // 平台标识：供 CSS 表达 macOS 专属几何（系统交通灯让位）。
+    // 设计意图(Why)：styles.css 无法感知平台，而 macOS 折叠态/展开态的左段 padding 必须不同。
+    // 约束与规则(Rules)：只在值变化时写入，避免高频 render 反复触发属性写与样式重算；
+    //   全仓唯一写入点，禁止在事件处理器里另写一份（否则形成第二真值面）。
+    if (rootEl.getAttribute?.('data-platform') !== state.platform) {
+      rootEl.setAttribute('data-platform', state.platform);
+    }
     const nextAppearance = SKINS[resolveSkinId(state.theme)]?.variant === 'light' ? 'light' : 'dark';
     if (rootEl.getAttribute?.('data-theme') !== state.theme) {
       rootEl.classList?.add('oc-theme-switching');
@@ -731,6 +738,8 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
         <div class="flux-body-container" style="flex: 1; display: flex; position: relative; overflow: hidden; width: 100%;">
           <div id="react-leftrail-host" style="display: contents;"></div>
 
+          <!-- 右主块容器：检查舱全屏只覆盖本层，左栏保持可见（用户 2026-11-20 裁决） -->
+          <div class="flux-main-block">
           ${renderMiddlePod({
             gatewayConnected: state.gatewayConnected,
             gatewayConnecting: state.gatewayConnecting,
@@ -792,6 +801,7 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
             gitDiffs: state.gitDiffs,
             memories: state.memories,
           })}
+          </div><!-- /.flux-main-block -->
         </div>
 
         <div id="react-settings-host" style="display: contents;"></div>

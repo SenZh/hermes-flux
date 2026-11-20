@@ -5,8 +5,8 @@
  *    - Left Work Pane (flex: 1): File previewer, Git diffs, Browser viewport, or Memories
  *    - Far-Right Vertical Scene Rail (fixed 48px): Vertical iconic switcher pinned to window edge
  * 2. True Workspace Fullscreen:
- *    - Fullscreen takes position: absolute; top: 0; left: 0; right: 0; bottom: 0 inside .flux-body-container
- *    - Covers conversation stream MiddlePod and LeftRail completely, but KEEPS Titlebar header and StatusBar!
+ *    - Fullscreen takes position: absolute; top: 0; left: 0; right: 0; bottom: 0 inside .flux-main-block
+ *    - Covers the conversation pod and itself, but leaves LeftRail and Titlebar visible and interactive
  * 3. 100% Standard Skin Design Tokens (Zero hardcoded colors)
  * 4. 100% Strict i18n key requirement (Zero hardcoded text strings in UI template)
  */
@@ -84,8 +84,8 @@ export function renderInspectionPod(props: InspectionPodProps): string {
     currentFile = files[0];
   }
 
-  // Workspace Fullscreen: inside .flux-body-container taking top:0, left:0, right:0, bottom:0
-  // Covers middle stream and left rail completely, preserving Titlebar header and bottom StatusBar!
+  // Workspace Fullscreen：覆盖“右主块容器” (.flux-main-block)，即对话舱 + 检查舱，
+  // 保留左栏与顶栏可见可交互（用户 2026-11-20 裁决：检查舱全屏不得遮挡左栏）。
   const asideStyle = isFullscreen
     ? `
       position: absolute;
