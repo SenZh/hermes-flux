@@ -3,7 +3,6 @@ export * from './tokens/tokens.js';
 export * from './tokens/types.js';
 export * from './tokens/skins.js';
 export * from './i18n/index.js';
-export * from './components/Titlebar/Titlebar.js';
 export {
   buildLeftRailModel,
   toSnippet,

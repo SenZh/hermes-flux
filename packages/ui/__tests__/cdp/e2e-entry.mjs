@@ -10,7 +10,8 @@
  *   2. 必须使用生产 dist 产物，禁止 mock。
  */
 
-import { renderTitlebar } from '../../dist/components/Titlebar/Titlebar.js';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { Titlebar } from '../../dist/components-react/Titlebar.js';
 import { renderLeftRailHtml } from '../../dist/components-react/leftRailStaticRender.js';
 import { renderMiddlePod } from '../../dist/components/MiddlePod/MiddlePod.js';
 import { renderInputDock } from '../../dist/components/InputDock/InputDock.js';
@@ -18,6 +19,33 @@ import { renderContextMenu } from '../../dist/components/ContextMenu/ContextMenu
 import * as React from 'react';
 import { createRoot } from 'react-dom/client';
 import { ConversationMessageList } from '../../dist/components-react/conversation/index.js';
+
+/**
+ * 顶栏静态渲染：复用生产 React 组件，禁止再引入第二套字符串模板。
+ * 【设计意图 (Why)】harness 渲染的 DOM 必须与发货实现逐字同源，否则断言的是不存在的视觉。
+ * 【约束与规则 (Rules)】交互回调一律 noop：静态渲染不承载行为，harness 也不会绑顶栏按钮。
+ */
+function renderTitlebar(props = {}) {
+  const noop = () => {};
+  return renderToStaticMarkup(
+    React.createElement(Titlebar, {
+      platform: props.platform ?? 'windows',
+      title: props.title ?? '',
+      isMaximized: Boolean(props.isMaximized),
+      gatewayConnected: Boolean(props.gatewayConnected),
+      leftRailCollapsed: Boolean(props.leftRailCollapsed),
+      inspectorCollapsed: props.inspectorCollapsed !== false,
+      latencyMs: props.latencyMs,
+      onMinimize: noop,
+      onMaximize: noop,
+      onClose: noop,
+      onToggleLeftRail: noop,
+      onToggleInspector: noop,
+      onOpenSettings: noop,
+      onToggleTheme: noop,
+    })
+  );
+}
 
 /**
  * 消息列表真实挂载。

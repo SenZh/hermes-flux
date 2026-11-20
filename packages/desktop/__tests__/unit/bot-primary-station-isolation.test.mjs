@@ -9,7 +9,7 @@ import {
   normalizeTimestamp,
   extractMessagePreview,
 } from '../../../../packages/core/dist/index.js';
-import { renderLeftRailHtml, renderTitlebar } from '../../../../packages/ui/dist/index.js';
+import { renderLeftRailHtml } from '../../../../packages/ui/dist/index.js';
 
 /** 左轨静态渲染入口（React 实现），语义与旧 renderLeftRail(props) 一一对应。 */
 function renderLeftRail(props = {}) {

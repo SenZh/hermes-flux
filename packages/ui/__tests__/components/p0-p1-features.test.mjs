@@ -7,7 +7,6 @@ import { LeftRail } from '../../dist/components-react/LeftRail.js';
 import { buildLeftRailModel } from '../../dist/components-react/leftRailModel.js';
 import { renderNewTaskModal } from '../../dist/components/TaskModal/NewTaskModal.js';
 import { renderInputDock } from '../../dist/components/InputDock/InputDock.js';
-import { renderTitlebar } from '../../dist/components/Titlebar/Titlebar.js';
 import { renderContextMenu } from '../../dist/components/ContextMenu/ContextMenu.js';
 import { BotManagerView } from '../../dist/components-react/settings/BotManagerView.js';
 
@@ -266,30 +265,7 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
     assert.ok(modalHtml.includes('留空将根据首轮对话自动生成'), '必须包含标题自动生成友好提示');
   });
 
-  await t.test('6. 顶部标题栏支持渲染当前会话所属 Workspace 徽章', () => {
-    // 6.1 会话关联项目时，Titlebar 必须渲染 Workspace Badge
-    const titlebarWithProject = renderTitlebar({
-      platform: 'windows',
-      title: '重构结算服务',
-      projectName: '电商微服务工程',
-      projectPath: 'D:/workspace/shop',
-      isMaximized: false,
-      gatewayConnected: true,
-    });
-    assert.ok(titlebarWithProject.includes('session-workspace-badge'), '必须包含 Workspace 徽章容器');
-    assert.ok(titlebarWithProject.includes('电商微服务工程'), '必须展示项目名称');
-
-    // 6.2 会话未关联项目时，严禁渲染 session-workspace-badge
-    const titlebarWithoutProject = renderTitlebar({
-      platform: 'windows',
-      title: '普通日常对话',
-      isMaximized: false,
-      gatewayConnected: true,
-    });
-    assert.ok(!titlebarWithoutProject.includes('session-workspace-badge'), '未关联项目时严禁渲染 Workspace 徽章');
-  });
-
-  await t.test('7. 项目甲板入口拔除后，左轨不再渲染项目卡片层（防死层复活）', () => {
+  await t.test('6. 项目甲板入口拔除后，左轨不再渲染项目卡片层（防死层复活）', () => {
     const railHtml = renderLeftRail({
       collapsed: false,
       activeSessionId: 'sess-shop-1',
@@ -310,7 +286,7 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
     assert.ok(railHtml.includes('修复支付订单超时'), '会话本体不得因项目甲板移除而消失');
   });
 
-  await t.test('8. 右键上下文菜单分流测试 (Bot / Group / Session 三态全覆盖)', () => {
+  await t.test('7. 右键上下文菜单分流测试 (Bot / Group / Session 三态全覆盖)', () => {
     // 8.1 Bot 右键菜单必须包含编辑智能体且彻底剔除清空历史
     const botMenu = renderContextMenu({
       x: 100,
@@ -353,7 +329,7 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
     assert.ok(!sessionMenu.includes('data-action="bot-chat"'), '会话菜单严禁包含进入工位');
   });
 
-  await t.test('9. BOT 面板取代旧内联编辑器：选择器、基础身份与保存/重置闭环', () => {
+  await t.test('8. BOT 面板取代旧内联编辑器：选择器、基础身份与保存/重置闭环', () => {
     // 【设计意图】旧 AgentProfileEditorModal 已删除，编辑入口收敛到设置中心 BOT 分区。
     //   本断言保留"编辑面板字段完备性"的原意，但改为对新 BotManagerView 的真实 SSR 产物下断言。
     const detail = {
@@ -412,7 +388,7 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
     );
   });
 
-  await t.test('10. 左轨双轨架构：微轨头像常驻与抽屉第一行大卡片三态与最新对话副标题联动', () => {
+  await t.test('9. 左轨双轨架构：微轨头像常驻与抽屉第一行大卡片三态与最新对话副标题联动', () => {
     const railHtml = renderLeftRail({
       collapsed: false,
       activeSessionId: 'sess-1',
@@ -449,7 +425,7 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
     assert.ok(railHtml.includes('activity-unread-badge'), '未读智能体必须包含未读指示器');
   });
 
-  await t.test('11. 群聊原地行内重命名 (inline rename) 渲染断言', () => {
+  await t.test('10. 群聊原地行内重命名 (inline rename) 渲染断言', () => {
     // 11.1 处于编辑状态下的房间
     const editingRailHtml = renderLeftRail({
       collapsed: false,

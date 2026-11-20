@@ -8,8 +8,7 @@
  *
  * 防范的历史坑 (Pitfall)：
  *   1) 历史只改 .flux-titlebar 而漏掉 responsive 的 top，出现 1px 缝隙；
- *   2) 字符串版 Titlebar 内联 42px 覆盖 class 规则，主页面 43px、harness 42px 双真值；
- *   3) 媒体查询里写了永不命中的 #flux-inspection-pod（真实 id 是 flux-inspector-pod）。
+ *   2) 媒体查询里写了永不命中的 #flux-inspection-pod（真实 id 是 flux-inspector-pod）。
  *
  * 约束与规则 (Rules)：
  *   断言基于字符级表达式比对，禁止放宽为 includes('43px') 之类的数值近似。
@@ -123,18 +122,6 @@ test('移动端注入 CSS：顶栏高度与桌面端同源', () => {
     mjs.includes(`height: calc(var(--geo-titlebar, ${rootHeight}px) + 1px + env(safe-area-inset-top, 0px)) !important;`),
     `Capacitor 注入的顶栏高度必须与桌面端同为「内容高 + 1px」，且 fallback 等于 :root 真值 ${rootHeight}px`,
   );
-});
-
-test('字符串版 Titlebar 内联高度必须与 class 规则同源（防止双真值）', () => {
-  const ts = read('packages/ui/src/components/Titlebar/Titlebar.ts');
-  const css = read('packages/desktop/src/renderer/styles.css');
-  const rootHeight = /--geo-titlebar:\s*(\d+)px/.exec(css)?.[1];
-  assert.ok(rootHeight, ':root 必须定义 --geo-titlebar');
-
-  assert.ok(ts.includes(`height: calc(var(--geo-titlebar, ${rootHeight}px) + 1px + env(safe-area-inset-top, 0px));`), '内联 height 必须补偿 1px 且 fallback 与 :root 同源');
-  assert.ok(ts.includes(`min-height: calc(var(--geo-titlebar, ${rootHeight}px) + 1px + env(safe-area-inset-top, 0px));`), '内联 min-height 必须同源');
-  assert.equal(ts.includes('height: calc(42px + env(safe-area-inset-top, 0px));'), false, '内联高度不得残留裸 42px');
-  assert.equal(ts.includes('min-height: 42px;'), false, '内联 min-height 不得残留裸 42px');
 });
 
 test('顶栏左段：展开态宽度必须与左栏共用 --rail-w-left，禁止 flex:1 弹性占满', () => {

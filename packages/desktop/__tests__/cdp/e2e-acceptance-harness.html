@@ -105,9 +105,6 @@
       groupRooms: [
         { roomId: 'room-1', name: '全链路微服务重构群', members: ['default', 'arch-wang'], activityState: 'running' }
       ],
-      projects: [
-        { id: 'proj-1', name: '电商微服务工程', path: 'D:/workspace/shop' }
-      ],
       activeSessionId: 'sess-1',
       sessionDrafts: new Map(),
       activeFocus: { type: 'session', sessionId: 'sess-1' },
@@ -136,7 +133,6 @@
       render() {
         const root = document.getElementById('flux-app-root');
         const activeSess = this.sessions.find(s => s.id === this.activeSessionId);
-        const currentProject = activeSess ? this.projects[0] : null;
 
         let displayTitle = activeSess ? activeSess.title : '赫尔墨斯';
         if (this.activeFocus?.type === 'bot') {
@@ -151,10 +147,10 @@
           ${renderTitlebar({
             platform: 'windows',
             title: displayTitle,
-            projectName: currentProject?.name,
-            projectPath: currentProject?.path,
             isMaximized: false,
-            gatewayConnected: true
+            gatewayConnected: true,
+            leftRailCollapsed: false,
+            inspectorCollapsed: true
           })}
           <div class="flux-body-container">
             ${renderLeftRail({

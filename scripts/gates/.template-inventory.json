@@ -66,9 +66,6 @@
     ],
     "packages/ui/src/components/TaskModal/NewTaskModal.ts": [
       "renderNewTaskModal"
-    ],
-    "packages/ui/src/components/Titlebar/Titlebar.ts": [
-      "renderTitlebar"
     ]
   }
 }

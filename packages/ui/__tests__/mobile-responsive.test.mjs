@@ -3,7 +3,7 @@
  *
  * 覆盖四大象限：
  * 1. 正向路径：Android / iOS 移动端平台下，Titlebar 彻底剥离桌面 Windows 三键与 Mac 三色灯；
- * 2. 桌面对比：Windows 平台保留 win-caption-controls，macOS 平台保留 mac-traffic-lights；
+ * 2. 桌面对比：Windows 平台保留 win-caption-controls，macOS 平台严禁自绘 mac-traffic-lights；
  * 3. 边界值断言：CSS 媒体查询选择器实名一致性，严禁出现 .left-rail / .input-dock 等失效死选择器；
  * 4. 变异检验：故意改错平台判断或保留死选择器时，本测试必须 100% 变红。
  */
@@ -15,10 +15,37 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { renderTitlebar } from '../dist/components/Titlebar/Titlebar.js';
+import { Titlebar } from '../dist/components-react/Titlebar.js';
 import { LeftRail } from '../dist/components-react/LeftRail.js';
 import { buildLeftRailModel } from '../dist/components-react/leftRailModel.js';
 import { assertCollapsedRailGeometry } from './helpers/rail-geometry.mjs';
+
+/**
+ * React 版 Titlebar 静态渲染入口（生产唯一发货实现）。
+ * 【约束与规则】交互回调一律 noop：静态渲染不承载行为，行为由 mountTitlebar 注入。
+ * 【防范的历史坑 (Pitfall)】此处曾渲染已删除的字符串版 renderTitlebar，形成第二真值面；
+ *   现统一断言生产组件本身，避免"测试绿、发货红"。
+ */
+function renderTitlebar(props = {}) {
+  const noop = () => {};
+  return renderToStaticMarkup(React.createElement(Titlebar, {
+    platform: props.platform,
+    title: props.title,
+    isMaximized: Boolean(props.isMaximized),
+    gatewayConnected: Boolean(props.gatewayConnected),
+    leftRailCollapsed: Boolean(props.leftRailCollapsed),
+    inspectorCollapsed: props.inspectorCollapsed !== false,
+    latencyMs: props.latencyMs,
+    activeAvatar: props.activeAvatar,
+    onMinimize: noop,
+    onMaximize: noop,
+    onClose: noop,
+    onToggleLeftRail: noop,
+    onToggleInspector: noop,
+    onOpenSettings: noop,
+    onToggleTheme: noop,
+  }));
+}
 
 /** 左轨 React 岛测试渲染入口，语义与旧 renderLeftRail(props) 一一对应。 */
 function renderLeftRail(props = {}) {

@@ -163,16 +163,17 @@ test('Hermes Flux Core Delivery - Real Headless Browser CDP Physical Acceptance 
     await new Promise((r) => setTimeout(r, 100));
   }
 
-  await t.test('1. CDP 物理验证: 顶栏 Workspace 徽章、微轨头像与抽屉纯净架构渲染', async () => {
+  await t.test('1. CDP 物理验证: 顶栏纯净骨架、微轨头像与抽屉纯净架构渲染', async () => {
     const res = await cdpCall('Runtime.evaluate', {
       expression: `(() => {
+        const titlebar = document.querySelector('.flux-titlebar');
         const badge = document.querySelector('.session-workspace-badge');
         const stationRail = document.getElementById('flux-station-rail');
         const primaryCard = document.querySelector('.rail-primary-agent-card');
         const botTrigger = document.getElementById('rail-bots-accordion-trigger');
         return {
+          hasTitlebar: Boolean(titlebar),
           hasBadge: Boolean(badge),
-          badgeText: badge ? badge.textContent.trim() : '',
           hasStationRail: Boolean(stationRail),
           hasPrimaryCard: Boolean(primaryCard),
           hasOldBotTrigger: Boolean(botTrigger),
@@ -182,8 +183,9 @@ test('Hermes Flux Core Delivery - Real Headless Browser CDP Physical Acceptance 
     });
 
     const info = res.result.value;
-    assert.equal(info.hasBadge, true, '标题栏必须渲染会话所属 Workspace 徽章');
-    assert.ok(info.badgeText.includes('电商微服务工程'), '徽章必须展示项目名称');
+    assert.equal(info.hasTitlebar, true, '顶栏必须真实渲染（生产 React 版 .flux-titlebar）');
+    // 顶栏 Workspace 徽章随字符串模板整体下线：生产 React 顶栏不承载该身份面，回归即双重真值。
+    assert.equal(info.hasBadge, false, '顶栏严禁渲染已下线的 Workspace 徽章');
     assert.equal(info.hasStationRail, true, '界面必须常驻 52px 物理微轨');
     assert.equal(info.hasPrimaryCard, true, '抽屉第一行必须渲染当前选中的核心 Agent 大卡片');
     assert.equal(info.hasOldBotTrigger, false, '抽屉内严格禁止存在旧有的智能体(N)折叠行');

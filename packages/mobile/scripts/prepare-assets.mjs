@@ -72,9 +72,8 @@ if (fs.existsSync(cssPath)) {
 }
 
 @media (max-width: 768px) {
-  /* 1. 彻底剥离桌面窗口控制按键 (Mac 红绿灯与 Windows 窗口控制) */
+  /* 1. 彻底剥离桌面窗口控制按键 (Windows 窗口控制) */
   .win-cap-btn,
-  .mac-traffic-lights,
   .flux-titlebar-controls,
   .titlebar-controls,
   .window-controls,
