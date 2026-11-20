@@ -35,14 +35,12 @@ function renderTitlebar(props = {}) {
       gatewayConnected: Boolean(props.gatewayConnected),
       leftRailCollapsed: Boolean(props.leftRailCollapsed),
       inspectorCollapsed: props.inspectorCollapsed !== false,
-      latencyMs: props.latencyMs,
       onMinimize: noop,
       onMaximize: noop,
       onClose: noop,
       onToggleLeftRail: noop,
       onToggleInspector: noop,
       onOpenSettings: noop,
-      onToggleTheme: noop,
     })
   );
 }

@@ -77,10 +77,11 @@
   /* 几何单源。设计意图(Why)：微轨/抽屉/检查舱/状态栏的尺寸被 TS(DIMENSIONS)、CSS fallback
      与组件 utility 三处引用；不定义真值就会永远走 fallback，改一处不生效。
      约束与规则(Rules)：本段是 CSS 侧唯一定义面，数值必须与 tokens.ts 的 DIMENSIONS 一致。 */
-  /* 顶栏内容高。用户 2026-11-20 裁决：42px 过高，收紧为 36px。
-     36px 可容纳 28px 图标按钮并保留上下各 4px 呼吸；再往下需同步复核
-     .win-cap-btn 高度与 macOS 交通灯 y 坐标。 */
-  --geo-titlebar: 36px;
+  /* 顶栏内容高。用户 2026-11-20 二次裁决：36px 仍偏高，压到 32px。
+     32px = 28px 图标按钮 + 上下各 2px 呼吸，正好"容纳下按钮高度"；
+     再往下就必须同时缩小按钮热区（低于 28px 触控下限），不得只改这一处。
+     依赖顶栏高度的 fixed 定位一律走 calc(var(--geo-titlebar) + 1px)。 */
+  --geo-titlebar: 32px;
   /* 顶栏左段几何拆成两个正交量：
      content = 折叠态需要容纳的按钮宽度（☰ 28px）
      inset   = 左侧让位（Windows 8px / macOS 88px 给系统交通灯）
@@ -90,6 +91,12 @@
   /* macOS 系统交通灯让位宽度。真值抄自 openchamber 源码 Header.tsx:1051 的硬编码 88px。 */
   --geo-titlebar-left-inset-macos: 88px;
   --geo-micro-rail: clamp(58px, 4.2vw, 72px);
+  /* 微轨站点卡几何。设计意图(Why)：微轨宽度本身是 clamp(58px, 4.2vw, 72px) 的动态量，
+     卡片刻成 42px 常量时，宽视口下头像只会更显小、窄视口下又贴死边界。
+     约束与规则(Rules)：卡片按微轨 0.72 等比跟随（34~50 夹紧），头像再内缩 3px/侧；
+     两者只此一处定义，LeftRail 与骨架占位必须同时引用，禁止任何一侧写回字面量。 */
+  --geo-station-card: clamp(34px, calc(var(--geo-micro-rail) * 0.72), 50px);
+  --geo-station-avatar: calc(var(--geo-station-card) - 6px);
   /* 仅被 .flux-context-drawer 的 width/min-width 声明引用，实际被 Tailwind flex-1/min-w-0 覆盖 */
   --geo-context-drawer: 244px;
   /* 设计参照值：展开态真值由 --rail-w-left 决定（默认 264px，可拖 264~480），本值当前无消费者 */
@@ -606,14 +613,14 @@
 .status-location { opacity: 0.7; }
 /* 延迟读数走 caption 档 muted 前景：同字号同色系，只靠等宽数字与间距区分层级 */
 .status-latency { font-variant-numeric: tabular-nums; }
-/* 设计意图 (Why)：顶栏主体操作与窗控区必须完整锁定 42px 物理内容高度。
-   防范的历史坑 (Pitfall)：box-sizing: border-box 下直接写 height: 42px，1px 下边框会
-   吃掉内容区，窗控三键与图标相对整栏视觉中心发生 1px 垂直偏心。
-   约束与规则 (Rules)：内部元素 height: 100% 精准对应 42px；含边框的外围总高为
-   calc(var(--geo-titlebar) + 1px)，所有依赖顶栏高度的 fixed 定位必须同步该表达式。 */
+/* 设计意图 (Why)：顶栏主体操作与窗控区必须完整锁定 --geo-titlebar（现 32px）物理内容高度。
+   防范的历史坑 (Pitfall)：box-sizing: border-box 下直接写死 `height: <内容高>px`，1px 下边框会
+   吃掉内容区，窗控三键与图标相对整栏视觉中心发生 1px 垂直偏心；写死数值还会与 Token 漂移。
+   约束与规则 (Rules)：内部元素 height: 100% 精准对应 --geo-titlebar；含边框的外围总高为
+   calc(var(--geo-titlebar) + 1px) = 33px，所有依赖顶栏高度的 fixed 定位必须同步该表达式。 */
 /* 设计意图(Why)：底边横线不得横穿左栏上方——那会把左栏切成上下两段，破坏"左栏顶天立地"的整体感。
    历史坑(Pitfall)：曾用 border-bottom 通栏画线，左栏上方也有一条，视觉上左栏被拦腰截断。
-   约束与规则(Rules)：border-bottom 保留 1px 但透明，仅用于维持 43px 总高；
+   约束与规则(Rules)：border-bottom 保留 1px 但透明，仅用于凑齐外围总高 33px；
    可见横线由 ::after 只画在左栏右边界右侧；左侧竖线由 .titlebar-left 的 border-right 从 y=0 贯穿。 */
 .flux-titlebar {
   height: calc(var(--geo-titlebar) + 1px + env(safe-area-inset-top, 0px));
@@ -630,7 +637,9 @@
   position: relative;
   z-index: 50;
 }
-/* 顶栏底边横线：只在左栏右边界之后可见，左栏上方留空 */
+/* 顶栏底边横线：只在左栏右边界之后可见，左栏上方留空。
+   用户 2026-11-20 裁决：这条横线"再细一点"——1px 是物理下限，只能降对比度：
+   取 --border-subtle 的 60% 混透明，使横线在深浅皮肤上都退成"表面分界"而非"分隔条"。 */
 .flux-titlebar::after {
   content: '';
   position: absolute;
@@ -638,7 +647,7 @@
   right: 0;
   bottom: 0;
   height: 1px;
-  background: var(--border-subtle);
+  background: color-mix(in srgb, var(--border-subtle) 60%, transparent);
   pointer-events: none;
   z-index: 3;
 }
@@ -655,12 +664,30 @@
    约束与规则(Rules)：宽度必须直接引用 --rail-w-left，禁止写字面量或二次计算；
      折叠态切换只经 .flux-titlebar[data-left-rail-collapsed]，禁止另写媒体查询分支。 */
 .titlebar-left {
+  /* 竖线颜色单一真值：border-right 与跨底边的 1px 补丁共用本变量，
+     hover/拖拽续接只改变量即可，避免两处各写一份 color-mix 造成色差。 */
+  --titlebar-divider: var(--border-subtle);
   flex: 0 0 var(--rail-w-left, 264px);
   min-width: 0;
   padding-left: var(--geo-titlebar-left-inset, 8px);
   /* 竖线从这里起，从窗口顶端（y=0）贯穿到顶栏底部，与左栏的 border-right 接成一条线 */
-  border-right: 1px solid var(--border-subtle);
+  border-right: 1px solid var(--titlebar-divider);
+  position: relative;
   transition: flex-basis var(--duration-exit) var(--ease-spring);
+}
+/* 跨底边补丁：.titlebar-left 的 height:100% 只覆盖 32px 内容盒，
+   下面 1px 属于 .flux-titlebar 的透明 border-bottom，竖线会在 y=32 断一个像素
+   （1.25x/2x 屏放大为 1.25~2px 缺口）。这里补一个 1px×1px 的同色方块把接缝焊死。
+   约束与规则(Rules)：颜色必须读 --titlebar-divider，禁止另写色值；只补 1px，不得改用
+   height:100%+1px 撑高左段（会让图标中线偏 0.5px，破坏三簇共线）。 */
+.titlebar-left::after {
+  content: '';
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 1px;
+  height: 1px;
+  background: var(--titlebar-divider);
 }
 /* 展开方向：与左栏同用 enter 时长（120ms），否则展开时左栏 120ms 到位、左段 200ms 未到，中间出现错位窗口 */
 .flux-titlebar:not([data-left-rail-collapsed="true"]) .titlebar-left {
@@ -671,6 +698,14 @@
 .flux-titlebar[data-left-rail-collapsed="true"] .titlebar-left {
   flex: 0 0 max(calc(var(--geo-micro-rail, clamp(58px, 4.2vw, 72px)) + 1px), calc(var(--geo-titlebar-left-content, 28px) + var(--geo-titlebar-left-inset, 8px)));
 }
+/* 折叠态隐藏设置键：微轨 58~72px 放不下两个 28px 热区（8+28+8+28=72 已顶格，
+   而 1440px 视口下微轨仅 60.5px）。若强行并排，要么图标压过竖线，要么竖线与左栏错开 13px——
+   两者都会破坏"左栏顶天立地"的单线。折叠态本就是专注态，设置仍可展开左栏取回，
+   或按 Ctrl/Cmd+, 直接打开设置中心（dropdownKeybindController.ts:424 的绑定，含脏稿拦截）。
+   约束与规则(Rules)：只准按折叠属性隐藏，禁止在 JS 里做宽度测量分流。 */
+.flux-titlebar[data-left-rail-collapsed="true"] #btn-open-settings {
+  display: none;
+}
 /* macOS：系统交通灯让位。
    真值来源：openchamber 实测源码 Header.tsx:1047-1052 —— macOS 桌面应用非全屏时
      硬编码 padding-left: 88px（未使用 getWindowButtonPosition()，因该 API 只回显
@@ -680,6 +715,15 @@ html[data-platform="macos"] {
   --geo-titlebar-left-inset: var(--geo-titlebar-left-inset-macos, 88px);
 }
 .titlebar-right { justify-content: flex-end; flex-shrink: 0; z-index: 2; }
+/* 非 Windows 平台右簇没有窗控三键，检查舱图标不得贴死窗口右缘：
+   与左簇的 8px inset 左右对称，并叠加安全区。Windows 保持三键通栏（系统惯例）。 */
+html[data-platform="macos"] .titlebar-right,
+html[data-platform="linux"] .titlebar-right,
+html[data-platform="ios"] .titlebar-right,
+html[data-platform="android"] .titlebar-right,
+html[data-platform="web"] .titlebar-right {
+  padding-right: calc(8px + env(safe-area-inset-right, 0px));
+}
 /* 标题居中基准 = 对话区中心，而非窗口中心。
    设计意图(Why)：标题应与对话内容对齐，避免被右侧检查舱拉偏。
    防范的历史坑(Pitfall)：
@@ -725,7 +769,6 @@ html[data-platform="macos"] {
   font-weight: 500;
   letter-spacing: -0.01em;
 }
-.titlebar-latency-pill { color: var(--secondary-foreground); font-family: var(--font-mono); }
 .win-caption-controls { display: flex; align-items: center; height: 100%; -webkit-app-region: no-drag; }
 .win-cap-btn { width: 46px; height: 100%; border: 0; background: transparent; color: var(--secondary-foreground); display: flex; align-items: center; justify-content: center; cursor: pointer; -webkit-app-region: no-drag; }
 .win-cap-btn:hover { background: var(--card-hover); }
@@ -735,7 +778,10 @@ html[data-platform="macos"] {
 /* 自绘 macOS 交通灯样式已随 B-i 裁决删除（系统原生三键由 titleBarStyle 绘制）。
    防范的历史坑(Pitfall)：这些规则一旦残留，随时可能被重新挂上 DOM，导致系统三键与自绘三键
    同时出现、屏幕上 6 个圆点错位重叠。禁止恢复。 */
-.titlebar-connection-indicator { width: 7px; height: 7px; border-radius: 50%; background: var(--muted-foreground); }
+/* 连接指示点：display 必须显式声明。它曾是 flex 子项，靠"flex 子项块化"才拿到宽高；
+   一旦父容器换成非 flex（或未来改结构），inline 元素上的 width/height 会被浏览器直接忽略，
+   指示点会静默变成 0×0（悬停提示还在，屏幕上却什么都没有）。 */
+.titlebar-connection-indicator { display: inline-block; flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--muted-foreground); }
 /* 连接态由 data-connected 属性驱动：文案(title)随语言切换，用它做选择器会在英文界面直接失效。 */
 .titlebar-connection-indicator[data-connected="true"] { background: var(--success); }
 
@@ -846,6 +892,46 @@ html[data-maximized="true"] #flux-app-root {
 .rail-resize-handle:active {
   border-color: color-mix(in srgb, var(--primary) 65%, transparent) !important;
   background: color-mix(in srgb, var(--primary) 12%, transparent) !important;
+}
+
+/* 左侧把手的高亮改落在左栏真实分隔线上（单一实线，不是双线）。
+   设计意图(Why)：把手宽 6px，其自身 border-right 位于分隔线左侧 1px；两层同时着色时
+     1x 屏上出现两条相距 1px 的蓝线、1.25x 屏上糊成一条发虚的宽线（用户实测截图）。
+     把 Accent 线交给 #flux-left-rail 的 border-right 后，高亮与分隔线共用同一像素列，
+     再由 .titlebar-left 续接即可从窗口顶端贯穿到底。
+   约束与规则(Rules)：
+     1. 左把手自身边框恒透明，只保留极轻底色作为"抓住了"的反馈；
+     2. 右侧把手保持既有 border 高亮——检查舱没有可由顶栏续接的竖线，改走同一套会露出断头；
+     3. 拖拽态只认 data-rail-resizing="left"，防止拖右舱时左侧误亮。 */
+.rail-resize-handle[data-rail-handle="left"]:hover,
+.rail-resize-handle[data-rail-handle="left"]:focus-visible,
+.rail-resize-handle[data-rail-handle="left"]:active {
+  border-color: transparent !important;
+  background: color-mix(in srgb, var(--primary) 10%, transparent) !important;
+}
+
+/* hover/focus-visible 态：仅在「未拖拽」时命中。
+   设计意图(Why)：拖拽时指针必然仍悬在把手上，若 hover 规则同时成立，
+   `html:has(...)` 的特异性高于 `html[data-rail-resizing="left"]`，65% 的锁定加深会被
+   45% 的 hover 色恒久压低——反馈看起来"按住了但没变深"。用 :not() 让两态互斥，
+   不必引入 !important（换肤 Token 仍可被覆盖）。 */
+html:not([data-rail-resizing="left"]):has(.rail-resize-handle[data-rail-handle="left"]:hover) #flux-left-rail,
+html:not([data-rail-resizing="left"]):has(.rail-resize-handle[data-rail-handle="left"]:focus-visible) #flux-left-rail {
+  border-right-color: color-mix(in srgb, var(--primary) 45%, transparent);
+}
+
+html:not([data-rail-resizing="left"]):has(.rail-resize-handle[data-rail-handle="left"]:hover) .titlebar-left,
+html:not([data-rail-resizing="left"]):has(.rail-resize-handle[data-rail-handle="left"]:focus-visible) .titlebar-left {
+  --titlebar-divider: color-mix(in srgb, var(--primary) 45%, transparent);
+}
+
+/* 拖拽锁定态：同一条线加深，顶栏左段同步，视觉上从 y=0 一贯穿到底 */
+html[data-rail-resizing="left"] #flux-left-rail {
+  border-right-color: color-mix(in srgb, var(--primary) 65%, transparent);
+}
+
+html[data-rail-resizing="left"] .titlebar-left {
+  --titlebar-divider: color-mix(in srgb, var(--primary) 65%, transparent);
 }
 
 /* 左轨平滑折叠/展开动效：严格对齐宪法 I6 非对称时序与 GPU 独立图层加速 */
@@ -1093,10 +1179,31 @@ button {
   }
 
   /* 标题居中复位：移动端左栏是浮层、检查舱是全屏 Sheet，对话区即全宽，
-     不得沿用桌面的「左栏 + 检查舱」对称补偿（390px 下会偏左 78px）。 */
+     不得沿用桌面的「左栏 + 检查舱」对称补偿（390px 下会偏左 78px）。
+     让位必须按两簇图标实占推导，不得写死：左簇 = inset 8 + ☰ 28 + gap 16 + 设置 28 = 80，
+     右侧检查舱簇 ≤ 44，取对称上限 80，故两侧共让 160px。写 120 会让长标题压到设置键下方。 */
   .titlebar-center {
     left: 50% !important;
-    max-width: calc(100% - 120px) !important;
+    max-width: calc(100% - 160px) !important;
+  }
+
+  /* 顶栏图标按钮的 44px 触控下限不得靠撑大按钮盒实现：
+     顶栏内容高只有 32px，44px 的盒子会让按下底色上下各压出 6px 到对话区。
+     视觉保持 28px，命中区用伪元素外扩到 44px，两者兼得。
+     但外扩 8px 会让相邻按钮的命中区各越界 8px、彼此重叠 8px（中间那道缝变成"点☰打开设置"），
+     所以移动端把左簇 gap 从 8px 提到 16px，让两个 44px 命中区恰好相接而不重叠。 */
+  .titlebar-left {
+    gap: 16px;
+  }
+  .flux-titlebar .icon-btn {
+    position: relative;
+    min-width: 28px !important;
+    min-height: 28px !important;
+  }
+  .flux-titlebar .icon-btn::after {
+    content: '';
+    position: absolute;
+    inset: -8px;
   }
 
   /* 移动端左栏是浮层不占布局，顶栏底边横线必须通栏（否则左栏区域缺一段线）。 */
@@ -1258,13 +1365,14 @@ button {
   box-shadow: none !important;
 }
 
-/* 抽屉搜索输入框在浅色模式下的纯净白底与精致微边框 */
-[data-theme="jade-white"] #session-search-input,
-[data-theme="suet-jade"] #session-search-input,
-[data-variant="light"] #session-search-input {
-  background: var(--bg-card) !important;
-  border-color: var(--border-subtle) !important;
-}
+/* 抽屉搜索框：静止态无边框无底色，彻底融进侧栏背景（用户 2026-11-20 裁决）。
+   设计意图(Why)：搜索框是"随手可用的过滤器"，不是侧栏里的一块白板；
+     常驻边框/底色会在 264px 宽的抽屉里形成第二个视觉焦点，压过会话标题。
+     交互语言与参考实现一致：静止态只有放大镜 + 占位文案，聚焦后才浮出 1px 描边。
+   防范的历史坑(Pitfall)：这里曾按皮肤分三条 `!important` 补丁强刷 `--bg-card` 白底 +
+     `--border-subtle` 边框，与"静止态无边框"直接对冲——只要补丁还在，浅色皮肤永远变不回通透态。
+   约束与规则(Rules)：描边只在 :focus 出现，且必须走 --border 系列 Token，禁止新增皮肤补丁；
+     内部元素禁止再用 `!important` 覆盖该输入的 background/border。 */
 
 /* 中间对话区在浅色模式下保持纯白画板，形成最佳阅读对比 */
 [data-theme="jade-white"] #conversation-stream,
@@ -1337,10 +1445,8 @@ blockquote {
   box-shadow: none !important;
 }
 
-[data-theme="warm-paper"] #session-search-input {
-  background: var(--bg-card) !important;
-  border-color: var(--border-subtle) !important;
-}
+/* 抽屉搜索框的静止/聚焦两态由 LeftRail 的 utility 类单点表达（透明 → 1px --border），
+   此处不得再按皮肤挂 `!important` 补丁：那会让"静止态无边框"在浅色皮肤上永远失效。 */
 
 /* Specific component tuning for Ayu Light mode (Exact match with OpenChamber ayu-light.json) */
 [data-theme="ayu-light"] #flux-left-rail,
@@ -1365,10 +1471,7 @@ blockquote {
   box-shadow: none !important;
 }
 
-[data-theme="ayu-light"] #session-search-input {
-  background: var(--bg-card) !important;
-  border-color: var(--border-subtle) !important;
-}
+/* 抽屉搜索框样式见上方同源说明，此处不再挂皮肤补丁。 */
 
 [data-theme="ayu-light"] .user-bubble {
   background: var(--chat-user-message-bg, var(--bg-card)) !important;

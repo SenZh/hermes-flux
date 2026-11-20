@@ -115,8 +115,10 @@
   --radius-pill:   9999px; /* 状态胶囊、徽标 */
 
   /* 核心几何单源尺寸 */
-  --geo-titlebar:        42px;   /* 顶栏内容高；含 1px 下边框后总高 43px */
+  --geo-titlebar:        32px;   /* 顶栏内容高；含 1px 下边框后总高 33px。28px 热区 + 上下各 2px 呼吸 */
   --geo-micro-rail:      clamp(58px, 4.2vw, 72px); /* 左侧微轨宽度（折叠态补偿 1px 右边框） */
+  --geo-station-card:    clamp(34px, calc(var(--geo-micro-rail) * 0.72), 50px); /* 微轨 Agent 站点卡，随微轨等比缩放 */
+  --geo-station-avatar:  calc(var(--geo-station-card) - 6px);                     /* 站点头像 = 卡高 − 3px/侧内缩 */
   --geo-context-drawer:  244px;  /* 设计参照；实际由 flex-1 吸收剩余（运行时约 202px） */
   --geo-left-rail:       296px;  /* 设计参照；展开态真值由 --rail-w-left 决定（默认 264px） */
   --geo-resize-handle:   6px;    /* 拖拽把手基准宽度 */

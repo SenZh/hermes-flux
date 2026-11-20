@@ -149,4 +149,15 @@ export const MUTATION_DOMAINS = {
     // 实测 7 mutant / 6 killed / 0 survived / 1 noCov = 85.71%（覆盖分 100%）（2026-11-18）
     minScore: 70,
   },
+  avatarSize: {
+    title: '头像尺寸白名单与回退 (Avatar Size Resolver)',
+    // 纯函数：数字/字符串双形态 + 白名单 + 回退值，全部可被单测直接命中。
+    // 门槛 98：50/51 = 98.04% 通过，49/51 = 96.08% 会被拦下 —— 只给唯一那个
+    // 等价变异体留余量（`typeof size === 'number'` → true 时，后续 Number.isFinite
+    // 天然不 coercion 字符串，行为完全一致，不可杀，已人工核对）。
+    mutate: ['packages/ui/src/utils/avatarSize.ts'],
+    testFiles: ['packages/ui/__tests__/avatar-size.test.mjs'],
+    buildCommand: 'npm run build:ui',
+    minScore: 98,
+  },
 };

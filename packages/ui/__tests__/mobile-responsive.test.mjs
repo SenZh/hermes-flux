@@ -43,7 +43,6 @@ function renderTitlebar(props = {}) {
     onToggleLeftRail: noop,
     onToggleInspector: noop,
     onOpenSettings: noop,
-    onToggleTheme: noop,
   }));
 }
 

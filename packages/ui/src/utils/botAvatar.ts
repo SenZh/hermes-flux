@@ -9,6 +9,7 @@
 
 // gate-theme-allow: 适配全皮肤主题色彩，消除与暗黑界面的冲突
 import { escapeHtml } from './html.js';
+import { resolveAvatarSizeAttributes, resolveAvatarSizeCss } from './avatarSize.js';
 const XIAOFAWANG_YELLOW = 'var(--foreground)';
 // gate-theme-allow: 1:1 对齐官方 Bot 双眼瞳孔自然黑，属品牌资产固定色而非皮肤面
 const BOT_PUPIL_BLACK = '#18181B';
@@ -93,36 +94,40 @@ export function renderGroupCollageAvatar(
 }
 
 /**
- * 1:1 消费网关真实自定义头像资产：
- * 1. 有 avatarUrl 优先渲染真实 <img>；
- * 2. 名称含 xiaofawang 或哈希落到 triangle 时渲染官方黄色三角形；
- * 3. 其余按名称哈希给出确定性几何图腾，保证同一 Bot 每次渲染一致。
- */
-/**
- * 无头像时的确定性几何图腾。
- * 【设计意图】同一 Bot 每次渲染必须一致，不同 Bot 必须可区分。
- * 【防范的历史坑】早期只用 7 种形状，但 7 种里 5 种都落到同一个 rect 兜底分支，
- *   实测 3 个 Bot 全部渲染成同一块橙色方块，微轨完全无法辨认（真实截图取证）。
- * 【约束与规则】形状 × 色调二维组合，色调只取皮肤语义槽，禁止硬编码色值。
+ * Bot 头像渲染（唯一实现）：真实资产优先，缺失时回退确定性几何图腾。
  *
- * 【shape 参数（第 5 位，默认 'rounded'）】
- *   在场指示器（AgentPresence）的头像槽位是 56px 正圆，需要圆形裁切；其余消费者
- *   （左轨、标题栏、群聊拼图、任务弹窗）保持 8px 圆角方形。默认值必须为 'rounded'，
- *   否则既有调用点会集体改变外观。三角形分支不参与圆角计算——它本身就是三角形，
- *   圆形裁切会把三个尖角削掉，反而失去辨识度。
+ * 【设计意图】微轨、抽屉行、标题栏、群聊拼图、任务弹窗共用同一资产管线，
+ *   真实 `<img>`（Base64 / HTTP / file URL）优先；无资产时用「形状 × 色调」二维哈希给出
+ *   确定性几何图腾，保证同一 Bot 每次渲染一致、不同 Bot 可区分。
+ * 【防范的历史坑】早期只 7 种形状，其中 5 种落到同一个 rect 兜底分支，实测 3 个 Bot
+ *   全渲染成同一块橙色方块，微轨完全无法辨认（真实截图取证）。
+ * 【约束与规则】
+ *   1. 色调只取皮肤语义槽，禁止硬编码色值；
+ *   2. 尺寸形参接受 `number | string`（微轨站点卡是 clamp 动态量），解析与白名单
+ *      统一收敛到 utils/avatarSize.ts（纯函数，可被单测与变异测试直接命中）；
+ *   3. shape 默认 'rounded'（8px 圆角方形）；在场指示器的 56px 正圆传 'circle'。
+ *      三角形分支不参与圆角计算——圆形裁切会把三个尖角削掉，反而失去辨识度。
  */
 export function renderBotAvatar(
   name: string,
   displayName?: string,
   avatarUrl?: string,
-  size = 36,
+  size: number | string = 36,
   shape: 'rounded' | 'circle' = 'rounded',
 ): string {
+  /* 尺寸既接受像素数字，也接受 CSS 长度表达式（如 var(--geo-station-avatar)）。
+     设计意图(Why)：微轨站点卡随视口 clamp 动态缩放，头像必须跟着卡走；
+       若只收数字，调用方只能靠 JS 量宽或写死像素，动态量就彻底断链。
+     约束与规则(Rules)：解析与白名单全部收敛到 utils/avatarSize.ts（纯函数，可被单测与变异测试
+       直接命中）；数字一律补 px，字符串只放行 var()/带单位数值，非法值回退 36px 并 console.warn。
+       数字形态继续下发 width/height 属性（既有调用点以属性为契约），字符串形态只走 style。 */
+  const cssSize = resolveAvatarSizeCss(size);
+  const dimAttrs = resolveAvatarSizeAttributes(size);
   const radiusPx = shape === 'circle' ? '50%' : '8px';
   if (avatarUrl) {
     return `<img src="${escapeHtml(avatarUrl)}" style="
-      width: ${size}px;
-      height: ${size}px;
+      width: ${cssSize};
+      height: ${cssSize};
       border-radius: ${radiusPx};
       object-fit: cover;
       flex-shrink: 0;
@@ -140,7 +145,7 @@ export function renderBotAvatar(
 
   if (cleanName.includes('xiaofawang')) {
     return `
-      <svg width="${size}" height="${size}" viewBox="0 0 36 36" fill="none" style="flex-shrink: 0; display: block;">
+      <svg${dimAttrs} viewBox="0 0 36 36" fill="none" style="width: ${cssSize}; height: ${cssSize}; flex-shrink: 0; display: block;">
         <path d="M18 4.5 C19.2 2.5 21.8 2.5 23 4.5 L34 26 C35.2 28.2 33.8 31 31.2 31 L6.8 31 C4.2 31 2.8 28.2 4 26 Z" fill="${XIAOFAWANG_YELLOW}" />
         <circle cx="15" cy="18" r="1.8" fill="${BOT_PUPIL_BLACK}" />
         <circle cx="23" cy="18" r="1.8" fill="${BOT_PUPIL_BLACK}" />
@@ -163,7 +168,7 @@ export function renderBotAvatar(
         : `<rect x="5" y="5" width="26" height="26" rx="7" fill="var(${pickedTone})" />`;
 
   return `
-    <svg width="${size}" height="${size}" viewBox="0 0 36 36" fill="none" style="flex-shrink: 0; display: block;">
+    <svg${dimAttrs} viewBox="0 0 36 36" fill="none" style="width: ${cssSize}; height: ${cssSize}; flex-shrink: 0; display: block;">
       <rect width="36" height="36" rx="${shape === 'circle' ? 18 : 8}" fill="var(--panel)" />
       ${body}
       <circle cx="14" cy="17" r="1.8" fill="${BOT_PUPIL_BLACK}" />

@@ -49,7 +49,7 @@ export interface LeftRailProps {
 }
 
 /** 头像只复用既有资产管线（真实 <img> / 几何图腾 SVG），避免第二套身份渲染分叉。 */
-function Avatar({ profile, size }: { profile: Pick<LeftRailProfile, 'name' | 'displayName' | 'avatar'>; size: number }): React.ReactElement {
+function Avatar({ profile, size }: { profile: Pick<LeftRailProfile, 'name' | 'displayName' | 'avatar'>; size: number | string }): React.ReactElement {
   return <span aria-hidden="true" className="inline-flex shrink-0" dangerouslySetInnerHTML={{ __html: renderBotAvatar(profile.name, profile.displayName, profile.avatar, size) }} />;
 }
 
@@ -80,11 +80,10 @@ function RowTime({ timestamp, fallback }: { timestamp?: number; fallback?: strin
 
 /**
  * 微轨 Agent 骨架的几何类。
- * 【约束与规则 (Rules)】必须与 AgentStationItem 的 42px 站点卡逐像素一致，
- * 直接复用同一个字面量，数据到达时不得产生布局跳动。
+ * 【约束与规则 (Rules)】必须与 AgentStationItem 的站点卡逐像素一致，
+ * 直接复用同一个 size-station-card（真值 --geo-station-card），数据到达时不得产生布局跳动。
  */
-// gate-theme-allow: 与 AgentStationItem 的 42px 站点卡逐像素对齐，骨架→真实卡不得跳动
-const STATION_SKELETON_CLASS = 'size-[42px] shrink-0 rounded-panel';
+const STATION_SKELETON_CLASS = 'size-station-card shrink-0 rounded-panel';
 
 /** 微轨 Agent 按钮单一实现，消灭大总管与其他 Agent 的双标分裂 */
 const AgentStationItem = React.memo(function AgentStationItem({
@@ -103,14 +102,16 @@ const AgentStationItem = React.memo(function AgentStationItem({
   return <Button
     variant="ghost"
     size="icon"
-    className={`station-agent-badge rail-pinned-bot-row relative size-[42px] shrink-0 rounded-panel border p-0 transition-all duration-150 ${active ? 'active border-primary bg-primary-subtle' : 'border-transparent bg-transparent hover:bg-card-hover/70'}`}
+    className={`station-agent-badge rail-pinned-bot-row relative size-station-card shrink-0 rounded-panel border p-0 transition-all duration-150 ${active ? 'active border-primary bg-primary-subtle' : 'border-transparent bg-transparent hover:bg-card-hover/70'}`}
     data-profile={agent.name}
     data-station-profile={agent.name}
     title={t('rail.enterBotChat', { name: agent.displayName || agent.name })}
     onClick={onClick}
     onContextMenu={onContextMenu}
   >
-    <Avatar profile={agent} size={36} />
+    {/* 头像尺寸随站点卡同比缩放：宽度真值只有 --geo-station-avatar 一处，
+        组件不再传死像素，否则窄/宽视口下头像与卡片内边距会漂移。 */}
+    <Avatar profile={agent} size="var(--geo-station-avatar, 36px)" />
     <ActivityIndicator
       state={agent.activityState}
       transition={agent.activityTransition}
@@ -337,7 +338,8 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
   const sessionsLoading = model.sessionsPhase === 'loading';
   const drawerPresence = useMotionPresence(!props.collapsed);
   // 微轨几何：内层微轨无条件补偿 1px 右边框 —— border-box 下该边框会吃掉内容区 1px，
-  // 否则 42px 站点卡在（真值 clamp(58px, 4.2vw, 72px) 减 1px）的内容区里左右留白各差 0.5px。
+  // 否则站点卡（--geo-station-card，随微轨宽度等比缩放）在（真值 clamp(58px, 4.2vw, 72px) 减 1px）
+  // 的内容区里左右留白各差 0.5px。
   // fallback 与 :root 真值一致，避免变量缺失时退回旧值造成几何漂移。
   // 内外层必须引用同一常量，禁止第二条同构写法。
   const microRailWidth = 'calc(var(--geo-micro-rail, clamp(58px, 4.2vw, 72px)) + 1px)';
@@ -405,10 +407,16 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
     >
       <div className="flex flex-col gap-2 p-2 pb-1">
         <label className="relative block">
-          <Search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground/70" size={13} />
+          <Search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" size={13} />
+          {/* 静止态无边框无底色，与侧栏背景融为一体（用户 2026-11-20 裁决，对标参考实现）；
+              聚焦后才浮出 1px 描边。禁止恢复常驻边框/常驻底色。
+              聚焦描边由 Input 基类的 focus-visible:border-border-strong 提供——文本输入在
+              点击时同样命中 :focus-visible，且 --border-strong 才够 2.16:1 的可辨对比；
+              这里只显式压平基类的 2px ring（搜索框是过滤器，不是主操作）。
+              hover 用 --border 而非 --border-subtle：后者在深色皮肤上只有 6% 白，等于没有反馈。 */}
           <Input
             id="session-search-input"
-            className="h-8 rounded-card border border-border-subtle bg-panel/70 pl-7 pr-2 text-aux transition-colors placeholder:text-muted-foreground/50 hover:border-border focus:border-primary/40 focus:bg-panel"
+            className="h-8 rounded-card border border-transparent bg-transparent pl-7 pr-2 text-aux transition-colors placeholder:text-muted-foreground hover:border-border focus:bg-transparent focus-visible:ring-0"
             placeholder={t('rail.searchPlaceholder')}
             value={props.searchQuery}
             onChange={(event) => props.onSearchChange(event.currentTarget.value)}

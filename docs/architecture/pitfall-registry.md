@@ -323,6 +323,18 @@
 | 复现命令 | DevTools → Application → 勾选「阻止所有 Cookie」或隐身窗口，点切主题 |
 | 范围 | 本条覆盖 21 处交互期写入（3 文件）；其余写入点（onboardingController、index.ts、appBootstrap、profileManagementService、titlebarController、inputDockController、dropdownKeybindController、botActivityStore 等）按风险分级分批迁移到 `safeSetItem`；`DesktopCacheStore` 的探测写入属正确设计，不纳入 |
 
+## P-033 拖拽把手高亮与分隔线错位 1px：顶栏下方"断头蓝线" + 体内双线
+
+| 项目 | 内容 |
+|---|---|
+| 症状 | 悬停/拖拽左轨右缘时，蓝线在顶栏下方突然截断（顶栏那段仍是灰色发丝线）；细看体内还有两条相距 1px 的蓝边，1.25x/2x 屏上糊成一条发虚的宽线（用户实测截图取证） |
+| 根因 | 拖拽把手是左栏的**子元素**，`top` 从顶栏下沿算起，它自身那 1px `border-right` 又落在真实分隔线左侧 1px（把手宽 6px，`right:0`）。于是 ① 高亮只能存在于顶栏以下；② 把手边框与 `#flux-left-rail` 的分隔线同时着色，形成 1px 错位双线 |
+| 识别特征 | `document.elementFromPoint(railRight-3, titlebarY)` 命中 `.rail-resize-handle` 却看不到高亮；`getComputedStyle(#flux-left-rail).borderRightColor` 在 hover 时仍是 `--border-subtle`；同一行扫到两个相邻蓝像素列 |
+| 守卫 | ① `packages/desktop/src/renderer/styles.css` 左把手自身边框恒透明，Accent 线交给 `#flux-left-rail` 的 `border-right`；② `:has(.rail-resize-handle[data-rail-handle="left"]:hover)` 与 `html[data-rail-resizing="left"]` 同时给 `.titlebar-left` 续接同色，使高亮从 y=0 贯穿到底；③ 拖拽态只认带侧别的 `data-rail-resizing="left"`，防拖右舱时左侧误亮；④ `titlebar-geometry.test.mjs` 静态断言上述三条规则与"左把手边框恒透明" |
+| 复现命令 | `node --test packages/desktop/__tests__/unit/titlebar-geometry.test.mjs`；或真机悬停左轨右缘，沿 `railRight-1` 像素列自上而下取样 |
+| 范围 | 仅左轨把手；右侧检查舱把手保持自身 border 高亮（检查舱上方没有可续接的竖线，改走同套会露出新断头） |
+| 附注 | 续接用 `html:has(...)` 实现：Electron 34 / Chromium 132 原生支持，`:has` 不可用时退化为"仅把手 10% 底色 + 拖拽态 65% 高亮"，不会破版。若左轨节点数显著增长，需复测 hover 帧耗时（root 级 `:has(:hover)` 的失效集随指针迁移重算，本仓库当前 DOM 规模实测无感） |
+
 ## 守卫总览
 
 | 守卫 | 命令 | 拦住的坑 |
@@ -355,3 +367,4 @@
 | 模态层单一实现守卫 | `npm test`（settings-modal 弹窗族源码断言 + primitives-consumption Dialog 转正） | P-029、P-030 |
 | BOT 离场拦截守卫 | `npm test`（settings-modal 离场确认三出路 + 壳层 requestSettingsExit 接线） | P-031 |
 | 存储写入降级守卫 | `npm test`（safe-storage 五路径 + 三服务抛错注入） | P-032 |
+| 拖拽高亮单线贯穿守卫 | `npm test`（titlebar-geometry：左把手边框恒透明 + 顶栏续接规则）+ 真机像素列取样 | P-033 |

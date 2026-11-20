@@ -592,9 +592,13 @@ export function resolveSkinId(savedTheme: string | null | undefined): SkinId {
 }
 
 /**
- * Resolves the next theme when toggling the quick theme button.
- * Transitions between dark and the primary light theme ('ayu-light').
- * 表驱动，返回 SKINS 键。
+ * 深/浅皮肤互切的目标皮肤（暗 ↔ ayu-light）。
+ *
+ * 【设计意图】顶栏的深浅色切换按钮已由用户裁决删除，生产侧当前无消费者；
+ *   但它是被 layout.test.mjs 钉死语义的纯函数（暗皮肤一律切到 ayu-light，
+ *   浅皮肤一律切回 obsidian-gold），保留它意味着"主题快速切换"能力还在，
+ *   只是入口收敛到设置中心 / Ctrl+,，不需要在控制器里再写一遍判定。
+ * 【约束与规则】表驱动，别名先经 SKIN_ALIASES 解析；不得硬编码皮肤键列表。
  */
 export function getToggleTheme(currentTheme: string): 'obsidian-gold' | 'ayu-light' {
   const resolved = SKIN_ALIASES[currentTheme] ?? currentTheme;

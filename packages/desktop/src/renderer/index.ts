@@ -1104,7 +1104,7 @@ const renderCoordinator = createRenderCoordinator({
   resolveSessionKnownFiles: () => resolveSessionKnownFiles(),
   getTitlebarSnapshot: () => titlebarController.getTitlebarSnapshot(),
   onMinimizeWindow: () => titlebarController.onMinimizeWindow(), onMaximizeWindow: () => titlebarController.onMaximizeWindow(),
-  onCloseWindow: () => titlebarController.onCloseWindow(), onToggleTheme: () => titlebarController.onToggleTheme(),
+  onCloseWindow: () => titlebarController.onCloseWindow(),
   getLeftRailSnapshot: () => getLeftRailSnapshot(), createLeftRailActions: () => createLeftRailActions(),
   getPromptNavigatorSnapshot: () => getPromptNavigatorSnapshot(), createPromptNavigatorActions: () => createPromptNavigatorActions(),
   setPromptNavigatorUpdateHandler: (handler) => promptNavigatorManager.setUpdateHandler(handler),

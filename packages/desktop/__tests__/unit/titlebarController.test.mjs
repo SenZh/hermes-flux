@@ -69,14 +69,16 @@ function createMockDeps(overrides = {}) {
 }
 
 test('TitlebarController: getTitlebarSnapshot 正确提取快照与平台状态', () => {
-  const { deps, state } = createMockDeps();
+  const { deps } = createMockDeps();
   const controller = createTitlebarController(deps);
 
   const snapshot = controller.getTitlebarSnapshot();
   assert.equal(snapshot.platform, 'windows');
   assert.equal(snapshot.isMaximized, false);
   assert.equal(snapshot.gatewayConnected, true);
-  assert.equal(snapshot.latencyMs, 42);
+  // 用户裁决（2026-11-20）：顶栏延迟数字已拔除，快照不得再携带 latencyMs，
+  // 否则组件层会静默复活一条文字读数（渲染层已无该字段的消费者）。
+  assert.equal('latencyMs' in snapshot, false, '快照不得再携带 statusBar 时代的 latencyMs 字段');
   assert.ok(snapshot.title.length > 0);
 });
 
@@ -116,17 +118,6 @@ test('TitlebarController: onMaximizeWindow 切换最大化状态并触发 render
 
   await controller.onMaximizeWindow();
   assert.equal(state.isMaximized, true);
-  assert.equal(getRenderCount(), 1);
-});
-
-test('TitlebarController: onToggleTheme 切换主题并触发 render', () => {
-  const { deps, state, getRenderCount } = createMockDeps({
-    state: { theme: 'obsidian-gold' },
-  });
-  const controller = createTitlebarController(deps);
-
-  controller.onToggleTheme();
-  assert.notEqual(state.theme, 'obsidian-gold');
   assert.equal(getRenderCount(), 1);
 });
 

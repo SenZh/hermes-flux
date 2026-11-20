@@ -153,16 +153,25 @@ test('顶栏底边横线不得横穿左栏上方（左栏必须视觉整体、�
   assert.ok(titlebar, '.flux-titlebar 规则块必须存在');
 
   // 通栏 border-bottom 会把左栏拦腰截断——必须透明，可见横线改由 ::after 从左栏右边界起画
-  assert.match(titlebar, /border-bottom:\s*1px solid transparent/, '顶栏 border-bottom 必须透明（保留 1px 仅维持 43px 总高）');
+  assert.match(titlebar, /border-bottom:\s*1px solid transparent/, '顶栏 border-bottom 必须透明（保留 1px 仅凑齐外围总高 33px）');
 
   const after = /\.flux-titlebar::after\s*\{([^}]*)\}/.exec(css)?.[1];
   assert.ok(after, '必须用 ::after 单独绘制顶栏底边横线');
   assert.match(after, /left:\s*var\(--rail-w-left/, '::after 必须从左栏右边界起画，否则横线穿进左栏');
-  assert.match(after, /background:\s*var\(--border-subtle\)/, '::after 必须使用语义 Token');
+  // 用户 2026-11-20 裁决：这条横线要"再细一点"——1px 已是物理下限，只能由 --border-subtle 派生降低对比度。
+  // 比例必须钉死 60%：写成 \d+% 会让"改回 100%"（等于撤销用户裁决）依然全绿。
+  assert.match(
+    after,
+    /background:\s*color-mix\(in srgb, var\(--border-subtle\) 60%, transparent\)/,
+    '::after 必须由 --border-subtle 派生且固定 60% 混透明（禁止裸色值，也禁止回退到 100%）',
+  );
 
   // 左栏竖线必须从顶栏顶端就存在（titlebar-left 的 border-right），才能与下方左栏接成一条
   const leftSeg = /\.titlebar-left\s*\{([^}]*)\}/.exec(css)?.[1];
-  assert.match(leftSeg, /border-right:\s*1px solid var\(--border-subtle\)/, '顶栏左段必须有 border-right，使竖线从窗口顶端贯穿');
+  // 颜色经 --titlebar-divider 单一真值转发（跨底边 1px 补丁与 border-right 共用），
+  // 因此这里断言的是"经变量转发 + 变量默认取 --border-subtle"，而不是字面色值。
+  assert.match(leftSeg, /border-right:\s*1px solid var\(--titlebar-divider\)/, '顶栏左段必须有 border-right（经 --titlebar-divider 转发），使竖线从窗口顶端贯穿');
+  assert.match(leftSeg, /--titlebar-divider:\s*var\(--border-subtle\)/, '--titlebar-divider 默认必须回落到 --border-subtle');
 });
 
 test('顶栏左段：content 与 inset 两个 Token 必须在 :root 各有唯一定义', () => {
@@ -278,6 +287,149 @@ test('拖拽左右栏时必须关闭标题过渡，否则标题弹簧追帧与�
     /html\[data-rail-resizing\][\s\S]{0,400}?\.titlebar-center/,
     'html[data-rail-resizing] 的免过渡清单必须包含 .titlebar-center',
   );
+});
+
+test('拖拽高亮必须贯穿顶栏（用户 2026-11-20：蓝线没到顶）', () => {
+  const css = read('packages/desktop/src/renderer/styles.css');
+
+  // 把手是左栏子元素，高亮天然止于顶栏下沿；必须由顶栏左段同色续接，否则出现"断头蓝线"。
+  assert.match(
+    css,
+    /html:not\(\[data-rail-resizing="left"\]\):has\(\.rail-resize-handle\[data-rail-handle="left"\]:hover\) \.titlebar-left/,
+    'hover 态必须在顶栏左段续接把手高亮（且与拖拽态互斥）',
+  );
+  const dragRule = /html\[data-rail-resizing="left"\] \.titlebar-left\s*\{([^}]*)\}/.exec(css)?.[1];
+  assert.ok(dragRule, '拖拽态必须声明 html[data-rail-resizing="left"] .titlebar-left 续接规则');
+  assert.match(dragRule, /--titlebar-divider:\s*color-mix\(in srgb, var\(--primary\)/, '续接色必须由 --primary 派生，禁止硬编码蓝');
+  // 高亮必须落在左栏真实分隔线（#flux-left-rail 的 border-right）上，
+  // 而不是把手自身那 1px 边框——两者相距 1px，会渲染成错位双线（用户实测）。
+  assert.match(
+    css,
+    /html:not\(\[data-rail-resizing="left"\]\):has\(\.rail-resize-handle\[data-rail-handle="left"\]:hover\) #flux-left-rail[^{]*\{[^}]*border-right-color/,
+    'hover 态必须着色左栏真实分隔线，而不是把手自身的边框',
+  );
+  assert.match(
+    css,
+    /\.rail-resize-handle\[data-rail-handle="left"\]:active\s*\{[^}]*border-color:\s*transparent/,
+    '左把手自身边框必须恒透明，避免与分隔线形成双线',
+  );
+  assert.equal(
+    /html\[data-rail-resizing\] \.titlebar-left\s*\{/.test(css),
+    false,
+    '续接规则禁止用无侧别的 data-rail-resizing，否则拖右舱时左侧误亮',
+  );
+  // 拖拽加深不得被 hover 规则压制：hover 分支必须带 :not([data-rail-resizing="left"])。
+  // 否则 :has() 的高特异性会让 45% 恒久覆盖 65%，"按住了但没变深"。
+  const cssNoComments = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const hoverRules = [...cssNoComments.matchAll(/html:([^{}]*:has\(\.rail-resize-handle\[data-rail-handle="left"\]):hover\)[^{]*\{/g)];
+  assert.ok(hoverRules.length >= 2, 'hover 续接规则必须同时覆盖左栏与顶栏左段');
+  for (const rule of hoverRules) {
+    assert.ok(
+      rule[1].startsWith('not([data-rail-resizing="left"])'),
+      `hover 续接规则必须与拖拽态互斥，实际前缀：${rule[1].slice(0, 40)}`,
+    );
+  }
+  // 键盘聚焦把手时同样要续接：把手自身边框三态恒透明，只补 :hover 会让键盘用户失去这条线。
+  assert.match(
+    css,
+    /html:not\(\[data-rail-resizing="left"\]\):has\(\.rail-resize-handle\[data-rail-handle="left"\]:focus-visible\) \.titlebar-left\s*\{[^}]*--titlebar-divider/,
+    'focus-visible 态必须在顶栏左段续接把手高亮（键盘可达性）',
+  );
+  // 跨底边 1px 补丁：.titlebar-left 的 100% 只覆盖内容盒，底部 1px 属顶栏透明边框，
+  // 竖线会在 y=32 断口。必须有同色 1px 方块焊接，且颜色读同一变量。
+  const seam = /\.titlebar-left::after\s*\{([^}]*)\}/.exec(css)?.[1];
+  assert.ok(seam, '必须存在跨底边接缝补丁 .titlebar-left::after');
+  assert.match(seam, /bottom:\s*-1px/, '接缝补丁必须下探 1px 越过顶栏透明底边框');
+  assert.match(seam, /background:\s*var\(--titlebar-divider\)/, '接缝补丁必须读 --titlebar-divider，禁止另写色值');
+});
+
+test('折叠态：设置键必须隐藏，保住「左栏单线顶天立地」', () => {
+  const css = read('packages/desktop/src/renderer/styles.css');
+  const rule = /\.flux-titlebar\[data-left-rail-collapsed="true"\] #btn-open-settings\s*\{([^}]*)\}/.exec(css)?.[1];
+  assert.ok(rule, '折叠态必须声明 #btn-open-settings 的隐藏规则');
+  assert.match(rule, /display:\s*none/, '折叠态微轨放不下两个 28px 热区，设置键必须隐藏而非压过竖线');
+});
+
+test('微轨站点卡与头像必须随微轨宽度等比缩放（禁止写回死像素）', () => {
+  const css = read('packages/desktop/src/renderer/styles.css');
+  const rail = read('packages/ui/src/components-react/LeftRail.tsx');
+
+  // 数值链路：clamp(下界, 微轨宽 × 系数, 上界) —— 上下界次序写反会让 clamp 恒取上界，
+  // 只断言"引用了 --geo-micro-rail"抓不到这种变异，必须把三段拆开核对。
+  const card = /--geo-station-card:\s*clamp\((\d+(?:\.\d+)?)px,\s*calc\(var\(--geo-micro-rail[^)]*\)\s*\*\s*([\d.]+)\),\s*(\d+(?:\.\d+)?)px\)/.exec(css);
+  assert.ok(card, '站点卡必须是 clamp(下界px, calc(--geo-micro-rail * 系数), 上界px) 形态');
+  const lower = Number(card[1]);
+  const factor = Number(card[2]);
+  const upper = Number(card[3]);
+  assert.ok(lower > 0, '站点卡下界必须为正，否则极窄视口会塌成 0');
+  assert.ok(lower < upper, `站点卡下界必须小于上界，实际 ${lower} / ${upper}`);
+  assert.ok(factor > 0 && factor < 1, '站点卡系数必须落在 (0,1)，否则会撑破微轨');
+  // 微轨下限（clamp 下界 58px）代入后必须仍 ≥ 28px 触控下限且 ≤ 上界
+  const microLower = Number(/--geo-micro-rail:\s*clamp\((\d+(?:\.\d+)?)px/.exec(css)?.[1]);
+  assert.ok(microLower >= 56, '微轨 clamp 下界必须存在且合理');
+  const atMin = Math.min(Math.max(microLower * factor, lower), upper);
+  assert.ok(atMin >= 28, `微轨最窄时站点卡 ${atMin}px 不得低于 28px 触控下限`);
+
+  assert.match(css, /--geo-station-avatar:\s*calc\(var\(--geo-station-card\)/, '头像必须由站点卡派生');
+  assert.ok(rail.includes('size-station-card'), '站点卡与骨架必须共用 size-station-card 具名 utility');
+  assert.equal(rail.includes('size-[42px]'), false, 'LeftRail 不得回落到 42px 死尺寸');
+  assert.match(rail, /size="var\(--geo-station-avatar/, '站点头像必须由 --geo-station-avatar 派生尺寸');
+});
+
+test('顶栏高度：DIMENSIONS 与 :root 真值必须同源（跨语言单一真值）', () => {
+  const css = read('packages/desktop/src/renderer/styles.css');
+  const tokens = read('packages/ui/src/tokens/tokens.ts');
+
+  const cssHeight = Number(/--geo-titlebar:\s*(\d+)px/.exec(css)?.[1]);
+  const tsHeight = Number(/titlebarHeight:\s*(\d+)/.exec(tokens)?.[1]);
+  assert.ok(cssHeight > 0, ':root 必须定义 --geo-titlebar');
+  assert.equal(tsHeight, cssHeight, `DIMENSIONS.titlebarHeight(${tsHeight}) 必须等于 --geo-titlebar(${cssHeight})，否则 TS 与 CSS 各说各话`);
+  assert.ok(cssHeight >= 28, `顶栏内容高 ${cssHeight}px 不得低于 28px 图标热区`);
+});
+
+test('移动端标题让位必须覆盖两簇图标实占（禁止写死 120px）', () => {
+  const css = read('packages/desktop/src/renderer/styles.css');
+  const start = css.indexOf('@media (max-width: 768px)');
+  const mobile = css.slice(start);
+
+  const centerBlock = /\.titlebar-center\s*\{([^}]*)\}/.exec(mobile)?.[1] ?? '';
+  const reserve = /max-width:\s*calc\(100% - (\d+)px\)\s*!important/.exec(centerBlock)?.[1];
+  assert.ok(reserve, '移动端标题必须声明 max-width 让位表达式');
+  // 左簇实占 = inset 8 + ☰ 28 + gap 16 + 设置 28 = 80；两侧对称故 ≥160。
+  // gap 16 是 44px 触控热区外扩 8px 后的必需值（8px gap 会让两键命中区重叠 8px）。
+  const leftBlocks = [...mobile.matchAll(/\.titlebar-left\s*\{([^}]*)\}/g)].map((m) => m[1]);
+  assert.ok(
+    leftBlocks.some((block) => /gap:\s*16px/.test(block)),
+    '移动端左簇 gap 必须 16px，否则 44px 命中区相互重叠 8px',
+  );
+  assert.ok(Number(reserve) >= 160, `移动端两侧让位 ${reserve}px 不足以覆盖两簇图标（左簇实占 80px/侧）`);
+
+  // 触控热区不得靠撑大按钮盒：否则 32px 顶栏里 44px 的按下底色会溢到对话区。
+  const iconRule = /\.flux-titlebar \.icon-btn\s*\{([^}]*)\}/.exec(mobile)?.[1] ?? '';
+  assert.match(iconRule, /min-height:\s*28px/, '顶栏图标按钮视觉盒必须保持 28px');
+  assert.match(mobile, /\.flux-titlebar \.icon-btn::after\s*\{[^}]*inset:\s*-8px/, '44px 命中区必须由伪元素外扩');
+});
+
+test('连接指示点：必须有显式 display，不得依赖父级 flex 的块化', () => {
+  const css = read('packages/desktop/src/renderer/styles.css');
+  const rule = /\.titlebar-connection-indicator\s*\{([^}]*)\}/.exec(css)?.[1];
+  assert.ok(rule, '必须存在 .titlebar-connection-indicator 规则');
+  // inline 元素上的 width/height 会被浏览器直接忽略：一旦父级不再是 flex，
+  // 指示点会静默变成 0×0（悬停提示还在，屏幕上什么都没有）。
+  assert.match(rule, /display:\s*inline-block/, '指示点必须显式 inline-block');
+  assert.match(rule, /width:\s*7px/, '指示点宽度必须 7px');
+});
+
+test('非 Windows 平台：右簇必须与左簇对称留 8px（不得贴死窗口右缘）', () => {
+  const css = read('packages/desktop/src/renderer/styles.css');
+  const rule = /html\[data-platform="macos"\] \.titlebar-right,[\s\S]{0,400}?\.titlebar-right\s*\{([^}]*)\}/.exec(css)?.[1];
+  assert.ok(rule, '必须存在非 Windows 平台的 .titlebar-right 右内距规则');
+  assert.match(rule, /padding-right:\s*calc\(8px \+ env\(safe-area-inset-right/, '右内距必须 8px 起且叠加安全区');
+  for (const platform of ['macos', 'linux', 'ios', 'android', 'web']) {
+    assert.ok(css.includes(`html[data-platform="${platform}"] .titlebar-right`), `${platform} 平台必须纳入对称留白`);
+  }
+  // 反向对照：Windows 必须留在列表之外，否则窗控三键会离窗口边缘 8px（违反系统惯例）。
+  assert.equal(css.includes('html[data-platform="windows"] .titlebar-right'), false, 'Windows 不得套用右内距');
 });
 
 test('标题与左段：展开方向过渡必须与左栏同频（enter 120ms）', () => {

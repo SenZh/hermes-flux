@@ -8,6 +8,8 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { LeftRail } from '../dist/components-react/LeftRail.js';
@@ -17,6 +19,8 @@ import { buildLeftRailModel, formatLeftRailTime, toSnippet, isAgentScopeActive }
 import { assertCollapsedRailGeometry } from './helpers/rail-geometry.mjs';
 
 const NOW = new Date(2026, 10, 3, 15, 30).getTime();
+/** 仓库相对路径读取：测试统一从仓库根执行（与 desktop 侧用例一致）。 */
+const read = (rel) => fs.readFileSync(path.resolve(process.cwd(), rel), 'utf8');
 
 const PROFILES = [
   { name: 'default', displayName: 'Default 助理', isDefault: true, lastMessage: '主中枢已就绪', lastTime: '10:00', timestamp: NOW - 600000 },
@@ -72,6 +76,30 @@ function render(overrides = {}, propOverrides = {}) {
     ...propOverrides,
   }));
 }
+
+test('搜索框：静止态无边框无底色，仅聚焦后浮出 1px 描边（用户 2026-11-20 裁决）', () => {
+  const markup = render();
+  const inputTag = /<input[^>]*id="session-search-input"[^>]*>/.exec(markup)?.[0] ?? '';
+  assert.ok(inputTag, '抽屉必须渲染 #session-search-input');
+
+  // 静止态：border-transparent + bg-transparent —— 与侧栏背景融为一体。
+  assert.match(inputTag, /border-transparent/, '静止态必须无边框');
+  assert.match(inputTag, /bg-transparent/, '静止态必须无底色');
+  assert.equal(/bg-panel/.test(inputTag), false, '静止态不得残留 panel 底色（会在抽屉里形成第二块白板）');
+  // 聚焦态：由 Input 基类的 focus-visible:border-border-strong 提供（文本输入点击即命中
+  // :focus-visible，且 --border-strong 才有 2.16:1 的可辨对比）；这里只负责压平 2px ring。
+  assert.match(inputTag, /focus-visible:ring-0/, '必须压平 Input 基类的 2px ring，否则聚焦像主操作按钮');
+  assert.equal(/focus:border-primary/.test(inputTag), false, '聚焦态不得用品牌主色描边');
+  // 负向：聚焦描边只能来自基类，调用点不得把它压平或改透明（否则"点击进来没边框"）。
+  assert.equal(/focus(-visible)?:border-transparent/.test(inputTag), false, '调用点不得压平聚焦描边');
+  const inputBase = read('packages/ui/src/components-react/primitives/Input.tsx');
+  assert.match(inputBase, /focus-visible:border-border-strong/, '聚焦描边必须由基类的 --border-strong 提供（窄屏可辨）');
+
+  // 皮肤补丁不得回归：任何 `#session-search-input { ... !important }` 都会让"无边框"在浅色皮肤失效。
+  const styles = read('packages/desktop/src/renderer/styles.css');
+  const patches = [...styles.matchAll(/#session-search-input\s*\{[^}]*!important[^}]*\}/g)];
+  assert.equal(patches.length, 0, `禁止按皮肤给搜索框挂 !important 补丁，实测发现 ${patches.length} 处`);
+});
 
 test('紧凑时间：当日 HH:mm、跨日 M/D、跨年 YYYY/M/D，非数字一律空串', async (t) => {
   await t.test('当日只给 HH:mm', () => {

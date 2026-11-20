@@ -304,6 +304,20 @@
 }
 
 /*
+ * 微轨 Agent 站点卡（42px 时代 → 动态量）。
+ *
+ * 设计意图(Why)：微轨宽度本身是 clamp(58px, 4.2vw, 72px) 的动态量，站点卡与头像却曾被
+ *   写死成 size-[42px] / 36px，结果是宽视口下头像显得越来越小、窄视口下又贴死轨道边界。
+ *   尺寸真值收敛到 styles.css 的 --geo-station-card / --geo-station-avatar 后，卡与头像
+ *   随轨道等比呼吸，业务侧只声明"这是微轨站点卡"，不再出现 42/36 之类散落字面量。
+ * 约束与规则(Rules)：骨架占位与真实卡必须共用本 utility，禁止任何一侧写回任意值类或内联尺寸。
+ */
+@utility size-station-card {
+  width: var(--geo-station-card, 42px);
+  height: var(--geo-station-card, 42px);
+}
+
+/*
  * 浮层菜单层级（z-index 语义档位）。
  *
  * 设计意图(Why)：设置弹窗宿主是 z-50；下拉菜单经 Radix Portal 挂到 body，

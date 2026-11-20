@@ -298,7 +298,7 @@ test('rail-cockpit-form: 微轨按钮收编、header 形态与时间内联（真
     assert.equal(dotAlignment.subtitleFontWeight, '400', '副标题必须保持 400 字重，未被外层继承污染');
   });
 
-  await t.test('PR-3e 壳层真值面：底栏彻底拔除、延迟移至顶栏右上角、标题栏真实头像去 (Forever Chat) 与小绿点', async () => {
+  await t.test('PR-3e 壳层真值面：底栏彻底拔除、顶栏只留连接指示点、标题栏真实头像去 (Forever Chat) 与小绿点', async () => {
     // 注入连接状态与网关延迟，切到专职 Bot 工位
     await evaluate(`(() => {
       window.__fluxState.gatewayConnected = true;
@@ -320,6 +320,7 @@ test('rail-cockpit-form: 微轨按钮收编、header 形态与时间内联（真
       const botAvatar = document.querySelector('.titlebar-center .titlebar-bot-avatar');
       const greenDot = document.querySelector('.titlebar-center .session-live-pulse');
       const latencyEl = document.querySelector('.titlebar-right .titlebar-latency');
+      const settingsBtn = document.getElementById('btn-open-settings');
 
       return {
         statusHostExists: Boolean(statusHost),
@@ -331,6 +332,7 @@ test('rail-cockpit-form: 微轨按钮收编、header 形态与时间内联（真
         greenDotExists: Boolean(greenDot),
         botAvatarExists: Boolean(botAvatar),
         latencyText: latencyEl?.textContent ?? '',
+        settingsInLeftCluster: Boolean(settingsBtn?.closest('.titlebar-left')),
       };
     })()`);
 
@@ -342,7 +344,8 @@ test('rail-cockpit-form: 微轨按钮收编、header 形态与时间内联（真
     assert.equal(shellCheck.titleFontSize, '12px', '顶栏标题字号必须收敛至 12px 极简规范');
     assert.equal(shellCheck.titleText, 'Default 助理', '专职 Bot 标题必须直接呈现纯净 Bot 名称');
     assert.equal(shellCheck.botAvatarExists, true, '专职 Bot 工位顶栏必须渲染真实 Bot 头像组件');
-    assert.equal(shellCheck.latencyText, '24ms', '顶栏右上角必须低调呈现 24ms 网关延迟');
+    assert.equal(shellCheck.latencyText, '', '用户裁决（2026-11-20）：顶栏延迟数字必须彻底拔除，只保留连接指示点');
+    assert.equal(shellCheck.settingsInLeftCluster, true, '用户裁决（2026-11-20）：设置键必须落在顶栏左簇');
 
     // 切到群聊工位，验证群聊真实拼图微头像与纯净群名
     await evaluate(`(() => {

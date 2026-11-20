@@ -2,16 +2,17 @@
  * Hermes Flux D17 顶栏状态与窗口按键控制器 (Titlebar Controller)
  *
  * 【设计意图 (Why)】
- * 统一管理工作台顶部标题栏的快照派生（TitlebarSnapshot）、窗口最小化、最大化、关闭
- * 与主题切换交互，以及宿主操作系统平台（Windows / macOS / Linux / Web）与全屏最大化状态机。
+ * 统一管理工作台顶部标题栏的快照派生（TitlebarSnapshot）、窗口最小化、最大化、关闭，
+ * 以及宿主操作系统平台（Windows / macOS / Linux / Web）与全屏最大化状态机。
  * 将散落在 index.ts 中的窗口生命周期事件和标题解析逻辑解耦，
  * 提供纯净的单向依赖注入接口，确保顶栏状态机可被脱离 DOM 的单元测试覆盖。
  *
  * 【防范的历史坑 (Pitfall)】
  * 1. 标题与头像解析必须根据当前 activeFocus（Bot 主工位 / 群聊研讨室 / 会话）做领域分流，防范标题跳动；
  * 2. 窗口最大化在某些平台上异步返回 boolean，在其它平台上可能需二次查询 isMaximized() 确认，需双重兜底；
- * 3. 主题切换必须同步写入 localStorage（双 key 兼容 hermes_flux_theme 与 hermes_aura_theme），避免二次启动回退；
- * 4. 移动端/小屏与 Web 姿态下平台推导应避免误将移动浏览器当作 Windows 桌面。
+ * 3. 移动端/小屏与 Web 姿态下平台推导应避免误将移动浏览器当作 Windows 桌面。
+ * 4. 顶栏延迟数字与深浅色切换按钮已由用户裁决删除（2026-11-20）：主题唯一入口是设置中心
+ *    （settingsDataService）与 Ctrl/Cmd+,，本控制器不再持有第二条换肤真值面。
  *
  * 【约束与规则 (Rules)】
  * - 严格单向依赖，禁止反向 import index.ts；
@@ -25,7 +26,6 @@ import {
 } from '@hermes-flux/core';
 import {
   getTitlebarSnapshot as createTitlebarSnapshot,
-  getToggleTheme,
   type TitlebarSnapshot,
   type I18nKey,
 } from '@hermes-flux/ui';
@@ -44,7 +44,6 @@ export interface TitlebarController {
   onMinimizeWindow(): void;
   onMaximizeWindow(): Promise<void>;
   onCloseWindow(): void;
-  onToggleTheme(): void;
   syncSystemWindow(): Promise<void>;
   detectInitialPlatform(): 'windows' | 'macos' | 'linux' | 'ios' | 'android' | 'web';
 }
@@ -87,7 +86,6 @@ export function createTitlebarController(deps: TitlebarControllerDeps): Titlebar
       gatewayConnected: state.gatewayConnected,
       leftRailCollapsed: state.leftRailCollapsed,
       inspectorCollapsed: state.inspectorCollapsed,
-      latencyMs: state.gatewayLatencyMs,
       activeAvatar: resolveTitlebarAvatar({
         activeFocus: state.activeFocus,
         profiles: state.profiles,
@@ -118,16 +116,6 @@ export function createTitlebarController(deps: TitlebarControllerDeps): Titlebar
     desktopApi?.close();
   }
 
-  function onToggleTheme(): void {
-    const state = getState();
-    state.theme = getToggleTheme(state.theme);
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('hermes_flux_theme', state.theme);
-      localStorage.setItem('hermes_aura_theme', state.theme);
-    }
-    render();
-  }
-
   async function syncSystemWindow(): Promise<void> {
     const desktopApi = getDesktopApi();
     if (!desktopApi) return;
@@ -152,7 +140,6 @@ export function createTitlebarController(deps: TitlebarControllerDeps): Titlebar
     onMinimizeWindow,
     onMaximizeWindow,
     onCloseWindow,
-    onToggleTheme,
     syncSystemWindow,
     detectInitialPlatform: () => detectInitialPlatform(getDesktopApi()),
   };

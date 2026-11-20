@@ -97,7 +97,6 @@ export interface RenderCoordinatorDeps {
   onMinimizeWindow?: () => void;
   onMaximizeWindow?: () => Promise<void>;
   onCloseWindow?: () => void;
-  onToggleTheme?: () => void;
 
   // 左轨操作
   getLeftRailSnapshot: () => LeftRailSnapshot;
@@ -522,10 +521,6 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
         onOpenSettings: () => {
           state.isSettingsOpen = true;
           deps.ensureSettingsSectionData(state.settingsSection);
-          render();
-        },
-        onToggleTheme: () => {
-          deps.onToggleTheme?.();
           render();
         },
       });

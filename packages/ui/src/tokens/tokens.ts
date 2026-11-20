@@ -5,7 +5,9 @@
  */
 
 export const DIMENSIONS = {
-  titlebarHeight: 36,
+  // 用户 2026-11-20 二次裁决：顶栏内容高 36 → 32（28px 按钮 + 上下各 2px 呼吸）。
+  // 必须与 styles.css 的 --geo-titlebar 同值；含 1px 下边框后外围总高 = 33px。
+  titlebarHeight: 32,
   leftRailWidth: 264,
   inspectorWidth: 410,
   inspectorRailWidth: 62,
