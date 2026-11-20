@@ -1498,6 +1498,87 @@ blockquote {
   background: var(--primary);
 }
 
+/* ═══ 全局极客美学 Tooltip (Global Geek Aesthetic Tooltip) ═══
+   彻底阻断 Chromium 原生黑底矩形墨渍，以 4px 基础网格、6px 控件圆角、
+   1px 精密发丝描边与高对比悬浮微表面对齐 Hermes Flux 现代工作台视觉。 */
+.flux-global-tooltip {
+  position: fixed !important;
+  z-index: 99999 !important;
+  pointer-events: none !important;
+  user-select: none !important;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-family: var(--font-sans, system-ui, -apple-system, sans-serif);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 14px;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  -webkit-font-smoothing: antialiased;
+
+  /* 基础暗色高对比微表面 */
+  background: var(--flux-tooltip-bg, #181A20);
+  color: var(--flux-tooltip-fg, #F3F4F6);
+  border: 1px solid var(--flux-tooltip-border, rgba(255, 255, 255, 0.12));
+  box-shadow: var(--flux-tooltip-shadow, 0 4px 12px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2));
+
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(2px) scale(0.98);
+  transition: opacity 120ms cubic-bezier(0.16, 1, 0.3, 1),
+              transform 120ms cubic-bezier(0.16, 1, 0.3, 1),
+              visibility 120ms;
+}
+
+.flux-global-tooltip[data-state="visible"] {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+}
+
+.flux-global-tooltip[data-placement="bottom"] {
+  transform: translateY(-2px) scale(0.98);
+}
+.flux-global-tooltip[data-placement="bottom"][data-state="visible"] {
+  transform: translateY(0) scale(1);
+}
+
+.flux-global-tooltip[data-placement="right"] {
+  transform: translateX(-2px) scale(0.98);
+}
+.flux-global-tooltip[data-placement="right"][data-state="visible"] {
+  transform: translateX(0) scale(1);
+}
+
+.flux-global-tooltip[data-placement="left"] {
+  transform: translateX(2px) scale(0.98);
+}
+.flux-global-tooltip[data-placement="left"][data-state="visible"] {
+  transform: translateX(0) scale(1);
+}
+
+/* 浅色主题下的精致微调（对标 Linear / VS Code 现代浅色 Tooltip） */
+[data-theme="jade-white"] .flux-global-tooltip,
+[data-theme="suet-jade"] .flux-global-tooltip,
+[data-theme="warm-stone"] .flux-global-tooltip,
+[data-theme="ayu-light"] .flux-global-tooltip {
+  --flux-tooltip-bg: #1F2328;
+  --flux-tooltip-fg: #F6F8FA;
+  --flux-tooltip-border: rgba(255, 255, 255, 0.14);
+  --flux-tooltip-shadow: 0 4px 12px rgba(0, 0, 0, 0.18), 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+/* 深色主题下的精致微调 */
+[data-theme="obsidian-gold"] .flux-global-tooltip,
+[data-theme="deepsea-submersible"] .flux-global-tooltip {
+  --flux-tooltip-bg: #1B1D24;
+  --flux-tooltip-fg: #ECEEF2;
+  --flux-tooltip-border: rgba(255, 255, 255, 0.12);
+  --flux-tooltip-shadow: 0 6px 16px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+
 
 
 

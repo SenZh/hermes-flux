@@ -10,3 +10,4 @@ export * from './Toolbar.js';
 export * from './Stat.js';
 export * from './Skeleton.js';
 export * from './ActivityIndicator.js';
+export * from './Tooltip.js';

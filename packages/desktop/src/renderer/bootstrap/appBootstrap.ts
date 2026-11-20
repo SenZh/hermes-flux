@@ -27,6 +27,7 @@ import {
 } from '@hermes-flux/core';
 import {
   mountFileTypeSprite,
+  mountGlobalTooltip,
   warmUpHighlighting,
   applyFontPreferences,
   setLocale,
@@ -383,6 +384,7 @@ export function createAppBootstrap(deps: AppBootstrapDeps): AppBootstrap {
 
     if (typeof document !== 'undefined') {
       mountFileTypeSprite();
+      mountGlobalTooltip();
       applyFontPreferences(fontPreferences);
       setLocale(state.lang === 'en' ? 'en-US' : 'zh-CN');
       warmUpHighlighting();

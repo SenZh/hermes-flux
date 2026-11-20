@@ -5,6 +5,7 @@ import { useMotionPresence } from '../motion/index.js';
 import { Button } from './primitives/Button.js';
 import { Input } from './primitives/Input.js';
 import { Skeleton } from './primitives/Skeleton.js';
+import { Tooltip } from './primitives/Tooltip.js';
 import { ActivityIndicator, type ActivityEntityKind } from './primitives/ActivityIndicator.js';
 import type { ActivityIndicatorVariant } from '../tokens/activityIndicator.js';
 import { renderBotAvatar, renderGroupCollageAvatar } from '../utils/botAvatar.js';
@@ -464,9 +465,11 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
               <Users size={13} className="opacity-75 shrink-0" />
               <span>{t('rail.groups')}</span>
             </button>
-            <Button variant="ghost" size="icon" className="rail-new-group-btn relative size-6 shrink-0 rounded p-0 text-muted-foreground hover:bg-card-hover hover:text-foreground transition-colors after:absolute after:-inset-1 after:content-['']" title={t('rail.newGroup')} aria-label={t('rail.newGroup')} onClick={() => props.onNewChat('group')}>
-              <Plus size={13} />
-            </Button>
+            <Tooltip content={t('rail.newGroup')}>
+              <Button variant="ghost" size="icon" className="rail-new-group-btn relative size-6 shrink-0 rounded p-0 text-muted-foreground hover:bg-card-hover hover:text-foreground transition-colors after:absolute after:-inset-1 after:content-['']" title={t('rail.newGroup')} data-tooltip={t('rail.newGroup')} aria-label={t('rail.newGroup')} onClick={() => props.onNewChat('group')}>
+                <Plus size={13} />
+              </Button>
+            </Tooltip>
           </div>
           <div id="rail-groups-nested-list" className="flex flex-col gap-2" style={{ display: model.isGroupsOpen ? 'flex' : 'none' }}>
             {model.visibleGroups.map((group) => <GroupRow
@@ -492,9 +495,11 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
               <Layers size={13} className="opacity-75 shrink-0" />
               <span>{t('rail.conversations')}</span>
             </button>
-            <Button variant="ghost" size="icon" className="rail-new-session-btn relative size-6 shrink-0 rounded p-0 text-muted-foreground hover:bg-card-hover hover:text-foreground transition-colors after:absolute after:-inset-1 after:content-['']" title={t('rail.newChat')} aria-label={t('rail.newChat')} onClick={() => props.onNewChat('session')}>
-              <Plus size={13} />
-            </Button>
+            <Tooltip content={t('rail.newChat')}>
+              <Button variant="ghost" size="icon" className="rail-new-session-btn relative size-6 shrink-0 rounded p-0 text-muted-foreground hover:bg-card-hover hover:text-foreground transition-colors after:absolute after:-inset-1 after:content-['']" title={t('rail.newChat')} data-tooltip={t('rail.newChat')} aria-label={t('rail.newChat')} onClick={() => props.onNewChat('session')}>
+                <Plus size={13} />
+              </Button>
+            </Tooltip>
           </div>
           <div id="rail-sessions-nested-list" className="flex flex-col gap-2" style={{ display: model.isSessionsOpen ? 'flex' : 'none' }}>
             {sessionsLoading
