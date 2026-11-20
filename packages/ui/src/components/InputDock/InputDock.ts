@@ -493,8 +493,13 @@ export function renderSlashPopper(items?: SlashCommandOption[], open = false): s
           .join('')}
       </div>
       <div class="composer-popper__foot">
-        <span>↑↓ ${t('dock.popperSelect')}</span>
-        <span class="composer-popper__enter">${ENTER_GLYPH}${t('dock.popperInsert')}</span>
+        <div class="composer-popper__hints">
+          <span>↑↓ ${t('dock.popperNavigate')}</span>
+          <span class="composer-popper__dot">•</span>
+          <span class="composer-popper__enter">${ENTER_GLYPH}Enter ${t('dock.popperSelect')}</span>
+          <span class="composer-popper__dot">•</span>
+          <span>Esc ${t('dock.popperClose')}</span>
+        </div>
       </div>
     </div>
   `;
@@ -527,8 +532,13 @@ export function renderMentionPopper(items?: MentionReferenceOption[], open = fal
           .join('')}
       </div>
       <div class="composer-popper__foot">
-        <span>↑↓ ${t('dock.popperSelect')}</span>
-        <span class="composer-popper__enter">${ENTER_GLYPH}${t('dock.popperInsert')}</span>
+        <div class="composer-popper__hints">
+          <span>↑↓ ${t('dock.popperNavigate')}</span>
+          <span class="composer-popper__dot">•</span>
+          <span class="composer-popper__enter">${ENTER_GLYPH}Enter ${t('dock.popperSelect')}</span>
+          <span class="composer-popper__dot">•</span>
+          <span>Esc ${t('dock.popperClose')}</span>
+        </div>
       </div>
     </div>
   `;

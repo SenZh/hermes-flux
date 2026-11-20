@@ -2197,9 +2197,17 @@ details[open] > summary > .tool-row__expand {
  * 【规则】外壳描边与输入舱同一条发丝线（--border），不抬到 --border-strong：
  *   浮层级靠 --shadow-window 表达，边框抬重会让浅色下出现「一圈更黑的灰框」。
  */
+/* ==========================================================================
+   12. 斜杠命令 (/) 与智能引用 (@) 补全浮层
+   设计意图(Why)：对标现代极客终端与 IDE 补全体验（参考现代极客浮层视觉），
+   弹窗拓宽至 580px 充分舒展，命令名与说明紧凑衔接（不再两端分散被截断），
+   单行采用 34px 高度与 6px 圆角高亮胶囊，字体排版对比清晰。
+   【规则】外壳描边与输入舱同一条发丝线（--border），不抬到 --border-strong：
+     浮层级靠 --shadow-window 表达，边框抬重会让浅色下出现「一圈更黑的灰框」。
+   ========================================================================== */
 .composer-popper {
   position: absolute;
-  bottom: calc(100% + 6px);
+  bottom: calc(100% + 8px);
   left: 12px;
   z-index: 100;
   overflow: hidden;
@@ -2208,44 +2216,43 @@ details[open] > summary > .tool-row__expand {
   background: var(--popover);
   box-shadow: var(--shadow-window);
   user-select: none;
+  backdrop-filter: blur(16px);
 }
 
-.composer-slash-popper {
-  width: 320px;
-  max-width: calc(100vw - 32px);
-}
-
+.composer-slash-popper,
 .composer-mention-popper {
-  width: 340px;
+  width: min(580px, calc(100% - 24px));
   max-width: calc(100vw - 32px);
 }
 
 .composer-popper__head {
-  padding: 8px 12px 6px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border-subtle);
   color: var(--muted-foreground);
   font-family: var(--font-sans);
-  font-size: var(--fs-micro, 10px);
+  font-size: var(--fs-caption, 11px);
   font-weight: 500;
   letter-spacing: 0.02em;
 }
 
 .composer-popper__list {
-  max-height: 260px;
+  max-height: 280px;
   overflow-y: auto;
-  padding: 5px 0;
+  padding: 4px;
+  scrollbar-width: thin;
 }
 
 .composer-popper__row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 30px;
-  padding: 0 12px;
+  gap: 12px;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: var(--radius-card, 6px);
   color: var(--foreground);
   font-family: var(--font-sans);
-  font-size: var(--fs-aux, 12px);
   cursor: pointer;
+  transition: background 80ms ease, color 80ms ease;
 }
 
 .composer-popper__row:hover,
@@ -2255,6 +2262,8 @@ details[open] > summary > .tool-row__expand {
 
 .composer-popper__glyph {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
   color: var(--muted-foreground);
 }
@@ -2262,8 +2271,8 @@ details[open] > summary > .tool-row__expand {
 .composer-popper__avatar {
   display: grid;
   place-items: center;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   border-radius: var(--radius-inner, 4px);
   background: var(--card-active);
   color: var(--secondary-foreground);
@@ -2272,23 +2281,24 @@ details[open] > summary > .tool-row__expand {
 }
 
 .composer-popper__name {
+  flex-shrink: 0;
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body, 13px);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.composer-popper__desc {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--foreground);
-  font-weight: 500;
-}
-
-.composer-popper__desc {
-  flex-shrink: 0;
-  max-width: 50%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--muted-foreground);
-  font-size: var(--fs-caption, 11px);
+  color: var(--secondary-foreground);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body, 13px);
+  line-height: 1.5;
 }
 
 .composer-popper__foot {
@@ -2296,11 +2306,21 @@ details[open] > summary > .tool-row__expand {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 12px;
+  padding: 8px 12px;
   border-top: 1px solid var(--border-subtle);
   color: var(--muted-foreground);
   font-family: var(--font-sans);
-  font-size: var(--fs-micro, 10px);
+  font-size: var(--fs-caption, 11px);
+}
+
+.composer-popper__hints {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.composer-popper__dot {
+  opacity: 0.5;
 }
 
 .composer-popper__enter {
