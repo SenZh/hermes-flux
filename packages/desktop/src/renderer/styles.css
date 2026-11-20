@@ -887,15 +887,14 @@ html[data-maximized="true"] #flux-app-root {
 .rail-resize-handle:hover,
 .rail-resize-handle:focus-visible {
   border-color: color-mix(in srgb, var(--primary) 45%, transparent) !important;
-  background: color-mix(in srgb, var(--primary) 0%, transparent);
+  background: transparent !important;
 }
 
-/* 拖拽锁定态必须比 hover 更强：细线加深 + 极轻底色，
-   否则用户按住拖动时无法确认"把手已被我抓住"。
-   底色控制在 12% 以内，保持发丝线美学，不做整块色带。 */
+/* 拖拽锁定态必须比 hover 更强：细线加深，
+   保持 1px 发丝线纯粹贯穿，不做整块宽色带（用户 2026-11-20 裁决：拔除 6px 宽色带重影）。 */
 .rail-resize-handle:active {
   border-color: color-mix(in srgb, var(--primary) 65%, transparent) !important;
-  background: color-mix(in srgb, var(--primary) 12%, transparent) !important;
+  background: transparent !important;
 }
 
 /* 左侧把手的高亮改落在左栏真实分隔线上（单一实线，不是双线）。
@@ -904,14 +903,14 @@ html[data-maximized="true"] #flux-app-root {
      把 Accent 线交给 #flux-left-rail 的 border-right 后，高亮与分隔线共用同一像素列，
      再由 .titlebar-left 续接即可从窗口顶端贯穿到底。
    约束与规则(Rules)：
-     1. 左把手自身边框恒透明，只保留极轻底色作为"抓住了"的反馈；
-     2. 右侧把手保持既有 border 高亮——检查舱没有可由顶栏续接的竖线，改走同一套会露出断头；
+     1. 左把手自身边框恒透明，背景恒透明（用户 2026-11-20 裁决：拔除 6px 宽底色，仅留真实分隔线 1px 单发丝线高亮）；
+     2. 右侧把手保持既有 border-left 1px 高亮，背景恒透明；
      3. 拖拽态只认 data-rail-resizing="left"，防止拖右舱时左侧误亮。 */
 .rail-resize-handle[data-rail-handle="left"]:hover,
 .rail-resize-handle[data-rail-handle="left"]:focus-visible,
 .rail-resize-handle[data-rail-handle="left"]:active {
   border-color: transparent !important;
-  background: color-mix(in srgb, var(--primary) 10%, transparent) !important;
+  background: transparent !important;
 }
 
 /* hover/focus-visible 态：仅在「未拖拽」时命中。
