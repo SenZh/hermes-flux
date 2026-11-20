@@ -147,23 +147,24 @@ test('顶栏左段：折叠态必须与左栏竖线对齐，且始终放得下 �
   assert.match(collapsed, /--geo-titlebar-left-content/, '折叠态必须保住内容容量，否则 ☰ 被 padding 钳出');
 });
 
-test('顶栏底边横线不得横穿左栏上方（左栏必须视觉整体、顶天立地）', () => {
+test('无边框一体化顶栏（顶栏与内容区同色且去除底边横线，无边框设计更现代高级）', () => {
   const css = read('packages/desktop/src/renderer/styles.css');
   const titlebar = /\.flux-titlebar\s*\{([^}]*)\}/.exec(css)?.[1];
   assert.ok(titlebar, '.flux-titlebar 规则块必须存在');
 
-  // 通栏 border-bottom 会把左栏拦腰截断——必须透明，可见横线改由 ::after 从左栏右边界起画
+  // 用户 2026-11-20 裁决：顶栏底色必须与下方主内容区一致（var(--panel)），消除色差断层
+  assert.match(titlebar, /background:\s*var\(--panel\)/, '顶栏背景必须与下方内容区同为 var(--panel)');
+  // 通栏 border-bottom 保持透明，仅用于凑齐外围总高 33px
   assert.match(titlebar, /border-bottom:\s*1px solid transparent/, '顶栏 border-bottom 必须透明（保留 1px 仅凑齐外围总高 33px）');
 
   const after = /\.flux-titlebar::after\s*\{([^}]*)\}/.exec(css)?.[1];
-  assert.ok(after, '必须用 ::after 单独绘制顶栏底边横线');
-  assert.match(after, /left:\s*var\(--rail-w-left/, '::after 必须从左栏右边界起画，否则横线穿进左栏');
-  // 用户 2026-11-20 裁决：这条横线要"再细一点"——1px 已是物理下限，只能由 --border-subtle 派生降低对比度。
-  // 比例必须钉死 60%：写成 \d+% 会让"改回 100%"（等于撤销用户裁决）依然全绿。
+  assert.ok(after, '必须用 ::after 控制顶栏底边');
+  assert.match(after, /left:\s*var\(--rail-w-left/, '::after 必须从左栏右边界起定位');
+  // 用户 2026-11-20 裁决：无边框一体化设计，彻底去除顶栏底部分割线
   assert.match(
     after,
-    /background:\s*color-mix\(in srgb, var\(--border-subtle\) 60%, transparent\)/,
-    '::after 必须由 --border-subtle 派生且固定 60% 混透明（禁止裸色值，也禁止回退到 100%）',
+    /background:\s*transparent/,
+    '::after 必须设为 transparent（无边框一体化设计，消除分割线）',
   );
 
   // 左栏竖线必须从顶栏顶端就存在（titlebar-left 的 border-right），才能与下方左栏接成一条
@@ -343,11 +344,12 @@ test('拖拽高亮必须贯穿顶栏（用户 2026-11-20：蓝线没到顶）', 
   assert.match(seam, /background:\s*var\(--titlebar-divider\)/, '接缝补丁必须读 --titlebar-divider，禁止另写色值');
 });
 
-test('折叠态：设置键必须隐藏，保住「左栏单线顶天立地」', () => {
+test('折叠态：设置键必须常驻可见，不得隐藏（用户 2026-11-20 裁决）', () => {
   const css = read('packages/desktop/src/renderer/styles.css');
   const rule = /\.flux-titlebar\[data-left-rail-collapsed="true"\] #btn-open-settings\s*\{([^}]*)\}/.exec(css)?.[1];
-  assert.ok(rule, '折叠态必须声明 #btn-open-settings 的隐藏规则');
-  assert.match(rule, /display:\s*none/, '折叠态微轨放不下两个 28px 热区，设置键必须隐藏而非压过竖线');
+  assert.ok(rule, '折叠态必须声明 #btn-open-settings 的显示规则');
+  assert.match(rule, /display:\s*inline-flex/, '折叠态设置键必须常驻且保持 inline-flex 对齐');
+  assert.equal(rule.includes('display: none'), false, '折叠态禁止隐藏设置键');
 });
 
 test('微轨站点卡与头像必须随微轨宽度等比缩放（禁止写回死像素）', () => {

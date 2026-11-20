@@ -338,11 +338,11 @@ export function LeftRail(props: LeftRailProps): React.ReactElement {
   const sessionsLoading = model.sessionsPhase === 'loading';
   const drawerPresence = useMotionPresence(!props.collapsed);
   // 微轨几何：内层微轨无条件补偿 1px 右边框 —— border-box 下该边框会吃掉内容区 1px，
-  // 否则站点卡（--geo-station-card，随微轨宽度等比缩放）在（真值 clamp(58px, 4.2vw, 72px) 减 1px）
+  // 否则站点卡（--geo-station-card，随微轨宽度等比缩放）在（真值 clamp(56px, 3.5vw, 56px) 减 1px）
   // 的内容区里左右留白各差 0.5px。
   // fallback 与 :root 真值一致，避免变量缺失时退回旧值造成几何漂移。
   // 内外层必须引用同一常量，禁止第二条同构写法。
-  const microRailWidth = 'calc(var(--geo-micro-rail, clamp(58px, 4.2vw, 72px)) + 1px)';
+  const microRailWidth = 'calc(var(--geo-micro-rail, clamp(56px, 3.5vw, 56px)) + 1px)';
   const railWidth = props.collapsed ? microRailWidth : 'var(--rail-w-left, 264px)';
 
   const activeSessionBotName = focus.type === 'session'

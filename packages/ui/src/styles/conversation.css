@@ -157,16 +157,16 @@
   transition: max-width 0.2s ease;
 }
 
-/* 底部渐变柔光遮罩：防止长文字撞击底部悬浮输入舱 */
+/* 底部渐变柔光遮罩：防止长文字撞击底部悬浮输入舱与两侧穿模泄露 */
 .conv-dock-scrim {
   position: absolute;
   bottom: 0;
   left: 0;
   right: 0;
-  height: 100px;
+  height: 180px;
   pointer-events: none;
-  background: linear-gradient(to top, var(--panel) 15%, transparent 100%);
-  z-index: 10;
+  background: linear-gradient(to top, var(--panel) 75%, transparent 100%);
+  z-index: 30;
   transform: translateZ(0);
 }
 
@@ -927,21 +927,21 @@ details[open] > summary > .tool-row__expand {
 .assistant-content.prose-block h1 {
   font-size: 1.15em;
   letter-spacing: -0.02em;
-  margin: 16px 0 6px;
+  margin: 24px 0 8px;
 }
 
 .conv-markdown h2,
 .assistant-content.prose-block h2 {
   font-size: 1.07em;
   letter-spacing: -0.015em;
-  margin: 14px 0 6px;
+  margin: 20px 0 8px;
 }
 
 .conv-markdown h3,
 .assistant-content.prose-block h3 {
   font-size: 1.02em;
   letter-spacing: -0.01em;
-  margin: 12px 0 4px;
+  margin: 16px 0 6px;
 }
 
 .conv-markdown h4,
@@ -1133,7 +1133,7 @@ details[open] > summary > .tool-row__expand {
   font-size: var(--conv-micro-size);
   line-height: 16px;
   cursor: pointer;
-  opacity: 0.55;
+  opacity: 0.35;
   transition: opacity 0.12s ease, color 0.12s ease, background-color 0.12s ease;
 }
 

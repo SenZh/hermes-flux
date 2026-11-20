@@ -83,20 +83,19 @@
      依赖顶栏高度的 fixed 定位一律走 calc(var(--geo-titlebar) + 1px)。 */
   --geo-titlebar: 32px;
   /* 顶栏左段几何拆成两个正交量：
-     content = 折叠态需要容纳的按钮宽度（☰ 28px）
+     content = 折叠态需要容纳的按钮组宽度（☰ 28px + gap 8px + ⚙️ 28px = 64px）
      inset   = 左侧让位（Windows 8px / macOS 88px 给系统交通灯）
      折叠态宽度 = content + inset。border-box 下二者相加才不会被 padding 钳死。 */
-  --geo-titlebar-left-content: 28px;
+  --geo-titlebar-left-content: 64px;
   --geo-titlebar-left-inset: 8px;
   /* macOS 系统交通灯让位宽度。真值抄自 openchamber 源码 Header.tsx:1051 的硬编码 88px。 */
   --geo-titlebar-left-inset-macos: 88px;
-  --geo-micro-rail: clamp(58px, 4.2vw, 72px);
-  /* 微轨站点卡几何。设计意图(Why)：微轨宽度本身是 clamp(58px, 4.2vw, 72px) 的动态量，
-     卡片刻成 42px 常量时，宽视口下头像只会更显小、窄视口下又贴死边界。
-     约束与规则(Rules)：卡片按微轨 0.72 等比跟随（34~50 夹紧），头像再内缩 3px/侧；
+  --geo-micro-rail: clamp(56px, 3.5vw, 56px);
+  /* 微轨站点卡几何。设计意图(Why)：微轨宽度锁死 56px（标准 4px 栅格），
+     卡片按微轨 0.72 等比跟随（32~40 夹紧，56px 时为 40px），头像再内缩 4px/侧（32px）；
      两者只此一处定义，LeftRail 与骨架占位必须同时引用，禁止任何一侧写回字面量。 */
-  --geo-station-card: clamp(34px, calc(var(--geo-micro-rail) * 0.72), 50px);
-  --geo-station-avatar: calc(var(--geo-station-card) - 6px);
+  --geo-station-card: clamp(32px, calc(var(--geo-micro-rail) * 0.72), 40px);
+  --geo-station-avatar: calc(var(--geo-station-card) - 8px);
   /* 仅被 .flux-context-drawer 的 width/min-width 声明引用，实际被 Tailwind flex-1/min-w-0 覆盖 */
   --geo-context-drawer: 244px;
   /* 设计参照值：展开态真值由 --rail-w-left 决定（默认 264px，可拖 264~480），本值当前无消费者 */
@@ -618,10 +617,13 @@
    吃掉内容区，窗控三键与图标相对整栏视觉中心发生 1px 垂直偏心；写死数值还会与 Token 漂移。
    约束与规则 (Rules)：内部元素 height: 100% 精准对应 --geo-titlebar；含边框的外围总高为
    calc(var(--geo-titlebar) + 1px) = 33px，所有依赖顶栏高度的 fixed 定位必须同步该表达式。 */
-/* 设计意图(Why)：底边横线不得横穿左栏上方——那会把左栏切成上下两段，破坏"左栏顶天立地"的整体感。
-   历史坑(Pitfall)：曾用 border-bottom 通栏画线，左栏上方也有一条，视觉上左栏被拦腰截断。
-   约束与规则(Rules)：border-bottom 保留 1px 但透明，仅用于凑齐外围总高 33px；
-   可见横线由 ::after 只画在左栏右边界右侧；左侧竖线由 .titlebar-left 的 border-right 从 y=0 贯穿。 */
+/* 设计意图(Why)：无边框一体化顶栏（用户 2026-11-20 裁决：顶栏底色与内容区一致取 var(--panel)，
+   彻底去除底部分割线，呈现现代极客无边框一体化透通美学）。
+   约束与规则(Rules)：
+     1. background 恒取 var(--panel)，与下方主内容区纯色贯通，消除视觉接缝；
+     2. border-bottom 保持 1px solid transparent 凑齐外围总高 33px 几何规范；
+     3. 展开态左段 .titlebar-left 使用 var(--sidebar) 与左栏顶天立地贯通；
+     4. 折叠态左段保持 transparent，横向通栏纯净一体化。 */
 .flux-titlebar {
   height: calc(var(--geo-titlebar) + 1px + env(safe-area-inset-top, 0px));
   min-height: calc(var(--geo-titlebar) + 1px + env(safe-area-inset-top, 0px));
@@ -631,15 +633,13 @@
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid transparent;
-  background: var(--sidebar);
+  background: var(--panel);
   user-select: none;
   -webkit-app-region: drag;
   position: relative;
   z-index: 50;
 }
-/* 顶栏底边横线：只在左栏右边界之后可见，左栏上方留空。
-   用户 2026-11-20 裁决：这条横线"再细一点"——1px 是物理下限，只能降对比度：
-   取 --border-subtle 的 60% 混透明，使横线在深浅皮肤上都退成"表面分界"而非"分隔条"。 */
+/* 无边框一体化顶栏：去除底边横线（透明），保持顶栏与内容区完全融为一体 */
 .flux-titlebar::after {
   content: '';
   position: absolute;
@@ -647,12 +647,12 @@
   right: 0;
   bottom: 0;
   height: 1px;
-  background: color-mix(in srgb, var(--border-subtle) 60%, transparent);
+  background: transparent;
   pointer-events: none;
   z-index: 3;
 }
 .flux-titlebar[data-left-rail-collapsed="true"]::after {
-  left: max(calc(var(--geo-micro-rail, clamp(58px, 4.2vw, 72px)) + 1px), calc(var(--geo-titlebar-left-content, 28px) + var(--geo-titlebar-left-inset, 8px)));
+  display: none;
 }
 .titlebar-left, .titlebar-right { display: flex; align-items: center; gap: 8px; height: 100%; }
 /* 展开态：顶栏左段宽度严格等于左栏宽度，两者共用 --rail-w-left 单一真值源。
@@ -670,6 +670,8 @@
   flex: 0 0 var(--rail-w-left, 264px);
   min-width: 0;
   padding-left: var(--geo-titlebar-left-inset, 8px);
+  /* 展开态底色与左栏一致为 --sidebar，形成顶天立地通体质感 */
+  background: var(--sidebar);
   /* 竖线从这里起，从窗口顶端（y=0）贯穿到顶栏底部，与左栏的 border-right 接成一条线 */
   border-right: 1px solid var(--titlebar-divider);
   position: relative;
@@ -693,18 +695,20 @@
 .flux-titlebar:not([data-left-rail-collapsed="true"]) .titlebar-left {
   transition-duration: var(--duration-enter);
 }
-/* 折叠态：窗口/Linux 取左栏宽度（微轨+1px）以保持竖线连续；macOS 因系统交通灯必须更宽。
-   max() 保证：内容容量永远放得下 ☰，同时尽量与左栏对齐。 */
+/* 折叠态：收起后顶栏转为上下通栏整体架构，去除截断竖线，底色透出顶栏 --panel；
+   flex 引用 max(微轨, 按钮组容量) 保证动画插值平滑且设置键与折叠键并排可见 */
 .flux-titlebar[data-left-rail-collapsed="true"] .titlebar-left {
-  flex: 0 0 max(calc(var(--geo-micro-rail, clamp(58px, 4.2vw, 72px)) + 1px), calc(var(--geo-titlebar-left-content, 28px) + var(--geo-titlebar-left-inset, 8px)));
+  flex: 0 0 max(calc(var(--geo-micro-rail, clamp(56px, 3.5vw, 56px)) + 1px), calc(var(--geo-titlebar-left-content, 64px) + var(--geo-titlebar-left-inset, 8px)));
+  background: transparent;
+  border-right: none;
 }
-/* 折叠态隐藏设置键：微轨 58~72px 放不下两个 28px 热区（8+28+8+28=72 已顶格，
-   而 1440px 视口下微轨仅 60.5px）。若强行并排，要么图标压过竖线，要么竖线与左栏错开 13px——
-   两者都会破坏"左栏顶天立地"的单线。折叠态本就是专注态，设置仍可展开左栏取回，
-   或按 Ctrl/Cmd+, 直接打开设置中心（dropdownKeybindController.ts:424 的绑定，含脏稿拦截）。
-   约束与规则(Rules)：只准按折叠属性隐藏，禁止在 JS 里做宽度测量分流。 */
-.flux-titlebar[data-left-rail-collapsed="true"] #btn-open-settings {
+.flux-titlebar[data-left-rail-collapsed="true"] .titlebar-left::after {
   display: none;
+}
+/* 折叠态设置键常驻：用户 2026-11-20 裁决，折叠态设置键不得隐藏，与折叠键在顶栏左簇并列常驻。
+   约束与规则(Rules)：保住 28px 图标热区，显式 inline-flex 保证与 ☰ 并排对齐。 */
+.flux-titlebar[data-left-rail-collapsed="true"] #btn-open-settings {
+  display: inline-flex;
 }
 /* macOS：系统交通灯让位。
    真值来源：openchamber 实测源码 Header.tsx:1047-1052 —— macOS 桌面应用非全屏时
@@ -758,7 +762,7 @@ html[data-platform="web"] .titlebar-right {
 }
 /* 折叠态：左栏宽度切换为微轨 + 1px 边框补偿 */
 .flux-titlebar[data-left-rail-collapsed="true"] .titlebar-center {
-  left: calc((calc(var(--geo-micro-rail, clamp(58px, 4.2vw, 72px)) + 1px) + 100% - var(--geo-titlebar-right-offset, 0px)) / 2);
+  left: calc((calc(var(--geo-micro-rail, clamp(56px, 3.5vw, 56px)) + 1px) + 100% - var(--geo-titlebar-right-offset, 0px)) / 2);
 }
 .titlebar-session-title {
   overflow: hidden;
@@ -1481,6 +1485,19 @@ blockquote {
 /* 输入舱的表面、边框与聚焦态统一由 conversation.css 的语义 Token 接管，
    皮肤差异只允许来自 --input / --border 等 slot，禁止在此处 !important 覆写。 */
 /* THEME D 注释头已随皮肤块迁入生成区 */
+
+/* 微轨站点卡激活态指示胶囊（左边缘 3px 宽、18px 高主题色圆角指示条） */
+.station-agent-badge.active::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 18px;
+  border-radius: var(--radius-pill, 9999px);
+  background: var(--primary);
+}
 
 
 

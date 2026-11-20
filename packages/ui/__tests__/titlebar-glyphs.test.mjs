@@ -96,11 +96,9 @@ test('还原字形与关闭字形：还原是双框叠压，关闭与方块同�
   assert.match(render(CloseGlyph), /M3\.6 3\.6l8\.8 8\.8M12\.4 3\.6l-8\.8 8\.8/, '关闭必须是 8.8px 对角十字');
 });
 
-test('设置字形：竖向双推子在滑块处断开轨道（不得一条线穿过去）', () => {
+test('设置字形：标准 16×16 六齿齿轮（圆心孔 + 外圈平滑轮齿，用户 2026-11-20 裁决）', () => {
   const html = render(SettingsGlyph);
-  assert.match(html, /M5\.5 2\.6v2\.1M5\.5 7\.3v6\.1/, '左推子轨道必须在滑块上下断开');
-  assert.match(html, /M10\.5 2\.6v5\.1M10\.5 11\.3v2\.1/, '右推子轨道必须在滑块上下断开');
-  assert.equal((html.match(/<circle/g) ?? []).length, 2, '必须恰好两颗滑块');
-  assert.match(html, /cx="5\.5" cy="6" r="1\.35"/, '左滑块几何固定');
-  assert.match(html, /cx="10\.5" cy="10" r="1\.35"/, '右滑块几何固定');
+  assert.match(html, /M6\.447 2\.757/, '齿轮外圈平滑轮齿轮廓');
+  assert.equal((html.match(/<circle/g) ?? []).length, 1, '齿轮中心恰有一颗圆心孔');
+  assert.match(html, /cx="8" cy="8" r="2"/, '齿轮圆心孔位于几何中心 (8,8) 且半径为 2');
 });

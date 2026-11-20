@@ -18,7 +18,7 @@
 ### 1. UI 视觉、设计系统与审查规范 (`docs/design-system/`)
 | 资产名称 | 路径 | 核心要点与适用场景 |
 |---|---|---|
-| **设计系统总纲** | [`docs/design-system/README.md`](docs/design-system/README.md) | **【强制】凡涉及 UI/视觉/样式/排版必须先读**。新极客精准美学、5 级表面阶梯（L0~L4）、1px 微距发丝线、7 档整数排版字阶、核心几何约束（42px顶栏/264px左双轨/740px输入舱/410px检查舱/拔除底栏）、高度抽象与组件复用铁律 |
+| **设计系统总纲** | [`docs/design-system/README.md`](docs/design-system/README.md) | **【强制】凡涉及 UI/视觉/样式/排版必须先读**。新极客精准美学、5 级表面阶梯（L0~L4）、1px 微距发丝线、7 档整数排版字阶、核心几何约束（32px顶栏/56px微轨/264px左双轨/740px输入舱/410px检查舱/拔除底栏）、高度抽象与组件复用铁律 |
 | **UI 与体验审查规范** | [`docs/design-system/style-review-spec.md`](docs/design-system/style-review-spec.md) | **【强制】样式审查专员 Specification**。Token 纯粹性、几何一致性、排版无抖动、i18n 完整性、组件复用度与动效物理学六大审查维度，结论 Binding（一票否决） |
 | **设计 Token 规范** | [`docs/design-system/04-tokens-and-design-system-spec.md`](docs/design-system/04-tokens-and-design-system-spec.md) | 全端空间网格、色彩阶梯、字体排印、圆角与阴影层级规范 |
 | **桌面端设计规范** | [`docs/design-system/desktop-design-system-spec.md`](docs/design-system/desktop-design-system-spec.md) | 空间骨架、通栏对话流、52+212px 双轨折叠、740px 黄金输入舱与 410px 竖向检查舱 |
