@@ -26,11 +26,13 @@ import {
   type InputAttachmentItem,
   type I18nKey,
   type RenderInputDockSnapshot,
+  type ComposerBadgeItem,
   renderModelPickerTree,
   renderInputDock,
   hasDockSnapshotChanged,
   renderSlashPopper,
   renderMentionPopper,
+  renderComposerBadges,
 } from '@hermes-flux/ui';
 import type { IRpcCaller, InteractiveService } from '@hermes-flux/core';
 import type { AppState } from '../state/appState.js';
@@ -106,9 +108,32 @@ export class InputDockController {
    * 先设为 auto 再按 scrollHeight 夹取，防止删除内容后高度无法回缩
    */
   public syncComposerHeight(inputEl: HTMLTextAreaElement | null): void {
-    if (!inputEl) return;
+    if (!inputEl || !inputEl.style) return;
     inputEl.style.height = 'auto';
-    inputEl.style.height = `${clampComposerHeight(inputEl.scrollHeight)}px`;
+    inputEl.style.height = `${clampComposerHeight(inputEl.scrollHeight || 66)}px`;
+  }
+
+  /**
+   * 将当前前置 Token 徽章与输入框文本组合为待发送草稿文本
+   */
+  public assembleDraftText(inputValue: string): string {
+    const state = this.deps.getState();
+    const badges = state.composerBadges || [];
+    const commandBadge = badges.find((b) => b.type === 'command');
+    const otherBadges = badges.filter((b) => b.type !== 'command');
+
+    const parts: string[] = [];
+    if (commandBadge) {
+      parts.push(commandBadge.rawText);
+    }
+    for (const b of otherBadges) {
+      parts.push(b.rawText);
+    }
+    const trimmed = (inputValue || '').trim();
+    if (trimmed) {
+      parts.push(trimmed);
+    }
+    return parts.join(' ').trim();
   }
 
   /**
@@ -117,10 +142,14 @@ export class InputDockController {
   public submitDraft(inputEl?: HTMLTextAreaElement | null): void {
     const el = inputEl || (typeof document !== 'undefined' ? (document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null) : null);
     if (!el) return;
-    const text = el.value.trim();
+    const text = this.assembleDraftText(el.value);
     if (!text) return;
     el.value = '';
+    this.deps.commitState({ composerBadges: [] });
+    this.syncComposerBadges();
     this.syncComposerHeight(el);
+    this.syncSendAvailability(undefined, el);
+    this.syncQueueButtonVisibility(undefined, el);
     void this.deps.routeSend(text);
   }
 
@@ -135,10 +164,12 @@ export class InputDockController {
     if (!el) return;
 
     const state = this.deps.getState();
+    const fullText = this.assembleDraftText(el.value);
+    const badgeCount = (state.composerBadges || []).length;
     const action = planEnterAction({
       phase: resolveComposerPhase({ activeTurn: this.deps.isStreamingActiveForCurrentSession() }),
-      text: el.value,
-      attachmentCount: state.attachments.length,
+      text: fullText,
+      attachmentCount: state.attachments.length + badgeCount,
     });
 
     if (action.kind === 'submit') {
@@ -160,8 +191,9 @@ export class InputDockController {
     const state = this.deps.getState();
     const gatewayClient = this.deps.getGatewayClient ? this.deps.getGatewayClient() : null;
     const el = typeof document !== 'undefined' ? (document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null) : null;
+    const fullText = this.assembleDraftText(el?.value ?? '');
     const draft = planEnqueue({
-      text: el?.value ?? '',
+      text: fullText,
       hasGateway: Boolean(gatewayClient),
       hasLiveSession: true,
     });
@@ -210,7 +242,9 @@ export class InputDockController {
 
       this.deps.commitState({
         queuedMessages: [...state.queuedMessages, outcome.entry],
+        composerBadges: [],
       });
+      this.syncComposerBadges();
       if (el) {
         el.value = '';
         el.style.height = '';
@@ -349,9 +383,11 @@ export class InputDockController {
     if (!btn || !el || btn.dataset.locked === 'true') return;
 
     const state = this.deps.getState();
+    const fullText = this.assembleDraftText(el.value);
+    const badgeCount = (state.composerBadges || []).length;
     const canSend = canSendDraft({
-      text: el.value,
-      attachmentCount: state.attachments.length,
+      text: fullText,
+      attachmentCount: state.attachments.length + badgeCount,
     });
 
     if ('disabled' in btn) {
@@ -368,9 +404,11 @@ export class InputDockController {
     if (!btn || !el) return;
 
     const state = this.deps.getState();
+    const fullText = this.assembleDraftText(el.value);
+    const badgeCount = (state.composerBadges || []).length;
     const visible = shouldShowQueueButton({
-      text: el.value,
-      attachmentCount: state.attachments.length,
+      text: fullText,
+      attachmentCount: state.attachments.length + badgeCount,
     });
 
     btn.hidden = !visible;
@@ -443,6 +481,83 @@ export class InputDockController {
   }
 
   /**
+   * 键盘上下键在补全浮层中循环切换活跃选中项
+   */
+  public navigatePopperSelection(direction: 1 | -1): void {
+    if (typeof document === 'undefined') return;
+    const rows = Array.from(document.querySelectorAll<HTMLElement>('.composer-popper .composer-popper__row'));
+    if (rows.length === 0) return;
+    const currentIndex = rows.findIndex((r) => r.classList.contains('is-active'));
+    let nextIndex = 0;
+    if (currentIndex >= 0) {
+      nextIndex = (currentIndex + direction + rows.length) % rows.length;
+    } else {
+      nextIndex = direction === 1 ? 0 : rows.length - 1;
+    }
+    rows.forEach((r, idx) => {
+      if (idx === nextIndex) {
+        r.classList.add('is-active');
+        r.scrollIntoView({ block: 'nearest' });
+      } else {
+        r.classList.remove('is-active');
+      }
+    });
+  }
+
+  /**
+   * 按回车或 Tab 选定当前浮层中的高亮项
+   */
+  public selectActivePopperOption(inputEl?: HTMLTextAreaElement | null): boolean {
+    if (typeof document === 'undefined') return false;
+    const activeRow = document.querySelector<HTMLElement>('.composer-popper .composer-popper__row.is-active')
+      || document.querySelector<HTMLElement>('.composer-popper .composer-popper__row');
+    if (!activeRow) return false;
+    return this.handleContainerClick(activeRow, inputEl);
+  }
+
+  /**
+   * 清除输入框光标前刚刚键入的斜杠 token
+   */
+  public clearActiveSlashToken(el: HTMLTextAreaElement): void {
+    const caret = el.selectionStart ?? el.value.length;
+    const textBefore = el.value.slice(0, caret);
+    const textAfter = el.value.slice(caret);
+    const slashMatch = /(?:^|\s)\/([a-zA-Z0-9_-]*)$/.exec(textBefore);
+    if (slashMatch) {
+      const slashIdx = slashMatch.index + (slashMatch[0].startsWith('/') ? 0 : 1);
+      const remainingBefore = el.value.slice(0, slashIdx).trimEnd();
+      const remainingAfter = textAfter.trimStart();
+      el.value = remainingBefore + (remainingBefore && remainingAfter ? ' ' : '') + remainingAfter;
+      const newPos = remainingBefore ? remainingBefore.length + (remainingAfter ? 1 : 0) : 0;
+      el.setSelectionRange(newPos, newPos);
+    } else {
+      el.value = '';
+    }
+    this.syncComposerHeight(el);
+  }
+
+  /**
+   * 清除输入框光标前刚刚键入的 @token
+   */
+  public clearActiveMentionToken(el: HTMLTextAreaElement): void {
+    const caret = el.selectionStart ?? el.value.length;
+    const textBefore = el.value.slice(0, caret);
+    const textAfter = el.value.slice(caret);
+    const atMatch = /(?:^|\s)@([^\s]*)$/.exec(textBefore);
+    if (atMatch) {
+      const atIdx = atMatch.index + (atMatch[0].startsWith('@') ? 0 : 1);
+      const remainingBefore = el.value.slice(0, atIdx).trimEnd();
+      const remainingAfter = textAfter.trimStart();
+      el.value = remainingBefore + (remainingBefore && remainingAfter ? ' ' : '') + remainingAfter;
+      const newPos = remainingBefore ? remainingBefore.length + (remainingAfter ? 1 : 0) : 0;
+      el.setSelectionRange(newPos, newPos);
+    } else {
+      el.value = '';
+    }
+    this.syncComposerHeight(el);
+  }
+
+  /**
    * 处理按键事件 (keydown)
    *
    * @returns 若按键已被输入舱消费并阻止默认行为则返回 true
@@ -459,6 +574,34 @@ export class InputDockController {
           mentionPopperOpen: false,
         });
         this.deps.requestRender();
+        return true;
+      }
+    }
+
+    if (state.slashPopperOpen || state.mentionPopperOpen) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        this.navigatePopperSelection(e.key === 'ArrowDown' ? 1 : -1);
+        return true;
+      }
+      if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey && !this.isComposing) {
+        const handled = this.selectActivePopperOption(el);
+        if (handled) {
+          e.preventDefault();
+          return true;
+        }
+      }
+    }
+
+    if (e.key === 'Backspace' && el && el.selectionStart === 0 && el.selectionEnd === 0) {
+      const badges = state.composerBadges || [];
+      if (badges.length > 0) {
+        e.preventDefault();
+        const nextBadges = badges.slice(0, -1);
+        this.deps.commitState({ composerBadges: nextBadges });
+        this.syncComposerBadges();
+        this.syncSendAvailability(undefined, el);
+        this.syncQueueButtonVisibility(undefined, el);
         return true;
       }
     }
@@ -547,6 +690,22 @@ export class InputDockController {
   public handleContainerClick(target: HTMLElement, inputEl?: HTMLTextAreaElement | null): boolean {
     const el = inputEl || (typeof document !== 'undefined' ? (document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null) : null);
 
+    // 0. 移除前置 Token 徽章
+    const removeBadgeBtn = target.closest<HTMLElement>('[data-action="remove-badge"]');
+    if (removeBadgeBtn) {
+      const badgeId = removeBadgeBtn.getAttribute('data-badge-id');
+      if (badgeId) {
+        const state = this.deps.getState();
+        const nextBadges = (state.composerBadges || []).filter((b) => b.id !== badgeId);
+        this.deps.commitState({ composerBadges: nextBadges });
+        this.syncComposerBadges();
+        this.syncSendAvailability(undefined, el);
+        this.syncQueueButtonVisibility(undefined, el);
+        el?.focus();
+        return true;
+      }
+    }
+
     // 1. 回滚取消
     const cancelAction = target.closest<HTMLElement>('[data-action="rollback-cancel"]');
     if (cancelAction) {
@@ -583,21 +742,41 @@ export class InputDockController {
     const slashOption = target.closest<HTMLElement>('.slash-item-option');
     if (slashOption && el) {
       const cmd = slashOption.getAttribute('data-command') || '';
-      const replaceFromRaw = slashOption.getAttribute('data-replace-from');
-      const replaceFrom = replaceFromRaw ? parseInt(replaceFromRaw, 10) : null;
+      const isSkill = slashOption.getAttribute('data-is-skill') === 'true';
       if (cmd) {
-        if (replaceFrom !== null && Number.isFinite(replaceFrom)) {
-          const caret = el.selectionStart ?? el.value.length;
-          el.value = el.value.slice(0, replaceFrom) + cmd + ' ' + el.value.slice(caret);
-          const pos = replaceFrom + cmd.length + 1;
-          el.setSelectionRange(pos, pos);
+        const state = this.deps.getState();
+        const existingBadges = state.composerBadges || [];
+        if (isSkill) {
+          const skillName = cmd.replace(/^\//, '');
+          const newBadge: ComposerBadgeItem = {
+            id: `badge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            type: 'skill',
+            name: skillName,
+            rawText: cmd,
+          };
+          this.deps.commitState({
+            composerBadges: [...existingBadges, newBadge],
+            slashPopperOpen: false,
+          });
         } else {
-          el.value = `${cmd} `;
-          el.setSelectionRange(el.value.length, el.value.length);
+          const commandBadge: ComposerBadgeItem = {
+            id: `badge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            type: 'command',
+            name: cmd.startsWith('/') ? cmd : `/${cmd}`,
+            rawText: cmd.startsWith('/') ? cmd : `/${cmd}`,
+          };
+          const nonCmdBadges = existingBadges.filter((b) => b.type !== 'command');
+          this.deps.commitState({
+            composerBadges: [commandBadge, ...nonCmdBadges],
+            slashPopperOpen: false,
+          });
         }
+        this.clearActiveSlashToken(el);
+        this.syncComposerBadges();
+        this.syncComposerPoppers();
+        this.syncSendAvailability(undefined, el);
+        this.syncQueueButtonVisibility(undefined, el);
         el.focus();
-        this.deps.commitState({ slashPopperOpen: false });
-        this.deps.requestRender();
         return true;
       }
     }
@@ -608,19 +787,37 @@ export class InputDockController {
       const mention = mentionOption.getAttribute('data-mention') || '';
       const mtype = mentionOption.getAttribute('data-type') || 'agent';
       if (mention) {
-        const prefix = el.value.replace(/@\S*$/, '');
-        el.value = `${prefix}@${mention} `;
-        el.setSelectionRange(el.value.length, el.value.length);
-        if (mtype !== 'file') {
-          this.deps.commitState({
-            pickedMention: { profile: mention, token: `@${mention}` },
-          });
-        }
+        const state = this.deps.getState();
+        const existingBadges = state.composerBadges || [];
+        const isFile = mtype === 'file';
+        const basename = isFile ? (mention.split(/[/\\]/).pop() || mention) : mention;
+        const newBadge: ComposerBadgeItem = {
+          id: `badge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          type: isFile ? 'file' : 'agent',
+          name: basename,
+          path: isFile ? mention : undefined,
+          rawText: `@${mention}`,
+        };
+        this.deps.commitState({
+          composerBadges: [...existingBadges, newBadge],
+          mentionPopperOpen: false,
+          ...(isFile ? {} : { pickedMention: { profile: mention, token: `@${mention}` } }),
+        });
+        this.clearActiveMentionToken(el);
+        this.syncComposerBadges();
+        this.syncComposerPoppers();
+        this.syncSendAvailability(undefined, el);
+        this.syncQueueButtonVisibility(undefined, el);
         el.focus();
-        this.deps.commitState({ mentionPopperOpen: false });
-        this.deps.requestRender();
         return true;
       }
+    }
+
+    // 6. 点击输入区空白处（包括徽章空白间隙）自动聚焦输入框
+    const inlineArea = target.closest<HTMLElement>('.composer-dock__inline-area');
+    if (inlineArea && !target.closest('button') && !target.closest('.composer-badge-pill') && !target.closest('.composer-badge-command')) {
+      el?.focus();
+      return true;
     }
 
     return false;
@@ -989,21 +1186,7 @@ export class InputDockController {
       };
     }
 
-    // 2. 容器事件委托（回滚取消与队列按键）
-    const dockContainer = doc.querySelector<HTMLElement>('.input-dock-container');
-    if (dockContainer && !dockContainer.dataset.dockClickBound) {
-      dockContainer.dataset.dockClickBound = 'true';
-      dockContainer.addEventListener('click', (e) => {
-        const target = e.target as HTMLElement;
-        const handled = this.handleContainerClick(target);
-        if (handled) {
-          e.stopPropagation();
-          e.preventDefault();
-        }
-      });
-    }
-
-    // 3. 发送、入队与停止按钮
+    // 2. 发送、入队与停止按钮及输入框
     const sendBtn = doc.getElementById('dock-send-btn') as HTMLButtonElement | null;
     const queueBtn = doc.getElementById('dock-queue-btn') as HTMLButtonElement | null;
     const stopBtn = doc.getElementById('dock-stop-btn') as HTMLButtonElement | null;
@@ -1012,6 +1195,20 @@ export class InputDockController {
     if (sendBtn) sendBtn.onclick = () => this.handleSend('button', inputEl);
     if (queueBtn) queueBtn.onclick = () => { void this.enqueueDraft(); };
     if (stopBtn) stopBtn.onclick = () => { void this.deps.interruptTurn(); };
+
+    // 3. 容器事件委托（回滚取消、队列操作、Token 移除与补全项选择）
+    const dockContainer = doc.querySelector<HTMLElement>('.input-dock-container');
+    if (dockContainer && !dockContainer.dataset.dockClickBound) {
+      dockContainer.dataset.dockClickBound = 'true';
+      dockContainer.addEventListener('click', (e) => {
+        const target = e.target as HTMLElement;
+        const handled = this.handleContainerClick(target, inputEl);
+        if (handled) {
+          e.stopPropagation();
+          e.preventDefault();
+        }
+      });
+    }
 
     // 4. 输入框状态与监听绑定
     this.syncSendAvailability(sendBtn, inputEl);
@@ -1059,18 +1256,6 @@ export class InputDockController {
         const files = e.dataTransfer?.files;
         if (files && files.length > 0) {
           void this.addInputAttachments(files);
-        }
-      });
-    }
-
-    // 6. 容器补全委托
-    if (dockContainer && !dockContainer.hasAttribute('data-popper-delegated')) {
-      dockContainer.setAttribute('data-popper-delegated', 'true');
-      dockContainer.addEventListener('click', (e) => {
-        const target = e.target as HTMLElement;
-        const handled = this.handleContainerClick(target, inputEl);
-        if (handled) {
-          e.stopPropagation();
         }
       });
     }
@@ -1147,6 +1332,7 @@ export class InputDockController {
       modelMenuOpen: state.modelMenuOpen,
       notice: state.dockNotice,
       attachments: state.attachments,
+      badges: state.composerBadges,
       queuedMessages: state.queuedMessages,
       slashPopperOpen: state.slashPopperOpen,
       slashItems: state.slashItems,
@@ -1233,6 +1419,24 @@ export class InputDockController {
     mount.innerHTML =
       renderSlashPopper(state.slashItems, state.slashPopperOpen) +
       renderMentionPopper(state.mentionItems, state.mentionPopperOpen);
+  }
+
+  /**
+   * 输入舱 Token 徽章的独立子树同步
+   */
+  public syncComposerBadges(): void {
+    if (typeof document === 'undefined') return;
+    const mount = document.getElementById('dock-badges-mount');
+    const inputEl = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
+    const state = this.deps.getState();
+    const badges = state.composerBadges || [];
+    if (mount) {
+      mount.innerHTML = renderComposerBadges(badges);
+    }
+    if (inputEl) {
+      const defaultPlaceholder = !state.gatewayConnected ? this.deps.t('dock.placeholderDisabled') : this.deps.t('dock.placeholder');
+      inputEl.placeholder = badges.length > 0 ? '' : defaultPlaceholder;
+    }
   }
 
   /**

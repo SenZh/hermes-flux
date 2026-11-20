@@ -242,11 +242,17 @@ test('InputDockController 领域行为测试', async (t) => {
     assert.equal(handledRemove, true);
     assert.equal(getState().attachments.length, 0);
 
-    // 6.2 斜杠命令替换
+    // 6.2 斜杠命令选择为前置徽标并清理输入框
     const fakeInput = {
       value: '/mo',
       selectionStart: 3,
-      setSelectionRange: () => {},
+      selectionEnd: 3,
+      style: { height: '' },
+      scrollHeight: 66,
+      setSelectionRange: (start, end) => {
+        fakeInput.selectionStart = start;
+        fakeInput.selectionEnd = end;
+      },
       focus: () => {},
     };
     const fakeSlashOption = {
@@ -263,10 +269,16 @@ test('InputDockController 领域行为测试', async (t) => {
     };
     const handledSlash = ctrl.handleContainerClick(fakeSlashOption, fakeInput);
     assert.equal(handledSlash, true);
-    assert.equal(fakeInput.value, '/model ');
+    assert.equal(getState().composerBadges.length, 1);
+    assert.equal(getState().composerBadges[0].name, '/model');
+    assert.equal(fakeInput.value, '');
+    assert.equal(ctrl.assembleDraftText(fakeInput.value), '/model');
     assert.equal(getState().slashPopperOpen, false);
 
-    // 6.3 智能引用替换
+    // 6.3 智能引用选择为胶囊徽标
+    fakeInput.value = '@Ali';
+    fakeInput.selectionStart = 4;
+    fakeInput.selectionEnd = 4;
     const fakeMentionOption = {
       closest: (sel) =>
         sel === '.mention-item-option'
@@ -283,6 +295,40 @@ test('InputDockController 领域行为测试', async (t) => {
     assert.equal(handledMention, true);
     assert.ok(getState().pickedMention);
     assert.equal(getState().pickedMention.profile, 'Alice');
+    assert.equal(getState().composerBadges.length, 2);
+    assert.equal(getState().composerBadges[1].name, 'Alice');
+    assert.equal(fakeInput.value, '');
+    assert.equal(ctrl.assembleDraftText(fakeInput.value), '/model @Alice');
+
+    // 6.4 点击移除按钮移除指定徽标
+    const aliceBadgeId = getState().composerBadges[1].id;
+    const fakeRemoveBadgeBtn = {
+      closest: (sel) =>
+        sel === '[data-action="remove-badge"]'
+          ? {
+              getAttribute: (name) => (name === 'data-badge-id' ? aliceBadgeId : null),
+            }
+          : null,
+    };
+    const handledRemoveBadge = ctrl.handleContainerClick(fakeRemoveBadgeBtn, fakeInput);
+    assert.equal(handledRemoveBadge, true);
+    assert.equal(getState().composerBadges.length, 1);
+    assert.equal(ctrl.assembleDraftText('hello'), '/model hello');
+
+    // 6.5 光标在 0 处按 Backspace 移除末尾徽标
+    fakeInput.value = '';
+    fakeInput.selectionStart = 0;
+    fakeInput.selectionEnd = 0;
+    let backspacePrevented = false;
+    const backspaceEv = {
+      key: 'Backspace',
+      preventDefault: () => { backspacePrevented = true; },
+    };
+    const handledBackspace = ctrl.handleKeyDown(backspaceEv, fakeInput);
+    assert.equal(handledBackspace, true);
+    assert.equal(backspacePrevented, true);
+    assert.equal(getState().composerBadges.length, 0);
+    assert.equal(ctrl.assembleDraftText(''), '');
   });
 
   await t.test('7. buildDockSnapshot 与 buildDockHtml 契约健全', async () => {

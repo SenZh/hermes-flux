@@ -1625,6 +1625,111 @@ details[open] > summary > .tool-row__expand {
   padding: 0 16px;
 }
 
+.composer-dock__inline-area {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+}
+
+.composer-dock__badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 0;
+}
+
+.composer-dock__badges:empty {
+  display: none;
+}
+
+.composer-badge-command {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 24px;
+  color: var(--primary);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body, 13px);
+  font-weight: 600;
+  line-height: 24px;
+  user-select: none;
+}
+
+.composer-badge-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill, 9999px);
+  background: var(--card);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: var(--fs-aux, 12px);
+  line-height: 1;
+  user-select: none;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.composer-badge-pill:hover {
+  background: var(--card-hover);
+  border-color: var(--border-strong);
+}
+
+.composer-badge-pill__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+}
+
+.composer-badge-pill--file .composer-badge-pill__icon {
+  color: var(--primary);
+}
+
+.composer-badge-pill--skill .composer-badge-pill__icon {
+  color: var(--foreground);
+}
+
+.composer-badge-pill__remove,
+.composer-badge-command__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 2px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: var(--fs-aux, 12px);
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 50%;
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+.composer-badge-pill:hover .composer-badge-pill__remove,
+.composer-badge-command:hover .composer-badge-command__remove,
+.composer-badge-pill__remove:focus-visible,
+.composer-badge-command__remove:focus-visible {
+  opacity: 0.8;
+}
+
+.composer-badge-pill__remove:hover,
+.composer-badge-command__remove:hover {
+  opacity: 1;
+  color: var(--foreground);
+  background: var(--card-active);
+}
+
 /*
  * 编辑区：66px 起步（两行正文 + 上下 11px 内距），随内容增高到 220px 后转内部滚动。
  * 【防范的历史坑】不得写 `height` 过渡：高频输入时高度动画会把排版抖动放大成「跳行」。
@@ -1632,6 +1737,8 @@ details[open] > summary > .tool-row__expand {
  */
 .composer-dock__textarea {
   box-sizing: border-box;
+  flex: 1 1 140px;
+  min-width: 120px;
   width: 100%;
   min-height: 66px;
   max-height: 220px;

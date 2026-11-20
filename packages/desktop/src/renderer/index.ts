@@ -1033,6 +1033,7 @@ const syncComposerHeight = () => {
 const handleSend = (source: 'button' | 'enter') => inputDockController.handleSend(source);
 const addInputAttachments = (fileList: FileList | File[]) => inputDockController.addInputAttachments(fileList);
 const syncComposerPoppers = () => inputDockController.syncComposerPoppers();
+const syncComposerBadges = () => inputDockController.syncComposerBadges();
 
 async function confirmGroupRename(roomId: string, name: string): Promise<void> {
   const newName = name.trim();
@@ -1118,7 +1119,7 @@ const renderCoordinator = createRenderCoordinator({
   // React 提交后驱动：提交后重新对齐 armed 计划（观察器合并到一帧），语义见 streamViewportManager.reassertActivePin。
   isSessionEnterPending: () => streamViewportManager.isSessionEnterPending(), settleSessionEnter: (probe, sessionId, phase, count, authoritativeReady) => streamViewportManager.settleSessionEnter(probe, sessionId, phase, count, authoritativeReady), reassertActivePin: () => streamViewportManager?.reassertActivePin(),
   markProgrammaticScroll: (stream) => markProgrammaticScroll(stream),
-  syncComposerPoppers: () => syncComposerPoppers(), logRender,
+  syncComposerPoppers: () => syncComposerPoppers(), syncComposerBadges: () => syncComposerBadges(), logRender,
 });
 
 const lockAverageRowHeight = () => { const r = messageWindowManager.lockAverageRowHeight(); syncWindowLocalState(); return r; };

@@ -181,15 +181,15 @@ export function createInputCompletion(host: InputCompletionHost, interactiveServ
   /** 斜杠补全：优先 complete.slash（携带 replace_from），失败降级目录快照本地过滤 */
   function requestSlashCompletion(query: string): void {
     if (slashDebounce) clearTimeout(slashDebounce);
-    const token = inputTokenSnapshot();
     slashDebounce = setTimeout(async () => {
       const mySeq = ++slashSeq;
       let resolved: SlashCommandOption[] | null = null;
       if (host.isGatewayReady()) {
         try {
+          const targetText = `/${query}`;
           const res = await interactiveService.getSlashCompletions(
             host.rpcCaller(),
-            token.fullText,
+            targetText,
             host.activeSessionId() || undefined,
             host.profileName() || undefined,
           );
@@ -203,9 +203,19 @@ export function createInputCompletion(host: InputCompletionHost, interactiveServ
       }
       if (mySeq !== slashSeq) return;
       // 【规则】`resolved !== null` 就代表请求成功，哪怕过滤后为空。
-      const base = resolved !== null
+      let base = resolved !== null
         ? filterDesktopCommands({ items: resolved, desktopMarks: slashDesktopMarks, aliases: slashAliasSet })
         : slashCatalogSnapshot.filter((c) => c.name.toLowerCase().includes(query.toLowerCase()));
+      // 补充匹配的技能项（若 gateway 返回的列表未包含该技能）
+      if (resolved !== null && slashCatalogSnapshot.length > 0) {
+        const existingNames = new Set(base.map((it) => it.name.toLowerCase()));
+        const matchingSkills = slashCatalogSnapshot.filter(
+          (c) => c.isSkill && c.name.toLowerCase().includes(query.toLowerCase()) && !existingNames.has(c.name.toLowerCase()),
+        );
+        if (matchingSkills.length > 0) {
+          base = [...base, ...matchingSkills];
+        }
+      }
       host.setSlashItems(base);
       host.setSlashPopperOpen(base.length > 0);
       host.render();

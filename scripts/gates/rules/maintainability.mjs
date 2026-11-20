@@ -50,7 +50,6 @@ export const KNOWN_OVERSIZE = {
   'packages/core/src/rpc/types.ts': { max: 998 },
   'packages/ui/src/components/InspectionPod/InspectionPod.ts': { max: 979 },
   'scripts/contract/probe.mjs': { max: 966 },
-  'packages/ui/src/components/InputDock/InputDock.ts': { max: 956 },
 };
 
 export const fileLineLimitRules = {

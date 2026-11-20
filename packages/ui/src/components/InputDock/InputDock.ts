@@ -52,6 +52,14 @@ export interface RollbackBannerView {
   anchorLabel: string;
 }
 
+export interface ComposerBadgeItem {
+  id: string;
+  type: 'command' | 'file' | 'skill' | 'agent';
+  name: string;
+  path?: string;
+  rawText: string;
+}
+
 export interface InputDockProps {
   selectedModel: string;
   models?: string[];
@@ -108,6 +116,7 @@ export interface InputDockProps {
   slashItems?: SlashCommandOption[];
   mentionPopperOpen?: boolean;
   mentionItems?: MentionReferenceOption[];
+  badges?: ComposerBadgeItem[];
   rollbackBanner?: RollbackBannerView | null;
 }
 
@@ -230,6 +239,12 @@ const IMAGE_GLYPH = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none"
 
 const FILE_GLYPH = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/></svg>`;
 
+const MARKDOWN_GLYPH = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="14" x="2" y="5" rx="2"/><path d="M7 15V9l2.5 3L12 9v6"/><path d="M17 9v6l-2-2"/><path d="M17 15l2-2"/></svg>`;
+
+const BOOK_GLYPH = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`;
+
+const BOT_GLYPH = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>`;
+
 const APPROVAL_ICON: Record<ApprovalMode, string> = {
   manual: LOCK_GLYPH,
   smart: SHIELD_CHECK_GLYPH,
@@ -306,7 +321,10 @@ export function renderInputDock(props: InputDockProps): string {
         <div id="composer-popper-mount">${renderSlashPopper(props.slashItems, props.slashPopperOpen)}${renderMentionPopper(props.mentionItems, props.mentionPopperOpen)}</div>
 
         <div class="composer-dock__editor">
-          <textarea id="dock-prompt-input" class="composer-dock__textarea" rows="1" placeholder="${props.disabled ? t('dock.placeholderDisabled') : t('dock.placeholder')}" ${props.disabled ? 'disabled' : ''}></textarea>
+          <div class="composer-dock__inline-area">
+            <div class="composer-dock__badges" id="dock-badges-mount">${renderComposerBadges(props.badges)}</div>
+            <textarea id="dock-prompt-input" class="composer-dock__textarea" rows="1" placeholder="${props.disabled ? t('dock.placeholderDisabled') : ((props.badges && props.badges.length > 0) ? '' : t('dock.placeholder'))}" ${props.disabled ? 'disabled' : ''}></textarea>
+          </div>
         </div>
 
         <div class="composer-dock__footer">
@@ -469,6 +487,50 @@ export function renderAttachmentTray(attachments?: InputAttachmentItem[]): strin
 }
 
 /**
+ * 输入舱前置 Token 徽章渲染 (renderComposerBadges)
+ *
+ * 【设计意图 (Why)】
+ *   对标现代化终端与 IDE（参考极客浮层视觉），将已选中的命令、技能、文件与 Agent
+ *   以独立徽标胶囊（Token Pill）形式内联呈现在输入框前端，
+ *   使命令呈现专属青色字体、文件与技能携带矢量图标，消除与普通打字文本的混淆。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 纯渲染函数，通过 data-badge-id 与 data-action="remove-badge" 提供事件钩子；
+ *   2. 严格使用 Design Tokens，不裸写像素或色相；
+ *   3. 徽章挂载于 #dock-badges-mount 独立子树，增删徽章时不摧毁 textarea 物理节点。
+ */
+export function renderComposerBadges(badges?: ComposerBadgeItem[]): string {
+  if (!badges || badges.length === 0) return '';
+  return badges
+    .map((b) => {
+      if (b.type === 'command') {
+        const cmdName = b.name.startsWith('/') ? b.name : `/${b.name}`;
+        return `
+          <span class="composer-badge-command" data-badge-id="${escapeHtml(b.id)}">
+            <span class="composer-badge-command__text">${escapeHtml(cmdName)}</span>
+            <button type="button" class="composer-badge-command__remove" data-action="remove-badge" data-badge-id="${escapeHtml(b.id)}" title="${t('dock.removeToken')}" aria-label="${t('dock.removeToken')}">×</button>
+          </span>
+        `;
+      }
+      const isMd = b.type === 'file' && /\.md$/i.test(b.path || b.name);
+      const glyph = b.type === 'skill'
+        ? BOOK_GLYPH
+        : b.type === 'file'
+          ? (isMd ? MARKDOWN_GLYPH : FILE_GLYPH)
+          : BOT_GLYPH;
+      const title = b.path && b.path !== b.name ? ` title="${escapeHtml(b.path)}"` : '';
+      return `
+        <span class="composer-badge-pill composer-badge-pill--${b.type}" data-badge-id="${escapeHtml(b.id)}"${title}>
+          <span class="composer-badge-pill__icon" aria-hidden="true">${glyph}</span>
+          <span class="composer-badge-pill__text">${escapeHtml(b.name)}</span>
+          <button type="button" class="composer-badge-pill__remove" data-action="remove-badge" data-badge-id="${escapeHtml(b.id)}" title="${t('dock.removeToken')}" aria-label="${t('dock.removeToken')}">×</button>
+        </span>
+      `;
+    })
+    .join('');
+}
+
+/**
  * 斜杠命令补全浮层
  *
  * 【规则】命令名用主前景色 + 无衬线，描述退到 muted；底部提示统一使用矢量 Enter，
@@ -484,7 +546,8 @@ export function renderSlashPopper(items?: SlashCommandOption[], open = false): s
         ${items
           .map(
             (cmd) => `
-            <div class="slash-item-option composer-popper__row" data-command="${escapeHtml(cmd.name)}" data-replace-from="${cmd.replaceFrom ?? ''}" role="option" tabindex="0">
+            <div class="slash-item-option composer-popper__row" data-command="${escapeHtml(cmd.name)}" data-is-skill="${cmd.isSkill ? 'true' : 'false'}" data-replace-from="${cmd.replaceFrom ?? ''}" role="option" tabindex="0">
+              <span class="composer-popper__glyph" aria-hidden="true">${cmd.isSkill ? BOOK_GLYPH : '<span class="composer-popper__avatar">/</span>'}</span>
               <span class="composer-popper__name">${escapeHtml(cmd.name)}</span>
               <span class="composer-popper__desc">${escapeHtml(cmd.description)}</span>
             </div>

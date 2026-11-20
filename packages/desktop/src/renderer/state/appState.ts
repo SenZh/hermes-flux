@@ -35,6 +35,7 @@ import {
   type InputAttachmentItem,
   type SlashCommandOption,
   type MentionReferenceOption,
+  type ComposerBadgeItem,
   type DataPhase,
   MessageViewModel,
   resolveSkinId,
@@ -165,6 +166,7 @@ export interface AppState {
   slashItems: SlashCommandOption[];
   mentionPopperOpen: boolean;
   mentionItems: MentionReferenceOption[];
+  composerBadges: ComposerBadgeItem[];
   rollbackArmed: {
     sessionId: string;
     targetId: string;
@@ -333,6 +335,7 @@ export function createInitialState(params: InitialStateParams): AppState {
     slashItems: [],
     mentionPopperOpen: false,
     mentionItems: [],
+    composerBadges: [],
     rollbackArmed: null,
     sideAgentCapsules: [],
     pickedMention: null,

@@ -341,7 +341,7 @@ async function start() {
           isMaximized: async () => false,
           onWindowStateChange: () => () => {},
           getDefaultGatewayConfig: async () => ({
-            url: localStorage.getItem('hermes_flux_gateway_url') || '',
+            url: localStorage.getItem('hermes_flux_gateway_url') || ${JSON.stringify(GW_BASE)},
             key: '',
             profile: localStorage.getItem('hermes_flux_profile') || 'default'
           }),

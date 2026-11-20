@@ -142,6 +142,7 @@ export interface RenderCoordinatorDeps {
   // 事件与 Popper
   bindEvents: () => void;
   syncComposerPoppers: () => void;
+  syncComposerBadges?: () => void;
 
   // 日志
   logRender?: {
@@ -1007,6 +1008,7 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
       }
     }
 
+    deps.syncComposerBadges?.();
     deps.syncComposerPoppers();
 
     // 【规则】进入计划挂起时即使消息快照未变也必须推进，否则缓存命中的切会话永远不落定；
