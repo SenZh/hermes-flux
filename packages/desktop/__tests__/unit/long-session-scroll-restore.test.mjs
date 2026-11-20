@@ -216,8 +216,17 @@ test('长会话滚动恢复全链路：红灯复现与门禁', async (t) => {
     let readerScrolledId = '';
     let lastScrollTop = 0;
     let progTarget = 65626;
-    let progIgnoreUntil = performance.now() + 180;
     let enterPending = true;
+
+    // 【确定性时基 (Why)】把 performance.now() 钉在进程启动后的极早期（1ms），
+    //   复现「刚启动就发生被动滚动」这一最容易踩中初始化缺陷的时序。
+    // 【防范的历史坑 (Pitfall)】此前用真实 performance.now()，该用例只在 worker
+    //   启动 400ms 内执行才会踩中 lastUserScrollInputAt 初值缺陷，导致本地绿、CI 随机红。
+    // 【约束与规则 (Rules)】必须在 finally 恢复真实时钟，不得泄漏到其它用例。
+    const realPerfNow = performance.now;
+    const fakeNow = 1;
+    performance.now = () => fakeNow;
+    const progIgnoreUntil = performance.now() + 180;
 
     const state = {
       activeSessionId: 'sess-long',
@@ -314,6 +323,7 @@ test('长会话滚动恢复全链路：红灯复现与门禁', async (t) => {
       assert.equal(cancelCalls, 1, '真实向上滚轮手势必须取消 pendingSessionEnter');
     } finally {
       globalThis.document = originalDoc;
+      performance.now = realPerfNow;
     }
   });
 

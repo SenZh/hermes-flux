@@ -162,7 +162,13 @@ export function createConversationStreamController(
   let runningToolTimerHandle: number | undefined;
 
   const USER_SCROLL_INPUT_WINDOW_MS = 400;
-  let lastUserScrollInputAt = 0;
+  // 【初始化哨兵 (Why)】必须用 -Infinity 表示「从未收到用户滚动输入」。
+  // 【防范的历史坑 (Pitfall)】曾初始化为 0，而 performance.now() 是进程内时间：
+  //   若首次判定发生在进程启动后 400ms 内，`now - 0 <= 400` 会伪成立，
+  //   把「从未输入」误判成「刚刚输入」，进而在 enterPending 期间误取消进入计划。
+  //   该缺陷在启动更快的 CI runner 上稳定复现，本地慢机反而不易触发。
+  // 【约束与规则 (Rules)】本值只允许由 markUserScrollInput() 写入真实时间戳。
+  let lastUserScrollInputAt = Number.NEGATIVE_INFINITY;
   let promptNavSyncScheduled = false;
   const markUserScrollInput = (): void => {
     lastUserScrollInputAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
