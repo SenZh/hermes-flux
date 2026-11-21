@@ -426,4 +426,70 @@ test('InputDockController 领域行为测试', async (t) => {
 
     delete globalThis.document;
   });
+
+  await t.test('10. runSlashCommand：本地别名归一、执行中常驻提示、完成自动刷新与错误兜底', async () => {
+    let executedCommand = null;
+    let reloadTargetSession = null;
+    const notices = [];
+
+    const { deps } = createMockDeps({ activeSessionId: 'sess-active-1' });
+    deps.ensureLiveSessionId = async () => 'live-sess-1';
+    deps.getRpcCaller = () => ({});
+    deps.interactiveService = {
+      execSlash: async (rpc, liveId, cmd) => {
+        executedCommand = cmd;
+        if (cmd === '/compress') {
+          return { output: '(no output)' };
+        }
+        if (cmd.startsWith('/fail')) {
+          throw new Error('rpc fail');
+        }
+        return { output: 'done' };
+      },
+    };
+    deps.setTimedDockNotice = (msg, dur) => {
+      notices.push({ msg, dur });
+    };
+    deps.reloadSessionMessages = async (sId) => {
+      reloadTargetSession = sId;
+    };
+    deps.t = (key, params) => {
+      if (params) return `${key}:${JSON.stringify(params)}`;
+      return key;
+    };
+
+    const ctrl = new InputDockController(deps);
+
+    // 10.1 /compact 自动本地归一为 /compress 并展示执行中常驻提示、完成文案与重拉消息
+    await ctrl.runSlashCommand('/compact');
+    assert.equal(executedCommand, '/compress', '/compact 必须被本地归一为 /compress');
+    assert.equal(notices[0].msg, 'dock.compressExecuting', '/compress 必须展示大模型提炼中的专属提示');
+    assert.equal(notices[0].dur, 0, '执行中提示必须常驻（dur=0）');
+    assert.equal(notices[1].msg, 'dock.compressCompleted');
+    assert.equal(reloadTargetSession, 'sess-active-1', '/compress 成功后必须触发会话消息重拉');
+
+    // 10.2 失败时展示真实的 dock.cmdFailed 错误提示，而非误导的网关未连接
+    notices.length = 0;
+    await ctrl.runSlashCommand('/fail-test');
+    assert.equal(notices[0].msg, 'dock.cmdExecuting:{"cmd":"/fail-test"}');
+    assert.ok(notices[1].msg.startsWith('dock.cmdFailed'));
+    assert.ok(notices[1].msg.includes('rpc fail'));
+
+    // 10.3 Skill 类指令（如 /human-writing）执行后自动清空常驻提示并触发 sendMessage
+    notices.length = 0;
+    let sentMessageText = null;
+    deps.sendMessage = async (text) => {
+      sentMessageText = text;
+    };
+    deps.interactiveService.execSlash = async (rpc, liveId, cmd) => {
+      return {
+        type: 'skill',
+        name: 'human-writing',
+        message: 'Prompt with full human-writing skill loaded',
+      };
+    };
+    await ctrl.runSlashCommand('/human-writing 散文写作');
+    assert.equal(sentMessageText, 'Prompt with full human-writing skill loaded');
+    assert.equal(notices[1].msg, '', 'Skill 命令触发发送时必须清空常驻提示');
+  });
 });

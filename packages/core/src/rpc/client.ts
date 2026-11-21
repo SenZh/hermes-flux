@@ -616,7 +616,31 @@ export class HermesGatewayClient {
     throw error;
   }
 
-  public call<T = unknown>(method: string, params?: unknown): Promise<T> {
+  /**
+   * 慢速长耗时 RPC 默认超时时间表（单位：毫秒）。
+   *
+   * 【设计意图 (Why)】
+   *   大上下文提炼压缩（session.compress）、执行外部斜杠技能与压缩指令（slash.exec）等操作
+   *   依赖服务端大语言模型真实推理。在数十轮、数万 Token 的对话历史下，服务端推理耗时通常在 20s ~ 90s 之间。
+   *   全局默认的 25s 超时会在服务端生成完成前单方面超时熔断，造成前端误报失败且丢失状态重拉。
+   *
+   * 【防范的历史坑 (Pitfall)】
+   *   硬编码统一短超时会导致所有慢速操作在大上下文下 100% 报 timed out after 25000ms。
+   *
+   * 【约束与规则 (Rules)】
+   *   - 显式传入 timeoutMs 优先；
+   *   - 命中 LONG_RUNNING_METHOD_TIMEOUT_MS 查表次之；
+   *   - 其余普通快速查询保持默认 this.timeoutMs。
+   */
+  public static readonly LONG_RUNNING_METHOD_TIMEOUT_MS: Readonly<Record<string, number>> = {
+    'slash.exec': 120_000,
+    'command.dispatch': 120_000,
+    'session.compress': 120_000,
+    'prompt.submit': 180_000,
+    'cli.exec': 120_000,
+  };
+
+  public call<T = unknown>(method: string, params?: unknown, timeoutMs?: number): Promise<T> {
     // 契约校验失败必须以 rejected promise 形式返回，保证调用方的
     // `await` / `.catch()` 语义统一，不会出现"同步抛错绕过 catch"的漏洞。
     try {
@@ -641,6 +665,8 @@ export class HermesGatewayClient {
       params: redactParams(method, params),
     });
 
+    const effectiveTimeout = timeoutMs ?? HermesGatewayClient.LONG_RUNNING_METHOD_TIMEOUT_MS[method] ?? this.timeoutMs;
+
     return new Promise<T>((resolve, reject) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
         log.warn('rpc call rejected: socket not open', { method, state: this.fsm.getState() });
@@ -649,9 +675,9 @@ export class HermesGatewayClient {
 
       const timer = setTimeout(() => {
         this.pendingRequests.delete(id);
-        log.warn('rpc call timed out', { id, method, timeoutMs: this.timeoutMs });
-        reject(new Error(`RPC request '${method}' with id ${id} timed out after ${this.timeoutMs}ms`));
-      }, this.timeoutMs);
+        log.warn('rpc call timed out', { id, method, timeoutMs: effectiveTimeout });
+        reject(new Error(`RPC request '${method}' with id ${id} timed out after ${effectiveTimeout}ms`));
+      }, effectiveTimeout);
 
       this.pendingRequests.set(id, {
         resolve: resolve as (result: unknown) => void,
@@ -666,8 +692,8 @@ export class HermesGatewayClient {
   /**
    * IRpcCaller adaptation for direct plug-in compatibility with ProfileService, ProjectService and GroupRoomStore
    */
-  public request<TResult = unknown, TParams = unknown>(method: string, params?: TParams): Promise<TResult> {
-    return this.call<TResult>(method, params);
+  public request<TResult = unknown, TParams = unknown>(method: string, params?: TParams, timeoutMs?: number): Promise<TResult> {
+    return this.call<TResult>(method, params, timeoutMs);
   }
 
   public onNotification<T = unknown>(method: string, handler: (params: T) => void): () => void {

@@ -986,10 +986,31 @@ export interface SessionBranchResult {
 }
 
 /**
+ * 通用命令与技能分派契约 (Command & Skill Dispatch Contract)
+ */
+export interface CommandDispatchParams {
+  name: string;
+  arg?: string | null;
+  session_id?: string | null;
+  profile?: string | null;
+}
+
+export interface CommandDispatchResult {
+  type?: string;
+  output?: string;
+  target?: string;
+  message?: string;
+  notice?: string;
+  display?: string;
+  name?: string;
+  status?: string;
+}
+
+/**
  * 通用 RPC 调用网桥接口 (Universal RPC Caller Bridge)
  */
 export interface IRpcCaller {
-  request<TResult = unknown, TParams = unknown>(method: string, params?: TParams): Promise<TResult>;
+  request<TResult = unknown, TParams = unknown>(method: string, params?: TParams, timeoutMs?: number): Promise<TResult>;
 }
 
 

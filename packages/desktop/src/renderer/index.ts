@@ -67,6 +67,7 @@ import {
   settleTurnTermination, applyTurnCompleted, ActivityTransitionTracker,
   type ActivityDomain, type GroupMessageEntry, InteractiveService,
   HandoffService, runGuarded, SessionListGeneration, CacheService,
+  deriveSessionKind,
   type CachedMessageRow, type CacheChannelRef, type MessageDisplayKind,
 } from '@hermes-flux/core';
 import { profilesDiffer } from './profileRefresh.js';
@@ -288,9 +289,9 @@ let activeStreamingMessageId: string | null = null, activeStreamingStoredSession
 let activeStreamingLiveId: string | null = null, activeStreamingBotName: string | null = null, activeLoadMessagesGeneration = 0;
 
 const rpcCaller: IRpcCaller = {
-  request: <TResult = unknown, TParams = unknown>(method: string, params?: TParams): Promise<TResult> => {
+  request: <TResult = unknown, TParams = unknown>(method: string, params?: TParams, timeoutMs?: number): Promise<TResult> => {
     if (!gatewayClient) return Promise.reject(new Error('Gateway client not connected'));
-    return gatewayClient.call<TResult>(method, params);
+    return gatewayClient.call<TResult>(method, params, timeoutMs);
   },
 };
 
@@ -776,6 +777,7 @@ const interactiveService = new InteractiveService();
 const inputCompletion = createInputCompletion(
   {
     activeSessionId: () => state.activeSessionId, profileName: () => state.profileName,
+    sessionKind: () => deriveSessionKind(state.activeFocus),
     activeCwd: () => {
       const sess = state.sessions.find((s) => s.id === state.activeSessionId);
       if (sess?.cwd) return sess.cwd;
@@ -1020,10 +1022,12 @@ const inputDockController = createInputDockController({
   requestPathCompletion: (query, agentItems) => inputCompletion.requestPathCompletion(query, agentItems),
   isStreamingActiveForCurrentSession: () => isStreamingActiveForCurrentSession(), t: (key, params) => t(key, params),
   clearDockNoticeDismissTimer: () => { if (dockNoticeDismissTimer) { clearTimeout(dockNoticeDismissTimer); dockNoticeDismissTimer = null; } },
-  setTimedDockNotice: (msg) => setTimedDockNotice(msg), getGatewayClient: () => gatewayClient,
+  setTimedDockNotice: (msg, dur) => setTimedDockNotice(msg, dur), getGatewayClient: () => gatewayClient,
   ensureLiveSessionId: () => ensureLiveSessionId(), createNewSession: () => createNewSession(),
   sendMessage: (text) => sendMessage(text), interactiveService: interactiveService,
   getRpcCaller: () => rpcCaller, describeRpcError: (err) => describeRpcError(err),
+  getSlashCanon: () => inputCompletion.getSlashCanon(),
+  reloadSessionMessages: async (sId) => { await loadMessages(sId); },
 });
 
 const syncComposerHeight = () => {

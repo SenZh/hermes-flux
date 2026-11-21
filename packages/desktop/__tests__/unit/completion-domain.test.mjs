@@ -103,16 +103,16 @@ test('completion · 未连接网关时目录预取直接返回，不产生任何
 test('completion · 斜杠补全：网关成功时使用其结果并打开浮层', async () => {
   const { host, seen } = makeHost();
   const service = makeService({
-    getSlashCompletions: async () => ({ items: [{ text: '/help', meta: 'show help' }] }),
+    getSlashCompletions: async () => ({ items: [{ text: '/plan', meta: 'plan task' }] }),
   });
   const domain = createInputCompletion(host, service);
-  domain.requestSlashCompletion('he');
+  domain.requestSlashCompletion('pl');
   await tick();
 
   assert.equal(seen.slashPopperOpen, true, '有结果时必须打开浮层');
   assert.deepEqual(
     seen.slashItems.map((i) => i.name),
-    ['/help'],
+    ['/plan'],
     '必须使用网关返回的条目',
   );
   assert.equal(seen.renders >= 1, true, '必须触发一次宿主重绘');
@@ -122,7 +122,7 @@ test('completion · 斜杠补全：网关失败时回退目录快照并按输入
   const { host, seen } = makeHost();
   const service = makeService({
     getCommandsCatalog: async () => ({
-      pairs: [['help', 'h'], ['hello-world', 'hw'], ['quit', 'q']],
+      pairs: [['plan', 'p'], ['planning', 'pl'], ['quit', 'q']],
       commands: {},
       skills: {},
       canon: {},
@@ -131,12 +131,12 @@ test('completion · 斜杠补全：网关失败时回退目录快照并按输入
   });
   const domain = createInputCompletion(host, service);
   await domain.prefetchSlashCatalog();
-  domain.requestSlashCompletion('hel');
+  domain.requestSlashCompletion('pla');
   await tick();
 
   const names = seen.slashItems.map((i) => i.name);
-  assert.deepEqual(names, ['/help', '/hello-world'], '降级必须命中本地快照里含 hel 的条目');
-  assert.equal(names.includes('/quit'), false, '不含关键字 `hel` 的条目不得出现（防降级变成全量倾倒）');
+  assert.deepEqual(names, ['/plan', '/planning'], '降级必须命中本地快照里含 pla 的条目');
+  assert.equal(names.includes('/quit'), false, '不含关键字 `pla` 的条目不得出现（防降级变成全量倾倒）');
 });
 
 test('completion · 斜杠补全：网关返回空结果必须视为成功，不得回退快照', async () => {
@@ -144,7 +144,7 @@ test('completion · 斜杠补全：网关返回空结果必须视为成功，不
   let gatewayCalls = 0;
   const service = makeService({
     getCommandsCatalog: async () => ({
-      pairs: [['help', 'h']],
+      pairs: [['plan', 'p']],
       commands: {},
       skills: {},
       canon: {},
@@ -156,7 +156,7 @@ test('completion · 斜杠补全：网关返回空结果必须视为成功，不
   });
   const domain = createInputCompletion(host, service);
   await domain.prefetchSlashCatalog();
-  domain.requestSlashCompletion('hel');
+  domain.requestSlashCompletion('pla');
   await tick();
 
   assert.equal(gatewayCalls, 1, '网关必须被真的调用一次');

@@ -683,6 +683,11 @@ function buildModules(ctx) {
           params: () => ({ session_id: ctx.promptLiveId, admission_id: 'flux-probe-none' }),
           skip: () => '未做真实网关验证：立即执行需要真实排队中的准入与在途回合，离线探针造不出该状态；目前仅由本地参数构造单测与契约表守护',
         },
+        {
+          method: 'command.dispatch',
+          params: () => ({ session_id: ctx.promptLiveId, name: 'human-writing', arg: '', profile }),
+          skip: () => '指令分派需活跃会话与在线命令分发器（exec/send/skill/prefill），离线探针显式跳过，由契约表与领域单测守护',
+        },
       ],
     },
   ];

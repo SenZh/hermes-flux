@@ -218,4 +218,62 @@ test('InteractiveService - 交互区领域服务全量契约测试', async (t) =
     await assert.rejects(async () => service.steerQueued(mockBridge, 'sess-1', ''), /admission ID are mandatory/);
     assert.equal(calls.length, before, '缺参数绝不许穿透到网络层');
   });
+
+  await t.test('10. execSlash 遇到 skill command 自动无缝降级转接 command.dispatch', async () => {
+    calls.length = 0;
+
+    // 10.1 模拟网关返回 4018: skill command: use command.dispatch for /human-writing
+    const fallbackBridge = {
+      request: async (method, params, timeoutMs) => {
+        calls.push({ method, params, timeoutMs });
+        if (method === 'slash.exec') {
+          const err = new Error('skill command: use command.dispatch for /human-writing');
+          err.code = 4018;
+          throw err;
+        }
+        if (method === 'command.dispatch') {
+          return {
+            type: 'skill',
+            name: params.name,
+            message: `Loaded skill: ${params.name} with arg: ${params.arg}`,
+            display: `/${params.name}`,
+          };
+        }
+        return {};
+      },
+    };
+
+    const res = await service.execSlash(fallbackBridge, 'sess-skill-1', '/human-writing 探讨小说结构', 'default', 120_000);
+    assert.equal(res.type, 'skill');
+    assert.equal(res.name, 'human-writing');
+    assert.ok(res.message.includes('探讨小说结构'));
+
+    // 验证调用链：第一次调 slash.exec，抛错后自动调 command.dispatch 且参数拆分精确无误
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].method, 'slash.exec');
+    assert.equal(calls[0].params.command, '/human-writing 探讨小说结构');
+    assert.equal(calls[1].method, 'command.dispatch');
+    assert.deepEqual(calls[1].params, {
+      session_id: 'sess-skill-1',
+      name: 'human-writing',
+      arg: '探讨小说结构',
+      profile: 'default',
+    });
+    assert.equal(calls[1].timeoutMs, 120_000, '超时时间必须原样透传至 command.dispatch');
+
+    // 10.2 验证显式 dispatchCommand
+    calls.length = 0;
+    const directRes = await service.dispatchCommand(fallbackBridge, 'sess-skill-2', '/code-review', 'src/main.ts');
+    assert.equal(directRes.type, 'skill');
+    assert.deepEqual(calls[0], {
+      method: 'command.dispatch',
+      params: {
+        session_id: 'sess-skill-2',
+        name: 'code-review',
+        arg: 'src/main.ts',
+        profile: null,
+      },
+      timeoutMs: undefined,
+    });
+  });
 });

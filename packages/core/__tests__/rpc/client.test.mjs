@@ -231,4 +231,40 @@ test('HermesGatewayClient JSON-RPC 2.0 Unit Tests', async (t) => {
     assert.equal(xfw.hasAvatar, false);
     assert.equal(xfw.uiMeta, undefined, '没有 ui_meta 时不得伪造空对象');
   });
+
+  await t.test('长耗时慢速 RPC 超时时间表与显式 timeoutMs 覆盖', async () => {
+    const client = new HermesGatewayClient({
+      url: 'ws://127.0.0.1:9119/api/ws',
+      timeoutMs: 50,
+    });
+
+    const mockWs = {
+      readyState: 1,
+      send() {},
+    };
+    client['ws'] = mockWs;
+
+    // slash.exec 在 LONG_RUNNING_METHOD_TIMEOUT_MS 中注册为 120_000ms
+    const p1 = client.call('slash.exec', { session_id: 'sess-1', command: '/compress' });
+    const pendingMap = client['pendingRequests'];
+    const lastId = client['nextId'] - 1;
+    const pending1 = pendingMap.get(lastId);
+    assert.ok(pending1, 'Pending request must exist');
+    // 在 50ms 后不应超时熔断（因为查表为 120000ms）
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.ok(pendingMap.has(lastId), 'slash.exec 不应在 50ms 全局短超时下提前熔断');
+
+    // 清理 p1
+    clearTimeout(pending1.timer);
+    pendingMap.delete(lastId);
+    p1.catch(() => {});
+
+    // 显式指定 timeoutMs = 30ms 必须覆盖长耗时表
+    const p2 = client.call('slash.exec', { session_id: 'sess-1', command: '/compress' }, 30);
+    await assert.rejects(
+      p2,
+      /timed out after 30ms/,
+      '显式传入的 timeoutMs 必须覆盖长耗时查表配置'
+    );
+  });
 });

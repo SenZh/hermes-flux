@@ -185,6 +185,81 @@
 
 ---
 
+## 五、 斜杠命令、技能与队列控制在三大模式下的分流与黑名单矩阵 (Slash Commands, Skills & Queue Governance)
+
+### 5.1 斜杠命令在桌面端与 TUI 的职责边界与冗余性分析
+在命令行终端（TUI）中，由于缺乏可视化窗口与多控件排版，所有操作均依赖输入框前导 `/` 指令完成。而在 Hermes Flux 桌面端工作台（GUI）中，会话是有状态、多视口、树状组织的图形工作台：
+
+1. **会话生命周期与回滚命令的 GUI 冗余性**：
+   * **`/new`、`/reset` 冗余**：左双轨抽屉顶部常驻新建按钮、全局快捷键 `Ctrl+N` / `Cmd+N`（调用 `sessionOperationService.createNewSession()`）。Flux 拥有多会话列表，清空当前或另起炉灶都是通过新建独立会话，在输入框输入 `/new` 或 `/reset` 破坏了多会话工作台的心智。
+   * **`/rollback`、`/undo`、`/fork`、`/branch` 冗余与参数缺陷**：在普通会话的每一条用户消息卡片上（`MessageFooter.tsx`），hover 即可唤出微距操作栏：
+     - `rollback-msg`：点击立即乐观裁撤后续消息，将该条提问回填至输入框，并弹出挂起回滚确认条（`rollback-pending-banner`），发送时调用 `InteractiveService.truncateAndSubmit`，携带真实的持久化 `rowId`。
+     - `fork-msg`：点击基于当前历史轮次调用 `InteractiveService.forkSession`（`session.branch`），秒级派生全新旁聊。
+     - **心智与参数缺陷**：斜杠命令是没有指向目标的（上下文脱敏）。用户如果输入 `/rollback` 或 `/fork`，必须手动输入索引数字（如 `/rollback 3`、`/fork 5`），极易数错行号；而在 GUI 中，直接点击目标卡片上的按钮具有 100% 确定的 `row_id` 物理锚点。
+2. **`/help` 与 `/status` 在桌面端的失效与鸡肋本质**：
+   * **`/help` 严重破坏可用性**：网关 `slash.exec('/help')` 输出的是包含 1.3 万字符的终端 stdout，不向 `messages` 表写入任何消息记录。客户端在 `slashCommandRunner.ts` 中将其塞入 5 秒即逝的小横幅通知（`timedDockNotice`），导致文字大面积截断、无法翻页、且 5 秒后自动消失，用户在会话流中什么都看不到，体验如同“发出去毫无反应”。
+   * **`/status` 完全冗余**：桌面端顶栏已常驻展示当前网络延迟与连接态；输入舱上方常驻 `ContextGauge` 上下文水位仪表盘（如 `42k / 128k (33%)`）；右侧检查舱提供完整的运行时与 Token 消耗，手敲 `/status` 毫无意义。
+3. **保留旁路外援胶囊 (`/btw`)**：
+   * `/btw`（By The Way）作为一次性旁路外援胶囊，允许在不打断或不污染长期记忆的前提下向外援 Bot 发起只读求助，具有独特的极客交互价值，在普通会话与 Bot 工位中予以保留。
+
+### 5.2 运行态发送、排队 (Queue) 与插话纠偏 (Steer) 真实机制
+
+1. **运行态 Enter 键的自动排队控制流**：
+   * 处于空闲态（`activeTurn: false`）时，按 Enter 触发 `submitDraft()` -> `routeSend()` 直接发送；
+   * 处于流式生成态（`activeTurn: true`）时，`planEnterAction` 判定 `hasDraft` 为真，返回 `{ kind: 'enqueue' }`，自动调用网关 `prompt.submit({ session_id: liveId, text, queued: true })` 入队。**用户完全不需要在输入框手敲 `/q` 或 `/queue`**；
+   * 入队成功后，输入舱上方渲染待发队列托盘（`renderQueueTray`），每条排队行显示编号、截断文本及三个动作：`queue-replace`（放回编辑）、`queue-steer`（闪电图标，调用 `interactive.steerQueued` 纠偏插话）、`queue-cancel`（叉号图标，取消排队）。
+2. **排队与插话的历史踩坑与防范规范**：
+   * **防范 P-012 临时 ID 逃逸**：网关在实测运行态排队回执中可能不包含 `admission_id`。客户端退化自造的 `local-${Date.now()}` 仅作为前端 UI 渲染 key，**绝对禁止作为 `prompt.steer_queued` 或 `prompt.cancel` 的入参发往网关**，否则必然触发网关 4001/4000 报错。缺失真实 `admission_id` 时应降级为通过 `session.interrupt` + 本地重填草稿。
+   * **键盘流交互演化**：支持用户在生成态按 `Ctrl+Enter` 触发“立即打断当前并以此内容重新生成（Interrupt & Send Now）”，消除必须先点 Stop 再按 Enter 的交互断层。
+
+### 5.3 三层黑名单分层与并集模型 (Three-Tier Union Blacklist Model)
+
+为彻底解决不同会话模式下的命令越权与 TUI 噪点干扰，Hermes Flux 建立三层黑名单并集体系：
+
+$$\text{EffectiveBlacklist}(\text{mode}) = \text{UNIVERSAL} \cup \begin{cases} \text{GROUP} & \text{if mode} = \text{group\_room} \\ \text{BOT} & \text{if mode} = \text{bot\_forever\_chat} \\ \emptyset & \text{if mode} = \text{scratchpad} \end{cases}$$
+
+```text
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                        Hermes Flux 三层黑名单并集过滤模型                               │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│ Tier 1: 桌面通用黑名单 (UNIVERSAL_DESKTOP_EXCLUDED)                                      │
+│ • 纯终端 TUI 控制: mouse, density, logs, palette, skin, battery, timestamps, quit...  │
+│ • 桌面 GUI 冗余/失效: new, reset, undo, rollback, fork, branch, help, status, q, steer...│
+│ • 输入舱专有控件承载: model, yolo, approvals, reasoning, login, topup...               │
+├────────────────────────────────────────┬───────────────────────────────────────────────┤
+│ Tier 2: Bot 工位专属黑名单 (BOT)        │ Tier 3: 群聊研讨室专属黑名单 (GROUP)          │
+│ • 破坏终身主工位保护实体:              │ • 单会话控制命令 (传 room_id 必崩 4001):      │
+│   handoff, archive, delete             │   compress, compact, btw, retry, plan, goal...│
+│ • 叠加 Universal 已屏蔽的 rollback/reset│ • 全量单会话技能 (Skills):                     │
+│   彻底杜绝 MEMORY.md 长期记忆精神分裂  │   彻底过滤全部 85+ 个人技能，群聊专注 groups.* │
+└────────────────────────────────────────┴───────────────────────────────────────────────┘
+```
+
+1. **Tier 1: 桌面端通用黑名单 `UNIVERSAL_DESKTOP_EXCLUDED`**：
+   * 无论何种模式，桌面端一律过滤纯终端 TUI 控制（`mouse`, `density`, `logs`, `palette`, `skin`, `battery`, `timestamps`, `ts`, `focus`, `clear`, `redraw`, `statusbar`, `quit`, `exit`, `copy`, `paste` 等）；
+   * 过滤桌面端已由 GUI 控件承载的生命周期与回滚命令（`new`, `reset`, `undo`, `rollback`, `fork`, `branch`, `branch_whole`）；
+   * 过滤输出体验残缺的元命令（`help`, `status`）与运行态队列命令（`q`, `queue`, `steer`, `s`）。
+2. **Tier 2: 专职 Bot 终身主工位专属黑名单 `BOT_SESSION_EXCLUDED`**：
+   * 专职 Bot 主工位受物理保护（`hidden=1`），严禁被交接、归档或删除：`handoff`, `archive`, `delete`；
+   * 叠加 Universal 中的 `new`, `reset`, `undo`, `rollback`, `fork`，全方位杜绝可能导致 Bot 认知倒退或毒化 `MEMORY.md` 的任何操作。
+3. **Tier 3: 多 Agent 群聊专属黑名单 `GROUP_ROOM_EXCLUDED`**：
+   * 群聊房间物理存储于 `hosted_rooms`，`slash.exec` 强校验 `session_id`，传 `room_id` 必然报错 `[4001] session not found`；
+   * 屏蔽单会话生命周期与工作流指令：`compress`, `compact`, `btw`, `retry`, `plan`, `goal`, `review`, `refine`, `moa`, `subgoal`, `loop`, `proactive`, `blueprint`, `bp`, `init`, `learn`, `handoff`；
+   * **彻底屏蔽全量单会话技能（85+ Skills）**：在群聊中输入 `/` 绝不展示单会话个人技能，防止用户误以为可以在群聊中单方面唤起技能；执行拦截时给出中文提示：`群聊研讨室为多 Agent 协同空间，不支持单会话指令或个人技能`。
+
+### 5.4 命令、SQL 与 `@文件` 在三大模式下的权威支持矩阵
+
+| 交互与调用类型 | 1. 普通会话 (Scratchpad) | 2. 专职 Bot 主工位 (Forever Chat) | 3. 多 Agent 群聊 (Group Room) | 架构分流与执行机制 |
+|---|:---:|:---:|:---:|---|
+| **核心工作流命令 (/compress, /plan, /goal)** | ✅ 100% 支持 | ✅ 支持 (Bot 个人规划与提炼) | ❌ **严格屏蔽** (群聊无单会话状态机) | 普通与 Bot 会话经 `InteractiveService.execSlash` 分派；群聊前置拦截 |
+| **旁路外援胶囊 (/btw)** | ✅ 支持 | ✅ **高频推荐** (只读外援，不写记忆)| ❌ 严格屏蔽 (群聊直接在房间发言) | 在 Bot 会话中转化为 `prompt.btw` 只读外援，保护 `MEMORY.md` 纯净性 |
+| **85+ 扩展 Skills (如 /human-writing)** | ✅ 支持 (根据 Profile 授权) | ⚠️ 受限支持 (仅限该 Bot 白名单技能)| ❌ **严格屏蔽并过滤** | 越权调用网关沙箱报 4018；群聊补全彻底隐藏技能项 |
+| **SQL 数据源查询与分析** | ✅ 支持 (只读分析) | ✅ 支持 (专职数据 Bot 具备能力) | ⚠️ 经由拥有该工具的参会 Agent 执行 | 群聊不可由人类直接用 slash 执行 SQL，须由参会专家作为工具调用执行 |
+| **`@file` 文件与代码上下文提及** | ✅ 100% 支持 (模糊匹配项目树) | ✅ 100% 支持 | ✅ 100% 支持 (广播至房间全员共享) | 统一通过 `@` 补全匹配，以相对路径与上下文片段附加至消息负载 |
+| **图片附件上传 (image.attach_bytes)** | ✅ 100% 支持 | ✅ 100% 支持 | ✅ 100% 支持 (广播展示) | 二段式上传：先通过 `image.attach_bytes` 附加，再发起回合提交流程 |
+
+---
+
 ## 六、 架构共同点与不同点深度解析 (Shared Invariants vs Key Divergences)
 
 ### 6.1 共同点（System-Wide Invariants）

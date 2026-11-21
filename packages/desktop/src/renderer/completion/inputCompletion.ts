@@ -37,6 +37,8 @@ import { buildAliasSet, filterDesktopCommands, normalizeCommandName } from '../s
 export interface InputCompletionHost {
   /** 当前活跃会话 id（可空，网关按会话过滤补全） */
   activeSessionId(): string;
+  /** 当前会话模式（'scratchpad' | 'bot_forever_chat' | 'group_room' 等） */
+  sessionKind?(): string;
   /** 当前 profile 名（可空） */
   profileName(): string;
   /** 当前活跃会话对应的项目/工作目录，作为 complete.path 的 cwd 边界 */
@@ -80,6 +82,8 @@ export function createInputCompletion(host: InputCompletionHost, interactiveServ
   let slashDesktopMarks = new Map<string, string | null | undefined>();
   /** 网关 canon 推导出的别名集合，别名不在补全列表重复出现 */
   let slashAliasSet = new Set<string>();
+  /** 网关原生 canon 别名映射快照 */
+  let slashCanon: Record<string, string> | undefined = undefined;
   let slashCatalogLoaded = false;
   let slashDebounce: ReturnType<typeof setTimeout> | undefined;
   let pathDebounce: ReturnType<typeof setTimeout> | undefined;
@@ -159,6 +163,7 @@ export function createInputCompletion(host: InputCompletionHost, interactiveServ
         }
       }
       // 别名折叠与桌面可见性都在快照上做一遍：降级通道与实时通道必须同源。
+      slashCanon = cat.canon;
       slashAliasSet = buildAliasSet(cat.canon);
       slashDesktopMarks = desktopMarks;
       const seen = new Set<string>();
@@ -203,11 +208,22 @@ export function createInputCompletion(host: InputCompletionHost, interactiveServ
       }
       if (mySeq !== slashSeq) return;
       // 【规则】`resolved !== null` 就代表请求成功，哪怕过滤后为空。
+      const currentSessionKind = host.sessionKind ? host.sessionKind() : undefined;
+      const isGroup = currentSessionKind === 'group_room' || currentSessionKind === 'group';
+
       let base = resolved !== null
-        ? filterDesktopCommands({ items: resolved, desktopMarks: slashDesktopMarks, aliases: slashAliasSet })
-        : slashCatalogSnapshot.filter((c) => c.name.toLowerCase().includes(query.toLowerCase()));
-      // 补充匹配的技能项（若 gateway 返回的列表未包含该技能）
-      if (resolved !== null && slashCatalogSnapshot.length > 0) {
+        ? filterDesktopCommands({
+            items: resolved,
+            desktopMarks: slashDesktopMarks,
+            aliases: slashAliasSet,
+            sessionKind: currentSessionKind,
+          })
+        : slashCatalogSnapshot.filter((c) => {
+            if (isGroup && c.isSkill) return false;
+            return c.name.toLowerCase().includes(query.toLowerCase());
+          });
+      // 补充匹配的技能项（若 gateway 返回的列表未包含该技能；群聊模式严禁补充技能）
+      if (!isGroup && resolved !== null && slashCatalogSnapshot.length > 0) {
         const existingNames = new Set(base.map((it) => it.name.toLowerCase()));
         const matchingSkills = slashCatalogSnapshot.filter(
           (c) => c.isSkill && c.name.toLowerCase().includes(query.toLowerCase()) && !existingNames.has(c.name.toLowerCase()),
@@ -271,6 +287,7 @@ export function createInputCompletion(host: InputCompletionHost, interactiveServ
     prefetchSlashCatalog,
     requestSlashCompletion,
     requestPathCompletion,
+    getSlashCanon: () => slashCanon,
     dispose,
     /** 供测试与诊断读取，不参与业务判定 */
     snapshotState: () => ({

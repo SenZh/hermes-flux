@@ -45,7 +45,7 @@ import type {
   CanonicalSteerQueuedParams,
   PromptCancelParams,
 } from '../rpc/contracts/gateway-contract.generated.js';
-import type { IRpcCaller } from '../rpc/types.js';
+import type { IRpcCaller, CommandDispatchParams, CommandDispatchResult } from '../rpc/types.js';
 import { isClientTempId, isDurableRowId } from './truncatePlan.js';
 
 export interface TruncateSubmitOptions {
@@ -252,14 +252,30 @@ export class InteractiveService {
   }
 
   /**
-   * 执行斜杠命令（slash.exec）。按 DispatchType 分派，不臆造语义：
-   * exec/plugin→output，alias→target，send/prefill/skill→message（UI 展示 display，绝不展示 message 原文）。
+   * 执行斜杠命令与技能分派（slash.exec / command.dispatch）。
+   * 
+   * 【设计意图 (Why)】
+   *   按 DispatchType 分派，不臆造语义：
+   *   exec/plugin→output，alias→target，send/prefill/skill→message（UI 展示 display，绝不展示 message 原文）。
+   *   对于 Skill 类指令（如 /human-writing），网关协议要求通过 command.dispatch 派发。
+   * 
+   * 【防范的历史坑 (Pitfall)】
+   *   1. 网关在收到 skill 命令调用 slash.exec 时直接抛错 4018：
+   *      "skill command: use command.dispatch for /<skill_name>"；
+   *      若未做自动转接，用户调用任何 skill 都会提示执行失败。
+   *   2. command.dispatch 严格受 Pydantic extra='forbid' 限制，入参仅允许 name, arg, session_id, profile。
+   * 
+   * 【约束与规则 (Rules)】
+   *   - 优先通过 slash.exec 执行；当服务端明确指示或报错为 skill 指令时，无缝降级转接 command.dispatch；
+   *   - 提取 command 中的主命令名与后续参数文本作为 arg；
+   *   - 保持 0 TS 报错，严格遵循 IRpcCaller 抽象。
    */
   public async execSlash(
     bridge: IRpcCaller,
     sessionId: string,
     command: string,
-    profile?: string
+    profile?: string,
+    timeoutMs?: number
   ): Promise<SlashExecResult> {
     if (!sessionId) {
       throw new Error('Session ID is mandatory for execSlash');
@@ -272,7 +288,54 @@ export class InteractiveService {
       command,
       profile: profile ?? null,
     };
-    return bridge.request<SlashExecResult, SlashExecParams>('slash.exec', params);
+    try {
+      return await bridge.request<SlashExecResult, SlashExecParams>('slash.exec', params, timeoutMs);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (errMsg.includes('use command.dispatch') || errMsg.includes('skill command:')) {
+        const trimmed = command.trim();
+        const match = trimmed.match(/^(\/?[^\s]+)([\s\S]*)$/);
+        const rawName = match ? match[1] : trimmed;
+        const name = rawName.startsWith('/') ? rawName.slice(1) : rawName;
+        const arg = match ? match[2].trim() : '';
+
+        const dispatchParams: CommandDispatchParams = {
+          session_id: sessionId,
+          name,
+          arg: arg || null,
+          profile: profile ?? null,
+        };
+        return await bridge.request<SlashExecResult, CommandDispatchParams>('command.dispatch', dispatchParams, timeoutMs);
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * 显式通过 command.dispatch 派发执行技能与高级扩展指令
+   */
+  public async dispatchCommand(
+    bridge: IRpcCaller,
+    sessionId: string,
+    name: string,
+    arg?: string,
+    profile?: string,
+    timeoutMs?: number
+  ): Promise<CommandDispatchResult> {
+    if (!sessionId) {
+      throw new Error('Session ID is mandatory for dispatchCommand');
+    }
+    if (!name) {
+      throw new Error('Command name is mandatory for dispatchCommand');
+    }
+    const normName = name.startsWith('/') ? name.slice(1) : name;
+    const params: CommandDispatchParams = {
+      session_id: sessionId,
+      name: normName,
+      arg: arg ? arg.trim() : null,
+      profile: profile ?? null,
+    };
+    return bridge.request<CommandDispatchResult, CommandDispatchParams>('command.dispatch', params, timeoutMs);
   }
 
   /**

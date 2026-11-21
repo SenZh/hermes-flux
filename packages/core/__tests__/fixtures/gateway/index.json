@@ -1382,6 +1382,12 @@
     },
     {
       "module": "prompt",
+      "method": "command.dispatch",
+      "skipped": true,
+      "reason": "指令分派需活跃会话与在线命令分发器（exec/send/skill/prefill），离线探针显式跳过，由契约表与领域单测守护"
+    },
+    {
+      "module": "prompt",
       "method": "prompt.background",
       "skipped": true,
       "reason": "后台子代理旁路呼叫需活跃会话与跨 profile 计算宿主，应答经事件流异步到达，离线探针显式跳过，由契约表与路由单测守护"

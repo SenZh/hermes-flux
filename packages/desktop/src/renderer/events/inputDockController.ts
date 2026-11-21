@@ -34,7 +34,7 @@ import {
   renderMentionPopper,
   renderComposerBadges,
 } from '@hermes-flux/ui';
-import type { IRpcCaller, InteractiveService } from '@hermes-flux/core';
+import { type IRpcCaller, type InteractiveService, deriveSessionKind } from '@hermes-flux/core';
 import type { AppState } from '../state/appState.js';
 import {
   canSendDraft,
@@ -48,6 +48,8 @@ import {
   queuedAfterAction,
 } from '../queueControl.js';
 import { parseMentionToken } from '../mentionToken.js';
+import { dispatchSlashCommand } from './slashCommandRunner.js';
+export { dispatchSlashCommand };
 import { ModelCascadeManager } from '../cascade/modelCascadeManager.js';
 
 export interface InputDockControllerDeps {
@@ -64,7 +66,9 @@ export interface InputDockControllerDeps {
   readonly isStreamingActiveForCurrentSession: () => boolean;
   readonly t: (key: I18nKey, params?: Record<string, string | number>) => string;
   readonly clearDockNoticeDismissTimer?: () => void;
-  readonly setTimedDockNotice?: (msg: string) => void;
+  readonly setTimedDockNotice?: (msg: string, durationMs?: number) => void;
+  readonly getSlashCanon?: () => Record<string, string> | undefined;
+  readonly reloadSessionMessages?: (sessionId: string) => Promise<void>;
   readonly fetchModelOptions?: () => Promise<void>;
   readonly switchModel?: (model: string, provider?: string) => Promise<void>;
   readonly switchApproval?: (mode: 'manual' | 'smart' | 'off') => Promise<void>;
@@ -322,56 +326,22 @@ export class InputDockController {
   /**
    * 执行斜杠指令分派
    */
-  public async runSlashCommand(command: string): Promise<void> {
-    const liveId = this.deps.ensureLiveSessionId ? await this.deps.ensureLiveSessionId() : null;
-    if (!liveId) {
-      if (this.deps.setTimedDockNotice) {
-        this.deps.setTimedDockNotice(this.deps.t('chat.forkNoLive'));
-      }
-      this.deps.requestRender();
-      return;
-    }
-
-    const interactive = this.deps.interactiveService;
-    const rpc = this.deps.getRpcCaller ? this.deps.getRpcCaller() : null;
-    if (!interactive || !rpc) return;
-
-    try {
-      const res = await interactive.execSlash(rpc, liveId, command, this.deps.getState().profileName || undefined);
-      const type = res.type || 'exec';
-      if (type === 'prefill') {
-        if (typeof document !== 'undefined') {
-          const el = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
-          if (el) el.value = res.target || res.message || '';
-        }
-        if (this.deps.setTimedDockNotice) {
-          this.deps.setTimedDockNotice(res.display || res.notice || '');
-        }
-        this.deps.requestRender();
-        return;
-      }
-      if (type === 'send' || type === 'skill') {
-        const text = res.message || res.output;
-        if (text && this.deps.sendMessage) {
-          await this.deps.sendMessage(text);
-        }
-        return;
-      }
-      if (type === 'alias') {
-        if (res.target) await this.runSlashCommand(res.target);
-        return;
-      }
-      const out = res.output || res.warning || '';
-      if (this.deps.setTimedDockNotice) {
-        this.deps.setTimedDockNotice(out || res.display || this.deps.t('dock.cmdHelp'));
-      }
-      this.deps.requestRender();
-    } catch (err) {
-      const errMsg = this.deps.describeRpcError ? this.deps.describeRpcError(err) : String(err);
-      if (this.deps.setTimedDockNotice) {
-        this.deps.setTimedDockNotice(`${this.deps.t('chat.gatewayNotConnected')}: ${errMsg}`);
-      }
-    }
+  public async runSlashCommand(rawCommand: string): Promise<void> {
+    await dispatchSlashCommand(rawCommand, {
+      ensureLiveSessionId: this.deps.ensureLiveSessionId,
+      getRpcCaller: this.deps.getRpcCaller,
+      interactiveService: this.deps.interactiveService,
+      getSlashCanon: this.deps.getSlashCanon,
+      getProfileName: () => this.deps.getState().profileName || undefined,
+      getActiveSessionId: () => this.deps.getState().activeSessionId,
+      getSessionKind: () => deriveSessionKind(this.deps.getState().activeFocus),
+      setTimedDockNotice: this.deps.setTimedDockNotice,
+      requestRender: this.deps.requestRender,
+      sendMessage: this.deps.sendMessage,
+      reloadSessionMessages: this.deps.reloadSessionMessages,
+      describeRpcError: this.deps.describeRpcError,
+      t: this.deps.t,
+    });
   }
 
   /**

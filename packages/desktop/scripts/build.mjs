@@ -501,6 +501,18 @@ async function buildAll() {
     sourcemap: true,
   });
 
+  // 斜杠命令执行器：从 inputDockController 抽出
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/renderer/events/slashCommandRunner.ts')],
+    outfile: path.join(rootDir, 'dist/renderer/events/slashCommandRunner.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    external: ['@hermes-flux/core', '@hermes-flux/ui'],
+    sourcemap: true,
+  });
+
   // 会话生命周期与设置切换服务：从 index.ts 抽出
   await esbuild.build({
     entryPoints: [path.join(rootDir, 'src/renderer/services/sessionOperationService.ts')],
