@@ -29,6 +29,7 @@ test('workspaceFs: 安全边界校验拒绝空字节、父目录逃逸与系统�
   assert.equal(isSafeWorkspaceDirectory('C:\\Windows', cwd), null);
   assert.equal(isSafeWorkspaceDirectory('C:\\Windows\\System32', cwd), null);
   assert.equal(isSafeWorkspaceDirectory('', 'C:\\'), null);
+  assert.equal(isSafeWorkspaceDirectory('D:\\projects\\demo', cwd), 'D:\\projects\\demo');
   assert.equal(isSafeWorkspaceDirectory('sub/dir', '/ws'), path.resolve('/ws', 'sub/dir'));
 });
 

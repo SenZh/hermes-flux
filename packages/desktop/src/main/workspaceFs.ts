@@ -30,9 +30,17 @@ function compareCodePoint(a: string, b: string): number {
   return a < b ? -1 : 1;
 }
 
-function isInsideParent(parent: string, child: string): boolean {
-  const rel = path.relative(parent, child);
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+function isWindowsDrivePath(p: string): boolean {
+  return /^[A-Za-z]:(?:[\\/]|$)/.test(p);
+}
+
+function isInsideParent(
+  parent: string,
+  child: string,
+  pathApi: Pick<typeof path, 'relative' | 'isAbsolute'>,
+): boolean {
+  const rel = pathApi.relative(parent, child);
+  return rel === '' || (!rel.startsWith('..') && !pathApi.isAbsolute(rel));
 }
 
 function isSystemSensitiveRoot(resolved: string): boolean {
@@ -55,18 +63,25 @@ export function isSafeWorkspaceDirectory(rawDir: string | undefined, fallbackCwd
   const candidate = typeof rawDir === 'string' ? rawDir.trim() : '';
   if (candidate.includes('\0')) return null;
 
-  const baseCwd = path.resolve(fallbackCwd || process.cwd());
+  const rawBase = fallbackCwd || process.cwd();
+  const basePathApi = isWindowsDrivePath(rawBase) ? path.win32 : path;
+  const baseCwd = basePathApi.resolve(rawBase);
   if (!candidate) {
     return isSystemSensitiveRoot(baseCwd) ? null : baseCwd;
   }
 
   const segments = candidate.replace(/\\/g, '/').split('/');
   if (segments.includes('..')) {
-    const resolvedTraversal = path.resolve(baseCwd, candidate);
-    if (!isInsideParent(baseCwd, resolvedTraversal)) {
+    const resolvedTraversal = basePathApi.resolve(baseCwd, candidate);
+    if (!isInsideParent(baseCwd, resolvedTraversal, basePathApi)) {
       return null;
     }
     return isSystemSensitiveRoot(resolvedTraversal) ? null : resolvedTraversal;
+  }
+
+  if (isWindowsDrivePath(candidate)) {
+    const winResolved = path.win32.resolve(candidate);
+    return isSystemSensitiveRoot(winResolved) ? null : winResolved;
   }
 
   const resolved = path.isAbsolute(candidate)
@@ -158,10 +173,14 @@ export function resolveSafeLocalSourceFile(
   const lexSegments = toPosixPath(candidate).split('/').filter(Boolean);
   if (lexSegments.some(isEnvSecretSegment)) return null;
 
-  const safeParent = isSafeWorkspaceDirectory(path.dirname(candidate), fallbackCwd ?? process.cwd());
+  const normCandidate = toPosixPath(candidate);
+  const safeParent = isSafeWorkspaceDirectory(
+    path.posix.dirname(normCandidate),
+    fallbackCwd ?? process.cwd(),
+  );
   if (!safeParent) return null;
 
-  const candidateFile = path.join(safeParent, path.basename(candidate));
+  const candidateFile = path.join(safeParent, path.posix.basename(normCandidate));
   try {
     if (!fs.existsSync(candidateFile)) return null;
     const real = fs.realpathSync(candidateFile);
