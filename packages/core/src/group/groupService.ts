@@ -272,60 +272,110 @@ export class GroupRoomStore {
 
   /**
    * 同步房间的历史日志流 (groups.log)
+   *
+   * 【设计意图 (Why)】
+   *   网关单次 groups.log 存在分页上限（最大 500，超过 500 报 4001 invalid_params）。
+   *   当群聊事件超过 limit（如群聊产生 100+ 讨论流）时，若不进行多页游标接续与自动增量对齐，
+   *   客户端将永远卡在 seq 1~99 的老日志，导致新消息与 Agent 回复永远拉不下来。
+   *
+   * 【防范的历史坑 (Pitfall)】
+   *   1. 假分页与日志截断（P-021）：如果不传 sinceSeq 且本地已有日志，必须自动以本地最大 seq
+   *      作为起点增量向后拉取，避免无休止重复拉取第一页；
+   *   2. 首次进入多页接续：若本地无日志且网关指示 has_more: true，必须循环按 cursor 接续拉取，
+   *      直至拉全最新消息；
+   *   3. 避免死循环：设置 maxPages: 20 安全上限，且下一页 cursor 必须严格大于上一轮 since_seq。
+   *
+   * 【约束与规则 (Rules)】
+   *   - 单次请求 limit 统一采用安全的 200（在网关 100~500 安全区间内）；
+   *   - 纯 TypeScript 实现，零宿主 API 或 DOM 依赖；
+   *   - 保证返回该房间在本地 store 中的最新完整线序日志。
    */
   public async fetchLogs(
     roomId: string,
     bridge: IRpcCaller,
     sinceSeq?: number,
-    limit = 100
+    limit = 200
   ): Promise<GroupMessageEntry[]> {
     if (!roomId) throw new Error('Room ID is mandatory for fetchLogs');
 
-    const res = await bridge.request<GroupsLogResult, GroupsLogParams>('groups.log', {
-      room_id: roomId,
-      since_seq: sinceSeq,
-      limit,
-    });
+    const localLogs = this.roomLogs.get(roomId);
+    let currentSince = sinceSeq;
+    // 若未显式指定起始序号，且本地已缓存该房间日志，自动从已知最大 seq 开始增量拉取
+    if (currentSince === undefined && localLogs && localLogs.length > 0) {
+      let maxKnownSeq = 0;
+      for (const e of localLogs) {
+        if (typeof e.seq === 'number' && e.seq > maxKnownSeq) {
+          maxKnownSeq = e.seq;
+        }
+      }
+      if (maxKnownSeq > 0) {
+        currentSince = maxKnownSeq;
+      }
+    }
 
-    // 官方网关返回 { events: [...], cursor, latest_seq }，客户端本地结构支持 entries
-    const rawEvents = Array.isArray(res?.events)
-      ? res.events
-      : Array.isArray(res?.entries)
-      ? res.entries
-      : [];
+    const pageLimit = Math.min(Math.max(limit, 50), 300);
+    let hasMore = true;
+    let pageCount = 0;
+    const maxPages = 20;
 
-    for (const raw of rawEvents) {
-      const r = raw as Record<string, unknown>;
-      const actor = (r.actor && typeof r.actor === 'object' ? r.actor : {}) as Record<string, unknown>;
-      const payload = (r.payload && typeof r.payload === 'object' ? r.payload : {}) as Record<string, unknown>;
-      const text = String(payload.text || r.text || '');
-      const kind = String(r.kind || '');
-      // 过滤非消息类系统纯控制事件（room.created / room.activity 等没有正文的事件）
-      if (!text && kind.startsWith('room.')) continue;
-      if (!text) continue;
+    while (hasMore && pageCount < maxPages) {
+      pageCount += 1;
+      const res = await bridge.request<GroupsLogResult, GroupsLogParams>('groups.log', {
+        room_id: roomId,
+        since_seq: currentSince,
+        limit: pageLimit,
+      });
 
-      // 官方 actor 形如 { kind: 'user'|'member', id, profile?, display_name? }，没有 name 字段
-      const actorKind = String(actor.kind || '');
-      const senderProfile = String(
-        actor.display_name || actor.profile || actor.id || r.senderProfile || (actorKind === 'user' ? 'user' : 'Agent')
-      );
-      const timestamp = typeof r.created_at === 'number'
-        ? (r.created_at > 1e11 ? r.created_at : r.created_at * 1000)
-        : typeof r.timestamp === 'number'
-        ? r.timestamp
-        : Date.now();
+      // 官方网关返回 { events: [...], cursor, latest_seq }，客户端本地结构支持 entries
+      const rawEvents = Array.isArray(res?.events)
+        ? res.events
+        : Array.isArray(res?.entries)
+        ? res.entries
+        : [];
 
-      const entry: GroupMessageEntry = {
-        messageId: String(r.event_id || r.messageId || `msg_${r.seq || Date.now()}`),
-        seq: Number(r.seq || 0),
-        senderProfile,
-        timestamp,
-        text,
-        isSeed: Boolean(payload.is_seed || r.isSeed),
-        threadId: typeof payload.thread_id === 'string' ? payload.thread_id : undefined,
-        actorKind: actorKind || undefined,
-      };
-      this.appendEntry(roomId, entry);
+      for (const raw of rawEvents) {
+        const r = raw as Record<string, unknown>;
+        const actor = (r.actor && typeof r.actor === 'object' ? r.actor : {}) as Record<string, unknown>;
+        const payload = (r.payload && typeof r.payload === 'object' ? r.payload : {}) as Record<string, unknown>;
+        const text = String(payload.text || r.text || '');
+        const kind = String(r.kind || '');
+        // 过滤非消息类系统纯控制事件（room.created / room.activity 等没有正文的事件）
+        if (!text && kind.startsWith('room.')) continue;
+        if (!text) continue;
+
+        // 官方 actor 形如 { kind: 'user'|'member', id, profile?, display_name? }，没有 name 字段
+        const actorKind = String(actor.kind || '');
+        const senderProfile = String(
+          actor.display_name || actor.profile || actor.id || r.senderProfile || (actorKind === 'user' ? 'user' : 'Agent')
+        );
+        const timestamp = typeof r.created_at === 'number'
+          ? (r.created_at > 1e11 ? r.created_at : r.created_at * 1000)
+          : typeof r.timestamp === 'number'
+          ? r.timestamp
+          : Date.now();
+
+        const entry: GroupMessageEntry = {
+          messageId: String(r.event_id || r.messageId || `msg_${r.seq || Date.now()}`),
+          seq: Number(r.seq || 0),
+          senderProfile,
+          timestamp,
+          text,
+          isSeed: Boolean(payload.is_seed || r.isSeed),
+          threadId: typeof payload.thread_id === 'string' ? payload.thread_id : undefined,
+          actorKind: actorKind || undefined,
+        };
+        this.appendEntry(roomId, entry);
+      }
+
+      if (
+        Boolean(res?.has_more) &&
+        typeof res?.cursor === 'number' &&
+        res.cursor > (currentSince ?? 0)
+      ) {
+        currentSince = res.cursor;
+      } else {
+        hasMore = false;
+      }
     }
 
     return this.getLogs(roomId);

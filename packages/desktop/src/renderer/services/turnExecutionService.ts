@@ -386,6 +386,9 @@ export function createTurnExecutionService(deps: TurnExecutionDeps): TurnExecuti
       deps.getActivityTransitionTracker().clear('group', roomId);
       deps.render();
     },
+    maxRounds: 60,
+    maxStagnantRounds: 45,
+    intervalMs: 1500,
   });
 
   async function refreshGroupRoomLog(roomId: string): Promise<number> {
@@ -925,6 +928,21 @@ export function createTurnExecutionService(deps: TurnExecutionDeps): TurnExecuti
     const knownProfiles = state.profiles.map((p) => p.name);
     for (const p of state.profiles) {
       if (p.displayName) knownProfiles.push(p.displayName);
+    }
+    // 群聊研讨室：将当前房间入驻成员与广播全员 token ('all') 纳入已知候选，保证 @ 路由精准收敛
+    const focus = state.activeFocus;
+    if (focus.type === 'group' && focus.roomId) {
+      const room = state.groupRooms.find((r) => r.roomId === focus.roomId);
+      if (room && Array.isArray(room.members)) {
+        for (const m of room.members) {
+          if (typeof m === 'string' && m && !knownProfiles.includes(m)) {
+            knownProfiles.push(m);
+          }
+        }
+      }
+      if (!knownProfiles.includes('all')) {
+        knownProfiles.push('all');
+      }
     }
     const route = planSendRoute({
       text,

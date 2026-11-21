@@ -272,4 +272,66 @@ test('GroupRoomStore - 多 Agent 群聊房间与四阶拉群升级管线', async
       /至少需要选择 2 位专家/
     );
   });
+
+  await t.test('6. fetchLogs 跨页接续拉取与增量同步（防止超过单页限制时丢消息）', async () => {
+    const store = new GroupRoomStore();
+    const calls = [];
+    const mockBridge = {
+      async request(method, params) {
+        if (method === 'groups.log') {
+          calls.push({ ...params });
+          if (params.since_seq === undefined) {
+            // 第一页：返回 seq 1..100，提示还有更多
+            return {
+              events: [
+                { event_id: 'ev-1', seq: 1, payload: { text: '历史第一条' } },
+                { event_id: 'ev-100', seq: 100, payload: { text: '历史第一百条' } },
+              ],
+              cursor: 100,
+              latest_seq: 150,
+              has_more: true,
+            };
+          } else if (params.since_seq === 100) {
+            // 第二页：返回 seq 101..150，无更多
+            return {
+              events: [
+                { event_id: 'ev-101', seq: 101, payload: { text: '新一轮讨论' } },
+                { event_id: 'ev-150', seq: 150, actor: { kind: 'member', profile: 'aura' }, payload: { text: '@default 确认收到并完成回复' } },
+              ],
+              cursor: 150,
+              latest_seq: 150,
+              has_more: false,
+            };
+          } else if (params.since_seq === 150) {
+            // 第三次拉取：增量查询返回最新的一条
+            return {
+              events: [
+                { event_id: 'ev-151', seq: 151, actor: { kind: 'member', profile: 'arch' }, payload: { text: '后续跟进' } },
+              ],
+              cursor: 151,
+              latest_seq: 151,
+              has_more: false,
+            };
+          }
+        }
+        throw new Error(`Unexpected call: ${method}`);
+      },
+    };
+
+    // 首次进入：自动跨页拉全
+    const allLogs = await store.fetchLogs('room-page-test', mockBridge);
+    assert.equal(calls.length, 2, '首次拉取必须自动接续 2 页');
+    assert.equal(calls[0].since_seq, undefined);
+    assert.equal(calls[1].since_seq, 100);
+    assert.equal(allLogs.length, 4);
+    assert.equal(allLogs[0].seq, 1);
+    assert.equal(allLogs[allLogs.length - 1].seq, 150);
+
+    // 二次增量拉取：自动使用本地已知最大 seq 作为 since_seq
+    const updatedLogs = await store.fetchLogs('room-page-test', mockBridge);
+    assert.equal(calls.length, 3, '增量拉取必须只发 1 次且携带 since_seq=150');
+    assert.equal(calls[2].since_seq, 150);
+    assert.equal(updatedLogs.length, 5);
+    assert.equal(updatedLogs[updatedLogs.length - 1].seq, 151);
+  });
 });
