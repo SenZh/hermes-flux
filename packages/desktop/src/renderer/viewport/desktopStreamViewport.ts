@@ -19,7 +19,7 @@
  */
 
 import type { FluxLogger } from '@hermes-flux/core';
-import type { AppState } from '../state/appState.js';
+import { type AppState, resolveActiveViewportKey } from '../state/appState.js';
 import { StreamViewportManager } from './streamViewportManager.js';
 
 type ScrollLogger = Pick<FluxLogger, 'trace' | 'debug'>;
@@ -58,7 +58,7 @@ export function createDesktopStreamViewport(deps: DesktopStreamViewportDeps): St
   const settle = streamSettleState;
   return new StreamViewportManager({
     getStreamElement: () => document.getElementById('conversation-stream'),
-    getActiveSessionId: () => deps.getState().activeSessionId,
+    getActiveSessionId: () => resolveActiveViewportKey(deps.getState()),
     getPresenceLayout: () => deps.getState().presenceLayout,
     isPromptJumpSettling: () => deps.isPromptJumpSettling(),
     getMessageWindowEnd: () => deps.getWindowGeom().end,

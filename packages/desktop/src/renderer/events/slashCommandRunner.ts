@@ -48,15 +48,6 @@ export async function dispatchSlashCommand(
   rawCommand: string,
   deps: SlashCommandRunnerDeps,
 ): Promise<void> {
-  const liveId = deps.ensureLiveSessionId ? await deps.ensureLiveSessionId() : null;
-  if (!liveId) {
-    if (deps.setTimedDockNotice) {
-      deps.setTimedDockNotice(deps.t('chat.forkNoLive'));
-    }
-    deps.requestRender();
-    return;
-  }
-
   const interactive = deps.interactiveService;
   const rpc = deps.getRpcCaller ? deps.getRpcCaller() : null;
   if (!interactive || !rpc) return;
@@ -71,7 +62,7 @@ export async function dispatchSlashCommand(
   const isBot = sessionKind === 'bot_forever_chat' || sessionKind === 'bot';
 
   // 1.1 三层黑名单拦截：先命中模式专属原因提示，再命中通用桌面黑名单
-  if (isGroup && GROUP_ROOM_EXCLUDED.has(bareCmd)) {
+  if (isGroup) {
     if (deps.setTimedDockNotice) {
       deps.setTimedDockNotice(deps.t('dock.cmdNotSupportedInGroup'), 4000);
     }
@@ -91,6 +82,15 @@ export async function dispatchSlashCommand(
   if (effectiveExcluded.has(bareCmd)) {
     if (deps.setTimedDockNotice) {
       deps.setTimedDockNotice(deps.t('dock.cmdExcludedOnDesktop', { cmd: mainCmd }), 4000);
+    }
+    deps.requestRender();
+    return;
+  }
+
+  const liveId = deps.ensureLiveSessionId ? await deps.ensureLiveSessionId() : null;
+  if (!liveId) {
+    if (deps.setTimedDockNotice) {
+      deps.setTimedDockNotice(deps.t('chat.forkNoLive'));
     }
     deps.requestRender();
     return;

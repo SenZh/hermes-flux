@@ -51,7 +51,7 @@ function createMockGroupDeps(overrides = {}) {
     return null;
   };
 
-  const gatewayClient = overrides.gatewayClient ?? {
+  const gatewayClient = 'gatewayClient' in overrides ? overrides.gatewayClient : {
     call: mockCall,
     request: mockCall,
     listProfiles: async () => [{ name: 'bot-a' }, { name: 'bot-b' }],
@@ -136,11 +136,12 @@ test('groupOperationService: openGroupRoom disarms rollback, switches focus, loa
   await service.openGroupRoom('room-1');
 
   const state = deps.getState();
-  assert.deepEqual(enters, [{ id: 'room-1', options: undefined }], '进房间必须锁存进入计划');
+  assert.deepEqual(enters, [{ id: 'group:room-1', options: undefined }], '进房间必须锁存进入计划（以 group:roomId 为视口键）');
   assert.equal(deps.getDisarmCount(), 1);
   assert.equal(state.activeFocus.type, 'group');
   assert.equal(state.activeFocus.roomId, 'room-1');
-  assert.equal(state.activeSessionId, 'room-1');
+  assert.equal(state.activeSessionId, '', '群聊模式下 activeSessionId 必须置空以杜绝单聊 RPC 逃逸');
+  assert.equal(state.activeLiveSessionId, '', '群聊模式下 activeLiveSessionId 必须置空');
   assert.equal(state.messages.length, 1);
   assert.equal(state.messages[0].sender, 'bot-a');
   assert.equal(state.messagesPhase, 'ready');
@@ -171,3 +172,45 @@ test('groupOperationService: openGroupRoom captures stream anchor when injected'
   await service.openGroupRoom('room-1');
   assert.equal(captured, 1, '切换群聊时必须调用 captureStreamAnchor 捕获前序视口');
 });
+
+test('groupOperationService: openGroupRoom handles offline/no-client without crashing and locks group focus', async () => {
+  const deps = createMockGroupDeps({
+    gatewayClient: null,
+  });
+  let coldStartCancelled = false;
+  deps.cancelColdStartFocus = () => { coldStartCancelled = true; };
+  const service = createGroupOperationService(deps);
+
+  await service.openGroupRoom('room-offline');
+  const state = deps.getState();
+
+  assert.equal(coldStartCancelled, true, '离线进群必须取消冷启动抢焦');
+  assert.equal(state.activeFocus.type, 'group');
+  assert.equal(state.activeFocus.roomId, 'room-offline');
+  assert.equal(state.activeSessionId, '');
+  assert.equal(state.messagesPhase, 'ready');
+  assert.equal(state.messages.length, 1);
+  assert.equal(state.messages[0].id, 'group_seed_notice');
+});
+
+test('groupOperationService: openGroupRoom saves previous session messages to sessionMessagesCache', async () => {
+  const sessionMessagesCache = new Map();
+  const deps = createMockGroupDeps({
+    state: {
+      activeSessionId: 'prev-session',
+      messages: [
+        { id: 'm-old', role: 'user', content: '之前单聊内容' },
+      ],
+    },
+  });
+  deps.sessionMessagesCache = sessionMessagesCache;
+  const service = createGroupOperationService(deps);
+
+  await service.fetchGroupRooms();
+  await service.openGroupRoom('room-1');
+
+  assert.equal(sessionMessagesCache.has('prev-session'), true);
+  assert.equal(sessionMessagesCache.get('prev-session').length, 1);
+  assert.equal(sessionMessagesCache.get('prev-session')[0].content, '之前单聊内容');
+});
+

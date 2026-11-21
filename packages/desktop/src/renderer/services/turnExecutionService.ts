@@ -943,11 +943,13 @@ export function createTurnExecutionService(deps: TurnExecutionDeps): TurnExecuti
         await sendMessage(route.text);
         return;
       case 'group-message':
-        if (state.activeFocus.type === 'group') await sendGroupMessage(state.activeFocus.roomId, route.text);
-        else await sendMessage(route.text);
-        return;
       case 'mention-group':
-        if (state.activeFocus.type === 'group') await sendGroupMessage(state.activeFocus.roomId, route.text);
+        if (state.activeFocus.type === 'group' && state.activeFocus.roomId) {
+          await sendGroupMessage(state.activeFocus.roomId, route.text);
+        } else {
+          setTimedDockNotice(deps.t('group.sendFailed', { error: 'Active group room focus lost' }));
+          deps.render();
+        }
         return;
       case 'mention-btw':
         await askSideAgent('btw', route.targetProfile, route.cleanText);

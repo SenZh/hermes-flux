@@ -341,3 +341,26 @@ export function createInitialState(params: InitialStateParams): AppState {
     pickedMention: null,
   };
 }
+
+/**
+ * 解析当前视口承载实体的唯一作用域键（Viewport Scope Key）。
+ *
+ * 【设计意图 (Why)】
+ *   网关会话主键 (`state.activeSessionId`) 仅属于 `state.db` 中的普通会话与 Bot 主工位；
+ *   群聊房间物理存储于 `hosted_rooms`，此时 `activeSessionId` 必须为空串 `''` 以阻断任何 `session.*` RPC。
+ *   但视口滚动记忆、消息窗口管理器、渲染快照比对与提示词导航轨需要区分「群 A ➔ 群 B」的视口切换，
+ *   因此通过本函数提供正交的视口作用域键。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 群聊视口统一返回 `group:${roomId}`（若尚未选定 roomId 则为空串）；
+ *   2. 非群聊视口统一返回 `state.activeSessionId`。
+ */
+export function resolveActiveViewportKey(
+  state: Pick<AppState, 'activeFocus' | 'activeSessionId'> | { activeSessionId?: string; activeFocus?: LeftRailActiveFocus } | undefined | null
+): string {
+  if (state?.activeFocus?.type === 'group') {
+    return state.activeFocus.roomId ? `group:${state.activeFocus.roomId}` : '';
+  }
+  return state?.activeSessionId ?? '';
+}
+

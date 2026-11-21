@@ -54,7 +54,7 @@ import {
   decideViewportPin,
   chooseViewportAnchor,
 } from '@hermes-flux/core';
-import type { AppState } from './state/appState.js';
+import { type AppState, resolveActiveViewportKey } from './state/appState.js';
 import { decideConversationPush } from './conversationPush.js';
 import type { MessageWindowManager } from './messageWindowManager.js';
 import type { ModalInteractionController } from './events/modalInteractionController.js';
@@ -647,7 +647,7 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
 
     const currentLastMsg = state.messages.length > 0 ? state.messages[state.messages.length - 1] : null;
     const currentMessagesSnapshot: RenderMessagesSnapshot = {
-      sessionId: state.activeSessionId,
+      sessionId: resolveActiveViewportKey(state),
       count: state.messages.length,
       lastMsgId: currentLastMsg ? currentLastMsg.id : '',
       lastContentLen: currentLastMsg ? currentLastMsg.content?.length || 0 : 0,
@@ -724,7 +724,7 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
       cancelActivePostRenderPin();
     }
     let armedPostRenderPin: ReturnType<typeof armPostRenderPinAnchor> | null = null;
-    const fallbackAnchor: StreamAnchor = { sessionId: state.activeSessionId, id: null, offset: 0, rawScrollTop: 0 };
+    const fallbackAnchor: StreamAnchor = { sessionId: resolveActiveViewportKey(state), id: null, offset: 0, rawScrollTop: 0 };
     const streamAnchor = chooseViewportAnchor(scrollDecision, () => deps.captureStreamAnchor(), fallbackAnchor);
     // 单点 apply：三个渲染分支共用同一判定，避免分支漂移。
     const applyAnchorAfterDom = () => { if (scrollDecision.applyAnchor) deps.applyStreamAnchor(streamAnchor, pinBottom); };
@@ -1029,7 +1029,7 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
            */
           deps.settleSessionEnter(
             lastVisibleMessageId(state.messages) ?? '',
-            state.activeSessionId,
+            resolveActiveViewportKey(state),
             state.messagesPhase,
             state.messages.length
           );

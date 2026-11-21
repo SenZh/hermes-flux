@@ -50,7 +50,7 @@ import { createToolPatchQueue } from './toolPatchQueue.js';
 import { resolveColdStartFocus } from './coldStartFocus.js';
 import { createModalInteractionController } from './events/modalInteractionController.js';
 import { createInputDockController } from './events/inputDockController.js';
-import { type AppState, createInitialState } from './state/appState.js';
+import { type AppState, createInitialState, resolveActiveViewportKey } from './state/appState.js';
 import { createTurnExecutionService } from './services/turnExecutionService.js';
 import { createGatewayEventDispatcher } from './gateway/gatewayEventDispatcher.js';
 type GatewayAuthResponse = { ok: boolean; message: string; latency: number };
@@ -143,6 +143,10 @@ function persistAgentsToCache(profiles: AgentProfile[]): void {
 declare global {
   interface Window {
     hermesDesktop?: HermesDesktopBridge;
+    __fluxState?: AppState;
+    __fluxRender?: () => void;
+    __fluxConnect?: (url?: string) => Promise<void> | void;
+    __fluxSelectSession?: (id: string, o?: { preserveFocus?: boolean; botName?: string }) => Promise<void> | void;
     __fluxLog?: {
       readonly level: LogLevel;
       setLevel(next: string): LogLevel;
@@ -280,6 +284,7 @@ let activityIndicatorVariant: ActivityIndicatorVariant = loadActivityIndicatorVa
 const state: AppState = {
   ...createInitialState({ platform: detectInitialPlatform() }),
 };
+if (typeof window !== 'undefined') window.__fluxState = state;
 
 const logApp = createLogger('app'), logRender = createLogger('render'), logSession = createLogger('session'), logStream = createLogger('stream'), logScroll = createLogger('scroll');
 
@@ -497,6 +502,7 @@ const groupOperationService = createGroupOperationService({
   getState: () => state, getGatewayClient: () => gatewayClient, render: () => render(),
   t: (k, p) => t(k, p), disarmRollbackOnLeave: () => disarmRollbackOnLeave(),
   unreadGroupRoomIds, activeRunningGroupRoomIds, activityTransitionTracker,
+  groupRoomStore, cancelColdStartFocus: () => cancelColdStartFocus(), sessionMessagesCache,
   turnExecutionService: {
     resetActiveGroupThread: () => turnExecutionService.resetActiveGroupThread(),
     syncGroupRoomLogsToState: (r, l) => turnExecutionService.syncGroupRoomLogsToState(r, l),
@@ -548,6 +554,7 @@ const cancelColdStartFocus = (): void => { coldStartFocusPending = false; };
 
 async function applyColdStartFocus(): Promise<void> {
   if (!coldStartFocusPending || coldStartFocusApplied) return;
+  if (state.activeFocus.type === 'group') return;
   if (state.profilesPhase !== 'ready') return;
   if (!gatewayClient || !getEffectiveUrl(state.gatewayUrl) || !state.gatewayConnected) return;
   const storedProfileName = localStorage.getItem('hermes_flux_profile') || localStorage.getItem('hermes_aura_profile') || (state.profileName !== 'default' ? state.profileName : undefined);
@@ -620,7 +627,7 @@ function syncWindowLocalState(): void {
   // 窗口状态已收敛至 messageWindowManager 单一真值源，保留空函数以兼容既有调用点
 }
 
-const layoutSignature = (): string => `${state.activeSessionId ?? ''}:${state.messages.length}:${messageWindowManager.getMessageWindowStart()}:${messageWindowManager.getMessageWindowEnd()}`;
+const layoutSignature = (): string => `${resolveActiveViewportKey(state)}:${state.messages.length}:${messageWindowManager.getMessageWindowStart()}:${messageWindowManager.getMessageWindowEnd()}`;
 function markProgrammaticScroll(stream: HTMLElement): void {
   programmaticScrollTarget = Math.round(stream.scrollTop);
   programmaticScrollIgnoreUntil = (typeof performance !== 'undefined' ? performance.now() : Date.now()) + 180;
@@ -641,7 +648,7 @@ const isGroupConversationActive = (sessionId = state.activeSessionId): boolean =
 };
 
 const promptNavigatorManager = new PromptNavigatorManager({
-  getActiveSessionId: () => state.activeSessionId, getMessages: () => state.messages, getLang: () => state.lang,
+  getActiveSessionId: () => resolveActiveViewportKey(state), getMessages: () => state.messages, getLang: () => state.lang,
   hasOlderMessages: () => state.hasOlderMessages, isLoadingOlder: () => state.isLoadingOlder,
   isGroupConversationActive: () => isGroupConversationActive(), getAverageRowHeightPx: () => messageWindowManager.getAverageRowHeightPx(),
   isAverageRowHeightLocked: () => messageWindowManager.isAverageRowHeightLocked(),
@@ -820,6 +827,7 @@ async function loadMessages(sessionId: string, targetBotName?: string): Promise<
 const loadMessagesInner = (s: string, b?: string) => messageLoadingService.loadMessagesInner(s, b);
 
 async function ensureLiveSessionId(): Promise<string> {
+  if (state.activeFocus.type === 'group') return '';
   if (state.activeLiveSessionId) return state.activeLiveSessionId;
   if (!gatewayClient || !state.activeSessionId) return '';
   const guard = { sessionId: state.activeSessionId, generation: activeLoadMessagesGeneration };
@@ -854,7 +862,7 @@ const exportMarkdown = (id: string) => sessionOperationService.exportMarkdown(id
 const archiveSession = (id: string) => sessionOperationService.archiveSession(id);
 const handleArmedOnDelete = (id: string) => sessionOperationService.handleArmedOnDelete(id);
 const disarmRollbackOnLeave = (outId?: string) => sessionOperationService.disarmRollbackOnLeave(outId);
-const selectSession = (id: string, o?: { preserveFocus?: boolean; botName?: string }) => sessionOperationService.selectSession(id, o);
+const selectSession = (id: string, o?: { preserveFocus?: boolean; botName?: string }) => { cancelColdStartFocus(); return sessionOperationService.selectSession(id, o); };
 const applyModelToLiveSession = (m: string, p?: string) => sessionOperationService.applyModelToLiveSession(m, p);
 const switchModel = (m: string, p?: string) => sessionOperationService.switchModel(m, p);
 const switchReasoning = (e: AppState['reasoningLevel']) => sessionOperationService.switchReasoning(e);
@@ -1268,6 +1276,11 @@ const syncLocale = () => {
 };
 const mountReactShellComponents = () => renderCoordinator.mountReactShellComponents();
 const render = () => renderCoordinator.render();
+if (typeof window !== 'undefined') {
+  window.__fluxRender = render;
+  window.__fluxConnect = connect;
+  window.__fluxSelectSession = selectSession;
+}
 
 const fileViewerService = createFileViewerService({
   getState: () => state, render: () => render(), getDesktopApi: () => desktopApi,

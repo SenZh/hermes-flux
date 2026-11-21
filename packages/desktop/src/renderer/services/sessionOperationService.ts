@@ -720,7 +720,7 @@ export class SessionOperationService {
     state.approvalMode = mode;
     this.deps.render();
 
-    if (!gatewayClient || !state.activeSessionId) return;
+    if (!gatewayClient || !state.activeSessionId || state.activeFocus.type === 'group') return;
 
     const liveId = await this.deps.ensureLiveSessionId();
     if (!liveId) {
