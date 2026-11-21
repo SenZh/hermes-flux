@@ -47,7 +47,7 @@ import {
 } from '@hermes-flux/core';
 import { safeSetItem, type I18nKey, type MessageViewModel, type StorageWriteFailure } from '@hermes-flux/ui';
 import { planRollbackLeaveRestore } from '../rollbackTransaction.js';
-import type { SessionDraftStore } from '../persistence/sessionDrafts.js';
+import { isCorruptedSystemErrorDraft, type SessionDraftStore } from '../persistence/sessionDrafts.js';
 
 export function rpcErrorCode(error: unknown): number | null {
   if (error instanceof Error && 'code' in error && typeof error.code === 'number') return error.code;
@@ -83,6 +83,7 @@ export interface SessionOperationDeps {
   readonly t: (key: I18nKey, params?: Record<string, string | number>) => string;
   readonly showToast: (message: string, durationMs?: number) => void;
   readonly setTimedDockNotice: (notice: string, durationMs?: number) => void;
+  readonly clearTimedDockNotice?: () => void;
   readonly restoreComposerFocus: () => void;
 
   readonly sessionDrafts: SessionDraftStore;
@@ -503,8 +504,19 @@ export class SessionOperationService {
       this.deps.cancelSmoothScrollOnLeave?.();
       this.deps.captureStreamAnchor?.();
       if (currentInputVal !== undefined) {
-        this.deps.sessionDrafts.set(state.activeSessionId, currentInputVal);
+        if (!isCorruptedSystemErrorDraft(currentInputVal)) {
+          this.deps.sessionDrafts.set(state.activeSessionId, currentInputVal);
+        } else {
+          this.deps.sessionDrafts.delete(state.activeSessionId);
+        }
       }
+      // 【关键隔离 1】：离开旧会话时立即清空 DOM 输入框，绝不将旧会话文本残留带入切换期
+      this.setInputValue('');
+
+      // 【关键隔离 2】：旧会话遗留的临时通知横幅绝不带到新会话
+      state.dockNotice = '';
+      this.deps.clearTimedDockNotice?.();
+
       if (state.rollbackArmed && state.rollbackArmed.sessionId === state.activeSessionId) {
         this.disarmRollbackOnLeave();
       } else if (state.messages.length > 0) {
@@ -550,13 +562,18 @@ export class SessionOperationService {
       }
     }
 
-    // Restore draft for incoming session without clobbering live typing
+    // Restore draft for incoming session without clobbering live typing during network load
+    const incomingDraft = this.deps.sessionDrafts.get(id) || '';
     const restoredCurrent = this.getInputValue();
-    if (restoredCurrent !== undefined) {
-      // 【非破坏性草稿恢复 (Non-Destructive Draft Restoration)】
-      // 若用户在网络加载期间已在输入框敲入文字，绝对禁止用空草稿冲刷抹除实时输入！
-      if (!restoredCurrent.trim() && this.deps.sessionDrafts.has(id)) {
-        this.setInputValue(this.deps.sessionDrafts.get(id) || '');
+    if (isCorruptedSystemErrorDraft(incomingDraft)) {
+      this.deps.sessionDrafts.delete(id);
+      this.setInputValue('');
+    } else if (restoredCurrent !== undefined) {
+      // 若在网络加载期间用户在空白框里已敲入了非报错文字，保留实时输入；否则权威恢复目标草稿或置空
+      if (restoredCurrent.trim() && !isCorruptedSystemErrorDraft(restoredCurrent)) {
+        // 用户在加载期间敲字，保留它
+      } else {
+        this.setInputValue(incomingDraft);
       }
     }
 

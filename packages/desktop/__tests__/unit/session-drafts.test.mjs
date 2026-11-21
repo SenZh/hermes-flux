@@ -16,6 +16,7 @@ import assert from 'node:assert/strict';
 import {
   createSessionDraftStore,
   SESSION_DRAFT_STORAGE_KEY,
+  isCorruptedSystemErrorDraft,
 } from '../../dist/renderer/persistence/sessionDrafts.mjs';
 
 /** 可控 storage 替身 */
@@ -138,4 +139,36 @@ test('drafts · 反复删除同一会话是幂等的，且不产生多余落盘'
   store.delete('a');
   store.delete('a');
   assert.equal(writes, afterSet + 1, '第一次 delete 落盘，后续幂等不得再写');
+});
+
+test('drafts · 报错草稿防污染（防范系统执行失败文本持久化跨会话阴魂不散）', () => {
+  const errMsg1 = "指令 /compress 执行失败: RPC request 'slash.exec' with id 74 timed out after 25000ms";
+  const errMsgChinesePure = "指令 /compress 执行失败: 未知错误或者参数无效";
+  const errMsg2 = "Command /plan failed: Network down";
+  const errMsg3 = "skill command: use command.dispatch for /human-writing";
+  const normalText = "请帮我重构一下 /compress 相关逻辑";
+
+  assert.equal(isCorruptedSystemErrorDraft(errMsg1), true, '中文指令报错必须识别为损坏草稿');
+  assert.equal(isCorruptedSystemErrorDraft(errMsgChinesePure), true, '无 RPC 超时特征的纯中文指令报错也必须识别为损坏草稿');
+  assert.equal(isCorruptedSystemErrorDraft(errMsg2), true, '英文指令报错必须识别为损坏草稿');
+  assert.equal(isCorruptedSystemErrorDraft(errMsg3), true, 'RPC 调度提示必须识别为损坏草稿');
+  assert.equal(isCorruptedSystemErrorDraft(normalText), false, '正常用户输入绝不得被误杀');
+
+  const storage = makeStorage({
+    [SESSION_DRAFT_STORAGE_KEY]: JSON.stringify({
+      'sess-clean': '正常提问',
+      'sess-corrupted': errMsg1,
+    }),
+  });
+  const store = createSessionDraftStore({ storage });
+
+  assert.equal(store.has('sess-clean'), true);
+  assert.equal(store.has('sess-corrupted'), false, '启动恢复时损坏报错草稿必须被彻底清除');
+  assert.equal(store.get('sess-corrupted'), '', '损坏草稿读取必须回退为空');
+  assert.deepEqual(storage.dump(), { 'sess-clean': '正常提问' }, '盘面必须自动重洗落盘，消除脏数据');
+
+  // 尝试 set 写入报错草稿应当被拒绝并等价于删除
+  store.set('sess-clean', errMsg2);
+  assert.equal(store.has('sess-clean'), false, '写入报错草稿必须被阻断并直接清除');
+  assert.deepEqual(storage.dump() ?? {}, {}, '存储不得残留报错草稿');
 });

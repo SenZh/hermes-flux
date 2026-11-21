@@ -167,6 +167,7 @@ export interface TurnExecutionService {
   clearPresenceTerminal(): void;
   armPresenceTerminal(terminal: NonNullable<AppState['presenceTerminal']>): void;
   setTimedDockNotice(msg: string, durationMs?: number, options?: { skipRender?: boolean }): void;
+  clearTimedDockNotice(options?: { skipRender?: boolean }): void;
   interruptTurn(): Promise<void>;
   sendGroupMessage(roomId: string, text: string): Promise<void>;
   syncGroupRoomLogsToState(roomId: string, logs: readonly GroupMessageEntry[]): void;
@@ -313,6 +314,18 @@ export function createTurnExecutionService(deps: TurnExecutionDeps): TurnExecuti
         }
       }, durationMs);
       safeUnref(dockNoticeDismissTimer);
+    }
+  }
+
+  function clearTimedDockNotice(options?: { skipRender?: boolean }): void {
+    const state = deps.getState();
+    state.dockNotice = '';
+    if (dockNoticeDismissTimer) {
+      clearTimeout(dockNoticeDismissTimer);
+      dockNoticeDismissTimer = null;
+    }
+    if (!options?.skipRender) {
+      deps.render();
     }
   }
 
@@ -963,6 +976,7 @@ export function createTurnExecutionService(deps: TurnExecutionDeps): TurnExecuti
     clearPresenceTerminal,
     armPresenceTerminal,
     setTimedDockNotice,
+    clearTimedDockNotice,
     interruptTurn,
     sendGroupMessage,
     syncGroupRoomLogsToState,
