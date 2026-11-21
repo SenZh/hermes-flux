@@ -69,11 +69,14 @@ export function SettingRow({
 /** 纵向字段：标签在上，控件撑满。用于表单输入。 */
 export function SettingField({
   label,
+  meta,
   htmlFor,
   anchorId,
   children,
 }: {
   label: string;
+  /** 标题右侧附属信息（如已选数量计数）。 */
+  meta?: React.ReactNode;
   htmlFor?: string;
   /** 检索跳转锚点；设置中心按此定位并做一次性高亮。 */
   anchorId?: string;
@@ -81,9 +84,18 @@ export function SettingField({
 }): React.ReactElement {
   return (
     <div className="flex flex-col gap-2" data-settings-anchor={anchorId}>
-      <label htmlFor={htmlFor} className="text-aux text-muted-foreground">
-        {label}
-      </label>
+      {meta !== undefined ? (
+        <div className="flex items-center justify-between gap-2">
+          <label htmlFor={htmlFor} className="text-aux text-muted-foreground">
+            {label}
+          </label>
+          {meta}
+        </div>
+      ) : (
+        <label htmlFor={htmlFor} className="text-aux text-muted-foreground">
+          {label}
+        </label>
+      )}
       {children}
     </div>
   );

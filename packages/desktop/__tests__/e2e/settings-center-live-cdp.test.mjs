@@ -41,9 +41,9 @@ test('settings-center-live: 真实网关下的提供商、技能与检索（出�
   let expectedProviders = [];
   let expectedSkills = 0;
   try {
-    const options = await rpc.call('model.options', { profile: 'default', include_unconfigured: true });
+    const options = await rpc.call('model.options', { profile: 'default', explicit_only: true });
     expectedProviders = (Array.isArray(options?.providers) ? options.providers : [])
-      .map((row) => String(row?.slug || '').trim())
+      .map((row) => String(row?.slug || '').trim().replace(/^custom:/, ''))
       .filter(Boolean);
     const skills = await rpc.call('skills.manage', { profile: 'default', action: 'list' });
     for (const names of Object.values(skills?.skills || {})) {
@@ -52,7 +52,7 @@ test('settings-center-live: 真实网关下的提供商、技能与检索（出�
   } finally {
     rpc.close();
   }
-  assert.ok(expectedProviders.length >= 5, `真实网关返回的 provider 太少（${expectedProviders.length}），无法形成有效对照`);
+  assert.ok(expectedProviders.length >= 1, `真实网关返回的已配 provider 为空（${expectedProviders.length}）`);
 
   const app = await launchLiveApp({ rootDir });
   t.after(async () => { await app.close(); });
@@ -63,15 +63,15 @@ test('settings-center-live: 真实网关下的提供商、技能与检索（出�
   await app.evaluate('document.getElementById("btn-open-settings").click()');
   await app.waitFor('Boolean(document.querySelector("[data-testid=settings-dialog]"))', { label: '设置弹窗' });
 
-  // 提供商页：必须出现真实数据，且 slug 集合与网关响应一致。
+  // 提供商页：必须出现真实数据，且 provider key 集合与网关 explicit_only 响应一致。
   await app.evaluate('document.querySelector("[data-settings-section=providers]").click()');
-  await app.waitFor('document.querySelectorAll("[data-provider-slug]").length > 0', {
+  await app.waitFor('document.querySelectorAll("[data-provider-key]").length > 0', {
     label: '真实提供商行',
     timeoutMs: 20000,
   });
 
   const renderedSlugs = await app.evaluate(
-    'Array.from(document.querySelectorAll("[data-provider-slug]")).map((node) => node.getAttribute("data-provider-slug"))',
+    'Array.from(document.querySelectorAll("[data-provider-key]")).map((node) => node.getAttribute("data-provider-key").replace(/^(custom|subscription):/, ""))',
   );
   assert.equal(
     renderedSlugs.length,
@@ -84,33 +84,25 @@ test('settings-center-live: 真实网关下的提供商、技能与检索（出�
   }
 
   // 当前使用的 provider 必须置顶（若网关明确给出 provider）。
-  const currentSlug = await app.evaluate('String(window.__fluxState.currentProvider || "").trim()');
+  const currentSlug = await app.evaluate('String(window.__fluxState.currentProvider || "").trim().replace(/^custom:/, "")');
   if (currentSlug) {
     assert.equal(renderedSlugs[0], currentSlug, '当前使用的 provider 必须排在第一行');
   }
 
-  // 搜索：输入真实 slug 片段后，所有可见行都必须命中。
-  const needle = expectedProviders[0].slice(0, Math.min(4, expectedProviders[0].length));
-  await app.evaluate(`(() => {
-    const input = Array.from(document.querySelectorAll('input')).find((node) => node.getAttribute('aria-label')?.includes('搜索提供商'));
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-    setter.call(input, ${JSON.stringify(needle)});
-    input.dispatchEvent(new Event('input', { bubbles: true }));
+  // 提供商页已去除「搜索提供商」输入框与顶部 BOT 作用域下拉框。
+  const redundantControls = await app.evaluate(`(() => {
+    const root = document.querySelector('[data-testid=settings-dialog]');
+    if (!root) return { hasSearch: false, hasScopeSelect: false };
+    const hasSearch = Array.from(root.querySelectorAll('input')).some((node) =>
+      (node.getAttribute('aria-label') || '').includes('搜索提供商'),
+    );
+    const hasScopeSelect = Array.from(root.querySelectorAll('[aria-label]')).some((node) =>
+      (node.getAttribute('aria-label') || '').includes('按 BOT'),
+    );
+    return { hasSearch, hasScopeSelect };
   })()`);
-  await app.waitFor(
-    `Array.from(document.querySelectorAll('[data-provider-slug]')).every((node) => node.getAttribute('data-provider-slug').includes(${JSON.stringify(needle)}) || node.textContent.includes(${JSON.stringify(needle)}))`,
-    { label: '提供商检索过滤' },
-  );
-  const filteredCount = await app.evaluate('document.querySelectorAll("[data-provider-slug]").length');
-  assert.ok(filteredCount >= 1 && filteredCount <= expectedProviders.length, `检索结果数量异常：${filteredCount}`);
-
-  // 清空检索
-  await app.evaluate(`(() => {
-    const input = Array.from(document.querySelectorAll('input')).find((node) => node.getAttribute('aria-label')?.includes('搜索提供商'));
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-    setter.call(input, '');
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  })()`);
+  assert.equal(redundantControls.hasSearch, false, '提供商页不得再显示搜索框');
+  assert.equal(redundantControls.hasScopeSelect, false, '提供商页不得再显示 BOT 作用域下拉框');
 
   // 扩展页：技能清单必须来自真实 skills.manage。
   await app.evaluate('document.querySelector("[data-settings-section=extensions]").click()');
@@ -133,8 +125,8 @@ test('settings-center-live: 真实网关下的提供商、技能与检索（出�
   // 数字员工页：真实 profiles.list。
   await app.evaluate('document.querySelector("[data-settings-section=agents]").click()');
   await app.waitFor('Boolean(document.querySelector("[data-settings-section=agents][aria-current=page]"))', { label: '数字员工页激活' });
-  await app.waitFor('document.body.textContent.includes("打开") || document.body.textContent.includes("Open")', {
-    label: '员工行渲染',
+  await app.waitFor('Boolean(document.querySelector("[data-settings-anchor=bot-id]"))', {
+    label: 'BOT 配置面板渲染',
     timeoutMs: 20000,
   });
 

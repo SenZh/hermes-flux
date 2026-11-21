@@ -5,9 +5,30 @@ import path from 'node:path';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { SettingsModal } from '../dist/components-react/settings/SettingsModal.js';
+import { AddProviderDialog } from '../dist/components-react/settings/AddProviderDialog.js';
+import { SwitchDefaultProviderDialog } from '../dist/components-react/settings/SwitchDefaultProviderDialog.js';
+import {
+  applyProbeResultToDraft,
+  buildSaveEndpointOptions,
+  createOAuthLoginCoordinator,
+  formatFanOutWarning,
+  hasStoredEndpointKey,
+  initialFormState,
+  resolveEditProfiles,
+} from '../dist/components-react/settings/providerDialogLogic.js';
 import { FanOutMemberList } from '../dist/components-react/settings/FanOutMemberList.js';
-import { AgentBindingGrid, describeDetail } from '../dist/components-react/settings/ProvidersAdminPanel.js';
-import { ModelOptionRow, ModelPickerDialog, ModelPickerField, resolveModelPick } from '../dist/components-react/settings/ModelPicker.js';
+import {
+  AgentBindingGrid,
+  describeDetail,
+  dispatchAgentBindingToggle,
+} from '../dist/components-react/settings/ProvidersAdminPanel.js';
+import {
+  ModelOptionRow,
+  ModelPickerDialog,
+  ModelPickerField,
+  handleModelSearchKeyDown,
+  resolveModelPick,
+} from '../dist/components-react/settings/ModelPicker.js';
 import { renderModelVendorIcon } from '../dist/lib/vendorIcon.js';
 import {
   SETTINGS_SECTIONS,
@@ -122,6 +143,7 @@ const noopActions = {
   onTestGateway() {},
   onConnectGateway() {},
   onDisconnectGateway() {},
+  onSwitchDefaultAndDisableProvider: async () => ({ ok: true }),
 };
 
 function render(overrides = {}) {
@@ -828,24 +850,28 @@ test('生效范围是每个 Agent 一个格子：头像 + 名称 + 勾选框，�
   assert.ok(html.includes('data-agent-profile="default"'), '每个 Agent 必须是一个可勾选的格子');
   assert.ok(html.includes('data-agent-profile="aura"'));
   assert.ok(html.includes('data-agent-profile="codeboy"'));
-  assert.ok(html.includes(t('settings.providerBindingTitleEditable')), '勾选区要有标题，说明它可操作');
-  assert.equal(html.includes(t('settings.providerScopeAll')), false, '不得再用"N 个 Agent 在用"这类计数代替');
+  assert.ok(
+    html.includes(t('settings.providerBindingScopeCount', { enabled: 2, total: 3 })),
+    '顶栏必须内嵌展示 2/3 BOT 开启概况，不再单独渲染突兀的「开启于」行',
+  );
+  assert.equal(html.includes('开启于'), false, '自定义提供商不再单独占用一行「开启于」');
+  assert.equal(html.includes(t('settings.providerScopeAll')), false, '不得再用"所有 BOT 都在用"这类计数代替');
 
   const active = agentCell(html, 'default');
-  assert.ok(active.includes('checked'), '当前模型必须勾选');
-  assert.ok(active.includes('disabled'), '当前模型的格子必须锁定：取消会让主模型指向不存在的 provider');
-  assert.ok(active.includes(t('settings.providerBindingActive')));
+  assert.ok(active.includes('checked'), '当前使用中同样处于已开启状态');
+  assert.equal(active.includes('disabled'), false, '当前使用的 BOT 头像不静默锁定，允许点击后弹出切换默认窗口');
+  assert.ok(active.includes(t('settings.providerBindingDefault')));
 
   const ready = agentCell(html, 'aura');
-  assert.ok(ready.includes('checked'), '已配置必须勾选');
-  assert.equal(ready.includes('disabled'), false, '已配置但非当前模型：可以取消勾选');
+  assert.ok(ready.includes('checked'), '已开启必须勾选');
+  assert.equal(ready.includes('disabled'), false, '已开启但非当前使用中：可以取消开启');
 
   const absent = agentCell(html, 'codeboy');
-  assert.equal(absent.includes('checked'), false, '未配置不得勾选');
+  assert.equal(absent.includes('checked'), false, '未开启不得勾选');
   assert.equal(/data-profile-slot=/.test(html), false, '不得再出现首字母头像槽位');
 });
 
-test('Agent 成员网格：44px 头像、64px 固定轨道、名称截断但 title 保留全名', () => {
+test('Agent 成员网格：56px 大头像、112px 宽轨道、常规名完整展示但 title 保留全名，不再绘默认绿环', () => {
   setLocale('zh-CN');
   const longName = 'auralis-infrastructure-ops';
   const html = render(providerSnapshot({
@@ -855,25 +881,34 @@ test('Agent 成员网格：44px 头像、64px 固定轨道、名称截断但 tit
         agents: [
           { profile: 'default', displayName: longName, state: 'ready' },
           { profile: 'aura', displayName: '基础设施运维助手', state: 'active' },
+          { profile: 'flux-product', displayName: 'flux-product', state: 'ready' },
           { profile: 'xiaofawang', displayName: 'xiaofawang', state: 'ready' },
+          { profile: 'cjk-long', displayName: '基础设施运维保障团队助手', state: 'ready' },
         ],
       })],
     },
   }));
-  assert.ok(html.includes('w-16'), '成员宽度固定 64px，不随容器拉伸');
-  assert.ok(html.includes('size-11'), '头像放大到 44px，不再被正方形卡片挤小');
+  assert.ok(html.includes('w-28'), '成员轨道放宽至 112px（w-28），让常规英文与中文名完整显示');
+  assert.ok(html.includes('size-14'), '头像放大到 56px（size-14）');
   assert.equal(html.includes('min-h-15'), false, '不再保留 60px 高的正方形卡片');
   assert.equal(html.includes('w-20'), false, '不再保留 80px 宽的正方形卡片');
-  assert.ok(html.includes('agent-grid'), '网格按 64px 固定轨道自动铺列，行数随数量增长');
+  assert.ok(html.includes('agent-grid'), '网格按 112px 固定轨道自动铺列，行数随数量增长');
+  const tailwindCss = fs.readFileSync(path.resolve(import.meta.dirname, '../src/tailwind-entry.css'), 'utf8');
+  assert.ok(
+    /@utility agent-grid\s*\{[\s\S]*--spacing:\s*4px;[\s\S]*112px/.test(tailwindCss),
+    'tailwind-entry.css 的 .agent-grid 必须锁定 --spacing: 4px 与 112px 轨道，避免受 13px 根字号缩放错位',
+  );
   assert.ok(html.includes('--ui-text-caption'), '名称字号必须消费用户字号档位变量');
-  assert.ok(html.includes('auralis-i…'), '英文名按 10 个半角单位截断，与 64px 轨道匹配');
-  assert.ok(html.includes('基础设施…'), '中文名按预算为省略号预留宽度');
-  assert.ok(html.includes('>xiaofawang<'), '10 个半角字符必须完整显示，不得提前截断');
+  assert.ok(html.includes('auralis-infrast…'), '超长英文名按 16 个半角单位截断，与 112px 轨道匹配');
+  assert.ok(html.includes('>基础设施运维助手<'), '8 个汉字以内中文名完整显示，不再腰斩');
+  assert.ok(html.includes('基础设施运维保…'), '超出 16 单位的超长中文名按预算预留省略号');
+  assert.ok(html.includes('>flux-product<'), 'flux-product 完整显示，不得截断');
+  assert.ok(html.includes('>xiaofawang<'), 'xiaofawang 完整显示，不得提前截断');
   assert.ok(html.includes(`title="${longName} · fn"`), '完整名称与 provider 保留在 title');
-  assert.ok(html.includes('ring-success'), '当前模型用 success 环表达');
+  assert.equal(html.includes('ring-success'), false, '列表页头像区只表达开启或关闭，不得再绘默认模型绿环');
 });
 
-test('Agent 成员网格：勾选样式只有一种，绿色环单独表达「当前模型」', () => {
+test('Agent 成员网格：普通勾选与当前默认以名字下方微标区分，不遮挡头像且无冗余开启于标题', () => {
   setLocale('zh-CN');
   const html = render(providerSnapshot({
     providerViews: {
@@ -888,16 +923,106 @@ test('Agent 成员网格：勾选样式只有一种，绿色环单独表达「�
   }));
   const active = agentCell(html, 'default');
   const ready = agentCell(html, 'aura');
-  assert.ok(active.includes('bg-primary text-primary-foreground'), '当前模型的勾选与普通已配置使用同一套视觉');
-  assert.ok(ready.includes('bg-primary text-primary-foreground'), '已配置的勾选不得再画成另一种绿色空心对号');
+  assert.ok(active.includes('data-bot-badge="default"'), '当前默认提供方应渲染克制的默认角标');
+  assert.equal((active.match(/data-bot-badge="default"/g) ?? []).length, 1, '默认微标只能出现在名字下方一次，不得重复输出到头像角标');
+  assert.ok(active.includes('bg-primary text-primary-foreground'), '可编辑的当前默认成员仍保留主色对号角标');
+  assert.ok(active.includes('lucide-check'), '可编辑默认成员必须保留勾选对号图标');
+  const defaultBadgeTag = active.match(/<span[^>]*data-bot-badge="default"[^>]*>/);
+  assert.ok(defaultBadgeTag, '必须找到默认微标节点');
+  assert.ok(defaultBadgeTag[0].includes('text-foreground'), '默认微标节点本身必须使用 text-foreground 高对比前景色');
+  assert.ok(defaultBadgeTag[0].includes('border-warning/40'), '默认微标须保留克制警示描边');
+  assert.ok(active.includes(`>${t('settings.agentDefault')}<`), '默认角标应展示简明「默认」标签');
+  // 「默认」标签位于名字容器内（size-14 头像包裹之后），不得压在 56px 头像脸部
+  const faceImgPos = active.indexOf('size-14');
+  const defaultBadgePos = active.indexOf('data-bot-badge="default"');
+  const namePos = active.indexOf('>default<');
+  assert.ok(faceImgPos > 0 && namePos > faceImgPos && defaultBadgePos > namePos, '默认微标应放在 BOT 名称下方，不得遮挡头像');
+  assert.ok(ready.includes('data-bot-badge="checked"'), '已开启的非默认成员应渲染对号角标');
+  assert.ok(ready.includes('bg-primary text-primary-foreground'), '已开启勾选使用主色对号角标');
   assert.equal(active.includes('border-success bg-success'), false, '不得再用绿色实底对号区分当前模型');
-  assert.ok(active.includes('ring-success'), '当前模型改用头像外环表达');
-  assert.ok(html.includes('绿环'), '界面必须说明绿环的含义');
-  assert.ok(html.includes('默认模型'), '绿环代表的必须是该 Bot 使用的默认模型');
+  assert.equal(active.includes('ring-success'), false, '不得再渲染默认模型绿环');
+  assert.equal(html.includes('开启于'), false, '列表中不应再单独渲染突兀的「开启于」行');
+  assert.ok(html.includes('2/2 BOT'), '顶栏应融入 BOT 开启范围统计');
+  assert.equal(html.includes('绿环'), false, '列表页不得再出现绿环图例');
+  assert.equal(html.includes('默认模型'), false, '列表页不得再混入默认模型说明');
   assert.equal(html.includes('勾选 = 已配置'), false, '已配置的解释按用户要求删除');
 });
 
-test('添加端点：成员选择与列表页同一套头像语义，保存目标用锁形角标区别于普通勾选', () => {
+test('Agent 成员网格点击分发：点默认成员走 onRequestSwitchDefault、无模型订阅顶栏不画多余圆点', () => {
+  setLocale('zh-CN');
+  const v = providerView({
+    agents: [
+      { profile: 'boss', displayName: '大总管', state: 'active' },
+      { profile: 'aura', displayName: 'aura', state: 'ready' },
+      { profile: 'newbie', displayName: 'newbie', state: 'absent' },
+    ],
+  });
+  const events = [];
+  dispatchAgentBindingToggle(v, v.agents[0], false, {
+    onRequestSwitchDefault: (ag) => events.push(['switch', ag.profile]),
+    onDirectAttach: (p) => events.push(['attach', p]),
+    onRunToggle: (p, c) => events.push(['toggle', p, c]),
+  });
+  dispatchAgentBindingToggle(v, v.agents[1], false, {
+    onRequestSwitchDefault: (ag) => events.push(['switch', ag.profile]),
+    onDirectAttach: (p) => events.push(['attach', p]),
+    onRunToggle: (p, c) => events.push(['toggle', p, c]),
+  });
+  dispatchAgentBindingToggle(v, v.agents[2], true, {
+    onRequestSwitchDefault: (ag) => events.push(['switch', ag.profile]),
+    onDirectAttach: (p) => events.push(['attach', p]),
+    onRunToggle: (p, c) => events.push(['toggle', p, c]),
+  });
+  dispatchAgentBindingToggle(v, v.agents[0], false, {
+    onDirectAttach: (p) => events.push(['attach', p]),
+    onRunToggle: (p, c) => events.push(['toggle', p, c]),
+  });
+  // 普通静态模型视图（非自定义 attach 流）走 onRunToggle(..., true)
+  const subView = providerView({ kind: 'subscription', key: 'subscription:x', id: 'x', agents: v.agents });
+  dispatchAgentBindingToggle(subView, subView.agents[2], true, {
+    onDirectAttach: (p) => events.push(['attach', p]),
+    onRunToggle: (p, c) => events.push(['toggle', p, c]),
+  });
+  assert.deepEqual(events, [
+    ['switch', 'boss'],
+    ['toggle', 'aura', false],
+    ['attach', 'newbie'],
+    ['toggle', 'boss', false],
+    ['toggle', 'newbie', true],
+  ]);
+
+  const noModelSubHtml = render(providerSnapshot({
+    providerViews: {
+      status: 'ready',
+      data: [providerView({
+        key: 'subscription:codex',
+        kind: 'subscription',
+        id: 'codex',
+        name: 'Codex',
+        models: [],
+        agents: [{ profile: 'default', displayName: 'default', state: 'ready' }],
+      })],
+    },
+  }));
+  assert.ok(noModelSubHtml.includes(t('settings.providerBindingScopeAll')), '无模型订阅仍应展示适用范围');
+  assert.equal(
+    />·<\/span>/.test(noModelSubHtml),
+    false,
+    '无模型数量前导文案时不得渲染孤立分隔圆点 ·',
+  );
+  const withModelsHtml = render(providerSnapshot({
+    providerViews: {
+      status: 'ready',
+      data: [providerView({
+        models: ['m1', 'm2'],
+        agents: [{ profile: 'default', displayName: 'default', state: 'ready' }],
+      })],
+    },
+  }));
+  assert.ok(/<span[^>]*text-caption[^>]*>·<\/span>/.test(withModelsHtml), '同时有模型数与范围时必须渲染 text-caption 分隔圆点');
+});
+
+test('添加端点：成员选择与列表页同一套头像语义，不传 lockedProfile 时全员自由开关', () => {
   setLocale('zh-CN');
   const html = renderToStaticMarkup(
     React.createElement(FanOutMemberList, {
@@ -906,28 +1031,30 @@ test('添加端点：成员选择与列表页同一套头像语义，保存目�
         { profile: 'ops', displayName: 'auralis-infrastructure-operations-team' },
       ],
       selected: ['xiaofawang'],
-      lockedProfile: 'default',
       onToggle() {},
     }),
   );
+  assert.ok(html.includes('max-w-36'), '紧凑档名称容器应使用 max-w-36 宽限');
   assert.ok(html.includes('title="xiaofawang"'), 'title 必须保留完整名称');
   assert.ok(html.includes('aria-label="xiaofawang"'), '勾选框的无障碍名称必须是全名');
   assert.ok(
     html.includes('title="auralis-infrastructure-operations-team"'),
     '超长名同样保留完整 title',
   );
-  assert.ok(html.includes('auralis-infra'), '超长名按紧凑规格截断');
+  assert.ok(html.includes('auralis-infrast…'), '超长名按 16 单位截断');
   const inputFor = (name) => {
     const match = html.match(new RegExp(`<input[^>]*aria-label="${name}"[^>]*/>`));
     assert.ok(match, `缺少 ${name} 的勾选框`);
     return match[0];
   };
   assert.ok(inputFor('xiaofawang').includes('checked'), '已选成员必须渲染为勾选');
+  assert.equal(inputFor('xiaofawang').includes('disabled'), false, '未传 lockedProfile 时成员不得被锁定');
   assert.equal(
     inputFor('auralis-infrastructure-operations-team').includes('checked'),
     false,
     '未选成员不得渲染为勾选',
   );
+  assert.equal(html.includes('data-bot-badge="locked"'), false, '自由模式下不得渲染锁定角标');
 });
 
 test('添加端点：保存目标本身必须出现、勾选且不可取消', () => {
@@ -1112,7 +1239,42 @@ test('查看模型弹框：复用模型行、标注当前模型、列出可读�
   assert.ok(html.includes(t('settings.providerCurrent')), '当前模型必须在弹框里标注');
   assert.equal(html.includes('>anthropic/claude-opus-4.8-fast<'), false);
   assert.equal(html.includes('>anthropic/claude-sonnet-5<'), false);
-  assert.ok(html.includes(`>${t('settings.close')}<`), '弹框必须有明确关闭入口');
+  assert.ok(html.includes(`aria-label="${t('settings.close')}"`), '弹框必须有明确关闭入口');
+});
+
+test('查看模型弹框：省略 onPick 时降级为只读展示列表（不渲染可点按钮）', () => {
+  setLocale('zh-CN');
+  const html = renderToStaticMarkup(
+    React.createElement(ModelPickerDialog, {
+      open: true,
+      onClose() {},
+      title: 'DeepSeek',
+      subtitle: t('settings.providerModelsReadonlyHint', { count: 2 }),
+      providerName: 'DeepSeek',
+      models: ['deepseek-chat', 'deepseek-reasoner'],
+    }),
+  );
+  assert.ok(html.includes('data-model-id="deepseek-chat"'));
+  assert.ok(html.includes('data-model-id="deepseek-reasoner"'));
+  assert.equal(/<button[^>]*data-model-id=/.test(html), false, '只读模型列表不得渲染成可点击按钮');
+  assert.equal(html.includes('复制 ID'), false, '查看模型弹窗不得再渲染冗余的复制 ID 按钮');
+  assert.ok(html.includes('max-h-modal-lg'), '查看模型弹窗应使用更高的 max-h-modal-lg 展示更多模型');
+  assert.ok(html.includes('max-h-picker-list'), '查看模型列表应使用 max-h-picker-list 拉高可视区');
+  assert.ok(html.includes(`class="sr-only">${t('settings.providerModelsReadonlyHint', { count: 2 })}<`), '副标题仅保留读屏 sr-only 语义，不在视觉头部占位');
+  assert.equal(html.includes('mt-1 text-caption text-muted-foreground'), false, '弹窗头部不得再渲染可见副标题段落');
+
+  // > 6 个模型时显示模型筛选输入框
+  const manyHtml = renderToStaticMarkup(
+    React.createElement(ModelPickerDialog, {
+      open: true,
+      onClose() {},
+      title: 'Relay',
+      subtitle: t('settings.providerModelsReadonlyHint', { count: 7 }),
+      providerName: 'OpenAI',
+      models: ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7'],
+    }),
+  );
+  assert.ok(manyHtml.includes(`placeholder="${t('settings.providerModelSearchPlaceholder')}"`), '模型数 > 6 时应展示筛选框');
 });
 
 test('端点编辑：默认模型选择器显示可读名，且可点开模型下拉', () => {
@@ -1232,14 +1394,18 @@ test('行内不再有笼统的「使用」：模型列表按需展开，动作�
   assert.ok(html.includes(t('settings.providerEdit')), '编辑入口必须存在');
   assert.ok(html.includes(t('settings.providerDelete')), '删除入口必须存在');
   assert.equal(html.includes(t('settings.refresh')), false, '常驻刷新按钮已删除：动作后自动重拉，失败态有重试');
-  assert.equal(t('settings.providerBindingHint').includes('勾选即'), false, '绑定提示不得再声称勾选即设为默认');
+  assert.equal(html.includes(`aria-label="${t('settings.providersSearch')}"`), false, '不得再显示搜索提供商输入框');
+  assert.equal(html.includes(`aria-label="${t('settings.viewByBot')}"`), false, '不得再显示顶部 BOT 作用域下拉框');
+  assert.equal(html.includes(t('settings.providersHint')), false, '列表页不得再展示冗长的区块副标题说明');
+  assert.equal(html.includes(t('settings.providerAddHint')), false, '列表页底部不得再展示冗余解释文案');
+  assert.equal(t('settings.providerBindingHint').includes('默认'), false, '绑定提示不得再提及设为默认');
   assert.ok(
-    t('settings.providerBindingHint').includes(t('settings.providerAttachEnableOnly')),
-    '绑定提示必须说明存在仅启用与启用并设为默认两种选择',
+    t('settings.providerBindingHint').includes('开启或关闭'),
+    '绑定提示必须清晰说明点击 BOT 头像仅作开启或关闭',
   );
 });
 
-test('AgentBindingGrid：行内确认条三种相严格分流（needs-key 隐藏意图按钮，submitting 只留取消可点）', () => {
+test('AgentBindingGrid：行内补密钥条仅在 needs-key 或由其发起的 submitting 时展开', () => {
   setLocale('zh-CN');
   const view = providerView({
     agents: [
@@ -1255,30 +1421,29 @@ test('AgentBindingGrid：行内确认条三种相严格分流（needs-key 隐藏
     ],
     busy: false,
     onToggle: async () => ({ ok: true }),
-    onRequestAttach() {},
-    onConfirmAttach() {},
+    onDirectAttach() {},
+    onRetryAttachKey() {},
     onEditAttachKey() {},
     onCancelAttach() {},
   };
 
-  // 1. choosing：有两个意图按钮，无 password 输入
-  const choosingHtml = renderToStaticMarkup(
+  // 1. direct 提交中：不得提前展开补密钥条（无布局闪烁）
+  const directHtml = renderToStaticMarkup(
     React.createElement(AgentBindingGrid, {
       ...baseProps,
       attachFlow: {
-        phase: 'choosing',
+        phase: 'submitting',
         providerKey: view.key,
         providerId: view.id,
         profile: 'aura',
+        previousPhase: 'direct',
+        token: 1,
       },
     }),
   );
-  assert.ok(choosingHtml.includes(t('settings.providerAttachTitle', { provider: view.name, bot: 'aura' })));
-  assert.ok(choosingHtml.includes(`>${t('settings.providerAttachEnableOnly')}</button>`), 'choosing 必须渲染仅启用按钮');
-  assert.ok(choosingHtml.includes(`>${t('settings.providerAttachEnableAndDefault')}</button>`), 'choosing 必须渲染启用并设为默认按钮');
-  assert.equal(choosingHtml.includes('type="password"'), false, 'choosing 不得渲染密码输入框');
+  assert.equal(directHtml.includes('data-attach-phase='), false, '直接点击尝试复用密钥期间不得展开补密钥条');
 
-  // 2. needs-key：有 password 输入框，严禁渲染两个意图按钮
+  // 2. needs-key：有 password 输入框与「保存并开启」，绝不再有双意图按钮
   const needsKeyHtml = renderToStaticMarkup(
     React.createElement(AgentBindingGrid, {
       ...baseProps,
@@ -1287,57 +1452,15 @@ test('AgentBindingGrid：行内确认条三种相严格分流（needs-key 隐藏
         providerKey: view.key,
         providerId: view.id,
         profile: 'aura',
-        intent: 'enable-only',
         token: 1,
         draftKey: '',
       },
     }),
   );
   assert.ok(needsKeyHtml.includes('type="password"'), 'needs-key 必须渲染密码输入框');
-  assert.ok(needsKeyHtml.includes(`>${t('settings.providerAttachSaveAndEnable')}</button>`), 'needs-key 必须有唯一提交出口');
-  assert.ok(
-    needsKeyHtml.includes(t('settings.providerAttachNeedsKeyIntent', { intent: t('settings.providerAttachEnableOnly') })),
-    'needs-key 必须写明当前将执行的意图',
-  );
-  assert.equal(
-    needsKeyHtml.includes(`>${t('settings.providerAttachEnableOnly')}</button>`),
-    false,
-    'needs-key 阶段严禁同时渲染「仅启用」意图按钮',
-  );
-  assert.equal(
-    needsKeyHtml.includes(`>${t('settings.providerAttachEnableAndDefault')}</button>`),
-    false,
-    'needs-key 阶段严禁同时渲染「启用并设为默认」意图按钮',
-  );
-
-  // 3. submitting：意图按钮必须禁用，但「取消」必须仍可点——REST 代理可能挂起，
-  //    把取消也禁用会让用户被永久锁在设置弹窗里。
-  const submittingHtml = renderToStaticMarkup(
-    React.createElement(AgentBindingGrid, {
-      ...baseProps,
-      attachFlow: {
-        phase: 'submitting',
-        providerKey: view.key,
-        providerId: view.id,
-        profile: 'aura',
-        intent: 'enable-and-default',
-        token: 2,
-      },
-    }),
-  );
-  const attachSection = submittingHtml.slice(submittingHtml.indexOf('data-attach-phase="submitting"'));
-  const buttons = [...attachSection.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g)]
-    .map((match) => ({ tag: match[0], label: match[1].replace(/<[^>]*>/g, '').trim() }));
-  assert.ok(buttons.length >= 2, 'submitting 阶段必须有按钮占位');
-  for (const { tag, label } of buttons) {
-    // 【规则】提交中该按钮文案是「收起」而非「取消」：cancel 事件只作废本地令牌，
-    //   在途 RPC 不会中止，网关照常写入，叫「取消」等于承诺一个做不到的语义。
-    if (label === t('settings.providerAttachDismiss')) {
-      assert.equal(/\sdisabled(=|>|\s)/.test(tag), false, '提交中必须仍能收起，否则用户被锁死在弹窗里');
-      continue;
-    }
-    assert.ok(/\sdisabled(=|>|\s)/.test(tag), `submitting 阶段非收起按钮必须禁用: ${tag}`);
-  }
+  assert.ok(needsKeyHtml.includes(`>${t('settings.providerAttachSaveAndEnable')}</button>`), 'needs-key 必须有保存并开启按钮');
+  assert.equal(needsKeyHtml.includes(t('settings.providerAttachEnableOnly')), false, '不得再渲染「仅启用」按钮');
+  assert.equal(needsKeyHtml.includes(t('settings.providerAttachEnableAndDefault')), false, '不得再渲染「启用并设为默认」按钮');
 });
 
 test('AgentBindingGrid：壳层忙态下取消仍必须可点（真实锁死场景，busy=true）', () => {
@@ -1348,10 +1471,6 @@ test('AgentBindingGrid：壳层忙态下取消仍必须可点（真实锁死场�
       { profile: 'aura', displayName: 'aura', state: 'absent' },
     ],
   });
-  // 【为什么必须单独一条】上一条测试传的是 busy: false，而真实链路里
-  //   ProviderRow 传下来的是 `busy || pending`，提交期间恒为 true。
-  //   于是「取消跟着 busy 一起禁用」这个回归在旧测试下全绿，用户却被永久锁死：
-  //   REST 一旦挂住，三个按钮同时 50% 灰掉，点取消毫无反应。
   const html = renderToStaticMarkup(
     React.createElement(AgentBindingGrid, {
       view,
@@ -1362,12 +1481,13 @@ test('AgentBindingGrid：壳层忙态下取消仍必须可点（真实锁死场�
         providerKey: view.key,
         providerId: view.id,
         profile: 'aura',
-        intent: 'enable-only',
+        previousPhase: 'needs-key',
+        draftKey: 'sk-draft',
         token: 5,
       },
       onToggle: async () => ({ ok: true }),
-      onRequestAttach() {},
-      onConfirmAttach() {},
+      onDirectAttach() {},
+      onRetryAttachKey() {},
       onEditAttachKey() {},
       onCancelAttach() {},
     }),
@@ -1382,112 +1502,13 @@ test('AgentBindingGrid：壳层忙态下取消仍必须可点（真实锁死场�
     false,
     'busy=true 时收起仍不得禁用：收起只作废本地令牌，不与任何在途请求冲突',
   );
-});
-
-test('AgentBindingGrid：提交中必须有可宣告的进度文案，否则读屏用户看不到任何变化', () => {
-  setLocale('zh-CN');
-  const view = providerView({
-    agents: [{ profile: 'aura', displayName: 'aura', state: 'absent' }],
-  });
-  const html = renderToStaticMarkup(
-    React.createElement(AgentBindingGrid, {
-      view,
-      bots: [{ profile: 'aura', displayName: 'aura' }],
-      busy: true,
-      attachFlow: {
-        phase: 'submitting',
-        providerKey: view.key,
-        providerId: view.id,
-        profile: 'aura',
-        intent: 'enable-only',
-        token: 6,
-      },
-      onToggle: async () => ({ ok: true }),
-      onRequestAttach() {},
-      onConfirmAttach() {},
-      onEditAttachKey() {},
-      onCancelAttach() {},
-    }),
-  );
   assert.ok(html.includes(t('settings.providerAttachSubmitting')), '提交中必须显示「正在写入网关…」');
-  assert.ok(html.includes('aria-live="polite"'), '进度文案必须是 aria-live 区域，否则读屏不宣告');
-});
-
-test('AgentBindingGrid：补密钥后提交（previousPhase=needs-key）同样必须宣告进度', () => {
-  setLocale('zh-CN');
-  const view = providerView({
-    agents: [{ profile: 'aura', displayName: 'aura', state: 'absent' }],
-  });
-  // 【为什么必须单独一条】`keyForm` 在 `submitting && previousPhase === 'needs-key'` 时非空，
-  //   若进度文案的判断排在 keyForm 之后，这条真实路径（补完密钥点保存）永远拿不到宣告：
-  //   输入框与保存按钮一起变灰，读屏却仍念「将执行：仅启用」。上一条测试没有 previousPhase，
-  //   结构上碰不到这个分支。
-  const html = renderToStaticMarkup(
-    React.createElement(AgentBindingGrid, {
-      view,
-      bots: [{ profile: 'aura', displayName: 'aura' }],
-      busy: true,
-      attachFlow: {
-        phase: 'submitting',
-        providerKey: view.key,
-        providerId: view.id,
-        profile: 'aura',
-        intent: 'enable-only',
-        token: 7,
-        previousPhase: 'needs-key',
-        draftKey: 'sk-draft',
-      },
-      onToggle: async () => ({ ok: true }),
-      onRequestAttach() {},
-      onConfirmAttach() {},
-      onEditAttachKey() {},
-      onCancelAttach() {},
-    }),
-  );
-  assert.ok(html.includes(t('settings.providerAttachSubmitting')), '补密钥提交路径同样必须显示进度文案');
-  assert.ok(html.includes('type="password"'), '提交中必须保持密钥形态，输入框不得被卸载');
-});
-
-test('AgentBindingGrid：补密钥后提交必须保持密钥形态，输入框不得消失', () => {
-  setLocale('zh-CN');
-  const view = providerView({
-    agents: [
-      { profile: 'default', displayName: 'default', state: 'active' },
-      { profile: 'aura', displayName: 'aura', state: 'absent' },
-    ],
-  });
-  const html = renderToStaticMarkup(
-    React.createElement(AgentBindingGrid, {
-      view,
-      bots: [{ profile: 'aura', displayName: 'aura' }],
-      busy: false,
-      attachFlow: {
-        phase: 'submitting',
-        providerKey: view.key,
-        providerId: view.id,
-        profile: 'aura',
-        intent: 'enable-only',
-        token: 3,
-        previousPhase: 'needs-key',
-        draftKey: 'sk-draft',
-      },
-      onToggle: async () => ({ ok: true }),
-      onRequestAttach() {},
-      onConfirmAttach() {},
-      onEditAttachKey() {},
-      onCancelAttach() {},
-    }),
-  );
-  assert.ok(html.includes('type="password"'), '从补密钥发起的提交必须保留密码框，不能换成意图按钮');
+  assert.ok(html.includes('aria-live="polite"'), '进度文案必须是 aria-live 区域');
+  assert.ok(html.includes('type="password"'), '从补密钥发起的提交必须保留密码框');
   assert.ok(html.includes('value="sk-draft"'), '已输入的密钥必须保留在框内');
-  assert.equal(
-    html.includes(`>${t('settings.providerAttachEnableOnly')}</button>`),
-    false,
-    '提交中不得再出现意图按钮',
-  );
 });
 
-test('AgentBindingGrid：确认条必须可被读屏定位，密码框必须有名称，目标头像声明展开态', () => {
+test('AgentBindingGrid：补密钥条必须可被读屏定位，密码框必须有名称，目标头像声明展开态', () => {
   setLocale('zh-CN');
   const view = providerView({
     agents: [
@@ -1505,25 +1526,421 @@ test('AgentBindingGrid：确认条必须可被读屏定位，密码框必须有�
         providerKey: view.key,
         providerId: view.id,
         profile: 'aura',
-        intent: 'enable-only',
         token: 4,
         draftKey: '',
       },
       onToggle: async () => ({ ok: true }),
-      onRequestAttach() {},
-      onConfirmAttach() {},
+      onDirectAttach() {},
+      onRetryAttachKey() {},
       onEditAttachKey() {},
       onCancelAttach() {},
     }),
   );
-  assert.ok(html.includes('role="group"'), '确认条必须是一个有名字的分组，不能是裸 div');
-  assert.ok(/aria-labelledby="attach-strip-[^"]+-title"/.test(html), '确认条必须用标题做可访问名称');
+  assert.ok(html.includes('role="group"'), '补密钥条必须是一个有名字的分组，不能是裸 div');
+  assert.ok(/aria-labelledby="attach-strip-[^"]+-title"/.test(html), '补密钥条必须用标题做可访问名称');
   assert.ok(
     html.includes(`aria-label="${t('settings.customEndpointKey')}"`),
     '密码框必须有可访问名称，否则读屏只说"编辑框"',
   );
-  assert.ok(/aria-expanded="true"/.test(html), '展开确认条的头像必须声明 aria-expanded');
-  assert.ok(/aria-controls="attach-strip-[^"]+"/.test(html), '头像必须指向它展开的那条确认条');
+  assert.ok(/aria-expanded="true"/.test(html), '展开补密钥条的头像必须声明 aria-expanded');
+  assert.ok(/aria-controls="attach-strip-[^"]+"/.test(html), '头像必须指向它展开的那条补密钥条');
+});
+
+test('AddProviderDialog：清晰双列页签、无套娃分组边框、内联测试按钮且编辑不显示页签', () => {
+  setLocale('zh-CN');
+  const addHtml = renderToStaticMarkup(
+    React.createElement(AddProviderDialog, {
+      open: true,
+      onClose() {},
+      bots: [
+        { profile: 'default', displayName: '大总管' },
+        { profile: 'aura', displayName: 'Aurora' },
+      ],
+      defaultProfile: 'default',
+      snapshot: snapshot({ section: 'providers' }),
+      actions: noopActions,
+      editing: null,
+      defaultTab: 'custom',
+    }),
+  );
+  assert.ok(addHtml.includes('max-h-modal-md'), '弹窗必须使用语义最大高度');
+  assert.ok(addHtml.includes('grid grid-cols-2'), '添加模式下必须展示醒目的双列页签条');
+  assert.ok(addHtml.includes('role="tablist"'), '页签切换必须具备 tablist 可访问语义');
+  assert.ok(addHtml.includes('grid-cols-2'), '名称与 ID 必须使用双栏排布');
+  assert.ok(addHtml.includes(`aria-label="${t('settings.customEndpointKeyShow')}"`), '必须提供显示/隐藏 API Key 按钮');
+  assert.ok(addHtml.includes(`>${t('settings.customEndpointTest')}<`), '自定义端点表单必须提供测试端点按钮');
+  assert.ok(addHtml.includes(`class="sr-only">${t('settings.addCustomHint')}</p>`), '头部描述应收敛为 sr-only 无障碍说明');
+  assert.equal(addHtml.split(t('settings.addCustomHint')).length, 2, '弹窗头部不得重复渲染可见冗余副标题');
+  assert.equal(addHtml.includes(t('settings.customEndpointApplyToHint')), false, 'BOT 托盘上方不应再渲染啰嗦说明文案');
+  assert.equal(addHtml.includes('data-bot-badge="locked"'), false, '新增弹窗内 BOT 开启列表不得锁定任何 BOT');
+  assert.ok(
+    addHtml.includes(t('settings.customEndpointApplyToCount', { selected: 1, total: 2 })),
+    '新增时默认预选 1 个 BOT 且显示已选计数',
+  );
+
+  const addSrc = readSettingsSource('AddProviderDialog.tsx');
+  assert.equal(addSrc.includes('SettingInset'), false, 'AddProviderDialog 不得再套娃使用三层 SettingInset 边框容器');
+  const pickerSrc = readSettingsSource('ModelPicker.tsx');
+  assert.ok(pickerSrc.includes('w-menu-trigger'), 'ModelPickerField 下拉必须与触发输入框等宽（w-menu-trigger）');
+  assert.ok(pickerSrc.includes('max-h-picker-menu'), 'ModelPickerField 下拉列表必须使用加高语义档位 max-h-picker-menu');
+
+  const editHtml = renderToStaticMarkup(
+    React.createElement(AddProviderDialog, {
+      open: true,
+      onClose() {},
+      bots: [
+        { profile: 'default', displayName: '大总管' },
+        { profile: 'aura', displayName: 'Aurora' },
+      ],
+      defaultProfile: 'default',
+      snapshot: snapshot({ section: 'providers' }),
+      actions: noopActions,
+      editing: {
+        id: 'deepseek',
+        name: 'DeepSeek',
+        baseUrl: 'https://api.deepseek.com/v1',
+        model: 'deepseek-chat',
+        models: ['deepseek-chat', 'deepseek-reasoner'],
+        apiMode: '',
+        hasApiKey: true,
+        isCurrent: true,
+      },
+      editingProfiles: ['default', 'aura'],
+    }),
+  );
+  assert.ok(editHtml.includes(t('settings.editTitle')), '编辑模式标题正确');
+  assert.equal(editHtml.includes(t('settings.addTabSubscription')), false, '编辑模式不得渲染页签切换');
+  assert.equal(editHtml.includes('role="tablist"'), false, '编辑模式不得渲染 tablist');
+  assert.ok(editHtml.includes(t('settings.customEndpointMembersHint', { count: 2 })), '编辑模式须展示已同步更新的成员数');
+  assert.ok(editHtml.includes(t('settings.customEndpointKeyClear')), '已保存密钥时显示清除按钮');
+
+  // hasApiKey === false 时，编辑模式不得显示"清除密钥"与"已保存，留空不修改"
+  const keylessEditHtml = renderToStaticMarkup(
+    React.createElement(AddProviderDialog, {
+      open: true,
+      onClose() {},
+      bots: [{ profile: 'default', displayName: '大总管' }],
+      defaultProfile: 'default',
+      snapshot: snapshot({ section: 'providers' }),
+      actions: noopActions,
+      editing: {
+        id: 'local',
+        name: 'Local',
+        baseUrl: 'http://127.0.0.1:8000/v1',
+        model: 'qwen',
+        models: ['qwen'],
+        apiMode: '',
+        hasApiKey: false,
+        isCurrent: false,
+      },
+      editingProfiles: ['default'],
+    }),
+  );
+  assert.equal(keylessEditHtml.includes(t('settings.customEndpointKeyClear')), false, '未保存密钥的端点不得渲染清除密钥按钮');
+  assert.equal(keylessEditHtml.includes(t('settings.customEndpointKeyKeep')), false, '未保存密钥的端点不得提示“已保存”');
+
+  // ModelPickerField 必须共享 Select 触发按钮视觉规范（含焦点环），且 ModelPickerDialog 列表行用 body 字阶
+  const pickerFieldHtml = renderToStaticMarkup(
+    React.createElement(ModelPickerField, {
+      value: 'gpt-5.4',
+      models: ['gpt-5.4'],
+      providerName: 'OpenAI',
+      ariaLabel: 'Model',
+      onChange() {},
+    }),
+  );
+  assert.ok(pickerFieldHtml.includes('focus-visible:ring-ring'), 'ModelPickerField 必须复用 Select 的焦点环规范');
+});
+
+test('ModelPickerField：内嵌搜索键盘导航隔离（放行 Escape、字符仅阻冒泡、Arrow/Tab 不被 Radix 吞噬）', () => {
+  const focusLog = [];
+  let closedCount = 0;
+  const fakeItems = [
+    { focus: () => focusLog.push('first') },
+    { focus: () => focusLog.push('last') },
+  ];
+  const makeEvent = (key, shiftKey = false, items = fakeItems) => {
+    const state = { defaultPrevented: false, propagationStopped: false };
+    return {
+      state,
+      event: {
+        key,
+        shiftKey,
+        preventDefault: () => { state.defaultPrevented = true; },
+        stopPropagation: () => { state.propagationStopped = true; },
+        currentTarget: {
+          closest: (sel) => (sel === '[data-radix-menu-content]' ? { querySelectorAll: () => items } : null),
+        },
+      },
+    };
+  };
+
+  // 1. Escape 完全放行（由 Radix DismissableLayer 关窗回焦）
+  const esc = makeEvent('Escape');
+  handleModelSearchKeyDown(esc.event, { closeMenu: () => { closedCount += 1; } });
+  assert.equal(esc.state.propagationStopped, false);
+  assert.equal(esc.state.defaultPrevented, false);
+
+  // 2. 字符/空格/退格只阻断冒泡，不阻塞原生输入框编辑
+  for (const key of ['g', ' ', 'Backspace']) {
+    const typing = makeEvent(key);
+    handleModelSearchKeyDown(typing.event, { closeMenu: () => { closedCount += 1; } });
+    assert.equal(typing.state.propagationStopped, true, `${key} 必须阻断冒泡以免触发 typeahead`);
+    assert.equal(typing.state.defaultPrevented, false, `${key} 不得 preventDefault 阻断输入`);
+  }
+
+  // 3. ArrowDown / Tab 跳转到首个可见菜单项，ArrowUp 跳到末项
+  const down = makeEvent('ArrowDown');
+  handleModelSearchKeyDown(down.event, { closeMenu: () => { closedCount += 1; } });
+  assert.equal(down.state.defaultPrevented, true);
+  assert.equal(down.state.propagationStopped, true);
+
+  const tab = makeEvent('Tab');
+  handleModelSearchKeyDown(tab.event, { closeMenu: () => { closedCount += 1; } });
+  assert.equal(tab.state.defaultPrevented, true);
+  assert.equal(tab.state.propagationStopped, true);
+
+  const up = makeEvent('ArrowUp');
+  handleModelSearchKeyDown(up.event, { closeMenu: () => { closedCount += 1; } });
+  assert.deepEqual(focusLog, ['first', 'first', 'last']);
+  assert.equal(closedCount, 0);
+
+  // 4. 无候选或无 Radix 容器时按 Tab、以及任意时刻按 Shift+Tab 退出菜单；空列表按上下方向键不报错也不关窗
+  const emptyDown = makeEvent('ArrowDown', false, []);
+  handleModelSearchKeyDown(emptyDown.event, { closeMenu: () => { closedCount += 1; } });
+  const emptyUp = makeEvent('ArrowUp', false, []);
+  handleModelSearchKeyDown(emptyUp.event, { closeMenu: () => { closedCount += 1; } });
+  const detachedDown = {
+    key: 'ArrowDown',
+    preventDefault() {},
+    stopPropagation() {},
+    currentTarget: { closest: () => null },
+  };
+  handleModelSearchKeyDown(detachedDown, { closeMenu: () => { closedCount += 1; } });
+  assert.equal(closedCount, 0);
+
+  // 节点缺失 focus 方法时静默跳过，不抛异常
+  const noFocusItems = [{}];
+  handleModelSearchKeyDown(makeEvent('ArrowDown', false, noFocusItems).event, { closeMenu: () => { closedCount += 1; } });
+  handleModelSearchKeyDown(makeEvent('ArrowUp', false, noFocusItems).event, { closeMenu: () => { closedCount += 1; } });
+  assert.equal(closedCount, 0);
+
+  const emptyTab = makeEvent('Tab', false, []);
+  handleModelSearchKeyDown(emptyTab.event, { closeMenu: () => { closedCount += 1; } });
+  const shiftTab = makeEvent('Tab', true);
+  handleModelSearchKeyDown(shiftTab.event, { closeMenu: () => { closedCount += 1; } });
+  const detachedTab = {
+    key: 'Tab',
+    shiftKey: false,
+    preventDefault() {},
+    stopPropagation() {},
+    currentTarget: { closest: () => null },
+  };
+  handleModelSearchKeyDown(detachedTab, { closeMenu: () => { closedCount += 1; } });
+  assert.equal(closedCount, 3);
+});
+
+test('SwitchDefaultProviderDialog：就地切换默认模型提示、过滤原提供商并处理无可用候选空态', () => {
+  setLocale('zh-CN');
+  const relayView = providerView({
+    key: 'custom:relay',
+    id: 'relay',
+    name: 'Claude Relay',
+    models: ['anthropic/claude-sonnet-4'],
+    agents: [
+      { profile: 'xiaofawang', displayName: 'xiaofawang', state: 'active', detail: 'anthropic/claude-sonnet-4' },
+    ],
+  });
+  const grokView = providerView({
+    key: 'subscription:xai-oauth',
+    kind: 'subscription',
+    id: 'xai-oauth',
+    name: 'xAI Grok',
+    detail: 'SuperGrok',
+    models: ['grok-3', 'grok-3-mini'],
+    agents: [
+      { profile: 'xiaofawang', displayName: 'xiaofawang', state: 'ready' },
+    ],
+  });
+  const absentView = providerView({
+    key: 'custom:backup',
+    id: 'backup',
+    name: 'Backup',
+    models: ['backup-1'],
+    agents: [
+      { profile: 'xiaofawang', displayName: 'xiaofawang', state: 'absent' },
+    ],
+  });
+
+  const html = renderToStaticMarkup(
+    React.createElement(SwitchDefaultProviderDialog, {
+      open: true,
+      onClose() {},
+      botProfile: 'xiaofawang',
+      botDisplayName: 'xiaofawang',
+      currentModel: 'anthropic/claude-sonnet-4',
+      providerView: relayView,
+      allViews: [relayView, grokView, absentView],
+      onConfirm: async () => ({ ok: true }),
+    }),
+  );
+  assert.ok(html.includes(t('settings.providerSwitchTitle')), '弹窗标题正确');
+  assert.ok(html.includes('xiaofawang') && html.includes('Claude Relay'), '告警文案必须点名 BOT 与提供商');
+  assert.ok(html.includes('role="radiogroup"'), '替补模型列表必须声明 radiogroup 角色');
+  assert.ok(html.includes('role="radio"'), '候选项按钮必须声明 radio 角色');
+  assert.ok(html.includes('aria-checked="true"'), '默认选中的首位候选项必须声明 aria-checked="true"');
+  assert.ok(html.includes('aria-checked="false"'), '其余候选项必须声明 aria-checked="false"');
+  assert.ok(html.includes('data-replacement-provider="xai-oauth"'), '已开启的其他提供商必须出现在候选列表');
+  assert.ok(html.includes('data-replacement-model="grok-3"'), '候选模型必须列出');
+  assert.equal(html.includes('data-replacement-provider="relay"'), false, '待关闭的原提供商不得出现在候选列表');
+  assert.equal(html.includes('data-replacement-provider="backup"'), false, '未开启的提供商不得出现在候选列表');
+
+  // 超过 6 个候选模型时自动展示搜索过滤框
+  const manyGrokView = providerView({
+    key: 'subscription:xai-oauth',
+    kind: 'subscription',
+    id: 'xai-oauth',
+    name: 'xAI Grok',
+    models: ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7'],
+    agents: [{ profile: 'xiaofawang', displayName: 'xiaofawang', state: 'ready' }],
+  });
+  const searchHtml = renderToStaticMarkup(
+    React.createElement(SwitchDefaultProviderDialog, {
+      open: true,
+      onClose() {},
+      botProfile: 'xiaofawang',
+      botDisplayName: 'xiaofawang',
+      providerView: relayView,
+      allViews: [relayView, manyGrokView],
+      onConfirm: async () => ({ ok: true }),
+    }),
+  );
+  assert.ok(
+    searchHtml.includes(`placeholder="${t('settings.providerModelSearchPlaceholder')}"`),
+    '替补候选模型超过 6 个时必须展示搜索框',
+  );
+
+  // 没有其他可用提供商时：提示空态且禁用确认按钮
+  const emptyHtml = renderToStaticMarkup(
+    React.createElement(SwitchDefaultProviderDialog, {
+      open: true,
+      onClose() {},
+      botProfile: 'xiaofawang',
+      botDisplayName: 'xiaofawang',
+      providerView: relayView,
+      allViews: [relayView, absentView],
+      onConfirm: async () => ({ ok: true }),
+    }),
+  );
+  assert.ok(emptyHtml.includes(t('settings.providerSwitchNoCandidate')), '无可用替补时必须明确告知用户');
+  const confirmPos = emptyHtml.indexOf(`>${t('settings.providerSwitchConfirm')}</button>`);
+  assert.ok(confirmPos > 0);
+  const confirmBtnTag = emptyHtml.slice(emptyHtml.lastIndexOf('<button', confirmPos), confirmPos);
+  assert.ok(/\sdisabled(=|>|\s)/.test(confirmBtnTag), '无可用替补时必须禁用确认按钮');
+});
+
+test('providerDialogLogic：保存恒不切默认、编辑推导保留故障成员、英文探测与告警不泄漏中文标点', () => {
+  // 1. 新增与编辑保存的 makeDefault 恒为 false
+  assert.deepEqual(
+    buildSaveEndpointOptions(false, ['bot-b', 'bot-a', 'bot-b'], undefined),
+    { targetProfiles: ['bot-b', 'bot-a'], fanOutTo: ['bot-a'], makeDefault: false },
+  );
+  assert.deepEqual(
+    buildSaveEndpointOptions(true, ['ignored'], ['bot-1', 'bot-2']),
+    { targetProfiles: ['bot-1', 'bot-2'], fanOutTo: ['bot-2'], makeDefault: false },
+  );
+
+  // 2. resolveEditProfiles 合并 endpointProfiles 与 active/ready 成员（防止漏掉 model.options 读取失败的成员）
+  assert.deepEqual(
+    resolveEditProfiles(
+      {
+        id: 'custom:fn',
+        agents: [
+          { profile: 'bot-a', displayName: 'A', state: 'error' },
+          { profile: 'bot-b', displayName: 'B', state: 'ready' },
+          { profile: 'bot-c', displayName: 'C', state: 'absent' },
+        ],
+      },
+      { fn: ['bot-a'] },
+    ),
+    ['bot-a', 'bot-b'],
+  );
+
+  // 3. hasStoredEndpointKey 只认 editing?.hasApiKey，不得误判新建手填 ID
+  assert.equal(hasStoredEndpointKey(null), false);
+  assert.equal(hasStoredEndpointKey({ hasApiKey: false }), false);
+  assert.equal(hasStoredEndpointKey({ hasApiKey: true }), true);
+
+  // 4. applyProbeResultToDraft 与 initialFormState
+  const initAdd = initialFormState(null, undefined, [{ profile: 'a', displayName: 'A' }, { profile: 'b', displayName: 'B' }], 'b');
+  assert.deepEqual(initAdd.selectedProfiles, ['b']);
+  const patch = applyProbeResultToDraft(
+    { id: '', name: 'GW', baseUrl: 'https://gw.example', model: '', apiKey: { kind: 'keep' } },
+    { kind: 'ok', resolvedBaseUrl: 'https://gw.example/v1', models: ['m1', 'm2'], modelCount: 2 },
+  );
+  assert.deepEqual(patch, { baseUrl: 'https://gw.example/v1', model: 'm1', models: ['m1', 'm2'] });
+
+  // 5. 英文环境不得泄漏中文冒号或顿号
+  setLocale('en-US');
+  assert.equal(t('settings.providerTestDetailsLine', { message: '401' }).includes('：'), false);
+  assert.equal(formatFanOutWarning(t('settings.customEndpointFanOutPartial'), ['Bot A', 'Bot B']).includes('、'), false);
+  setLocale('zh-CN');
+});
+
+test('providerDialogLogic：OAuth 轮询协调器在关闭、取消与迟滞返回时必须彻底清理定时器与远端会话', async () => {
+  const scheduled = new Map();
+  let nextHandle = 1;
+  const cancelled = [];
+  let reloads = 0;
+  let states = [];
+  let resolveStart;
+  let pollResult = { status: 'pending' };
+
+  const coordinator = createOAuthLoginCoordinator({
+    setTimeout: (fn) => {
+      const id = nextHandle++;
+      scheduled.set(id, fn);
+      return id;
+    },
+    clearTimeout: (id) => {
+      scheduled.delete(id);
+    },
+    onStartLogin: async () => new Promise((resolve) => { resolveStart = resolve; }),
+    onPollLogin: async () => pollResult,
+    onCancelLogin: (sid) => { cancelled.push(sid); },
+    onReloadProviders: () => { reloads += 1; },
+    onStateChange: (s) => { states.push(s); },
+  });
+
+  // 场景 A：startLogin 尚在途时用户关闭弹框（dispose），随后迟滞返回 sessionId 必须被立即取消且不启动轮询
+  const pendingStart = coordinator.start('oauth-1');
+  coordinator.dispose();
+  resolveStart({ ok: true, sessionId: 'sid-late', userCode: 'ABCD', verificationUrl: 'https://auth.example' });
+  await pendingStart;
+  assert.deepEqual(cancelled, ['sid-late'], '关闭后才到的 sessionId 必须主动撤回');
+  assert.equal(scheduled.size, 0, '关闭后不得调度任何轮询定时器');
+
+  // 场景 B：正常启动并排入 3 秒轮询后点关闭/卸载 -> 定时器必须被 clearTimeout，之后不得继续打网关
+  states = [];
+  cancelled.length = 0;
+  const start2 = coordinator.start('oauth-2');
+  resolveStart({ ok: true, sessionId: 'sid-2', userCode: '1234', verificationUrl: 'https://auth.example' });
+  await start2;
+  await Promise.resolve();
+  assert.equal(scheduled.size, 1, 'pending 状态应排入下一次轮询定时器');
+  coordinator.dispose();
+  assert.equal(scheduled.size, 0, 'dispose 必须清除挂起的轮询定时器');
+  assert.deepEqual(cancelled, ['sid-2'], 'dispose 必须取消远端挂起会话');
+  assert.equal(reloads, 0);
+
+  // 场景 C：正常轮询批准应触发一次 onReloadProviders 且停止调度
+  pollResult = { status: 'approved' };
+  const start3 = coordinator.start('oauth-3');
+  resolveStart({ ok: true, sessionId: 'sid-3', userCode: '5678', verificationUrl: 'https://auth.example' });
+  await start3;
+  await Promise.resolve();
+  assert.equal(reloads, 1);
+  assert.equal(scheduled.size, 0);
 });
 
 test('没有模型的提供商：模型区说明为空，且不存在可点的空列表', () => {
@@ -1580,6 +1997,7 @@ test('订阅默认对所有 Agent 生效：格子只读，不能逐 Agent 取消
         name: 'xAI Grok OAuth',
         detail: 'SuperGrok',
         agents: [
+          { profile: 'boss', displayName: '大总管', state: 'active' },
           { profile: 'default', displayName: 'default', state: 'ready' },
           { profile: 'aura', displayName: 'aura', state: 'absent' },
           { profile: 'codeboy', displayName: 'codeboy', state: 'absent' },
@@ -1587,11 +2005,22 @@ test('订阅默认对所有 Agent 生效：格子只读，不能逐 Agent 取消
       })],
     },
   }));
+  const boss = agentCell(html, 'boss');
+  const bossInput = boss.match(/<input[^>]*>/);
+  assert.ok(bossInput && bossInput[0].includes('checked'), '订阅行当前默认成员 input 必须保留已启用无障碍态');
+  assert.ok(bossInput && bossInput[0].includes('disabled'), '订阅行当前默认成员 input 必须保留只读禁用态');
+  assert.ok(boss.includes('data-bot-badge="default"'), '订阅行当前默认成员仍需在名字下方展示默认微标');
+  assert.equal(boss.includes('data-bot-badge="checked"'), false, '只读订阅默认头像不得渲染可点击勾选角标');
+  assert.equal(boss.includes('bg-primary text-primary-foreground'), false, '只读订阅默认头像不得渲染主色对号圆圈');
+
   const ready = agentCell(html, 'default');
-  assert.ok(ready.includes('checked'), '订阅默认对所有 Agent 生效，格子必须已勾选');
+  assert.ok(ready.includes('checked'), '订阅默认对所有 Agent 生效，格子必须保留已启用无障碍态');
   assert.ok(ready.includes('disabled'), '订阅没有按 Agent 可写的绑定，不能逐 Agent 取消');
+  assert.equal(ready.includes('data-bot-badge="checked"'), false, '只读订阅头像不再渲染容易误以为可点击的勾选小圆圈');
   assert.ok(ready.includes(t('settings.providerBindingSubscriptionAll')), 'title 必须说明订阅对所有 Agent 生效');
-  assert.ok(html.includes(t('settings.providerBindingTitleAll')), '订阅标题必须说明全部 Agent');
+  assert.ok(html.includes(t('settings.providerBindingScopeAll')), '订阅行顶栏必须说明全部 BOT 生效');
+  assert.equal(html.includes('开启于'), false, '订阅行不得再渲染「开启于 · 全部 BOT（只读）」');
+  assert.equal(html.includes('（只读）'), false, '订阅行不应暴露（只读）开发术语');
   const absent = agentCell(html, 'aura');
   assert.ok(absent.includes('disabled'), '订阅格子一律只读');
 });
@@ -1616,7 +2045,7 @@ test('设置中心弹窗尺寸：按主窗口视口自适应放大，不再写�
 /* -------------------------------------------------------------------------- */
 
 const SETTINGS_SRC_DIR = path.resolve(import.meta.dirname, '../src/components-react/settings');
-const DIALOG_FAMILY = ['SettingsModal.tsx', 'ModelPicker.tsx', 'ProvidersAdminPanel.tsx', 'BotManagerView.tsx'];
+const DIALOG_FAMILY = ['SettingsModal.tsx', 'ModelPicker.tsx', 'AddProviderDialog.tsx', 'SwitchDefaultProviderDialog.tsx', 'ProvidersAdminPanel.tsx', 'BotManagerView.tsx'];
 
 function readSettingsSource(file) {
   return fs.readFileSync(path.join(SETTINGS_SRC_DIR, file), 'utf8');
@@ -1951,7 +2380,7 @@ test('模型下拉占位互斥：空目录与未绑定叠加时只保留一个�
   assert.equal(unbound[1].options[0].value, 'claude-sonnet-5');
 });
 
-test('提供商页作用域显性化：顶部提供「作用 BOT」切换器并消费花名册', () => {
+test('提供商页简化：已去除顶部按 BOT 下拉框与搜索提供商输入框', () => {
   setLocale('zh-CN');
   const html = render({
     section: 'providers',
@@ -1962,8 +2391,9 @@ test('提供商页作用域显性化：顶部提供「作用 BOT」切换器并�
     ],
     scopedProfile: 'arch',
   });
-  assert.ok(html.includes(`aria-label="${t('settings.viewByBot')}"`), '必须有作用域切换器，明确删除/设为默认作用于哪个 BOT');
-  assert.ok(html.includes('架构老王'), '选项必须来自 BOT 花名册（当前作用域可见）');
+  assert.equal(html.includes(`aria-label="${t('settings.viewByBot')}"`), false, '顶部不得再显示 BOT 作用域下拉框');
+  assert.equal(html.includes(`aria-label="${t('settings.providersSearch')}"`), false, '顶部不得再显示搜索提供商框');
+  assert.ok(html.includes(t('settings.providerAdd')), '添加提供商按钮必须保留');
 });
 
 test('卡片层级：提供商行与 MCP 行必须消费 Surface，主题卡靠受光线与投影撑层级', () => {
@@ -2021,7 +2451,7 @@ test('术语基准：设置中心统一 BOT / Bot，技能与 MCP 服务器不�
   // 硬编码期望值：与组件同时调 t() 会形成循环自证，字典丢 key 时两边一起退化。
   assert.equal(t('settings.presenceTitle'), 'BOT 状态');
   assert.equal(t('settings.providerScopeAll'), '所有 BOT 都在用');
-  assert.equal(t('settings.providerBindingLegend'), '绿环 = 该 BOT 当前默认模型所属的提供商');
+  assert.equal(t('settings.providerBindingHint'), '点击 BOT 头像即可开启或关闭该提供商');
   assert.equal(t('settings.gatewayProfile'), '默认配置');
   assert.equal(t('settings.sectionProvidersDesc'), '提供商、密钥与可用模型');
   assert.equal(t('bot.skillsTitle'), '技能');
@@ -2033,6 +2463,7 @@ test('术语基准：设置中心统一 BOT / Bot，技能与 MCP 服务器不�
   setLocale('en-US');
   assert.equal(t('settings.presenceTitle'), 'BOT status');
   assert.equal(t('settings.providerScopeAll'), 'Used by every BOT');
+  assert.equal(t('settings.providerBindingHint'), 'Click a BOT avatar to enable or turn off this provider');
   assert.equal(t('bot.skillsTitle'), 'Skills');
   assert.equal(t('bot.mcpTitle'), 'MCP servers');
   assert.equal(t('rail.pinnedBots'), 'Bots');
@@ -2040,7 +2471,7 @@ test('术语基准：设置中心统一 BOT / Bot，技能与 MCP 服务器不�
 });
 
 test('设置中心组件不得硬编码实体称谓（必须全部走 t()）', () => {
-  for (const file of ['SettingsModal.tsx', 'BotManagerView.tsx', 'ProvidersAdminPanel.tsx', 'ModelPicker.tsx', 'BotCapabilityList.tsx']) {
+  for (const file of ['SettingsModal.tsx', 'BotManagerView.tsx', 'AddProviderDialog.tsx', 'ProvidersAdminPanel.tsx', 'ModelPicker.tsx', 'BotCapabilityList.tsx']) {
     const source = readSettingsSource(file);
     // 只看 JSX 文本节点：>Agent< / >智能体< / >Bot< 这类直出文案。
     assert.equal(/>\s*(Agent|智能体|Bot)\s*</.test(source), false, `${file} 不得硬编码实体称谓，必须走 t()`);
@@ -2077,24 +2508,32 @@ test('配置内容必须自适应填满可用宽度：禁止限宽居中留白',
 });
 
 test('二级弹窗高度收敛为语义档位：不得用任意值类或内联 maxHeight 规避审计', () => {
-  for (const file of ['ModelPicker.tsx', 'ProvidersAdminPanel.tsx']) {
+  for (const file of ['ModelPicker.tsx', 'AddProviderDialog.tsx', 'SwitchDefaultProviderDialog.tsx', 'ProvidersAdminPanel.tsx']) {
     const source = readSettingsSource(file);
     assert.equal(source.includes('max-h-['), false, `${file} 不得使用任意值 max-h-[...]`);
     assert.equal(/maxHeight:\s*'min\(/.test(source), false, `${file} 不得用内联 maxHeight 规避任意值审计`);
   }
-  assert.ok(readSettingsSource('ModelPicker.tsx').includes('max-h-modal-sm'), '模型弹窗必须使用 max-h-modal-sm 语义档位');
-  assert.ok(readSettingsSource('ProvidersAdminPanel.tsx').includes('max-h-modal-md'), '提供商弹窗必须使用 max-h-modal-md 语义档位');
+  assert.ok(readSettingsSource('ModelPicker.tsx').includes('max-h-modal-lg'), '模型弹窗必须使用 max-h-modal-lg 语义档位');
+  assert.ok(readSettingsSource('AddProviderDialog.tsx').includes('max-h-modal-md'), '提供商弹窗必须使用 max-h-modal-md 语义档位');
+  assert.ok(readSettingsSource('SwitchDefaultProviderDialog.tsx').includes('max-h-modal-lg'), '切换默认弹窗必须使用 max-h-modal-lg 语义档位');
 
   const css = fs.readFileSync(path.resolve(import.meta.dirname, '../src/tailwind-entry.css'), 'utf8');
   assert.ok(css.includes('@utility max-h-modal-sm'), '语义档位必须在 Token 入口登记（禁止散落在业务里）');
   assert.ok(css.includes('@utility max-h-modal-md'), '语义档位必须在 Token 入口登记（禁止散落在业务里）');
+  assert.ok(css.includes('@utility max-h-modal-lg'), '语义档位必须在 Token 入口登记（禁止散落在业务里）');
+  assert.ok(css.includes('@utility max-h-picker-menu'), '下拉列表加高档位必须在 Token 入口登记');
+  assert.ok(css.includes('@utility max-h-picker-list'), '弹窗模型列表加高档位必须在 Token 入口登记');
+  assert.ok(css.includes('@utility w-menu-trigger'), '下拉等宽档位必须在 Token 入口登记');
   // 值也必须守护：只断言类名存在时，把档位改成 100vh 仍然全绿。
   assert.ok(css.includes('max-height: min(560px, calc(100vh - 96px));'), 'max-h-modal-sm 必须相对视口有界并留出安全边距');
   assert.ok(css.includes('max-height: min(680px, calc(100vh - 96px));'), 'max-h-modal-md 必须相对视口有界并留出安全边距');
+  assert.ok(css.includes('max-height: min(760px, calc(100vh - 64px));'), 'max-h-modal-lg 必须相对视口有界并留出安全边距');
 
   // 新档位必须同时在 tw-merge 登记，否则 `max-h-64 max-h-modal-sm` 会退化为 CSS 顺序决定。
   assert.equal(cn('max-h-64', 'max-h-modal-sm'), 'max-h-modal-sm', '语义档位必须能在 cn() 中覆盖原生 max-h');
   assert.equal(cn('max-h-modal-sm', 'max-h-modal-md'), 'max-h-modal-md', '两个语义档位之间也必须可覆盖');
+  assert.equal(cn('max-h-modal-md', 'max-h-modal-lg'), 'max-h-modal-lg', 'max-h-modal-lg 必须能在 cn() 中互相覆盖');
+  assert.equal(cn('w-80', 'w-menu-trigger'), 'w-menu-trigger', 'w-menu-trigger 必须能在 cn() 中覆盖固定宽度');
 
   // 浮层菜单层级同样收敛为语义档位，禁止业务回到 z-[1200] 任意值。
   assert.ok(css.includes('@utility z-menu'), '浮层菜单层级必须在 Token 入口登记');

@@ -32,7 +32,6 @@ import type {
   EndpointProbe,
   CustomEndpointDraft,
   ProviderView,
-  BindingAttachIntent,
   BotDetailData,
   BotDraftState,
   BotManagementStatus,
@@ -406,15 +405,8 @@ export interface SettingsActionResult {
   needsKey?: boolean;
 }
 
-/** 绑定未配置自定义端点时的附加意图参数。 */
-export interface ToggleProviderAgentOptions {
-  attachIntent?: BindingAttachIntent;
-}
-
-/** 绑定操作返回结构：缺意图时壳层返回 `confirmRequired: true` 且不写入任何配置。 */
-export interface ToggleProviderAgentResult extends SettingsActionResult {
-  confirmRequired?: boolean;
-}
+/** 绑定操作返回结构。 */
+export type ToggleProviderAgentResult = SettingsActionResult;
 
 /** 对话区列宽切换回调类型。 */
 export type ConversationWidthChangeHandler = (width: ConversationWidthMode) => void;
@@ -483,26 +475,37 @@ export interface SettingsActions {
 
   /** 探测端点，不落盘。 */
   onProbeEndpoint: (draft: CustomEndpointDraft) => Promise<EndpointProbe>;
-  /** 保存端点；`fanOutTo` 非空时逐个写到目标 Agent。 */
+  /** 保存端点；`targetProfiles`（或兼容的 `fanOutTo`）指定写入到哪些 BOT。 */
   onSaveEndpoint: (
     draft: CustomEndpointDraft,
-    options: { fanOutTo: readonly string[]; makeDefault: boolean },
+    options: { fanOutTo: readonly string[]; targetProfiles?: readonly string[]; makeDefault: boolean },
   ) => Promise<SettingsActionResult & { fanOut?: Array<{ profile: string; displayName: string; ok: boolean; message?: string }> }>;
   /** 删除端点。用户看到一行，删除就是整体删除：壳层会跨所有配过它的 Agent 一起删。 */
   onDeleteEndpoint: (id: string) => Promise<SettingsActionResult>;
   /**
-   * 勾选 / 取消勾选某一个 Agent 对某提供商的绑定。
+   * 串行切换默认提供商并关闭原提供商：
+   * 1. 先通过 `/api/model/set` 把目标 BOT 切到新选定的默认模型；
+   * 2. 只有第一步成功后，才移除原提供商在该 BOT 上的配置。
+   */
+  onSwitchDefaultAndDisableProvider: (params: {
+    profile: string;
+    disableProviderId: string;
+    newProviderId: string;
+    newModel: string;
+    confirmExpensive?: boolean;
+  }) => Promise<SettingsActionResult & { confirmRequired?: boolean; step?: 'switch' | 'disable' }>;
+  /**
+   * 开启 / 关闭某一个 BOT 对某提供商的访问权限。
    *
-   * 【规则】`apiKey` 只在「把自定义端点配置到一个未配置的 Agent」且确实无法复用时才需要：
-   *   壳层会先尝试从其它成员复制密钥；没有可读来源时返回 `needsKey`，界面再就地补一次。
-   * 【规则】正在被当作当前主模型的 Agent 不允许取消，壳层会拒绝并给出原因。
+   * 【规则】`apiKey` 只在「为未开启该端点的 BOT 开启」且其他成员没有可复用密钥时才需要：
+   *   壳层会先尝试从其它成员复制密钥；没有可读来源时返回 `needsKey`，界面再就地展开补密钥条。
+   * 【规则】正在被当作当前主模型的 BOT 不允许关闭，壳层会拒绝并给出原因。
    */
   onToggleProviderAgent: (
     providerId: string,
     profile: string,
     nextChecked: boolean,
     apiKey?: string,
-    options?: ToggleProviderAgentOptions,
   ) => Promise<ToggleProviderAgentResult>;
   /**
    * 把某个 Agent 的主模型切到这个提供商。
