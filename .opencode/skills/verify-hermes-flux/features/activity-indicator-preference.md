@@ -1,20 +1,20 @@
 # Activity indicator preference
 
-设置 › 外观里的「活动指示器」是左轨运行时动效的唯一选择入口。六套变体（流云 / 陀螺 / 轨道 / 突触 / 弹簧 / 旋涡）以卡片并列，卡片里跑的就是左轨里用的同一个 `ActivityIndicator` 运行态，点一下立即更换并落盘，刷新后保持。
+设置 › 外观里的「活动指示器」是左轨运行时动效的唯一选择入口。十八套变体（原有 6 套纯 CSS 几何雕塑 + 新增 12 套 3D 透视点云装置）以卡片并列，卡片里跑的就是左轨里用的同一个 `ActivityIndicator` 运行态，点一下立即更换并落盘，刷新后保持。
 
 ## Sub-features
 
-- `six-live-previews`: 六张卡按真值表顺序排列，每张卡内嵌运行态指示器，动画节点真实在跑（不是静态缩略图）。
+- `eighteen-live-previews`: 十八张卡按真值表顺序排列，每张卡内嵌运行态指示器，动画节点真实在跑（不是静态缩略图）。
 - `single-selection`: 选中态互斥，来自当前快照而不是默认值；切换后其余卡 `aria-checked="false"`。
 - `apply-and-persist`: 点击后 `localStorage.hermes_flux_activity_variant` 写入所选变体，关闭再打开、刷新页面都保持。
-- `reduced-motion`: 系统开启「减少动态效果」时六套动效全部停止。
-- `page-hidden-pause`: 页面隐藏（`data-page-hidden="true"`）时六套动效全部暂停，不空转合成器。
-- `no-clipping`: 两种界面语言下卡片名称与描述都不被截断。
+- `reduced-motion`: 系统开启「减少动态效果」时十八套动效全部停止，且点云保留 `t0` 3D 景深分布并释放 `will-change`。
+- `page-hidden-pause`: 页面隐藏（`data-page-hidden="true"`）时十八套动效全部暂停，不空转合成器。
+- `no-clipping`: 两种界面语言下十八张卡片名称与描述都不被截断。
 
 ## How to get to it (user POV)
 
 - 顶栏齿轮 / 快捷键打开设置 › 外观。
-- 在「界面主题」下方找到「活动指示器」，六张卡并排可直接比较。
+- 在「界面主题」下方找到「活动指示器」，十八张卡并排可直接比较。
 - 点任意一张卡：边框高亮立刻切换，左轨下次出现的运行态就用新动效。
 - 关闭设置、重启或刷新应用：仍保持上次选择。
 
@@ -23,13 +23,13 @@
 Preconditions: `npm run build` is fresh, `node scripts/verify/control-flux.mjs doctor` passes. No gateway needed.
 
 1. Run `node scripts/verify/control-flux.mjs run activity-indicator-preference`.
-   Observable: `[data-activity-variant]` count is 6, in the order `cloud, gyro, orbit, synapse, spring, matrix`.
+   Observable: `[data-activity-variant]` count is 18, in exact `ACTIVITY_INDICATOR_VARIANTS` order (`cloud`..`matrix`, `abyss-whale`..`kinetic-helix`, `whale-compact`..`dipole-vortex`).
 2. Read each card's preview.
    Observable: every card contains `[data-activity-preview="<variant>"]` whose inner `[data-status]` is `running`, carries `flux-variant-<variant>`, and has at least one node with `animationName !== 'none'`.
 3. Read the selection state.
    Observable: exactly one card has `aria-checked="true"`.
-4. Click `[data-activity-variant=orbit]`.
-   Observable: `aria-checked` moves to `orbit` only, and `localStorage.hermes_flux_activity_variant === 'orbit'`.
+4. Click `[data-activity-variant=abyss-whale]`.
+   Observable: `aria-checked` moves to `abyss-whale` only, and `localStorage.hermes_flux_activity_variant === 'abyss-whale'`.
 5. Switch the interface language to English and re-read every card's text row.
    Observable: no text row has `scrollWidth > clientWidth`.
 6. Emulate `prefers-reduced-motion: reduce`.
@@ -37,7 +37,7 @@ Preconditions: `npm run build` is fresh, `node scripts/verify/control-flux.mjs d
 7. Set `document.documentElement.dataset.pageHidden = 'true'`.
    Observable: every animated node inside the previews reports `animation-play-state: paused`.
 8. Reload the page and open Settings › Appearance again.
-   Observable: `orbit` is still the single checked card, and the stored value is still `orbit`.
+   Observable: `abyss-whale` is still the single checked card, and the stored value is still `abyss-whale`.
 
 ## Gotchas
 

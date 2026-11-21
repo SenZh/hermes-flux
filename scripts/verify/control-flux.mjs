@@ -1307,10 +1307,10 @@ export async function runFeature(featureId) {
         await session.waitFor('document.querySelector("[data-testid=settings-dialog]") !== null', 10000, 'settings dialog');
         await session.click('[data-settings-section=appearance]');
         await session.waitFor('document.querySelector("[data-settings-section=appearance][aria-current=page]") !== null', 8000, 'appearance active');
-        await session.waitFor('document.querySelectorAll("[data-activity-variant]").length === 6', 8000, 'six variant cards');
+        await session.waitFor('document.querySelectorAll("[data-activity-variant]").length === 18', 8000, 'eighteen variant cards');
       };
 
-      console.log('  1. 打开设置 › 外观：六张变体卡必须各自运行真实动效...');
+      console.log('  1. 打开设置 › 外观：十八张变体卡必须各自运行真实动效...');
       await openAppearance();
       const cards = await session.evaluate(`(() => {
         const list = Array.from(document.querySelectorAll('[data-activity-variant]'));
@@ -1332,9 +1332,9 @@ export async function runFeature(featureId) {
         });
       })()`);
       console.log('     · 卡片统计:', JSON.stringify(cards));
-      const expectedVariants = ['cloud', 'gyro', 'orbit', 'synapse', 'spring', 'matrix'];
+      const expectedVariants = ['cloud', 'gyro', 'orbit', 'synapse', 'spring', 'matrix', 'abyss-whale', 'prolate-lattice', 'infinity-knot', 'surf-ribbon', 'twin-vortex', 'kinetic-helix', 'whale-compact', 'torus-mesh', 'wave-net', 'sphere-mesh', 'mobius-band', 'dipole-vortex'];
       if (JSON.stringify(cards.map((card) => card.variant)) !== JSON.stringify(expectedVariants)) {
-        throw new Error(`六张卡顺序必须与真值表一致，实测 ${cards.map((card) => card.variant).join(',')}`);
+        throw new Error(`十八张卡顺序必须与真值表一致，实测 ${cards.map((card) => card.variant).join(',')}`);
       }
       for (const card of cards) {
         if (card.previewStatus !== 'running') throw new Error(`${card.variant} 预览必须是运行态，实测 ${card.previewStatus}`);
@@ -1344,15 +1344,15 @@ export async function runFeature(featureId) {
       }
       if (cards.filter((card) => card.checked === 'true').length !== 1) throw new Error('变体选中态必须互斥');
 
-      console.log('  2. 点击「轨道」：必须立即生效并落盘...');
-      await session.click('[data-activity-variant=orbit]');
-      await session.waitFor('document.querySelector("[data-activity-variant=orbit]").getAttribute("aria-checked") === "true"', 5000, 'orbit checked');
+      console.log('  2. 点击「深海光鲸」：必须立即生效并落盘...');
+      await session.click('[data-activity-variant=abyss-whale]');
+      await session.waitFor('document.querySelector("[data-activity-variant=abyss-whale]").getAttribute("aria-checked") === "true"', 5000, 'abyss-whale checked');
       const applied = await session.evaluate(`(() => ({
         stored: localStorage.getItem('hermes_flux_activity_variant'),
         checked: Array.from(document.querySelectorAll('[data-activity-variant][aria-checked=true]')).map((el) => el.getAttribute('data-activity-variant')),
       }))()`);
-      if (applied.stored !== 'orbit') throw new Error(`偏好必须落盘为 orbit，实测 ${applied.stored}`);
-      if (JSON.stringify(applied.checked) !== '["orbit"]') throw new Error(`选中态必须唯一切到 orbit，实测 ${JSON.stringify(applied.checked)}`);
+      if (applied.stored !== 'abyss-whale') throw new Error(`偏好必须落盘为 abyss-whale，实测 ${applied.stored}`);
+      if (JSON.stringify(applied.checked) !== '["abyss-whale"]') throw new Error(`选中态必须唯一切到 abyss-whale，实测 ${JSON.stringify(applied.checked)}`);
 
       console.log('  3. 切到 English：卡片名称与描述不得被截断...');
       const switched = await session.evaluate(`(() => {
@@ -1373,7 +1373,7 @@ export async function runFeature(featureId) {
       console.log('     · 文本宽度:', JSON.stringify(clipping));
       if (clipped.length > 0) throw new Error(`英文文案被截断：${JSON.stringify(clipped)}`);
 
-      console.log('  4. 减少动态效果：六套动效必须停止...');
+      console.log('  4. 减少动态效果：十八套动效必须停止...');
       await session.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
       const reduced = await session.evaluate(`(() => {
         const animated = Array.from(document.querySelectorAll('[data-activity-preview] *')).filter((el) => getComputedStyle(el).animationName !== 'none');
@@ -1383,7 +1383,7 @@ export async function runFeature(featureId) {
       console.log('     · reduce 后仍动画的节点:', JSON.stringify(reduced));
       if (reduced.total > 0) throw new Error(`减少动态效果下不得继续动画：${JSON.stringify(reduced.offenders)}`);
 
-      console.log('  5. 页面隐藏：六套动效必须暂停而不是空转...');
+      console.log('  5. 页面隐藏：十八套动效必须暂停而不是空转...');
       const hidden = await session.evaluate(`(() => {
         document.documentElement.dataset.pageHidden = 'true';
         const animated = Array.from(document.querySelectorAll('[data-activity-preview] *')).filter((el) => getComputedStyle(el).animationName !== 'none');
@@ -1406,8 +1406,8 @@ export async function runFeature(featureId) {
         stored: localStorage.getItem('hermes_flux_activity_variant'),
         checked: Array.from(document.querySelectorAll('[data-activity-variant][aria-checked=true]')).map((el) => el.getAttribute('data-activity-variant')),
       }))()`);
-      if (restored.stored !== 'orbit' || JSON.stringify(restored.checked) !== '["orbit"]') {
-        throw new Error(`刷新后必须仍选中 orbit，实测 ${JSON.stringify(restored)}`);
+      if (restored.stored !== 'abyss-whale' || JSON.stringify(restored.checked) !== '["abyss-whale"]') {
+        throw new Error(`刷新后必须仍选中 abyss-whale，实测 ${JSON.stringify(restored)}`);
       }
 
       const evidence = {
