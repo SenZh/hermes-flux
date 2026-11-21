@@ -5,9 +5,9 @@
 
 | 方法 | 入参（契约） | 出参（契约） | 调用点 | 真实探针 |
 | --- | --- | --- | --- | --- |
-| `command.dispatch` | `name` `arg` `session_id` `profile` | `type` `output` `target` `message` `notice` `display` `name` `status` | `packages/core/src/session/interactiveService.ts:308`<br>`packages/core/src/session/interactiveService.ts:338`<br>`packages/desktop/src/renderer/services/settingsDataService.ts:1258` | 跳过：指令分派需活跃会话与在线命令分发器（exec/send/skill/prefill），离线探针显式跳过，由契约表与领域单测守护 |
+| `command.dispatch` | `name` `arg` `session_id` `profile` | `type` `output` `target` `message` `notice` `display` `name` `status` | `packages/core/src/session/interactiveService.ts:308`<br>`packages/core/src/session/interactiveService.ts:338`<br>`packages/desktop/src/renderer/services/settingsDataService.ts:1411` | 跳过：指令分派需活跃会话与在线命令分发器（exec/send/skill/prefill），离线探针显式跳过，由契约表与领域单测守护 |
 | `complete.path` | `profile` `word` `cwd` `session_id` | `items` | `packages/core/src/session/interactiveService.ts:251` | 跳过：文件路径补全依赖活跃会话的 cwd 与工作区文件系统实时遍历，离线探针无有效 cwd，显式跳过，由契约表与 CDP 场景守护 |
-| `complete.slash` | `text` `session_id` `profile` | `items` `replace_from` | `packages/core/src/session/interactiveService.ts:231`<br>`packages/desktop/src/renderer/services/settingsDataService.ts:369` | 跳过：斜杠实时补全需绑定活跃会话的 profile 与项目技能上下文，离线探针无会话可绑，显式跳过，由契约表与 CDP 场景守护 |
+| `complete.slash` | `text` `session_id` `profile` | `items` `replace_from` | `packages/core/src/session/interactiveService.ts:231`<br>`packages/desktop/src/renderer/services/settingsDataService.ts:402` | 跳过：斜杠实时补全需绑定活跃会话的 profile 与项目技能上下文，离线探针无会话可绑，显式跳过，由契约表与 CDP 场景守护 |
 | `image.attach_bytes` | `session_id` `profile` `content_base64` `data` `filename` `ext` | `name` `width` `height` `token_estimate` `attached` `path` `count` `remainder` `text` `bytes` `message` | `packages/desktop/src/renderer/services/turnExecutionService.ts:718` | 跳过：图片二进制字节附加通道需依赖在线活跃通道与图文模型，在离线探针下显式跳过，由契约表与 CDP 物理测试严格守护 |
 | `prompt.background` | `session_id` `profile` `text` | `task_id` | `packages/desktop/src/renderer/services/turnExecutionService.ts:886` | 跳过：后台子代理旁路呼叫需活跃会话与跨 profile 计算宿主，应答经事件流异步到达，离线探针显式跳过，由契约表与路由单测守护 |
 | `prompt.btw` | `session_id` `profile` `text` | `task_id` | `packages/core/src/session/handoffService.ts:58` | ✅ 0.22.5 |
@@ -26,7 +26,7 @@
 - 调用点：
   - `packages/core/src/session/interactiveService.ts:308`
   - `packages/core/src/session/interactiveService.ts:338`
-  - `packages/desktop/src/renderer/services/settingsDataService.ts:1258`
+  - `packages/desktop/src/renderer/services/settingsDataService.ts:1411`
 
 ### `complete.path`
 
@@ -43,7 +43,7 @@
 - 真实探针：跳过 —— 斜杠实时补全需绑定活跃会话的 profile 与项目技能上下文，离线探针无会话可绑，显式跳过，由契约表与 CDP 场景守护
 - 调用点：
   - `packages/core/src/session/interactiveService.ts:231`
-  - `packages/desktop/src/renderer/services/settingsDataService.ts:369`
+  - `packages/desktop/src/renderer/services/settingsDataService.ts:402`
 
 ### `image.attach_bytes`
 

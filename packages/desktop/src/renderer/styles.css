@@ -1084,18 +1084,8 @@ html[data-rail-resizing] webview {
   --flux-activity-ink-label: #2563EB;
 }
 
-/* jadePulse 已删除：唯一消费者是已移除的左舵模板；其无休止 CSS 动画与集中时钟军规冲突，
-   呼吸动效待 useDurationTicker 接入后以 JS 驱动恢复。flux-pulse 仍被存量模板消费，保留待该舱迁移时一并处理。 */
-@keyframes flux-pulse {
-  0%, 100% {
-    transform: scale(1);
-    opacity: 0.85;
-  }
-  50% {
-    transform: scale(1.3);
-    opacity: 1;
-  }
-}
+/* jadePulse 与 flux-pulse 已删除：原存量模板消费者（左舵与 StatusBar）已全部迁移/清理，
+   不再保留无休止 CSS 动画；呼吸动效后续待 useDurationTicker 接入后以 JS 驱动恢复。 */
 
 @keyframes flux-fade-in {
   from {

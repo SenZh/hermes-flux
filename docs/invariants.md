@@ -25,17 +25,17 @@ JSON 版本强制每条给出唯一 `id`、被测源码 `source`、`symbol` 与�
 | `source` 为真实源码路径 | 违者 FAIL |
 | `source`+`symbol` 组合唯一 | 违者 FAIL |
 
-## 总览（43 条，覆盖 11 个领域）
+## 总览（44 条，覆盖 12 个领域）
 
 ### ATTACH（5 条）
 
 | 编号 | 主题 | 源码锚点 | 守护测试 | 失效模式 |
 |---|---|---|---|---|
-| `INV-ATTACH-01` | 迟滞响应不串台（令牌不匹配的 settle 不改变字段） | `packages/core/src/models/providerAttachFlow.ts` → `settleAttach` | `provider-attach-flow-formal.test.mjs` | 旧的确认结果写到新目标行上 |
-| `INV-ATTACH-02` | 提交中意图不可变 | `packages/core/src/models/providerAttachFlow.ts` → `beginAttach` | `provider-attach-flow-formal.test.mjs` | 提交过程中意图被改写，最终绑定了错误的 Agent |
-| `INV-ATTACH-03` | 失败不丢用户输入 | `packages/core/src/models/providerAttachFlow.ts` → `failAttach` | `provider-attach-flow-formal.test.mjs` | 失败后密钥草稿被清空，用户要重新输入 |
-| `INV-ATTACH-04` | 取消恒生效且 busy 只由 submitting 决定 | `packages/core/src/models/providerAttachFlow.ts` → `cancelAttach` | `provider-attach-flow-formal.test.mjs` | 取消失效；或不该忙的时候锁死界面 |
-| `INV-ATTACH-05` | 目录收敛只挂仍为 absent 的同一格子 | `packages/core/src/models/providerAttachFlow.ts` → `reconcileAttach` | `provider-attach-flow-formal.test.mjs` | 用户刚打开的确认条瞬间消失 |
+| `INV-ATTACH-01` | 迟滞响应不串台（令牌不匹配的 settle 不改变字段） | `packages/core/src/models/providerAttachFlow.ts` → `reduceAttachFlow#settle` | `provider-attach-flow-formal.test.mjs` | 旧的开启结果写到新目标行上 |
+| `INV-ATTACH-02` | 提交中不可重入（重复 submit 不得覆盖在途令牌与草稿） | `packages/core/src/models/providerAttachFlow.ts` → `reduceAttachFlow#submit` | `provider-attach-flow-formal.test.mjs` | 连续点击覆盖在途令牌或草稿，导致旧响应串台或重发写坏配置 |
+| `INV-ATTACH-03` | 失败不丢用户输入 | `packages/core/src/models/providerAttachFlow.ts` → `reduceAttachFlow#needs-key-failure` | `provider-attach-flow-formal.test.mjs` | 失败后密钥草稿被清空，用户要重新输入 |
+| `INV-ATTACH-04` | 取消恒生效且 busy 只由 submitting 决定 | `packages/core/src/models/providerAttachFlow.ts` → `reduceAttachFlow#cancel` | `provider-attach-flow-formal.test.mjs` | 取消失效；或不该忙的时候锁死界面 |
+| `INV-ATTACH-05` | 目录收敛只挂仍为 absent 的同一格子 | `packages/core/src/models/providerAttachFlow.ts` → `reconcileAttachFlow` | `provider-attach-flow-formal.test.mjs` | 用户刚打开的补密钥条瞬间消失 |
 
 ### BOT（3 条）
 
@@ -100,6 +100,12 @@ JSON 版本强制每条给出唯一 `id`、被测源码 `source`、`symbol` 与�
 | 编号 | 主题 | 源码锚点 | 守护测试 | 失效模式 |
 |---|---|---|---|---|
 | `INV-STREAM-01` | 流式直写锚点存在性：流式末条助手行恒有 #msg-content-*，非流式全空行恒不占位 | `packages/ui/src/components-react/conversation/MessageRow.tsx` → `MessageRow#streamingAnchor` | `streaming-anchor-formal.test.mjs` | 流式正文一次性铺满：空助手行被判空抹掉锚点，tokenStreamWriter 直写全程空转 |
+
+### SWITCH（1 条）
+
+| 编号 | 主题 | 源码锚点 | 守护测试 | 失效模式 |
+|---|---|---|---|---|
+| `INV-SWITCH-01` | 替补默认模型候选排除目标与不可用提供商 | `packages/core/src/models/providerViews.ts` → `collectReplacementModels` | `provider-attach-flow-formal.test.mjs` | 把正在关闭的提供商或未开启/空模型提供商塞进替补列表，导致切换后 BOT 无模型可用 |
 
 ### TIME（2 条）
 

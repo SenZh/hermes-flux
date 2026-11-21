@@ -48,10 +48,15 @@ export {
   ACTIVITY_INDICATOR_VARIANTS,
   DEFAULT_ACTIVITY_INDICATOR_VARIANT,
   ACTIVITY_INDICATOR_STORAGE_KEY,
+  POINT_CLOUD_SPECS,
+  POINT_CLOUD_SPEC_MAP,
+  getPointCloudSpec,
   resolveActivityIndicatorVariant,
   loadActivityIndicatorVariant,
   saveActivityIndicatorVariant,
   type ActivityIndicatorVariant,
+  type PointCloudShape,
+  type PointCloudSpec,
 } from './tokens/activityIndicator.js';
 export * from './tokens/conversationWidth.js';
 export * from './lib/safeStorage.js';

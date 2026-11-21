@@ -7,9 +7,9 @@ import { BotAvatarToggle } from './BotAvatarToggle.js';
  * 「保存时配置到」的成员选择。
  *
  * 【设计意图 (Why)】
- *   这里问的问题和提供商列表里的「生效于」是同一个：「这条提供商要配置到哪些 Bot」。
+ *   这里问的问题和提供商列表里的 BOT 成员网格是同一个：「这条提供商要配置到哪些 Bot」。
  *   交互必须同源——点头像选择——否则用户要在一处辨认 12px 复选框、在另一处
- *   辨认 44px 头像，同一个动作两种手感。长相与语义全部由 `BotAvatarToggle` 的
+ *   辨认 56px 大头像，同一个动作两种手感。长相与语义全部由 `BotAvatarToggle` 的
  *   compact 档承担，本文件只做数据适配与排布。
  *
  * 【防范的历史坑 (Pitfall)】
@@ -17,7 +17,7 @@ import { BotAvatarToggle } from './BotAvatarToggle.js';
  *      长名被截断成 `auralis-infrastructure-…`，用户还得靠 title 才认得出是谁。
  *   2. 上一版把当前 Bot 从列表里过滤掉，用户看不到"这条会写到谁身上"，只能靠副标题猜。
  *      当前 Bot 必须出现并显示为已勾选且锁定：它本来就是保存目标。
- *   3. 换成列表页的 44px 网格后，弹框高度受硬限，头像网格把「保存」推出首屏。
+ *   3. 换成列表页的 56px 大头像网格后，弹框高度受硬限，头像网格把「保存」推出首屏。
  *      这里必须用 compact 档，把垂直预算留给动作条。
  *
  * 【约束与规则 (Rules)】
@@ -35,14 +35,14 @@ export function FanOutMemberList({
 }: {
   bots: readonly SettingsBotRow[];
   selected: readonly string[];
-  /** 保存目标本身：永远勾选且不可取消。 */
-  lockedProfile: string;
+  /** 可选：若指定则该 BOT 永远勾选且不可取消。 */
+  lockedProfile?: string;
   onToggle: (profile: string) => void;
 }): React.ReactElement {
   return (
     <div className="flex flex-wrap gap-2">
       {bots.map((bot) => {
-        const locked = bot.profile === lockedProfile;
+        const locked = Boolean(lockedProfile) && bot.profile === lockedProfile;
         return (
           <BotAvatarToggle
             key={bot.profile}

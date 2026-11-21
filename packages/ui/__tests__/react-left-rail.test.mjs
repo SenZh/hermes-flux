@@ -13,7 +13,11 @@ import path from 'node:path';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { LeftRail } from '../dist/components-react/LeftRail.js';
-import { ActivityIndicator } from '../dist/index.js';
+import {
+  ActivityIndicator,
+  ACTIVITY_INDICATOR_VARIANTS,
+  POINT_CLOUD_SPECS,
+} from '../dist/index.js';
 import { renderLeftRailHtml } from '../dist/components-react/leftRailStaticRender.js';
 import { buildLeftRailModel, formatLeftRailTime, toSnippet, isAgentScopeActive } from '../dist/components-react/leftRailModel.js';
 import { assertCollapsedRailGeometry } from './helpers/rail-geometry.mjs';
@@ -250,20 +254,23 @@ test('左轨组件：会话行形态与关键交互契约', async (t) => {
     const running = render({ sessions: [{ id: 's-1', title: '跑', timestamp: NOW, activityState: 'running' }] });
     assert.ok(running.includes('activity-pulse-indicator'));
     assert.ok(running.includes('flux-cloud-indicator--running'));
-    assert.equal((running.match(/class="flux-cloud-dot"/g) || []).length, 13);
+    assert.equal((running.match(/flux-cloud-stream--/g) || []).length, 3);
+    assert.equal((running.match(/class="flux-cloud-glint"/g) || []).length, 1);
+    assert.equal(running.includes('flux-cloud-dot'), false, '禁止回退到密集圆点阵');
     assert.ok(running.includes('执行中'));
     assert.equal(running.includes('activity-unread-badge'), false);
     const runningRow = running.slice(running.indexOf('data-id="s-1"'), running.indexOf('</button>', running.indexOf('data-id="s-1"')));
-    assert.equal(runningRow.includes('<svg'), false, 'SessionRow 运行态云朵点阵必须零 SVG');
+    assert.equal(runningRow.includes('<svg'), false, 'SessionRow 运行态流云必须零 SVG');
 
     const unread = render({ sessions: [{ id: 's-1', title: '未读', timestamp: NOW, activityState: 'unread' }] });
     assert.ok(unread.includes('activity-unread-badge'));
     assert.ok(unread.includes('flux-cloud-indicator--unread'));
-    assert.equal((unread.match(/class="flux-cloud-dot"/g) || []).length, 13);
+    assert.ok(unread.includes('flux-cloud-done-ring'));
+    assert.ok(unread.includes('flux-cloud-check'));
     assert.ok(unread.includes('已完成'));
     assert.equal(unread.includes('activity-pulse-indicator'), false);
     const unreadRow = unread.slice(unread.indexOf('data-id="s-1"'), unread.indexOf('</button>', unread.indexOf('data-id="s-1"')));
-    assert.equal(unreadRow.includes('<svg'), false, 'SessionRow 未读态云朵点阵必须零 SVG');
+    assert.equal(unreadRow.includes('<svg'), false, 'SessionRow 未读态完成环必须零 SVG');
 
     const read = render({ sessions: [{ id: 's-1', title: '已读', timestamp: NOW, activityState: 'read' }] });
     assert.equal(read.includes('activity-pulse-indicator'), false);
@@ -480,7 +487,7 @@ test('静态渲染快照同样携带变体，避免服务端/测试链路恒为�
   assert.ok(fallback.includes('data-variant="cloud"'), '快照缺省时必须回落默认变体');
 });
 
-test('ActivityIndicator 统一原语：placement、entityKind、13 颗稀疏云朵点阵与静态 read 零节点', () => {
+test('ActivityIndicator 统一原语：placement、entityKind、流云丝带与静态 read 零节点', () => {
   const cornerRunning = renderToStaticMarkup(React.createElement(ActivityIndicator, {
     state: 'running',
     placement: 'corner',
@@ -514,8 +521,8 @@ test('ActivityIndicator 统一原语：placement、entityKind、13 颗稀疏云�
   assert.ok(inlineRunningSession.includes('activity-pulse-indicator'));
   assert.ok(inlineRunningSession.includes('flux-cloud-indicator--running'));
   assert.ok(inlineRunningSession.includes('flux-cloud-canvas'));
-  assert.ok(inlineRunningSession.includes('flux-cloud-fog'));
-  assert.equal((inlineRunningSession.match(/class="flux-cloud-dot"/g) || []).length, 13);
+  assert.equal((inlineRunningSession.match(/flux-cloud-stream--/g) || []).length, 3);
+  assert.equal((inlineRunningSession.match(/class="flux-cloud-glint"/g) || []).length, 1);
   assert.ok(inlineRunningSession.includes('执行中'));
   assert.equal(inlineRunningSession.includes('<svg'), false);
 
@@ -525,7 +532,7 @@ test('ActivityIndicator 统一原语：placement、entityKind、13 颗稀疏云�
     entityKind: 'bot',
   }));
   assert.ok(inlineRunningBot.includes('思考中'));
-  assert.equal((inlineRunningBot.match(/class="flux-cloud-dot"/g) || []).length, 13);
+  assert.equal((inlineRunningBot.match(/flux-cloud-stream--/g) || []).length, 3);
 
   const inlineRunningGroup = renderToStaticMarkup(React.createElement(ActivityIndicator, {
     state: 'running',
@@ -533,7 +540,7 @@ test('ActivityIndicator 统一原语：placement、entityKind、13 颗稀疏云�
     entityKind: 'group',
   }));
   assert.ok(inlineRunningGroup.includes('协作中'));
-  assert.equal((inlineRunningGroup.match(/class="flux-cloud-dot"/g) || []).length, 13);
+  assert.equal((inlineRunningGroup.match(/flux-cloud-stream--/g) || []).length, 3);
 
   const inlineUnreadStatic = renderToStaticMarkup(React.createElement(ActivityIndicator, {
     state: 'unread',
@@ -543,9 +550,8 @@ test('ActivityIndicator 统一原语：placement、entityKind、13 颗稀疏云�
   assert.ok(inlineUnreadStatic.includes('flux-cloud-indicator--unread'));
   assert.ok(inlineUnreadStatic.includes('data-transition="none"'));
   assert.ok(inlineUnreadStatic.includes('data-placement="inline"'));
-  assert.equal((inlineUnreadStatic.match(/class="flux-cloud-dot"/g) || []).length, 13);
-  assert.equal((inlineUnreadStatic.match(/data-on="1"/g) || []).length, 7);
-  assert.equal((inlineUnreadStatic.match(/data-on="0"/g) || []).length, 6);
+  assert.ok(inlineUnreadStatic.includes('flux-cloud-done-ring'));
+  assert.ok(inlineUnreadStatic.includes('flux-cloud-check'));
   assert.ok(inlineUnreadStatic.includes('已完成'));
   assert.equal(inlineUnreadStatic.includes('flux-cloud-ripple'), false);
   assert.equal(inlineUnreadStatic.includes('ring-sidebar'), false);
@@ -560,6 +566,7 @@ test('ActivityIndicator 统一原语：placement、entityKind、13 颗稀疏云�
   assert.ok(inlineUnreadJustCompleted.includes('data-transition="just-completed"'));
   assert.ok(inlineUnreadJustCompleted.includes('activity-unread-badge'));
   assert.ok(inlineUnreadJustCompleted.includes('flux-cloud-ripple'));
+  assert.ok(inlineUnreadJustCompleted.includes('flux-cloud-done-ring'));
   assert.ok(inlineUnreadJustCompleted.includes('已完成'));
 
   assert.equal(renderToStaticMarkup(React.createElement(ActivityIndicator, { state: 'read' })), '');
@@ -588,7 +595,7 @@ test('ActivityIndicator 统一原语：placement、entityKind、13 颗稀疏云�
   }));
   assert.ok(readSettleInline.includes('activity-settle-fade'));
   assert.ok(readSettleInline.includes('flux-cloud-settle'));
-  assert.equal((readSettleInline.match(/class="flux-cloud-settle-dot"/g) || []).length, 7);
+  assert.equal((readSettleInline.match(/flux-cloud-settle-stream--/g) || []).length, 3);
   assert.ok(readSettleInline.includes('data-status="read"'));
   assert.ok(readSettleInline.includes('data-transition="just-completed"'));
   assert.ok(readSettleInline.includes('data-placement="inline"'));
@@ -596,9 +603,9 @@ test('ActivityIndicator 统一原语：placement、entityKind、13 颗稀疏云�
   assert.equal(readSettleInline.includes('activity-pulse-indicator'), false);
   assert.equal(readSettleInline.includes('activity-unread-badge'), false);
 
-  // 6 种 variant 完整落盘验证（cloud / gyro / orbit / synapse / spring / matrix 全部纯 HTML/CSS 零 SVG）
-  const variants = ['cloud', 'gyro', 'orbit', 'synapse', 'spring', 'matrix'];
-  for (const v of variants) {
+  // 全部 18 种 variant 完整落盘验证（6 套几何雕塑 + 12 套 3D 点云全部纯 HTML/CSS 零 SVG）
+  assert.equal(ACTIVITY_INDICATOR_VARIANTS.length, 18);
+  for (const v of ACTIVITY_INDICATOR_VARIANTS) {
     const runMarkup = renderToStaticMarkup(React.createElement(ActivityIndicator, {
       state: 'running',
       variant: v,
@@ -629,79 +636,105 @@ test('ActivityIndicator 统一原语：placement、entityKind、13 颗稀疏云�
   }
 });
 
-/**
- * 几何守卫：会话行里的云团是"用户直接看到的密度"。
- *
- * 【为什么需要】2026-11-19 会话行内 24 颗 2.0~2.6px 点铺满 19×14px，颗粒首尾相抵，
- *   读起来是一块密点而非云；只把每颗点改小不解决观感，必须同时约束颗数与最小间距。
- *   这条测试挡的正是"把点阵加密回去"与"命中偏移算错导致逐颗偏心"两类静默回退。
- *
- * 【阈值依据】当前 13 颗最近中心距 ≈3.25px（相邻层最小水平错位 1.8 view 单位，实测）；旧 24 颗版
- *   实测 ≈2.07px，"同列对位"的 13 颗版 ≈2.62px——3.1px 下限把这两种密度都拦在门外，
- *   只给美术留 ±0.15px 微调余量。
- */
-test('云点几何守卫：13 颗、正圆、命中偏移成对、直径上限、最小间距与对勾 step 唯一', () => {
-  const html = renderToStaticMarkup(React.createElement(ActivityIndicator, { state: 'running', placement: 'inline' }));
-  const dots = html.match(/<i class="flux-cloud-dot"[^>]*>/g) || [];
-  assert.equal(dots.length, 13, '稀疏云团必须恒为 13 颗；加回 24 颗会重新糊成一整块密点');
-
-  const readNum = (tag, prop, unit) => {
-    const style = tag.match(/style="([^"]*)"/)?.[1] ?? '';
-    const decl = style.split(';').map((s) => s.trim()).find((s) => s.startsWith(`${prop}:`));
-    return decl ? Number.parseFloat(decl.slice(prop.length + 1).replace(unit, '')) : Number.NaN;
-  };
-
-  const centers = [];
-  dots.forEach((tag, i) => {
-    const w = readNum(tag, 'width', 'px');
-    const h = readNum(tag, 'height', 'px');
-    assert.equal(w, h, `第 ${i} 颗点必须正圆（width=${w} height=${h}）`);
-    assert.ok(w > 0 && w <= 2.3, `第 ${i} 颗点直径 ${w}px 必须落在 (0, 2.3]，回到设计稿 2.4px+ 会重新变密`);
-    assert.ok(Math.abs(readNum(tag, 'margin-left', 'px') + w / 2) < 0.011, `第 ${i} 颗点 margin-left 必须等于 -width/2，否则偏心`);
-    assert.ok(Math.abs(readNum(tag, 'margin-top', 'px') + h / 2) < 0.011, `第 ${i} 颗点 margin-top 必须等于 -height/2，否则偏心`);
-    centers.push({
-      x: (readNum(tag, 'left', '%') * 19) / 100,
-      y: (readNum(tag, 'top', '%') * 14) / 100,
-    });
-  });
-
-  let minGap = Number.POSITIVE_INFINITY;
-  for (let i = 0; i < centers.length; i += 1) {
-    for (let j = i + 1; j < centers.length; j += 1) {
-      const gap = Math.hypot(centers[i].x - centers[j].x, centers[i].y - centers[j].y);
-      if (gap < minGap) minGap = gap;
+test('12 套 3D 点云变体结构守卫：精准粒子数、宽/方画布、零内联样式与完成态收敛', () => {
+  for (const spec of POINT_CLOUD_SPECS) {
+    const runMarkup = renderToStaticMarkup(React.createElement(ActivityIndicator, {
+      state: 'running',
+      variant: spec.id,
+      placement: 'inline',
+    }));
+    assert.ok(runMarkup.includes('flux-pc-canvas'), `${spec.id} 必须渲染 .flux-pc-canvas`);
+    const shapeCls = spec.shape === 'wide' ? 'flux-pc-canvas--wide' : 'flux-pc-canvas--sq';
+    assert.ok(runMarkup.includes(shapeCls), `${spec.id} 必须声明画布比例类 ${shapeCls}`);
+    assert.equal((runMarkup.match(/class="flux-pc-dot /g) || []).length, spec.dotCount, `${spec.id} 粒子数必须严格为 ${spec.dotCount}`);
+    for (let i = 0; i < spec.dotCount; i += 1) {
+      assert.ok(runMarkup.includes(`flux-pc-${spec.code}-${i}`), `${spec.id} 缺少粒子类 flux-pc-${spec.code}-${i}`);
     }
+    assert.equal(runMarkup.includes('style='), false, `${spec.id} 禁止使用内联 style 属性，粒子定位必须全走 CSS`);
+    assert.equal(runMarkup.includes('<svg'), false, `${spec.id} 严禁含 <svg>`);
+
+    const unreadStatic = renderToStaticMarkup(React.createElement(ActivityIndicator, {
+      state: 'unread',
+      variant: spec.id,
+      placement: 'inline',
+    }));
+    assert.ok(unreadStatic.includes('flux-pc-done-ring'), `${spec.id} 完成态必须渲染完成环`);
+    assert.ok(unreadStatic.includes('flux-pc-done-tick'), `${spec.id} 完成态必须渲染对勾`);
+    assert.equal((unreadStatic.match(/flux-pc-done-spark--/g) || []).length, 3, `${spec.id} 完成态必须带 3 颗微星收敛点`);
+    assert.equal(unreadStatic.includes('flux-cloud-ripple'), false, `${spec.id} 静态历史未读不得渲染波纹`);
+
+    const unreadJust = renderToStaticMarkup(React.createElement(ActivityIndicator, {
+      state: 'unread',
+      variant: spec.id,
+      placement: 'inline',
+      transition: 'just-completed',
+      transitionToken: 12,
+    }));
+    assert.ok(unreadJust.includes('flux-cloud-ripple'), `${spec.id} just-completed 必须渲染瞬态扩散波纹`);
   }
-  assert.ok(minGap >= 3.1, `最近两颗点中心距 ${minGap.toFixed(2)}px 必须 ≥ 3.1px，否则会话行内会粘连成密集点阵`);
+});
 
-  // 未读态把 7 颗 on 点飞到对勾锚点：step 必须 0..6 各一次，且锚点沿 x 单调、y 先增后减成 V，
-  // 否则聚拢动画会错序/同帧，或勾形塌成一条斜线——这两类回归此前的守卫完全看不见。
-  const unreadHtml = renderToStaticMarkup(React.createElement(ActivityIndicator, { state: 'unread', placement: 'inline' }));
-  const onDots = unreadHtml.match(/<i class="flux-cloud-dot"[^>]*data-on="1"[^>]*>/g) || [];
-  assert.equal(onDots.length, 7, '未读对勾必须恒为 7 颗');
-  const byStep = [...onDots].sort((a, b) => readNum(a, '--step', '') - readNum(b, '--step', ''));
-  assert.deepEqual(
-    byStep.map((tag) => readNum(tag, '--step', '')),
-    [0, 1, 2, 3, 4, 5, 6],
-    '对勾 7 颗必须各自消费唯一 step（0..6），交换或重复会让聚拢动画错序/同帧',
-  );
-  const xs = byStep.map((tag) => readNum(tag, 'left', '%'));
-  const ys = byStep.map((tag) => readNum(tag, 'top', '%'));
-  assert.deepEqual(xs, [...xs].sort((a, b) => a - b), '对勾锚点必须沿 x 单调递增（step 越大越靠右）');
-  // 单调断言挡不住"两个锚点 x 相同"：排序后仍相等，勾臂会竖直对位叠点。必须另断互不相同。
-  assert.equal(new Set(xs).size, xs.length, '对勾 7 个锚点 x 必须互不相同，同列会对位叠点、勾臂读作一坨');
-  const bottom = ys.indexOf(Math.max(...ys));
-  assert.ok(bottom > 0 && bottom < ys.length - 1, '对勾必须存在唯一最低点，否则不是 V 形而是一条斜杠');
-  assert.deepEqual(ys.slice(0, bottom + 1), [...ys.slice(0, bottom + 1)].sort((a, b) => a - b), '对勾左臂必须随 step 单调下探');
-  assert.deepEqual(ys.slice(bottom), [...ys.slice(bottom)].sort((a, b) => b - a), '对勾右臂必须随 step 单调上扬');
+/**
+ * 反密集点阵与六变体多谐波结构守卫。
+ *
+ * 【为什么需要】旧版流云（13 颗小点）、突触（4×4=16 格密点）、旋涡（16 颗螺旋散点）在 16px
+ *   尺寸下视觉拥挤发糊；同时单一周期旋转显得呆板。这里钉住：
+ *   1. cloud / synapse / matrix 严禁出现旧版密点类名；
+ *   2. 6 套变体各自保留足够的多层元素以承载互质多谐波演进动效；
+ *   3. 每套变体在 unread 态均有独立静态收敛形态，且全程零 SVG。
+ */
+test('反密集点阵与六变体结构守卫：三套重制彻底清零密点，六套均具备多层运动载体与完成态', () => {
+  const runningOf = (variant) => renderToStaticMarkup(React.createElement(ActivityIndicator, {
+    state: 'running',
+    variant,
+    placement: 'inline',
+  }));
+  const unreadOf = (variant) => renderToStaticMarkup(React.createElement(ActivityIndicator, {
+    state: 'unread',
+    variant,
+    placement: 'inline',
+  }));
 
-  // 飞行位移：上界防"横穿画布的长飞行"，逐点下界防 `--from-x/--from-y` 被置零
-  // （完成态聚拢退化为瞬移；只看最大值时，非最大点丢失位移仍会绿）。
-  const flights = onDots.map((tag) => Math.hypot(readNum(tag, '--from-x', 'px'), readNum(tag, '--from-y', 'px')));
-  const maxFlight = Math.max(...flights);
-  assert.ok(maxFlight <= 3.3, `对勾载体最大飞行位移 ${maxFlight.toFixed(2)}px 必须 ≤3.3px，否则完成瞬间是横穿画面的长距离飞行`);
-  assert.ok(
-    flights.every((distance) => distance >= 0.3),
-    `每颗对勾载体的飞行位移都必须 ≥0.3px（实测 ${flights.map((d) => d.toFixed(2)).join(' / ')}），任一颗归零即动画退化为瞬移`,
-  );
+  const cloudRun = runningOf('cloud');
+  assert.equal((cloudRun.match(/flux-cloud-stream--/g) || []).length, 3, '流云必须为 3 条稀疏丝带');
+  assert.equal((cloudRun.match(/class="flux-cloud-glint"/g) || []).length, 1, '流云必须含 1 颗微星流光');
+  assert.equal(cloudRun.includes('flux-cloud-dot'), false, '流云严禁退回密集圆点阵');
+  assert.equal(cloudRun.includes('flux-cloud-fog'), false, '流云严禁退回糊成一团的旧雾底');
+  assert.ok(unreadOf('cloud').includes('flux-cloud-done-ring'));
+
+  const gyroRun = runningOf('gyro');
+  assert.ok(gyroRun.includes('flux-gyro-gimbal'), '陀螺必须具备外框进动层');
+  assert.equal((gyroRun.match(/flux-gyro-ring--/g) || []).length, 3, '陀螺必须具备完整三轴谐振环');
+  assert.ok(gyroRun.includes('flux-gyro-core'));
+  assert.ok(unreadOf('gyro').includes('flux-gyro-done-ring'));
+
+  const orbitRun = runningOf('orbit');
+  assert.equal((orbitRun.match(/flux-orbit-plane--/g) || []).length, 2, '轨道必须具备双椭圆进动平面');
+  assert.equal((orbitRun.match(/flux-orbit-arm--/g) || []).length, 2, '轨道必须具备双伴星悬臂');
+  assert.ok(orbitRun.includes('flux-orbit-sun'));
+  assert.ok(unreadOf('orbit').includes('flux-orbit-star'));
+
+  const synapseRun = runningOf('synapse');
+  assert.ok(synapseRun.includes('flux-synapse-field'), '突触必须具备缓慢旋移星座场');
+  assert.equal((synapseRun.match(/flux-synapse-branch--/g) || []).length, 3, '突触必须为 120° 三向神经分支');
+  assert.equal((synapseRun.match(/class="flux-synapse-pulse"/g) || []).length, 3, '突触三条轴突均须有独立电脉冲');
+  assert.ok(synapseRun.includes('flux-synapse-wave'), '突触必须具备共振波环');
+  assert.equal(synapseRun.includes('flux-synapse-cell'), false, '突触严禁退回 4x4 密集点阵');
+  const synapseDone = unreadOf('synapse');
+  assert.ok(synapseDone.includes('flux-synapse-done-ring'));
+  assert.equal((synapseDone.match(/flux-synapse-done-node--/g) || []).length, 3);
+
+  const springRun = runningOf('spring');
+  assert.equal((springRun.match(/flux-spring-arc--/g) || []).length, 3, '弹簧必须具备三层游丝弧');
+  assert.ok(springRun.includes('flux-spring-dot'));
+  assert.ok(unreadOf('spring').includes('flux-spring-done-ring'));
+
+  const matrixRun = runningOf('matrix');
+  assert.ok(matrixRun.includes('flux-vortex-field'), '旋涡必须具备整体流体吸合层');
+  assert.equal((matrixRun.match(/flux-vortex-arm--/g) || []).length, 3, '旋涡必须具备三层偏心螺旋臂');
+  assert.ok(matrixRun.includes('flux-vortex-eye'));
+  assert.equal(matrixRun.includes('flux-matrix-dot'), false, '旋涡严禁退回 16 颗密集散点');
+  const matrixDone = unreadOf('matrix');
+  assert.ok(matrixDone.includes('flux-vortex-done-outer'));
+  assert.ok(matrixDone.includes('flux-vortex-done-ring'));
 });

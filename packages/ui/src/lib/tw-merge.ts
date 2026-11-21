@@ -29,8 +29,10 @@ export const TYPE_SCALE_TOKENS = ['hero', 'title', 'section', 'body', 'aux', 'ca
 export const RADIUS_TOKENS = ['inner', 'card', 'panel', 'window'] as const;
 /** 与 tailwind-entry.css 的 @utility shadow-* 一一对应。 */
 export const ELEVATION_TOKENS = ['card', 'window', 'dock'] as const;
-/** 与 tailwind-entry.css 的 @utility max-h-modal-* 一一对应（模态层高度语义档位）。 */
-export const MODAL_HEIGHT_TOKENS = ['modal-sm', 'modal-md'] as const;
+/** 与 tailwind-entry.css 的 @utility max-h-modal-* / max-h-picker-* 一一对应。 */
+export const MODAL_HEIGHT_TOKENS = ['modal-sm', 'modal-md', 'modal-lg', 'picker-menu', 'picker-list'] as const;
+/** 与 tailwind-entry.css 的 @utility w-menu-trigger 一一对应。 */
+export const MENU_WIDTH_TOKENS = ['menu-trigger'] as const;
 /** 与 tailwind-entry.css 的 @utility z-menu 一一对应（浮层菜单层级）。 */
 export const Z_LAYER_TOKENS = ['menu'] as const;
 
@@ -42,6 +44,7 @@ const merge = extendTailwindMerge({
       shadow: [{ shadow: [...ELEVATION_TOKENS] }],
       // 不登记会让 `max-h-64 max-h-modal-sm` 这类混用退化为 CSS 顺序决定，而不是后写覆盖。
       'max-h': [{ 'max-h': [...MODAL_HEIGHT_TOKENS] }],
+      w: [{ w: [...MENU_WIDTH_TOKENS] }],
       z: [{ z: [...Z_LAYER_TOKENS] }],
       // surface-raised 与 bg-* 同属背景色：不登记时两者同时出现会由 CSS 顺序决定，
       // 例如 `bg-primary-subtle` 会被静默吃掉。

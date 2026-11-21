@@ -12,7 +12,20 @@ export {
 export { SkillDetailDialog, type SkillDetailDialogProps, type SkillMarkdownViewMode } from './SkillDetailDialog.js';
 export { SkillInstallDialog, type SkillInstallDialogProps } from './SkillInstallDialog.js';
 export { mountSettingsModal } from './mount.js';
-export { ProvidersAdminPanel } from './ProvidersAdminPanel.js';
+export { AddProviderDialog, type AddProviderTab } from './AddProviderDialog.js';
+export { SwitchDefaultProviderDialog } from './SwitchDefaultProviderDialog.js';
+export {
+  applyProbeResultToDraft,
+  buildSaveEndpointOptions,
+  createOAuthLoginCoordinator,
+  defaultSelectedProfiles,
+  formatFanOutWarning,
+  formReducer,
+  hasStoredEndpointKey,
+  initialFormState,
+  resolveEditProfiles,
+} from './providerDialogLogic.js';
+export { AgentBindingGrid, describeDetail, ProvidersAdminPanel } from './ProvidersAdminPanel.js';
 export {
   OVERFLOW_THRESHOLD_PX,
   SOUL_SOFT_LIMIT_BYTES,
@@ -42,7 +55,7 @@ export {
   messageKeyForVerdict,
   pickProviderViewsState,
   planAttachSettlement,
-  shouldNotifyEnableOnly,
+  shouldNotifyAttachDone,
   type AttachSettlement,
   type AttachVerdictMessageKey,
 } from './providerAttachOrchestration.js';
@@ -57,7 +70,6 @@ export {
   type SettingsSearchEntry,
   type SettingsActions,
   type SettingsActionResult,
-  type ToggleProviderAgentOptions,
   type ToggleProviderAgentResult,
   type SettingsIconName,
   type SettingsLoadable,

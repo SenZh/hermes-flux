@@ -224,13 +224,18 @@ test('勾选未配置的自定义端点：先从其它成员复制密钥，复�
     source.indexOf('onToggleProviderAgent:'),
     source.indexOf('onNotify:', source.indexOf('onToggleProviderAgent:')),
   );
-  assert.ok(
-    toggleBlock.includes("case 'confirm-attach':") && toggleBlock.includes('confirmRequired: true'),
-    '缺意图调用必须命中 confirm-attach 且返回 confirmRequired: true，绝不直接落盘',
+  assert.equal(
+    toggleBlock.includes("case 'confirm-attach':"),
+    false,
+    '已移除「设为默认 / 仅启用」二次分流，绝不得残留 confirm-attach 分支',
   );
   assert.ok(
-    toggleBlock.includes('planBindingToggle(view, profile, nextChecked, options?.attachIntent)'),
-    '壳层必须把调用方意图透传给 core 的 planBindingToggle',
+    toggleBlock.includes('planBindingToggle(view, profile, nextChecked)'),
+    '壳层必须调用三参 planBindingToggle(view, profile, nextChecked)',
+  );
+  assert.ok(
+    source.slice(source.indexOf('onSaveEndpoint:'), source.indexOf('onActivateProvider:')).includes('options.targetProfiles'),
+    '保存自定义端点必须优先消费用户点选的 targetProfiles',
   );
   assert.ok(
     source.includes('inFlightProviderBindings'),

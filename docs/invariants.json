@@ -251,23 +251,23 @@
       "id": "INV-ATTACH-01",
       "topic": "迟滞响应不串台（令牌不匹配的 settle 不改变字段）",
       "source": "packages/core/src/models/providerAttachFlow.ts",
-      "symbol": "settleAttach",
+      "symbol": "reduceAttachFlow#settle",
       "test": "packages/core/__tests__/formal/provider-attach-flow-formal.test.mjs",
-      "failure": "旧的确认结果写到新目标行上"
+      "failure": "旧的开启结果写到新目标行上"
     },
     {
       "id": "INV-ATTACH-02",
-      "topic": "提交中意图不可变",
+      "topic": "提交中不可重入（重复 submit 不得覆盖在途令牌与草稿）",
       "source": "packages/core/src/models/providerAttachFlow.ts",
-      "symbol": "beginAttach",
+      "symbol": "reduceAttachFlow#submit",
       "test": "packages/core/__tests__/formal/provider-attach-flow-formal.test.mjs",
-      "failure": "提交过程中意图被改写，最终绑定了错误的 Agent"
+      "failure": "连续点击覆盖在途令牌或草稿，导致旧响应串台或重发写坏配置"
     },
     {
       "id": "INV-ATTACH-03",
       "topic": "失败不丢用户输入",
       "source": "packages/core/src/models/providerAttachFlow.ts",
-      "symbol": "failAttach",
+      "symbol": "reduceAttachFlow#needs-key-failure",
       "test": "packages/core/__tests__/formal/provider-attach-flow-formal.test.mjs",
       "failure": "失败后密钥草稿被清空，用户要重新输入"
     },
@@ -275,7 +275,7 @@
       "id": "INV-ATTACH-04",
       "topic": "取消恒生效且 busy 只由 submitting 决定",
       "source": "packages/core/src/models/providerAttachFlow.ts",
-      "symbol": "cancelAttach",
+      "symbol": "reduceAttachFlow#cancel",
       "test": "packages/core/__tests__/formal/provider-attach-flow-formal.test.mjs",
       "failure": "取消失效；或不该忙的时候锁死界面"
     },
@@ -283,9 +283,17 @@
       "id": "INV-ATTACH-05",
       "topic": "目录收敛只挂仍为 absent 的同一格子",
       "source": "packages/core/src/models/providerAttachFlow.ts",
-      "symbol": "reconcileAttach",
+      "symbol": "reconcileAttachFlow",
       "test": "packages/core/__tests__/formal/provider-attach-flow-formal.test.mjs",
-      "failure": "用户刚打开的确认条瞬间消失"
+      "failure": "用户刚打开的补密钥条瞬间消失"
+    },
+    {
+      "id": "INV-SWITCH-01",
+      "topic": "替补默认模型候选排除目标与不可用提供商",
+      "source": "packages/core/src/models/providerViews.ts",
+      "symbol": "collectReplacementModels",
+      "test": "packages/core/__tests__/formal/provider-attach-flow-formal.test.mjs",
+      "failure": "把正在关闭的提供商或未开启/空模型提供商塞进替补列表，导致切换后 BOT 无模型可用"
     },
     {
       "id": "INV-VIEW-01",

@@ -87,6 +87,18 @@ const ACTIVITY_VARIANT_TEXT: Record<ActivityIndicatorVariant, { label: I18nKey; 
   synapse: { label: 'settings.activitySynapse', hint: 'settings.activitySynapseHint' },
   spring: { label: 'settings.activitySpring', hint: 'settings.activitySpringHint' },
   matrix: { label: 'settings.activityMatrix', hint: 'settings.activityMatrixHint' },
+  'abyss-whale': { label: 'settings.activityAbyssWhale', hint: 'settings.activityAbyssWhaleHint' },
+  'prolate-lattice': { label: 'settings.activityProlateLattice', hint: 'settings.activityProlateLatticeHint' },
+  'infinity-knot': { label: 'settings.activityInfinityKnot', hint: 'settings.activityInfinityKnotHint' },
+  'surf-ribbon': { label: 'settings.activitySurfRibbon', hint: 'settings.activitySurfRibbonHint' },
+  'twin-vortex': { label: 'settings.activityTwinVortex', hint: 'settings.activityTwinVortexHint' },
+  'kinetic-helix': { label: 'settings.activityKineticHelix', hint: 'settings.activityKineticHelixHint' },
+  'whale-compact': { label: 'settings.activityWhaleCompact', hint: 'settings.activityWhaleCompactHint' },
+  'torus-mesh': { label: 'settings.activityTorusMesh', hint: 'settings.activityTorusMeshHint' },
+  'wave-net': { label: 'settings.activityWaveNet', hint: 'settings.activityWaveNetHint' },
+  'sphere-mesh': { label: 'settings.activitySphereMesh', hint: 'settings.activitySphereMeshHint' },
+  'mobius-band': { label: 'settings.activityMobiusBand', hint: 'settings.activityMobiusBandHint' },
+  'dipole-vortex': { label: 'settings.activityDipoleVortex', hint: 'settings.activityDipoleVortexHint' },
 };
 
 function StatusDot({ tone }: { tone: 'success' | 'warning' | 'destructive' | 'muted' }): React.ReactElement {

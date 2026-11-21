@@ -2,30 +2,30 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fc from 'fast-check';
 import {
+  beginAttachFlow,
   isAttachFlowBusy,
-  openAttachFlow,
   reconcileAttachFlow,
   reduceAttachFlow,
 } from '../../dist/models/providerAttachFlow.js';
+import { collectReplacementModels } from '../../dist/models/providerViews.js';
+import { normalizeEndpointId } from '../../dist/index.js';
 
 /**
- * 行内绑定确认流的形式化不变量（定理 30~34）。
+ * 行内开启与补密钥状态机的形式化不变量（INV-ATTACH-01 ~ 05）。
  *
  * 目标不是复刻实现，而是在随机事件交错下断言"任何实现都必须满足"的性质。
  * 每条定理对应一个真实会伤到用户的失效模式：
- *   定理 30 —— 迟滞响应把用户已经切走的确认条改掉（串台）；
- *   定理 31 —— 提交中用户换了意图，写下的默认模型与界面显示不一致；
- *   定理 32 —— 提交失败后用户必须重打密钥、重选意图；
- *   定理 33 —— 取消不生效（用户关不掉确认条）；
- *   定理 34 —— 目录已就绪时确认条挂在不再需要它的格子上。
+ *   INV-ATTACH-01 —— 迟滞响应把用户已经切走的流程改掉（串台）；
+ *   INV-ATTACH-02 —— 提交中不可重入，重复 submit 不得覆盖在途令牌与目标；
+ *   INV-ATTACH-03 —— 补密钥失败后用户必须重打密钥；
+ *   INV-ATTACH-04 —— 取消不生效（用户关不掉补密钥条），或空闲时仍锁死；
+ *   INV-ATTACH-05 —— 目录已就绪时流程挂在不再需要它的格子上。
  */
 
 const TARGET = { providerKey: 'custom:fn', providerId: 'fn', profile: 'aura' };
 
-const intentArb = fc.constantFrom('enable-only', 'enable-and-default');
-
 const eventArb = fc.oneof(
-  fc.record({ type: fc.constant('choose'), intent: intentArb, token: fc.integer({ min: 0, max: 20 }) }),
+  fc.record({ type: fc.constant('submit'), token: fc.integer({ min: 0, max: 20 }) }),
   fc.record({
     type: fc.constant('settle'),
     token: fc.integer({ min: 0, max: 20 }),
@@ -58,21 +58,22 @@ function makeViews(states) {
   }));
 }
 
-test('定理 30 [迟滞响应不串台]: 令牌不匹配的 settle 不得改变任何字段', () => {
+test('INV-ATTACH-01 [迟滞响应不串台]: 令牌不匹配的 settle 不得改变任何字段', () => {
   fc.assert(
     fc.property(
-      fc.array(eventArb, { minLength: 1, maxLength: 10 }),
+      fc.integer({ min: 0, max: 20 }),
+      fc.array(eventArb, { minLength: 0, maxLength: 10 }),
       fc.integer({ min: 0, max: 20 }),
       fc.record({
         ok: fc.constant(false),
         needsKey: fc.boolean(),
         message: fc.string(),
       }),
-      (events, staleToken, outcome) => {
-        let flow = openAttachFlow(TARGET);
+      (initToken, events, staleToken, outcome) => {
+        let flow = beginAttachFlow(TARGET, initToken);
         for (const event of events) {
           const next = reduceAttachFlow(flow, event);
-          if (next === null) return; // 已收起，本序列不再有在途提交
+          if (next === null) return;
           flow = next;
         }
         if (flow.phase !== 'submitting' || flow.token === staleToken) return;
@@ -84,52 +85,53 @@ test('定理 30 [迟滞响应不串台]: 令牌不匹配的 settle 不得改变�
   );
 });
 
-test('定理 31 [提交中意图不可变]: submitting 阶段的意图只来自进入提交时的那次选择', () => {
+test('INV-ATTACH-02 [提交中不可重入]: submitting 阶段的重复 submit 不得覆盖在途令牌与草稿', () => {
   fc.assert(
     fc.property(
-      intentArb,
-      intentArb,
       fc.integer({ min: 0, max: 20 }),
-      (chosen, other, token) => {
-        const submitting = reduceAttachFlow(openAttachFlow(TARGET), { type: 'choose', intent: chosen, token });
-        assert.ok(submitting && submitting.phase === 'submitting');
-        const reentered = reduceAttachFlow(submitting, { type: 'choose', intent: other, token: token + 1 });
-        assert.equal(reentered, submitting, '提交期间再次选择必须被忽略');
-        assert.equal(reentered.intent, chosen, '提交期间的意图不得被改写');
+      fc.integer({ min: 0, max: 20 }),
+      fc.string({ minLength: 1, maxLength: 8 }),
+      (token, otherToken, draftKey) => {
+        const direct = beginAttachFlow(TARGET, token);
+        const reenteredDirect = reduceAttachFlow(direct, { type: 'submit', token: otherToken });
+        assert.equal(reenteredDirect, direct, 'direct 提交期间再次 submit 必须被忽略');
+        assert.equal(reenteredDirect.token, token);
 
-        // needs-key 阶段再点意图：意图锁死为进入 needs-key 时的那个，不得被换成另一个。
-        const needsKey = reduceAttachFlow(submitting, {
+        const needsKey = reduceAttachFlow(direct, {
           type: 'settle',
           token,
           outcome: { ok: false, needsKey: true, message: 'need key' },
         });
         assert.ok(needsKey && needsKey.phase === 'needs-key');
-        assert.equal(needsKey.intent, chosen);
-        const fromKey = reduceAttachFlow(needsKey, { type: 'choose', intent: other, token: token + 1 });
-        assert.equal(fromKey.intent, chosen, '补密钥阶段提交必须沿用已锁定的意图');
+        const withDraft = reduceAttachFlow(needsKey, { type: 'edit-key', draftKey });
+        const fromKey = reduceAttachFlow(withDraft, { type: 'submit', token: token + 1 });
+        assert.ok(fromKey && fromKey.phase === 'submitting');
+        const reenteredKey = reduceAttachFlow(fromKey, { type: 'submit', token: otherToken });
+        assert.equal(reenteredKey, fromKey, '补密钥提交期间再次 submit 必须被忽略');
+        assert.equal(reenteredKey.token, token + 1);
+        assert.equal(reenteredKey.draftKey, draftKey);
       },
     ),
     { numRuns: 400 },
   );
 });
 
-test('定理 32 [失败不丢用户输入]: 普通失败回到进入提交前的阶段并保留密钥草稿与错误原因', () => {
+test('INV-ATTACH-03 [失败不丢用户输入]: 补密钥失败留在 needs-key 并保留密钥草稿与错误原因', () => {
   fc.assert(
     fc.property(
-      intentArb,
       fc.string({ minLength: 1, maxLength: 8 }),
       fc.string({ minLength: 1, maxLength: 12 }),
       fc.integer({ min: 0, max: 20 }),
-      (intent, draftKey, message, token) => {
-        const firstKey = reduceAttachFlow(
-          reduceAttachFlow(openAttachFlow(TARGET), { type: 'choose', intent, token }),
+      (draftKey, message, token) => {
+        const needsKey = reduceAttachFlow(
+          beginAttachFlow(TARGET, token),
           { type: 'settle', token, outcome: { ok: false, needsKey: true, message: 'need key' } },
         );
-        const withDraft = reduceAttachFlow(firstKey, { type: 'edit-key', draftKey });
+        const withDraft = reduceAttachFlow(needsKey, { type: 'edit-key', draftKey });
         assert.equal(withDraft.draftKey, draftKey);
 
-        // 1) 补密钥后普通失败：留在 needs-key，草稿与意图与错误都在。
-        const submitting = reduceAttachFlow(withDraft, { type: 'choose', intent, token: token + 1 });
+        // 1) 补密钥后普通失败：留在 needs-key，草稿与错误都在。
+        const submitting = reduceAttachFlow(withDraft, { type: 'submit', token: token + 1 });
         const backToKey = reduceAttachFlow(submitting, {
           type: 'settle',
           token: token + 1,
@@ -137,61 +139,64 @@ test('定理 32 [失败不丢用户输入]: 普通失败回到进入提交前的
         });
         assert.equal(backToKey.phase, 'needs-key', '补密钥失败必须留在密钥阶段');
         assert.equal(backToKey.draftKey, draftKey, '补密钥失败必须保留用户已输入的密钥');
-        assert.equal(backToKey.intent, intent, '补密钥失败必须保留意图');
         assert.equal(backToKey.error, message, '补密钥失败必须显式给出原因');
 
         // 2) 补密钥后仍然缺密钥：同样保留草稿与原因，用户不必重打。
         const again = reduceAttachFlow(
-          reduceAttachFlow(withDraft, { type: 'choose', intent, token: token + 2 }),
+          reduceAttachFlow(withDraft, { type: 'submit', token: token + 2 }),
           { type: 'settle', token: token + 2, outcome: { ok: false, needsKey: true, message } },
         );
         assert.equal(again.phase, 'needs-key');
         assert.equal(again.draftKey, draftKey, '二次缺密钥不得清空用户已输入的密钥');
         assert.equal(again.error, message, '二次缺密钥必须说明原因');
 
-        // 3) 首次从选择阶段失败：回到 choosing 并带错误，用户可重选。
-        const fromChoose = reduceAttachFlow(
-          reduceAttachFlow(openAttachFlow(TARGET), { type: 'choose', intent, token }),
+        // 3) 首次直接点击开启普通失败：收起为 null，交由行级提示报错。
+        const fromDirect = reduceAttachFlow(
+          beginAttachFlow(TARGET, token),
           { type: 'settle', token, outcome: { ok: false, message } },
         );
-        assert.equal(fromChoose.phase, 'choosing');
-        assert.equal(fromChoose.error, message);
+        assert.equal(fromDirect, null);
       },
     ),
     { numRuns: 400 },
   );
 });
 
-test('定理 33 [取消恒生效]: 任意可达状态上 cancel 都收起为 null，且 busy 只由 submitting 决定', () => {
+test('INV-ATTACH-04 [取消恒生效]: 任意可达状态上 cancel 都收起为 null，且 busy 只由 submitting 决定', () => {
   fc.assert(
-    fc.property(fc.array(eventArb, { minLength: 0, maxLength: 12 }), (events) => {
-      let flow = openAttachFlow(TARGET);
-      for (const event of events) {
-        const next = reduceAttachFlow(flow, event);
-        if (next === null) break;
-        flow = next;
-        assert.equal(
-          isAttachFlowBusy(flow),
-          flow.phase === 'submitting',
-          '只有提交阶段算忙：取消按钮在其余阶段必须可用',
-        );
-      }
-      if (flow) {
-        assert.equal(reduceAttachFlow(flow, { type: 'cancel' }), null, 'cancel 必须收起确认条');
-      }
-    }),
+    fc.property(
+      fc.integer({ min: 0, max: 20 }),
+      fc.array(eventArb, { minLength: 0, maxLength: 12 }),
+      (initToken, events) => {
+        let flow = beginAttachFlow(TARGET, initToken);
+        for (const event of events) {
+          const next = reduceAttachFlow(flow, event);
+          if (next === null) break;
+          flow = next;
+          assert.equal(
+            isAttachFlowBusy(flow),
+            flow.phase === 'submitting',
+            '只有提交阶段算忙：取消按钮在其余阶段必须可用',
+          );
+        }
+        if (flow) {
+          assert.equal(reduceAttachFlow(flow, { type: 'cancel' }), null, 'cancel 必须收起状态流');
+        }
+      },
+    ),
     { numRuns: 400 },
   );
 });
 
-test('定理 34 [目录收敛]: 目录就绪后确认条只可能挂在仍为 absent 的同一格子', () => {
+test('INV-ATTACH-05 [目录收敛]: 目录就绪后状态流只可能挂在仍为 absent 的同一格子', () => {
   fc.assert(
     fc.property(
       targetArb,
+      fc.integer({ min: 0, max: 20 }),
       fc.array(eventArb, { minLength: 0, maxLength: 6 }),
       fc.constantFrom('absent', 'ready', 'active', 'error'),
-      (target, events, state) => {
-        let flow = openAttachFlow(target);
+      (target, initToken, events, state) => {
+        let flow = beginAttachFlow(target, initToken);
         for (const event of events) {
           const next = reduceAttachFlow(flow, event);
           if (next === null) return;
@@ -203,9 +208,9 @@ test('定理 34 [目录收敛]: 目录就绪后确认条只可能挂在仍为 ab
 
         const kept = reconcileAttachFlow(flow, makeViews([[target.providerKey, target.profile, state]]));
         if (state === 'absent') {
-          assert.equal(kept, flow, '目标仍为 absent 时必须保留确认条');
+          assert.equal(kept, flow, '目标仍为 absent 时必须保留');
         } else {
-          assert.equal(kept, null, `目标变为 ${state} 时必须收起确认条`);
+          assert.equal(kept, null, `目标变为 ${state} 时必须收起`);
         }
 
         // 目标行或 Agent 消失：同样收起。
@@ -215,6 +220,82 @@ test('定理 34 [目录收敛]: 目录就绪后确认条只可能挂在仍为 ab
           null,
           'Agent 不在该行时必须收起',
         );
+      },
+    ),
+    { numRuns: 400 },
+  );
+});
+
+test('INV-SWITCH-01 [替补模型候选]: 与数学集合规范严格等价（排除关闭目标、非 ready/active 与空模型组）', () => {
+  const idArb = fc.constantFrom('relay', 'xai-oauth', 'openai', 'backup', 'custom:relay', 'LOCAL');
+  const stateArb = fc.constantFrom('active', 'ready', 'absent', 'error');
+  const viewArb = fc.record({
+    id: idArb,
+    kind: fc.constantFrom('custom', 'subscription'),
+    name: fc.string({ minLength: 1, maxLength: 12 }),
+    detail: fc.constantFrom('', 'https://gw.example/v1'),
+    models: fc.array(fc.constantFrom('', '  ', 'm1', ' m1 ', 'm2', 'grok-3'), { maxLength: 6 }),
+    state: stateArb,
+    includeTarget: fc.boolean(),
+  }).map((row) => {
+    const cleanId = normalizeEndpointId(row.id);
+    return {
+      key: `${row.kind}:${cleanId}`,
+      kind: row.kind,
+      id: row.id,
+      name: row.name,
+      detail: row.detail,
+      availability: row.state === 'active' ? 'active' : 'ready',
+      models: row.models,
+      agents: row.includeTarget ? [{ profile: 'xiaofawang', displayName: 'xiaofawang', state: row.state }] : [],
+    };
+  });
+
+  fc.assert(
+    fc.property(
+      fc.array(viewArb, { maxLength: 10 }),
+      fc.constantFrom('relay', 'custom:relay', 'xai-oauth', 'backup'),
+      (views, excludeId) => {
+        const excludeClean = normalizeEndpointId(excludeId);
+
+        // 独立形式化规范：与实现解耦地推导全部合法替补组
+        const expected = [];
+        for (const v of views) {
+          if (normalizeEndpointId(v.id) === excludeClean) continue;
+          const targetAgent = v.agents.find((a) => a.profile === 'xiaofawang');
+          if (!targetAgent || (targetAgent.state !== 'ready' && targetAgent.state !== 'active')) continue;
+          const cleanModels = [...new Set(v.models.map((m) => m.trim()).filter(Boolean))];
+          if (cleanModels.length === 0) continue;
+          expected.push({
+            providerId: v.id,
+            providerKey: v.key,
+            providerName: v.name,
+            kind: v.kind,
+            baseUrl: v.kind === 'custom' && v.detail ? v.detail : undefined,
+            models: cleanModels,
+          });
+        }
+
+        const groups = collectReplacementModels(views, excludeId, 'xiaofawang');
+        assert.deepEqual(groups, expected, '输出替补组必须与数学规范严格等价（防多塞也防漏杀/空返回）');
+
+        for (let i = 0; i < groups.length; i += 1) {
+          const group = groups[i];
+          assert.notEqual(normalizeEndpointId(group.providerId), excludeClean);
+          assert.ok(group.models.length > 0);
+          assert.equal(new Set(group.models).size, group.models.length);
+          const matchingViews = views.filter((v) => v.id === group.providerId && v.key === group.providerKey);
+          assert.ok(
+            matchingViews.some((v) => {
+              const ag = v.agents.find((a) => a.profile === 'xiaofawang');
+              return ag && (ag.state === 'ready' || ag.state === 'active');
+            }),
+            '每个返回项必须有对应 BOT 处于 ready 或 active 状态',
+          );
+          if (group.kind === 'subscription') {
+            assert.equal(group.baseUrl, undefined, '订阅候选项不得带自定义 baseUrl');
+          }
+        }
       },
     ),
     { numRuns: 400 },

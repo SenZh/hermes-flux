@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { ChevronDown } from 'lucide-react';
-import { cva, type VariantProps } from 'class-variance-authority';
+import { type VariantProps } from 'class-variance-authority';
+import { selectTriggerVariants } from '../../lib/selectTrigger.js';
 import { cn } from '../../lib/utils.js';
 import { Menu, MenuContent, MenuRadioGroup, MenuRadioItem, MenuTrigger } from './Menu.js';
 
@@ -23,20 +24,6 @@ import { Menu, MenuContent, MenuRadioGroup, MenuRadioItem, MenuTrigger } from '.
  *   3. 选中项用 Check 图标表达，不依赖颜色单一通道；
  *   4. 文案全部由调用方传入，本组件不引入任何 i18n key。
  */
-
-const selectTriggerVariants = cva(
-  'flex w-full items-center gap-2 rounded-card border border-border bg-input text-left text-foreground transition-colors hover:bg-card-hover focus-visible:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50',
-  {
-    variants: {
-      size: {
-        default: 'h-9 px-3 text-body',
-        sm: 'h-8 px-3 text-body',
-        xs: 'h-7 px-2 text-aux',
-      },
-    },
-    defaultVariants: { size: 'default' },
-  },
-);
 
 export interface SelectOption {
   value: string;

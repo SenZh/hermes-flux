@@ -710,14 +710,14 @@ function renderFileContent(
 
     if (isDiff) {
       if (line.startsWith('+') && !line.startsWith('+++')) {
-        lineBg = 'rgba(34, 197, 94, 0.12)';
-        lineTextColor = '#4ADE80';
+        lineBg = 'color-mix(in srgb, var(--success) 12%, transparent)';
+        lineTextColor = 'var(--success)';
       } else if (line.startsWith('-') && !line.startsWith('---')) {
-        lineBg = 'rgba(239, 68, 68, 0.12)';
-        lineTextColor = '#F87171';
+        lineBg = 'color-mix(in srgb, var(--destructive) 12%, transparent)';
+        lineTextColor = 'var(--destructive)';
       } else if (line.startsWith('@@')) {
-        lineBg = 'rgba(56, 189, 248, 0.08)';
-        lineTextColor = '#38BDF8';
+        lineBg = 'var(--accent-subtle)';
+        lineTextColor = 'var(--accent)';
       }
     }
 
@@ -837,8 +837,8 @@ function renderGitDiffsPane(diffs: Array<{ file: string; additions: number; dele
         <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 8px 12px; font-size: 12px; font-family: var(--font-mono); display: flex; justify-content: space-between; align-items: center;">
           <span style="color: var(--text-main);">${escapeHtml(d.file)}</span>
           <span style="display: flex; gap: 6px; font-size: 11px;">
-            <span style="color: #4ADE80;">+${d.additions}</span>
-            <span style="color: #F87171;">-${d.deletions}</span>
+            <span style="color: var(--success);">+${d.additions}</span>
+            <span style="color: var(--destructive);">-${d.deletions}</span>
           </span>
         </div>
       `).join('')}

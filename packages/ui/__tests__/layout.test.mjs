@@ -124,6 +124,34 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     assert.ok(html.includes('已连接'), 'Left corner shows the real connection state instead');
   });
 
+  await t.test('StatusBar must use semantic tokens, valid glow CSS, i18n, and zero infinite animations', async () => {
+    const { getLocale, setLocale } = await import('../dist/i18n/index.js');
+    const prevLocale = getLocale();
+    try {
+      setLocale('zh-CN');
+      const zhConnected = renderStatusBar({ connectionStatus: 'connected', latencyMs: 12 });
+      const zhConnecting = renderStatusBar({ connectionStatus: 'connecting', latencyMs: 0 });
+      const zhDisconnected = renderStatusBar({ connectionStatus: 'disconnected', latencyMs: 0 });
+
+      assert.ok(zhConnected.includes('var(--success)'), 'Connected dot must use var(--success)');
+      assert.ok(zhConnecting.includes('var(--warning)'), 'Connecting dot must use var(--warning)');
+      assert.ok(zhDisconnected.includes('var(--destructive)'), 'Disconnected dot must use var(--destructive)');
+
+      for (const html of [zhConnected, zhConnecting, zhDisconnected]) {
+        assert.ok(html.includes('color-mix(in srgb, var(--'), 'Dot glow must use valid color-mix CSS');
+        assert.ok(!/var\(--[^)]+\)aa/i.test(html), 'Must not append hex alpha to CSS var()');
+        assert.ok(!/\binfinite\b/i.test(html), 'StatusBar must not declare infinite CSS animation');
+      }
+
+      setLocale('en-US');
+      assert.ok(renderStatusBar({ connectionStatus: 'connected', latencyMs: 12 }).includes('Connected'));
+      assert.ok(renderStatusBar({ connectionStatus: 'connecting', latencyMs: 0 }).includes('Connecting...'));
+      assert.ok(renderStatusBar({ connectionStatus: 'disconnected', latencyMs: 0 }).includes('Disconnected'));
+    } finally {
+      setLocale(prevLocale);
+    }
+  });
+
   await t.test('MiddlePod Onboarding must provide Username & Password fields for Dashboard', async () => {
     const { renderMiddlePod } = await import('../dist/components/MiddlePod/MiddlePod.js');
     const html = renderMiddlePod({
@@ -138,6 +166,69 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     assert.ok(html.includes('id="onboarding-username"'), 'Onboarding must have username input');
     assert.ok(html.includes('id="onboarding-password"'), 'Onboarding must have password input');
     assert.ok(html.includes('id="btn-test-connection"'), 'Onboarding must have test button');
+  });
+
+  await t.test('MiddlePod must localize onboarding/connecting/welcome states with token purity and no infinite animation', async () => {
+    const { renderMiddlePod } = await import('../dist/components/MiddlePod/MiddlePod.js');
+    const { getLocale, setLocale } = await import('../dist/i18n/index.js');
+    const stripHtmlComments = (html) => html.replace(/<!--[\s\S]*?-->/g, '');
+    const prevLocale = getLocale();
+    try {
+      setLocale('zh-CN');
+      const zhOnboarding = renderMiddlePod({ gatewayConnected: false, messages: [] });
+      assert.ok(zhOnboarding.includes('连接至 Hermes Gateway'));
+      assert.ok(zhOnboarding.includes('color: var(--primary-foreground);'), 'Primary button must use var(--primary-foreground)');
+      assert.ok(!zhOnboarding.includes('#090A0F'), 'Onboarding must not hardcode #090A0F');
+
+      setLocale('en-US');
+      const enOnboarding = renderMiddlePod({ gatewayConnected: false, gatewayConnecting: false, messages: [] });
+      assert.ok(enOnboarding.includes('Connect to Hermes Gateway'));
+      assert.ok(enOnboarding.includes('Gateway URL'));
+      assert.ok(enOnboarding.includes('Test connection'));
+      assert.ok(enOnboarding.includes('Save and connect'));
+      assert.ok(!/[\u4e00-\u9fa5]/.test(stripHtmlComments(enOnboarding)), 'en-US onboarding must not leak hardcoded Chinese');
+
+      const enConnecting = renderMiddlePod({ gatewayConnected: false, gatewayConnecting: true, messages: [] });
+      assert.ok(!/\binfinite\b/i.test(enConnecting), 'Connecting state must not use infinite CSS animation');
+      assert.ok(!/[\u4e00-\u9fa5]/.test(stripHtmlComments(enConnecting)), 'en-US connecting state must not leak Chinese');
+
+      const enWelcome = renderMiddlePod({ gatewayConnected: true, messages: [] });
+      assert.ok(enWelcome.includes('Hermes Flux Workspace Ready'));
+      assert.ok(!/[\u4e00-\u9fa5]/.test(stripHtmlComments(enWelcome)), 'en-US welcome state must not leak Chinese');
+    } finally {
+      setLocale(prevLocale);
+    }
+  });
+
+  await t.test('InspectionPod diff preview and git tab must use semantic tokens without hardcoded hex', () => {
+    const diffHtml = renderInspectionPod({
+      collapsed: false,
+      gatewayConnected: true,
+      previewFile: {
+        path: 'src/change.diff',
+        isDiff: true,
+        content: '@@ -1,2 +1,2 @@\n-const a = 1;\n+const a = 2;',
+      },
+    });
+    assert.ok(diffHtml.includes('var(--success)'), 'Added diff line must use var(--success)');
+    assert.ok(diffHtml.includes('var(--destructive)'), 'Deleted diff line must use var(--destructive)');
+    assert.ok(diffHtml.includes('var(--accent)'), 'Hunk line must use var(--accent)');
+    assert.ok(diffHtml.includes('var(--accent-subtle)'), 'Hunk line background must use var(--accent-subtle)');
+
+    const gitHtml = renderInspectionPod({
+      collapsed: false,
+      gatewayConnected: true,
+      activeTab: 'git',
+      gitDiffs: [{ file: 'src/a.ts', additions: 5, deletions: 2 }],
+    });
+    assert.ok(gitHtml.includes('var(--success)'), 'Git additions must use var(--success)');
+    assert.ok(gitHtml.includes('var(--destructive)'), 'Git deletions must use var(--destructive)');
+
+    for (const html of [diffHtml, gitHtml]) {
+      assert.ok(!/#4ADE80/i.test(html), 'Must not hardcode #4ADE80');
+      assert.ok(!/#F87171/i.test(html), 'Must not hardcode #F87171');
+      assert.ok(!/#38BDF8/i.test(html), 'Must not hardcode #38BDF8');
+    }
   });
 
   await t.test('InputDock must strictly conform to 740px golden width constraint', async () => {

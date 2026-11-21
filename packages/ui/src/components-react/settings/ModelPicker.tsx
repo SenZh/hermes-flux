@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom';
 import { Check, ChevronDown, ChevronRight, Search, X } from 'lucide-react';
 import { resolveProviderVendorId } from '@hermes-flux/core';
 import { t } from '../../i18n/index.js';
+import { cn } from '../../lib/utils.js';
+import { selectTriggerVariants } from '../../lib/selectTrigger.js';
 import { describeModelVendorIcon, describeVendorIcon, type VendorIconDescriptor } from '../../lib/vendorIcon.js';
 import { presentModel, type ModelPresentation } from '../../lib/modelPresentation.js';
 import { Button } from '../primitives/Button.js';
@@ -134,37 +136,112 @@ export function ModelOptionRow({
   providerName,
   current,
   selected,
+  size = 'compact',
 }: {
   modelId: string;
   providerName: string;
   current?: boolean;
   selected?: boolean;
+  /** 列表密度：`compact` 用于普通下拉菜单；`comfortable` 用于独立弹窗主内容与等宽下拉项。 */
+  size?: 'compact' | 'comfortable';
 }): React.ReactElement {
   const view: ModelPresentation = presentModel(modelId, providerName);
+  const nameClass = size === 'comfortable' ? 'text-body font-medium' : 'text-caption';
   return (
-    <span className="flex min-w-0 flex-1 items-center gap-2">
+    <span className="flex min-w-0 flex-1 items-center gap-2" title={modelId}>
       <ModelVendorIcon modelId={modelId} providerName={providerName} />
-      <span className="min-w-0 flex-1 truncate text-caption text-foreground">{view.name}</span>
+      <span className={`min-w-0 flex-1 truncate ${nameClass} text-foreground`}>{view.name}</span>
       {current ? <span className="shrink-0 text-micro text-success">{t('settings.providerCurrent')}</span> : null}
-      {selected ? <Check aria-hidden="true" className="size-3 shrink-0 text-primary" strokeWidth={2.5} /> : null}
+      {selected ? <Check aria-hidden="true" className="size-4 shrink-0 text-primary" strokeWidth={2.5} /> : null}
     </span>
   );
 }
 
+export interface ModelSearchKeyEvent {
+  key: string;
+  shiftKey?: boolean;
+  preventDefault: () => void;
+  stopPropagation: () => void;
+  currentTarget: {
+    closest: (selector: string) => {
+      querySelectorAll: (selector: string) => ArrayLike<{ focus?: () => void }>;
+    } | null;
+  };
+}
+
 /**
- * 端点表单的默认模型选择器（可输入 + 可下拉）。
+ * 隔离并接管下拉搜索输入框的键盘事件。
  *
  * 【设计意图 (Why)】
- *   用户要求"点击后有下拉框，从可用模型里选"，但端点第一次创建时模型列表可能还没探测出来，
- *   所以不能把输入能力砍掉：选择器与手输必须共存。
+ *   模型数量较多时在 DropdownMenu 内部提供实时搜索框；必须兼顾“打字输入不被菜单抢焦”和“箭头/Tab 顺滑切回候选列表”。
  *
- * 【防范的历史坑】
- *   裸 `<select>` 无法显示图标与计算后的名称，只能把 ID 原样铺出来；
- *   完全只读的按钮又会让"还没探测模型"的新端点无法创建。
+ * 【防范的历史坑 (Pitfall)】
+ *   1. 若仅过滤不拦截字符键，Radix `MenuContent` 会触发 `handleTypeaheadSearch` 把输入劫持为首字母 jump；
+ *   2. 若对 `Tab` 不做 `stopPropagation()`，Radix `MenuContent` 会显式调用 `event.preventDefault()` 吞噬 `Tab`，
+ *      叠加 `modal` FocusScope 会把键盘焦点永久锁死在输入框里。
  *
  * 【约束与规则 (Rules)】
- *   1. 有模型列表时默认展示选择器；切到"手动输入"后保留原始 ID 编辑能力；
- *   2. 下拉项一律走 `ModelOptionRow`，禁止直接渲染 ID；
+ *   1. `Escape` 完全放行（不调 `stopPropagation`/`preventDefault`），由 Radix DismissableLayer 关窗回焦触发按钮；
+ *   2. `ArrowDown` 或正向 `Tab` 聚焦首个可用 `[role="menuitem"]` / `[role="menuitemradio"]`；无候选且按 `Tab` 时关窗；
+ *   3. `ArrowUp` 聚焦最后一个可用菜单项；`Shift+Tab` 关窗离开菜单；其它字符与编辑键只做 `stopPropagation()`。
+ */
+export function handleModelSearchKeyDown(
+  event: ModelSearchKeyEvent,
+  options: { closeMenu: () => void },
+): void {
+  const queryItems = (): ArrayLike<{ focus?: () => void }> =>
+    event.currentTarget
+      .closest('[data-radix-menu-content]')
+      ?.querySelectorAll('[role="menuitem"]:not([data-disabled]), [role="menuitemradio"]:not([data-disabled])') ?? [];
+
+  if (event.key === 'ArrowDown' || (event.key === 'Tab' && !event.shiftKey)) {
+    event.preventDefault();
+    event.stopPropagation();
+    const items = queryItems();
+    if (items.length > 0) {
+      items[0].focus?.();
+    } else if (event.key === 'Tab') {
+      options.closeMenu();
+    }
+    return;
+  }
+  if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    event.stopPropagation();
+    const items = queryItems();
+    if (items.length > 0) {
+      items[items.length - 1].focus?.();
+    }
+    return;
+  }
+  // 正向 Tab（!event.shiftKey）已在上方提前 return，因此到达此处的 Tab 必为 Shift+Tab。
+  if (event.key === 'Tab') {
+    event.preventDefault();
+    event.stopPropagation();
+    options.closeMenu();
+    return;
+  }
+  // Esc 交由 Radix DismissableLayer 栈分层关闭，其余字符/编辑键仅阻断冒泡以防触发菜单首字母定位。
+  if (event.key !== 'Escape') {
+    event.stopPropagation();
+  }
+}
+
+/**
+ * 端点表单的默认模型选择器（可输入 + 等宽可搜索下拉）。
+ *
+ * 【设计意图 (Why)】
+ *   用户要求"点击后有等宽下拉框，从可用模型里轻松筛选选择"，但端点第一次创建时模型列表可能还没探测出来，
+ *   所以选择器与手动输入必须共存。
+ *
+ * 【防范的历史坑】
+ *   1. 裸 `<select>` 无法显示图标与计算后的名称；固定 `w-80` 下拉在宽输入框下直接缩成半截、错位；
+ *   2. 列表容器过矮（256px + 小字紧贴）在 10+ 模型时要反复滚动，必须用 `max-h-picker-menu` 拉高可视行数；
+ *   3. 超过 6 个模型时内嵌搜索框必须拦截字符按键冒泡，防止 Radix RovingFocus 抢走键盘焦点。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 下拉宽度通过 `w-menu-trigger` 严格绑定触发按钮宽度，并使用 `surface-raised + specular-top` 浮层质感；
+ *   2. 下拉项一律走 `ModelOptionRow`，禁止把裸 ID 直接渲染成可见文本；
  *   3. 没有模型列表时退化为普通输入框，不渲染空下拉。
  */
 export function ModelPickerField({
@@ -183,8 +260,18 @@ export function ModelPickerField({
   onChange: (model: string) => void;
 }): React.ReactElement {
   const [manual, setManual] = React.useState(false);
+  const [open, setOpen] = React.useState(false);
+  const [query, setQuery] = React.useState('');
   const hasModels = models.length > 0;
   const selected = value ? presentModel(value, providerName) : null;
+  const showSearch = models.length > 6;
+  const needle = query.trim().toLowerCase();
+  const filteredModels = needle
+    ? models.filter((model) => {
+        const displayName = presentModel(model, providerName).name.toLowerCase();
+        return displayName.includes(needle) || model.toLowerCase().includes(needle);
+      })
+    : models;
 
   if (!hasModels) {
     return (
@@ -194,10 +281,9 @@ export function ModelPickerField({
           placeholder={placeholder}
           aria-label={ariaLabel}
           onChange={(event) => onChange(event.target.value)}
-          size="sm"
           className="font-code"
         />
-        <p className="text-micro text-muted-foreground">{t('settings.providerModelListHint')}</p>
+        <p className="text-caption text-muted-foreground">{t('settings.providerModelListHint')}</p>
       </div>
     );
   }
@@ -211,12 +297,10 @@ export function ModelPickerField({
           aria-label={ariaLabel}
           autoFocus
           onChange={(event) => onChange(event.target.value)}
-          size="sm"
           className="flex-1 font-code"
         />
         <Button
           variant="outline"
-          size="sm"
           type="button"
           className="shrink-0 whitespace-nowrap"
           onClick={() => setManual(false)}
@@ -227,42 +311,86 @@ export function ModelPickerField({
     );
   }
 
+  const handleOpenChange = (next: boolean): void => {
+    setOpen(next);
+    if (!next) setQuery('');
+  };
+
   return (
-    <Menu>
+    <Menu
+      open={open}
+      onOpenChange={handleOpenChange}
+    >
       <MenuTrigger asChild>
         <button
           type="button"
           aria-label={ariaLabel}
-          className="flex h-8 w-full items-center gap-2 rounded-card border border-border bg-input px-3 text-left text-body text-foreground transition-colors hover:bg-card-hover"
+          className={selectTriggerVariants()}
         >
           {selected ? (
             <>
               <ModelVendorIcon modelId={value} providerName={providerName} />
-              <span className="min-w-0 flex-1 truncate text-caption text-foreground">{selected.name}</span>
+              <span className="min-w-0 flex-1 truncate text-body text-foreground">{selected.name}</span>
             </>
           ) : (
-            <span className="min-w-0 flex-1 truncate text-caption text-muted-foreground">
+            <span className="min-w-0 flex-1 truncate text-body text-muted-foreground">
               {placeholder || t('settings.providerModelPick')}
             </span>
           )}
           <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
         </button>
       </MenuTrigger>
-      {/* 下拉经 Radix Portal 挂到 body，用语义档位 z-menu 高于设置弹窗宿主 */}
-      <MenuContent className="z-menu w-80 p-1" align="start">
-        <div className="max-h-64 overflow-y-auto">
-          {models.map((model) => (
-            <MenuItem
-              key={model}
-              className="flex items-center gap-2"
-              onSelect={() => onChange(model)}
-            >
-              <ModelOptionRow modelId={model} providerName={providerName} selected={model === value} />
-            </MenuItem>
-          ))}
+      {/* 下拉经 Radix Portal 挂到 body，用 w-menu-trigger 严格对齐触发框宽度，z-menu 高于设置弹窗宿主 */}
+      <MenuContent className="z-menu w-menu-trigger p-1" align="start">
+        {showSearch ? (
+          <div
+            className="border-b border-border-subtle p-2"
+            onKeyDown={(event) => handleModelSearchKeyDown(event, { closeMenu: () => handleOpenChange(false) })}
+          >
+            <div className="relative flex items-center">
+              <Search
+                size={14}
+                aria-hidden="true"
+                className="pointer-events-none absolute left-3 text-muted-foreground"
+              />
+              <Input
+                size="sm"
+                value={query}
+                placeholder={t('settings.providerModelSearchPlaceholder')}
+                aria-label={t('settings.providerModelSearchPlaceholder')}
+                onChange={(event) => setQuery(event.target.value)}
+                className="pl-8"
+              />
+            </div>
+          </div>
+        ) : null}
+        <div className="max-h-picker-menu overflow-y-auto p-1">
+          {filteredModels.length === 0 ? (
+            <p className="px-3 py-4 text-center text-caption text-muted-foreground">
+              {t('settings.providerModelSearchEmpty')}
+            </p>
+          ) : (
+            filteredModels.map((model) => (
+              <MenuItem
+                key={model}
+                className={cn(
+                  'flex items-center gap-2 px-3 py-2',
+                  model === value && 'bg-card-active',
+                )}
+                onSelect={() => onChange(model)}
+              >
+                <ModelOptionRow
+                  modelId={model}
+                  providerName={providerName}
+                  selected={model === value}
+                  size="comfortable"
+                />
+              </MenuItem>
+            ))
+          )}
         </div>
         <div className="my-1 h-px bg-border-subtle" role="separator" />
-        <MenuItem className="text-caption text-muted-foreground" onSelect={() => setManual(true)}>
+        <MenuItem className="px-3 py-2 text-caption text-muted-foreground" onSelect={() => setManual(true)}>
           {t('settings.providerModelManual')}
         </MenuItem>
       </MenuContent>
@@ -326,7 +454,8 @@ export function ModelPickerDialog({
   models: readonly string[];
   currentModel?: string;
   busy?: boolean;
-  onPick: (model: string, confirmExpensive: boolean) => Promise<{
+  /** 传入后列表项可点击选择；省略时退化为只读模型列表展示。 */
+  onPick?: (model: string, confirmExpensive: boolean) => Promise<{
     ok: boolean;
     confirmRequired?: boolean;
     message?: string;
@@ -336,6 +465,7 @@ export function ModelPickerDialog({
   const [pending, setPending] = React.useState(false);
   const [warning, setWarning] = React.useState('');
   const [error, setError] = React.useState('');
+  const [query, setQuery] = React.useState('');
 
   React.useEffect(() => {
     if (open) return;
@@ -343,11 +473,22 @@ export function ModelPickerDialog({
     setPending(false);
     setWarning('');
     setError('');
+    setQuery('');
   }, [open]);
 
   if (!open) return null;
 
+  const showSearch = models.length > 6;
+  const needle = query.trim().toLowerCase();
+  const filteredModels = needle
+    ? models.filter((model) => {
+        const displayName = presentModel(model, providerName).name.toLowerCase();
+        return displayName.includes(needle) || model.toLowerCase().includes(needle);
+      })
+    : models;
+
   const pick = async (model: string, confirmExpensive: boolean): Promise<void> => {
+    if (!onPick) return;
     setPending(true);
     setPendingModel(model);
     setError('');
@@ -376,57 +517,109 @@ export function ModelPickerDialog({
     >
       <DialogContent
         portal={false}
-        className="flex max-h-modal-sm w-full max-w-lg flex-col gap-0 overflow-hidden rounded-window p-0"
+        className="flex max-h-modal-lg w-full max-w-lg flex-col gap-0 overflow-hidden rounded-window p-0"
       >
-        <div className="flex items-start justify-between gap-3 border-b border-border-subtle px-4 py-3">
-          <div className="min-w-0">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border-subtle px-5 py-4">
+          <div className="flex min-w-0 items-center gap-2">
             <DialogTitle className="truncate text-section font-medium text-foreground">{title}</DialogTitle>
-            <DialogDescription className="mt-1 text-caption text-muted-foreground">{subtitle}</DialogDescription>
+            <span className="shrink-0 rounded-full border border-border bg-secondary px-2 text-caption text-muted-foreground">
+              {t('settings.providerModels', { count: models.length })}
+            </span>
           </div>
-          <Button variant="ghost" size="sm" type="button" onClick={onClose}>
-            {t('settings.close')}
+          <DialogDescription className="sr-only">{subtitle}</DialogDescription>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            type="button"
+            className="shrink-0"
+            aria-label={t('settings.close')}
+            onClick={onClose}
+          >
+            <X size={14} aria-hidden="true" />
           </Button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-2 py-2">
-          {models.length === 0 ? (
-            <p className="px-2 py-6 text-center text-caption text-muted-foreground">
-              {t('settings.providerNoModels')}
-            </p>
-          ) : (
-            models.map((model) => (
-              <button
-                key={model}
-                type="button"
-                disabled={busy || pending}
-                data-model-id={model}
-                onClick={() => { void pick(model, false); }}
-                className="flex w-full items-center gap-2 rounded-inner px-2 py-2 text-left transition-colors hover:bg-card-hover disabled:opacity-60"
-              >
-                <ModelOptionRow
-                  modelId={model}
-                  providerName={providerName}
-                  current={currentModel === model}
-                  selected={pendingModel === model && pending}
-                />
-              </button>
-            ))
-          )}
+        <div className="flex flex-1 flex-col gap-3 overflow-hidden px-5 py-4">
+          {showSearch ? (
+            <div className="relative flex shrink-0 items-center">
+              <Search
+                size={14}
+                aria-hidden="true"
+                className="pointer-events-none absolute left-3 text-muted-foreground"
+              />
+              <Input
+                size="sm"
+                value={query}
+                placeholder={t('settings.providerModelSearchPlaceholder')}
+                aria-label={t('settings.providerModelSearchPlaceholder')}
+                onChange={(event) => setQuery(event.target.value)}
+                className="pl-8"
+              />
+            </div>
+          ) : null}
+
+          <div className="max-h-picker-list flex-1 overflow-y-auto rounded-card border border-border-subtle bg-input p-2">
+            {models.length === 0 ? (
+              <p className="px-3 py-6 text-center text-caption text-muted-foreground">
+                {t('settings.providerNoModels')}
+              </p>
+            ) : filteredModels.length === 0 ? (
+              <p className="px-3 py-6 text-center text-caption text-muted-foreground">
+                {t('settings.providerModelSearchEmpty')}
+              </p>
+            ) : onPick ? (
+              filteredModels.map((model) => (
+                <button
+                  key={model}
+                  type="button"
+                  disabled={busy || pending}
+                  data-model-id={model}
+                  onClick={() => { void pick(model, false); }}
+                  className="flex w-full items-center gap-2 rounded-card px-3 py-2 text-left transition-colors hover:bg-card-hover disabled:opacity-60"
+                >
+                  <ModelOptionRow
+                    modelId={model}
+                    providerName={providerName}
+                    current={currentModel === model}
+                    selected={pendingModel === model && pending}
+                    size="comfortable"
+                  />
+                </button>
+              ))
+            ) : (
+              filteredModels.map((model) => (
+                <div
+                  key={model}
+                  data-model-id={model}
+                  className="flex w-full items-center gap-2 rounded-card px-3 py-2 transition-colors hover:bg-card-hover"
+                >
+                  <ModelOptionRow
+                    modelId={model}
+                    providerName={providerName}
+                    size="comfortable"
+                  />
+                </div>
+              ))
+            )}
+          </div>
         </div>
 
         {warning ? (
-          <p className="border-t border-border-subtle px-4 py-2 text-caption text-warning" role="alert">
+          <p className="shrink-0 border-t border-border-subtle px-5 py-2 text-caption text-warning" role="alert">
             {warning}
           </p>
         ) : null}
         {error ? (
-          <p className="border-t border-border-subtle px-4 py-2 text-caption text-destructive" role="alert">
+          <p className="shrink-0 border-t border-border-subtle px-5 py-2 text-caption text-destructive" role="alert">
             {error}
           </p>
         ) : null}
 
-        {confirmPending ? (
-          <div className="flex items-center justify-end gap-2 border-t border-border-subtle px-4 py-3">
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border-subtle px-5 py-3">
+          <Button variant="secondary" size="sm" type="button" onClick={onClose}>
+            {t('settings.close')}
+          </Button>
+          {confirmPending ? (
             <Button
               size="sm"
               type="button"
@@ -435,8 +628,8 @@ export function ModelPickerDialog({
             >
               {t('settings.providerUseAnyway')}
             </Button>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </DialogContent>
     </Dialog>
   );

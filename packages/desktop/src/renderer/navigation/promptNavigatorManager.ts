@@ -82,6 +82,11 @@ export class PromptNavigatorManager {
   private promptJumpSeq = 0;
   /** 跳转落定状态。 */
   private promptJumpSettling = false;
+  /**
+   * 跳转意图锁定目标：点击/跳转落定后，只要目标位于视口内，优先保持该目标，
+   * 防止因目标处于物理触底区未达 12px 留白而被 100px 固定阅读线反弹覆盖。
+   */
+  private activeJumpTargetMessageId: string | null = null;
   /** 滚动容器 padding-top 实测值。 */
   private streamPaddingTopPx = 24;
   private streamPaddingTopRead = false;
@@ -188,8 +193,23 @@ export class PromptNavigatorManager {
 
   /**
    * 按滚动位置刷新当前项。
+   *
+   * 【设计意图 (Why)】
+   *   1. 意图锁定优先：用户主动跳转至某提问时，若目标在视口内（即使物理触底无法达到 12px 留白），优先确认该目标；
+   *   2. 触底平滑收敛：当大会话滚到底部（距离底部 <= 48px）且可滚动时，收敛至最新提问，消除 100px 读线造成的末端盲区；
+   *   3. 短会话免疫：当容器内容未超出一屏（canScroll = false）时，禁用触底盲目收敛，保持首屏精准定位。
+   *
+   * 【防范的历史坑 (Pitfall)】
+   *   1. 顶部 100px 固定读线让大会话滚动到底部时被倒数第 3 条提问截断，无法激活最新提问；
+   *   2. 跳转到底部提问后，固定读线再次重算引发高亮闪跳回弹；
+   *   3. 盲目收敛若在短会话生效，会导致无论怎么点都会被强制吸附在末条。
+   *
+   * 【约束与规则 (Rules)】
+   *   1. 纯 TypeScript 无界模块，入参防御；
+   *   2. 仅在 canScroll（scrollHeight > clientHeight + 8）且 distanceToBottom <= 48 时触发触底收敛；
+   *   3. 用户点击目标在视口内时，意图锁定高于触底收敛与固定读线。
    */
-  public syncFromScroll(): void {
+  public syncFromScroll(intendedMessageId?: string): void {
     const stream = this.host.getStreamElement();
     if (stream) this.ensureStreamPaddingTop(stream);
     this.promptNavigatorRebuildDepth += 1;
@@ -217,6 +237,60 @@ export class PromptNavigatorManager {
     const messages = this.host.getMessages();
     const total = messages.length;
     if (total <= 0 || !stream) return;
+
+    // 1. 【用户显式跳转意图优先】
+    // 若来自点击跳转且目标节点在视口内可见，锁定为激活项，防止触底或 100px 读线回弹覆盖
+    const targetId = intendedMessageId || this.activeJumpTargetMessageId;
+    if (targetId) {
+      const promptIdx = this.promptNavigatorEntries.findIndex((e) => e.id === targetId);
+      if (promptIdx >= 0) {
+        const escapedId =
+          typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+            ? CSS.escape(targetId)
+            : targetId.replace(/["\\]/g, '\\$&');
+        const targetNode = stream.querySelector<HTMLElement>(`[data-msg-id="${escapedId}"]`);
+        if (targetNode && typeof targetNode.getBoundingClientRect === 'function' && typeof stream.getBoundingClientRect === 'function') {
+          const nodeRect = targetNode.getBoundingClientRect();
+          const streamRect = stream.getBoundingClientRect();
+          if (nodeRect.bottom > streamRect.top - 16 && nodeRect.top < streamRect.bottom + 16) {
+            const next = promptIdx;
+            if (
+              next === (this.promptNavigatorSnapshot?.activeIndex ?? -1) &&
+              this.isMetaSame(this.promptNavigatorSnapshot)
+            ) {
+              return;
+            }
+            this.promptNavigatorSnapshot = this.buildSnapshot(this.promptNavigatorEntries, next);
+            this.sync();
+            return;
+          }
+        }
+      }
+    }
+
+    // 2. 【触底平滑收敛与短会话免疫】
+    // 只有具有物理滚动余量的视口，在距离底部 <= 48px 时才收敛至末条提问；短会话（无法滚动）禁用此分支
+    const canScroll = typeof stream.scrollHeight === 'number' &&
+      typeof stream.clientHeight === 'number' &&
+      stream.scrollHeight > stream.clientHeight + 8;
+
+    if (canScroll) {
+      const distanceToBottom = typeof stream.scrollTop === 'number'
+        ? stream.scrollHeight - stream.scrollTop - stream.clientHeight
+        : 1000;
+      if (distanceToBottom <= 48) {
+        const next = this.promptNavigatorEntries.length - 1;
+        if (
+          next === (this.promptNavigatorSnapshot?.activeIndex ?? -1) &&
+          this.isMetaSame(this.promptNavigatorSnapshot)
+        ) {
+          return;
+        }
+        this.promptNavigatorSnapshot = this.buildSnapshot(this.promptNavigatorEntries, next);
+        this.sync();
+        return;
+      }
+    }
 
     let messageIndex = -1;
     const streamTop = stream.getBoundingClientRect().top;
@@ -323,6 +397,7 @@ export class PromptNavigatorManager {
     this.promptJumpSeq += 1;
     const seq = this.promptJumpSeq;
     this.promptJumpSettling = true;
+    this.activeJumpTargetMessageId = messageId;
     this.host.onJumpSettlingChange?.(true);
 
     this.host.relocateMessageWindowToIndex(index);
@@ -398,7 +473,7 @@ export class PromptNavigatorManager {
         if (Math.abs(delta - 12) >= 1) {
           stream.scrollTop += delta - 12;
         }
-        this.syncFromScroll();
+        this.syncFromScroll(messageId);
         this.releasePromptJump(seq);
         return;
       }
@@ -425,6 +500,7 @@ export class PromptNavigatorManager {
     this.runRaf(() => {
       if (seq !== this.promptJumpSeq) return;
       this.promptJumpSettling = false;
+      this.activeJumpTargetMessageId = null;
       this.host.onJumpSettlingChange?.(false);
     });
   }

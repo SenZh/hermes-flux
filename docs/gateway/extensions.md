@@ -5,13 +5,13 @@
 
 | 方法 | 入参（契约） | 出参（契约） | 调用点 | 真实探针 |
 | --- | --- | --- | --- | --- |
-| `mcp.catalog` | `profile` | `servers` | `packages/desktop/src/renderer/services/settingsDataService.ts:1091` | 跳过：新增 MCP 目录查询 RPC 在无 .env 离线探针下显式跳过，由契约白名单与核心/桌面端单测守护；连真实网关跑 probe:gateway 可补录 |
-| `mcp.servers.add` | `profile` `name` `preset` `config` `bearer_token` | `ok` `name` `server` | `packages/desktop/src/renderer/services/settingsDataService.ts:1111` | 跳过：新增 MCP 服务器写操作在无 .env 离线探针下显式跳过，由契约白名单与参数构造单测守护；连真实网关跑 probe:gateway 可补录 |
-| `mcp.servers.remove` | `profile` `name` | `ok` `removed` | `packages/desktop/src/renderer/services/settingsDataService.ts:1134` | 跳过：移除 MCP 服务器写操作在无 .env 离线探针下显式跳过，由契约白名单与控制器单测守护；连真实网关跑 probe:gateway 可补录 |
-| `mcp.servers.status` | `profile` | `servers` `checked_at` | `packages/desktop/src/renderer/services/settingsDataService.ts:394`<br>`packages/desktop/src/renderer/settingsController.ts:209` | ✅ 0.21.6 |
-| `mcp.servers.test` | `profile` `name` | `ok` `tools` `error` `prompts` `resources` `oauth_needed` `oauth_tokens_present` | `packages/desktop/src/renderer/services/settingsDataService.ts:1159` | 跳过：MCP 服务器探活 RPC 在无 .env 离线探针下显式跳过，由契约白名单与结果归一化单测守护；连真实网关跑 probe:gateway 可补录 |
-| `skills.manage` | `profile` `action` `query` `page` `page_size` | `skills` `results` `installed` `name` `items` `page` `total_pages` `total` `info` | `packages/desktop/src/renderer/services/settingsDataService.ts:1182`<br>`packages/desktop/src/renderer/services/settingsDataService.ts:1189`<br>`packages/desktop/src/renderer/services/settingsDataService.ts:1214`<br>`packages/desktop/src/renderer/services/settingsDataService.ts:1253`<br>`packages/desktop/src/renderer/services/settingsDataService.ts:348`<br>`packages/desktop/src/renderer/settingsController.ts:210` | ✅ 0.21.6 |
-| `skills.reload` | `session_id` `profile` | `output` `result` | `packages/desktop/src/renderer/services/settingsDataService.ts:1223`<br>`packages/desktop/src/renderer/settingsController.ts:257` | ✅ 0.21.6 |
+| `mcp.catalog` | `profile` | `servers` | `packages/desktop/src/renderer/services/settingsDataService.ts:1244` | 跳过：新增 MCP 目录查询 RPC 在无 .env 离线探针下显式跳过，由契约白名单与核心/桌面端单测守护；连真实网关跑 probe:gateway 可补录 |
+| `mcp.servers.add` | `profile` `name` `preset` `config` `bearer_token` | `ok` `name` `server` | `packages/desktop/src/renderer/services/settingsDataService.ts:1264` | 跳过：新增 MCP 服务器写操作在无 .env 离线探针下显式跳过，由契约白名单与参数构造单测守护；连真实网关跑 probe:gateway 可补录 |
+| `mcp.servers.remove` | `profile` `name` | `ok` `removed` | `packages/desktop/src/renderer/services/settingsDataService.ts:1287` | 跳过：移除 MCP 服务器写操作在无 .env 离线探针下显式跳过，由契约白名单与控制器单测守护；连真实网关跑 probe:gateway 可补录 |
+| `mcp.servers.status` | `profile` | `servers` `checked_at` | `packages/desktop/src/renderer/services/settingsDataService.ts:427`<br>`packages/desktop/src/renderer/settingsController.ts:209` | ✅ 0.21.6 |
+| `mcp.servers.test` | `profile` `name` | `ok` `tools` `error` `prompts` `resources` `oauth_needed` `oauth_tokens_present` | `packages/desktop/src/renderer/services/settingsDataService.ts:1312` | 跳过：MCP 服务器探活 RPC 在无 .env 离线探针下显式跳过，由契约白名单与结果归一化单测守护；连真实网关跑 probe:gateway 可补录 |
+| `skills.manage` | `profile` `action` `query` `page` `page_size` | `skills` `results` `installed` `name` `items` `page` `total_pages` `total` `info` | `packages/desktop/src/renderer/services/settingsDataService.ts:1335`<br>`packages/desktop/src/renderer/services/settingsDataService.ts:1342`<br>`packages/desktop/src/renderer/services/settingsDataService.ts:1367`<br>`packages/desktop/src/renderer/services/settingsDataService.ts:1406`<br>`packages/desktop/src/renderer/services/settingsDataService.ts:381`<br>`packages/desktop/src/renderer/settingsController.ts:210` | ✅ 0.21.6 |
+| `skills.reload` | `session_id` `profile` | `output` `result` | `packages/desktop/src/renderer/services/settingsDataService.ts:1376`<br>`packages/desktop/src/renderer/settingsController.ts:257` | ✅ 0.21.6 |
 
 ## 明细
 
@@ -21,7 +21,7 @@
 - 结果类型：`McpCatalogResult`
 - 真实探针：跳过 —— 新增 MCP 目录查询 RPC 在无 .env 离线探针下显式跳过，由契约白名单与核心/桌面端单测守护；连真实网关跑 probe:gateway 可补录
 - 调用点：
-  - `packages/desktop/src/renderer/services/settingsDataService.ts:1091`
+  - `packages/desktop/src/renderer/services/settingsDataService.ts:1244`
 
 ### `mcp.servers.add`
 
@@ -29,7 +29,7 @@
 - 结果类型：`McpServersAddResult`
 - 真实探针：跳过 —— 新增 MCP 服务器写操作在无 .env 离线探针下显式跳过，由契约白名单与参数构造单测守护；连真实网关跑 probe:gateway 可补录
 - 调用点：
-  - `packages/desktop/src/renderer/services/settingsDataService.ts:1111`
+  - `packages/desktop/src/renderer/services/settingsDataService.ts:1264`
 
 ### `mcp.servers.remove`
 
@@ -37,7 +37,7 @@
 - 结果类型：`McpServersRemoveResult`
 - 真实探针：跳过 —— 移除 MCP 服务器写操作在无 .env 离线探针下显式跳过，由契约白名单与控制器单测守护；连真实网关跑 probe:gateway 可补录
 - 调用点：
-  - `packages/desktop/src/renderer/services/settingsDataService.ts:1134`
+  - `packages/desktop/src/renderer/services/settingsDataService.ts:1287`
 
 ### `mcp.servers.status`
 
@@ -46,7 +46,7 @@
 - 真实探针：已通过（网关 0.21.6，录制于 2026-11-08T13:18:53.038Z）
 - 备注：本机回环网关实测录制；主基线其余条目录制自 0.22.5
 - 调用点：
-  - `packages/desktop/src/renderer/services/settingsDataService.ts:394`
+  - `packages/desktop/src/renderer/services/settingsDataService.ts:427`
   - `packages/desktop/src/renderer/settingsController.ts:209`
 
 ### `mcp.servers.test`
@@ -55,7 +55,7 @@
 - 结果类型：`McpServersTestResult`
 - 真实探针：跳过 —— MCP 服务器探活 RPC 在无 .env 离线探针下显式跳过，由契约白名单与结果归一化单测守护；连真实网关跑 probe:gateway 可补录
 - 调用点：
-  - `packages/desktop/src/renderer/services/settingsDataService.ts:1159`
+  - `packages/desktop/src/renderer/services/settingsDataService.ts:1312`
 
 ### `skills.manage`
 
@@ -64,11 +64,11 @@
 - 真实探针：已通过（网关 0.21.6，录制于 2026-11-08T13:18:53.038Z）
 - 备注：本机回环网关实测录制；主基线其余条目录制自 0.22.5
 - 调用点：
-  - `packages/desktop/src/renderer/services/settingsDataService.ts:1182`
-  - `packages/desktop/src/renderer/services/settingsDataService.ts:1189`
-  - `packages/desktop/src/renderer/services/settingsDataService.ts:1214`
-  - `packages/desktop/src/renderer/services/settingsDataService.ts:1253`
-  - `packages/desktop/src/renderer/services/settingsDataService.ts:348`
+  - `packages/desktop/src/renderer/services/settingsDataService.ts:1335`
+  - `packages/desktop/src/renderer/services/settingsDataService.ts:1342`
+  - `packages/desktop/src/renderer/services/settingsDataService.ts:1367`
+  - `packages/desktop/src/renderer/services/settingsDataService.ts:1406`
+  - `packages/desktop/src/renderer/services/settingsDataService.ts:381`
   - `packages/desktop/src/renderer/settingsController.ts:210`
 
 ### `skills.reload`
@@ -78,6 +78,6 @@
 - 真实探针：已通过（网关 0.21.6，录制于 2026-11-08T13:18:53.038Z）
 - 备注：本机回环网关实测录制；主基线其余条目录制自 0.22.5
 - 调用点：
-  - `packages/desktop/src/renderer/services/settingsDataService.ts:1223`
+  - `packages/desktop/src/renderer/services/settingsDataService.ts:1376`
   - `packages/desktop/src/renderer/settingsController.ts:257`
 
