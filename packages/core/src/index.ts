@@ -28,6 +28,7 @@ export * from './agent/toolTaxonomy.js';
 export * from './agent/groupSpeaker.js';
 export * from './agent/agentPresence.js';
 export * from './fs/fileService.js';
+export * from './fs/fileTreeService.js';
 export * from './log/logger.js';
 export * from './log/redact.js';
 export * from './log/fileLogPolicy.js';

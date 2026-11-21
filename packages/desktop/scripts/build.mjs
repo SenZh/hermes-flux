@@ -248,6 +248,25 @@ async function buildAll() {
     format: 'esm',
     sourcemap: true,
   });
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/main/workspaceFs.ts')],
+    outfile: path.join(rootDir, 'dist/main/workspaceFs.mjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    sourcemap: true,
+  });
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, 'src/main/ipc.ts')],
+    outfile: path.join(rootDir, 'dist/main/ipc.cjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'cjs',
+    external: ['electron'],
+    sourcemap: true,
+  });
   console.log('  ✔ Interactive-stage pure modules compiled (rollbackTransaction, toolPatchQueue, conversationPush, settingsController, botManagementController, messageWindow, profileRefresh, promptNavigator, coldStartFocus, providerAdminController, providerAdminRest, providerCatalog, gatewayConnection, cookieHeader)');
 
   // transcriptRows 单独编译：它以 external 保留 @hermes-flux/ui 与 core 的裸说明符，

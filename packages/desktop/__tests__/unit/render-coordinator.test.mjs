@@ -1010,11 +1010,95 @@ test('RenderCoordinator - 渲染装配与协调管线领域纯行为测试', asy
     }
   });
 
-  function installDomStub() {    const saved = {
+  await t.test('24. 右侧检查舱增量展开、状态更新与收起保留常驻竖栏契约', () => {
+    const dom = installDomStub();
+    try {
+      const rootEl = dom.elements.get('flux-app-root');
+      const shellEl = { id: 'flux-inspector-shell', outerHTML: '' };
+      const podEl = {
+        id: 'flux-inspector-pod',
+        outerHTML: '',
+        offsetWidth: 0,
+        style: {},
+        classList: new Set(['flux-inspector-pod']),
+        getAttribute: () => null,
+        setAttribute() {},
+        removeAttribute() {},
+        addEventListener() {},
+        removeEventListener() {},
+      };
+      podEl.classList = {
+        add: () => {},
+        remove: () => {},
+        toggle: () => {},
+        contains: () => false,
+      };
+      const removedClasses = [];
+      const railAttrs = new Map();
+      const railBtn = {
+        classList: { remove: (c) => removedClasses.push(c) },
+        setAttribute: (k, v) => railAttrs.set(k, v),
+      };
+      const origQuery = rootEl.querySelector.bind(rootEl);
+      rootEl.querySelector = (sel) => {
+        if (sel === '#flux-inspector-shell') return shellEl;
+        if (sel === '#flux-inspector-pod') return podEl;
+        return origQuery(sel);
+      };
+      rootEl.querySelectorAll = (sel) =>
+        sel === '#flux-inspector-rail .vertical-tab-item' ? [railBtn] : [];
+
+      const { coordinator, state } = createHarness({ isSessionEnterPending: () => false });
+      try {
+        state.sessions = [{ id: 'sess-test', cwd: '/ws/demo' }];
+
+        // 首帧：收起态全量挂载（包含常驻竖栏）
+        coordinator.render();
+        assert.ok(rootEl.innerHTML.includes('id="flux-inspector-rail"'));
+        assert.ok(rootEl.innerHTML.includes('class="flux-inspector-pod inspector-collapsed"'));
+
+        // 展开：增量分支 true -> false
+        state.inspectorCollapsed = false;
+        state.fileTreeState = { status: 'ready', rootPath: '/ws/demo', source: 'local_fs', nodes: [] };
+        state.fileTreeExpandedPaths = ['/ws/demo'];
+        state.fileTreeFilterQuery = 'index';
+        state.fileTreeCollapsed = false;
+        coordinator.render();
+        assert.ok(shellEl.outerHTML.includes('class="inspector-floating-window"'));
+        assert.ok(shellEl.outerHTML.includes('demo'));
+
+        // 保持展开二次更新：!state.inspectorCollapsed 分支
+        state.fileTreeCollapsed = true;
+        coordinator.render();
+        assert.ok(shellEl.outerHTML.includes('id="btn-file-tree-expand"'));
+
+        // 无本地 session cwd 时，workspaceRootName 必须回退取 fileTreeState.rootPath basename
+        state.sessions = [];
+        state.fileTreeCollapsed = false;
+        state.fileTreeState = { status: 'ready', rootPath: '/opt/data', source: 'gateway_api', nodes: [] };
+        coordinator.render();
+        assert.ok(shellEl.outerHTML.includes('>data<'));
+
+        // 收起：增量分支 false -> true，常驻竖栏按钮立即退出高亮
+        state.inspectorCollapsed = true;
+        coordinator.render();
+        assert.deepEqual(removedClasses, ['active-tab']);
+        assert.equal(railAttrs.get('aria-pressed'), 'false');
+      } finally {
+        coordinator.dispose();
+      }
+    } finally {
+      dom.restore();
+    }
+  });
+
+  function installDomStub() {
+    const saved = {
       document: globalThis.document,
       window: globalThis.window,
       raf: globalThis.requestAnimationFrame,
       gcs: globalThis.getComputedStyle,
+      htmlElement: globalThis.HTMLElement,
     };
     const elements = new Map();
     const makeEl = (id) => ({
@@ -1084,6 +1168,7 @@ test('RenderCoordinator - 渲染装配与协调管线领域纯行为测试', asy
     };
     globalThis.requestAnimationFrame = (cb) => { cb(); return 1; };
     globalThis.getComputedStyle = () => ({ paddingBottom: '0px', getPropertyValue: () => '' });
+    globalThis.HTMLElement = saved.htmlElement ?? class HTMLElement {};
     return {
       elements,
       rootAttrs,
@@ -1093,6 +1178,7 @@ test('RenderCoordinator - 渲染装配与协调管线领域纯行为测试', asy
         globalThis.window = saved.window;
         globalThis.requestAnimationFrame = saved.raf;
         globalThis.getComputedStyle = saved.gcs;
+        globalThis.HTMLElement = saved.htmlElement;
       },
     };
   }

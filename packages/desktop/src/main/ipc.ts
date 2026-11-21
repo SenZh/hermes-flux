@@ -9,6 +9,7 @@ import crypto from 'node:crypto';
 import { appendExternalLogRecord, getLogDir } from './logFile';
 import { resolveTitlebarMaximized, resolveWindowToggle } from './windowControl';
 import { extractCookieHeader } from './cookieHeader';
+import { listWorkspaceDirectory, resolveSafeLocalSourceFile } from './workspaceFs';
 import type { LogRecord } from '@hermes-flux/core';
 
 /**
@@ -30,8 +31,29 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function getGatewayOrigin(rawUrl: string): string {
+  try {
+    return new URL(rawUrl).origin.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+async function cancelResponseBody(res: Response): Promise<void> {
+  const body = (res as { body?: { cancel?: () => Promise<unknown> } | null }).body;
+  if (body && typeof body.cancel === 'function') {
+    await body.cancel().catch(() => {});
+  }
+}
+
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   let activeGatewayCookies = '';
+  let activeGatewayOrigin = '';
+
+  const shouldAttachGatewayCookies = (targetUrl: string): boolean => {
+    if (!activeGatewayCookies || !activeGatewayOrigin) return false;
+    return getGatewayOrigin(targetUrl) === activeGatewayOrigin;
+  };
 
   /**
    * 渲染进程日志转发。
@@ -184,6 +206,8 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         const gatewayVersion = typeof statusData.version === 'string' ? statusData.version : undefined;
 
         if (!authRequired) {
+          activeGatewayCookies = '';
+          activeGatewayOrigin = '';
           return {
             ok: true,
             message: `网关直连就绪 (无需认证) · 延迟 ${latency}ms`,
@@ -216,15 +240,20 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         });
 
         if (loginRes.status === 401) {
+          activeGatewayCookies = '';
+          activeGatewayOrigin = '';
           return { ok: false, message: '认证失败: 用户名或密码错误 (HTTP 401)', latency };
         }
         if (!loginRes.ok) {
+          activeGatewayCookies = '';
+          activeGatewayOrigin = '';
           return { ok: false, message: `登录接口异常 HTTP ${loginRes.status}`, latency };
         }
 
         // 仅保留 name=value 段，避免把 Path/HttpOnly/SameSite 属性带入后续 Cookie 请求头
         const cookies = extractCookieHeader(loginRes.headers);
         activeGatewayCookies = cookies;
+        activeGatewayOrigin = cookies ? getGatewayOrigin(baseUrl) : '';
 
         // Mint WS Ticket
         const ticketRes = await fetch(`${baseUrl}/api/auth/ws-ticket`, {
@@ -301,7 +330,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       Accept: 'application/json',
       Origin: base,
     };
-    if (activeGatewayCookies) {
+    if (shouldAttachGatewayCookies(fullUrl)) {
       headers['Cookie'] = activeGatewayCookies;
     }
     if (options.token) {
@@ -344,8 +373,11 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     if (contentType.includes('application/json')) {
       return await res.json();
     }
-    // 图像二进制自动转换为 Base64 Data URL
-    if (contentType.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg|ico|bmp)$/i.test(options.path)) {
+    // 图像二进制自动转换为 Base64 Data URL（排除 text/html SPA fallback 页误判）
+    if (
+      contentType.startsWith('image/') ||
+      (/\.(png|jpe?g|gif|webp|svg|ico|bmp)$/i.test(options.path) && !contentType.includes('text/html'))
+    ) {
       const arrayBuffer = await res.arrayBuffer();
       const base64 = Buffer.from(arrayBuffer).toString('base64');
       const mime = contentType.split(';')[0] || 'image/png';
@@ -565,7 +597,16 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // 支持 canceled 状态回传，避免取消保存被误判为报错。
   ipcMain.handle(
     'fs:save-file',
-    async (_event, options: { fileName: string; content: string; isBase64?: boolean }) => {
+    async (
+      _event,
+      options: {
+        fileName: string;
+        content: string;
+        isBase64?: boolean;
+        sourcePath?: string;
+        remoteUrl?: string;
+      },
+    ) => {
       try {
         const defaultName = path.basename(options.fileName) || 'download';
         const ext = path.extname(defaultName).toLowerCase().replace('.', '');
@@ -591,13 +632,59 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
           return { success: false, canceled: true };
         }
 
-        let dataToWrite: Buffer | string;
-        // 1. 如果指定了 remoteDownloadUrl，直接由宿主网络以二进制流下载写入，不受 V8 字符串上限与前端内存限制
-        if (options.content.startsWith('http://') || options.content.startsWith('https://')) {
-          const fetchHeaders: Record<string, string> = {};
-          if (activeGatewayCookies) fetchHeaders['Cookie'] = activeGatewayCookies;
-          const dlRes = await fetch(options.content, { headers: fetchHeaders });
+        const remoteTarget =
+          options.remoteUrl ||
+          (options.content.startsWith('http://') || options.content.startsWith('https://')
+            ? options.content
+            : '');
+
+        // 1. 本地工作区大文件或二进制文件优先直拷（支持非 process.cwd() 的合法工作区目录，拦截系统目录/.env*；不可读且无替代内容时显式报错）
+        if (options.sourcePath) {
+          const safeWsFile = resolveSafeLocalSourceFile(options.sourcePath, process.cwd());
+          const absSource =
+            safeWsFile ||
+            (isSafeReadablePath(options.sourcePath) ? path.resolve(options.sourcePath) : null);
+          if (absSource && fs.existsSync(absSource) && fs.statSync(absSource).isFile()) {
+            fs.copyFileSync(absSource, result.filePath);
+            return { success: true, filePath: result.filePath };
+          }
+          if (!remoteTarget && !options.content) {
+            return { success: false, error: '无法读取本地源文件' };
+          }
+        }
+
+        // 2. 远程 URL（仅允许 http/https，仅同源发送 Cookie，/api/fs/download 404 时剥离额外查询参数回退 /api/files/download）
+        if (remoteTarget) {
+          let parsedRemote: URL;
+          try {
+            parsedRemote = new URL(remoteTarget);
+          } catch {
+            return { success: false, error: '非法远程下载地址' };
+          }
+          if (parsedRemote.protocol !== 'http:' && parsedRemote.protocol !== 'https:') {
+            return { success: false, error: '非法远程下载地址' };
+          }
+          const fetchHeaders: Record<string, string> = {
+            Origin: parsedRemote.origin,
+          };
+          if (shouldAttachGatewayCookies(remoteTarget)) {
+            fetchHeaders['Cookie'] = activeGatewayCookies;
+          }
+          let dlRes = await fetch(remoteTarget, {
+            headers: fetchHeaders,
+            signal: AbortSignal.timeout(60_000),
+          });
+          if (dlRes.status === 404 && parsedRemote.pathname.endsWith('/api/fs/download')) {
+            await cancelResponseBody(dlRes);
+            const pathParam = parsedRemote.searchParams.get('path') || '';
+            const fallbackUrl = `${parsedRemote.origin}/api/files/download?path=${encodeURIComponent(pathParam)}`;
+            dlRes = await fetch(fallbackUrl, {
+              headers: fetchHeaders,
+              signal: AbortSignal.timeout(60_000),
+            });
+          }
           if (!dlRes.ok) {
+            await cancelResponseBody(dlRes);
             return { success: false, error: `下载远程文件失败 HTTP ${dlRes.status}` };
           }
           const arrayBuffer = await dlRes.arrayBuffer();
@@ -605,6 +692,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
           return { success: true, filePath: result.filePath };
         }
 
+        let dataToWrite: Buffer | string;
         if (options.content.startsWith('data:')) {
           const commaIdx = options.content.indexOf(',');
           const b64 = commaIdx >= 0 ? options.content.slice(commaIdx + 1) : options.content;
@@ -623,4 +711,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       }
     }
   );
+
+  // Local Workspace Directory Listing for Right Tool Window File Tree
+  ipcMain.handle('fs:list-directory', (_event, dirPath?: string) => {
+    return listWorkspaceDirectory(dirPath, { cwd: process.cwd() });
+  });
 }

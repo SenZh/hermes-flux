@@ -38,6 +38,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '../..');
 const require = createRequire(path.join(REPO_ROOT, 'package.json'));
+const ts = require('typescript');
 
 const C = {
   reset: '\u001b[0m',
@@ -97,9 +98,17 @@ function resolveBase() {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
-    // 防范历史坑：当 mb === head 时说明分支与基准已对齐无领先 commit，
-    // 若直接比对自身会导致 diff 为空从而静默通过。此时退回 HEAD~1。
+    // 防范历史坑：当 mb === head 时说明分支与基准已对齐无领先 commit：
+    //   若工作区有未提交改动，必须比对 HEAD（否则会拉入上一笔无关提交）；仅工作区干净时退回 HEAD~1。
     if (mb && mb !== head) return mb;
+    if (mb && mb === head) {
+      const dirty = execFileSync('git', ['status', '--porcelain', '--', 'packages/'], {
+        cwd: REPO_ROOT,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+      if (dirty) return 'HEAD';
+    }
   } catch {
     // 没有远端分支时退回到 HEAD~1，保证本地可跑
   }
@@ -198,7 +207,7 @@ async function collectLcov(suite, targetFiles = []) {
   const r = spawnSync(
     process.execPath,
     ['--test', '--experimental-test-coverage', '--test-reporter=lcov', `--test-reporter-destination=${outFile}`, ...files],
-    { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, timeout: 60 * 1000, env },
+    { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, timeout: 120 * 1000, env },
   );
   if (!fs.existsSync(outFile)) return { path: null, files: files.length, status: r.status };
   return { path: outFile, files: files.length, status: r.status };
@@ -296,12 +305,31 @@ function parseSourceMapMappings(map) {
         originalLine += vals[2];
         const srcFile = map.sources[sourceIndex];
         if (srcFile) {
-          distToSrc.set(genLine, { source: srcFile, line: originalLine + 1 });
+          const lineNum = originalLine + 1;
+          let list = distToSrc.get(genLine);
+          if (!list) {
+            list = [];
+            distToSrc.set(genLine, list);
+          }
+          if (!list.some((item) => item.source === srcFile && item.line === lineNum)) {
+            list.push({ source: srcFile, line: lineNum });
+          }
         }
       }
     }
   }
   return distToSrc;
+}
+
+/** 读取源码行缓存，供 BRDA 过滤非可执行尾部段时复用。 */
+const sourceLinesCache = new Map();
+function getSourceLines(relPath) {
+  let cached = sourceLinesCache.get(relPath);
+  if (cached) return cached;
+  const abs = path.join(REPO_ROOT, relPath);
+  cached = fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8').split('\n') : [];
+  sourceLinesCache.set(relPath, cached);
+  return cached;
 }
 
 /**
@@ -342,33 +370,47 @@ function buildSrcLineCoverage(records) {
     mappedRecords += 1;
 
     const mapDir = path.dirname(sf);
+    const resolveRel = (source) => {
+      const abs = path.resolve(REPO_ROOT, mapDir, source);
+      return path.relative(REPO_ROOT, abs).split(path.sep).join('/');
+    };
 
-    // 反解代码行 (DA)
+    // 反解代码行 (DA)：同一 JS 行可能对应多个源码行（如多行 TS 函数头/表达式），保留全部映射以免丢失覆盖记录
     for (const [distLine, hits] of rec.da) {
-      const hit = distToSrc.get(distLine);
-      if (!hit) continue;
-      // sourcemap 里的 source 是相对 map 文件的路径，归一成仓库相对 POSIX 路径
-      const abs = path.resolve(REPO_ROOT, mapDir, hit.source);
-      const rel = path.relative(REPO_ROOT, abs).split(path.sep).join('/');
-      if (!srcMapped.has(rel)) srcMapped.set(rel, new Set());
-      srcMapped.get(rel).add(hit.line);
-      if (hits > 0) {
-        if (!srcCovered.has(rel)) srcCovered.set(rel, new Set());
-        srcCovered.get(rel).add(hit.line);
+      const mappedList = distToSrc.get(distLine);
+      if (!mappedList || mappedList.length === 0) continue;
+      for (const hit of mappedList) {
+        const rel = resolveRel(hit.source);
+        if (!srcMapped.has(rel)) srcMapped.set(rel, new Set());
+        srcMapped.get(rel).add(hit.line);
+        if (hits > 0) {
+          if (!srcCovered.has(rel)) srcCovered.set(rel, new Set());
+          srcCovered.get(rel).add(hit.line);
+        }
       }
     }
 
-    // 反解代码分支 (BRDA)
+    // 反解代码分支 (BRDA)：优先落到该生成行中最后一个可计数源码行，兼容原有末段映射语义
     for (const b of rec.brda) {
-      const hit = distToSrc.get(b.distLine);
-      if (!hit) continue;
-      const abs = path.resolve(REPO_ROOT, mapDir, hit.source);
-      const rel = path.relative(REPO_ROOT, abs).split(path.sep).join('/');
+      const mappedList = distToSrc.get(b.distLine);
+      if (!mappedList || mappedList.length === 0) continue;
+      let chosen = mappedList[mappedList.length - 1];
+      let chosenRel = resolveRel(chosen.source);
+      for (let i = mappedList.length - 1; i >= 0; i -= 1) {
+        const cand = mappedList[i];
+        const candRel = resolveRel(cand.source);
+        const lines = getSourceLines(candRel);
+        if (isCountableLine(lines[cand.line - 1] ?? '')) {
+          chosen = cand;
+          chosenRel = candRel;
+          break;
+        }
+      }
 
-      if (!srcBranchByArtifact.has(rel)) srcBranchByArtifact.set(rel, new Map());
-      const lineMap = srcBranchByArtifact.get(rel);
-      if (!lineMap.has(hit.line)) lineMap.set(hit.line, new Map());
-      const perArtifact = lineMap.get(hit.line);
+      if (!srcBranchByArtifact.has(chosenRel)) srcBranchByArtifact.set(chosenRel, new Map());
+      const lineMap = srcBranchByArtifact.get(chosenRel);
+      if (!lineMap.has(chosen.line)) lineMap.set(chosen.line, new Map());
+      const perArtifact = lineMap.get(chosen.line);
       const stat = perArtifact.get(sf) ?? { total: 0, hit: 0 };
       stat.total += 1;
       if (b.taken > 0) stat.hit += 1;
@@ -438,6 +480,124 @@ function isCountableLine(raw) {
   return true;
 }
 
+/**
+ * 基于 TypeScript AST 提取真正会产出运行时 JS 的可执行源码行集合。
+ *
+ * 【设计意图 (Why)】
+ *   仅靠逐行正则无法识别跨行 interface/type、多行类型标注、打包器内联消除的静态 import，
+ *   以及多行模板字符串中不含 ${...} 的纯静态 HTML 文本/注释行。
+ * 【约束与规则 (Rules)】
+ *   - 纯类型节点（Interface/TypeAlias/Import/Export/TypeNode/Signature/declare）直接剪枝；
+ *   - 模板字符串仅计入首行与 ${...} 内部表达式，真实未调用函数与未走到的分支仍严格保留在集合内。
+ */
+function computeExecutableTsLines(fileName, sourceText) {
+  const scriptKind = fileName.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  const sf = ts.createSourceFile(fileName, sourceText, ts.ScriptTarget.Latest, true, scriptKind);
+  const execLines = new Set();
+
+  const markPos = (pos) => {
+    const lc = sf.getLineAndCharacterOfPosition(pos);
+    execLines.add(lc.line + 1);
+  };
+
+  const hasDeclareModifier = (node) =>
+    ts.canHaveModifiers(node) &&
+    Boolean(ts.getModifiers(node)?.some((m) => m.kind === ts.SyntaxKind.DeclareKeyword));
+
+  const isPureTypeNode = (node) =>
+    ts.isInterfaceDeclaration(node) ||
+    ts.isTypeAliasDeclaration(node) ||
+    ts.isImportDeclaration(node) ||
+    ts.isExportDeclaration(node) ||
+    ts.isTypeNode(node) ||
+    ts.isTypeParameterDeclaration(node) ||
+    ts.isPropertySignature(node) ||
+    ts.isMethodSignature(node) ||
+    ts.isIndexSignatureDeclaration(node) ||
+    ts.isCallSignatureDeclaration(node) ||
+    ts.isConstructSignatureDeclaration(node) ||
+    hasDeclareModifier(node);
+
+  const visit = (node) => {
+    if (!node || isPureTypeNode(node)) return;
+
+    if (ts.isNoSubstitutionTemplateLiteral(node)) {
+      markPos(node.getStart(sf));
+      return;
+    }
+
+    if (ts.isTemplateExpression(node)) {
+      markPos(node.head.getStart(sf));
+      for (const span of node.templateSpans) {
+        visit(span.expression);
+      }
+      return;
+    }
+
+    if (
+      ts.isFunctionDeclaration(node) ||
+      ts.isMethodDeclaration(node) ||
+      ts.isArrowFunction(node) ||
+      ts.isFunctionExpression(node) ||
+      ts.isConstructorDeclaration(node) ||
+      ts.isGetAccessorDeclaration(node) ||
+      ts.isSetAccessorDeclaration(node)
+    ) {
+      if (!node.body) return;
+      markPos(node.getStart(sf));
+      for (const param of node.parameters) {
+        if (param.initializer) visit(param.initializer);
+      }
+      visit(node.body);
+      return;
+    }
+
+    if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) {
+      markPos(node.getStart(sf));
+      for (const member of node.members) visit(member);
+      return;
+    }
+
+    if (ts.isVariableDeclaration(node)) {
+      if (node.initializer) {
+        markPos(node.name.getStart(sf));
+        visit(node.initializer);
+      }
+      return;
+    }
+
+    if (
+      ts.isBlock(node) ||
+      ts.isSourceFile(node) ||
+      ts.isEmptyStatement(node) ||
+      ts.isLabeledStatement(node)
+    ) {
+      ts.forEachChild(node, visit);
+      return;
+    }
+
+    if (
+      ts.isStatement(node) ||
+      ts.isExpression(node) ||
+      ts.isPropertyAssignment(node) ||
+      ts.isShorthandPropertyAssignment(node) ||
+      ts.isSpreadAssignment(node) ||
+      ts.isCaseClause(node) ||
+      ts.isDefaultClause(node) ||
+      ts.isCatchClause(node) ||
+      ts.isPropertyDeclaration(node) ||
+      ts.isEnumMember(node)
+    ) {
+      markPos(node.getStart(sf));
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sf);
+  return execLines;
+}
+
 /* ---------------- 主流程 ---------------- */
 async function main() {
   const base = resolveBase();
@@ -494,7 +654,12 @@ async function main() {
     const branchHit = srcBranchHit.get(file) ?? new Map();
     const branchUncovered = srcBranchUncovered.get(file) ?? new Set();
 
-    const countable = lines.filter((ln) => isCountableLine(rawLines[ln - 1] ?? ''));
+    const tsExecLines = (file.endsWith('.ts') || file.endsWith('.tsx'))
+      ? computeExecutableTsLines(file, rawLines.join('\n'))
+      : null;
+    const countable = lines.filter(
+      (ln) => isCountableLine(rawLines[ln - 1] ?? '') && (!tsExecLines || tsExecLines.has(ln)),
+    );
 
     if (countable.length === 0) {
       skipped.push(file);

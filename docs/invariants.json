@@ -358,6 +358,46 @@
       "symbol": "MessageRow#streamingAnchor",
       "test": "packages/ui/__tests__/streaming-anchor-formal.test.mjs",
       "failure": "流式正文一次性铺满：空助手行被判空抹掉锚点，tokenStreamWriter 直写全程空转"
+    },
+    {
+      "id": "INV-FS-01",
+      "topic": "文件树目录优先与码点确定性全序幂等",
+      "source": "packages/core/src/fs/fileTreeService.ts",
+      "symbol": "sortFileTreeNodes",
+      "test": "packages/core/__tests__/formal/file-tree-formal.test.mjs",
+      "failure": "文件树受系统 locale 影响乱序或目录/文件混排，每次刷新条目上下跳动"
+    },
+    {
+      "id": "INV-FS-02",
+      "topic": "扁平路径建树守恒、去重收敛与同构幂等",
+      "source": "packages/core/src/fs/fileTreeService.ts",
+      "symbol": "buildTreeFromFlatPaths",
+      "test": "packages/core/__tests__/formal/file-tree-formal.test.mjs",
+      "failure": "补全结果或会话文件树出现重复目录节点或斜杠分裂"
+    },
+    {
+      "id": "INV-FS-03",
+      "topic": "子目录懒加载合并保持非目标子树完整与幂等",
+      "source": "packages/core/src/fs/fileTreeService.ts",
+      "symbol": "mergeDirectoryChildren",
+      "test": "packages/core/__tests__/formal/file-tree-formal.test.mjs",
+      "failure": "展开一个子目录把用户已展开的其他目录重置或清空"
+    },
+    {
+      "id": "INV-FS-04",
+      "topic": "文件树过滤完备性（无空祖先残留且命中叶/祖先路径可回溯）",
+      "source": "packages/core/src/fs/fileTreeService.ts",
+      "symbol": "filterFileTree",
+      "test": "packages/core/__tests__/formal/file-tree-formal.test.mjs",
+      "failure": "过滤关键字后留下大量空文件夹或漏掉深层匹配文件"
+    },
+    {
+      "id": "INV-FS-05",
+      "topic": "二进制文件与超大文件预览阻断单调性（二进制恒优先于体积上限拦截且绝不误杀图片）",
+      "source": "packages/core/src/fs/fileService.ts",
+      "symbol": "evaluateFilePreviewGuard",
+      "test": "packages/core/__tests__/formal/file-tree-formal.test.mjs",
+      "failure": ".exe 等二进制文件被当作文本渲染成乱码，或超大文件直接撑爆前端 DOM 表格"
     }
   ]
 }

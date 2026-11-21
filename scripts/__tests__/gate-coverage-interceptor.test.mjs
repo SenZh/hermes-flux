@@ -86,3 +86,16 @@ test('拦截器健壮性：基线比对与参数解析在无源码变动时安�
     '无受控源码改动时应输出无需判定提示',
   );
 });
+
+test('拦截器纯类型边界：仅含 TypeScript interface/type 声明的文件不计入未执行代码假红', () => {
+  const r = spawnSync(
+    process.execPath,
+    [
+      'scripts/verify/new-code-coverage.mjs',
+      '--probe-files=packages/core/src/pal/IPlatformBridge.ts',
+    ],
+    { cwd: REPO_ROOT, encoding: 'utf8' },
+  );
+
+  assert.equal(r.status, 0, `纯接口声明文件应退出 0，实际输出:\n${r.stdout}\n${r.stderr}`);
+});

@@ -30,6 +30,9 @@ export interface ResolveFileOptions {
   platformBridge?: IPlatformBridge | null;
   gatewayClient?: HermesGatewayClient | null;
   gatewayUrl?: string;
+  profile?: string;
+  sessionId?: string;
+  knownSize?: number;
   messages?: SessionMessageWithTools[];
   fallbackNotice?: string;
 }
@@ -38,9 +41,26 @@ export interface ResolvedFileResult {
   content: string;
   isImage: boolean;
   isHtml: boolean;
+  isBinary?: boolean;
+  isTooLarge?: boolean;
+  isDirectory?: boolean;
+  byteSize?: number;
   fromCache: boolean;
   source: 'session_tool' | 'local_fs' | 'remote_http' | 'gateway_api' | 'fallback';
 }
+
+export const MAX_PREVIEW_FILE_BYTES = 1024 * 1024;
+export const MAX_PREVIEW_IMAGE_BYTES = 10 * 1024 * 1024;
+
+const BINARY_EXTENSIONS = new Set([
+  'exe', 'dll', 'so', 'dylib', 'msi', 'bin', 'dat', 'com', 'deb', 'rpm', 'apk', 'ipa', 'dmg', 'iso', 'img', 'wasm',
+  'o', 'a', 'lib', 'obj', 'pdb', 'pyc', 'pyo', 'class', 'jar', 'war', 'whl',
+  'zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', 'zst', '7z', 'rar', 'lz4', 'cab',
+  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp', 'epub',
+  'mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a', 'mp4', 'mkv', 'mov', 'avi', 'webm', 'wmv', 'flv',
+  'ttf', 'otf', 'woff', 'woff2', 'eot', 'sqlite', 'sqlite3', 'db', 'parquet', 'arrow', 'npy', 'npz',
+  'pt', 'pth', 'onnx', 'safetensors', 'gguf',
+]);
 
 /**
  * 校验目标路径是否为图片格式扩展名
@@ -50,6 +70,164 @@ export function isImageExtension(filePath: string): boolean {
   const clean = filePath.split(/[?#]/)[0];
   const ext = (clean.split('.').pop() || '').toLowerCase();
   return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp'].includes(ext);
+}
+
+/**
+ * 判断扩展名是否属于不可直接按文本预览的二进制格式（可执行程序、压缩包、音视频、字体、数据库等）。
+ */
+export function isBinaryExtension(filePath: string): boolean {
+  if (!filePath || typeof filePath !== 'string') return false;
+  const clean = filePath.split(/[?#]/)[0];
+  if (isImageExtension(clean)) return false;
+  const base = clean.split(/[/\\]/).pop() || '';
+  const dotIdx = base.lastIndexOf('.');
+  if (dotIdx <= 0) return false;
+  const ext = base.slice(dotIdx + 1).toLowerCase();
+  return BINARY_EXTENSIONS.has(ext);
+}
+
+/**
+ * 探测文本前段是否包含 NUL 空字节，用以拦截 Linux 无后缀二进制/ELF 可执行文件。
+ */
+export function hasBinaryNullBytes(sample: string): boolean {
+  if (!sample || typeof sample !== 'string') return false;
+  const limit = Math.min(sample.length, 8192);
+  for (let i = 0; i < limit; i++) {
+    if (sample.charCodeAt(i) === 0) return true;
+  }
+  return false;
+}
+
+/**
+ * 确定性格式化文件字节数（B / KB / MB / GB）。
+ */
+export function formatFileSize(bytes?: number): string {
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) return '';
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+/**
+ * 解码网关 `/api/files/read` 返回的 `data:*;base64,...` 为 UTF-8 文本；失败返回 null 并显式告警。
+ */
+export function decodeDataUrlUtf8(dataUrl: string): string | null {
+  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) return null;
+  const commaIdx = dataUrl.indexOf(',');
+  if (commaIdx < 0) return null;
+  const meta = dataUrl.slice(5, commaIdx).toLowerCase();
+  const body = dataUrl.slice(commaIdx + 1);
+  if (!meta.includes(';base64')) {
+    try {
+      return decodeURIComponent(body);
+    } catch (err) {
+      console.warn('[fileService] failed to decode URL-encoded data URL:', err);
+      return null;
+    }
+  }
+  try {
+    const binaryStr = atob(body);
+    const bytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) {
+      bytes[i] = binaryStr.charCodeAt(i);
+    }
+    return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+  } catch (err) {
+    console.warn('[fileService] failed to decode base64 data URL:', err);
+    return null;
+  }
+}
+
+/**
+ * 将 ws/wss/裸主机形式的网关地址规范化为无尾斜杠 HTTP(S) 基址。
+ */
+export function normalizeHttpBaseUrl(rawUrl: string): string {
+  let base = (rawUrl || '').trim();
+  if (!base) return '';
+  if (base.startsWith('ws://')) base = `http://${base.slice(5)}`;
+  else if (base.startsWith('wss://')) base = `https://${base.slice(6)}`;
+  else if (!/^https?:\/\//i.test(base)) {
+    const isLoopback = /^(127\.0\.0\.1|localhost)(:\d+)?$/i.test(base);
+    base = isLoopback ? `http://${base}` : `https://${base}`;
+  }
+  return base.replace(/\/+$/, '');
+}
+
+/**
+ * 拼装远程工作区附件下载接口 URL（优先走支持 SSH 工作区与多 Profile 的 `/api/fs/download`）。
+ */
+export function buildGatewayDownloadUrl(
+  gatewayUrl: string,
+  filePath: string,
+  profile?: string,
+  sessionId?: string,
+): string {
+  const base = normalizeHttpBaseUrl(gatewayUrl);
+  if (!base || !filePath) return '';
+  const q = new URLSearchParams();
+  q.set('path', filePath);
+  if (profile) q.set('profile', profile);
+  if (sessionId) q.set('session_id', sessionId);
+  return `${base}/api/fs/download?${q.toString()}`;
+}
+
+export interface FilePreviewGuardInput {
+  filePath: string;
+  isImage: boolean;
+  byteSize?: number;
+  serverBinary?: boolean;
+  serverTruncated?: boolean;
+  sampleText?: string;
+}
+
+export interface FilePreviewGuardResult {
+  status: 'ok' | 'binary' | 'too_large';
+  byteSize?: number;
+}
+
+/**
+ * 文件预览安全守卫（INV-FS-05 单一真值裁决）：
+ *   1. 非图片文件只要命中二进制扩展名、服务端 `binary` 标记或 NUL 字节，一律优先裁定为 `binary`；
+ *   2. 体积超过渲染上限（文本 1 MiB / 图片 10 MiB）或服务端已截断，裁定为 `too_large`；
+ *   3. 杜绝把 `.exe` / 压缩包或数十 MB 大文件强行灌入前端源码表格。
+ */
+export function evaluateFilePreviewGuard(input: FilePreviewGuardInput): FilePreviewGuardResult {
+  const knownSize =
+    typeof input.byteSize === 'number' && Number.isFinite(input.byteSize) && input.byteSize >= 0
+      ? input.byteSize
+      : undefined;
+  const measuredBytes =
+    knownSize !== undefined
+      ? knownSize
+      : !input.isImage && typeof input.sampleText === 'string'
+        ? new TextEncoder().encode(input.sampleText).byteLength
+        : undefined;
+
+  if (
+    !input.isImage &&
+    (input.serverBinary === true ||
+      isBinaryExtension(input.filePath) ||
+      (typeof input.sampleText === 'string' && hasBinaryNullBytes(input.sampleText)))
+  ) {
+    return {
+      status: 'binary',
+      ...(measuredBytes !== undefined ? { byteSize: measuredBytes } : {}),
+    };
+  }
+
+  const maxBytes = input.isImage ? MAX_PREVIEW_IMAGE_BYTES : MAX_PREVIEW_FILE_BYTES;
+  if ((measuredBytes !== undefined && measuredBytes > maxBytes) || input.serverTruncated === true) {
+    return {
+      status: 'too_large',
+      ...(measuredBytes !== undefined ? { byteSize: measuredBytes } : {}),
+    };
+  }
+
+  return {
+    status: 'ok',
+    ...(measuredBytes !== undefined ? { byteSize: measuredBytes } : {}),
+  };
 }
 
 /**
@@ -289,9 +467,62 @@ export function extractFileContentFromSessionTools(
   return hasFullUnnumberedContent;
 }
 
+function buildGuardedResult(
+  content: string,
+  meta: {
+    filePath: string;
+    isImage: boolean;
+    isHtml: boolean;
+    fromCache: boolean;
+    source: ResolvedFileResult['source'];
+    byteSize?: number;
+    serverBinary?: boolean;
+    serverTruncated?: boolean;
+  },
+): ResolvedFileResult {
+  const guard = evaluateFilePreviewGuard({
+    filePath: meta.filePath,
+    isImage: meta.isImage,
+    byteSize: meta.byteSize,
+    serverBinary: meta.serverBinary,
+    serverTruncated: meta.serverTruncated,
+    sampleText: content,
+  });
+  if (guard.status === 'binary') {
+    return {
+      content: '',
+      isImage: false,
+      isHtml: false,
+      isBinary: true,
+      ...(guard.byteSize !== undefined ? { byteSize: guard.byteSize } : {}),
+      fromCache: meta.fromCache,
+      source: meta.source,
+    };
+  }
+  if (guard.status === 'too_large') {
+    return {
+      content: '',
+      isImage: meta.isImage,
+      isHtml: false,
+      isTooLarge: true,
+      ...(guard.byteSize !== undefined ? { byteSize: guard.byteSize } : {}),
+      fromCache: meta.fromCache,
+      source: meta.source,
+    };
+  }
+  return {
+    content,
+    isImage: meta.isImage,
+    isHtml: meta.isHtml,
+    ...(guard.byteSize !== undefined ? { byteSize: guard.byteSize } : {}),
+    fromCache: meta.fromCache,
+    source: meta.source,
+  };
+}
+
 /**
  * 统一通用文件读取公共服务
- * 应用层调用本接口即可自动完成：历史提取 -> 本地/图片Base64探测 -> HTTP代理 -> 网关REST降级
+ * 应用层调用本接口即可自动完成：二进制/体积守卫 -> 历史提取 -> 本地/图片Base64探测 -> HTTP代理 -> 网关REST降级
  */
 export async function resolveFileContent(
   target: string,
@@ -303,17 +534,35 @@ export async function resolveFileContent(
   const isHtml = ext === 'html' || ext === 'htm';
   const isHttp = cleanTarget.startsWith('http://') || cleanTarget.startsWith('https://');
 
+  // 0. 前置二进制/超大文件阻断：已知为二进制或超限文件时直接返回下载卡片态，绝不消耗带宽与渲染节点
+  const preGuard = evaluateFilePreviewGuard({
+    filePath: cleanTarget,
+    isImage,
+    byteSize: options.knownSize,
+  });
+  if (preGuard.status !== 'ok') {
+    return {
+      content: '',
+      isImage: preGuard.status === 'binary' ? false : isImage,
+      isHtml: false,
+      ...(preGuard.status === 'binary' ? { isBinary: true } : { isTooLarge: true }),
+      ...(preGuard.byteSize !== undefined ? { byteSize: preGuard.byteSize } : {}),
+      fromCache: false,
+      source: isHttp ? 'remote_http' : 'fallback',
+    };
+  }
+
   // 1. 尝试从会话消息的工具调用记录中瞬间秒出内容 (0ms 白屏)
   if (options.messages && options.messages.length > 0) {
     const cached = extractFileContentFromSessionTools(cleanTarget, options.messages);
     if (cached) {
-      return {
-        content: cached,
+      return buildGuardedResult(cached, {
+        filePath: cleanTarget,
         isImage,
         isHtml,
         fromCache: true,
         source: 'session_tool',
-      };
+      });
     }
   }
 
@@ -333,15 +582,16 @@ export async function resolveFileContent(
     try {
       const localContent = await options.platformBridge.readFile(cleanTarget);
       if (typeof localContent === 'string' && localContent.length > 0) {
-        return {
-          content: localContent,
+        return buildGuardedResult(localContent, {
+          filePath: cleanTarget,
           isImage,
           isHtml,
           fromCache: false,
           source: 'local_fs',
-        };
+          byteSize: isImage ? options.knownSize : undefined,
+        });
       }
-    // gate-degrade: 本地文件读取是四级回退链的第一级，失败必须继续下一级
+    // gate-degrade: 本地文件读取是四级回退链的一级，失败必须继续下一级
     } catch {}
   }
 
@@ -355,52 +605,192 @@ export async function resolveFileContent(
       });
       const str = typeof text === 'string' ? text : text ? JSON.stringify(text, null, 2) : '';
       if (str) {
-        return {
-          content: str,
+        return buildGuardedResult(str, {
+          filePath: cleanTarget,
           isImage: false,
           isHtml,
           fromCache: false,
           source: 'remote_http',
-        };
+        });
       }
     // gate-degrade: HTTP 抓取是回退链的一环，失败继续走网关 REST 端点
     } catch {}
   }
 
-  // 4. 网关 REST 文件端点拉取 (支持网关静态文件直连 /api/files/download, /api/fs/read 等)
+  // 4. 网关 REST 文件端点拉取（对接真实网关 /api/fs/read-data-url、/api/fs/read-text、/api/files/read、/api/fs/download 等）
   if (options.platformBridge?.httpProxy && options.gatewayUrl && !isHttp) {
-    const candidateEndpoints = [
-      `/api/files/download?path=${encodeURIComponent(cleanTarget)}`,
-      `/api/fs/read?path=${encodeURIComponent(cleanTarget)}&optional=true`,
-      `/api/workspace/file?path=${encodeURIComponent(cleanTarget)}`,
-      `/api/files?path=${encodeURIComponent(cleanTarget)}`,
-    ];
+    const fsParams = new URLSearchParams({ path: cleanTarget });
+    if (options.profile) fsParams.set('profile', options.profile);
+    if (options.sessionId) fsParams.set('session_id', options.sessionId);
+    const fsQuery = fsParams.toString();
+    const encTarget = encodeURIComponent(cleanTarget);
 
-    for (const endpoint of candidateEndpoints) {
+    if (isImage) {
+      const imageEndpoints = [
+        `/api/fs/read-data-url?${fsQuery}`,
+        `/api/files/read?path=${encTarget}`,
+        `/api/files/download?path=${encTarget}`,
+      ];
+      for (const endpoint of imageEndpoints) {
+        try {
+          const res = await options.platformBridge.httpProxy({
+            baseUrl: options.gatewayUrl,
+            path: endpoint,
+            method: 'GET',
+          });
+          const rec = res && typeof res === 'object' ? (res as Record<string, unknown>) : null;
+          const dataUrl =
+            rec && typeof rec.dataUrl === 'string'
+              ? rec.dataUrl
+              : rec && typeof rec.data_url === 'string'
+                ? rec.data_url
+                : typeof res === 'string' && res.startsWith('data:image/')
+                  ? res
+                  : '';
+          const rawSize = rec ? (rec.size ?? rec.byteSize) : undefined;
+          const byteSize =
+            typeof rawSize === 'number' && Number.isFinite(rawSize) ? rawSize : options.knownSize;
+          if (dataUrl) {
+            return buildGuardedResult(dataUrl, {
+              filePath: cleanTarget,
+              isImage: true,
+              isHtml: false,
+              fromCache: false,
+              source: 'gateway_api',
+              byteSize,
+            });
+          }
+        } catch (err) {
+          console.warn('[fileService] gateway image endpoint failed:', endpoint, err);
+        }
+      }
+    } else {
+      // 4a. 首选 `/api/fs/read-text`：自带 binary/truncated/byteSize 元数据，安全高效
       try {
         const res = await options.platformBridge.httpProxy({
           baseUrl: options.gatewayUrl,
-          path: endpoint,
+          path: `/api/fs/read-text?${fsQuery}`,
           method: 'GET',
         });
-        const text = typeof res === 'string'
-          ? res
-          : typeof (res as Record<string, unknown>)?.content === 'string'
-          ? String((res as Record<string, unknown>).content)
-          : '';
-
-        // 【核心防御】：若返回的内容为空、包含 404 或命中了网关 SPA Dashboard 的 HTML 回退，一律坚决丢弃！
-        if (text && text.length > 0 && !text.includes('Cannot GET') && !text.includes('404 Not Found') && !isSpaFallbackHtml(text, cleanTarget)) {
-          return {
-            content: text,
-            isImage,
-            isHtml,
-            fromCache: false,
-            source: 'gateway_api',
-          };
+        if (res && typeof res === 'object') {
+          const rec = res as Record<string, unknown>;
+          const byteSize =
+            typeof rec.byteSize === 'number' && Number.isFinite(rec.byteSize) ? rec.byteSize : options.knownSize;
+          const serverBinary = rec.binary === true;
+          const serverTruncated = rec.truncated === true;
+          if (serverBinary || serverTruncated) {
+            return buildGuardedResult('', {
+              filePath: cleanTarget,
+              isImage: false,
+              isHtml,
+              fromCache: false,
+              source: 'gateway_api',
+              byteSize,
+              serverBinary,
+              serverTruncated,
+            });
+          }
+          if (typeof rec.text === 'string' && !isSpaFallbackHtml(rec.text, cleanTarget)) {
+            return buildGuardedResult(rec.text, {
+              filePath: cleanTarget,
+              isImage: false,
+              isHtml,
+              fromCache: false,
+              source: 'gateway_api',
+              byteSize,
+            });
+          }
         }
-      // gate-degrade: 网关 REST 拉取是回退链的一环，失败落到最终兜底文本
-      } catch {}
+      } catch (err) {
+        console.warn('[fileService] gateway /api/fs/read-text failed:', err);
+      }
+
+      // 4b. 次选 `/api/files/read`：返回 data_url 与 size，先核验体积再解码 UTF-8
+      try {
+        const res = await options.platformBridge.httpProxy({
+          baseUrl: options.gatewayUrl,
+          path: `/api/files/read?path=${encTarget}`,
+          method: 'GET',
+        });
+        if (res && typeof res === 'object') {
+          const rec = res as Record<string, unknown>;
+          const byteSize =
+            typeof rec.size === 'number' && Number.isFinite(rec.size) ? rec.size : options.knownSize;
+          const sizeGuard = evaluateFilePreviewGuard({
+            filePath: cleanTarget,
+            isImage: false,
+            byteSize,
+          });
+          if (sizeGuard.status !== 'ok') {
+            return buildGuardedResult('', {
+              filePath: cleanTarget,
+              isImage: false,
+              isHtml,
+              fromCache: false,
+              source: 'gateway_api',
+              byteSize: sizeGuard.byteSize,
+            });
+          }
+          if (typeof rec.data_url === 'string') {
+            const decoded = decodeDataUrlUtf8(rec.data_url);
+            if (decoded !== null && !isSpaFallbackHtml(decoded, cleanTarget)) {
+              return buildGuardedResult(decoded, {
+                filePath: cleanTarget,
+                isImage: false,
+                isHtml,
+                fromCache: false,
+                source: 'gateway_api',
+                byteSize,
+              });
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[fileService] gateway /api/files/read failed:', err);
+      }
+
+      // 4c. 兜底下载与目录鉴别（若 /api/files 返回 entries 数组，识别为目录防止误当文件报错）
+      const fallbackEndpoints = [
+        `/api/fs/download?${fsQuery}`,
+        `/api/files/download?path=${encTarget}`,
+        `/api/files?path=${encTarget}`,
+      ];
+      for (const endpoint of fallbackEndpoints) {
+        try {
+          const res = await options.platformBridge.httpProxy({
+            baseUrl: options.gatewayUrl,
+            path: endpoint,
+            method: 'GET',
+          });
+          if (res && typeof res === 'object' && Array.isArray((res as Record<string, unknown>).entries)) {
+            return {
+              content: '',
+              isImage: false,
+              isHtml: false,
+              isDirectory: true,
+              fromCache: false,
+              source: 'gateway_api',
+            };
+          }
+          const text = typeof res === 'string'
+            ? res
+            : res && typeof (res as Record<string, unknown>).content === 'string'
+              ? String((res as Record<string, unknown>).content)
+              : '';
+          if (text && !text.includes('Cannot GET') && !text.includes('404 Not Found') && !isSpaFallbackHtml(text, cleanTarget)) {
+            return buildGuardedResult(text, {
+              filePath: cleanTarget,
+              isImage: false,
+              isHtml,
+              fromCache: false,
+              source: 'gateway_api',
+              byteSize: options.knownSize,
+            });
+          }
+        } catch (err) {
+          console.warn('[fileService] gateway fallback endpoint failed:', endpoint, err);
+        }
+      }
     }
   }
 

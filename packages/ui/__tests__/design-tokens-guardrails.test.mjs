@@ -118,8 +118,9 @@ test('Design System Tokens & Architectural Invariant Guardrails (Gate 4)', async
     assert.ok(!html.includes('background: #151720'), 'Must use var(--bg-card), not hardcoded #151720');
     assert.ok(!html.includes('background: #12141A'), 'Must use var(--bg-input), not hardcoded #12141A');
     assert.ok(!html.includes('background: #0A0B10'), 'Must use var(--bg-code), not hardcoded #0A0B10');
-    assert.ok(html.includes('var(--bg-panel)'), 'Must apply var(--bg-panel)');
-    assert.ok(html.includes('var(--bg-card)'), 'Must apply var(--bg-card)');
-    assert.ok(html.includes('var(--bg-code)'), 'Must apply var(--bg-code)');
+    assert.ok(html.includes('class="inspector-floating-window"'), 'Must render 4-bordered floating window container');
+    assert.ok(html.includes('var(--card)'), 'Must apply canonical var(--card) surface token');
+    assert.ok(html.includes('var(--code)'), 'Must apply canonical var(--code) surface token');
+    assert.ok(html.includes('var(--border)'), 'Must apply canonical var(--border) hairline token');
   });
 });

@@ -53,8 +53,9 @@ import {
   doesSessionBelongToProject,
   decideViewportPin,
   chooseViewportAnchor,
+  extractPathBasename,
 } from '@hermes-flux/core';
-import { type AppState, resolveActiveViewportKey } from './state/appState.js';
+import { type AppState, resolveActiveViewportKey, resolveActiveWorkspaceCwd } from './state/appState.js';
 import { decideConversationPush } from './conversationPush.js';
 import type { MessageWindowManager } from './messageWindowManager.js';
 import type { ModalInteractionController } from './events/modalInteractionController.js';
@@ -499,6 +500,35 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
     return controller;
   }
 
+  function buildInspectorProps(collapsed: boolean) {
+    const state = deps.getState();
+    const cwd = resolveActiveWorkspaceCwd(state);
+    return {
+      collapsed,
+      activeTab: state.activeInspectorTab,
+      gatewayConnected: state.gatewayConnected,
+      isFullscreen: state.inspectorFullscreen,
+      openFiles: state.openFiles,
+      activeFilePath: state.activeFilePath,
+      viewMode: state.fileViewMode,
+      showLineNumbers: state.fileShowLineNumbers,
+      wordWrap: state.fileWordWrap,
+      searchOpen: state.fileSearchOpen,
+      searchQuery: state.fileSearchQuery,
+      fileTreeState: state.fileTreeState ?? { status: 'idle' as const },
+      fileTreeExpandedPaths: state.fileTreeExpandedPaths ?? [],
+      fileTreeFilterQuery: state.fileTreeFilterQuery ?? '',
+      fileTreeCollapsed: state.fileTreeCollapsed ?? false,
+      workspaceRootName: extractPathBasename(
+        cwd || (state.fileTreeState?.status === 'ready' ? state.fileTreeState.rootPath : ''),
+      ),
+      artifacts: state.artifacts,
+      browserFrame: state.browserFrame,
+      gitDiffs: state.gitDiffs,
+      memories: state.memories,
+    };
+  }
+
   function mountReactShellComponents(): void {
     if (typeof document === 'undefined') return;
     const titlebarHost = document.getElementById('react-titlebar-host');
@@ -785,23 +815,7 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
               : '',
           })}
 
-          ${renderInspectionPod({
-            collapsed: state.inspectorCollapsed,
-            activeTab: state.activeInspectorTab,
-            gatewayConnected: state.gatewayConnected,
-            isFullscreen: state.inspectorFullscreen,
-            openFiles: state.openFiles,
-            activeFilePath: state.activeFilePath,
-            viewMode: state.fileViewMode,
-            showLineNumbers: state.fileShowLineNumbers,
-            wordWrap: state.fileWordWrap,
-            searchOpen: state.fileSearchOpen,
-            searchQuery: state.fileSearchQuery,
-            artifacts: state.artifacts,
-            browserFrame: state.browserFrame,
-            gitDiffs: state.gitDiffs,
-            memories: state.memories,
-          })}
+          ${renderInspectionPod(buildInspectorProps(state.inspectorCollapsed))}
           </div><!-- /.flux-main-block -->
         </div>
 
@@ -831,28 +845,14 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
       }
       mountReactShellComponents();
 
+      const shellEl = root.querySelector('#flux-inspector-shell') as HTMLElement | null;
       const inspectEl = (root.querySelector('#flux-inspector-pod') ||
         root.querySelector('.flux-inspector-pod')) as HTMLElement | null;
-      if (inspectEl) {
+      const replaceTarget = shellEl ?? inspectEl;
+      if (replaceTarget && inspectEl) {
         if (lastInspectorCollapsed !== state.inspectorCollapsed) {
           if (!state.inspectorCollapsed) {
-            inspectEl.outerHTML = renderInspectionPod({
-              collapsed: false,
-              activeTab: state.activeInspectorTab,
-              gatewayConnected: state.gatewayConnected,
-              isFullscreen: state.inspectorFullscreen,
-              openFiles: state.openFiles,
-              activeFilePath: state.activeFilePath,
-              viewMode: state.fileViewMode,
-              showLineNumbers: state.fileShowLineNumbers,
-              wordWrap: state.fileWordWrap,
-              searchOpen: state.fileSearchOpen,
-              searchQuery: state.fileSearchQuery,
-              artifacts: state.artifacts,
-              browserFrame: state.browserFrame,
-              gitDiffs: state.gitDiffs,
-              memories: state.memories,
-            });
+            replaceTarget.outerHTML = renderInspectionPod(buildInspectorProps(false));
             const nextInspectEl = root.querySelector('#flux-inspector-pod') as HTMLElement | null;
             if (nextInspectEl) {
               nextInspectEl.classList.add('inspector-collapsed');
@@ -863,29 +863,17 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
               void controller.enter();
             }
           } else {
+            root.querySelectorAll('#flux-inspector-rail .vertical-tab-item').forEach((btn) => {
+              btn.classList.remove('active-tab');
+              btn.setAttribute('aria-pressed', 'false');
+            });
             const controller = inspectorMotionController || bindInspectorController(inspectEl);
             inspectEl.classList.add('inspector-collapsed');
             void controller.exit();
           }
           lastInspectorCollapsed = state.inspectorCollapsed;
         } else if (!state.inspectorCollapsed) {
-          inspectEl.outerHTML = renderInspectionPod({
-            collapsed: false,
-            activeTab: state.activeInspectorTab,
-            gatewayConnected: state.gatewayConnected,
-            isFullscreen: state.inspectorFullscreen,
-            openFiles: state.openFiles,
-            activeFilePath: state.activeFilePath,
-            viewMode: state.fileViewMode,
-            showLineNumbers: state.fileShowLineNumbers,
-            wordWrap: state.fileWordWrap,
-            searchOpen: state.fileSearchOpen,
-            searchQuery: state.fileSearchQuery,
-            artifacts: state.artifacts,
-            browserFrame: state.browserFrame,
-            gitDiffs: state.gitDiffs,
-            memories: state.memories,
-          });
+          replaceTarget.outerHTML = renderInspectionPod(buildInspectorProps(false));
           const nextInspectEl = root.querySelector('#flux-inspector-pod') as HTMLElement | null;
           if (nextInspectEl) {
             bindInspectorController(nextInspectEl);
