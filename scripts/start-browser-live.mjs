@@ -12,6 +12,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { attachGatewayWsProxy } from './lib/ws-proxy.mjs';
 import {
@@ -33,6 +34,19 @@ const PORT = Number(process.env.PORT) || 9120;
 let sessionCookie = '';
 let authenticatedOrigin = '';
 let lastKnownBaseUrl = '';
+
+function getUrlOrigin(rawUrl) {
+  try {
+    return new URL(rawUrl).origin.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function shouldAttachSessionCookie(targetUrl) {
+  if (!sessionCookie || !authenticatedOrigin) return false;
+  return getUrlOrigin(targetUrl) === authenticatedOrigin.toLowerCase();
+}
 
 process.on('uncaughtException', (err) => {
   console.error('[Browser Live UncaughtException]', err);
@@ -77,13 +91,15 @@ async function authenticateWithCredentials(baseUrl, username, password) {
     // 忽略 status 探测错误，继续走认证通道
   }
 
-  // 免密网关判定：如果不需要认证，且用户没有输入密码，直接放行无需 Basic Auth
+  // 免密网关判定：如果不需要认证，且用户没有输入密码，清理旧凭据后直接放行无需 Basic Auth
   if (statusData && statusData.auth_required === false && !password) {
+    sessionCookie = '';
+    authenticatedOrigin = '';
     return null;
   }
 
-  // 复用已建立的会话 Cookie 换取 ticket
-  if (sessionCookie && !username && !password) {
+  // 仅当目标与已认证 Origin 严格一致时，才复用已建立的会话 Cookie 换取 ticket
+  if (shouldAttachSessionCookie(base) && !username && !password) {
     try {
       const ticketRes = await fetch(`${base}/api/auth/ws-ticket`, {
         method: 'POST',
@@ -111,9 +127,13 @@ async function authenticateWithCredentials(baseUrl, username, password) {
     body: JSON.stringify({ username, password, provider: 'basic' }),
   });
   if (loginRes.status === 401) {
+    sessionCookie = '';
+    authenticatedOrigin = '';
     throw new Error('认证失败: 用户名或密码错误 (HTTP 401)');
   }
   if (!loginRes.ok) {
+    sessionCookie = '';
+    authenticatedOrigin = '';
     throw new Error(`登录接口异常 HTTP ${loginRes.status}`);
   }
 
@@ -161,11 +181,12 @@ async function httpProxy(cookie, { baseUrl, path: p = '', method = 'GET', params
     if (qs) fullUrl += (fullUrl.includes('?') ? '&' : '?') + qs;
   }
 
-  // REST 降级通道与桌面主进程 ipc.ts 对齐，注入 Origin、Cookie 与 X-WS-Ticket
+  // REST 降级通道与桌面主进程 ipc.ts 对齐，注入 Origin、同源 Cookie 与 X-WS-Ticket
+  const effectiveCookie = shouldAttachSessionCookie(b) ? cookie : '';
   const headers = {
     Accept: 'application/json',
     Origin: b,
-    ...(cookie ? { Cookie: cookie } : {}),
+    ...(effectiveCookie ? { Cookie: effectiveCookie } : {}),
   };
   if (ticket) headers['X-WS-Ticket'] = ticket;
 
@@ -186,6 +207,15 @@ async function httpProxy(cookie, { baseUrl, path: p = '', method = 'GET', params
   if (contentType.includes('application/json')) {
     return await res.json();
   }
+  if (
+    contentType.startsWith('image/') ||
+    (/\.(png|jpe?g|gif|webp|svg|ico|bmp)$/i.test(safePath) && !contentType.includes('text/html'))
+  ) {
+    const arrayBuffer = await res.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString('base64');
+    const mime = (contentType.startsWith('image/') && contentType.split(';')[0]) || 'image/png';
+    return `data:${mime};base64,${base64}`;
+  }
   return await res.text();
 }
 
@@ -195,6 +225,87 @@ function readBody(req) {
     req.on('data', (d) => { buf += d; });
     req.on('end', () => { try { resolve(buf ? JSON.parse(buf) : {}); } catch { resolve({}); } });
   });
+}
+
+function isLoopbackOrigin(req) {
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  return /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(String(origin).trim());
+}
+
+function isEnvSecretFile(name) {
+  const lower = String(name || '').trim().toLowerCase();
+  return lower === '.env' || (lower.startsWith('.env.') && lower !== '.env.example');
+}
+
+function isEnvSecretPath(targetPath) {
+  const segments = String(targetPath || '')
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter(Boolean);
+  return segments.some((seg) => isEnvSecretFile(seg));
+}
+
+let ROOT_REAL = ROOT;
+try {
+  ROOT_REAL = fs.realpathSync(ROOT);
+} catch {}
+
+function isWithinDir(baseDir, candidate) {
+  const rel = path.relative(baseDir, candidate);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+function resolveInsideRoot(rawPath) {
+  const trimmed = typeof rawPath === 'string' ? rawPath.trim() : '';
+  if (trimmed.includes('\0')) return null;
+  const resolved = !trimmed
+    ? ROOT
+    : path.isAbsolute(trimmed)
+      ? path.resolve(trimmed)
+      : path.resolve(ROOT, trimmed);
+  if (!isWithinDir(ROOT, resolved)) return null;
+  const relLex = path.relative(ROOT, resolved);
+  if (relLex && isEnvSecretPath(relLex)) return null;
+  try {
+    if (fs.existsSync(resolved)) {
+      const real = fs.realpathSync(resolved);
+      if (!isWithinDir(ROOT_REAL, real)) return null;
+      const relReal = path.relative(ROOT_REAL, real);
+      if (relReal && isEnvSecretPath(relReal)) return null;
+      return real;
+    }
+    let probe = path.dirname(resolved);
+    while (probe && probe !== path.dirname(probe) && !fs.existsSync(probe)) {
+      probe = path.dirname(probe);
+    }
+    if (probe && fs.existsSync(probe)) {
+      const realProbe = fs.realpathSync(probe);
+      if (!isWithinDir(ROOT_REAL, realProbe)) return null;
+    }
+  } catch {
+    return null;
+  }
+  return resolved;
+}
+
+const IMAGE_MIME = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+};
+
+let cachedListWorkspaceDirectory = null;
+async function getListWorkspaceDirectory() {
+  if (!cachedListWorkspaceDirectory) {
+    const mod = await import('../packages/desktop/dist/main/workspaceFs.mjs');
+    cachedListWorkspaceDirectory = mod.listWorkspaceDirectory;
+  }
+  return cachedListWorkspaceDirectory;
 }
 
 /**
@@ -299,6 +410,133 @@ async function start() {
       }
     }
 
+    // 2b. 本地工作区目录列举接口（仅限回环 Origin 且严格锁定在 ROOT 之内，屏蔽 .env 凭据）
+    if (url.pathname === '/__fs/list-directory') {
+      if (!isLoopbackOrigin(req)) return sendJson({ error: 'Forbidden origin' }, 403);
+      if (req.method !== 'POST') return sendJson({ error: 'Method not allowed' }, 405);
+      const body = await readBody(req);
+      const targetDir = body?.dirPath ? resolveInsideRoot(body.dirPath) : ROOT;
+      if (!targetDir) return sendJson(null);
+      try {
+        const listWorkspaceDirectory = await getListWorkspaceDirectory();
+        const entries = listWorkspaceDirectory(targetDir, { cwd: ROOT });
+        if (!Array.isArray(entries)) return sendJson(null);
+        return sendJson(entries.filter((entry) => !isEnvSecretFile(entry?.name)));
+      } catch (err) {
+        console.warn('[Browser Live FS] list-directory failed:', err);
+        return sendJson(null);
+      }
+    }
+
+    // 2c. 本地工作区文件读取接口（仅限 ROOT 内 <=5MB 文件，屏蔽 .env*）
+    if (url.pathname === '/__fs/read-file') {
+      if (!isLoopbackOrigin(req)) return sendJson({ error: 'Forbidden origin' }, 403);
+      if (req.method !== 'POST') return sendJson({ error: 'Method not allowed' }, 405);
+      const body = await readBody(req);
+      const filePath = typeof body?.filePath === 'string' ? body.filePath : '';
+      const resolved = filePath && !isEnvSecretPath(filePath) ? resolveInsideRoot(filePath) : null;
+      if (!resolved || isEnvSecretPath(path.relative(ROOT_REAL, resolved))) {
+        return sendJson({ content: null });
+      }
+      try {
+        if (!fs.existsSync(resolved)) return sendJson({ content: null });
+        const st = fs.statSync(resolved);
+        if (!st.isFile() || st.size > 5 * 1024 * 1024) return sendJson({ content: null });
+        const ext = path.extname(resolved).toLowerCase();
+        if (IMAGE_MIME[ext]) {
+          const b64 = fs.readFileSync(resolved).toString('base64');
+          return sendJson({ content: `data:${IMAGE_MIME[ext]};base64,${b64}` });
+        }
+        return sendJson({ content: fs.readFileSync(resolved, 'utf8') });
+      } catch (err) {
+        console.warn('[Browser Live FS] read-file failed:', err);
+        return sendJson({ content: null });
+      }
+    }
+
+    // 2d. 本地工作区大文件 / 二进制文件流式下载（支持 HEAD 探测与 GET 附件下载，严格锁定在 ROOT 内且屏蔽 .env*）
+    if (url.pathname === '/__fs/download') {
+      if (!isLoopbackOrigin(req)) return sendJson({ error: 'Forbidden origin' }, 403);
+      if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson({ error: 'Method not allowed' }, 405);
+      const filePath = url.searchParams.get('path') || '';
+      const resolved = filePath && !isEnvSecretPath(filePath) ? resolveInsideRoot(filePath) : null;
+      if (!resolved || isEnvSecretPath(path.relative(ROOT_REAL, resolved)) || !fs.existsSync(resolved)) {
+        return sendJson({ error: 'Not found' }, 404);
+      }
+      try {
+        const st = fs.statSync(resolved);
+        if (!st.isFile()) return sendJson({ error: 'Not a file' }, 404);
+        const fileName = path.basename(resolved);
+        const safeAscii = fileName.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+        res.writeHead(200, {
+          'Content-Type': 'application/octet-stream',
+          'Content-Length': String(st.size),
+          'Content-Disposition': `attachment; filename="${safeAscii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+        });
+        if (req.method === 'HEAD') return res.end();
+        fs.createReadStream(resolved).pipe(res);
+        return;
+      } catch (err) {
+        console.warn('[Browser Live FS] download failed:', err);
+        return sendJson({ error: 'Download failed' }, 500);
+      }
+    }
+
+    // 2e. 远程网关文件流式附件下载（携带已登录会话 Cookie，支持 /api/fs/download 在 404 时回退 /api/files/download）
+    if (url.pathname === '/__gw/download') {
+      if (!isLoopbackOrigin(req)) return sendJson({ error: 'Forbidden origin' }, 403);
+      if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson({ error: 'Method not allowed' }, 405);
+      const filePath = url.searchParams.get('path') || '';
+      const base = normalizeGatewayUrl(url.searchParams.get('baseUrl') || lastKnownBaseUrl || GW_BASE);
+      const profile = url.searchParams.get('profile') || '';
+      const sessionId = url.searchParams.get('session_id') || '';
+      if (!base || !filePath) {
+        return sendJson({ error: 'Missing gateway baseUrl or path' }, 400);
+      }
+      try {
+        const qPrimary = new URLSearchParams({ path: filePath });
+        if (profile) qPrimary.set('profile', profile);
+        if (sessionId) qPrimary.set('session_id', sessionId);
+        const upstreamHeaders = {
+          Origin: base,
+          ...(shouldAttachSessionCookie(base) ? { Cookie: sessionCookie } : {}),
+        };
+        const upstreamMethod = req.method === 'HEAD' ? 'HEAD' : 'GET';
+        let dlRes = await fetch(`${base}/api/fs/download?${qPrimary.toString()}`, {
+          method: upstreamMethod,
+          headers: upstreamHeaders,
+        });
+        if (dlRes.status === 404) {
+          await dlRes.body?.cancel?.();
+          dlRes = await fetch(`${base}/api/files/download?path=${encodeURIComponent(filePath)}`, {
+            method: upstreamMethod,
+            headers: upstreamHeaders,
+          });
+        }
+        if (!dlRes.ok) {
+          await dlRes.body?.cancel?.();
+          return sendJson({ error: `HTTP ${dlRes.status}` }, dlRes.status);
+        }
+        const fileName = path.basename(filePath.replace(/\\/g, '/')) || 'download';
+        const safeAscii = fileName.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+        const outHeaders = {
+          'Content-Type': dlRes.headers.get('content-type') || 'application/octet-stream',
+          'Content-Disposition':
+            dlRes.headers.get('content-disposition') ||
+            `attachment; filename="${safeAscii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+        };
+        const contentLen = dlRes.headers.get('content-length');
+        if (contentLen) outHeaders['Content-Length'] = contentLen;
+        res.writeHead(200, outHeaders);
+        if (req.method === 'HEAD' || !dlRes.body) return res.end();
+        Readable.fromWeb(dlRes.body).pipe(res);
+        return;
+      } catch (err) {
+        console.error('[Browser Live GW Download Error]', err);
+        return sendJson({ error: String(err) }, 502);
+      }
+    }
+
     // 3. 页面入口
     if (url.pathname === '/' || url.pathname === '/index.html') {
       res.writeHead(200, {
@@ -351,6 +589,10 @@ async function start() {
           },
           httpProxy: async (options) => {
             const r = await fetch('/__gw/proxy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options || {}) });
+            if (!r.ok) {
+              const errData = await r.json().catch(() => null);
+              throw new Error(errData && errData.error ? errData.error : 'HTTP ' + r.status);
+            }
             return await r.json();
           },
           proxyWebSocketUrl: (wsUrl) => {
@@ -359,6 +601,74 @@ async function start() {
           },
           appendLog: () => {},
           getLogDir: async () => null,
+          listDirectory: async (dirPath) => {
+            const r = await fetch('/__fs/list-directory', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ dirPath }),
+            });
+            if (!r.ok) return null;
+            return await r.json();
+          },
+          readFile: async (filePath) => {
+            const r = await fetch('/__fs/read-file', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ filePath }),
+            });
+            if (!r.ok) return null;
+            const data = await r.json();
+            return data && typeof data.content === 'string' ? data.content : null;
+          },
+          saveFile: async ({ fileName, content, isBase64, sourcePath, remoteUrl } = {}) => {
+            const triggerHrefDownload = (href, name) => {
+              const a = document.createElement('a');
+              a.href = href;
+              a.download = name || 'download';
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+            };
+            if (sourcePath) {
+              const probeUrl = '/__fs/download?path=' + encodeURIComponent(sourcePath);
+              try {
+                const headRes = await fetch(probeUrl, { method: 'HEAD' });
+                if (headRes.ok) {
+                  triggerHrefDownload(probeUrl, fileName);
+                  return { success: true };
+                }
+              } catch {}
+              if (!remoteUrl && !content) {
+                return { success: false, error: '无法读取本地源文件' };
+              }
+            }
+            if (remoteUrl) {
+              try {
+                const u = new URL(remoteUrl);
+                if (u.pathname.startsWith('/api/')) {
+                  const q = new URLSearchParams(u.search);
+                  q.set('baseUrl', u.origin);
+                  triggerHrefDownload('/__gw/download?' + q.toString(), fileName);
+                  return { success: true };
+                }
+              } catch {}
+              triggerHrefDownload(remoteUrl, fileName);
+              return { success: true };
+            }
+            if (typeof content === 'string' && content.startsWith('data:')) {
+              triggerHrefDownload(content, fileName);
+              return { success: true };
+            }
+            if (typeof content === 'string' && isBase64) {
+              triggerHrefDownload('data:application/octet-stream;base64,' + content, fileName);
+              return { success: true };
+            }
+            const blob = new Blob([content || ''], { type: 'application/octet-stream' });
+            const blobUrl = URL.createObjectURL(blob);
+            triggerHrefDownload(blobUrl, fileName);
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+            return { success: true };
+          },
           clipboardWrite: async (t) => {
             try { await navigator.clipboard.writeText(t); return true; } catch { return false; }
           },
@@ -384,26 +694,26 @@ async function start() {
       return;
     }
 
-    // 5. 静态资源伺服
-    const reqPath = url.pathname.replace(/^\//, '');
+    // 5. 静态资源伺服（禁止访问 .env* 机密及根目录外路径，含 symlink realpath 越界防护，一律 404）
+    const reqPath = url.pathname.replace(/^\/+/, '');
+    if (isEnvSecretPath(reqPath)) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not Found');
+      return;
+    }
     // 【规则】浏览器直跑模式的入口页面在 `/`，但真实桌面产物在 `packages/desktop/dist/renderer/`。
     // 组件里 `<img src="icons/lobe/...">` 按文档基准解析时会请求 `/icons/lobe/...`，
     // 必须映射到渲染产物目录，否则全部彩色厂商图标在浏览器直跑下 404 破图。
-    let fullPath = path.resolve(ROOT, reqPath);
-    const rootWithSep = ROOT.endsWith(path.sep) ? ROOT : ROOT + path.sep;
-    if (fullPath !== ROOT && !fullPath.startsWith(rootWithSep)) {
-      res.writeHead(403, { 'Content-Type': 'text/plain' });
-      res.end('Forbidden');
-      return;
-    }
-    if ((!fs.existsSync(fullPath) || fs.statSync(fullPath).isDirectory()) && reqPath.startsWith('icons/lobe/')) {
-      const iconsBase = path.resolve(ROOT, 'packages', 'desktop', 'dist', 'renderer', 'icons', 'lobe');
-      const fallback = path.resolve(ROOT, 'packages', 'desktop', 'dist', 'renderer', reqPath);
-      if (fallback.startsWith(iconsBase + path.sep)) {
+    let fullPath = reqPath ? resolveInsideRoot(reqPath) : null;
+    if ((!fullPath || !fs.existsSync(fullPath) || fs.statSync(fullPath).isDirectory()) && reqPath.startsWith('icons/lobe/')) {
+      const iconsBaseLex = path.resolve(ROOT_REAL, 'packages', 'desktop', 'dist', 'renderer', 'icons', 'lobe');
+      const iconsBase = fs.existsSync(iconsBaseLex) ? fs.realpathSync(iconsBaseLex) : iconsBaseLex;
+      const fallback = resolveInsideRoot(path.join('packages', 'desktop', 'dist', 'renderer', reqPath));
+      if (fallback && isWithinDir(iconsBase, fallback)) {
         fullPath = fallback;
       }
     }
-    if (!fs.existsSync(fullPath) || fs.statSync(fullPath).isDirectory()) {
+    if (!fullPath || !fs.existsSync(fullPath) || fs.statSync(fullPath).isDirectory()) {
       res.writeHead(404, { 'Content-Type': 'text/plain' });
       res.end('Not Found');
       return;
@@ -417,6 +727,7 @@ async function start() {
       '.png': 'image/png',
       '.ico': 'image/x-icon',
       '.json': 'application/json; charset=utf-8',
+      '.woff2': 'font/woff2',
       // 【规则】厂商图标是 SVG，必须给出正确 MIME：Chromium 对 `application/octet-stream`
       // 的 <img>/mask 一律拒绝解码，表现为「图标全丢但不报错」，极难定位。
       '.svg': 'image/svg+xml',

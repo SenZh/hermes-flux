@@ -233,7 +233,7 @@ test('OpenChamber File Bar - Live Headless Browser CDP Test', async (t) => {
     });
 
     assert.equal(res.result.value.hasRail, true, 'Far-right vertical rail must be mounted');
-    assert.deepEqual(res.result.value.tabs, ['preview', 'git', 'browser', 'memory'], 'Vertical rail must list all 4 extensible functional tabs');
+    assert.deepEqual(res.result.value.tabs, ['preview'], 'Vertical rail currently focuses on unified Explorer & Preview tool tab');
   });
 
   await t.test('CDP verify Silent clipboard copy button without dockNotice pollution', async () => {

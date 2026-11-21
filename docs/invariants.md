@@ -25,7 +25,7 @@ JSON 版本强制每条给出唯一 `id`、被测源码 `source`、`symbol` 与�
 | `source` 为真实源码路径 | 违者 FAIL |
 | `source`+`symbol` 组合唯一 | 违者 FAIL |
 
-## 总览（44 条，覆盖 12 个领域）
+## 总览（49 条，覆盖 13 个领域）
 
 ### ATTACH（5 条）
 
@@ -57,6 +57,16 @@ JSON 版本强制每条给出唯一 `id`、被测源码 `source`、`symbol` 与�
 | `INV-CACHE-06` | 在途展示序不撞号且强保序 | `packages/core/src/cache/cacheMerge.ts` → `mergeRemoteWindow#displaySeq` | `cache-fence-formal.test.mjs` | 拉取在途期间生成的 displaySeq 与远端冲突，界面错序 |
 | `INV-CACHE-07` | appendRows 同键展示序不漂移 | `packages/core/src/cache/cacheMerge.ts` → `appendRows` | `cache-fence-formal.test.mjs` | 重复追加同一批消息时 displaySeq 重新计算，行跳动 |
 | `INV-CACHE-08` | 更早分片展示序精确切片 | `packages/core/src/cache/cacheMerge.ts` → `sortByDisplayAsc` | `cache-fence-formal.test.mjs` | 按 orderKey 翻页取 displaySeq 不连续，历史消息顺序错乱 |
+
+### FS（5 条）
+
+| 编号 | 主题 | 源码锚点 | 守护测试 | 失效模式 |
+|---|---|---|---|---|
+| `INV-FS-01` | 文件树目录优先与码点确定性全序幂等 | `packages/core/src/fs/fileTreeService.ts` → `sortFileTreeNodes` | `file-tree-formal.test.mjs` | 文件树受系统 locale 影响乱序或目录/文件混排，每次刷新条目上下跳动 |
+| `INV-FS-02` | 扁平路径建树守恒、去重收敛与同构幂等 | `packages/core/src/fs/fileTreeService.ts` → `buildTreeFromFlatPaths` | `file-tree-formal.test.mjs` | 补全结果或会话文件树出现重复目录节点或斜杠分裂 |
+| `INV-FS-03` | 子目录懒加载合并保持非目标子树完整与幂等 | `packages/core/src/fs/fileTreeService.ts` → `mergeDirectoryChildren` | `file-tree-formal.test.mjs` | 展开一个子目录把用户已展开的其他目录重置或清空 |
+| `INV-FS-04` | 文件树过滤完备性（无空祖先残留且命中叶/祖先路径可回溯） | `packages/core/src/fs/fileTreeService.ts` → `filterFileTree` | `file-tree-formal.test.mjs` | 过滤关键字后留下大量空文件夹或漏掉深层匹配文件 |
+| `INV-FS-05` | 二进制文件与超大文件预览阻断单调性（二进制恒优先于体积上限拦截且绝不误杀图片） | `packages/core/src/fs/fileService.ts` → `evaluateFilePreviewGuard` | `file-tree-formal.test.mjs` | .exe 等二进制文件被当作文本渲染成乱码，或超大文件直接撑爆前端 DOM 表格 |
 
 ### PAGE（2 条）
 

@@ -14,6 +14,7 @@ import assert from 'node:assert/strict';
 import {
   createInitialState,
   readPresenceLayout,
+  resolveActiveWorkspaceCwd,
   PRESENCE_LAYOUT_STORAGE_KEY,
 } from '../../dist/renderer/state/appState.mjs';
 
@@ -100,5 +101,72 @@ test('AppState 领域状态模型测试', async (t) => {
     assert.equal(PRESENCE_LAYOUT_STORAGE_KEY, 'hermes_flux_presence_layout');
     const layout = readPresenceLayout();
     assert.ok(layout === 'stage' || layout === 'dock');
+  });
+
+  await t.test('3. resolveActiveWorkspaceCwd 四级工作区目录解析优先级与默认文件树状态', () => {
+    const initial = createInitialState({ platform: 'windows' });
+    assert.deepEqual(initial.fileTreeState, { status: 'idle' });
+    assert.deepEqual(initial.fileTreeExpandedPaths, []);
+    assert.equal(initial.fileTreeFilterQuery, '');
+    assert.equal(initial.fileTreeCollapsed, false);
+    assert.equal(initial.fileTreeLoadedCwd, '');
+
+    assert.equal(resolveActiveWorkspaceCwd(null), '');
+    assert.equal(resolveActiveWorkspaceCwd({}), '');
+
+    // 1. activeSession.cwd 最高优先级
+    assert.equal(
+      resolveActiveWorkspaceCwd({
+        activeSessionId: 's1',
+        sessions: [{ id: 's1', cwd: 'E:\\repos\\proj-a\\' }],
+        projects: [{ id: 'p1', name: 'P1', path: '/other' }],
+      }),
+      'E:/repos/proj-a',
+    );
+
+    // 2. 无 cwd 时匹配会话归属 project.path
+    assert.equal(
+      resolveActiveWorkspaceCwd({
+        activeSessionId: 's2',
+        sessions: [{ id: 's2', projectId: 'p1', projectName: 'P1' }],
+        projects: [{ id: 'p1', name: 'P1', path: '/ws/p1/' }],
+      }),
+      '/ws/p1',
+    );
+
+    // 2b. 通过 projectName 匹配 project.path
+    assert.equal(
+      resolveActiveWorkspaceCwd({
+        activeSessionId: 's3',
+        sessions: [{ id: 's3', projectName: 'NameMatch' }],
+        projects: [{ id: 'p2', name: 'NameMatch', path: '/ws/name-match' }],
+      }),
+      '/ws/name-match',
+    );
+
+    // 3. 回落 selectedNewTaskProjectId 对应项目路径
+    assert.equal(
+      resolveActiveWorkspaceCwd({
+        activeSessionId: '',
+        sessions: [],
+        selectedNewTaskProjectId: 'p-sel',
+        projects: [
+          { id: 'p-first', name: 'First', path: '/ws/first' },
+          { id: 'p-sel', name: 'Sel', path: '/ws/selected' },
+        ],
+      }),
+      '/ws/selected',
+    );
+
+    // 4. 再回落首个带 path 的工程
+    assert.equal(
+      resolveActiveWorkspaceCwd({
+        activeSessionId: '',
+        sessions: [],
+        selectedNewTaskProjectId: 'missing',
+        projects: [{ id: 'p-first', name: 'First', path: '/ws/first' }],
+      }),
+      '/ws/first',
+    );
   });
 });

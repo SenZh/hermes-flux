@@ -122,8 +122,12 @@ export function attachGatewayWsProxy(server, getCookie, getAllowedCookieOrigin) 
     }
 
     const cookie = typeof getCookie === 'function' ? getCookie() : '';
-    const allowedCookieOrigin = typeof getAllowedCookieOrigin === 'function' ? getAllowedCookieOrigin() : '';
-    if (cookie && (!allowedCookieOrigin || allowedCookieOrigin === upstreamOrigin)) {
+    const hasOriginGuard = typeof getAllowedCookieOrigin === 'function';
+    const allowedCookieOrigin = hasOriginGuard ? String(getAllowedCookieOrigin() || '') : '';
+    const canAttachCookie = hasOriginGuard
+      ? Boolean(allowedCookieOrigin) && allowedCookieOrigin.toLowerCase() === upstreamOrigin.toLowerCase()
+      : true;
+    if (cookie && canAttachCookie) {
       headers.Cookie = cookie;
     }
 

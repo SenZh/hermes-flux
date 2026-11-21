@@ -200,7 +200,7 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     }
   });
 
-  await t.test('InspectionPod diff preview and git tab must use semantic tokens without hardcoded hex', () => {
+  await t.test('InspectionPod diff preview must use semantic tokens without hardcoded hex', () => {
     const diffHtml = renderInspectionPod({
       collapsed: false,
       gatewayConnected: true,
@@ -215,20 +215,9 @@ test('UI Components Layout & Engineering Guardrails', async (t) => {
     assert.ok(diffHtml.includes('var(--accent)'), 'Hunk line must use var(--accent)');
     assert.ok(diffHtml.includes('var(--accent-subtle)'), 'Hunk line background must use var(--accent-subtle)');
 
-    const gitHtml = renderInspectionPod({
-      collapsed: false,
-      gatewayConnected: true,
-      activeTab: 'git',
-      gitDiffs: [{ file: 'src/a.ts', additions: 5, deletions: 2 }],
-    });
-    assert.ok(gitHtml.includes('var(--success)'), 'Git additions must use var(--success)');
-    assert.ok(gitHtml.includes('var(--destructive)'), 'Git deletions must use var(--destructive)');
-
-    for (const html of [diffHtml, gitHtml]) {
-      assert.ok(!/#4ADE80/i.test(html), 'Must not hardcode #4ADE80');
-      assert.ok(!/#F87171/i.test(html), 'Must not hardcode #F87171');
-      assert.ok(!/#38BDF8/i.test(html), 'Must not hardcode #38BDF8');
-    }
+    assert.ok(!/#4ADE80/i.test(diffHtml), 'Must not hardcode #4ADE80');
+    assert.ok(!/#F87171/i.test(diffHtml), 'Must not hardcode #F87171');
+    assert.ok(!/#38BDF8/i.test(diffHtml), 'Must not hardcode #38BDF8');
   });
 
   await t.test('InputDock must strictly conform to 740px golden width constraint', async () => {

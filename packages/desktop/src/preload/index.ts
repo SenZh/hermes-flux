@@ -4,7 +4,7 @@
  */
 
 import { contextBridge, ipcRenderer } from 'electron';
-import type { IPlatformBridge, SystemInfo, GatewayAuthResult, WindowControlState } from '@hermes-flux/core';
+import type { IPlatformBridge, SystemInfo, GatewayAuthResult, WorkspaceDirEntry } from '@hermes-flux/core';
 
 export type { SystemInfo, GatewayAuthResult };
 
@@ -30,8 +30,15 @@ export interface HermesDesktopBridge extends IPlatformBridge {
    */
   proxyWebSocketUrl?: (wsUrl: string) => string;
   openFileDialog: () => Promise<string[] | null>;
+  listDirectory: (dirPath?: string) => Promise<WorkspaceDirEntry[] | null>;
   readFile: (path: string) => Promise<string | null>;
-  saveFile: (options: { fileName: string; content: string; isBase64?: boolean }) => Promise<{ success: boolean; canceled?: boolean; filePath?: string; error?: string }>;
+  saveFile: (options: {
+    fileName: string;
+    content: string;
+    isBase64?: boolean;
+    sourcePath?: string;
+    remoteUrl?: string;
+  }) => Promise<{ success: boolean; canceled?: boolean; filePath?: string; error?: string }>;
   clipboardWrite: (text: string) => Promise<boolean>;
   clipboardRead: () => Promise<string>;
   /**
@@ -78,6 +85,7 @@ const bridge: HermesDesktopBridge = {
   httpProxy: (options) => ipcRenderer.invoke('gateway:http-proxy', options),
   openExternal: (url: string, content?: string) => ipcRenderer.invoke('shell:open-external', url, content),
   openFileDialog: () => ipcRenderer.invoke('dialog:open-file'),
+  listDirectory: (dirPath?: string) => ipcRenderer.invoke('fs:list-directory', dirPath),
   readFile: (filePath: string) => ipcRenderer.invoke('fs:read-file', filePath),
   saveFile: (options) => ipcRenderer.invoke('fs:save-file', options),
   clipboardWrite: (text: string) => ipcRenderer.invoke('clipboard:write-text', text),

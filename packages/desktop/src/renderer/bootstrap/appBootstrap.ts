@@ -37,6 +37,7 @@ import type { AppState } from '../state/appState.js';
 import type { HermesDesktopBridge } from '../../preload/index.js';
 
 export const LEFT_RAIL_WIDTH = { min: 264, max: 480, defaultValue: 264 } as const;
+export const RIGHT_RAIL_WIDTH = { min: 380, defaultValue: 640 } as const;
 
 export function clampLeftRailWidth(raw: string | null): number {
   const parsed = raw ? Number.parseFloat(raw) : NaN;
@@ -52,15 +53,15 @@ export function clampRail(raw: string | null, minW: number, maxW: number, fallba
 
 export function restoreRailWidths(): { left: number; right: number } {
   if (typeof window === 'undefined' || typeof document === 'undefined' || typeof localStorage === 'undefined') {
-    return { left: LEFT_RAIL_WIDTH.defaultValue, right: 420 };
+    return { left: LEFT_RAIL_WIDTH.defaultValue, right: RIGHT_RAIL_WIDTH.defaultValue };
   }
-  const railMaxW = Math.round(window.innerWidth * 0.85);
+  const railMaxW = Math.max(RIGHT_RAIL_WIDTH.min, Math.round(window.innerWidth * 0.85));
   const restoredLeft = clampLeftRailWidth(localStorage.getItem('hermes_flux_rail_w_left') || localStorage.getItem('hermes_aura_rail_w_left'));
   document.documentElement.style.setProperty('--rail-w-left', `${restoredLeft}px`);
   localStorage.setItem('hermes_flux_rail_w_left', String(restoredLeft));
 
   const rawRight = localStorage.getItem('hermes_flux_rail_w_right') || localStorage.getItem('hermes_aura_rail_w_right');
-  const restoredRight = clampRail(rawRight, 260, railMaxW, 420);
+  const restoredRight = clampRail(rawRight, RIGHT_RAIL_WIDTH.min, railMaxW, RIGHT_RAIL_WIDTH.defaultValue);
   document.documentElement.style.setProperty('--rail-w-right', `${restoredRight}px`);
   localStorage.setItem('hermes_flux_rail_w_right', String(restoredRight));
 
@@ -140,9 +141,9 @@ export function bindRailResizeEvents(): void {
       return;
     }
     const cssVar = '--rail-w-right';
-    const minW = 260;
-    const maxW = Math.round(window.innerWidth * 0.85);
-    const defaultW = 420;
+    const minW = RIGHT_RAIL_WIDTH.min;
+    const maxW = Math.max(minW, Math.round(window.innerWidth * 0.85));
+    const defaultW = RIGHT_RAIL_WIDTH.defaultValue;
     const storageKey = 'hermes_flux_rail_w_right';
 
     handle.ondblclick = (e) => {

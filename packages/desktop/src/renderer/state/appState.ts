@@ -44,6 +44,8 @@ import {
 import type { ConversationWidthMode } from '@hermes-flux/ui';
 
 import {
+  normalizeWorkspacePath,
+  type FileTreeLoadState,
   type NormalizedSession,
   type ModelDetail,
   type ModelCatalogEntry,
@@ -153,13 +155,28 @@ export interface AppState {
   presenceTerminal?: { kind: 'failed'; message: string } | { kind: 'interrupted' };
   activeGroupSpeaker?: string | null;
   inspectorFullscreen?: boolean;
-  openFiles: Array<{ id?: string; path: string; content: string; language?: string; isDiff?: boolean }>;
+  openFiles: Array<{
+    id?: string;
+    path: string;
+    content: string;
+    language?: string;
+    isDiff?: boolean;
+    isBinary?: boolean;
+    isTooLarge?: boolean;
+    byteSize?: number;
+    source?: 'session_tool' | 'local_fs' | 'remote_http' | 'gateway_api' | 'fallback';
+  }>;
   activeFilePath: string;
   fileViewMode: 'rendered' | 'raw';
   fileShowLineNumbers: boolean;
   fileWordWrap: boolean;
   fileSearchOpen: boolean;
   fileSearchQuery: string;
+  fileTreeState: FileTreeLoadState;
+  fileTreeExpandedPaths: string[];
+  fileTreeFilterQuery: string;
+  fileTreeCollapsed: boolean;
+  fileTreeLoadedCwd: string;
   attachments: InputAttachmentItem[];
   queuedMessages: Array<{ id: string; admissionId: string; text: string }>;
   slashPopperOpen: boolean;
@@ -324,6 +341,11 @@ export function createInitialState(params: InitialStateParams): AppState {
     fileWordWrap: false,
     fileSearchOpen: false,
     fileSearchQuery: '',
+    fileTreeState: { status: 'idle' },
+    fileTreeExpandedPaths: [],
+    fileTreeFilterQuery: '',
+    fileTreeCollapsed: false,
+    fileTreeLoadedCwd: '',
     testStatus: undefined,
     artifacts: [],
     browserFrame: undefined,
@@ -362,5 +384,44 @@ export function resolveActiveViewportKey(
     return state.activeFocus.roomId ? `group:${state.activeFocus.roomId}` : '';
   }
   return state?.activeSessionId ?? '';
+}
+
+/**
+ * 推导当前激活会话或工程所属的工作区根目录路径（作为文件树加载的单一真值口径）。
+ */
+export function resolveActiveWorkspaceCwd(
+  state:
+    | Pick<AppState, 'activeSessionId' | 'sessions' | 'projects' | 'selectedNewTaskProjectId'>
+    | { activeSessionId?: string; sessions?: AppState['sessions']; projects?: AppState['projects']; selectedNewTaskProjectId?: string }
+    | undefined
+    | null,
+): string {
+  const sessions = state?.sessions ?? [];
+  const projects = state?.projects ?? [];
+  const activeSession = sessions.find((s) => s.id === state?.activeSessionId);
+  if (activeSession?.cwd) {
+    return normalizeWorkspacePath(activeSession.cwd);
+  }
+  const matchedProject = activeSession
+    ? projects.find(
+        (p) =>
+          p.id === activeSession.projectId ||
+          (Boolean(activeSession.projectName) && p.name === activeSession.projectName),
+      )
+    : undefined;
+  if (matchedProject?.path) {
+    return normalizeWorkspacePath(matchedProject.path);
+  }
+  if (state?.selectedNewTaskProjectId) {
+    const selectedProj = projects.find((p) => p.id === state.selectedNewTaskProjectId);
+    if (selectedProj?.path) {
+      return normalizeWorkspacePath(selectedProj.path);
+    }
+  }
+  const firstProjWithPath = projects.find((p) => Boolean(p.path));
+  if (firstProjWithPath?.path) {
+    return normalizeWorkspacePath(firstProjWithPath.path);
+  }
+  return '';
 }
 

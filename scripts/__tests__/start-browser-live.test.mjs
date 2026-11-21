@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { attachGatewayWsProxy } from '../lib/ws-proxy.mjs';
 
 /**
  * 浏览器直跑服务鉴权链路的真实子进程集成测试
@@ -366,5 +367,227 @@ test('浏览器直跑 /__gw/auth 凭据透传与失败显式化', { timeout: 400
     });
     closingConn.sock.destroy();
     assert.equal(await closedOnGateway, true, '客户端断开后代理必须同步销毁上游连接防止孤儿句柄泄漏');
+  });
+
+  await t.test('5. 本地工作区文件树列举与文件预览安全边界 (/__fs/list-directory & /__fs/read-file)', async () => {
+    const dirRes = await postJson('/__fs/list-directory', {});
+    assert.equal(dirRes.status, 200);
+    assert.ok(Array.isArray(dirRes.data));
+    assert.ok(dirRes.data.some((e) => e.name === 'package.json' && e.isDirectory === false));
+    assert.ok(dirRes.data.some((e) => e.name === 'packages' && e.isDirectory === true));
+    assert.equal(dirRes.data.some((e) => e.name === '.git' || e.name === '.env'), false);
+
+    const escapeDir = await postJson('/__fs/list-directory', { dirPath: '../../../outside' });
+    assert.equal(escapeDir.data, null);
+
+    const evilDir = await fetch(`${baseUrl}/__fs/list-directory`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example.com' },
+      body: '{}',
+    });
+    assert.equal(evilDir.status, 403);
+
+    const fileRes = await postJson('/__fs/read-file', { filePath: 'package.json' });
+    assert.equal(fileRes.status, 200);
+    assert.ok(typeof fileRes.data?.content === 'string' && fileRes.data.content.includes('hermes-flux-monorepo'));
+
+    const envFile = await postJson('/__fs/read-file', { filePath: '.env' });
+    assert.equal(envFile.data?.content, null);
+
+    const escapeFile = await postJson('/__fs/read-file', { filePath: '../outside.txt' });
+    assert.equal(escapeFile.data?.content, null);
+  });
+
+  await t.test('6. 本地与远程流式附件下载 (/__fs/download & /__gw/download) 二进制字节无损校验', async () => {
+    // 1. 先让 fake gateway 开放一个带 MZ/.exe 任意二进制字节的 /api/files/download（模拟 /api/fs/download 404 回退）
+    const binaryPayload = Buffer.from([0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00, 0xff, 0xfe, 0x00, 0x45, 0x4c, 0x46]);
+    const binGwSeenHeaders = [];
+    const binGw = http.createServer((req, res) => {
+      binGwSeenHeaders.push({ url: req.url, cookie: req.headers.cookie });
+      const reqUrl = new URL(req.url, 'http://127.0.0.1');
+      if (reqUrl.pathname === '/api/files/download') {
+        res.writeHead(200, {
+          'Content-Type': 'application/octet-stream',
+          'Content-Length': String(binaryPayload.length),
+          'Content-Disposition': 'attachment; filename="agent-tool.exe"',
+        });
+        res.end(binaryPayload);
+        return;
+      }
+      if (reqUrl.pathname === '/api/spa-fake.png') {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end('<html><body>SPA</body></html>');
+        return;
+      }
+      if (reqUrl.pathname.endsWith('/api/status')) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ auth_required: !reqUrl.pathname.includes('noauth') }));
+        return;
+      }
+      if (reqUrl.pathname === '/api/auth/ws-ticket') {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'no_cookie' }));
+        return;
+      }
+      res.writeHead(404);
+      res.end('not found');
+    });
+    const binGwPort = await listenDynamic(binGw);
+    t.after(async () => {
+      binGw.closeAllConnections?.();
+      await new Promise((resolve) => binGw.close(resolve));
+    });
+
+    // 本地工作区流式下载 HEAD + GET
+    const localHead = await fetch(`${baseUrl}/__fs/download?path=package.json`, { method: 'HEAD' });
+    assert.equal(localHead.status, 200);
+    assert.match(localHead.headers.get('content-disposition') || '', /attachment/);
+
+    const localGet = await fetch(`${baseUrl}/__fs/download?path=package.json`);
+    assert.equal(localGet.status, 200);
+    assert.ok((await localGet.text()).includes('hermes-flux-monorepo'));
+
+    const envDl = await fetch(`${baseUrl}/__fs/download?path=.env`);
+    assert.equal(envDl.status, 404);
+
+    // 先重新认证到主 gwPort（写入 sessionCookie & authenticatedOrigin），再验证跨 Origin 访问 binGwPort 绝不泄露 Cookie
+    const reAuth = await postJson('/__gw/auth', {
+      url: `http://127.0.0.1:${gwPort}`,
+      username: 'alice',
+      password: 'correct-horse',
+    });
+    assert.equal(reAuth.data.ok, true);
+
+    // 远程网关二进制流式下载（包含 404 从 /api/fs/download 回退 /api/files/download，且不跨 Origin 带 Cookie）
+    const gwBinRes = await fetch(
+      `${baseUrl}/__gw/download?path=${encodeURIComponent('/opt/data/workspace/agent-tool.exe')}&baseUrl=${encodeURIComponent(`http://127.0.0.1:${binGwPort}`)}`,
+    );
+    assert.equal(gwBinRes.status, 200);
+    assert.match(gwBinRes.headers.get('content-disposition') || '', /agent-tool\.exe/);
+    const downloadedBuf = Buffer.from(await gwBinRes.arrayBuffer());
+    assert.deepEqual(downloadedBuf, binaryPayload, '二进制下载必须逐字节无损还原（含 NUL 与 high-bit 字节）');
+    assert.ok(binGwSeenHeaders.every((h) => !h.cookie), '不同 Origin 上游下载绝不得携带主网关 sessionCookie');
+
+    // /__gw/proxy 遇到返回 text/html 的 .png URL 不得误转为 data:image base64，且同样隔离 Cookie
+    const htmlImgProxy = await postJson('/__gw/proxy', {
+      baseUrl: `http://127.0.0.1:${binGwPort}`,
+      path: '/api/spa-fake.png',
+      method: 'GET',
+    });
+    assert.equal(htmlImgProxy.data, '<html><body>SPA</body></html>');
+    assert.equal(binGwSeenHeaders.at(-1).cookie, undefined);
+
+    // 静态资源伺服：.env* 与路径越界必须统一返回 404
+    const staticEnv = await fetch(`${baseUrl}/.env`);
+    assert.equal(staticEnv.status, 404);
+    const staticNestedEnv = await fetch(`${baseUrl}/packages/.env.local`);
+    assert.equal(staticNestedEnv.status, 404);
+    const staticEscape = await fetch(`${baseUrl}/../../../outside.txt`);
+    assert.equal(staticEscape.status, 404);
+
+    // 校验 /inject.js 暴露 saveFile 与强异常化 httpProxy，且 sourcePath 优先并禁止空内容 0 字节兜底
+    const injectCode = await (await fetch(`${baseUrl}/inject.js`)).text();
+    assert.match(injectCode, /saveFile\s*:/);
+    assert.match(injectCode, /\/__gw\/download\?/);
+    assert.match(injectCode, /if\s*\(sourcePath\)\s*\{/);
+    assert.match(injectCode, /!remoteUrl\s*&&\s*!content/);
+    assert.match(injectCode, /if\s*\(!r\.ok\)/);
+
+    // 重连跨 Origin（空密码）绝不得将主网关 Cookie 发送到 binGwPort 的 /api/auth/ws-ticket，且须要求输入凭据
+    const crossReconnect = await postJson('/__gw/auth', { url: `http://127.0.0.1:${binGwPort}` });
+    assert.equal(crossReconnect.data.ok, false);
+    assert.match(crossReconnect.data.message, /用户名与密码/);
+    assert.ok(binGwSeenHeaders.every((h) => !h.cookie), '空密码跨 Origin 重连 ws-ticket 不得携带主网关 Cookie');
+
+    // 主网关失败登录 (401) 后必须清空 sessionCookie 与 authenticatedOrigin
+    const fail401 = await postJson('/__gw/auth', {
+      url: `http://127.0.0.1:${gwPort}`,
+      username: 'alice',
+      password: 'wrong-password',
+    });
+    assert.equal(fail401.data.ok, false);
+    await postJson('/__gw/proxy', { baseUrl: `http://127.0.0.1:${gwPort}`, path: '/api/probe', method: 'GET' });
+    assert.equal(seen.proxy.at(-1).headers.cookie, undefined, '登录 401 后必须清空残留 sessionCookie');
+
+    // 重新登录再切换免密服务时，也必须清空旧 Cookie
+    await postJson('/__gw/auth', { url: `http://127.0.0.1:${gwPort}`, username: 'alice', password: 'correct-horse' });
+    const noAuthSwitch = await postJson('/__gw/auth', { url: `http://127.0.0.1:${binGwPort}/noauth` });
+    assert.equal(noAuthSwitch.data.ok, true);
+    await postJson('/__gw/proxy', { baseUrl: `http://127.0.0.1:${gwPort}`, path: '/api/probe', method: 'GET' });
+    assert.equal(seen.proxy.at(-1).headers.cookie, undefined, '切换免密网关时必须清理旧 sessionCookie');
+  });
+
+  await t.test('7. ws-proxy.mjs getAllowedCookieOrigin 严格闭环策略（空值/不匹配 fail-closed，大小写匹配与未传守卫放行）', async () => {
+    const wsCookiesSeen = [];
+    const upstreamSrv = http.createServer();
+    upstreamSrv.on('upgrade', (req, socket) => {
+      wsCookiesSeen.push(req.headers.cookie || '');
+      const key = req.headers['sec-websocket-key'];
+      const accept = crypto.createHash('sha1').update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64');
+      socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+      socket.end();
+    });
+    const upstreamPort = await listenDynamic(upstreamSrv);
+    t.after(async () => {
+      upstreamSrv.closeAllConnections?.();
+      await new Promise((r) => upstreamSrv.close(r));
+    });
+
+    let allowedOrigin = '';
+    const proxySrv = http.createServer();
+    attachGatewayWsProxy(proxySrv, () => 'session=ws-secret', () => allowedOrigin);
+    const proxyPort = await listenDynamic(proxySrv);
+    t.after(async () => {
+      proxySrv.closeAllConnections?.();
+      await new Promise((r) => proxySrv.close(r));
+    });
+
+    const openWsOnce = (port) =>
+      new Promise((resolve, reject) => {
+        const req = http.request({
+          hostname: '127.0.0.1',
+          port,
+          path: `/__gw/ws?target=${encodeURIComponent(`ws://127.0.0.1:${upstreamPort}/api/ws`)}`,
+          headers: {
+            Origin: `http://127.0.0.1:${port}`,
+            Connection: 'Upgrade',
+            Upgrade: 'websocket',
+            'Sec-WebSocket-Version': '13',
+            'Sec-WebSocket-Key': crypto.randomBytes(16).toString('base64'),
+          },
+        });
+        req.on('upgrade', (_res, sock) => {
+          sock.destroy();
+          resolve();
+        });
+        req.on('error', reject);
+        req.end();
+      });
+
+    // 空 allowedOrigin 必须 fail-closed 拒绝携带 Cookie
+    allowedOrigin = '';
+    await openWsOnce(proxyPort);
+    assert.equal(wsCookiesSeen.at(-1), '');
+
+    // 不匹配 Origin 同样 fail-closed
+    allowedOrigin = 'http://127.0.0.1:1';
+    await openWsOnce(proxyPort);
+    assert.equal(wsCookiesSeen.at(-1), '');
+
+    // 大小写不一致但同 Origin 允许发送 Cookie
+    allowedOrigin = `HTTP://127.0.0.1:${upstreamPort}`;
+    await openWsOnce(proxyPort);
+    assert.equal(wsCookiesSeen.at(-1), 'session=ws-secret');
+
+    // 未传入 getAllowedCookieOrigin 时保持向后兼容允许发送 Cookie
+    const openProxySrv = http.createServer();
+    attachGatewayWsProxy(openProxySrv, () => 'session=legacy');
+    const openProxyPort = await listenDynamic(openProxySrv);
+    t.after(async () => {
+      openProxySrv.closeAllConnections?.();
+      await new Promise((r) => openProxySrv.close(r));
+    });
+    await openWsOnce(openProxyPort);
+    assert.equal(wsCookiesSeen.at(-1), 'session=legacy');
   });
 });

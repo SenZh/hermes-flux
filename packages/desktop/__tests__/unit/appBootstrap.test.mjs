@@ -8,10 +8,13 @@ import assert from 'node:assert/strict';
 import {
   clampLeftRailWidth,
   clampRail,
+  restoreRailWidths,
+  bindRailResizeEvents,
   isConversationDemoMode,
   injectConversationDemo,
   createAppBootstrap,
   LEFT_RAIL_WIDTH,
+  RIGHT_RAIL_WIDTH,
 } from '../../dist/renderer/bootstrap/appBootstrap.mjs';
 
 function createMockDeps(overrides = {}) {
@@ -126,4 +129,45 @@ test('AppBootstrap: init 正常执行自举流水线，触发缓存恢复与连�
   assert.equal(getSyncSystemWindowCount(), 1);
   assert.equal(getRestoreCacheCount(), 1);
   assert.equal(getConnectCount(), 1);
+});
+
+test('AppBootstrap: RIGHT_RAIL_WIDTH 默认 640px，restoreRailWidths 与双击复位对齐该真值', () => {
+  assert.equal(RIGHT_RAIL_WIDTH.min, 380);
+  assert.equal(RIGHT_RAIL_WIDTH.defaultValue, 640);
+  assert.deepEqual(restoreRailWidths(), {
+    left: LEFT_RAIL_WIDTH.defaultValue,
+    right: RIGHT_RAIL_WIDTH.defaultValue,
+  });
+
+  const savedDoc = globalThis.document;
+  const savedWin = globalThis.window;
+  const savedStorage = globalThis.localStorage;
+  const rootProps = new Map();
+  const store = new Map();
+  const handle = { dataset: { railHandle: 'right' } };
+
+  globalThis.window = { innerWidth: 1440, addEventListener() {}, removeEventListener() {} };
+  globalThis.document = {
+    documentElement: { style: { setProperty: (k, v) => rootProps.set(k, v) } },
+    querySelectorAll: () => [handle],
+  };
+  globalThis.localStorage = {
+    getItem: (k) => store.get(k) ?? null,
+    setItem: (k, v) => store.set(k, v),
+  };
+
+  try {
+    const restored = restoreRailWidths();
+    assert.equal(restored.right, RIGHT_RAIL_WIDTH.defaultValue);
+    assert.equal(rootProps.get('--rail-w-right'), '640px');
+
+    bindRailResizeEvents();
+    handle.ondblclick({ stopPropagation() {} });
+    assert.equal(rootProps.get('--rail-w-right'), '640px');
+    assert.equal(store.get('hermes_flux_rail_w_right'), '640');
+  } finally {
+    globalThis.document = savedDoc;
+    globalThis.window = savedWin;
+    globalThis.localStorage = savedStorage;
+  }
 });

@@ -22,6 +22,13 @@ export interface WindowControlState {
   isFocused?: boolean;
 }
 
+export interface WorkspaceDirEntry {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  size?: number;
+}
+
 export interface GatewayAuthResult {
   ok: boolean;
   message: string;
@@ -78,8 +85,15 @@ export interface IPlatformBridge {
   // Native Shell & Dialogs
   openExternal(url: string, content?: string): Promise<void>;
   openFileDialog?(): Promise<string[] | null>;
+  listDirectory?(dirPath?: string): Promise<WorkspaceDirEntry[] | null>;
   readFile?(filePath: string): Promise<string | null>;
-  saveFile?(options: { fileName: string; content: string; isBase64?: boolean }): Promise<{ success: boolean; canceled?: boolean; filePath?: string; error?: string }>;
+  saveFile?(options: {
+    fileName: string;
+    content: string;
+    isBase64?: boolean;
+    sourcePath?: string;
+    remoteUrl?: string;
+  }): Promise<{ success: boolean; canceled?: boolean; filePath?: string; error?: string }>;
   showSaveDialog?(options: { title?: string; defaultPath?: string; filters?: { name: string; extensions: string[] }[] }): Promise<string | null>;
   showOpenDialog?(options: { title?: string; properties?: string[]; filters?: { name: string; extensions: string[] }[] }): Promise<string[] | null>;
 
