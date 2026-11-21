@@ -249,6 +249,13 @@ export const zhSettings = {
   'gateway.urlRequired': '请先填写网关地址',
   'gateway.urlHint': '填写你部署的网关地址',
   'gateway.urlPlaceholder': 'http://主机:端口 或 https://你的域名',
+  'gateway.onboardingTitle': '连接至 Hermes Gateway',
+  'gateway.onboardingDesc': '接入本地守护进程或远程云端的 Hermes 网关，开启真实的自主 Agent 会话、流式推理与工业级工具流。',
+  'gateway.onboardingUrlLabel': '网关连接地址 (Gateway URL)',
+  'gateway.onboardingUsernameLabel': '用户名 (Username)',
+  'gateway.onboardingPasswordLabel': '登录密码 (Password)',
+  'gateway.onboardingOptionalPlaceholder': '免密网关可留空',
+  'gateway.onboardingConnecting': '正在连接...',
 };
 
 export const enSettings = {
@@ -493,4 +500,11 @@ export const enSettings = {
   'gateway.urlRequired': 'Please enter the gateway URL first',
   'gateway.urlHint': 'Enter your deployed gateway address',
   'gateway.urlPlaceholder': 'http://host:port or https://your-domain',
+  'gateway.onboardingTitle': 'Connect to Hermes Gateway',
+  'gateway.onboardingDesc': 'Connect to a local daemon or remote Hermes Gateway to unlock autonomous Agent sessions, streaming reasoning, and toolchains.',
+  'gateway.onboardingUrlLabel': 'Gateway URL',
+  'gateway.onboardingUsernameLabel': 'Username',
+  'gateway.onboardingPasswordLabel': 'Password',
+  'gateway.onboardingOptionalPlaceholder': 'Optional for passwordless gateways',
+  'gateway.onboardingConnecting': 'Connecting...',
 };

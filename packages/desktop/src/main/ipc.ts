@@ -24,6 +24,12 @@ function readTitlebarMaximized(win: BrowserWindow): boolean {
   });
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   let activeGatewayCookies = '';
 
@@ -173,15 +179,16 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         }
 
         // gate-degrade: 路径越界判定失败一律按不安全处理（返回 false），这是安全默认值
-        const statusData: any = await statusRes.json().catch(() => ({}));
+        const statusData = asRecord(await statusRes.json().catch(() => ({})));
         const authRequired = Boolean(statusData.auth_required);
+        const gatewayVersion = typeof statusData.version === 'string' ? statusData.version : undefined;
 
         if (!authRequired) {
           return {
             ok: true,
             message: `网关直连就绪 (无需认证) · 延迟 ${latency}ms`,
             latency,
-            version: statusData.version,
+            version: gatewayVersion,
           };
         }
 
@@ -238,18 +245,20 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         }
 
         // gate-degrade: 文件预览读取失败时由调用方渲染"无法预览"错误态
-        const ticketData: any = await ticketRes.json().catch(() => ({}));
+        const ticketData = asRecord(await ticketRes.json().catch(() => ({})));
+        const ticket = typeof ticketData.ticket === 'string' ? ticketData.ticket : undefined;
         return {
           ok: true,
-          ticket: ticketData.ticket,
-          message: `认证成功 · 延迟 ${latency}ms · Gateway v${statusData.version || '0.22.5'}`,
+          ticket,
+          message: `认证成功 · 延迟 ${latency}ms · Gateway v${gatewayVersion || '0.22.5'}`,
           latency,
-          version: statusData.version,
+          version: gatewayVersion,
         };
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const errMessage = err instanceof Error ? err.message : String(err);
         return {
           ok: false,
-          message: `网络连接失败: ${err.message || '无法访问目标网关'}`,
+          message: `网络连接失败: ${errMessage || '无法访问目标网关'}`,
           latency: Date.now() - start,
         };
       }
@@ -268,8 +277,8 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     method?: string;
     token?: string;
     ticket?: string;
-    body?: any;
-    params?: any;
+    body?: unknown;
+    params?: unknown;
   }) => {
     let base = (options.baseUrl || '').trim();
     if (!base) throw new Error('未配置网关地址');
@@ -302,7 +311,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       headers['X-WS-Ticket'] = options.ticket;
     }
 
-    const fetchOptions: any = {
+    const fetchOptions: RequestInit = {
       method: options.method || 'GET',
       headers,
       // 【规则】必须带超时：REST 代理无超时会让调用方的在途锁（如提供商绑定合流）永久占用，

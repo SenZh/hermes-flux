@@ -65,7 +65,13 @@ export interface ArtifactItem {
  *   - `hidden`/`unread`/`pinned` 原样透传，供上层过滤与三态判定，不在本层做业务决策；
  *   - 纯函数，零 DOM / 零网络依赖。
  */
-export function normalizeSessionsResult(payload: any): Array<{
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+export function normalizeSessionsResult(payload: unknown): Array<{
   id: string;
   title: string;
   model: string;
@@ -87,19 +93,19 @@ export function normalizeSessionsResult(payload: any): Array<{
   timeSource: string;
 }> {
   if (!payload) return [];
-  const rawList = Array.isArray(payload)
+  const rawList: unknown[] = Array.isArray(payload)
     ? payload
-    : Array.isArray(payload.sessions)
+    : isRecord(payload) && Array.isArray(payload.sessions)
     ? payload.sessions
-    : Array.isArray(payload.data)
+    : isRecord(payload) && Array.isArray(payload.data)
     ? payload.data
     : [];
 
   return rawList
-    .filter((s: any) => s && (s.id || s.session_id))
-    .map((s: any) => {
+    .filter((s): s is UnknownRecord => isRecord(s) && Boolean(s.id || s.session_id))
+    .map((s) => {
       const id = String(s.id || s.session_id || '');
-      const rawTitle = (s.title || '').trim();
+      const rawTitle = typeof s.title === 'string' ? s.title.trim() : '';
       const title = rawTitle || (id ? `会话 ${id.slice(0, 8)}` : '新对话');
       const model = String(s.model || '');
       // 时间来源固定优先级：last_active 是"最后一条消息时间"，started_at/created_at 只是创建时间
@@ -108,7 +114,7 @@ export function normalizeSessionsResult(payload: any): Array<{
         : typeof s.created_at === 'number' ? 'created_at'
         : 'none';
       const rawTs = s.last_active ?? s.started_at ?? s.created_at ?? 0;
-      const numTs = typeof rawTs === 'number' ? (rawTs > 1e11 ? rawTs : rawTs * 1000) : Date.parse(rawTs) || 0;
+      const numTs = typeof rawTs === 'number' ? (rawTs > 1e11 ? rawTs : rawTs * 1000) : Date.parse(String(rawTs)) || 0;
 
       const timeStr = numTs > 0
         ? new Date(numTs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -137,11 +143,11 @@ export function normalizeSessionsResult(payload: any): Array<{
     });
 }
 
-export function extractModelDetails(payload: any): ModelDetail[] {
+export function extractModelDetails(payload: unknown): ModelDetail[] {
   const result: ModelDetail[] = [];
   const seen = new Set<string>();
 
-  if (!payload || typeof payload !== 'object') return result;
+  if (!isRecord(payload)) return result;
 
   const rootProvider = typeof payload.provider === 'string' ? payload.provider.trim() : '';
 
@@ -149,15 +155,15 @@ export function extractModelDetails(payload: any): ModelDetail[] {
   if (Array.isArray(payload.providers)) {
     // Check if any provider in the list explicitly has configured === true or connected === true
     const hasExplicitConfiguredFlags = payload.providers.some(
-      (p: any) => p && (p.configured === true || p.connected === true || p.is_configured === true || p.has_key === true)
+      (p) => isRecord(p) && (p.configured === true || p.connected === true || p.is_configured === true || p.has_key === true)
     );
 
     const configuredSet = Array.isArray(payload.configured_providers)
-      ? new Set(payload.configured_providers.map((s: any) => String(s).toLowerCase().trim()))
+      ? new Set(payload.configured_providers.map((s) => String(s).toLowerCase().trim()))
       : null;
 
     for (const p of payload.providers) {
-      if (!p || typeof p !== 'object') continue;
+      if (!isRecord(p)) continue;
 
       const pSlug = String(p.slug || p.provider || p.id || '').trim();
       const pSlugLower = pSlug.toLowerCase();
@@ -213,11 +219,12 @@ export function extractModelDetails(payload: any): ModelDetail[] {
 
       if (Array.isArray(p.models) && p.models.length > 0) {
         for (const m of p.models) {
-          const mId = typeof m === 'string' ? m.trim() : typeof m?.id === 'string' ? m.id.trim() : '';
-          const mName = typeof m === 'object' && typeof m?.name === 'string' ? m.name.trim() : mId;
+          const mObj = isRecord(m) ? m : null;
+          const mId = typeof m === 'string' ? m.trim() : typeof mObj?.id === 'string' ? mObj.id.trim() : '';
+          const mName = mObj && typeof mObj.name === 'string' ? mObj.name.trim() : mId;
           const contextTokens =
-            typeof m === 'object' &&
-            (m?.context_length || m?.context_window || m?.max_tokens || m?.context_tokens);
+            mObj &&
+            (mObj.context_length || mObj.context_window || mObj.max_tokens || mObj.context_tokens);
           if (mId) {
             const lowerId = mId.toLowerCase();
             if (!seen.has(lowerId)) {
@@ -239,8 +246,9 @@ export function extractModelDetails(payload: any): ModelDetail[] {
   // 2. Direct models array (merged and deduplicated)
   if (Array.isArray(payload.models)) {
     for (const m of payload.models) {
-      const mId = typeof m === 'string' ? m.trim() : typeof m?.id === 'string' ? m.id.trim() : '';
-      const mName = typeof m === 'object' && typeof m?.name === 'string' ? m.name.trim() : mId;
+      const mObj = isRecord(m) ? m : null;
+      const mId = typeof m === 'string' ? m.trim() : typeof mObj?.id === 'string' ? mObj.id.trim() : '';
+      const mName = mObj && typeof mObj.name === 'string' ? mObj.name.trim() : mId;
       if (mId) {
         const lowerId = mId.toLowerCase();
         if (!seen.has(lowerId)) {
@@ -274,7 +282,7 @@ export function extractModelDetails(payload: any): ModelDetail[] {
   return result;
 }
 
-export function extractAvailableModels(payload: any, fallbackModels: string[] = []): string[] {
+export function extractAvailableModels(payload: unknown, fallbackModels: string[] = []): string[] {
   const details = extractModelDetails(payload);
   if (details.length > 0) {
     const set = new Set<string>();
