@@ -84,6 +84,7 @@ export function ConversationStage({
         )}
       </ConversationStream>
 
+      <div className="top-scrim-fade conv-top-scrim" data-conv-layer="top-scrim" />
       <div className="dock-scrim-fade conv-dock-scrim" data-conv-layer="scrim" />
       {dock}
     </main>

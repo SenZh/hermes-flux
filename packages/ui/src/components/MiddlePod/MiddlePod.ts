@@ -273,6 +273,9 @@ export function renderMiddlePod(props: MiddlePodProps): string {
       <!-- Prompt Navigator Rail Host (React 岛，常驻，绝不进滚动流) -->
       <div id="react-prompt-navigator-host"></div>
 
+      <!-- Top Scrim Fade (Top gradient to soften conversation edge with topbar) -->
+      <div class="top-scrim-fade conv-top-scrim" data-conv-layer="top-scrim"></div>
+
       <!-- Dock Scrim Fade (Bottom gradient to prevent card collision) -->
       <div class="dock-scrim-fade conv-dock-scrim" data-conv-layer="scrim"></div>
 

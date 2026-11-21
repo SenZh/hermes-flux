@@ -157,6 +157,19 @@
   transition: max-width 0.2s ease;
 }
 
+/* 顶部渐变柔光遮罩：防止长文字滚动时与顶栏交接处生硬截断，形成平滑过渡 */
+.conv-top-scrim {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 48px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, var(--panel) 25%, transparent 100%);
+  z-index: 30;
+  transform: translateZ(0);
+}
+
 /* 底部渐变柔光遮罩：防止长文字撞击底部悬浮输入舱与两侧穿模泄露 */
 .conv-dock-scrim {
   position: absolute;
