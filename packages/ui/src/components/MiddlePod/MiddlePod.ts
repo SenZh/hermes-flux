@@ -158,7 +158,7 @@ export function renderConversationCanvas(props: MiddlePodProps): string {
       <div class="content-fluid-canvas conv-canvas" data-conv-layer="canvas">
         ${renderContextGauge(props.contextUsage)}
         <div style="max-width: 480px; margin: 120px auto 0; text-align: center; color: var(--text-muted); font-size: var(--chat-text-meta); display: flex; flex-direction: column; align-items: center; gap: 10px;">
-          <span style="font-size: 20px; animation: pulse 1.5s infinite;">⚡</span>
+          <span style="font-size: 20px;">⚡</span>
           <span>${t('conversation.connecting')}</span>
         </div>
       </div>
@@ -318,9 +318,9 @@ function renderGatewayOnboarding(props: MiddlePodProps): string {
             <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
           </svg>
         </div>
-        <h2 style="font-size: 19px; font-weight: 700; color: var(--text-main); margin: 0; letter-spacing: -0.01em;">连接至 Hermes Gateway</h2>
+        <h2 style="font-size: 19px; font-weight: 700; color: var(--text-main); margin: 0; letter-spacing: -0.01em;">${t('gateway.onboardingTitle')}</h2>
         <p style="font-size: 12.5px; color: var(--text-secondary); margin: 0; line-height: 1.55; max-width: 440px;">
-          接入本地守护进程或远程云端的 Hermes 网关，开启真实的自主 Agent 会话、流式推理与工业级工具流。
+          ${t('gateway.onboardingDesc')}
         </p>
       </div>
 
@@ -329,7 +329,7 @@ function renderGatewayOnboarding(props: MiddlePodProps): string {
         <!-- Gateway URL -->
         <div style="display: flex; flex-direction: column; gap: 6px;">
           <div style="display: flex; justify-content: space-between; align-items: baseline;">
-            <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">网关连接地址 (Gateway URL)</label>
+            <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">${t('gateway.onboardingUrlLabel')}</label>
             <span style="font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono);">${t('gateway.urlHint')}</span>
           </div>
           <input type="text" id="onboarding-gateway-url" value="${escapeHtml(props.gatewayUrl || '')}" placeholder="${t('gateway.urlPlaceholder')}" style="
@@ -352,8 +352,8 @@ function renderGatewayOnboarding(props: MiddlePodProps): string {
         <div id="onboarding-section-dashboard" style="display: flex; flex-direction: column; gap: 10px;">
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
             <div style="display: flex; flex-direction: column; gap: 6px;">
-              <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">用户名 (Username)</label>
-              <input type="text" id="onboarding-username" value="${escapeHtml(props.username || '')}" placeholder="免密网关可留空" style="
+              <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">${t('gateway.onboardingUsernameLabel')}</label>
+              <input type="text" id="onboarding-username" value="${escapeHtml(props.username || '')}" placeholder="${escapeHtml(t('gateway.onboardingOptionalPlaceholder'))}" style="
                 width: 100%;
                 height: 36px;
                 background: var(--bg-panel);
@@ -368,8 +368,8 @@ function renderGatewayOnboarding(props: MiddlePodProps): string {
               "/>
             </div>
             <div style="display: flex; flex-direction: column; gap: 6px;">
-              <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">登录密码 (Password)</label>
-              <input type="password" id="onboarding-password" value="${escapeHtml(props.password || '')}" placeholder="免密网关可留空" style="
+              <label style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">${t('gateway.onboardingPasswordLabel')}</label>
+              <input type="password" id="onboarding-password" value="${escapeHtml(props.password || '')}" placeholder="${escapeHtml(t('gateway.onboardingOptionalPlaceholder'))}" style="
                 width: 100%;
                 height: 36px;
                 background: var(--bg-panel);
@@ -416,7 +416,7 @@ function renderGatewayOnboarding(props: MiddlePodProps): string {
           font-size: 12.5px;
           font-weight: 500;
           cursor: pointer;
-        ">连通性测试</button>
+        ">${t('settings.testConnection')}</button>
 
         <button id="btn-save-and-connect" style="
           height: 36px;
@@ -424,12 +424,12 @@ function renderGatewayOnboarding(props: MiddlePodProps): string {
           border-radius: 8px;
           background: var(--accent);
           border: none;
-          color: var(--theme-thumb-color, #090A0F);
+          color: var(--primary-foreground);
           font-size: 12.5px;
           font-weight: 700;
           cursor: pointer;
           box-shadow: 0 1px 8px var(--accent-glow);
-        ">${props.gatewayConnecting ? '正在连接...' : '保存并连接 ↗'}</button>
+        ">${props.gatewayConnecting ? t('gateway.onboardingConnecting') : `${t('settings.saveAndConnect')} ↗`}</button>
       </div>
     </div>
   `;
@@ -461,9 +461,9 @@ function renderWelcomeEmptyState(): string {
       ">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
       </div>
-      <h3 style="font-size: 17px; font-weight: 700; color: var(--text-main); margin: 0; letter-spacing: -0.01em;">Hermes Flux 工作台已就绪</h3>
+      <h3 style="font-size: 17px; font-weight: 700; color: var(--text-main); margin: 0; letter-spacing: -0.01em;">${t('chat.welcomeTitle')}</h3>
       <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin: 0; max-width: 480px;">
-        在下方 740px 黄金限宽输入舱下达任务，按 Enter 发送。Hermes 将自主规划多步骤推理、调用工具链并流式呈现。
+        ${t('chat.welcomeSub')}
       </p>
     </div>
   `;

@@ -16,18 +16,15 @@ export interface StatusBarProps {
 }
 
 export function renderStatusBar(props: StatusBarProps): string {
-  let dotColor = '#EF4444'; // Red for disconnected/error
-  let statusText = '未连接';
-  let pulseAnimation = '';
+  let dotColor = 'var(--destructive)'; // Red for disconnected/error
+  let statusText = t('status.disconnected');
 
   if (props.connectionStatus === 'connected') {
-    dotColor = '#10B981'; // Green
-    statusText = '已连接';
-    pulseAnimation = 'animation: flux-pulse 2.4s infinite cubic-bezier(0.4, 0, 0.6, 1);';
+    dotColor = 'var(--success)'; // Green
+    statusText = t('status.connected');
   } else if (props.connectionStatus === 'connecting') {
-    dotColor = '#F59E0B'; // Amber
-    statusText = '连接中...';
-    pulseAnimation = 'animation: flux-pulse 1.2s infinite ease-in-out;';
+    dotColor = 'var(--warning)'; // Amber
+    statusText = t('status.connecting');
   }
 
   const latencyText = props.connectionStatus === 'connected' ? `${props.latencyMs}ms` : '';
@@ -57,10 +54,9 @@ export function renderStatusBar(props: StatusBarProps): string {
           height: 6px;
           border-radius: 50%;
           background: ${dotColor};
-          box-shadow: 0 0 6px ${dotColor}aa;
+          box-shadow: 0 0 6px color-mix(in srgb, ${dotColor} 65%, transparent);
           display: inline-block;
           flex-shrink: 0;
-          ${pulseAnimation}
         "></span>
         <span style="font-size: 11px; font-weight: 500; color: ${props.connectionStatus === 'connected' ? 'var(--text-main)' : 'var(--text-muted)'};">${escapeHtml(statusText)}</span>
         

@@ -252,4 +252,73 @@ test('PromptNavigatorManager 核心状态机行为测试', async (t) => {
     assert.ok(host._logs.some((l) => l.msg === 'prompt jump target not mounted'), '必须显式告警而非静默失败');
     assert.equal(host._settlingStates.at(-1), false);
   });
+
+  await t.test('11. syncFromScroll 大会话触底收敛（canScroll 且 distanceToBottom <= 48 时平滑收敛到末条提问）', () => {
+    // 模拟大会话底部：视口顶部 100px 处仍在显示倒数第二条/第三条提问，
+    // 但滚动容器已滚至物理底部（distanceToBottom = 0 <= 48）
+    const rows = [
+      { getAttribute: () => 'u1', getBoundingClientRect: () => ({ top: -500, bottom: 200, height: 700 }) },
+      { getAttribute: () => 'u2', getBoundingClientRect: () => ({ top: 220, bottom: 350, height: 130 }) },
+    ];
+    const stream = {
+      scrollTop: 2600,
+      clientHeight: 400,
+      scrollHeight: 3000, // canScroll = true, distanceToBottom = 3000 - 2600 - 400 = 0 <= 48
+      getBoundingClientRect: () => ({ top: 0, bottom: 400 }),
+      querySelectorAll: () => rows,
+      querySelector: () => null,
+    };
+    const host = createMockHost({ streamElement: stream });
+    const manager = new PromptNavigatorManager(host);
+    manager.rebuildEntries();
+    manager.syncFromScroll();
+
+    // 如果未触底收敛，u1.bottom (200) > 100 会被误判为 u1 (index 0)；
+    // 触底收敛后必须精准收敛至末项 u2 (index 1)！
+    assert.equal(manager.getSnapshot().activeIndex, 1, '触底时必须平滑收敛至末条提问（index 1），不得停留在倒数历史提问');
+  });
+
+  await t.test('12. syncFromScroll 短会话不可滚时禁用触底收敛，保持常规阅读线判定', () => {
+    // 短会话：总高度 300px <= clientHeight 400px + 8，canScroll = false
+    const rows = [
+      { getAttribute: () => 'u1', getBoundingClientRect: () => ({ top: 20, bottom: 150, height: 130 }) },
+      { getAttribute: () => 'u2', getBoundingClientRect: () => ({ top: 160, bottom: 250, height: 90 }) },
+    ];
+    const stream = {
+      scrollTop: 0,
+      clientHeight: 400,
+      scrollHeight: 300, // 无法滚动
+      getBoundingClientRect: () => ({ top: 0, bottom: 400 }),
+      querySelectorAll: () => rows,
+      querySelector: () => null,
+    };
+    const host = createMockHost({ streamElement: stream });
+    const manager = new PromptNavigatorManager(host);
+    manager.rebuildEntries();
+    manager.syncFromScroll();
+
+    // 短会话中 u1 穿过 100px 阅读线，且不可滚动，不得被盲目收敛到 u2
+    assert.equal(manager.getSnapshot().activeIndex, 0, '不可滚动短会话不得被触底逻辑误劫持');
+  });
+
+  await t.test('13. jumpToPrompt 带有意图锁定，落定后目标在视口内时保持激活，防止被阅读线反弹洗掉', () => {
+    // 模拟点击 u1 跳转，u1 位于视口内部 [top: 50, bottom: 150]
+    const u1Node = {
+      getBoundingClientRect: () => ({ top: 50, bottom: 150, height: 100 }),
+    };
+    const stream = {
+      scrollTop: 2580,
+      clientHeight: 400,
+      scrollHeight: 3000,
+      getBoundingClientRect: () => ({ top: 0, bottom: 400 }),
+      querySelectorAll: (sel) => (sel.includes('u1') ? [u1Node] : []),
+      querySelector: (sel) => (sel.includes('u1') ? u1Node : null),
+    };
+    const host = createMockHost({ streamElement: stream });
+    const manager = new PromptNavigatorManager(host);
+    manager.rebuildEntries();
+
+    manager.jumpToPrompt('u1');
+    assert.equal(manager.getSnapshot().activeIndex, 0, '跳转目标在视口内时必须保持 u1 激活，严禁被触底收敛或读线反弹');
+  });
 });

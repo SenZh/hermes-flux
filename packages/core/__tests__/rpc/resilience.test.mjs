@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeSessionsResult, extractAvailableModels } from '../../dist/models/types.js';
+import { normalizeSessionsResult, extractAvailableModels, extractModelDetails } from '../../dist/models/types.js';
 import { HermesGatewayClient } from '../../dist/rpc/client.js';
 
 test('Core Model Extractors - normalizeSessionsResult', async (t) => {
@@ -126,6 +126,47 @@ test('Core Model Extractors - extractAvailableModels', async (t) => {
 
     // 3. Assert
     assert.deepEqual(models, fallbacks);
+  });
+
+  await t.test('normalizeSessionsResult and extractModelDetails safely handle malformed payloads', () => {
+    for (const bad of [undefined, null, 42, 'invalid', true]) {
+      assert.deepEqual(normalizeSessionsResult(bad), []);
+      assert.deepEqual(extractModelDetails(bad), []);
+    }
+
+    assert.deepEqual(extractModelDetails([]), [], '顶层数组不得被 isRecord 视为对象');
+    assert.deepEqual(normalizeSessionsResult([null, undefined, 123, 'str', {}, ['nested']]), []);
+    assert.deepEqual(
+      normalizeSessionsResult({ sessions: [null, 'bad', ['nested'], { id: 'ok-1', title: 123 }] }).map((s) => s.id),
+      ['ok-1']
+    );
+
+    const details = extractModelDetails({
+      providers: [
+        null,
+        'bad',
+        ['nested'],
+        { slug: 'p1', models: [null, 42, ['nested'], 'm1', { id: 'm2' }] },
+      ],
+      models: [
+        null,
+        99,
+        ['nested'],
+        'm3',
+        { id: 'm4', name: 'Model 4' },
+        { id: 'm5' },
+      ],
+    });
+    assert.deepEqual(
+      details.map((m) => ({ id: m.id, name: m.name })),
+      [
+        { id: 'm1', name: 'm1' },
+        { id: 'm2', name: 'm2' },
+        { id: 'm3', name: 'm3' },
+        { id: 'm4', name: 'Model 4' },
+        { id: 'm5', name: 'm5' },
+      ]
+    );
   });
 });
 

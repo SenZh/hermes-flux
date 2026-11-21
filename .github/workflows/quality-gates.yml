@@ -72,9 +72,9 @@ jobs:
 
       - name: Gate 0/4 · 静态门禁（架构 / 换肤 / i18n / 性能）
         run: node scripts/gates/run.mjs
-        # 默认棘轮模式：新增违规一律阻断，存量债务（314 条）放行。
+        # 默认棘轮模式：新增违规一律阻断，存量债务基线放行（当前存量已清零）。
         # 刻意不在 CI 用 --strict：若 CI 因历史债务常红，它必然被忽略，
-        # 门禁随即名存实亡。存量清偿进度由下方独立的非阻断任务观测。
+        # 门禁随即名存实亡。存量清偿进度由下方独立的观测任务写入 Summary。
 
       - name: Gate 1 · 全栈严格类型
         run: npm run typecheck
@@ -137,11 +137,10 @@ jobs:
         run: npm run build
 
   debt-progress:
-    # 存量债务清偿进度观测。刻意设为非阻断：
-    # 它的产出是「还欠多少」的信息，而不是「这次提交能不能进」的裁决。
+    # 存量债务清偿进度观测：将 --strict --json 结果写入 Job Summary，
+    # 避免历史冻结债务或观察性统计触发无意义的 CheckRun 红灯，同时在出现新增阻断违规时仍失败。
     name: 存量债务进度
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -149,5 +148,5 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - run: npm ci --ignore-scripts
-      - name: 全量严格扫描（预期失败，用于量化剩余债务）
-        run: node scripts/gates/run.mjs --strict
+      - name: 存量债务进度观测（输出至 Job Summary）
+        run: node scripts/gates/report-debt-progress.mjs
