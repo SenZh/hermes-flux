@@ -26,6 +26,24 @@
 
 export const SESSION_DRAFT_STORAGE_KEY = 'hermes_flux_session_drafts';
 
+/**
+ * 判定草稿文本是否为系统或指令执行报错（防范报错文本逃逸为持久草稿）
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   指令失败提示（如 `/compress` 超时报错）可能在异常路径或用户反馈复制时进入输入框或草稿存储。
+ *   若存入 SessionDraftStore，会在跨会话切换或重启应用后阴魂不散地反复向输入框回填。
+ */
+export function isCorruptedSystemErrorDraft(text: string): boolean {
+  if (!text) return false;
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  return (
+    /^(?:\u6307\u4ee4\s+\S+\s+\u6267\u884c\u5931\u8d25|Command\s+\S+\s+failed):/i.test(trimmed) ||
+    /RPC request '.*?' with id \d+ timed out/i.test(trimmed) ||
+    /skill command: use command\.dispatch for/i.test(trimmed)
+  );
+}
+
 export interface SessionDraftStore {
   /** 读取指定会话的草稿；不存在返回空串 */
   get(sessionId: string): string;
@@ -74,8 +92,18 @@ export function createSessionDraftStore(options: SessionDraftOptions = {}): Sess
       if (!raw) return;
       const parsed: unknown = JSON.parse(raw);
       if (!parsed || typeof parsed !== 'object') return;
+      let hasCorrupted = false;
       for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-        if (typeof v === 'string' && v.trim()) drafts.set(k, v);
+        if (typeof v === 'string' && v.trim()) {
+          if (isCorruptedSystemErrorDraft(v)) {
+            hasCorrupted = true;
+          } else {
+            drafts.set(k, v);
+          }
+        }
+      }
+      if (hasCorrupted) {
+        persist();
       }
     } catch (err) {
       // gate-degrade: 本地草稿恢复失败时回落到空草稿，属于可选加速
@@ -93,8 +121,8 @@ export function createSessionDraftStore(options: SessionDraftOptions = {}): Sess
     },
     set: (sessionId, text) => {
       if (!sessionId) return;
-      if (!text.trim()) {
-        // 空白草稿等价于没有草稿：删掉它，避免"看似有草稿"造成的误判
+      if (!text.trim() || isCorruptedSystemErrorDraft(text)) {
+        // 空白草稿或系统错误等价于没有草稿：删掉它，避免报错阴魂不散
         if (!drafts.has(sessionId)) return;
         drafts.delete(sessionId);
         persist();

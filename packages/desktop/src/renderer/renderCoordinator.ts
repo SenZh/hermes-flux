@@ -19,6 +19,7 @@
  *   - 保持视口物理稳定性与 120 FPS 响应。
  */
 
+import { isCorruptedSystemErrorDraft } from './persistence/sessionDrafts.js';
 import {
   mountTitlebar,
   mountLeftRail,
@@ -233,6 +234,7 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
 
   let lastInspectorCollapsed = true;
   let inspectorMotionController: ReturnType<typeof attachMotionController> | null = null;
+  let lastRenderedSessionId: string | null = null;
 
   /**
    * 【单在途渲染后贴底句柄 (Why)】
@@ -593,8 +595,11 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
     ensurePostCommitPinObservers();
 
     const existingInput = document.getElementById('dock-prompt-input') as HTMLTextAreaElement | null;
-    const draftText = existingInput ? existingInput.value : '';
-    const inputHadFocus = Boolean(existingInput) && document.activeElement === existingInput;
+    const isSessionTransition = deps.isSessionEnterPending() || (lastRenderedSessionId !== null && lastRenderedSessionId !== state.activeSessionId);
+    const rawDraftText = existingInput ? existingInput.value : '';
+    // 【会话隔离守卫 (Why)】跨会话过渡期或输入框残留系统报错时，绝不作为合法草稿记忆，杜绝幽灵报错跨会话复活
+    const draftText = isSessionTransition || isCorruptedSystemErrorDraft(rawDraftText) ? '' : rawDraftText;
+    const inputHadFocus = Boolean(existingInput) && document.activeElement === existingInput && !isSessionTransition;
     const caretStart = existingInput?.selectionStart ?? draftText.length;
     const caretEnd = existingInput?.selectionEnd ?? draftText.length;
 
@@ -1082,9 +1087,11 @@ export function createRenderCoordinator(deps: RenderCoordinatorDeps): RenderCoor
       pinBottom,
       anchor: streamAnchor.id,
     });
+    lastRenderedSessionId = state.activeSessionId;
   }
 
   function dispose(): void {
+    lastRenderedSessionId = null;
     cancelActivePostRenderPin();
     postCommitPinObservers?.dispose();
     if (inspectorMotionController) {

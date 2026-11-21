@@ -172,12 +172,44 @@ test('SessionOperationService - 核心生命周期与状态切换测试', async 
     assert.deepEqual(enters[0], { id: 'sess-next', options: undefined }, '切会话必须锁存进入计划');
     assert.equal(deps.getPromptInputValue(), '旧会话草稿内容', '空输入框切入时必须恢复旧草稿');
 
-    // 场景 B: 用户已经键入文字时不被冲刷
+    // 场景 B: 用户在网络加载期间已键入文字时不被冲刷
     deps.sessionDrafts.set('sess-current', '更旧草稿');
-    deps.setPromptInputValue('正在实时输入的文字');
+    deps.loadMessages = async () => {
+      // 模拟网络加载异步期间，用户在空白输入框中敲入了实时文字
+      deps.setPromptInputValue('正在实时输入的文字');
+    };
     await service.selectSession('sess-current');
     assert.equal(capturedAnchors, 2, '再次切离会话时继续捕获快照');
-    assert.equal(deps.getPromptInputValue(), '正在实时输入的文字', '非空输入框绝对不可被草稿冲刷');
+    assert.equal(deps.getPromptInputValue(), '正在实时输入的文字', '加载期间敲入的文字绝对不可被草稿冲刷');
+  });
+
+  await t.test('3b. selectSession: 切换会话时必须立即重置 dockNotice 并清除定时器', async () => {
+    let clearedTimerCalls = 0;
+    const { deps, state } = createMockDeps({
+      clearTimedDockNotice: () => { clearedTimerCalls += 1; },
+    });
+    state.dockNotice = "指令 /compress 执行失败: RPC request 'slash.exec' with id 74 timed out after 25000ms";
+    const service = createSessionOperationService(deps);
+
+    await service.selectSession('sess-next');
+
+    assert.equal(state.dockNotice, '', '切换会话时旧会话的 dockNotice 必须被重置为空');
+    assert.equal(clearedTimerCalls, 1, '切换会话时必须触发 clearTimedDockNotice 清除定时器');
+  });
+
+  await t.test('3c. selectSession: 切离会话时立即清空 DOM，无草稿新会话输入框严格为空，且报错文本绝对禁止暂存为草稿', async () => {
+    const { deps, state } = createMockDeps();
+    const service = createSessionOperationService(deps);
+
+    // 假设旧会话输入框中有残留的报错文本
+    const errorText = "指令 /compress 执行失败: RPC request 'slash.exec' with id 74 timed out after 25000ms";
+    deps.setPromptInputValue(errorText);
+
+    // 切换至没有任何草稿的新会话 sess-clean
+    await service.selectSession('sess-clean');
+
+    assert.equal(deps.sessionDrafts.has('sess-current'), false, '旧会话中的报错文本绝对不得被存入草稿 store');
+    assert.equal(deps.getPromptInputValue(), '', '新会话无草稿时输入框必须严格为空，绝不残留旧会话内容');
   });
 
   await t.test('4. exportMarkdown: 导出口径与视图一致，过滤 hidden 机器行', async () => {

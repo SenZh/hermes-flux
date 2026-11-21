@@ -284,7 +284,7 @@ const state: AppState = {
 const logApp = createLogger('app'), logRender = createLogger('render'), logSession = createLogger('session'), logStream = createLogger('stream'), logScroll = createLogger('scroll');
 
 let gatewayClient: HermesGatewayClient | null = null, currentTicket: string | null = null;
-let sessionsRefreshTimer: ReturnType<typeof setTimeout> | null = null, dockNoticeDismissTimer: ReturnType<typeof setTimeout> | null = null;
+let sessionsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let activeStreamingMessageId: string | null = null, activeStreamingStoredSessionId: string | null = null;
 let activeStreamingLiveId: string | null = null, activeStreamingBotName: string | null = null, activeLoadMessagesGeneration = 0;
 
@@ -735,6 +735,7 @@ sessionOperationService = createSessionOperationService({
   getState: () => state, getGatewayClient: () => gatewayClient, getDesktopApi: () => desktopApi,
   getCurrentTicket: () => currentTicket ?? null, getEffectiveUrl: (url) => getEffectiveUrl(url ?? state.gatewayUrl),
   render: () => render(), t, showToast, setTimedDockNotice: (m, d) => setTimedDockNotice(m, d),
+  clearTimedDockNotice: () => clearTimedDockNotice({ skipRender: true }),
   restoreComposerFocus: () => restoreComposerFocus(), sessionDrafts, sessionMessagesCache,
   unreadSessionIds, activeRunningSessionIds, activityTransitionTracker,
   sessionHandleRegistry: defaultSessionHandleRegistry, cacheService,
@@ -939,6 +940,7 @@ const isStreamingActiveForCurrentSession = () => turnExecutionService.isStreamin
 const clearPresenceTerminal = () => turnExecutionService.clearPresenceTerminal();
 const armPresenceTerminal = (t: NonNullable<AppState['presenceTerminal']>) => turnExecutionService.armPresenceTerminal(t);
 const setTimedDockNotice = (msg: string, d = 4000) => turnExecutionService.setTimedDockNotice(msg, d);
+const clearTimedDockNotice = (options?: { skipRender?: boolean }) => turnExecutionService.clearTimedDockNotice(options);
 const interruptTurn = () => turnExecutionService.interruptTurn();
 const sendGroupMessage = (roomId: string, text: string) => turnExecutionService.sendGroupMessage(roomId, text);
 const syncGroupRoomLogsToState = (roomId: string, logs: readonly GroupMessageEntry[]) => turnExecutionService.syncGroupRoomLogsToState(roomId, logs);
@@ -1021,7 +1023,7 @@ const inputDockController = createInputDockController({
   requestSlashCompletion: (prefix) => inputCompletion.requestSlashCompletion(prefix),
   requestPathCompletion: (query, agentItems) => inputCompletion.requestPathCompletion(query, agentItems),
   isStreamingActiveForCurrentSession: () => isStreamingActiveForCurrentSession(), t: (key, params) => t(key, params),
-  clearDockNoticeDismissTimer: () => { if (dockNoticeDismissTimer) { clearTimeout(dockNoticeDismissTimer); dockNoticeDismissTimer = null; } },
+  clearDockNoticeDismissTimer: () => clearTimedDockNotice({ skipRender: true }),
   setTimedDockNotice: (msg, dur) => setTimedDockNotice(msg, dur), getGatewayClient: () => gatewayClient,
   ensureLiveSessionId: () => ensureLiveSessionId(), createNewSession: () => createNewSession(),
   sendMessage: (text) => sendMessage(text), interactiveService: interactiveService,
