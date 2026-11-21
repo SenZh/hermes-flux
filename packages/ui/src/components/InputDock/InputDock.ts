@@ -245,6 +245,20 @@ const BOOK_GLYPH = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" 
 
 const BOT_GLYPH = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>`;
 
+const REFRESH_GLYPH = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>`;
+
+const STAR_OUTLINE_GLYPH = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
+
+const STAR_FILLED_GLYPH = `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
+
+const CLOCK_GLYPH = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`;
+
+const CHEVRON_DOWN_GLYPH = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>`;
+
+const CHEVRON_RIGHT_GLYPH = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>`;
+
+const CHECK_GLYPH = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>`;
+
 const APPROVAL_ICON: Record<ApprovalMode, string> = {
   manual: LOCK_GLYPH,
   smart: SHIELD_CHECK_GLYPH,
@@ -355,7 +369,7 @@ export function renderInputDock(props: InputDockProps): string {
                 <div class="model-dropdown__search">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
                   <input id="dock-model-search-input" type="text" placeholder="${t('dock.searchModel')}" value="${escapeHtml(props.modelSearchQuery || '')}" aria-label="${t('dock.searchModel')}" />
-                  <button id="btn-refresh-models" class="model-dropdown__refresh" type="button" title="${t('dock.refresh')}" aria-label="${t('dock.refresh')}">↻</button>
+                  <button id="btn-refresh-models" class="model-dropdown__refresh" type="button" title="${t('dock.refresh')}" aria-label="${t('dock.refresh')}">${REFRESH_GLYPH}</button>
                 </div>
 
                 <div id="model-picker-scroll-list" class="model-dropdown__list" role="listbox" aria-label="${t('dock.selectModel')}">
@@ -371,7 +385,7 @@ export function renderInputDock(props: InputDockProps): string {
                       return `
                         <div class="model-cascade__item${isSelected ? ' active' : ''}" role="menuitemradio" aria-checked="${isSelected ? 'true' : 'false'}" data-level="${lvl}" tabindex="0">
                           <span>${escapeHtml(lvl === 'default' ? t('dock.reasoningDefault') : lvl === 'none' ? t('dock.reasoningNone') : lvl === 'low' ? t('dock.reasoningLow') : lvl === 'high' ? t('dock.reasoningHigh') : t('dock.reasoningMax'))}</span>
-                          ${isSelected ? '<span class="model-cascade__check" aria-hidden="true">✓</span>' : ''}
+                          ${isSelected ? `<span class="model-cascade__check" aria-hidden="true">${CHECK_GLYPH}</span>` : ''}
                         </div>
                       `;
                     })
@@ -812,7 +826,7 @@ export function renderModelPickerTree(props: InputDockProps): string {
         ? `
       <div class="model-picker-section" role="group" aria-label="${escapeHtml(t('dock.favorites'))}">
         <div class="model-picker-section__head">
-          <span aria-hidden="true">★</span>
+          <span class="model-picker-section__icon" aria-hidden="true">${STAR_FILLED_GLYPH}</span>
           <span>${escapeHtml(t('dock.favorites'))}</span>
         </div>
         ${favoriteItems.map((item) => renderModelItemRow(item, props.selectedModel, true)).join('')}
@@ -827,7 +841,7 @@ export function renderModelPickerTree(props: InputDockProps): string {
         ? `
       <div class="model-picker-section" role="group" aria-label="${escapeHtml(t('dock.recents'))}">
         <div class="model-picker-section__head">
-          <span aria-hidden="true">🕒</span>
+          <span class="model-picker-section__icon" aria-hidden="true">${CLOCK_GLYPH}</span>
           <span>${escapeHtml(t('dock.recents'))}</span>
         </div>
         ${recentItems.map((item) => renderModelItemRow(item, props.selectedModel, favorites.has(item.id))).join('')}
@@ -862,7 +876,7 @@ export function renderModelPickerTree(props: InputDockProps): string {
                   <span>${escapeHtml(displayName)}</span>
                   <span class="model-provider-group-header__count">(${models.length})</span>
                 </span>
-                <span class="provider-accordion-arrow" aria-hidden="true">${isCollapsed ? '▸' : '▾'}</span>
+                <span class="provider-accordion-arrow" aria-hidden="true">${isCollapsed ? CHEVRON_RIGHT_GLYPH : CHEVRON_DOWN_GLYPH}</span>
               </div>
               <!-- Accordion Body -->
               <div class="model-provider-items" role="group" aria-label="${escapeHtml(displayName)}" style="display: ${isCollapsed ? 'none' : 'block'};">
@@ -899,7 +913,7 @@ function renderModelItemRow(
   return `
     <div class="model-option${isSelected ? ' active' : ''}${locked ? ' is-locked' : ''}" data-model="${escapeHtml(item.id)}" data-provider="${escapeHtml(item.provider)}" data-locked="${locked ? 'true' : 'false'}" title="${lockHint}" role="option" aria-selected="${isSelected ? 'true' : 'false'}" aria-disabled="${locked ? 'true' : 'false'}" tabindex="0"${locked ? '' : ' aria-haspopup="menu"'}>
       <span class="model-option__main">
-        <span class="btn-toggle-favorite model-option__fav${isFav ? ' is-on' : ''}" data-model="${escapeHtml(item.id)}">${isFav ? '★' : '☆'}</span>
+        <span class="btn-toggle-favorite model-option__fav${isFav ? ' is-on' : ''}" data-model="${escapeHtml(item.id)}">${isFav ? STAR_FILLED_GLYPH : STAR_OUTLINE_GLYPH}</span>
         ${vendorIcon}
         <span class="model-option__name">${escapeHtml(item.name)}</span>
         ${renderModelBadge(item.variant, 'model-option__badge--name')}
@@ -909,8 +923,8 @@ function renderModelItemRow(
         ${locked ? `<span class="model-option__badge model-option__badge--meta">${escapeHtml(t('dock.modelLockedBadge'))}</span>` : ''}
         ${item.supportsVision ? `<span class="model-option__badge model-option__badge--meta">VISION</span>` : ''}
         ${contextBadge ? `<span class="model-option__context">${contextBadge}</span>` : ''}
-        ${isSelected ? '<span class="model-option__check" aria-hidden="true">✓</span>' : ''}
-        <span class="model-option__cascade" aria-hidden="true">›</span>
+        ${isSelected ? `<span class="model-option__check" aria-hidden="true">${CHECK_GLYPH}</span>` : ''}
+        <span class="model-option__cascade" aria-hidden="true">${CHEVRON_RIGHT_GLYPH}</span>
       </span>
     </div>
   `;
