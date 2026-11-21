@@ -341,13 +341,13 @@ test('rail-cockpit-form: 微轨按钮收编、header 形态与时间内联（真
     assert.equal(shellCheck.hasForeverChat, false, '标题栏禁止夹带 (Forever Chat) 冗余后缀');
     assert.equal(shellCheck.hasBotEmoji, false, '标题栏禁止使用 🤖 emoji 伪冒头像');
     assert.equal(shellCheck.greenDotExists, false, '标题栏中心禁止插入 session-live-pulse 小绿点');
-    assert.equal(shellCheck.titleFontSize, '12px', '顶栏标题字号必须收敛至 12px 极简规范');
-    assert.equal(shellCheck.titleText, 'Default 助理', '专职 Bot 标题必须直接呈现纯净 Bot 名称');
-    assert.equal(shellCheck.botAvatarExists, true, '专职 Bot 工位顶栏必须渲染真实 Bot 头像组件');
+    // 用户裁决（2026-11-21）：顶部标题栏保持纯粹空白，内部头像与标题全部去除
+    assert.equal(shellCheck.titleText, '', '用户裁决（2026-11-21）：顶部标题栏保持纯粹空白，不渲染会话标题');
+    assert.equal(shellCheck.botAvatarExists, false, '用户裁决（2026-11-21）：顶部标题栏保持纯粹空白，不渲染 Bot 头像');
     assert.equal(shellCheck.latencyText, '', '用户裁决（2026-11-20）：顶栏延迟数字必须彻底拔除，只保留连接指示点');
     assert.equal(shellCheck.settingsInLeftCluster, true, '用户裁决（2026-11-20）：设置键必须落在顶栏左簇');
 
-    // 切到群聊工位，验证群聊真实拼图微头像与纯净群名
+    // 切到群聊工位，验证群聊顶栏同样保持空白
     await evaluate(`(() => {
       window.__fluxState.activeFocus = { type: 'group', roomId: 'room-form-check' };
       window.__fluxRender();
@@ -365,8 +365,8 @@ test('rail-cockpit-form: 微轨按钮收编、header 形态与时间内联（真
     })()`);
 
     assert.equal(groupCheck.hasGroupEmoji, false, '群聊顶栏标题禁止包含 👥 伪 emoji');
-    assert.equal(groupCheck.titleText, '形态验证群', '群聊顶栏标题必须呈现纯净群名');
-    assert.equal(groupCheck.groupAvatarExists, true, '群聊工位顶栏必须渲染真实拼图微头像');
+    assert.equal(groupCheck.titleText, '', '用户裁决（2026-11-21）：群聊工位顶栏保持纯粹空白，不渲染群名');
+    assert.equal(groupCheck.groupAvatarExists, false, '用户裁决（2026-11-21）：群聊工位顶栏保持纯粹空白，不渲染拼图微头像');
   });
 
   // 出图取证（artifacts 不入 Git，教训 D.4：凡触碰视觉必须出图）

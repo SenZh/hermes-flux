@@ -19,9 +19,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '../../..');
 const read = (rel) => fs.readFileSync(path.join(repoRoot, rel), 'utf8');
 
-test('对话区 CSS：四个结构选择器、无裸色值、无 smooth、无裸字号', () => {
+test('对话区 CSS：五个结构选择器、无裸色值、无 smooth、无裸字号', () => {
   const css = read('packages/ui/src/styles/conversation.css').replace(/\/\*[\s\S]*?\*\//g, '');
-  for (const sel of ['.conversation-pod', '.conv-stream', '.conv-canvas', '.conv-dock-scrim']) {
+  for (const sel of ['.conversation-pod', '.conv-stream', '.conv-canvas', '.conv-dock-scrim', '.conv-top-scrim']) {
     assert.ok(css.includes(sel), `缺少结构选择器 ${sel}`);
   }
   assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(css), 'conversation.css 禁止色值字面量');
@@ -31,9 +31,9 @@ test('对话区 CSS：四个结构选择器、无裸色值、无 smooth、无裸
   assert.ok(!/font-size:\s*\d+px/.test(css), '禁止裸字号，必须使用字阶变量');
 });
 
-test('MiddlePod 四容器：结构类与 data-conv-layer 钩子，几何不得留在模板', () => {
+test('MiddlePod 结构容器：结构类与 data-conv-layer 钩子，几何不得留在模板', () => {
   const ts = read('packages/ui/src/components/MiddlePod/MiddlePod.ts');
-  for (const layer of ['stage', 'canvas', 'stream', 'scrim']) {
+  for (const layer of ['stage', 'canvas', 'stream', 'scrim', 'top-scrim']) {
     assert.ok(ts.includes(`data-conv-layer="${layer}"`), `缺少 data-conv-layer="${layer}"`);
   }
   assert.ok(!/padding:\s*24px 32px 180px/.test(ts), '画布内距必须迁入 CSS，不得留在模板');

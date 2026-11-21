@@ -24,10 +24,11 @@ test('Titlebar renders window controls, global toggles and no profile switcher',
   assert.match(markup, /data-testid="react-titlebar"/);
   assert.match(markup, /data-left-rail-collapsed="false"/);
   assert.match(markup, /toggle-inspector-btn/);
-  // 产品裁决（PR-3e）：顶栏承载真实头像，不再承载 profile 下拉与 session-live-pulse
+  // 产品裁决（2026-11-21）：顶栏居中保持纯粹空白，移除头像与会话标题
   assert.doesNotMatch(markup, /titlebar-profile-select/);
   assert.doesNotMatch(markup, /session-live-pulse/);
-  assert.match(markup, /titlebar-bot-avatar/);
+  assert.doesNotMatch(markup, /titlebar-bot-avatar/);
+  assert.doesNotMatch(markup, /titlebar-session-title/);
   // 产品裁决（2026-11-20）：顶栏延迟数字与深浅色切换按钮全部拔除，
   // 设置键左移到左簇与 ☰ 同处一行；顶栏只保留连接指示点。
   assert.doesNotMatch(markup, /titlebar-latency/, '顶栏不得再渲染延迟数字读数');

@@ -17,9 +17,9 @@ const base = {
   isStreaming: false,
 };
 
-test('空态：四个结构钩子齐全，渲染 conv-state', () => {
+test('空态：五个结构钩子齐全，渲染 conv-state', () => {
   const html = renderToStaticMarkup(React.createElement(ConversationStage, { snapshot: base }));
-  for (const layer of ['stage', 'stream', 'canvas', 'scrim']) {
+  for (const layer of ['stage', 'stream', 'canvas', 'scrim', 'top-scrim']) {
     assert.ok(html.includes(`data-conv-layer="${layer}"`), `缺少 data-conv-layer="${layer}"`);
   }
   assert.ok(html.includes('conv-state'), '空态必须渲染 conv-state');
