@@ -23,9 +23,9 @@ const PRIMITIVES_DIR = path.join(UI_SRC, 'components-react/primitives');
  */
 const CONSUMPTION = {
   ActivityIndicator: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/settings/BotManagerView.tsx'] },
-  Button: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/settings/LoadBoundary.tsx', 'components-react/settings/ProvidersAdminPanel.tsx', 'components-react/settings/ModelPicker.tsx', 'components-react/settings/BotManagerView.tsx', 'components-react/settings/LoginPanel.tsx', 'components-react/gallery/Gallery.tsx'] },
-  Input: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/settings/ProvidersAdminPanel.tsx', 'components-react/settings/ModelPicker.tsx', 'components-react/settings/BotManagerView.tsx'] },
-  Select: { state: 'consumed', consumers: ['components-react/settings/SettingsModal.tsx', 'components-react/settings/BotManagerView.tsx', 'components-react/settings/ProvidersAdminPanel.tsx'] },
+  Button: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/settings/LoadBoundary.tsx', 'components-react/settings/ProvidersAdminPanel.tsx', 'components-react/settings/AddProviderDialog.tsx', 'components-react/settings/SwitchDefaultProviderDialog.tsx', 'components-react/settings/ModelPicker.tsx', 'components-react/settings/BotManagerView.tsx', 'components-react/settings/LoginPanel.tsx', 'components-react/gallery/Gallery.tsx'] },
+  Input: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/settings/ProvidersAdminPanel.tsx', 'components-react/settings/AddProviderDialog.tsx', 'components-react/settings/SwitchDefaultProviderDialog.tsx', 'components-react/settings/ModelPicker.tsx', 'components-react/settings/BotManagerView.tsx'] },
+  Select: { state: 'consumed', consumers: ['components-react/settings/SettingsModal.tsx', 'components-react/settings/BotManagerView.tsx'] },
   Textarea: { state: 'consumed', consumers: ['components-react/settings/BotManagerView.tsx'] },
   Badge: { state: 'consumed', consumers: ['components-react/settings/SettingsModal.tsx', 'components-react/settings/BotHeroCarousel.tsx', 'components-react/gallery/Gallery.tsx'] },
   Dialog: {
@@ -33,7 +33,8 @@ const CONSUMPTION = {
     consumers: [
       'components-react/settings/SettingsModal.tsx',
       'components-react/settings/ModelPicker.tsx',
-      'components-react/settings/ProvidersAdminPanel.tsx',
+      'components-react/settings/AddProviderDialog.tsx',
+      'components-react/settings/SwitchDefaultProviderDialog.tsx',
       'components-react/settings/BotManagerView.tsx',
     ],
   },

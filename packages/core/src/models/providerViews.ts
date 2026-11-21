@@ -249,14 +249,6 @@ function subscriptionStateForProfile(option: ProfileModelOption | undefined, slu
   return hit?.isCurrent ? 'active' : 'ready';
 }
 
-function apiUrlFor(options: readonly ProfileModelOption[], slug: string): string {
-  for (const option of options) {
-    const hit = option.rows.find((row) => row.slug === slug);
-    if (hit?.apiUrl) return hit.apiUrl;
-  }
-  return '';
-}
-
 /**
  * 把订阅与自定义端点归并成一张表。
  *
@@ -489,33 +481,95 @@ export function profilesWithProvider(view: ProviderView): string[] {
 }
 
 /**
+ * 切换默认提供商弹窗中的候选组（按提供商归并，列出某 BOT 可改选的其他模型）。
+ */
+export interface ReplacementProviderGroup {
+  providerId: string;
+  providerKey: string;
+  providerName: string;
+  kind: ProviderView['kind'];
+  baseUrl?: string;
+  models: string[];
+}
+
+/**
+ * 收集某个 BOT 可用于替补默认模型的提供商与模型分组。
+ *
+ * 【设计意图 (Why)】
+ *   用户点击「当前默认提供方」头像想关闭它时，不能直接删除/移除（否则该 BOT 失去可用模型）。
+ *   就地弹窗展示该 BOT 名下其余可用的提供商与模型，让用户直接选定替补项后串行切换并关闭。
+ *
+ * 【防范的历史坑 (Pitfall)】
+ *   1. `custom:fn` 与 `fn` 在自定义端点目录和运行时视图里可能混用，直接用 `===` 排除会把正想关掉的那家自己列进候选；
+ *      必须统一走 `normalizeEndpointId`。
+ *   2. 已关闭（`absent`）、读取失败（`error`）或没有任何可用模型的提供商绝不能进候选列表，否则切换必定失败。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 纯函数、零 DOM、零网络；
+ *   2. 仅包含目标 `profile` 状态为 `ready` 或 `active` 的其他提供商，且模型列表去重去空后非空；
+ *   3. 自定义端点透传 `baseUrl`（来自 `view.detail`），订阅不带 `baseUrl`。
+ */
+export function collectReplacementModels(
+  views: readonly ProviderView[],
+  excludeProviderId: string,
+  profile: string,
+): ReplacementProviderGroup[] {
+  const excluded = normalizeEndpointId(excludeProviderId);
+  const groups: ReplacementProviderGroup[] = [];
+
+  for (const view of views) {
+    if (normalizeEndpointId(view.id) === excluded) continue;
+    const agent = view.agents.find((item) => item.profile === profile);
+    if (!agent || (agent.state !== 'ready' && agent.state !== 'active')) continue;
+
+    const seen = new Set<string>();
+    const models: string[] = [];
+    for (const raw of view.models) {
+      const model = raw.trim();
+      if (!model || seen.has(model)) continue;
+      seen.add(model);
+      models.push(model);
+    }
+    if (models.length === 0) continue;
+
+    groups.push({
+      providerId: view.id,
+      providerKey: view.key,
+      providerName: view.name,
+      kind: view.kind,
+      baseUrl: view.kind === 'custom' && view.detail ? view.detail : undefined,
+      models,
+    });
+  }
+
+  return groups;
+}
+
+/**
  * 勾选/取消勾选某一个 Agent 时应当发生什么。
  *
  * 【设计意图 (Why)】
- *   界面上一个勾选框同时承担三件事：新增绑定、移除绑定、以及"这件事现在做不了"。
- *   把判定放在纯函数里，视图只负责渲染，测试才能穷举四种状态 × 两个方向。
- *   把"配置给这个 Bot"与"切为这个 Bot 的默认模型"拆成两步意图，防止误点直接覆盖当前主模型。
+ *   界面上每个 BOT 头像只表达一件事：该提供商在这个 BOT 上「开启 / 关闭」。
+ *   把判定收进纯函数里，视图只负责渲染，测试才能穷举四种状态 × 两个方向。
+ *   开启提供商只建立该 BOT 的可用配置（`makeDefault: false`），绝不顺手改写当前默认模型。
  *
  * 【防范的历史坑 (Pitfall)】
  *   1. `active` 的 Agent 一旦被取消勾选，它的当前主模型就指向一个不存在的 provider。
- *      用户已确认的策略是"先改模型再移除"，所以这里必须阻断，而不是交给网关报错。
+ *      策略是"先切换模型再关闭"，所以这里必须阻断，而不是交给网关报错。
  *   2. `error` 的 Agent 与 `absent` 长得像，但前者是"读不到"，不能当成"没配"去写。
- *   3. 自定义端点的新增需要明文密钥（GET 不回密钥），订阅不需要（登录态按 profile 回落）。
- *      这个差异必须在计划里显式表达，不能由视图自己猜。
- *   4. 点击未启用头像曾直接按 `makeDefault: true` 落盘，只想给 Bot 挂载备选提供商时被迫改掉主模型。
- *      现在必须由用户显式给出意图，缺意图一律先走 `confirm-attach`。
+ *   3. 自定义端点的新增需要明文密钥（先复用兄弟 BOT，无可读密钥时就地补填），订阅不需要
+ *      （登录态按 profile 独立）。这个差异必须在计划里显式表达，不能由视图自己猜。
+ *   4. 过去头像同时承载"默认模型"与"开启/关闭"双语义，导致点击未开启头像还要弹二选一确认条。
+ *      现在已剥离"默认"语义，勾选即纯开启（`makeDefault: false`）。
  *
  * 【约束与规则 (Rules)】
  *   1. 纯函数，不做任何网络与状态写入；
  *   2. 已处于目标状态的点击返回 `noop`，不发无意义请求；
  *   3. 未知 profile 返回 `unknown-profile`，由调用方提示重读，不静默忽略；
- *   4. 勾选未配置的自定义端点且缺少 `attachIntent` 时，必须返回 `confirm-attach`，不得猜默认意图。
+ *   4. 勾选未配置的自定义端点直接返回 `attach` 且恒为 `makeDefault: false`。
  */
-export type BindingAttachIntent = 'enable-only' | 'enable-and-default';
-
 export type BindingTogglePlan =
-  | { kind: 'confirm-attach'; profile: string; requiresApiKey: boolean }
-  | { kind: 'attach'; profile: string; requiresApiKey: boolean; makeDefault: boolean; intent: BindingAttachIntent }
+  | { kind: 'attach'; profile: string; requiresApiKey: boolean; makeDefault: false }
   | { kind: 'login-required'; profile: string }
   | { kind: 'detach'; profile: string }
   | { kind: 'logout-subscription'; profile: string }
@@ -528,10 +582,8 @@ export type BindingTogglePlan =
  * 勾选一个未配置的 Agent 时该落到哪个模型。
  *
  * 【设计意图 (Why)】
- *   勾选同时要回答"用哪个模型"，否则只能建立配置关系、主模型纹丝不动，用户点完看到
- *   没有绿环，会认为点击失灵。默认模型优先取端点自己声明的 `model`，但它可能已经不在
- *   运行时目录里（端点换过上游/代理），此时必须退到运行时目录的第一个，绝不把主模型
- *   指向一个选不到的 id。
+ *   自定义端点配置接口要求携带一个有效模型名。优先取端点自己声明的 `model`，但它可能已经不在
+ *   运行时目录里（端点换过上游/代理），此时必须退到运行时目录的第一个，绝不写入选不到的 id。
  *
  * 【约束与规则 (Rules)】
  *   1. 纯函数：只做集合判定，不猜别名、不规范化大小写（模型 id 区分大小写）；
@@ -550,7 +602,6 @@ export function planBindingToggle(
   view: ProviderView,
   profile: string,
   nextChecked: boolean,
-  attachIntent?: BindingAttachIntent,
 ): BindingTogglePlan {
   const agent = view.agents.find((item) => item.profile === profile);
   if (!agent) return { kind: 'unknown-profile', profile };
@@ -563,13 +614,11 @@ export function planBindingToggle(
     // 订阅没有可写的端点记录：它的绑定由该 profile 上的 OAuth 登录态决定，
     // 客户端没有任何接口能把"登录态"复制到另一个 Agent。所以只能引导去登录。
     if (view.kind === 'subscription') return { kind: 'login-required', profile };
-    if (!attachIntent) return { kind: 'confirm-attach', profile, requiresApiKey: true };
     return {
       kind: 'attach',
       profile,
       requiresApiKey: true,
-      makeDefault: attachIntent === 'enable-and-default',
-      intent: attachIntent,
+      makeDefault: false,
     };
   }
 

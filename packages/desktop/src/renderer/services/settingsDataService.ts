@@ -142,9 +142,17 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
   let botDirtyGuard: (() => boolean) | null = null;
   let pendingBotExit: BotExitTarget | null = null;
 
+  type BindingFlightResult = ToggleProviderAgentResult & {
+    confirmRequired?: boolean;
+    step?: 'switch' | 'disable';
+  };
+
+  let providerCatalogGen = 0;
+  let providerCatalogInFlight = false;
+
   const inFlightProviderBindings = new Map<
     string,
-    { signature: string; promise: Promise<ToggleProviderAgentResult> }
+    { signature: string; promise: Promise<BindingFlightResult> }
   >();
 
   function scopedProfileName(): string {
@@ -202,12 +210,33 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
     return providerAdminController;
   }
 
+  /**
+   * 刷新模型与提供商聚合视图（Stale-While-Revalidate + 代际竞态防护）。
+   *
+   * 【设计意图 (Why)】
+   *   从 BOT 配置页修改默认模型或增删提供商后切回设置页，必须拉回最新 `providerViews`，
+   *   同时在已有 `ready` 快照时避免重绘加载骨架，防止切换默认模型或列表跳闪。
+   *
+   * 【防范的历史坑 (Pitfall)】
+   *   1. 若同步触发 `deps.render()` 位于 `try` 块外部，一旦渲染异常就会把 `providerCatalogInFlight`
+   *      永久锁死在 `true`，导致后续所有切页自动刷新全部失效；
+   *   2. 乱序慢响应曾在后发先至之后回写，用过时 `active` 状态覆盖最新目录。
+   *
+   * 【约束与规则 (Rules)】
+   *   1. 递增 `providerCatalogGen` 并把所有写状态与首次渲染收进同一 `try/finally`，确保在途标记必清；
+   *   2. `try` 与 `catch` 回写前必须校验 `gen === providerCatalogGen`，丢弃任何迟到的旧响应。
+   */
   async function reloadProviderCatalog(): Promise<void> {
     const state = deps.getState();
     const agents = botRoster();
-    state.settingsProviderViews = { status: 'loading' };
-    deps.render();
+    const gen = ++providerCatalogGen;
+    providerCatalogInFlight = true;
     try {
+      // 已有就绪数据时做静默后台刷新，避免切页或保存 BOT 后闪烁空骨架或瞬时清空 BOT 面板模型目录。
+      if (state.settingsProviderViews.status !== 'ready') {
+        state.settingsProviderViews = { status: 'loading' };
+        deps.render();
+      }
       const desktopApi = deps.getDesktopApi?.();
       const rest = createProviderAdminRest({
         baseUrl: () => deps.getEffectiveUrl(state.gatewayUrl),
@@ -229,6 +258,7 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
         },
         describeError: (error) => deps.describeRpcError(error),
       });
+      if (gen !== providerCatalogGen) return;
       state.settingsProviderViews = { status: 'ready', data: result.views };
       state.settingsProviderFailures = result.failed;
       state.settingsCustomEndpoints = { status: 'ready', data: result.endpoints.map((entry) => entry.row) };
@@ -240,12 +270,15 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
         ? { status: 'ready', data: result.subscriptions }
         : { status: 'error', message: result.subscriptionsError || deps.t('settings.loadFailed') };
     } catch (error) {
+      if (gen !== providerCatalogGen) return;
       state.settingsProviderViews = { status: 'error', message: deps.describeRpcError(error) };
       state.settingsProviderFailures = [];
       state.settingsCustomEndpoints = { status: 'error', message: deps.describeRpcError(error) };
       state.settingsEndpointProfiles = {};
       state.settingsEndpointFailures = [];
       state.settingsSubscriptionCatalog = { status: 'error', message: deps.describeRpcError(error) };
+    } finally {
+      if (gen === providerCatalogGen) providerCatalogInFlight = false;
     }
     deps.render();
   }
@@ -365,7 +398,10 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
       translate: (key) => deps.t(key),
       describeError: (error) => deps.describeRpcError(error),
       notify: (message) => deps.showToast(message),
-      onProfilesChanged: () => { void deps.fetchProfiles(); },
+      onProfilesChanged: () => {
+        void deps.fetchProfiles();
+        void reloadProviderCatalog();
+      },
       onAvatarChanged: (botId, dataUrl) => {
         const key = botId.toLowerCase();
         if (dataUrl) deps.profileAvatarCache.set(key, dataUrl);
@@ -567,6 +603,21 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
     };
   }
 
+  /**
+   * 按需加载设置分区数据，并在切入提供商页时触发后台静默对齐。
+   *
+   * 【设计意图 (Why)】
+   *   即使用户先去 `BOT 配置` 改过默认模型（使 `settingsProviderViews.status` 已为 `ready`），
+   *   切回 `providers` 页也必须再向网关校准一次，消除旧状态残留导致的"切了默认还关不掉"。
+   *
+   * 【防范的历史坑 (Pitfall)】
+   *   曾因 `status === 'ready'` 就跳过刷新，造成页面持续展示改模型前的过时 `active` 状态；
+   *   若不检查 `!providerCatalogInFlight`，连续重绘会放大出重复目录请求。
+   *
+   * 【约束与规则 (Rules)】
+   *   1. `agents` 域仅在 `force` 或 `idle` 时预拉提供商目录，避免阻塞 BOT 配置页；
+   *   2. `providers` 域只要 `!providerCatalogInFlight && status !== 'loading'` 均静默校准。
+   */
   function ensureSettingsSectionData(section: SettingsSectionId, force = false): void {
     const state = deps.getState();
     if (section === 'agents') {
@@ -579,7 +630,7 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
     getSettingsController().ensureSection(section, force);
     if (section !== 'providers') return;
     if (state.profiles.length === 0) void getSettingsController().loadProfiles();
-    if (force || state.settingsProviderViews.status === 'idle') {
+    if (force || (!providerCatalogInFlight && state.settingsProviderViews.status !== 'loading')) {
       void reloadProviderCatalog();
     }
   }
@@ -703,8 +754,11 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
       },
       onProbeEndpoint: (draft) => getProviderAdminController().probe(draft),
       onSaveEndpoint: async (draft, options) => {
-        const outcome = await getProviderAdminController().save(scopedProfileName(), draft, {
-          fanOutTo: options.fanOutTo,
+        const targets = options.targetProfiles?.filter(Boolean) ?? [];
+        const primary = targets[0] ?? scopedProfileName();
+        const fanOutTo = targets.length > 0 ? targets.slice(1) : options.fanOutTo;
+        const outcome = await getProviderAdminController().save(primary, draft, {
+          fanOutTo,
           makeDefault: options.makeDefault,
           profileDisplayNames: Object.fromEntries(botRoster().map((bot) => [bot.profile, bot.displayName])),
         });
@@ -863,7 +917,7 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
           };
           deps.render();
         }),
-      onToggleProviderAgent: async (providerId, profile, nextChecked, apiKey, options) => {
+      onToggleProviderAgent: async (providerId, profile, nextChecked, apiKey) => {
         const controller = getProviderAdminController();
         const targetId = normalizeEndpointId(providerId);
         const view = state.settingsProviderViews.status === 'ready'
@@ -871,26 +925,28 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
           : undefined;
         if (!view) return { ok: false, message: deps.t('settings.providerDeleteUnknown') };
 
-        const plan = planBindingToggle(view, profile, nextChecked, options?.attachIntent);
+        const botDisplayName = botRoster().find((item) => item.profile === profile)?.displayName || profile;
+        const plan = planBindingToggle(view, profile, nextChecked);
         switch (plan.kind) {
           case 'noop':
             return { ok: true };
           case 'unknown-profile':
-            return { ok: false, message: deps.t('settings.providerToggleUnknownProfile', { profile }) };
+            return { ok: false, message: deps.t('settings.providerToggleUnknownProfile', { profile: botDisplayName }) };
           case 'blocked-active':
-            return { ok: false, message: deps.t('settings.providerToggleBlockedActive', { profile }) };
+            return { ok: false, message: deps.t('settings.providerToggleBlockedActive', { profile: botDisplayName }) };
           case 'blocked-error':
-            return { ok: false, message: plan.message || deps.t('settings.providerToggleBlockedError', { profile }) };
+            return {
+              ok: false,
+              message: plan.message || deps.t('settings.providerToggleBlockedError', { profile: botDisplayName }),
+            };
           case 'login-required':
-            return { ok: false, message: deps.t('settings.providerToggleLoginRequired', { profile }) };
-          case 'confirm-attach':
-            return { ok: false, confirmRequired: true, message: deps.t('settings.providerAttachConfirmRequired') };
+            return { ok: false, message: deps.t('settings.providerToggleLoginRequired', { profile: botDisplayName }) };
           default:
             break;
         }
 
         const flightKey = `${targetId}\u0000${profile}`;
-        const signature = plan.kind + (plan.kind === 'attach' ? plan.intent : '');
+        const signature = plan.kind;
         const existing = inFlightProviderBindings.get(flightKey);
         if (existing) {
           if (existing.signature === signature) return existing.promise;
@@ -924,7 +980,7 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
                     return {
                       ok: false,
                       needsKey: true,
-                      message: deps.t('settings.providerToggleNeedsKey', { profile }),
+                      message: deps.t('settings.providerToggleNeedsKey', { profile: botDisplayName }),
                     };
                   }
                   return { ok: false, message: copied.message || deps.t('settings.providerToggleFailed') };
@@ -969,6 +1025,103 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
         }
       },
       onNotify: (message) => deps.showToast(message),
+      /**
+       * 就地先为 BOT 改选新默认提供方/模型，成功后再关闭原自定义端点（INV-SWITCH-01）。
+       *
+       * 【设计意图 (Why)】
+       *   禁止直接对“当前默认提供方”执行关闭/移除；弹窗选定替补模型后必须在同一在途锁下严格串行完成两步。
+       *
+       * 【防范的历史坑 (Pitfall)】
+       *   1. 第一步切换默认若因高价确认或网络拒绝未落盘，一旦并发或继续执行 DELETE，会让 BOT 断供且无可回滚；
+       *   2. 服务层若依赖 UI 禁用而不校验 `disableView.kind !== 'custom'`，直接调用可能对订阅项误发 DELETE。
+       *
+       * 【约束与规则 (Rules)】
+       *   1. 与 `inFlightProviderBindings` 共享互斥键，同签名并发复用、异方向返回 busy；
+       *   2. 严格先调 `controller.useMainModel`，仅当 `switchResult.ok` 且非 `confirmRequired` 才调 `controller.remove`；
+       *   3. 仅允许关闭 `kind === 'custom'` 端点；第一步成功而第二步失败时无条件刷新目录反映最新默认模型。
+       */
+      onSwitchDefaultAndDisableProvider: async ({
+        profile,
+        disableProviderId,
+        newProviderId,
+        newModel,
+        confirmExpensive,
+      }) => {
+        const controller = getProviderAdminController();
+        const disableTargetId = normalizeEndpointId(disableProviderId);
+        const newTargetId = normalizeEndpointId(newProviderId);
+        const views = state.settingsProviderViews.status === 'ready' ? state.settingsProviderViews.data : [];
+        const disableView = views.find((item) => normalizeEndpointId(item.id) === disableTargetId);
+        const newView = views.find((item) => normalizeEndpointId(item.id) === newTargetId);
+        if (!disableView || !newView) {
+          return { ok: false, step: 'switch', message: deps.t('settings.providerDeleteUnknown') };
+        }
+        if (disableView.kind !== 'custom') {
+          return { ok: false, step: 'disable', message: deps.t('settings.providerToggleFailed') };
+        }
+        const model = newModel.trim();
+        if (!model || disableTargetId === newTargetId) {
+          return { ok: false, step: 'switch', message: deps.t('settings.providerToggleFailed') };
+        }
+
+        const flightKey = `${disableTargetId}\u0000${profile}`;
+        const signature = `switch-disable:${newTargetId}:${model}:${Boolean(confirmExpensive)}`;
+        const existing = inFlightProviderBindings.get(flightKey);
+        if (existing) {
+          if (existing.signature === signature) return existing.promise;
+          return { ok: false, step: 'switch', message: deps.t('settings.providerAttachBusy') };
+        }
+
+        const promise = (async (): Promise<BindingFlightResult> => {
+          // 1. 先切换目标 BOT 的默认提供方与模型；失败或要求高价确认时立即中止，绝不提前关闭原提供商。
+          const switchResult = await controller.useMainModel(profile, {
+            provider: newView.id,
+            model,
+            baseUrl: newView.kind === 'custom' && newView.detail ? newView.detail : undefined,
+            confirmExpensive,
+          });
+          if (switchResult.confirmRequired) {
+            return {
+              ok: false,
+              confirmRequired: true,
+              step: 'switch',
+              message: switchResult.confirmMessage || switchResult.message || deps.t('settings.providerExpensiveWarning'),
+            };
+          }
+          if (!switchResult.ok) {
+            return {
+              ok: false,
+              step: 'switch',
+              message: switchResult.message || deps.t('settings.providerToggleFailed'),
+            };
+          }
+
+          // 2. 第一步落盘后再关闭原提供商，并无条件重拉目录使主模型变更即时反映到 UI 与 BOT 配置。
+          const removeResult = await controller.remove([profile], disableView.id);
+          await reloadProviderCatalog();
+          void deps.fetchProfiles();
+          if (!removeResult.ok) {
+            return {
+              ok: false,
+              step: 'disable',
+              message: deps.t('settings.providerSwitchDoneDisableFailed', {
+                detail: removeResult.message || deps.t('settings.providerToggleFailed'),
+              }),
+            };
+          }
+          return { ok: true };
+        })();
+
+        const entry = { signature, promise };
+        inFlightProviderBindings.set(flightKey, entry);
+        try {
+          return await promise;
+        } finally {
+          if (inFlightProviderBindings.get(flightKey) === entry) {
+            inFlightProviderBindings.delete(flightKey);
+          }
+        }
+      },
 
       onBotDraftChange: (botId, patch) => getBotManagementController().updateDraft(botId, patch),
       onSelectBotSettle: (botId) => getBotManagementController().selectBot(botId),

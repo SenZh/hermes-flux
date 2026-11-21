@@ -204,21 +204,26 @@
 }
 
 /**
- * Agent 成员网格。
+ * Agent 成员网格（方案 2 · 56px 放大竖排宽格）。
  *
- * 设计意图(Why)：设置页的「生效于」是一张成员名单。轨道宽度必须固定，
- *   Agent 增多时只增加行数，不能把名字压成两行或让成员忽宽忽窄。
- *   网格本身必须横跨整行：早期把它放在标题与动作按钮之间，动作按钮宽度不同
- *   会让同一份名单在自定义端点行排出 4 列、订阅行排出 5 列。
- * 几何依据：轨道 64px、头像 44px、列间距 8px、行间距 12px，全部落在 4px 网格上；
- *   设置弹窗内约 5-6 列，窄屏自动降列。不承诺固定列数，避免文档与真实 DOM 脱节。
- * 约束与规则(Rules)：64px 与成员自身的 `w-16` 同值，改这里必须同步宽度；
+ * 设计意图(Why)：设置页各提供商下的成员名单需完整呈现头像与 BOT 名称，轨道宽度必须固定，
+ *   Agent 增多时只增加行数，不能把名字压成两行、腰斩英文全名或让成员忽宽忽窄。
+ *   网格本身横跨卡片整行，与顶栏操作区通过发丝线上下分离。
+ * 防范的历史坑(Pitfall)：Desktop 渲染进程在 `styles.css` 把根字号设为 `13px`（1rem=13px），
+ *   使 Tailwind 默认 `--spacing: 0.25rem` 实际缩水为 `3.25px`，导致 `w-28` 变成 `91px`、
+ *   `size-14` 缩成 `45.5px`，与 `112px` 轨道产生 21px 错位缝且补密钥聚焦环偏右。
+ *   在 `@utility agent-grid` 局部锁定 `--spacing: 4px;` 后，内部所有 `w-28`/`size-14`/`px-1`/`py-2`
+ *   均严格对齐真实 4px 物理像素网格（`w-28 === 112px`、`size-14 === 56px`、`size-7 === 28px`）。
+ * 几何依据：轨道 112px（`w-28`）、头像 56px（`size-14`）、列间距 8px、行间距 12px；
+ *   窄屏自动降列换行，不承诺固定列数。
+ * 约束与规则(Rules)：112px 与成员自身的 `w-28` 同值（配合 `--spacing: 4px` 恒等）；
  *   禁止改成 auto-fit 或 1fr，否则头像间距会被拉伸得不均匀；
  *   禁止横向滚动：成员多时必须换行，让所有成员始终可见。
  */
 @utility agent-grid {
+  --spacing: 4px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, 64px);
+  grid-template-columns: repeat(auto-fill, 112px);
   justify-content: start;
   gap: 12px 8px;
 }
@@ -303,6 +308,29 @@
 
 @utility max-h-modal-md {
   max-height: min(680px, calc(100vh - 96px));
+}
+
+@utility max-h-modal-lg {
+  max-height: min(760px, calc(100vh - 64px));
+}
+
+/*
+ * 模型下拉与弹窗列表高度、宽度语义档位。
+ *
+ * 设计意图(Why)：查看模型弹窗与模型选择下拉需要同屏展示约 9~10 行模型以减少频繁滚动，
+ *   且下拉面板必须严格与触发框等宽，禁止在组件里写死 w-80 或 arbitrary `[...]` 类。
+ * 约束与规则(Rules)：与 `tw-merge.ts` 的 MODAL_HEIGHT_TOKENS / MENU_WIDTH_TOKENS 同源登记。
+ */
+@utility w-menu-trigger {
+  width: var(--radix-dropdown-menu-trigger-width, 100%);
+}
+
+@utility max-h-picker-menu {
+  max-height: min(360px, calc(100vh - 200px));
+}
+
+@utility max-h-picker-list {
+  max-height: min(440px, calc(100vh - 240px));
 }
 
 /*

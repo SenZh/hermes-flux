@@ -1,15 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  beginAttachFlow,
   classifyAttachWrite,
   routeAttachFailure,
   shouldClearAttachFlow,
+  shouldShowAttachStrip,
 } from '../../core/dist/models/providerAttachFlow.js';
 import {
   messageKeyForVerdict,
   pickProviderViewsState,
   planAttachSettlement,
-  shouldNotifyEnableOnly,
+  shouldNotifyAttachDone,
 } from '../dist/components-react/settings/providerAttachOrchestration.js';
 
 /**
@@ -31,7 +33,8 @@ function submittingFlow(overrides = {}) {
     providerKey: TARGET.providerKey,
     providerId: 'fn',
     profile: TARGET.profile,
-    intent: 'enable-only',
+    previousPhase: 'needs-key',
+    draftKey: '',
     token: TARGET.token,
     ...overrides,
   };
@@ -90,24 +93,40 @@ test('失败落点单维：只有 token 不匹配 → 行级', () => {
 });
 
 test('失败落点单维：只有 phase 不是 submitting → 行级', () => {
-  for (const phase of ['choosing', 'needs-key']) {
-    const flow = phase === 'choosing'
-      ? { phase, providerKey: TARGET.providerKey, providerId: 'fn', profile: TARGET.profile }
-      : {
-          phase,
-          providerKey: TARGET.providerKey,
-          providerId: 'fn',
-          profile: TARGET.profile,
-          intent: 'enable-only',
-          token: TARGET.token,
-          draftKey: '',
-        };
-    assert.deepEqual(
-      routeAttachFailure(flow, TARGET),
-      { kind: 'row', providerKey: TARGET.providerKey },
-      `${phase} 阶段的确认条不在等待这次提交的结果`,
-    );
-  }
+  const flow = {
+    phase: 'needs-key',
+    providerKey: TARGET.providerKey,
+    providerId: 'fn',
+    profile: TARGET.profile,
+    token: TARGET.token,
+    draftKey: '',
+  };
+  assert.deepEqual(
+    routeAttachFailure(flow, TARGET),
+    { kind: 'row', providerKey: TARGET.providerKey },
+    'needs-key 阶段的确认条不在等待这次提交的结果',
+  );
+});
+
+test('条显隐与直通落点：direct 提交不闪烁条；仅 needs-key 展开条', () => {
+  const direct = beginAttachFlow({ providerKey: TARGET.providerKey, providerId: 'fn', profile: TARGET.profile }, TARGET.token);
+  assert.equal(shouldShowAttachStrip(null), false);
+  assert.equal(shouldShowAttachStrip(direct), false, '直接点头像复用密钥期间不得展开补密钥条');
+  assert.deepEqual(routeAttachFailure(direct, TARGET), { kind: 'direct', providerKey: TARGET.providerKey });
+
+  const fromStrip = submittingFlow({ previousPhase: 'needs-key' });
+  assert.equal(shouldShowAttachStrip(fromStrip), true, '补密钥提交期间必须保留输入条');
+  assert.equal(
+    shouldShowAttachStrip({
+      phase: 'needs-key',
+      providerKey: TARGET.providerKey,
+      providerId: 'fn',
+      profile: TARGET.profile,
+      token: TARGET.token,
+      draftKey: 'sk-1',
+    }),
+    true,
+  );
 });
 
 /* -------------------------------------------------------------------------- */
@@ -179,14 +198,13 @@ test('重读沿用：loading 期间保留上一帧，首次加载仍走加载态
 /* 迟滞结果                                                                     */
 /* -------------------------------------------------------------------------- */
 
-test('迟滞成功：只有本次意图、本次令牌、且仍成功才提示', () => {
+test('迟滞成功：只有本次令牌且仍成功才提示', () => {
   const ok = { ok: true };
-  assert.equal(shouldNotifyEnableOnly(ok, 'enable-only', 7, 7), true);
-  assert.equal(shouldNotifyEnableOnly(ok, 'enable-and-default', 7, 7), false, '切默认模型不需要额外提示');
-  assert.equal(shouldNotifyEnableOnly(ok, 'enable-only', 0, 7), false, '取消后令牌归零，不得再提示');
-  assert.equal(shouldNotifyEnableOnly(ok, 'enable-only', 8, 7), false, '已被新一轮提交顶掉的令牌不得提示');
-  assert.equal(shouldNotifyEnableOnly({ ok: false }, 'enable-only', 7, 7), false, '失败不提示成功');
-  assert.equal(shouldNotifyEnableOnly(ok, 'enable-only', 0, 0), false, '零令牌永不提示');
+  assert.equal(shouldNotifyAttachDone(ok, 7, 7), true);
+  assert.equal(shouldNotifyAttachDone(ok, 0, 7), false, '取消后令牌归零，不得再提示');
+  assert.equal(shouldNotifyAttachDone(ok, 8, 7), false, '已被新一轮提交顶掉的令牌不得提示');
+  assert.equal(shouldNotifyAttachDone({ ok: false }, 7, 7), false, '失败不提示成功');
+  assert.equal(shouldNotifyAttachDone(ok, 0, 0), false, '零令牌永不提示');
 });
 
 /* -------------------------------------------------------------------------- */
@@ -199,20 +217,31 @@ test('提交结算：成功一律回给确认条，由目录收敛负责收起',
     { kind: 'settle-strip', outcome: { ok: true } },
   );
   assert.deepEqual(
+    planAttachSettlement({ ok: true }, { kind: 'direct', providerKey: 'custom:fn' }, 'boom'),
+    { kind: 'settle-strip', outcome: { ok: true } },
+  );
+  assert.deepEqual(
     planAttachSettlement({ ok: true }, { kind: 'row', providerKey: 'custom:fn' }, 'boom'),
     { kind: 'settle-strip', outcome: { ok: true } },
     '成功不得变成行级错误',
   );
 });
 
-test('提交结算：失败时条还在就写条内', () => {
+test('提交结算：失败时按归属三态分流（strip 留条内、direct 缺密钥才开条、其余落行级）', () => {
   assert.deepEqual(
     planAttachSettlement({ ok: false }, { kind: 'strip' }, 'boom'),
     { kind: 'settle-strip', outcome: { ok: false, message: 'boom' } },
   );
-});
-
-test('提交结算：失败时条已消失必须落到行级，不得静默丢弃', () => {
+  assert.deepEqual(
+    planAttachSettlement({ ok: false, needsKey: true }, { kind: 'direct', providerKey: 'custom:fn' }, 'need-key'),
+    { kind: 'settle-strip', outcome: { ok: false, needsKey: true } },
+    '直接点头像遇到 needsKey 必须展开补密钥条',
+  );
+  assert.deepEqual(
+    planAttachSettlement({ ok: false }, { kind: 'direct', providerKey: 'custom:fn' }, 'boom'),
+    { kind: 'row-error', providerKey: 'custom:fn', message: 'boom' },
+    '直接点头像遇到普通网络/业务失败应落行级报错而非卡在补密钥条',
+  );
   assert.deepEqual(
     planAttachSettlement({ ok: false }, { kind: 'row', providerKey: 'custom:fn' }, 'boom'),
     { kind: 'row-error', providerKey: 'custom:fn', message: 'boom' },

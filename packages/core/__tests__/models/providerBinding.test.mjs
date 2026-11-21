@@ -1,12 +1,13 @@
 /**
- * 绑定关系判定的穷举测试（勾选 / 取消 / 删除可行性）。
+ * 绑定关系判定的穷举测试（开启 / 关闭 / 删除可行性）。
  *
  * 【为什么要单独一份】这四个状态 × 两个方向是界面上唯一会写配置的入口，
- *   错了就是"看着删掉了其实还在""把正在用的模型删了"。纯函数必须穷举。
+ *   错了就是"看着关掉了其实还在""把正在用的模型删了"。纯函数必须穷举。
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  collectReplacementModels,
   planBindingToggle,
   planProviderRemoval,
   resolveBindingDefaultModel,
@@ -28,31 +29,12 @@ function view(overrides = {}) {
   };
 }
 
-test('勾选一个未配置的自定义端点且缺意图时：先要求二次确认，不猜默认意图', () => {
+test('开启一个未配置的自定义端点：直接返回 attach 且绝不修改默认模型（makeDefault=false）', () => {
   assert.deepEqual(planBindingToggle(view(), 'aura', true), {
-    kind: 'confirm-attach',
-    profile: 'aura',
-    requiresApiKey: true,
-  });
-});
-
-test('勾选一个未配置的自定义端点并明确仅启用：写定义但不改默认模型', () => {
-  assert.deepEqual(planBindingToggle(view(), 'aura', true, 'enable-only'), {
     kind: 'attach',
     profile: 'aura',
     requiresApiKey: true,
     makeDefault: false,
-    intent: 'enable-only',
-  });
-});
-
-test('勾选一个未配置的自定义端点并明确启用并设为默认：写定义且切换默认模型', () => {
-  assert.deepEqual(planBindingToggle(view(), 'aura', true, 'enable-and-default'), {
-    kind: 'attach',
-    profile: 'aura',
-    requiresApiKey: true,
-    makeDefault: true,
-    intent: 'enable-and-default',
   });
 });
 
@@ -68,23 +50,15 @@ test('勾选时落哪个模型：声明值还在运行时目录就保留，否�
   assert.equal(resolveBindingDefaultModel('  ', []), '', '空声明不得被拼成空白 id');
 });
 
-test('勾选一个未配置的订阅：客户端无法复制登录态，只能引导去该 Agent 登录（即使传了意图）', () => {
+test('勾选一个未配置的订阅：客户端无法复制登录态，只能引导去该 Agent 登录', () => {
   const sub = view({ kind: 'subscription', key: 'subscription:xai-oauth', id: 'xai-oauth' });
   assert.deepEqual(planBindingToggle(sub, 'aura', true), {
     kind: 'login-required',
     profile: 'aura',
   });
-  assert.deepEqual(planBindingToggle(sub, 'aura', true, 'enable-only'), {
-    kind: 'login-required',
-    profile: 'aura',
-  });
-  assert.deepEqual(planBindingToggle(sub, 'aura', true, 'enable-and-default'), {
-    kind: 'login-required',
-    profile: 'aura',
-  });
 });
 
-test('取消勾选一个已配置但非当前的 Agent：只移除这一条', () => {
+test('取消勾选一个已开启但非当前的 Agent：只移除这一条', () => {
   assert.deepEqual(planBindingToggle(view(), 'default', false), {
     kind: 'detach',
     profile: 'default',
@@ -122,24 +96,6 @@ test('对已经处于目标状态的勾选发 noop，不发无意义请求', () 
   assert.equal(planBindingToggle(active, 'default', true).kind, 'noop');
   assert.equal(planBindingToggle(active, 'aura', true).kind, 'noop');
   assert.equal(planBindingToggle(view(), 'aura', false).kind, 'noop');
-});
-
-test('取消勾选方向不受意图影响：带意图仍然只能是 detach', () => {
-  assert.deepEqual(planBindingToggle(view(), 'default', false, 'enable-only'), {
-    kind: 'detach',
-    profile: 'default',
-  });
-  assert.deepEqual(planBindingToggle(view(), 'default', false, 'enable-and-default'), {
-    kind: 'detach',
-    profile: 'default',
-  });
-  const active = view({
-    agents: [
-      { profile: 'default', displayName: 'default', state: 'active', detail: 'm1' },
-      { profile: 'aura', displayName: 'aura', state: 'absent' },
-    ],
-  });
-  assert.equal(planBindingToggle(active, 'default', false, 'enable-only').kind, 'blocked-active');
 });
 
 test('读取失败的 Agent 两个方向都阻断，并把原始原因带出来', () => {
@@ -213,4 +169,99 @@ test('删除：读取不一致（在用但配置集合为空）时优先报"在�
   });
   const plan = planProviderRemoval(active, []);
   assert.equal(plan.kind, 'blocked-in-use', '宁可按在用处理，也不能静默只删一部分');
+});
+
+test('收集替补模型候选：排除目标端点（含 custom: 前缀）、不可用 BOT 与空模型组，保留并去重可用候选', () => {
+  const views = [
+    view({
+      key: 'custom:relay',
+      id: 'relay',
+      name: 'Relay',
+      models: ['m-old'],
+      detail: 'https://relay.example/v1',
+      agents: [{ profile: 'xiaofawang', displayName: 'xiaofawang', state: 'active', detail: 'm-old' }],
+    }),
+    view({
+      key: 'subscription:xai-oauth',
+      kind: 'subscription',
+      id: 'xai-oauth',
+      name: 'xAI Grok',
+      detail: 'SuperGrok',
+      models: [' grok-3 ', 'grok-3-mini', 'grok-3', ''],
+      agents: [{ profile: 'xiaofawang', displayName: 'xiaofawang', state: 'ready' }],
+    }),
+    view({
+      key: 'custom:backup',
+      id: 'backup',
+      name: 'Backup',
+      detail: 'https://backup.example/v1',
+      models: ['b1', 'b2'],
+      agents: [{ profile: 'xiaofawang', displayName: 'xiaofawang', state: 'ready' }],
+    }),
+    view({
+      key: 'custom:unconfigured',
+      id: 'unconfigured',
+      name: 'Absent',
+      models: ['u1'],
+      agents: [{ profile: 'xiaofawang', displayName: 'xiaofawang', state: 'absent' }],
+    }),
+    view({
+      key: 'custom:broken',
+      id: 'broken',
+      name: 'Broken',
+      models: ['e1'],
+      agents: [{ profile: 'xiaofawang', displayName: 'xiaofawang', state: 'error', detail: 'HTTP 500' }],
+    }),
+    view({
+      key: 'custom:nomodels',
+      id: 'nomodels',
+      name: 'Empty',
+      models: ['   ', ''],
+      agents: [{ profile: 'xiaofawang', displayName: 'xiaofawang', state: 'ready' }],
+    }),
+    view({
+      key: 'custom:other-bot-only',
+      id: 'other-bot-only',
+      name: 'OtherBot',
+      detail: 'https://other.example/v1',
+      models: ['o1'],
+      agents: [{ profile: 'default', displayName: 'default', state: 'ready' }],
+    }),
+    view({
+      key: 'custom:nodetail',
+      id: 'nodetail',
+      name: 'NoDetail',
+      detail: '',
+      models: ['n1'],
+      agents: [{ profile: 'xiaofawang', displayName: 'xiaofawang', state: 'ready' }],
+    }),
+  ];
+
+  const groups = collectReplacementModels(views, 'custom:relay', 'xiaofawang');
+  assert.deepEqual(groups, [
+    {
+      providerId: 'xai-oauth',
+      providerKey: 'subscription:xai-oauth',
+      providerName: 'xAI Grok',
+      kind: 'subscription',
+      baseUrl: undefined,
+      models: ['grok-3', 'grok-3-mini'],
+    },
+    {
+      providerId: 'backup',
+      providerKey: 'custom:backup',
+      providerName: 'Backup',
+      kind: 'custom',
+      baseUrl: 'https://backup.example/v1',
+      models: ['b1', 'b2'],
+    },
+    {
+      providerId: 'nodetail',
+      providerKey: 'custom:nodetail',
+      providerName: 'NoDetail',
+      kind: 'custom',
+      baseUrl: undefined,
+      models: ['n1'],
+    },
+  ]);
 });

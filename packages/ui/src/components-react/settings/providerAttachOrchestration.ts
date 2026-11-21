@@ -41,18 +41,17 @@ export function pickProviderViewsState<T>(
 }
 
 /**
- * 迟滞的成功结果能否弹「已启用」提示。
+ * 迟滞的成功结果能否弹「已在某 BOT 开启」提示。
  *
- * 【规则】必须是本次意图、本次令牌、且仍然成功；用户取消或切到别的格子后
+ * 【规则】必须是本次令牌且确实成功；用户取消或切到别的格子后
  *   令牌归零或前进，一律不提示。零令牌永远不提示。
  */
-export function shouldNotifyEnableOnly(
+export function shouldNotifyAttachDone(
   result: ToggleProviderAgentResult,
-  intent: 'enable-only' | 'enable-and-default',
   liveToken: number,
   token: number,
 ): boolean {
-  return result.ok && intent === 'enable-only' && liveToken === token && token !== 0;
+  return result.ok && liveToken === token && token !== 0;
 }
 
 /** 一次提交结束后要执行的动作。 */
@@ -63,9 +62,11 @@ export type AttachSettlement =
 /**
  * 一次提交结果的落地方式。
  *
- * 【规则】成功一律回给确认条结算：成功后由目录收敛负责收起，界面不留手工残留。
+ * 【规则】成功一律回给状态流结算：成功后由目录收敛负责收起，界面不留手工残留。
  * 【规则】失败时落点由 core 的 `routeAttachFailure` 决定：
- *   条仍是这次提交的那一条就写条内，否则挂到行级——不能因为条没了就把错误丢掉。
+ *   - `strip`：当前已在补密钥条提交，失败留在条内保留草稿；
+ *   - `direct`：直接点击开启时若网关返回 `needsKey`，转交状态流展开补密钥条；普通失败收起状态流并挂到行级错误；
+ *   - `row`：令牌或目标不再匹配，挂到对应行的行级错误，绝不静默丢弃。
  * 【规则】用户已取消（令牌归零）时仍然结算：界面必须如实反映网关已经发生的写入，
  *   只是不弹成功提示。这里不做"静默成功"的优化，静默等于撒谎。
  */
@@ -77,6 +78,11 @@ export function planAttachSettlement(
   if (result.ok) return { kind: 'settle-strip', outcome: result };
   if (surface.kind === 'strip') {
     return { kind: 'settle-strip', outcome: { ok: false, message: failureMessage } };
+  }
+  if (surface.kind === 'direct') {
+    return result.needsKey
+      ? { kind: 'settle-strip', outcome: result }
+      : { kind: 'row-error', providerKey: surface.providerKey, message: failureMessage };
   }
   return { kind: 'row-error', providerKey: surface.providerKey, message: failureMessage };
 }
