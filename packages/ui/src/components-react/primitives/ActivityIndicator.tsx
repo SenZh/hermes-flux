@@ -2,7 +2,7 @@ import * as React from 'react';
 import { t, type I18nKey } from '../../i18n/index.js';
 import { cn } from '../../lib/utils.js';
 import type { ActivityState, ActivityTransition } from '../../components/LeftRail/types.js';
-import type { ActivityIndicatorVariant } from '../../tokens/activityIndicator.js';
+import { getPointCloudSpec, type ActivityIndicatorVariant } from '../../tokens/activityIndicator.js';
 
 export type ActivityIndicatorPlacement = 'inline' | 'corner';
 
@@ -19,147 +19,6 @@ export interface ActivityIndicatorProps {
   title?: string;
 }
 
-type CustomCssVars = React.CSSProperties & Record<`--${string}`, string | number>;
-
-interface CloudANodeSpec {
-  readonly x: number;
-  readonly y: number;
-  readonly size: number;
-  readonly dx: number;
-  readonly dy: number;
-  readonly delayMs: number;
-  readonly on: boolean;
-  readonly tx?: number;
-  readonly ty?: number;
-  readonly step?: number;
-}
-
-interface CloudANode extends CloudANodeSpec {
-  readonly leftPct: string;
-  readonly topPct: string;
-  readonly targetLeftPct: string;
-  readonly targetTopPct: string;
-  readonly fromX: string;
-  readonly fromY: string;
-  readonly settleToX: string;
-  readonly settleToY: string;
-  readonly offsetPx: string;
-}
-
-const CLOUD_VIEW_W = 23;
-const CLOUD_VIEW_H = 15;
-const CLOUD_CANVAS_W = 19;
-const CLOUD_CANVAS_H = 14;
-const CLOUD_CENTER_X = CLOUD_VIEW_W / 2;
-const CLOUD_CENTER_Y = CLOUD_VIEW_H / 2;
-
-function toPctX(val: number): string {
-  return `${((val / CLOUD_VIEW_W) * 100).toFixed(2)}%`;
-}
-
-function toPctY(val: number): string {
-  return `${((val / CLOUD_VIEW_H) * 100).toFixed(2)}%`;
-}
-
-function buildCloudANodes(specs: readonly CloudANodeSpec[]): readonly CloudANode[] {
-  return specs.map((node) => {
-    const tx = node.tx ?? node.x;
-    const ty = node.ty ?? node.y;
-    const fromXVal = ((node.x - tx) / CLOUD_VIEW_W) * CLOUD_CANVAS_W;
-    const fromYVal = ((node.y - ty) / CLOUD_VIEW_H) * CLOUD_CANVAS_H;
-    const settleXVal = ((CLOUD_CENTER_X - node.x) / CLOUD_VIEW_W) * CLOUD_CANVAS_W * 0.65;
-    const settleYVal = ((CLOUD_CENTER_Y - node.y) / CLOUD_VIEW_H) * CLOUD_CANVAS_H * 0.65;
-    return {
-      ...node,
-      leftPct: toPctX(node.x),
-      topPct: toPctY(node.y),
-      targetLeftPct: toPctX(tx),
-      targetTopPct: toPctY(ty),
-      fromX: `${fromXVal.toFixed(2)}px`,
-      fromY: `${fromYVal.toFixed(2)}px`,
-      settleToX: `${settleXVal.toFixed(2)}px`,
-      settleToY: `${settleYVal.toFixed(2)}px`,
-      // 命中偏移取直径之半：除以 2 不产生新舍入，圆点恒以 (left,top) 为圆心，避免逐颗偏心。
-      offsetPx: `${-(node.size / 2)}px`,
-    };
-  });
-}
-
-/**
- * 积雨流云点阵（稀疏版）。
- *
- * 【设计意图 Why】原 24 颗点阵铺在 19×14px 画布上，会话行内显示时点与点首尾相抵，
- *   视觉密度过高（密集恐惧观感），且雾底衬把细点糊成一团。改为 13 颗：层间竖直 2.8~3.0px、
- *   同层相邻 3.5~4.0px（view 坐标 4.2~4.8），颗粒之间留出明显空隙，才读得出"云 + 落雨"的形状。
- *
- * 【防范的历史坑 Pitfall】`on` 的 7 颗是"未读态收拢成对勾"的载体，不是构图上的勾选点：
- *   完成时它们会带着 `--from-x/--from-y` 位移飞到 `tx/ty`（对勾轨迹 0~6 号锚点）。
- *   因此 `on` 必须保持 7 颗，且每个载体到其锚点的位移都必须 ≥0.3px 且 ≤3.3px（实测 0.51~2.85px）——
- *   超过画布宽度的 ~15% 会变成横穿画面的长距离飞行，而位移归零则聚拢动画退化为瞬移。
- *
- * 【约束 Rules】
- *   1. `size` 即最终渲染直径（px），画布为 19×14，禁止把颗粒改回 2.4px 以上或增加颗数；
- *   2. 圆心由 left/top 百分比定位，`offsetPx` 恒等于 -size/2，改尺寸必须同步；
- *   3. 未读数必须恒为 7（对勾 7 锚点），改数量会破坏已完成态的图形语义；
- *   4. 【密度红线】相邻两层必须水平错位 ≥1.8（view 坐标），竖直堆叠会形成 2.8px 的
- *      贴点竖链——减颗数解决不了它，会话行里仍是"密密一列"，几何守卫有最小间距断言；
- *   5. 【飞行红线】改勾锚点或载体位置后必须复算位移，几何守卫逐点断言位移落在 [0.3, 3.3]px。
- */
-const CLOUD_A_NODES: readonly CloudANode[] = buildCloudANodes([
-  // 落雨层（最低，四点错开云腹层）
-  { x: 4.2, y: 12.4, size: 2.0, dx: -0.7, dy: 0.4, delayMs: 0, on: false },
-  { x: 8.6, y: 12.4, size: 2.2, dx: -0.4, dy: 0.5, delayMs: 180, on: true, tx: 7.4, ty: 12.2, step: 2 },
-  { x: 13.0, y: 12.4, size: 2.2, dx: 0.2, dy: 0.5, delayMs: 360, on: false },
-  { x: 17.4, y: 12.4, size: 2.0, dx: 0.7, dy: 0.4, delayMs: 540, on: false },
-  // 云腹层
-  { x: 2.2, y: 9.2, size: 2.0, dx: -0.9, dy: 0.2, delayMs: 90, on: true, tx: 3.8, ty: 8.8, step: 0 },
-  { x: 6.4, y: 9.2, size: 2.1, dx: -0.5, dy: 0.3, delayMs: 270, on: true, tx: 5.5, ty: 10.5, step: 1 },
-  { x: 10.8, y: 9.2, size: 2.3, dx: 0.1, dy: 0.3, delayMs: 450, on: true, tx: 9.6, ty: 10.0, step: 3 },
-  { x: 15.6, y: 9.2, size: 2.0, dx: 0.8, dy: 0.2, delayMs: 630, on: false },
-  // 云肩层
-  { x: 4.4, y: 6.2, size: 2.1, dx: -0.7, dy: -0.4, delayMs: 180, on: false },
-  { x: 8.8, y: 6.2, size: 2.3, dx: 0.0, dy: -0.5, delayMs: 360, on: true, tx: 11.8, ty: 7.7, step: 4 },
-  { x: 13.6, y: 6.2, size: 2.1, dx: 0.6, dy: -0.4, delayMs: 540, on: true, tx: 14.1, ty: 5.4, step: 5 },
-  // 云顶层（左肩一点 + 右端一点，右端同时是勾末载体，位移仅 0.50px）
-  { x: 6.6, y: 3.2, size: 2.0, dx: -0.4, dy: -0.6, delayMs: 360, on: false },
-  { x: 16.0, y: 3.2, size: 2.0, dx: 0.4, dy: -0.6, delayMs: 540, on: true, tx: 16.6, ty: 3.1, step: 6 },
-]);
-
-const CLOUD_CORE_NODES = CLOUD_A_NODES.filter((node) => node.on);
-
-/** 4×4 神经突触点阵 (方案 6) */
-const SYNAPSE_CELLS = Array.from({ length: 16 }, (_, index) => {
-  const r = Math.floor(index / 4);
-  const c = index % 4;
-  const isCheck = (r === 3 && c === 1) || (r === 3 && c === 0) || (r === 2 && c === 1) || (r === 1 && c === 2) || (r === 0 && c === 3);
-  const step = (r === 3 && c === 1) ? 0 : (r === 3 && c === 0) ? 1 : (r === 2 && c === 1) ? 2 : (r === 1 && c === 2) ? 3 : (r === 0 && c === 3) ? 4 : undefined;
-  return { r, c, on: isCheck, step, delayMs: (r + c) * 90 };
-});
-
-/** 3D 旋涡流形点阵 (方案 M) 16 颗粒子 */
-const MATRIX_NODES = Array.from({ length: 16 }, (_, i) => {
-  const baseR = 1.8 + Math.sqrt(i) * 1.45;
-  const theta = i * 2.39996;
-  const x = 9.5 + Math.cos(theta) * baseR;
-  const y = 7.5 + Math.sin(theta) * (baseR * 0.72);
-  const checkX = [3.0, 4.8, 6.8, 9.0, 11.2, 13.4, 15.6][i] ?? x;
-  const checkY = [8.8, 10.6, 12.4, 10.0, 7.6, 5.2, 2.8][i] ?? y;
-  const on = i < 7;
-  return {
-    x,
-    y,
-    on,
-    step: on ? i : undefined,
-    fromX: `${(x - checkX).toFixed(2)}px`,
-    fromY: `${(y - checkY).toFixed(2)}px`,
-    targetLeftPct: `${((checkX / 19) * 100).toFixed(2)}%`,
-    targetTopPct: `${((checkY / 15) * 100).toFixed(2)}%`,
-    leftPct: `${((x / 19) * 100).toFixed(2)}%`,
-    topPct: `${((y / 15) * 100).toFixed(2)}%`,
-    delayMs: i * 80,
-  };
-});
-
 const RUNNING_STATUS_KEY_BY_KIND: Readonly<Record<ActivityEntityKind, I18nKey>> = {
   session: 'rail.activityStatusRunning',
   bot: 'rail.activityStatusThinking',
@@ -172,17 +31,20 @@ const CORNER_DOT_BASE_CLASS = 'absolute right-0 top-0 inline-flex size-2 items-c
  * 统一三态活动指示器原语 (ActivityIndicator)。
  *
  * 设计意图 (Why)：
- *   微轨头像角标（corner）保持简洁的高对比圆点（深色亮白 / 浅色蓝），抽屉列表行（inline）
- *   在时间前方呈现纯 HTML/CSS 驱动的 13 颗稀疏积雨流云点阵与流光状态词，兼顾辨识度与零 SVG 约束。
+ *   微轨头像角标（corner）保持高对比圆点（深色亮白 / 浅色蓝），抽屉列表行（inline）
+ *   采用纯 HTML/CSS 几何雕塑（流云丝带 / 陀螺 / 轨道 / 突触 / 弹簧 / 旋涡）及 12 套 3D 透视点云装置
+ *   （6 套 30×16 宽幅 + 6 套 18×18 紧凑，预烘焙关键帧驱动），同时匹配轻盈 11px 状态词。
  *
  * 防范的历史坑 (Pitfall)：
- *   1. 抽屉重挂载时静态 unread 不可播放跃迁动画，必须由 `transition === 'just-completed'` 门控；
- *   2. 普通会话行强制零 `<svg>`，点阵粒子必须使用纯 `<i>` + GPU `transform/opacity` 实现；
- *   3. 聚焦实体收敛到 `read` 时，仅 `just-completed` 窗口渲染独立 `.activity-settle-fade` 节点。
+ *   1. 旧版平面密点粘连成块；现流云/突触/旋涡保持大留白雕塑，新增点云全部带 3D 纵深尺度与透明度衰减；
+ *   2. 抽屉重挂载时静态 unread 不可播放跃迁动画，必须由 `transition === 'just-completed'` 门控；
+ *   3. 普通会话行强制零 `<svg>`，所有图形与粒子均由语义 `<span>` / `<i>` + GPU `transform/opacity` 实现；
+ *   4. 聚焦实体收敛到 `read` 时，仅 `just-completed` 窗口渲染独立 `.activity-settle-fade` 节点。
  *
  * 约束与规则 (Rules)：
  *   - 静态/普通 `read` 态与 `undefined` 严格返回 `null`；
- *   - 禁止出现硬编码色值、原生调色板类名或硬编码中文文案。
+ *   - 禁止出现硬编码色值、原生调色板类名或硬编码中文文案；
+ *   - 外层画布类名（.flux-cloud-canvas / .flux-pc-canvas / .flux-motif-*）与 tailwind-entry.css 预览 zoom 契约同源。
  */
 export function ActivityIndicator({
   state,
@@ -224,20 +86,10 @@ export function ActivityIndicator({
           data-placement="inline"
           data-variant={variant}
         >
-          <span className="flux-cloud-canvas">
-            {CLOUD_CORE_NODES.map((node, index) => {
-              const dotStyle: CustomCssVars = {
-                left: node.leftPct,
-                top: node.topPct,
-                width: `${node.size}px`,
-                height: `${node.size}px`,
-                marginLeft: node.offsetPx,
-                marginTop: node.offsetPx,
-                '--to-x': node.settleToX,
-                '--to-y': node.settleToY,
-              };
-              return <i key={index} className="flux-cloud-settle-dot" style={dotStyle} />;
-            })}
+          <span className="flux-cloud-canvas flux-cloud-canvas--settle">
+            <span className="flux-cloud-settle-stream flux-cloud-settle-stream--top" />
+            <span className="flux-cloud-settle-stream flux-cloud-settle-stream--mid" />
+            <span className="flux-cloud-settle-stream flux-cloud-settle-stream--low" />
           </span>
         </span>
       );
@@ -290,12 +142,46 @@ export function ActivityIndicator({
   }
 
   const renderMotifContent = (running: boolean) => {
+    const pcSpec = getPointCloudSpec(variant);
+    if (pcSpec) {
+      if (running) {
+        return (
+          <span
+            className={cn(
+              `flux-motif-${variant}`,
+              'flux-pc-canvas',
+              pcSpec.shape === 'wide' ? 'flux-pc-canvas--wide' : 'flux-pc-canvas--sq',
+            )}
+            aria-hidden="true"
+          >
+            {Array.from({ length: pcSpec.dotCount }, (_, idx) => (
+              <i key={idx} className={`flux-pc-dot flux-pc-${pcSpec.code}-${idx}`} />
+            ))}
+          </span>
+        );
+      }
+      return (
+        <span className={`flux-motif-${variant} flux-motif-${variant}--done flux-pc-done`} aria-hidden="true">
+          {effectiveTransition === 'just-completed' && <span className="flux-cloud-ripple" />}
+          <span className="flux-pc-done-ring">
+            <i className="flux-pc-done-tick" />
+          </span>
+          <i className="flux-pc-done-spark flux-pc-done-spark--a" />
+          <i className="flux-pc-done-spark flux-pc-done-spark--b" />
+          <i className="flux-pc-done-spark flux-pc-done-spark--c" />
+        </span>
+      );
+    }
+
     if (variant === 'gyro') {
       if (running) {
         return (
           <span className="flux-motif-gyro" aria-hidden="true">
-            <span className="flux-gyro-ring flux-gyro-ring--a"><i /><i /></span>
-            <span className="flux-gyro-ring flux-gyro-ring--b"><i /><i /></span>
+            <span className="flux-gyro-gimbal">
+              <span className="flux-gyro-ring flux-gyro-ring--a" />
+              <span className="flux-gyro-ring flux-gyro-ring--b" />
+              <span className="flux-gyro-ring flux-gyro-ring--c" />
+            </span>
             <i className="flux-gyro-core" />
           </span>
         );
@@ -311,9 +197,14 @@ export function ActivityIndicator({
       if (running) {
         return (
           <span className="flux-motif-orbit" aria-hidden="true">
-            <span className="flux-orbit-track" />
-            <span className="flux-orbit-arm flux-orbit-arm--a"><i className="flux-orbit-sat-a" /></span>
-            <span className="flux-orbit-arm flux-orbit-arm--b"><i className="flux-orbit-sat-b" /></span>
+            <span className="flux-orbit-plane flux-orbit-plane--a">
+              <span className="flux-orbit-ring flux-orbit-ring--a" />
+              <span className="flux-orbit-arm flux-orbit-arm--a"><i className="flux-orbit-sat-a" /></span>
+            </span>
+            <span className="flux-orbit-plane flux-orbit-plane--b">
+              <span className="flux-orbit-ring flux-orbit-ring--b" />
+              <span className="flux-orbit-arm flux-orbit-arm--b"><i className="flux-orbit-sat-b" /></span>
+            </span>
             <i className="flux-orbit-sun" />
           </span>
         );
@@ -326,19 +217,40 @@ export function ActivityIndicator({
     }
 
     if (variant === 'synapse') {
+      if (running) {
+        return (
+          <span className="flux-motif-synapse" aria-hidden="true">
+            <span className="flux-synapse-field">
+              <span className="flux-synapse-halo" />
+              <span className="flux-synapse-branch flux-synapse-branch--a">
+                <i className="flux-synapse-axon" />
+                <i className="flux-synapse-pulse" />
+                <i className="flux-synapse-node" />
+              </span>
+              <span className="flux-synapse-branch flux-synapse-branch--b">
+                <i className="flux-synapse-axon" />
+                <i className="flux-synapse-pulse" />
+                <i className="flux-synapse-node" />
+              </span>
+              <span className="flux-synapse-branch flux-synapse-branch--c">
+                <i className="flux-synapse-axon" />
+                <i className="flux-synapse-pulse" />
+                <i className="flux-synapse-node" />
+              </span>
+            </span>
+            <span className="flux-synapse-wave" />
+            <i className="flux-synapse-core" />
+          </span>
+        );
+      }
       return (
-        <span className={cn('flux-motif-synapse', !running && 'flux-motif-synapse--done')} aria-hidden="true">
-          {SYNAPSE_CELLS.map((c, i) => (
-            <i
-              key={i}
-              className="flux-synapse-cell"
-              data-on={!running && c.on ? '1' : '0'}
-              style={{
-                '--d': `${c.delayMs}ms`,
-                '--step': c.step ?? 0,
-              } as CustomCssVars}
-            />
-          ))}
+        <span className="flux-motif-synapse flux-motif-synapse--done" aria-hidden="true">
+          <span className="flux-synapse-done-ring">
+            <i className="flux-synapse-tick" />
+          </span>
+          <i className="flux-synapse-done-node flux-synapse-done-node--a" />
+          <i className="flux-synapse-done-node flux-synapse-done-node--b" />
+          <i className="flux-synapse-done-node flux-synapse-done-node--c" />
         </span>
       );
     }
@@ -348,6 +260,7 @@ export function ActivityIndicator({
         return (
           <span className="flux-motif-spring" aria-hidden="true">
             <span className="flux-spring-arc flux-spring-arc--outer" />
+            <span className="flux-spring-arc flux-spring-arc--mid" />
             <span className="flux-spring-arc flux-spring-arc--inner" />
             <i className="flux-spring-dot" />
           </span>
@@ -364,87 +277,42 @@ export function ActivityIndicator({
       if (running) {
         return (
           <span className="flux-motif-matrix" aria-hidden="true">
-            {MATRIX_NODES.map((m, i) => (
-              <i
-                key={i}
-                className="flux-matrix-dot"
-                style={{
-                  left: m.leftPct,
-                  top: m.topPct,
-                  '--d': `${m.delayMs}ms`,
-                } as CustomCssVars}
-              />
-            ))}
+            <span className="flux-vortex-field">
+              <span className="flux-vortex-arm flux-vortex-arm--outer" />
+              <span className="flux-vortex-arm flux-vortex-arm--mid" />
+              <span className="flux-vortex-arm flux-vortex-arm--inner" />
+            </span>
+            <i className="flux-vortex-eye" />
           </span>
         );
       }
       return (
         <span className="flux-motif-matrix flux-motif-matrix--done" aria-hidden="true">
-          {MATRIX_NODES.map((m, i) => (
-            <i
-              key={i}
-              className="flux-matrix-dot"
-              data-on={m.on ? '1' : '0'}
-              style={{
-                left: m.on ? m.targetLeftPct : m.leftPct,
-                top: m.on ? m.targetTopPct : m.topPct,
-                '--from-x': m.on ? m.fromX : '0px',
-                '--from-y': m.on ? m.fromY : '0px',
-                '--step': m.step ?? 0,
-              } as CustomCssVars}
-            />
-          ))}
+          <span className="flux-vortex-done-outer">
+            <span className="flux-vortex-done-ring"><i className="flux-vortex-tick" /></span>
+          </span>
         </span>
       );
     }
 
-    // Default 'cloud' (方案 A · 积雨流云点阵)
+    // Default 'cloud' (层叠渐变流云丝带 + 微星流光)
     if (running) {
       return (
         <span aria-hidden="true" className="flux-cloud-canvas">
-          <span className="flux-cloud-fog" />
-          {CLOUD_A_NODES.map((node, index) => {
-            const dotStyle: CustomCssVars = {
-              left: node.leftPct,
-              top: node.topPct,
-              width: `${node.size}px`,
-              height: `${node.size}px`,
-              marginLeft: node.offsetPx,
-              marginTop: node.offsetPx,
-              '--dx': `${node.dx}px`,
-              '--dy': `${node.dy}px`,
-              '--d': `${node.delayMs}ms`,
-            };
-            return <i key={index} className="flux-cloud-dot" style={dotStyle} />;
-          })}
+          <span className="flux-cloud-stream flux-cloud-stream--top" />
+          <span className="flux-cloud-stream flux-cloud-stream--mid" />
+          <span className="flux-cloud-stream flux-cloud-stream--low" />
+          <i className="flux-cloud-glint" />
         </span>
       );
     }
 
     return (
-      <span aria-hidden="true" className="flux-cloud-canvas">
+      <span aria-hidden="true" className="flux-cloud-canvas flux-cloud-canvas--done">
         {effectiveTransition === 'just-completed' && <span className="flux-cloud-ripple" />}
-        {CLOUD_A_NODES.map((node, index) => {
-          const dotStyle: CustomCssVars = {
-            left: node.on ? node.targetLeftPct : node.leftPct,
-            top: node.on ? node.targetTopPct : node.topPct,
-            width: `${node.size}px`,
-            height: `${node.size}px`,
-            marginLeft: node.offsetPx,
-            marginTop: node.offsetPx,
-            '--from-x': node.on ? node.fromX : '0px',
-            '--from-y': node.on ? node.fromY : '0px',
-            '--step': node.step ?? 0,
-          };
-          return (
-            <i
-              key={index}
-              className="flux-cloud-dot"
-              data-on={node.on ? '1' : '0'}
-              style={dotStyle}
-            />
-          );
-        })}
+        <span className="flux-cloud-done-ring">
+          <i className="flux-cloud-check" />
+        </span>
       </span>
     );
   };

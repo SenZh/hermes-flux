@@ -305,7 +305,7 @@ test('变异检验：把状态预期改错必然变红', async (t) => {
 test('全挂点统一三态与完成瞬态跃迁契约（微轨/主工位卡/会话/项目内会话/群聊/群聊汇总）', async (t) => {
   const countMatches = (text, re) => (text.match(re) || []).length;
 
-  await t.test('corner 保持简洁角标，inline 渲染 13 颗稀疏云朵 A 微粒与对应 entityKind 状态词，零 SVG 且三态互斥', () => {
+  await t.test('corner 保持简洁角标，inline 渲染流云丝带与对应 entityKind 状态词，零 SVG 且三态互斥', () => {
     const markup = renderRail({
       activeFocus: { type: 'bot', botName: 'bot-run' },
       profileName: 'bot-run',
@@ -357,13 +357,15 @@ test('全挂点统一三态与完成瞬态跃迁契约（微轨/主工位卡/会
     const primaryCard = between(markup, 'rail-primary-agent-card', '</button>');
     assert.ok(primaryCard.includes('flux-cloud-indicator--running'));
     assert.ok(primaryCard.includes('data-placement="inline"'));
-    assert.equal(countMatches(primaryCard, /class="flux-cloud-dot"/g), 13, '主工位卡运行态必须渲染 13 颗稀疏云朵微粒');
+    assert.equal(countMatches(primaryCard, /flux-cloud-stream--/g), 3, '主工位卡运行态必须渲染 3 条渐变流云丝带');
+    assert.equal(countMatches(primaryCard, /class="flux-cloud-glint"/g), 1, '主工位卡运行态必须渲染 1 颗微星流光');
     assert.ok(primaryCard.includes('思考中'), 'Bot 主工位卡运行态必须显示「思考中」');
 
     const sRun = between(markup, 'data-id="s-run"', '</button>');
     assert.ok(sRun.includes('flux-cloud-indicator--running'));
     assert.ok(sRun.includes('data-placement="inline"'));
-    assert.equal(countMatches(sRun, /class="flux-cloud-dot"/g), 13, '会话运行态必须渲染 13 颗稀疏云朵微粒');
+    assert.equal(countMatches(sRun, /flux-cloud-stream--/g), 3, '会话运行态必须渲染 3 条渐变流云丝带');
+    assert.equal(countMatches(sRun, /class="flux-cloud-glint"/g), 1, '会话运行态必须渲染 1 颗微星流光');
     assert.ok(sRun.includes('执行中'), '会话运行态必须显示「执行中」');
     assert.equal(sRun.includes('<svg'), false, 'SessionRow 运行态严禁包含 <svg');
     assert.equal(sRun.includes('activity-unread-badge'), false);
@@ -372,7 +374,8 @@ test('全挂点统一三态与完成瞬态跃迁契约（微轨/主工位卡/会
     assert.ok(sUnreadNew.includes('flux-cloud-indicator--unread'));
     assert.ok(sUnreadNew.includes('data-transition="just-completed"'));
     assert.ok(sUnreadNew.includes('flux-cloud-ripple'), 'just-completed 必须渲染散开波纹');
-    assert.equal(countMatches(sUnreadNew, /class="flux-cloud-dot"/g), 13, '会话完成态必须渲染 13 颗稀疏云朵微粒');
+    assert.ok(sUnreadNew.includes('flux-cloud-done-ring'), '会话完成态必须渲染完成环');
+    assert.ok(sUnreadNew.includes('flux-cloud-check'), '会话完成态必须渲染对勾');
     assert.ok(sUnreadNew.includes('已完成'), '未读态必须显示「已完成」');
     assert.equal(sUnreadNew.includes('<svg'), false, 'SessionRow 未读态严禁包含 <svg');
     assert.equal(sUnreadNew.includes('activity-pulse-indicator'), false);
@@ -381,6 +384,7 @@ test('全挂点统一三态与完成瞬态跃迁契约（微轨/主工位卡/会
     assert.ok(sUnreadOld.includes('flux-cloud-indicator--unread'));
     assert.ok(sUnreadOld.includes('data-transition="none"'));
     assert.equal(sUnreadOld.includes('flux-cloud-ripple'), false, '静态历史未读不得渲染波纹');
+    assert.ok(sUnreadOld.includes('flux-cloud-done-ring'));
     assert.ok(sUnreadOld.includes('已完成'));
 
     const sRead = between(markup, 'data-id="s-read"', '</button>');
@@ -391,7 +395,7 @@ test('全挂点统一三态与完成瞬态跃迁契约（微轨/主工位卡/会
     const gRun = between(markup, 'data-room-id="g-run"', '</button>');
     assert.ok(gRun.includes('flux-cloud-indicator--running'));
     assert.ok(gRun.includes('data-placement="inline"'));
-    assert.equal(countMatches(gRun, /class="flux-cloud-dot"/g), 13, '群聊运行态必须渲染 13 颗稀疏云朵微粒');
+    assert.equal(countMatches(gRun, /flux-cloud-stream--/g), 3, '群聊运行态必须渲染 3 条渐变流云丝带');
     assert.ok(gRun.includes('协作中'), '群聊运行态必须显示「协作中」');
 
     const gUnreadNew = between(markup, 'data-room-id="g-unread-new"', '</button>');
@@ -444,7 +448,7 @@ test('全挂点统一三态与完成瞬态跃迁契约（微轨/主工位卡/会
     ]) {
       assert.ok(chunk.includes('activity-settle-fade'), 'inline just-completed read 必须渲染收敛淡出元素');
       assert.ok(chunk.includes('flux-cloud-settle'));
-      assert.equal(countMatches(chunk, /class="flux-cloud-settle-dot"/g), 7, 'inline 收敛淡出必须带 7 颗核心蓝粒');
+      assert.equal(countMatches(chunk, /flux-cloud-settle-stream--/g), 3, 'inline 收敛淡出必须带 3 条收拢丝带');
       assert.ok(chunk.includes('data-status="read"'));
       assert.ok(chunk.includes('data-transition="just-completed"'));
       assert.ok(chunk.includes('aria-hidden="true"'));

@@ -5,34 +5,216 @@ import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import esbuild from 'esbuild';
 
 const BROWSER_CANDIDATES = [
   'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
   'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
 ];
-const RENDERER_ENTRY = 'packages/desktop/dist/renderer/index.html';
+const REQUIRED_ARTIFACTS = [
+  'packages/core/dist/index.js',
+  'packages/ui/dist/index.js',
+  'packages/desktop/dist/renderer/leftrail/leftRailSnapshotManager.mjs',
+  'packages/desktop/dist/renderer/styles.css',
+  'packages/desktop/dist/renderer/conversation.css',
+  'packages/desktop/dist/renderer/tailwind.css',
+];
 
 function parseRgb(rgbStr) {
   const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(rgbStr || '');
   return m ? { r: Number(m[1]), g: Number(m[2]), b: Number(m[3]) } : null;
 }
 
-test('session-list-status-animation: 稀疏云朵 A 点阵、头像简洁角标、纯合成层动效与双肤出图', async (t) => {
+test('session-list-status-animation: 流云渐变丝带、轻盈状态词、纯合成层多谐波动效与双肤出图', async (t) => {
   const browserPath = BROWSER_CANDIDATES.find((p) => fs.existsSync(p));
   if (!browserPath) {
     t.skip('未找到 Edge/Chrome');
     return;
   }
   const rootDir = process.cwd();
-  if (!fs.existsSync(path.join(rootDir, RENDERER_ENTRY))) {
-    t.skip('renderer 产物缺失，请先执行 npm run build');
+  if (REQUIRED_ARTIFACTS.some((rel) => !fs.existsSync(path.join(rootDir, rel)))) {
+    t.skip('构建产物缺失，请先执行 npm run build');
     return;
   }
 
+  const harnessCode = `
+    import { mountLeftRail, setLocale } from './packages/ui/dist/index.js';
+    import {
+      ActivityTransitionTracker,
+      applyTurnStarted,
+      applyTurnCompleted,
+      applyEnteredRead,
+    } from './packages/core/dist/index.js';
+    import { LeftRailSnapshotManager } from './packages/desktop/dist/renderer/leftrail/leftRailSnapshotManager.mjs';
+
+    setLocale('zh-CN');
+    const runningSessions = new Set();
+    const unreadSessions = new Set();
+    const runningBots = new Set();
+    const unreadBots = new Set();
+    const runningGroups = new Set();
+    const unreadGroups = new Set();
+    const tracker = new ActivityTransitionTracker({ windowMs: 850 });
+    let refreshTimer = null;
+
+    const state = {
+      theme: 'obsidian-gold',
+      gatewayConnected: false,
+      gatewayLatencyMs: 0,
+      profilesPhase: 'ready',
+      sessionsPhase: 'ready',
+      profileName: 'default',
+      activeFocus: { type: 'bot', botName: 'default' },
+      activeSessionId: '',
+      profiles: [],
+      sessions: [],
+      groupRooms: [],
+      projects: [],
+      sessionSearchQuery: '',
+      isSessionsGroupExpanded: true,
+      isGroupsGroupExpanded: true,
+      sessionListError: '',
+      leftRailCollapsed: false,
+      editingGroupRoomId: undefined,
+      activityVariant: 'cloud',
+    };
+
+    const snapshotManager = new LeftRailSnapshotManager({
+      getSessions: () => state.sessions,
+      getGroupRooms: () => state.groupRooms,
+      getProfiles: () => state.profiles,
+      getActiveSessionId: () => state.activeSessionId,
+      getActiveFocus: () => state.activeFocus,
+      getProfileName: () => state.profileName,
+      getSearchQuery: () => state.sessionSearchQuery,
+      isSessionsGroupExpanded: () => state.isSessionsGroupExpanded,
+      isGroupsGroupExpanded: () => state.isGroupsGroupExpanded,
+      getError: () => state.sessionListError,
+      isCollapsed: () => state.leftRailCollapsed,
+      getEditingGroupRoomId: () => state.editingGroupRoomId,
+      getProfilesPhase: () => state.profilesPhase,
+      getSessionsPhase: () => state.sessionsPhase,
+      getActivityVariant: () => state.activityVariant,
+      getActiveRunningSessionIds: () => runningSessions,
+      getUnreadSessionIds: () => unreadSessions,
+      getActiveStreamingStoredSessionId: () => null,
+      getActiveRunningGroupRoomIds: () => runningGroups,
+      getUnreadGroupRoomIds: () => unreadGroups,
+      getActiveRunningBotNames: () => runningBots,
+      getUnreadBotNames: () => unreadBots,
+      resolveAgentAvatar: () => '',
+      resolveTransition: (scope, id, st, now) => tracker.resolveTransition(scope, id, st, now),
+    });
+
+    const noop = () => {};
+    const actions = {
+      onSelectSession: noop,
+      onSelectBot: noop,
+      onSelectGroup: noop,
+      onOpenSessionMenu: noop,
+      onOpenBotMenu: noop,
+      onOpenGroupMenu: noop,
+      onSearchChange: noop,
+      onNewChat: noop,
+      onToggleSessions: noop,
+      onToggleGroups: noop,
+      onStartGroupRename: noop,
+      onConfirmGroupRename: noop,
+      onCancelGroupRename: noop,
+      onResizeStart: noop,
+    };
+
+    const host = document.getElementById('rail-host');
+    const pushRail = mountLeftRail(host, () => snapshotManager.getSnapshot(), actions);
+    const render = () => pushRail();
+
+    function scheduleRefresh() {
+      if (refreshTimer !== null) {
+        clearTimeout(refreshTimer);
+        refreshTimer = null;
+      }
+      const delay = tracker.nextExpiryDelayMs(Date.now());
+      if (delay === null) return;
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        scheduleRefresh();
+        render();
+      }, delay);
+    }
+
+    function domainSets(domain) {
+      if (domain === 'session') return [runningSessions, unreadSessions];
+      if (domain === 'bot') return [runningBots, unreadBots];
+      return [runningGroups, unreadGroups];
+    }
+
+    window.__fluxState = state;
+    window.__fluxRender = render;
+    window.__fluxActivity = {
+      startTurn: (domain, entityId) => {
+        const [running, unread] = domainSets(domain);
+        applyTurnStarted(running, unread, entityId);
+        tracker.clear(domain, entityId);
+        render();
+      },
+      completeTurn: (domain, entityId, isFocused) => {
+        const [running, unread] = domainSets(domain);
+        const wasRunning = running.has(entityId);
+        applyTurnCompleted(running, unread, entityId, isFocused);
+        if (wasRunning) {
+          tracker.recordCompleted(domain, entityId, isFocused ? 'read' : 'unread', Date.now());
+          scheduleRefresh();
+        }
+        render();
+      },
+      enterRead: (domain, entityId) => {
+        const [, unread] = domainSets(domain);
+        applyEnteredRead(unread, entityId);
+        tracker.clear(domain, entityId);
+        render();
+      },
+    };
+  `;
+
+  const built = await esbuild.build({
+    stdin: { contents: harnessCode, resolveDir: rootDir, loader: 'js' },
+    bundle: true,
+    write: false,
+    format: 'iife',
+    platform: 'browser',
+    target: 'es2022',
+    define: { 'process.env.NODE_ENV': '"production"' },
+    logLevel: 'silent',
+  });
+  const harnessJs = built.outputFiles[0].text;
+  const harnessHtml = `<!DOCTYPE html>
+<html lang="zh-CN" data-theme="obsidian-gold">
+<head>
+  <meta charset="UTF-8">
+  <title>Hermes Flux Activity Indicator CDP</title>
+  <link rel="stylesheet" href="/packages/desktop/dist/renderer/styles.css">
+  <link rel="stylesheet" href="/packages/desktop/dist/renderer/conversation.css">
+  <link rel="stylesheet" href="/packages/desktop/dist/renderer/tailwind.css">
+</head>
+<body style="margin:0;width:100vw;height:100vh;display:flex;background:var(--background);color:var(--foreground);font-family:var(--font-sans);">
+  <div id="rail-host" style="display:flex;height:100%;"></div>
+  <script src="/harness.js"></script>
+</body>
+</html>`;
+
   const server = http.createServer((req, res) => {
-    let reqPath = decodeURIComponent(req.url?.split('?')[0] || '/');
-    if (reqPath === '/') reqPath = `/${RENDERER_ENTRY}`;
+    const reqPath = decodeURIComponent(req.url?.split('?')[0] || '/');
+    if (reqPath === '/' || reqPath === '/harness.html') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(harnessHtml);
+      return;
+    }
+    if (reqPath === '/harness.js') {
+      res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8' });
+      res.end(harnessJs);
+      return;
+    }
     const filePath = path.join(rootDir, reqPath);
     if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
       res.writeHead(404);
@@ -69,7 +251,7 @@ test('session-list-status-animation: 稀疏云朵 A 点阵、头像简洁角标�
     '--no-default-browser-check',
     `--user-data-dir=${tmpUserDataDir}`,
     '--window-size=1280,800',
-    `http://127.0.0.1:${serverPort}/${RENDERER_ENTRY}`,
+    `http://127.0.0.1:${serverPort}/harness.html`,
   ], { stdio: 'ignore' });
 
   let ws = null;
@@ -188,10 +370,13 @@ test('session-list-status-animation: 稀疏云朵 A 点阵、头像简洁角标�
   const lightMetrics = await evaluate(`(() => {
     const sessRow = document.querySelector('.session-item[data-id="s-running"]');
     const sessRun = sessRow ? sessRow.querySelector('.activity-pulse-indicator') : null;
-    const sessRunDots = sessRun ? sessRun.querySelectorAll('.flux-cloud-dot') : [];
+    const sessRunStreams = sessRun ? Array.from(sessRun.querySelectorAll('.flux-cloud-stream')) : [];
+    const sessRunGlint = sessRun ? sessRun.querySelector('.flux-cloud-glint') : null;
     const sessRunHasSvg = Boolean(sessRow && sessRow.querySelector('svg'));
     const sessHistUnread = document.querySelector('.session-item[data-id="s-unread-hist"] .activity-unread-badge');
-    const sessHistOnDots = sessHistUnread ? sessHistUnread.querySelectorAll('.flux-cloud-dot[data-on="1"]') : [];
+    const sessHistDoneRing = sessHistUnread ? sessHistUnread.querySelector('.flux-cloud-done-ring') : null;
+    const sessHistCheck = sessHistUnread ? sessHistUnread.querySelector('.flux-cloud-check') : null;
+    const sessHistDoneLabel = sessHistUnread ? sessHistUnread.querySelector('.flux-cloud-label--done') : null;
     const sessRead = document.querySelector('.session-item[data-id="s-read"]');
 
     const botCardRun = document.querySelector('.rail-primary-agent-card[data-primary-bot="arch-wang"] .activity-pulse-indicator');
@@ -201,13 +386,13 @@ test('session-list-status-animation: 稀疏云朵 A 点阵、头像简洁角标�
     const groupRowRun = document.querySelector('.rail-group-item[data-room-id="g-running"] .activity-pulse-indicator');
     const groupRowRead = document.querySelector('.rail-group-item[data-room-id="g-read"]');
 
-    const firstCloudDot = sessRunDots[0] || null;
-    const firstDoneDot = sessHistOnDots[0] || null;
+    const firstStream = sessRunStreams[0] || null;
     const csCorner = stationBotRun ? getComputedStyle(stationBotRun) : null;
     const csCornerAfter = stationBotRun ? getComputedStyle(stationBotRun, '::after') : null;
-    const csCloudDot = firstCloudDot ? getComputedStyle(firstCloudDot) : null;
-    const csDoneDot = firstDoneDot ? getComputedStyle(firstDoneDot) : null;
-    const csHistUnread = sessHistUnread ? getComputedStyle(sessHistUnread) : null;
+    const csFirstStream = firstStream ? getComputedStyle(firstStream) : null;
+    const csGlint = sessRunGlint ? getComputedStyle(sessRunGlint) : null;
+    const csDoneRing = sessHistDoneRing ? getComputedStyle(sessHistDoneRing) : null;
+    const csDoneLabel = sessHistDoneLabel ? getComputedStyle(sessHistDoneLabel) : null;
     const sessRunLabel = sessRun ? sessRun.querySelector('.flux-cloud-label--running') : null;
     const csSessRunLabel = sessRunLabel ? getComputedStyle(sessRunLabel) : null;
     const botCardTitle = document.querySelector('.rail-primary-agent-card[data-primary-bot="arch-wang"] .truncate.text-body');
@@ -218,6 +403,7 @@ test('session-list-status-animation: 稀疏云朵 A 点阵、头像简洁角标�
     const timeEl = sessRow ? sessRow.querySelector('time') : null;
     const timeRight = timeEl ? timeEl.getBoundingClientRect().right : 0;
     const rowRight = sessRow ? sessRow.getBoundingClientRect().right : 0;
+    const harmonicDurations = [...sessRunStreams, sessRunGlint].filter(Boolean).map((el) => getComputedStyle(el).animationDuration);
 
     return {
       hasAllRunning: Boolean(sessRun && botCardRun && stationBotRun && groupRowRun),
@@ -226,21 +412,26 @@ test('session-list-status-animation: 稀疏云朵 A 点阵、头像简洁角标�
         sessRead && !sessRead.querySelector('.activity-pulse-indicator, .activity-unread-badge, .activity-settle-fade')
         && groupRowRead && !groupRowRead.querySelector('.activity-pulse-indicator, .activity-unread-badge, .activity-settle-fade')
       ),
-      cloudDotCount: sessRunDots.length,
-      doneCheckDotCount: sessHistOnDots.length,
+      cloudStreamCount: sessRunStreams.length,
+      hasGlint: Boolean(sessRunGlint),
+      hasDoneCheck: Boolean(sessHistDoneRing && sessHistCheck),
+      harmonicDurations,
       sessRunHasSvg,
       cornerIsSimple: Boolean(stationBotRun && !stationBotRun.querySelector('.flux-cloud-canvas')),
       cornerSize: csCorner ? [csCorner.width, csCorner.height] : null,
       cornerAfterAnim: csCornerAfter ? csCornerAfter.animationName : null,
-      cloudDotBg: csCloudDot ? csCloudDot.backgroundColor : null,
-      cloudDotAnim: csCloudDot ? csCloudDot.animationName : null,
-      doneDotBg: csDoneDot ? csDoneDot.backgroundColor : null,
+      runInkBg: csGlint ? csGlint.backgroundColor : null,
+      cloudStreamAnim: csFirstStream ? csFirstStream.animationName : null,
+      doneRingColor: csDoneRing ? csDoneRing.borderTopColor : null,
       runLabelDisplay: csSessRunLabel ? csSessRunLabel.display : null,
       runLabelColor: csSessRunLabel ? csSessRunLabel.color : null,
       runLabelAnim: csSessRunLabel ? csSessRunLabel.animationName : null,
+      runLabelFontWeight: csSessRunLabel ? csSessRunLabel.fontWeight : null,
+      runLabelFontSize: csSessRunLabel ? csSessRunLabel.fontSize : null,
+      doneLabelFontWeight: csDoneLabel ? csDoneLabel.fontWeight : null,
       botCardTitleFull: !botCardTitleEllipsis,
       histUnreadTransition: sessHistUnread ? sessHistUnread.getAttribute('data-transition') : null,
-      histUnreadDoneDotAnim: csDoneDot ? csDoneDot.animationName : null,
+      histUnreadDoneRingAnim: csDoneRing ? csDoneRing.animationName : null,
       botCornerInside: Boolean(botBtnRect && botDotRect && botDotRect.right <= botBtnRect.right + 1 && botDotRect.top >= botBtnRect.top - 1),
       timeRightGap: Math.round(rowRight - timeRight),
       runningText: sessRun ? sessRun.textContent : '',
@@ -253,15 +444,17 @@ test('session-list-status-animation: 稀疏云朵 A 点阵、头像简洁角标�
   assert.equal(lightMetrics.hasAllRunning, true, '三类列表与微轨 Bot 必须全部渲染 running 指示器');
   assert.equal(lightMetrics.hasUnread, true, '历史未读必须渲染已完成指示器');
   assert.equal(lightMetrics.readHasZeroDots, true, '静态已读会话与群聊必须零特殊状态节点');
-  assert.equal(lightMetrics.cloudDotCount, 13, '云朵 A 必须精确渲染 13 颗稀疏微粒');
-  assert.equal(lightMetrics.doneCheckDotCount, 7, '云朵 A 完成态必须精确点亮 7 颗对勾核心晶粒');
+  assert.equal(lightMetrics.cloudStreamCount, 3, '流云必须精确渲染 3 条渐变丝带');
+  assert.equal(lightMetrics.hasGlint, true, '流云必须包含 1 颗微星流光');
+  assert.equal(lightMetrics.hasDoneCheck, true, '流云完成态必须渲染完成环与对勾');
+  assert.equal(new Set(lightMetrics.harmonicDurations).size, 4, `流云四层运动周期必须互不相同，实测 ${JSON.stringify(lightMetrics.harmonicDurations)}`);
   assert.equal(lightMetrics.sessRunHasSvg, false, '普通会话行内严禁出现 <svg> 标签');
   assert.equal(lightMetrics.cornerIsSimple, true, '头像角标必须保持简洁圆点，不含云朵画布');
   assert.deepEqual(lightMetrics.cornerSize, ['8px', '8px'], '头像角标必须保持 8x8');
   assert.equal(lightMetrics.cornerAfterAnim, 'fluxActivityPulseRing', '头像角标脉冲环动画必须生效');
-  assert.equal(lightMetrics.cloudDotAnim, 'fluxCloudDrift', '云朵微粒必须运行缓慢飘浮波浪动画');
+  assert.equal(lightMetrics.cloudStreamAnim, 'fluxCloudRibbonTop', '流云丝带必须运行渐变漂移动画');
   assert.equal(lightMetrics.histUnreadTransition, 'none', '超过窗口的历史未读必须回落 none');
-  assert.equal(lightMetrics.histUnreadDoneDotAnim, 'none', '历史未读不得重播聚拢动画');
+  assert.equal(lightMetrics.histUnreadDoneRingAnim, 'none', '历史未读不得重播完成环动画');
   assert.equal(lightMetrics.botCornerInside, true, '微轨 Bot 角标必须落在按钮边界内');
   assert.ok(lightMetrics.timeRightGap <= 16, `时间必须紧贴行右缘，当前差 ${lightMetrics.timeRightGap}px`);
   assert.equal(lightMetrics.runningText, '执行中');
@@ -269,14 +462,17 @@ test('session-list-status-animation: 稀疏云朵 A 点阵、头像简洁角标�
   assert.equal(lightMetrics.groupText, '协作中');
   assert.equal(lightMetrics.unreadText, '已完成');
 
-  const runRgb = parseRgb(lightMetrics.cloudDotBg);
-  const doneRgb = parseRgb(lightMetrics.doneDotBg);
+  const runRgb = parseRgb(lightMetrics.runInkBg);
+  const doneRgb = parseRgb(lightMetrics.doneRingColor);
   const labelRgb = parseRgb(lightMetrics.runLabelColor);
-  assert.ok(runRgb && runRgb.b > runRgb.g && runRgb.b > runRgb.r, `运行态必须为纯蓝色系，实测 ${lightMetrics.cloudDotBg}`);
-  assert.ok(doneRgb && doneRgb.b > doneRgb.g && doneRgb.b > doneRgb.r, `完成态必须为纯蓝色系（严禁绿色），实测 ${lightMetrics.doneDotBg}`);
+  assert.ok(runRgb && runRgb.b > runRgb.g && runRgb.b > runRgb.r, `运行态必须为纯蓝色系，实测 ${lightMetrics.runInkBg}`);
+  assert.ok(doneRgb && doneRgb.b > doneRgb.g && doneRgb.b > doneRgb.r, `完成态必须为纯蓝色系（严禁绿色），实测 ${lightMetrics.doneRingColor}`);
   assert.ok(labelRgb && labelRgb.b > labelRgb.g && labelRgb.b > labelRgb.r, `流光状态文字必须为纯蓝色系，实测 ${lightMetrics.runLabelColor}`);
   assert.notEqual(lightMetrics.runLabelDisplay, 'none', '普通会话行在默认宽度下必须展示流光状态文字');
   assert.equal(lightMetrics.runLabelAnim, 'fluxCloudLabelPulse', '流光状态文字必须走纯 GPU opacity 呼吸');
+  assert.equal(lightMetrics.runLabelFontWeight, '400', '运行状态文字必须保持轻盈 regular (400) 字重');
+  assert.equal(lightMetrics.runLabelFontSize, '11px', '运行状态文字必须对齐 11px caption 阶梯');
+  assert.equal(lightMetrics.doneLabelFontWeight, '400', '已完成文字必须保持轻盈 regular (400) 字重');
   assert.equal(lightMetrics.botCardTitleFull, true, '窄抽屉下主工位卡大标题「架构老王」必须完整显示不被截断');
 
   const verifyDir = path.join(rootDir, 'artifacts', 'verification');
@@ -293,7 +489,7 @@ test('session-list-status-animation: 稀疏云朵 A 点阵、头像简洁角标�
   await new Promise((r) => setTimeout(r, 150));
 
   const darkBlue = await evaluate(`(() => {
-    const dot = document.querySelector('.session-item[data-id="s-running"] .flux-cloud-dot');
+    const dot = document.querySelector('.session-item[data-id="s-running"] .flux-cloud-glint');
     return dot ? getComputedStyle(dot).backgroundColor : null;
   })()`);
   const darkRgb = parseRgb(darkBlue);
@@ -314,10 +510,10 @@ test('session-list-status-animation: 稀疏云朵 A 点阵、头像简洁角标�
     window.__fluxRender();
   })()`);
   const pausedState = await evaluate(`(() => {
-    const dot = document.querySelector('.session-item[data-id="s-running"] .flux-cloud-dot');
-    return dot ? getComputedStyle(dot).animationPlayState : null;
+    const els = Array.from(document.querySelectorAll('.session-item[data-id="s-running"] .flux-cloud-stream, .session-item[data-id="s-running"] .flux-cloud-glint'));
+    return els.length > 0 && els.every((el) => getComputedStyle(el).animationPlayState === 'paused');
   })()`);
-  assert.equal(pausedState, 'paused', '页面隐藏时云朵飘浮动画必须自动暂停');
+  assert.equal(pausedState, true, '页面隐藏时流云丝带与微星流光动画必须自动暂停');
 
   await evaluate(`(() => {
     delete document.documentElement.dataset.pageHidden;
@@ -330,29 +526,29 @@ test('session-list-status-animation: 稀疏云朵 A 点阵、头像简洁角标�
     const sBadge = document.querySelector('.session-item[data-id="s-running"] .activity-unread-badge');
     const bCorner = document.querySelector('#flux-station-rail [data-station-profile="arch-wang"] .activity-unread-badge');
     const gBadge = document.querySelector('.rail-group-item[data-room-id="g-running"] .activity-unread-badge');
-    const onDot = sBadge ? sBadge.querySelector('.flux-cloud-dot[data-on="1"]') : null;
+    const doneRing = sBadge ? sBadge.querySelector('.flux-cloud-done-ring') : null;
     const ripple = sBadge ? sBadge.querySelector('.flux-cloud-ripple') : null;
     return {
       allJustCompleted: [sBadge, bCorner, gBadge].every((el) => el && el.getAttribute('data-transition') === 'just-completed'),
-      checkDotAnimation: onDot ? getComputedStyle(onDot).animationName : null,
+      checkRingAnimation: doneRing ? getComputedStyle(doneRing).animationName : null,
       rippleAnimation: ripple ? getComputedStyle(ripple).animationName : null,
     };
   })()`);
   assert.equal(transitionActive.allJustCompleted, true, '刚完成三类会话必须全部进入 just-completed 确认态');
-  assert.equal(transitionActive.checkDotAnimation, 'fluxCloudCheckArrive', '云朵核心晶粒必须播放飞移聚拢对勾动画');
+  assert.equal(transitionActive.checkRingAnimation, 'fluxCloudCheckArrive', '完成瞬间必须播放完成环落定动画');
   assert.equal(transitionActive.rippleAnimation, 'fluxCloudRipple', '完成瞬间必须播放柔蓝扩散波纹');
 
   await new Promise((r) => setTimeout(r, 950));
   const afterWindow = await evaluate(`(() => {
     const sBadge = document.querySelector('.session-item[data-id="s-running"] .activity-unread-badge');
-    const onDot = sBadge ? sBadge.querySelector('.flux-cloud-dot[data-on="1"]') : null;
+    const doneRing = sBadge ? sBadge.querySelector('.flux-cloud-done-ring') : null;
     return {
       transition: sBadge ? sBadge.getAttribute('data-transition') : null,
-      animation: onDot ? getComputedStyle(onDot).animationName : null,
+      animation: doneRing ? getComputedStyle(doneRing).animationName : null,
     };
   })()`);
   assert.equal(afterWindow.transition, 'none', '850ms 窗口到期后必须自动切回静态 none');
-  assert.equal(afterWindow.animation, 'none', '窗口到期后必须停止动画驻留静默蓝勾');
+  assert.equal(afterWindow.animation, 'none', '窗口到期后必须停止动画驻留静默完成环');
 
   await evaluate(`(() => {
     window.__fluxActivity.startTurn('session', 's-read');
@@ -363,14 +559,17 @@ test('session-list-status-animation: 稀疏云朵 A 点阵、头像简洁角标�
   const focusSettle = await evaluate(`(() => {
     const row = document.querySelector('.session-item[data-id="s-read"]');
     const settle = row ? row.querySelector('.activity-settle-fade') : null;
+    const streams = settle ? settle.querySelectorAll('.flux-cloud-settle-stream').length : 0;
     const legacy = row ? row.querySelector('.activity-pulse-indicator, .activity-unread-badge') : null;
     return {
       hasSettle: Boolean(settle),
+      streams,
       hasLegacy: Boolean(legacy),
       animation: settle ? getComputedStyle(settle).animationName : null,
     };
   })()`);
   assert.equal(focusSettle.hasSettle, true, '聚焦会话完成瞬间必须呈现独立收敛淡出');
+  assert.equal(focusSettle.streams, 3, '收敛淡出必须包含 3 条收拢丝带');
   assert.equal(focusSettle.hasLegacy, false, '聚焦完成态绝不得混入脉冲或未读类名');
   assert.equal(focusSettle.animation, 'fluxCloudSettleFade');
 
@@ -386,10 +585,88 @@ test('session-list-status-animation: 稀疏云朵 A 点阵、头像简洁角标�
     window.__fluxActivity.startTurn('session', 's-running');
   })()`);
   const railRunning = await evaluate(`(() => {
-    const el = document.querySelector('#session-list-container .session-item[data-id="s-running"] .activity-pulse-indicator .flux-cloud-dot');
+    const el = document.querySelector('#session-list-container .session-item[data-id="s-running"] .activity-pulse-indicator .flux-cloud-stream');
     return Boolean(el);
   })()`);
-  assert.equal(railRunning, true, '会话甲板内的会话必须实时透传云朵三态状态动画');
+  assert.equal(railRunning, true, '会话甲板内的会话必须实时透传流云三态状态动画');
   const projectsDeckGone = await evaluate(`(() => document.getElementById('rail-projects-deck') === null)()`);
   assert.equal(projectsDeckGone, true, '项目甲板已随微轨项目入口移除，任何状态切换都不得把它渲染回来');
+
+  // 切换为 30×16 宽幅 3D 点云「abyss-whale」，实测物理尺寸、26 颗动画粒子、pageHidden 与 reduced-motion
+  await evaluate(`(() => {
+    window.__fluxState.activityVariant = 'abyss-whale';
+    window.__fluxRender();
+  })()`);
+  await new Promise((r) => setTimeout(r, 80));
+
+  const whaleMetrics = await evaluate(`(() => {
+    const canvas = document.querySelector('.session-item[data-id="s-running"] .flux-pc-canvas--wide');
+    const dots = canvas ? Array.from(canvas.querySelectorAll('.flux-pc-dot')) : [];
+    const csCanvas = canvas ? getComputedStyle(canvas) : null;
+    const activeAnim = dots.filter((d) => getComputedStyle(d).animationName.startsWith('fluxPcG')).length;
+    const xs = dots.map((d) => d.getBoundingClientRect().left);
+    const spanX = xs.length ? Math.max(...xs) - Math.min(...xs) : 0;
+    return {
+      hasCanvas: Boolean(canvas),
+      canvasSize: csCanvas ? [csCanvas.width, csCanvas.height] : null,
+      dotCount: dots.length,
+      activeAnim,
+      spanX,
+    };
+  })()`);
+  assert.equal(whaleMetrics.hasCanvas, true, 'abyss-whale 必须挂载 .flux-pc-canvas--wide');
+  assert.deepEqual(whaleMetrics.canvasSize, ['30px', '16px'], '宽幅 3D 点云画布必须严格为 30px×16px');
+  assert.equal(whaleMetrics.dotCount, 26, '深海光鲸必须精确挂载 26 颗点云粒子');
+  assert.equal(whaleMetrics.activeAnim, 26, '深海光鲸全部 26 颗粒子必须运行独立关键帧动画');
+  assert.ok(whaleMetrics.spanX >= 14, `点云粒子必须在 30px 画布上舒展分布，实测 spanX=${whaleMetrics.spanX}`);
+
+  await evaluate(`(() => {
+    document.documentElement.dataset.pageHidden = 'true';
+  })()`);
+  const whalePaused = await evaluate(`(() => {
+    const dots = Array.from(document.querySelectorAll('.session-item[data-id="s-running"] .flux-pc-dot'));
+    return dots.length === 26 && dots.every((d) => getComputedStyle(d).animationPlayState === 'paused');
+  })()`);
+  assert.equal(whalePaused, true, '页面隐藏时全部 26 颗点云粒子动画必须暂停');
+  await evaluate(`(() => {
+    delete document.documentElement.dataset.pageHidden;
+  })()`);
+
+  // 验证三套负 delay 共享轨道变体（torus-mesh / sphere-mesh / mobius-band）与宽幅变体（abyss-whale）在 reduced-motion 下全部停动且保持舒展分布
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  const reducedPointClouds = [
+    { variant: 'abyss-whale', count: 26, minSpanX: 20, minSpanY: 6.5 },
+    { variant: 'torus-mesh', count: 20, minSpanX: 10, minSpanY: 7.5 },
+    { variant: 'sphere-mesh', count: 20, minSpanX: 10, minSpanY: 10.5 },
+    { variant: 'mobius-band', count: 18, minSpanX: 9.5, minSpanY: 6.5 },
+  ];
+  for (const item of reducedPointClouds) {
+    await evaluate(`(() => {
+      window.__fluxState.activityVariant = ${JSON.stringify(item.variant)};
+      window.__fluxRender();
+    })()`);
+    await new Promise((r) => setTimeout(r, 40));
+    const stats = await evaluate(`(() => {
+      const dots = Array.from(document.querySelectorAll('.session-item[data-id="s-running"] .flux-pc-dot'));
+      const allStopped = dots.length === ${item.count} && dots.every((d) => getComputedStyle(d).animationName === 'none');
+      const allAutoWillChange = dots.length === ${item.count} && dots.every((d) => getComputedStyle(d).willChange === 'auto');
+      const xs = dots.map((d) => d.getBoundingClientRect().left);
+      const ys = dots.map((d) => d.getBoundingClientRect().top);
+      return {
+        count: dots.length,
+        allStopped,
+        allAutoWillChange,
+        spanX: xs.length ? Math.max(...xs) - Math.min(...xs) : 0,
+        spanY: ys.length ? Math.max(...ys) - Math.min(...ys) : 0,
+      };
+    })()`);
+    assert.equal(stats.count, item.count, `${item.variant} 必须渲染 ${item.count} 颗点云粒子`);
+    assert.equal(stats.allStopped, true, `减弱动效下 ${item.variant} 全部粒子必须停止动画`);
+    assert.equal(stats.allAutoWillChange, true, `减弱动效下 ${item.variant} 必须释放 will-change 合成层提示`);
+    assert.ok(
+      stats.spanX >= item.minSpanX && stats.spanY >= item.minSpanY,
+      `减弱动效下 ${item.variant} 不得坍缩，实测 span=${stats.spanX.toFixed(2)}x${stats.spanY.toFixed(2)}`,
+    );
+  }
+  await send('Emulation.setEmulatedMedia', { features: [] });
 });
