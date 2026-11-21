@@ -405,7 +405,16 @@ export class GroupRoomStore {
       list = [];
       this.roomLogs.set(roomId, list);
     }
-    if (!list.some((e) => e.messageId === entry.messageId)) {
+    const existingIdx = list.findIndex((e) => e.messageId === entry.messageId);
+    if (existingIdx >= 0) {
+      const prev = list[existingIdx];
+      list[existingIdx] = {
+        ...prev,
+        ...entry,
+        seq: entry.seq > 0 ? entry.seq : prev.seq,
+      };
+      list.sort((a, b) => a.seq - b.seq);
+    } else {
       list.push(entry);
       list.sort((a, b) => a.seq - b.seq);
     }

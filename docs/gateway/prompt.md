@@ -13,7 +13,7 @@
 | `prompt.btw` | `session_id` `profile` `text` | `task_id` | `packages/core/src/session/handoffService.ts:58` | ✅ 0.22.5 |
 | `prompt.cancel` | `session_id` `admission_id` | `admission_id` `ref` `sequence` `status` `outcome` `authority_epoch` `execution_generation` | `packages/core/src/session/interactiveService.ts:377` | 跳过：未做真实网关验证：取消需要真实排队中的准入（仅在有在途回合时存在），离线探针造不出该状态，误传真实 admission_id 又会撤掉用户自己的排队消息；目前仅由本地参数构造单测与契约表守护 |
 | `prompt.steer_queued` | `profile` `session_id` `admission_id` | `admission_id` `ref` `sequence` `status` `outcome` `authority_epoch` `execution_generation` | `packages/core/src/session/interactiveService.ts:403` | 跳过：未做真实网关验证：立即执行需要真实排队中的准入与在途回合，离线探针造不出该状态；目前仅由本地参数构造单测与契约表守护 |
-| `prompt.submit` | `session_id` `profile` `text` `display_kind` `interrupted` `queued` `surface` `voice_context` `voice_turn` `title_preview` `truncate_before_user_ordinal` `truncate_before_row_id` `truncate_before_message_id` `confirm_truncate` `confirm_empty_truncate` `confirm_deep_truncate` `rebind_survivor_row_ids` `submission_id` `input_id` `attachments` `finite` `unattended` `turn_author` `api_text` `model_override` `clarify_batch` | `status` `voice_stopped` `user_row_id` `survivor_user_row_ids` `survivor_row_id_map` `turn_isolation` `admission_id` `forwarded` | `packages/core/src/session/interactiveService.ts:110`<br>`packages/desktop/src/renderer/events/inputDockController.ts:228`<br>`packages/desktop/src/renderer/services/turnExecutionService.ts:735` | ✅ 0.22.5 |
+| `prompt.submit` | `session_id` `profile` `text` `display_kind` `interrupted` `queued` `surface` `voice_context` `voice_turn` `title_preview` `truncate_before_user_ordinal` `truncate_before_row_id` `truncate_before_message_id` `confirm_truncate` `confirm_empty_truncate` `confirm_deep_truncate` `rebind_survivor_row_ids` `submission_id` `input_id` `attachments` `finite` `unattended` `turn_author` `api_text` `model_override` `clarify_batch` | `status` `voice_stopped` `user_row_id` `survivor_user_row_ids` `survivor_row_id_map` `turn_isolation` `admission_id` `forwarded` | `packages/core/src/session/interactiveService.ts:110`<br>`packages/desktop/src/renderer/events/inputDockController.ts:236`<br>`packages/desktop/src/renderer/services/turnExecutionService.ts:735` | ✅ 0.22.5 |
 | `slash.exec` | `session_id` `command` `profile` | `output` `warning` `type` `target` `message` `notice` `display` `name` `status` | `packages/core/src/session/interactiveService.ts:292` | 跳过：斜杠指令执行需活跃会话与在线命令分发器（exec/alias/send/prefill/skill），离线探针显式跳过，由契约表与领域单测守护 |
 
 ## 明细
@@ -90,7 +90,7 @@
 - 真实探针：已通过（网关 0.22.5，录制于 2026-11-01T01:59:35.303Z）
 - 调用点：
   - `packages/core/src/session/interactiveService.ts:110`
-  - `packages/desktop/src/renderer/events/inputDockController.ts:228`
+  - `packages/desktop/src/renderer/events/inputDockController.ts:236`
   - `packages/desktop/src/renderer/services/turnExecutionService.ts:735`
 
 ### `slash.exec`

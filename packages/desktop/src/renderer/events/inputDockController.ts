@@ -211,6 +211,14 @@ export class InputDockController {
       return;
     }
 
+    if (state.activeFocus.type === 'group') {
+      if (this.deps.setTimedDockNotice) {
+        this.deps.setTimedDockNotice(this.deps.t('dock.cmdNotSupportedInGroup'), 4000);
+      }
+      this.deps.requestRender();
+      return;
+    }
+
     if (!state.activeSessionId && this.deps.createNewSession) {
       await this.deps.createNewSession();
     }

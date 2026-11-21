@@ -45,7 +45,7 @@ export interface ModalInteractionDeps {
   readonly openBotChat: (profile: string) => Promise<void> | void;
   readonly openBotSettings: (profile: string) => void;
   readonly openGroupRoom: (roomId: string) => Promise<void>;
-  readonly createGroupRoom: (title: string, members: string[]) => Promise<{ room_id?: string }>;
+  readonly createGroupRoom: (title: string, members: string[]) => Promise<{ room_id?: string; room?: { room_id?: string } }>;
   readonly disbandGroupRoom: (roomId: string) => Promise<void>;
   readonly fetchGroupRooms: () => Promise<void>;
   readonly t: (key: I18nKey, params?: Record<string, string | number>) => string;
@@ -203,7 +203,7 @@ export class ModalInteractionController {
           finalMembers,
         );
         await this.deps.fetchGroupRooms();
-        const roomId = room?.room_id || '';
+        const roomId = room?.room?.room_id || room?.room_id || '';
         if (roomId) {
           await this.deps.openGroupRoom(roomId);
         }

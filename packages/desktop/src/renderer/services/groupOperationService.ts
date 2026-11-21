@@ -70,6 +70,9 @@ export interface GroupOperationDeps {
   readonly getCurrentLoadMessagesGeneration: () => number;
   readonly logSession?: Pick<FluxLogger, 'debug'> | GuardedRunLogger;
   readonly setPendingScrollToBottom?: (pending: boolean) => void;
+  readonly groupRoomStore?: GroupRoomStore;
+  readonly cancelColdStartFocus?: () => void;
+  readonly sessionMessagesCache?: Map<string, MessageViewModel[]>;
   beginSessionEnter?: SessionEnterBeginHook;
   captureStreamAnchor?: GroupAnchorCapturer;
 }
@@ -87,7 +90,7 @@ export interface GroupOperationService {
 
 export function createGroupOperationService(deps: GroupOperationDeps): GroupOperationService {
   const hostedRoomIds = new Set<string>();
-  const groupRoomStore = new GroupRoomStore();
+  const groupRoomStore = deps.groupRoomStore ?? new GroupRoomStore();
 
   function isHostedRoom(id: string): boolean {
     return hostedRoomIds.has(id);
@@ -162,50 +165,127 @@ export function createGroupOperationService(deps: GroupOperationDeps): GroupOper
     state.activeGroupSpeaker = resolveGroupSpeaker(state.messages, members, state.profiles);
   }
 
+  /**
+   * 开启或切换群聊研讨室视口
+   *
+   * 【设计意图 (Why)】
+   *   群聊房间（hosted_rooms）与普通会话（state.db / session.*）物理正交隔离。
+   *   进群时必须将 `activeFocus` 设为 `{ type: 'group', roomId }`，并将 `activeSessionId` 与 `activeLiveSessionId`
+   *   归零置空，彻底隔断任何 `session.*` 单聊 RPC。同时以 `group:${roomId}` 作为视口作用域键锁存进入计划。
+   *
+   * 【防范的历史坑 (Pitfall)】
+   *   1. 严禁把 roomId 赋给 activeSessionId，否则会引发 session.resume 4001 报错；
+   *   2. 离线/未握手态（!client）点击群聊时，必须率先落盘 activeFocus 与清空视口，杜绝后续冷启动篡改焦点；
+   *   3. runGuarded 的代际比对基准必须基于 activeFocus.roomId 而非 activeSessionId，防止永远被判为 discarded；
+   *   4. discarded 时若用户仍在当前群聊（仅因后台并发递增了代际），需兜底收敛 messagesPhase = 'ready'，杜绝永久骨架屏；
+   *   5. 离场前必须将前序普通会话的 messages 存入 sessionMessagesCache，避免切换折返时丢消息。
+   *
+   * 【约束与规则 (Rules)】
+   *   1. 首帧同步清理视口并声明 loading，0ms 触发 deps.render() 显示骨架屏；
+   *   2. 不得降级或假冒普通会话。
+   */
   async function openGroupRoom(roomId: string): Promise<void> {
-    const client = deps.getGatewayClient();
-    if (!roomId || !client) return;
+    if (!roomId) return;
     const state = deps.getState();
 
-    // 切换焦点域前解除挂起回滚并捕获前序会话视口快照
+    // 1. 切换焦点域前解除挂起回滚、取消冷启动抢焦点并捕获前序视口快照
+    deps.cancelColdStartFocus?.();
     deps.disarmRollbackOnLeave();
     deps.captureStreamAnchor?.();
+
+    // 若前序处于普通会话且存在消息，存入内存缓存供折返恢复
+    if (state.activeSessionId && state.messages.length > 0 && deps.sessionMessagesCache) {
+      deps.sessionMessagesCache.set(state.activeSessionId, [...state.messages]);
+    }
+
+    // 2. 率先同步写入群聊焦点并重置单聊 Session ID（彻底隔断跨域逃逸）
     state.activeFocus = { type: 'group', roomId };
     applyEnteredRead(deps.unreadGroupRoomIds, roomId);
     deps.activityTransitionTracker.clear('group', roomId);
     const targetRoom = state.groupRooms.find((r) => r.roomId === roomId);
 
-    state.activeSessionId = roomId;
-    state.activeLiveSessionId = roomId;
-    // 【规则】群聊与普通会话共用同一套进入语义：首次进房间贴底，曾回溯则恢复原阅读位。
-    deps.beginSessionEnter?.(roomId);
+    state.activeSessionId = '';
+    state.activeLiveSessionId = '';
+    state.isStreaming = false;
+    state.messages = [];
     state.isLoadingOlder = false;
     state.hasOlderMessages = false;
-    // 研讨记录尚未到达：与普通会话同口径声明 loading，避免把"切换房间的空窗"读成空会话。
-    state.messagesPhase = 'loading';
-    const generation = deps.nextLoadMessagesGeneration();
-    const guard = { sessionId: roomId, generation };
+    state.activeGroupSpeaker = null;
 
     // 切换房间时重置线程上下文，避免跨房间误用同一 thread_id
     deps.turnExecutionService.resetActiveGroupThread();
-    // 【在场指示器】换房间立刻清空说话者：上一个房间的成员绝不能在新房间被高亮
-    state.activeGroupSpeaker = null;
 
-    // 从 groups.log 拉取官方事件流
+    // 视口进入计划：群聊统一以 group:${roomId} 作为视口作用域键
+    const viewportKey = `group:${roomId}`;
+    deps.beginSessionEnter?.(viewportKey);
+    const generation = deps.nextLoadMessagesGeneration();
+    const guard = { sessionId: roomId, generation };
+
+    const client = deps.getGatewayClient();
     let fetchedLogs: GroupMessageEntry[] = [];
-    try {
-      const guarded = await runGuarded(
-        guard,
-        () => ({ sessionId: state.activeSessionId, generation: deps.getCurrentLoadMessagesGeneration() }),
-        () => undefined,
-        () => groupRoomStore.fetchLogs(roomId, client),
-        deps.logSession,
-      );
-      if (guarded.status === 'discarded') return;
-      const logs = guarded.value;
-      fetchedLogs = logs ? [...logs] : [];
-      if (logs && logs.length > 0) {
-        state.messages = logs.map((entry, idx): MessageViewModel => {
+
+    if (client) {
+      // 在线态：首帧声明 loading 并即时渲染骨架屏（0ms 响应）
+      state.messagesPhase = 'loading';
+      deps.render();
+
+      // 从 groups.log 拉取官方事件流
+      try {
+        const guarded = await runGuarded(
+          guard,
+          () => ({
+            sessionId: state.activeFocus.type === 'group' ? state.activeFocus.roomId : '',
+            generation: deps.getCurrentLoadMessagesGeneration(),
+          }),
+          () => undefined,
+          () => groupRoomStore.fetchLogs(roomId, client),
+          deps.logSession,
+        );
+        if (guarded.status === 'discarded') return;
+        const logs = guarded.value;
+        fetchedLogs = logs ? [...logs] : [];
+        if (logs && logs.length > 0) {
+          state.messages = logs.map((entry, idx): MessageViewModel => {
+            const senderName = entry.senderProfile || 'Agent';
+            return {
+              id: entry.messageId || `g_msg_${idx}`,
+              role: entry.actorKind === 'user' || entry.senderProfile === 'user' ? 'user' : 'assistant',
+              content: entry.text,
+              sender: senderName,
+              senderAvatar: deps.resolveAgentAvatar(senderName),
+              timestamp: deps.formatTimestamp(entry.timestamp || Date.now()),
+            };
+          });
+        } else {
+          const roomName = targetRoom?.name || deps.t('group.defaultRoomName');
+          const membersText = targetRoom?.members?.join('、') || '';
+          state.messages = [
+            {
+              id: 'group_seed_notice',
+              role: 'system',
+              content: deps.t('group.welcomeInit', { name: roomName, members: membersText }),
+              timestamp: deps.formatTimestamp(Date.now()),
+            },
+          ];
+        }
+      } catch {
+        if (state.activeFocus.type !== 'group' || state.activeFocus.roomId !== guard.sessionId || deps.getCurrentLoadMessagesGeneration() !== guard.generation) return;
+        const roomName = targetRoom?.name || deps.t('group.defaultRoomName');
+        const membersText = targetRoom?.members?.join('、') || '';
+        state.messages = [
+          {
+            id: 'group_seed_notice',
+            role: 'system',
+            content: deps.t('group.welcomeReady', { name: roomName, members: membersText }),
+            timestamp: deps.formatTimestamp(Date.now()),
+          },
+        ];
+      }
+    } else {
+      // 离线或网关未连接兜底：使用内存已有日志或种子欢迎语呈现
+      const cachedLogs = groupRoomStore.getLogs(roomId);
+      if (cachedLogs.length > 0) {
+        state.messages = cachedLogs.map((entry, idx): MessageViewModel => {
           const senderName = entry.senderProfile || 'Agent';
           return {
             id: entry.messageId || `g_msg_${idx}`,
@@ -228,18 +308,6 @@ export function createGroupOperationService(deps: GroupOperationDeps): GroupOper
           },
         ];
       }
-    } catch {
-      if (state.activeSessionId !== guard.sessionId || deps.getCurrentLoadMessagesGeneration() !== guard.generation) return;
-      const roomName = targetRoom?.name || deps.t('group.defaultRoomName');
-      const membersText = targetRoom?.members?.join('、') || '';
-      state.messages = [
-        {
-          id: 'group_seed_notice',
-          role: 'system',
-          content: deps.t('group.welcomeReady', { name: roomName, members: membersText }),
-          timestamp: deps.formatTimestamp(Date.now()),
-        },
-      ];
     }
 
     // 无论拿到日志还是回落种子通知，研讨记录都已落地：离开骨架相位。

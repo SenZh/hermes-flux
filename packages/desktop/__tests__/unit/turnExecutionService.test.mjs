@@ -389,6 +389,53 @@ test('D5: turnExecutionService - sendGroupMessage 严格走 groups.send', async 
   service.getGroupPollerManager().stopAll();
 });
 
+test('D5: turnExecutionService - routeSend 群聊模式零逃逸：严格走 sendGroupMessage，绝不调用 prompt.submit 或新建会话', async () => {
+  let promptSubmitCalled = false;
+  let createSessionCalled = false;
+  const { deps, state, groupRoomStore, interactiveService } = createMockTurnDeps({
+    state: {
+      activeFocus: { type: 'group', roomId: 'room-alpha' },
+      activeSessionId: '',
+      activeLiveSessionId: '',
+    },
+  });
+  interactiveService.submitPrompt = async () => { promptSubmitCalled = true; };
+  deps.createNewSession = async () => { createSessionCalled = true; };
+
+  const service = createTurnExecutionService(deps);
+  await service.routeSend('群聊研讨测试发言');
+
+  assert.equal(groupRoomStore.sent.length, 1);
+  assert.equal(groupRoomStore.sent[0].roomId, 'room-alpha');
+  assert.equal(groupRoomStore.sent[0].text, '群聊研讨测试发言');
+  assert.equal(promptSubmitCalled, false, '群聊消息严禁逃逸至 prompt.submit');
+  assert.equal(createSessionCalled, false, '群聊消息严禁触发 createNewSession');
+  assert.equal(state.activeSessionId, '', '群聊发送后 activeSessionId 必须保持为空');
+
+  service.getGroupPollerManager().stopAll();
+});
+
+test('D5: turnExecutionService - routeSend 群聊焦点丢失显式失败，绝不回退至普通单聊', async () => {
+  let promptSubmitCalled = false;
+  let createSessionCalled = false;
+  const { deps, state, interactiveService } = createMockTurnDeps({
+    state: {
+      activeFocus: { type: 'group', roomId: '' }, // 群聊焦点但 roomId 丢失/异常
+      activeSessionId: '',
+    },
+  });
+  interactiveService.submitPrompt = async () => { promptSubmitCalled = true; };
+  deps.createNewSession = async () => { createSessionCalled = true; };
+
+  const service = createTurnExecutionService(deps);
+  await service.routeSend('异常群聊文本');
+
+  assert.equal(promptSubmitCalled, false, '焦点失配时严禁逃逸至 prompt.submit');
+  assert.equal(createSessionCalled, false, '焦点失配时严禁创建新单聊会话');
+  assert.equal(state.dockNotice.includes('group.sendFailed'), true, '必须显式提示群聊发送失败通知');
+});
+
+
 test('D5: turnExecutionService - sendMessage 截断失败时原子恢复快照', async () => {
   const { deps, state, interactiveService } = createMockTurnDeps({
     state: {
