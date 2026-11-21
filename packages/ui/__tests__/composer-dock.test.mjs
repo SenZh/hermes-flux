@@ -149,6 +149,64 @@ test('Composer dock - 输入舱语义与几何', async (t) => {
       'warm-paper 的选中底色不得与浮层底色相同，否则选中行在视觉上完全消失',
     );
   });
+
+  await t.test('9. / 与 @ 弹框及输入区滚动条采用设计系统 6px 胶囊样式，禁止裸写 scrollbar-width: thin 压死 WebKit 滚动条', () => {
+    const popperList = blockOf('.composer-popper__list');
+    assert.ok(
+      !popperList.includes('scrollbar-width: thin'),
+      'Chromium 121+ 中 scrollbar-width: thin 会屏蔽 ::-webkit-scrollbar 导致退化为丑陋原生滚动条',
+    );
+    assert.ok(popperList.includes('overscroll-behavior: contain'), '浮层滚动不得穿透到对话区');
+
+    const textarea = blockOf('.composer-dock__textarea');
+    assert.ok(
+      !textarea.includes('scrollbar-width: thin'),
+      '输入区同样禁止裸写 scrollbar-width: thin 屏蔽设计系统滚动条',
+    );
+
+    assert.match(
+      css,
+      /\.composer-popper__list::-webkit-scrollbar[\s\S]*?width:\s*6px/,
+      '弹框列表必须绑定设计系统 6px 滚动条宽度',
+    );
+    assert.match(
+      css,
+      /\.composer-popper__list::-webkit-scrollbar-thumb[\s\S]*?border-radius:\s*var\(--radius-pill\)/,
+      '弹框滚动滑块必须采用设计系统胶囊圆角与语义色',
+    );
+    assert.match(
+      css,
+      /@supports not selector\(::-webkit-scrollbar\)[\s\S]*?\.composer-popper__list[\s\S]*?scrollbar-width:\s*thin/,
+      '非 WebKit 引擎需在 @supports 守卫内提供标准细滚动条兜底',
+    );
+  });
+
+  await t.test('10. 模型选择器宽幅舒展且与斜杠/@ 浮层视觉同源', () => {
+    const dropdown = blockOf('.model-dropdown-menu');
+    assert.match(
+      dropdown,
+      /width:\s*min\(460px,\s*calc\(100vw - 64px\)\)/,
+      '模型选择器必须拓宽至 460px（窄屏自适应防左溢），避免模型名与能力标签被挤断',
+    );
+    assert.ok(dropdown.includes('backdrop-filter: blur(16px)'), '模型浮层需与斜杠/@ 浮层统一毛玻璃质感');
+
+    const list = blockOf('.model-dropdown__list');
+    assert.ok(list.includes('padding: 6px'), '列表需保留 6px 内边距，让行高亮以胶囊圆角悬浮而非通栏贴边');
+    assert.ok(list.includes('overscroll-behavior: contain'), '模型列表滚动不得穿透到对话区');
+
+    const optionMatches = [...css.matchAll(/\.model-option\s*\{([\s\S]*?)\}/g)].map((m) => m[1]).join('\n');
+    assert.ok(optionMatches.includes('min-height: 34px'), '模型行高需与斜杠/@ 浮层对齐 34px');
+    assert.ok(optionMatches.includes('border-radius: var(--radius-card, 6px)'), '模型行需使用 6px 卡片圆角');
+
+    const html = renderInputDock({
+      ...baseProps,
+      modelMenuOpen: true,
+      favoriteModels: ['gemini-3.8-flash'],
+      recentModels: ['gpt-5'],
+    });
+    assert.ok(!html.includes('🕒'), '最近分区禁止使用平台不一致的时钟 emoji，须用矢量 SVG');
+    assert.ok(html.includes('circle cx="12" cy="12" r="9"'), '最近分区必须正向渲染矢量时钟 SVG');
+  });
 });
 
 test('Composer dock - 渲染产物与状态机', async (t) => {
