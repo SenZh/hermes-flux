@@ -1,81 +1,62 @@
 import * as React from 'react';
-import { Camera, ChevronLeft, ChevronRight } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react';
 import type { BotDraftState } from '@hermes-flux/core';
 import { t } from '../../i18n/index.js';
+import { presentModel } from '../../lib/modelPresentation.js';
 import { renderBotAvatar } from '../../utils/botAvatar.js';
 import { Badge } from '../primitives/Badge.js';
+import { Button } from '../primitives/Button.js';
+import { Input } from '../primitives/Input.js';
+import { Tooltip } from '../primitives/Tooltip.js';
+import {
+  filterBotRoster,
+  resolveBotAvatar,
+  resolveBotCardSubtitle,
+  resolveBotDisplayTitle,
+  resolveCarouselKeyTarget,
+  resolveFocusableBotId,
+} from './botPanelLogic.js';
 import type { BotRosterEntry } from './settingsModel.js';
 
 /**
- * BOT 头像滑动选择器（一行 5 个，固定槽位池）。
+ * BOT 成员垂直选择微轨（方案 1：默认 56px 纯头像微轨，底部开关平滑展开名单）。
  *
  * 【设计意图 (Why)】
- *   BOT 数量会随用户长期使用增长，选择器必须像物理转盘一样连续位移，而不是
- *   "点一下换一屏"。固定 5 个 DOM 槽位 + 纯 GPU transform，让 1000 个 BOT 与
- *   5 个 BOT 的渲染成本完全相同；rAF 在稳态时注销，静止时 CPU 占用为 0。
+ *   设置中心左侧已有一级主导航栏，若再并列一条常驻宽名单栏会产生"双层侧栏"压迫感，
+ *   而旧版顶部横向砖块墙在少人/多人与宽窄屏下均显笨重。改为紧贴左边界的 56px 纯头像
+ *   微轨：默认把 90%+ 空间还给右侧工作台；悬停头像经极客 Tooltip 弹出"名称 · 模型"轻量
+ *   名片；点击底部标准 `PanelLeftOpen`/`PanelLeftClose` 图标（禁止箭头）可平滑展开为
+ *   208px 带搜索框的完整名单列。选中态通过 GPU 垂直磁吸光柱与滑块表达，头像永远零外圈。
  *
  * 【防范的历史坑 (Pitfall)】
- *   1. 早期按数量重建槽位，拖动时 React 每帧重建节点，头像闪烁且焦点丢失；
- *   2. 用 width/height 做近大远小会触发每帧 Reflow，长列表下整页掉帧；
- *   3. 透明度公式未设下限时最外侧降到 0.048，用户把"一行 5 个"读成"一行 3 个"；
- *   4. 拖拽在窗口外松手时 pointerup 丢失，dragging 永久为真，吸附彻底失效；
- *   5. 小样本数据直接取模会渲染出重复 BOT（N=2 时出现同一头像两次）。
+ *   1. 头像容器缺 `shrink-0` / `aspect-square` 时会被 flex 压成椭圆，必须硬锁定 1:1 正圆；
+ *   2. 头像外围加 `ring-2` 会与内置描边叠成靶心圈，视觉生硬且违反用户明确要求；
+ *   3. 折叠开关用 `<` / `>` 箭头语义模糊、像翻页键，改用 `PanelLeftOpen`/`PanelLeftClose` 并置底；
+ *   4. 使用原生 `title` 会弹出 Chromium 丑陋黑框，收起态悬停名片与展开按钮统一走 `Tooltip`；
+ *   5. 滚动容器禁止声明 `scroll-behavior: smooth`（违反 Gate 4c 性能红线）。
  *
  * 【约束与规则 (Rules)】
- *   1. 槽位固定 5 个，禁止按 roster 长度增删 DOM；
- *   2. 每帧只允许直接改 ref DOM 的 transform / opacity / zIndex，禁止每帧 setState；
- *      React 状态只记录"当前中心索引"，用于切换槽位内容；
- *   3. N ≥ 5 才启用环形取模；N < 5 按实际数量平铺并把 target 夹在 [0, N-1]；
- *   4. 松手/静止吸附完成后才回调 onSettle，滑动过程零 RPC；
- *   5. 文案全部走 t()，颜色只用语义 Token，不画准星、椭圆框等装饰辅助线。
+ *   1. 头像容器恒为 `size-8 shrink-0 aspect-square rounded-full`，严禁外圈 `ring-*`；
+ *   2. 选中态完全受控于 `activeBotId`，`tabIndex` 由 `resolveFocusableBotId` 计算；
+ *   3. 展开/收起按钮恒固定在微轨底部，展开态显式带「收起」文案；
+ *   4. 所有文案走 `t()`，颜色与圆角严格使用语义 Token，间距落在 4px 整数网格。
  */
 
-const SLOT_COUNT = 5;
-const CENTER_SLOT = 2;
-const SLOT_WIDTH = 76;
-const SLOT_HEIGHT = 112;
-const AVATAR_INNER_SIZE = 72;
-/** 视口高度与原型严格一致：148px。 */
-const VIEWPORT_HEIGHT = 148;
-/** iOS HIG 触控下限：左右翻页按钮 44×44。 */
-const NAV_BUTTON_SIZE = 44;
-const MIN_STEP = 56;
-const LERP_RATE = 0.18;
-const SETTLE_EPSILON = 0.001;
-const DRAG_CLICK_SLOP = 4;
-const WHEEL_THRESHOLD = 12;
-const WHEEL_LOCK_MS = 130;
-
-const mod = (value: number, modulus: number): number => ((value % modulus) + modulus) % modulus;
-
-/** 把连续位移收敛为合法中心索引（N < 5 时夹紧，N ≥ 5 时环形）。 */
-function normalizeCenter(value: number, length: number): number {
-  if (length <= 0) return 0;
-  const rounded = Math.round(value);
-  return length >= SLOT_COUNT ? mod(rounded, length) : Math.max(0, Math.min(length - 1, rounded));
-}
-
-/** 草稿头像优先：replace 用新图，clear 墓碑语义视为无头像，unchanged 回落到花名册资产。 */
-function resolveAvatar(row: BotRosterEntry, draft: BotDraftState | undefined): string | undefined {
-  if (!draft) return row.avatar;
-  if (draft.avatar.kind === 'replace') return draft.avatar.dataUrl;
-  if (draft.avatar.kind === 'clear') return undefined;
-  return row.avatar;
-}
+const AVATAR_SIZE = '100%';
 
 export interface BotHeroCarouselProps {
   /** 花名册（快照派生，只读）。 */
   roster: readonly BotRosterEntry[];
-  /** 当前中心的 BOT（壳层状态机权威值）。 */
+  /** 当前选中的 BOT（壳层状态机权威值）。 */
   activeBotId: string;
-  /** 当前中心 BOT 的草稿：只用于中心头像预览与标题回显，整表草稿不进快照。 */
+  /** 当前选中 BOT 的草稿：用于回显编辑中的名称、头像与模型。 */
   activeDraft?: BotDraftState;
-  /** 保存中锁定轮播，防止在提交途中切换 BOT。 */
+  /** 保存中锁定选择栏，防止在提交途中切换 BOT。 */
   locked?: boolean;
-  /** 静止吸附后通知壳层取详情（壳层负责 160ms 防抖与令牌收敛）。 */
+  /** 选中目标 BOT 后通知壳层加载详情（壳层负责防抖与令牌收敛）。 */
   onSettle: (botId: string) => void;
-  /** 点击中心头像的编辑遮罩：请求宿主打开文件选择器。 */
-  onRequestAvatarUpload: (botId: string) => void;
+  /** 保留可选签名以兼容既有调用方类型契约。 */
+  onRequestAvatarUpload?: (botId: string) => void;
 }
 
 export function BotHeroCarousel({
@@ -84,513 +65,264 @@ export function BotHeroCarousel({
   activeDraft,
   locked = false,
   onSettle,
-  onRequestAvatarUpload,
 }: BotHeroCarouselProps): React.ReactElement {
-  const viewportRef = React.useRef<HTMLDivElement>(null);
-  const slotRefs = React.useRef<Array<HTMLDivElement | null>>([]);
+  const [expanded, setExpanded] = React.useState(true);
+  const [filterQuery, setFilterQuery] = React.useState('');
+  const listRef = React.useRef<HTMLDivElement>(null);
+  const tabRefs = React.useRef<Map<string, HTMLButtonElement>>(new Map());
+  const [glider, setGlider] = React.useState<{ top: number; height: number } | null>(null);
 
-  const rosterRef = React.useRef<readonly BotRosterEntry[]>(roster);
-  rosterRef.current = roster;
-  const lockedRef = React.useRef(locked);
-  lockedRef.current = locked;
-  const onSettleRef = React.useRef(onSettle);
-  onSettleRef.current = onSettle;
-  const onRequestAvatarRef = React.useRef(onRequestAvatarUpload);
-  onRequestAvatarRef.current = onRequestAvatarUpload;
-
-  const initialCenter = Math.max(0, roster.findIndex((row) => row.id === activeBotId));
-  const [center, setCenter] = React.useState(initialCenter);
-  const centerRef = React.useRef(initialCenter);
-  const offsetRef = React.useRef(initialCenter);
-  const targetRef = React.useRef(initialCenter);
-  const stepRef = React.useRef(SLOT_WIDTH);
-  const rafRef = React.useRef<number | null>(null);
-
-  const draggingRef = React.useRef(false);
-  const pressedSlotRef = React.useRef<number | null>(null);
-  const dragStartXRef = React.useRef(0);
-  const dragStartOffsetRef = React.useRef(0);
-  const suppressClickRef = React.useRef(false);
-  const movedRef = React.useRef(false);
-
-  const wheelAccRef = React.useRef(0);
-  const wheelLockRef = React.useRef(false);
-  const wheelTimerRef = React.useRef<number | null>(null);
-  const lastLengthRef = React.useRef(-1);
-
-  /** 读取指定目标位置对应的 BOT；越界返回 undefined，绝不伪造数据。 */
-  const botIdAt = React.useCallback((value: number): string | undefined => {
-    const list = rosterRef.current;
-    if (list.length === 0) return undefined;
-    return list[normalizeCenter(value, list.length)]?.id;
-  }, []);
-
-  /**
-   * 把当前 offset 写到 5 个固定槽位。
-   * 【规则】每帧只写 transform / opacity；仅当中心索引或花名册数量变化时才同步
-   *   可见性与键盘可达性，并在中心变化时 setState（内容切换交给 React）。
-   */
-  const applyFrame = React.useCallback((): void => {
-    // 步进只在 ResizeObserver / 首次布局时测量，rAF 每帧不读布局，避免强制同步重排。
-    const step = stepRef.current;
-    const length = rosterRef.current.length;
-    const nextCenter = normalizeCenter(offsetRef.current, length);
-    // 连续位移：位置、缩放、透明度都用"槽位索引 - 连续 offset"的真实距离，
-    // 而不是整数 rel。否则拖动时头像只在跨界瞬间跳格，读起来像翻页而不是转盘。
-    const rounded = Math.round(offsetRef.current);
-    const fractional = offsetRef.current - rounded;
-    // 只有中心或数量变化时才需要改可见性与键盘可达性；其余帧严格只写 transform / opacity。
-    const syncInteractivity = nextCenter !== centerRef.current || length !== lastLengthRef.current;
-    lastLengthRef.current = length;
-
-    for (let index = 0; index < SLOT_COUNT; index += 1) {
-      const node = slotRefs.current[index];
-      if (!node) continue;
-      const rel = index - CENTER_SLOT;
-      const distance = rel - fractional;
-      const absoluteDistance = Math.abs(distance);
-      const scale = Math.max(0.5, 1 - absoluteDistance * 0.24);
-      const opacity = Math.max(0.55, 1 - absoluteDistance * 0.22);
-      const rawIndex = nextCenter + rel;
-      const visible = length > 0 && (length >= SLOT_COUNT || (rawIndex >= 0 && rawIndex < length));
-
-      node.style.transform = `translate3d(${distance * step}px, 0, 0) scale(${scale})`;
-      node.style.opacity = visible ? String(opacity) : '0';
-      if (syncInteractivity) {
-        node.style.pointerEvents = visible ? 'auto' : 'none';
-        node.tabIndex = visible && rel === 0 ? 0 : -1;
-        if (visible) node.removeAttribute('aria-hidden');
-        else node.setAttribute('aria-hidden', 'true');
-      }
-    }
-
-    if (nextCenter !== centerRef.current) {
-      centerRef.current = nextCenter;
-      setCenter(nextCenter);
-    }
-  }, []);
-
-  /** 启动/唤醒 rAF；已运行时保持同一循环，避免叠加多个 rAF。 */
-  const startLoop = React.useCallback((): void => {
-    if (rafRef.current !== null) return;
-    // 只在真正位移期间提示合成器提升图层；静止后必须撤回，
-    // 否则 5 个槽位常驻 5 个合成层，静置时白占 GPU 内存。
-    for (const node of slotRefs.current) {
-      if (node) node.style.willChange = 'transform, opacity';
-    }
-    rafRef.current = requestAnimationFrame(function tick(): void {
-      if (!draggingRef.current) {
-        const diff = targetRef.current - offsetRef.current;
-        if (Math.abs(diff) < SETTLE_EPSILON) {
-          offsetRef.current = targetRef.current;
-          applyFrame();
-          // 稳态：撤回 will-change，让浏览器回收合成层。
-          for (const node of slotRefs.current) {
-            if (node) node.style.willChange = 'auto';
-          }
-          rafRef.current = null;
-          // 只有真正发生过位移才上报，纯点击中心不产生无意义的详情请求。
-          if (movedRef.current) {
-            movedRef.current = false;
-            const settledId = botIdAt(targetRef.current);
-            if (settledId) onSettleRef.current(settledId);
-          }
-          return;
-        }
-        offsetRef.current += diff * LERP_RATE;
-        movedRef.current = true;
-      }
-      applyFrame();
-      rafRef.current = requestAnimationFrame(tick);
-    });
-  }, [applyFrame, botIdAt]);
-
-  /** 按槽位相对位移翻页；N < 5 时夹紧，N = 1 时禁用。 */
-  const stepBy = React.useCallback(
-    (delta: number): void => {
-      if (lockedRef.current) return;
-      const length = rosterRef.current.length;
-      if (length <= 1) return;
-      const next = Math.round(targetRef.current) + delta;
-      targetRef.current = length >= SLOT_COUNT ? next : Math.max(0, Math.min(length - 1, next));
-      movedRef.current = true;
-      startLoop();
-    },
-    [startLoop],
+  const visibleRoster = React.useMemo(
+    () => (expanded ? filterBotRoster(roster, filterQuery) : [...roster]),
+    [expanded, filterQuery, roster],
   );
+  const focusableId = resolveFocusableBotId(visibleRoster, activeBotId);
 
-  const endDrag = React.useCallback((): void => {
-    if (!draggingRef.current) return;
-    draggingRef.current = false;
-    const length = rosterRef.current.length;
-    const rounded = length >= SLOT_COUNT ? Math.round(targetRef.current) : Math.max(0, Math.min(Math.max(length - 1, 0), Math.round(targetRef.current)));
-    targetRef.current = rounded;
-    const needsSnap = Math.abs(offsetRef.current - rounded) > SETTLE_EPSILON;
-    if (needsSnap) movedRef.current = true;
-    if (needsSnap || movedRef.current) startLoop();
-  }, [startLoop]);
+  const measureGlider = React.useCallback((): void => {
+    const activeNode = tabRefs.current.get(activeBotId);
+    if (!activeNode || activeNode.offsetHeight <= 0) {
+      setGlider(null);
+      return;
+    }
+    const next = { top: activeNode.offsetTop, height: activeNode.offsetHeight };
+    setGlider((prev) => (prev && prev.top === next.top && prev.height === next.height ? prev : next));
+  }, [activeBotId]);
 
-  // 首次布局与尺寸变化后写一遍变换；先测量步进，避免首帧按 76px 落位后跳一下。
   React.useLayoutEffect(() => {
-    const viewport = viewportRef.current;
-    if (viewport) {
-      const width = viewport.clientWidth;
-      stepRef.current = width > 0 ? Math.max(MIN_STEP, Math.min(width / 5, width / 4 - 68)) : MIN_STEP;
-    }
-    applyFrame();
-  }, [applyFrame, roster.length]);
+    measureGlider();
+    const listNode = listRef.current;
+    if (!listNode || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measureGlider);
+    observer.observe(listNode);
+    for (const el of tabRefs.current.values()) observer.observe(el);
+    return () => observer.disconnect();
+  }, [expanded, visibleRoster.length, filterQuery, measureGlider]);
 
   React.useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    const sync = (): void => {
-      const width = viewport.clientWidth;
-      stepRef.current = width > 0 ? Math.max(MIN_STEP, Math.min(width / 5, width / 4 - 68)) : MIN_STEP;
-      applyFrame();
-    };
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(sync);
-    observer?.observe(viewport);
-    window.addEventListener('resize', sync);
-    return () => {
-      observer?.disconnect();
-      window.removeEventListener('resize', sync);
-    };
-  }, [applyFrame]);
+    const node = tabRefs.current.get(activeBotId);
+    if (!node || typeof node.scrollIntoView !== 'function') return;
+    node.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+  }, [activeBotId, visibleRoster.length]);
 
-  // 滚轮必须用原生非 passive 监听：React 的 onWheel 在根节点上是 passive，preventDefault 会失效。
-  React.useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    const onWheel = (event: WheelEvent): void => {
-      event.preventDefault();
-      if (lockedRef.current) return;
-      if (rosterRef.current.length <= 1) return;
-      // deltaMode 归一化：1 = 行，2 = 页，0 = 像素。
-      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 100 : 1;
-      const dominant = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
-      wheelAccRef.current += dominant * unit;
-      if (wheelLockRef.current) return;
-      if (Math.abs(wheelAccRef.current) < WHEEL_THRESHOLD) return;
-
-      const direction = wheelAccRef.current > 0 ? 1 : -1;
-      // 消费后立即清零，避免残余符号在解锁瞬间把轮播推向反方向。
-      wheelAccRef.current = 0;
-      stepBy(direction);
-
-      wheelLockRef.current = true;
-      if (wheelTimerRef.current !== null) window.clearTimeout(wheelTimerRef.current);
-      wheelTimerRef.current = window.setTimeout(() => {
-        wheelLockRef.current = false;
-        wheelAccRef.current = 0;
-        wheelTimerRef.current = null;
-      }, WHEEL_LOCK_MS);
-    };
-    viewport.addEventListener('wheel', onWheel, { passive: false });
-    return () => viewport.removeEventListener('wheel', onWheel);
-  }, [stepBy]);
-
-  // pointercancel 或窗口失焦时统一复位拖拽，否则吸附会永久停摆。
-  React.useEffect(() => {
-    const onWindowBlur = (): void => {
-      pressedSlotRef.current = null;
-      endDrag();
-    };
-    window.addEventListener('blur', onWindowBlur);
-    return () => window.removeEventListener('blur', onWindowBlur);
-  }, [endDrag]);
-
-  React.useEffect(
-    () => () => {
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-      if (wheelTimerRef.current !== null) window.clearTimeout(wheelTimerRef.current);
-    },
-    [],
-  );
-
-  // 外部 activeBotId 变化（保存后壳层回推、恢复默认等）时平滑对齐到目标。
-  const lastActivePropRef = React.useRef(activeBotId);
-  React.useEffect(() => {
-    if (lastActivePropRef.current === activeBotId) return;
-    lastActivePropRef.current = activeBotId;
-    const list = rosterRef.current;
-    const targetIndex = list.findIndex((row) => row.id === activeBotId);
-    if (targetIndex < 0 || draggingRef.current) return;
-    const length = list.length;
-    const currentRounded = Math.round(targetRef.current);
-    let next = targetIndex;
-    if (length >= SLOT_COUNT) {
-      const base = mod(currentRounded, length);
-      let delta = mod(targetIndex - base, length);
-      // 走环形最短路径，避免从最后一个 BOT 回到第一个时倒着转一整圈。
-      if (delta > length / 2) delta -= length;
-      next = currentRounded + delta;
-    }
-    if (next === currentRounded) return;
-    targetRef.current = next;
-    movedRef.current = true;
-    startLoop();
-  }, [activeBotId, startLoop]);
-
-  // roster 缩到 4 个以下时把目标夹回合法范围，防止平铺态下 target 越界。
-  React.useEffect(() => {
-    const length = roster.length;
-    if (length === 0 || length >= SLOT_COUNT) return;
-    const rounded = normalizeCenter(targetRef.current, length);
-    if (Math.round(targetRef.current) === rounded && Math.abs(offsetRef.current - rounded) < SETTLE_EPSILON) return;
-    targetRef.current = rounded;
-    offsetRef.current = rounded;
-    movedRef.current = false;
-    applyFrame();
-  }, [roster.length, applyFrame]);
-
-  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
-    if (lockedRef.current || event.button !== 0) return;
-    if (rosterRef.current.length <= 1) return;
-    // 记录按下时命中的槽位：pointer capture 会把 pointerup 重定向到视口，
-    // 因此点击动作必须在 pointerup 里按这个记录判定，不能依赖槽位的 click。
-    const origin = event.target instanceof Element ? event.target.closest('[data-bot-slot]') : null;
-    const pressedRel = origin?.getAttribute('data-bot-slot');
-    pressedSlotRef.current = pressedRel === null || pressedRel === undefined ? null : Number(pressedRel);
-    if (rafRef.current !== null) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-    }
-    draggingRef.current = true;
-    dragStartXRef.current = event.clientX;
-    dragStartOffsetRef.current = offsetRef.current;
-    suppressClickRef.current = false;
-    movedRef.current = false;
-    // 接管瞬间 target 跟随 offset，消除"按住就跳半格"的突跳。
-    targetRef.current = offsetRef.current;
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-  };
-
-  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
-    if (!draggingRef.current) return;
-    const deltaX = event.clientX - dragStartXRef.current;
-    if (Math.abs(deltaX) > DRAG_CLICK_SLOP) suppressClickRef.current = true;
-    const step = stepRef.current || SLOT_WIDTH;
-    const nextOffset = dragStartOffsetRef.current - deltaX / step;
-    const length = rosterRef.current.length;
-    // N<5 时端头不允许拖出范围；>=5 时环绕由 normalizeCenter 处理，offset 保持连续。
-    offsetRef.current = length >= SLOT_COUNT
-      ? nextOffset
-      : Math.max(0, Math.min(Math.max(length - 1, 0), nextOffset));
-    targetRef.current = offsetRef.current;
-    if (Math.abs(offsetRef.current - dragStartOffsetRef.current) > 0.05) movedRef.current = true;
-    applyFrame();
-  };
-
-  const handlePointerUp = (): void => {
-    const pressedRel = pressedSlotRef.current;
-    const suppressClick = suppressClickRef.current;
-    const wasTap = Math.abs(offsetRef.current - dragStartOffsetRef.current) < 0.02;
-    pressedSlotRef.current = null;
-    suppressClickRef.current = false;
-    endDrag();
-    // 未发生拖拽才视为点击：先由 rAF 平滑吸附，settle 在动画终止时统一上报。
-    if (!suppressClick && wasTap && pressedRel !== null && !lockedRef.current && pressedRel !== 0) {
-      stepBy(pressedRel);
+  const selectBot = (botId: string, focusTab = false): void => {
+    if (locked || !botId || botId === activeBotId) return;
+    onSettle(botId);
+    if (focusTab) {
+      window.requestAnimationFrame(() => {
+        tabRefs.current.get(botId)?.focus();
+      });
     }
   };
 
-  const handlePointerCancel = (): void => {
-    pressedSlotRef.current = null;
-    suppressClickRef.current = false;
-    endDrag();
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number): void => {
+    if (locked) return;
+    const targetIndex = resolveCarouselKeyTarget(event.key, index, visibleRoster.length);
+    if (targetIndex < 0) return;
+    event.preventDefault();
+    const target = visibleRoster[targetIndex];
+    if (target) selectBot(target.id, true);
   };
 
-  const handleSlotKeyDown = (event: React.KeyboardEvent<HTMLDivElement>, rel: number, botId: string): void => {
-    if (lockedRef.current) return;
-    if (event.key === 'ArrowLeft') {
-      event.preventDefault();
-      stepBy(-1);
-      return;
-    }
-    if (event.key === 'ArrowRight') {
-      event.preventDefault();
-      stepBy(1);
-      return;
-    }
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      if (rel === 0) onRequestAvatarRef.current(botId);
-      else stepBy(rel);
-    }
-  };
-
-  const wrap = roster.length >= SLOT_COUNT;
-  const slots = React.useMemo(() => {
-    const length = roster.length;
-    const centerIndex = normalizeCenter(center, length);
-    return Array.from({ length: SLOT_COUNT }, (_, index) => {
-      const rel = index - CENTER_SLOT;
-      const rawIndex = centerIndex + rel;
-      const visible = length > 0 && (wrap || (rawIndex >= 0 && rawIndex < length));
-      const bot = visible ? roster[wrap ? mod(rawIndex, length) : rawIndex] : undefined;
-      return { rel, bot, isCenter: rel === 0 };
+  const toggleExpanded = (): void => {
+    setExpanded((prev) => {
+      if (prev) setFilterQuery('');
+      return !prev;
     });
-  }, [center, roster, wrap]);
-
-  const canPrev = roster.length > 1 && (wrap || center > 0);
-  const canNext = roster.length > 1 && (wrap || center < roster.length - 1);
+  };
 
   return (
-    <div
-      ref={viewportRef}
-      role="tablist"
-      aria-label={t('bot.selectBot')}
+    <aside
       data-bot-carousel="true"
-      className="relative w-full shrink-0 cursor-grab touch-pan-y select-none overflow-hidden border-b border-border-subtle bg-card active:cursor-grabbing"
-      style={{ height: VIEWPORT_HEIGHT }}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerCancel}
+      data-bot-rail-expanded={expanded ? 'true' : 'false'}
+      className="relative flex h-full shrink-0 flex-col border-r border-border-subtle bg-panel ease-out"
+      style={{
+        width: expanded ? 204 : 64,
+        transitionProperty: 'width',
+        transitionDuration: '200ms',
+        transitionTimingFunction: 'ease-out',
+      }}
     >
-      <div className="absolute inset-0 flex items-center justify-center">
-        {slots.map(({ rel, bot, isCenter }) => {
-          const draft = bot && bot.id === activeBotId ? activeDraft : undefined;
-          const displayName = draft?.displayName ?? bot?.displayName ?? '';
-          const avatar = bot ? resolveAvatar(bot, draft) : undefined;
-          const isDefault = draft?.isDefault ?? bot?.isDefault ?? false;
-          const hasDraft = Boolean(bot?.hasDraft);
-          const avatarHtml = bot ? renderBotAvatar(bot.id, displayName, avatar, AVATAR_INNER_SIZE, 'circle') : '';
+      {expanded ? (
+        <div className="flex shrink-0 flex-col gap-2 border-b border-border-subtle px-3 py-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="truncate text-caption font-semibold text-secondary-foreground">
+              {t('bot.railTitle', { count: roster.length })}
+            </span>
+          </div>
+          <div className="relative">
+            <Search
+              aria-hidden="true"
+              className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              size="xs"
+              value={filterQuery}
+              data-bot-rail-filter="true"
+              aria-label={t('bot.railFilterPlaceholder')}
+              placeholder={t('bot.railFilterPlaceholder')}
+              onChange={(event) => setFilterQuery(event.target.value)}
+              className="pl-7"
+            />
+          </div>
+        </div>
+      ) : null}
 
-          return (
-            <div
-              key={rel}
-              ref={(node) => {
-                slotRefs.current[rel + CENTER_SLOT] = node;
-              }}
-              role="tab"
-              aria-selected={isCenter}
-              tabIndex={isCenter ? 0 : -1}
-              data-bot-slot={rel}
-              data-bot-id={bot?.id ?? ''}
-              className={`group absolute flex flex-col items-center outline-none ${
-                bot ? 'cursor-pointer' : 'pointer-events-none'
-              }`}
+      <div
+        ref={listRef}
+        role="tablist"
+        aria-label={t('bot.selectBot')}
+        aria-orientation="vertical"
+        className="scrollbar-thin relative flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2 py-2"
+      >
+        {glider ? (
+          <>
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-2 top-0 rounded-card bg-card-active shadow-card transition-transform duration-200 ease-out"
               style={{
-                width: SLOT_WIDTH,
-                height: SLOT_HEIGHT,
-                // 槽位盒在舞台正中；缩放原点锁在头像圆心，近大远小时头像始终排成一行。
-                left: '50%',
-                top: '50%',
-                marginLeft: -SLOT_WIDTH / 2,
-                marginTop: -SLOT_HEIGHT / 2,
-                transformOrigin: 'center 38px',
-                // 首帧（SSR / hydration 前）按基准步进先排开，避免 5 个槽位叠在中心；
-                // useLayoutEffect 测得真实视口宽度后会用精确 STEP 覆盖。
-                transform: `translate3d(${rel * SLOT_WIDTH}px, 0, 0) scale(${Math.max(0.5, 1 - Math.abs(rel) * 0.24)})`,
-                opacity: bot ? Math.max(0.55, 1 - Math.abs(rel) * 0.22) : 0,
-                zIndex: Math.round(10 - Math.abs(rel) * 3),
-                // will-change 由 startLoop 在位移期间动态置位、稳态撤回（见 startLoop 注释）。
+                height: glider.height,
+                transform: `translate3d(0, ${glider.top}px, 0)`,
               }}
-              onKeyDown={(event) => {
-                if (bot) handleSlotKeyDown(event, rel, bot.id);
+            />
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute left-1 top-0 z-10 w-1 rounded-full bg-primary transition-transform duration-200 ease-out"
+              style={{
+                height: Math.max(12, glider.height - 16),
+                transform: `translate3d(0, ${glider.top + 8}px, 0)`,
               }}
-            >
-              {bot ? (
-                <>
+            />
+          </>
+        ) : null}
+
+        {visibleRoster.length === 0 ? (
+          <p className="px-2 py-4 text-center text-caption text-muted-foreground">{t('bot.railEmptyFilter')}</p>
+        ) : (
+          visibleRoster.map((bot, index) => {
+            const isSelected = bot.id === activeBotId;
+            const isFocusable = bot.id === focusableId;
+            const draft = isSelected ? activeDraft : undefined;
+            const title = resolveBotDisplayTitle(bot.displayName, bot.id, draft);
+            const subtitle = resolveBotCardSubtitle(
+              bot.model,
+              bot.id,
+              draft,
+              (modelId) => presentModel(modelId).name,
+            );
+            const avatarSrc = resolveBotAvatar(bot.avatar, draft);
+            const hasDraft = Boolean(bot.hasDraft);
+            const cardTooltip = `${title} · ${subtitle}${bot.isDefault ? ` (${t('bot.defaultBadge')})` : ''}`;
+
+            const buttonNode = (
+              <button
+                key={bot.id}
+                ref={(node) => {
+                  if (node) tabRefs.current.set(bot.id, node);
+                  else tabRefs.current.delete(bot.id);
+                }}
+                type="button"
+                role="tab"
+                aria-selected={isSelected}
+                aria-label={title}
+                tabIndex={isFocusable ? 0 : -1}
+                disabled={locked}
+                data-bot-slot={bot.id}
+                data-bot-id={bot.id}
+                onClick={() => selectBot(bot.id)}
+                onKeyDown={(event) => handleKeyDown(event, index)}
+                className={`relative z-10 flex w-full shrink-0 items-center rounded-card text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  expanded ? 'gap-2 px-2 py-2' : 'justify-center py-2'
+                } ${
+                  isSelected
+                    ? glider
+                      ? 'text-foreground'
+                      : 'bg-card-active text-foreground'
+                    : 'text-secondary-foreground hover:bg-card-hover hover:text-foreground'
+                } ${locked ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}
+              >
+                <span
+                  data-bot-avatar="true"
+                  className="relative flex shrink-0 aspect-square items-center justify-center overflow-hidden rounded-full"
+                  style={{ width: 36, height: 36 }}
+                  dangerouslySetInnerHTML={{
+                    __html: renderBotAvatar(bot.id, title, avatarSrc, AVATAR_SIZE, 'circle'),
+                  }}
+                />
+                {!expanded && hasDraft ? (
                   <span
-                    className={`relative overflow-hidden rounded-full bg-panel ring-offset-0 ${
-                      isCenter ? 'ring-2 ring-primary' : 'ring-1 ring-border-strong'
-                    }`}
-                    style={{ width: SLOT_WIDTH, height: SLOT_WIDTH }}
-                  >
-                    {/* 头像唯一实现：与左轨共用 renderBotAvatar，禁止在这里另造首字母兜底。 */}
-                    <span
-                      className="flex size-full items-center justify-center"
-                      // eslint-disable-next-line react/no-danger
-                      dangerouslySetInnerHTML={{ __html: avatarHtml }}
-                    />
-
-                    {isCenter ? (
-                      <>
-                        {/* 悬停编辑遮罩：点击调起文件选择；键盘 Enter 由槽位本身处理。 */}
-                        <span
-                          aria-hidden="true"
-                          title={t('bot.avatarUpload')}
-                          onPointerDown={(event) => event.stopPropagation()}
-                          onPointerUp={(event) => event.stopPropagation()}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            event.preventDefault();
-                            if (!lockedRef.current) onRequestAvatarRef.current(bot.id);
-                          }}
-                          className="absolute inset-0 z-10 flex cursor-pointer flex-col items-center justify-center gap-1 rounded-full bg-backdrop/70 text-foreground opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
-                        >
-                          <Camera aria-hidden="true" className="size-4" />
-                          <span className="text-micro">{t('bot.avatarUpload')}</span>
-                        </span>
-
-                        {hasDraft ? (
-                          <span
-                            aria-hidden="true"
-                            title={t('bot.unsavedDot')}
-                            className="absolute bottom-0 right-0 z-20 size-2 rounded-full bg-warning ring-2 ring-card"
-                          />
-                        ) : null}
-                      </>
-                    ) : null}
-
-                    {isDefault ? (
-                      <Badge className="absolute bottom-0 left-1/2 z-10 -translate-x-1/2 border-card bg-primary px-1 py-0 text-micro leading-none text-primary-foreground">
-                        {t('bot.defaultBadge')}
-                      </Badge>
-                    ) : null}
+                    aria-label={t('bot.unsavedDot')}
+                    className="pointer-events-none absolute right-1 top-1 size-2 rounded-full bg-warning"
+                  />
+                ) : null}
+                {expanded ? (
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="flex min-w-0 items-center gap-1">
+                      <span
+                        className={`truncate text-aux ${
+                          isSelected ? 'font-semibold text-foreground' : 'font-medium text-foreground'
+                        }`}
+                      >
+                        {title}
+                      </span>
+                      {bot.isDefault ? (
+                        <Badge variant="default" className="shrink-0 px-2 py-0 text-micro">
+                          {t('bot.defaultBadge')}
+                        </Badge>
+                      ) : null}
+                    </span>
+                    <span className="truncate font-code text-micro text-muted-foreground">{subtitle}</span>
                   </span>
-
+                ) : null}
+                {expanded && hasDraft ? (
                   <span
-                    className={`mt-2 max-w-24 truncate text-aux ${
-                      isCenter ? 'font-semibold text-foreground' : 'font-medium text-muted-foreground'
-                    }`}
-                  >
-                    {displayName}
-                  </span>
-                  {/* 极小字号会被 scale 再压到不可辨（10px×0.52≈5px），只在中心槽位显示 ID。 */}
-                  {isCenter ? (
-                    <span className="max-w-24 truncate font-code text-micro text-secondary-foreground">{bot.id}</span>
-                  ) : null}
-                </>
-              ) : null}
-            </div>
-          );
-        })}
+                    aria-label={t('bot.unsavedDot')}
+                    className="size-2 shrink-0 rounded-full bg-warning"
+                  />
+                ) : null}
+              </button>
+            );
+
+            return (
+              <Tooltip key={bot.id} content={cardTooltip} placement="right" disabled={expanded}>
+                {buttonNode}
+              </Tooltip>
+            );
+          })
+        )}
       </div>
 
-      <button
-        type="button"
-        aria-label={t('bot.prevBot')}
-        title={t('bot.prevBot')}
-        disabled={locked || !canPrev}
-        onPointerDown={(event) => event.stopPropagation()}
-        onPointerUp={(event) => event.stopPropagation()}
-        onClick={() => stepBy(-1)}
-        className="absolute left-1 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center rounded-full text-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-        style={{ width: NAV_BUTTON_SIZE, height: NAV_BUTTON_SIZE }}
-      >
-        <span className="flex size-7 items-center justify-center rounded-full border border-border-strong bg-card">
-          <ChevronLeft aria-hidden="true" className="size-4" />
-        </span>
-      </button>
-
-      <button
-        type="button"
-        aria-label={t('bot.nextBot')}
-        title={t('bot.nextBot')}
-        disabled={locked || !canNext}
-        onPointerDown={(event) => event.stopPropagation()}
-        onPointerUp={(event) => event.stopPropagation()}
-        onClick={() => stepBy(1)}
-        className="absolute right-1 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center rounded-full text-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-        style={{ width: NAV_BUTTON_SIZE, height: NAV_BUTTON_SIZE }}
-      >
-        <span className="flex size-7 items-center justify-center rounded-full border border-border-strong bg-card">
-          <ChevronRight aria-hidden="true" className="size-4" />
-        </span>
-      </button>
-    </div>
+      {/* 展开/收起按钮：固定在微轨最底部，使用标准分栏图标并禁用箭头 */}
+      <div className="flex shrink-0 items-center justify-center border-t border-border-subtle p-2">
+        {expanded ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            data-bot-rail-toggle="true"
+            aria-expanded="true"
+            onClick={toggleExpanded}
+            className="w-full justify-start gap-2 text-secondary-foreground"
+          >
+            <PanelLeftClose aria-hidden="true" className="size-4 shrink-0" />
+            <span className="truncate">{t('bot.railCollapse')}</span>
+          </Button>
+        ) : (
+          <Tooltip content={t('bot.railExpand')} placement="right">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              data-bot-rail-toggle="true"
+              aria-expanded="false"
+              aria-label={t('bot.railExpand')}
+              onClick={toggleExpanded}
+              className="text-secondary-foreground"
+            >
+              <PanelLeftOpen aria-hidden="true" className="size-4 shrink-0" />
+            </Button>
+          </Tooltip>
+        )}
+      </div>
+    </aside>
   );
 }

@@ -28,6 +28,7 @@ import {
   evaluateBotConfigureOutcome,
   isBotDraftDirty,
   mergeMcpStatus,
+  mergeSkillDescriptions,
   mergeSkillInventory,
   type BotConfigureSegment,
   type BotDetailData,
@@ -86,6 +87,8 @@ export interface BotManagementControllerDeps {
   ): Promise<BotDetailData>;
   /** 全局技能目录（仅用于 describe 未返回技能清单时补全展示，不得推导 disabled_skills）。 */
   fetchSkillInventory(botId: string): Promise<string[] | null>;
+  /** 可选：读取斜杠补全目录以回填缺失的技能简介（只补描述，不增删技能或改启用态）。 */
+  fetchSkillDescriptions?(botId: string): Promise<Record<string, string> | null>;
   /** MCP 探活；失败必须返回 null（界面显示"状态未知"），禁止画成红灯。 */
   fetchMcpStatus(
     botId: string,
@@ -105,6 +108,12 @@ export interface BotManagementControllerDeps {
 }
 
 export interface BotManagementController {
+  /** 清空当前 BOT 暂存变更以外的确认态，保留能力增删后的最新基线并同步新增/已删 MCP ID。 */
+  refreshActiveCapabilities(
+    botId: string,
+    options?: { addedMcpName?: string; removedMcpName?: string },
+  ): Promise<void>;
+  /** 打开 BOT 面板或显式刷新后进入。 */
   /** 进入 BOT 面板时调用；未初始化才拉花名册，已有详情不重复取数。 */
   ensureLoaded(force?: boolean): void;
   loadRoster(force?: boolean): Promise<void>;
@@ -262,9 +271,16 @@ export function createBotManagementController(
    * 【规则】补全只写当前 activeDetail；令牌失效或用户已切走时丢弃迟到结果。
    */
   async function enrichCapabilities(botId: string, detail: BotDetailData, token: number): Promise<void> {
-    const [skillsResult, mcpResult] = await Promise.allSettled([
+    const needsDescriptions = Boolean(
+      deps.fetchSkillDescriptions &&
+        (!detail.skills.authoritative || detail.skills.rows.some((row) => !row.description?.trim())),
+    );
+    const [skillsResult, mcpResult, skillDescResult] = await Promise.allSettled([
       detail.skills.authoritative ? Promise.resolve(null) : deps.fetchSkillInventory(botId),
       deps.fetchMcpStatus(botId),
+      needsDescriptions && deps.fetchSkillDescriptions
+        ? deps.fetchSkillDescriptions(botId)
+        : Promise.resolve(null),
     ]);
     if (token !== detailToken) return;
     const current = deps.getState();
@@ -273,6 +289,9 @@ export function createBotManagementController(
     let next = current.activeDetail;
     if (skillsResult.status === 'fulfilled' && skillsResult.value && skillsResult.value.length > 0) {
       next = { ...next, skills: mergeSkillInventory(next.skills, skillsResult.value) };
+    }
+    if (skillDescResult.status === 'fulfilled' && skillDescResult.value) {
+      next = { ...next, skills: mergeSkillDescriptions(next.skills, skillDescResult.value) };
     }
     if (mcpResult.status === 'fulfilled' && mcpResult.value) {
       next = { ...next, mcpServers: mergeMcpStatus(next.mcpServers, mcpResult.value) };
@@ -553,6 +572,54 @@ export function createBotManagementController(
     }
   }
 
+  /** 静默刷新当前激活 BOT 的能力详情（用于新增/删除 MCP 或安装技能后重对账，不闪屏骨架）。 */
+  async function refreshActiveCapabilities(
+    botId: string,
+    options: { addedMcpName?: string; removedMcpName?: string } = {},
+  ): Promise<void> {
+    if (!botId || !deps.isConnected()) return;
+    const current = deps.getState();
+    if (current.status.status === 'saving' || current.activeBotId !== botId) return;
+
+    const token = ++detailToken;
+    try {
+      const detail = await deps.describeBot(botId, resolveIdentityHint(botId));
+      if (token !== detailToken) return;
+      const latest = deps.getState();
+      if (latest.status.status === 'saving' || latest.activeBotId !== botId) return;
+
+      const nextDrafts = { ...latest.drafts };
+      if (nextDrafts[botId] && (options.removedMcpName || options.addedMcpName)) {
+        let nextServers = options.removedMcpName
+          ? nextDrafts[botId].enabledMcpServers.filter((id) => id !== options.removedMcpName)
+          : [...nextDrafts[botId].enabledMcpServers];
+        if (options.addedMcpName) {
+          const addedRow = detail.mcpServers.rows.find((row) => row.id === options.addedMcpName);
+          if (addedRow?.enabled && !nextServers.includes(options.addedMcpName)) {
+            nextServers = [...nextServers, options.addedMcpName];
+          }
+        }
+        const reconciled = { ...nextDrafts[botId], enabledMcpServers: nextServers };
+        if (isBotDraftDirty(detail, reconciled)) nextDrafts[botId] = reconciled;
+        else delete nextDrafts[botId];
+      }
+
+      deps.setState({
+        status: { status: 'idle', activeBotId: botId },
+        activeBotId: botId,
+        activeDetail: detail,
+        drafts: nextDrafts,
+      });
+      deps.render();
+      void enrichCapabilities(botId, detail, token);
+    } catch (error) {
+      // gate-degrade: 能力增量刷新失败保留既有详情并显式透出横幅，禁止清空表单。
+      if (token !== detailToken) return;
+      deps.setState({ errorBanner: deps.describeError(error) });
+      deps.render();
+    }
+  }
+
   return {
     ensureLoaded,
     loadRoster,
@@ -562,5 +629,6 @@ export function createBotManagementController(
     saveBot,
     dismissError,
     dismissConfirm,
+    refreshActiveCapabilities,
   };
 }

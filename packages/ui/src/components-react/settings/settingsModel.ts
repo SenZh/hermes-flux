@@ -36,10 +36,16 @@ import type {
   BotDraftState,
   BotManagementStatus,
   ProfileUiMeta,
+  McpCatalogItem,
+  McpServerAddRpcParams,
+  McpTestResultView,
+  SkillHubSearchResult,
+  SkillInspectView,
 } from '@hermes-flux/core';
 
 export type { McpServerRow, SkillRow };
 export type { CustomEndpointRow, OauthProviderRow, ProviderView };
+export type { McpCatalogItem, McpServerAddRpcParams, McpTestResultView, SkillHubSearchResult, SkillInspectView };
 
 /** 设置中心的一级域。只允许真实存在的能力。 */
 export type SettingsSectionId = 'appearance' | 'providers' | 'agents' | 'extensions' | 'connection' | 'about';
@@ -464,6 +470,36 @@ export interface SettingsActions {
   onRegisterBotDirtyGuard: (guard: (() => boolean) | null) => void;
   onRefreshExtensions: () => void;
   onReloadSkills: () => Promise<SettingsActionResult>;
+  /** 拉取 MCP 预设目录（BOT 能力面板与扩展页共用）。 */
+  onFetchMcpCatalog?: (
+    profile: string,
+  ) => Promise<{ ok: boolean; items: McpCatalogItem[]; message?: string }>;
+  /** 新增 MCP 服务器（预设或自定义 stdio / HTTP），成功后由壳层刷新能力视图。 */
+  onAddMcpServer?: (
+    profile: string,
+    params: Omit<McpServerAddRpcParams, 'profile'>,
+  ) => Promise<SettingsActionResult & { name?: string }>;
+  /** 删除已配置的 MCP 服务器。 */
+  onRemoveMcpServer?: (profile: string, name: string) => Promise<SettingsActionResult>;
+  /** 测试单个 MCP 服务器连通性并返回发现的工具数 / OAuth 提示。 */
+  onTestMcpServer?: (
+    profile: string,
+    name: string,
+  ) => Promise<McpTestResultView & { message?: string }>;
+  /** 浏览或关键词搜索可安装技能目录。 */
+  onSearchSkillsHub?: (
+    profile: string,
+    query: string,
+    page?: number,
+  ) => Promise<{ ok: boolean; data?: SkillHubSearchResult; message?: string }>;
+  /** 安装技能并尝试热重载技能列表。 */
+  onInstallSkill?: (profile: string, name: string) => Promise<SettingsActionResult>;
+  /** 读取单个技能的详情与完整 Markdown 内容（优雅预览与原始源码共用）。 */
+  onInspectSkill?: (
+    profile: string,
+    skillName: string,
+    fallbackDescription?: string,
+  ) => Promise<{ ok: boolean; data?: SkillInspectView; message?: string }>;
   onTestGateway: (draft: GatewayDraft) => void;
   onConnectGateway: (draft: GatewayDraft) => void;
   onDisconnectGateway: () => void;

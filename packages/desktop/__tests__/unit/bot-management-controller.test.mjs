@@ -85,6 +85,15 @@ function makeHarness(options = {}) {
       if (options.skillInventoryError) throw new Error(options.skillInventoryError);
       return options.skillInventory ?? null;
     },
+    ...(options.skillDescriptions !== undefined || options.skillDescriptionsError
+      ? {
+          fetchSkillDescriptions: async (botId) => {
+            calls.push({ method: 'complete.slash', botId });
+            if (options.skillDescriptionsError) throw new Error(options.skillDescriptionsError);
+            return options.skillDescriptions ?? null;
+          },
+        }
+      : {}),
     fetchMcpStatus: async (botId) => {
       calls.push({ method: 'mcp.servers.status', botId });
       if (options.mcpStatusError) throw new Error(options.mcpStatusError);
@@ -613,4 +622,282 @@ test('能力补全：技能清单非权威时才拉全局目录，权威清单�
     false,
     '权威清单不需要额外 RPC',
   );
+});
+
+test('refreshActiveCapabilities：静默重拉详情、保留未冲突草稿并清理已删 MCP 勾选', async () => {
+  const describeDetail = detail({
+    id: 'arch',
+    displayName: '架构老王',
+    mcpServers: {
+      authoritative: true,
+      rows: [
+        { id: 'github-mcp', label: 'github-mcp', enabled: true, transport: 'stdio', online: true },
+        { id: 'temp-mcp', label: 'temp-mcp', enabled: true, transport: 'http', online: true },
+      ],
+    },
+  });
+  const h = makeHarness({
+    profiles: roster(),
+    describeDetail,
+  });
+  await h.controller.selectBot('arch', { immediate: true });
+  await tick();
+
+  // 用户在草稿中修改了 displayName 且同时勾选着两个 MCP
+  h.controller.updateDraft('arch', {
+    displayName: '未保存的新昵称',
+    enabledMcpServers: ['github-mcp', 'temp-mcp'],
+  });
+
+  // 后端删除了 temp-mcp，静默重拉后应只保留 github-mcp，同时保留用户编辑过的 displayName
+  describeDetail.mcpServers = {
+    authoritative: true,
+    rows: [{ id: 'github-mcp', label: 'github-mcp', enabled: true, transport: 'stdio', online: true }],
+  };
+  await h.controller.refreshActiveCapabilities('arch', { removedMcpName: 'temp-mcp' });
+  await tick();
+
+  assert.equal(h.state.activeDetail.mcpServers.rows.length, 1);
+  assert.equal(h.state.activeDetail.mcpServers.rows[0].id, 'github-mcp');
+  assert.equal(h.state.drafts.arch.displayName, '未保存的新昵称');
+  assert.deepEqual(h.state.drafts.arch.enabledMcpServers, ['github-mcp']);
+  assert.equal(h.state.status.status, 'idle');
+
+  // 已有脏草稿时新增默认启用的 MCP，必须合并进草稿 enabledMcpServers；新增未启用 MCP 时不误开启
+  describeDetail.mcpServers = {
+    authoritative: true,
+    rows: [
+      { id: 'github-mcp', label: 'github-mcp', enabled: true, transport: 'stdio', online: true },
+      { id: 'fresh-mcp', label: 'fresh-mcp', enabled: true, transport: 'http', online: undefined },
+      { id: 'off-mcp', label: 'off-mcp', enabled: false, transport: 'http', online: undefined },
+    ],
+  };
+  await h.controller.refreshActiveCapabilities('arch', { addedMcpName: 'fresh-mcp' });
+  await tick();
+  assert.deepEqual(h.state.drafts.arch.enabledMcpServers, ['github-mcp', 'fresh-mcp']);
+  assert.equal(h.state.drafts.arch.displayName, '未保存的新昵称');
+  await h.controller.refreshActiveCapabilities('arch', { addedMcpName: 'off-mcp' });
+  await tick();
+  assert.deepEqual(h.state.drafts.arch.enabledMcpServers, ['github-mcp', 'fresh-mcp']);
+});
+
+test('refreshActiveCapabilities：切换 BOT 后陈旧返回必须被令牌丢弃', async () => {
+  // 观察竞态：selectBot 切换走后旧 refreshActiveCapabilities 的返回不得覆盖当前激活 BOT
+  const staleHarness = makeHarness({ profiles: roster() });
+  await staleHarness.controller.selectBot('arch', { immediate: true });
+  await tick();
+  const slowPromise = staleHarness.controller.refreshActiveCapabilities('arch');
+  await staleHarness.controller.selectBot('default', { immediate: true });
+  await slowPromise;
+  await tick();
+  assert.equal(staleHarness.state.activeBotId, 'default');
+  assert.equal(staleHarness.state.activeDetail.id, 'default');
+});
+
+test('refreshActiveCapabilities：断连与 saving/非激活 BOT 守卫、草稿归零清理与失败横幅降级', async () => {
+  // 1. 空 botId、未连接与非激活 BOT 直接忽略，不发任何 RPC；无草稿时带 removedMcpName 安全退出
+  const offline = makeHarness({ connected: false, profiles: roster() });
+  await offline.controller.refreshActiveCapabilities('');
+  await offline.controller.refreshActiveCapabilities('arch');
+  assert.equal(offline.calls.length, 0);
+
+  const nonActive = makeHarness({ profiles: roster() });
+  await nonActive.controller.selectBot('arch', { immediate: true });
+  await tick();
+  nonActive.calls.length = 0;
+  await nonActive.controller.refreshActiveCapabilities('default');
+  assert.equal(nonActive.calls.length, 0);
+  await nonActive.controller.refreshActiveCapabilities('arch', { removedMcpName: 'unused-mcp' });
+
+  // 2. status === saving 请求前守卫：不发 RPC
+  const savingBefore = makeHarness({ profiles: roster() });
+  await savingBefore.controller.selectBot('arch', { immediate: true });
+  await tick();
+  savingBefore.calls.length = 0;
+  savingBefore.state.status = { status: 'saving', activeBotId: 'arch' };
+  await savingBefore.controller.refreshActiveCapabilities('arch');
+  assert.equal(savingBefore.calls.length, 0);
+
+  // 3. saving / 切人 在途防覆写（describeBot 解析期间状态切入 saving 或 activeBotId 变更均不得落盘覆盖）
+  const raceSaving = makeHarness({ profiles: roster() });
+  await raceSaving.controller.selectBot('arch', { immediate: true });
+  await tick();
+  raceSaving.state.activeBotId = 'arch';
+  const inflight = raceSaving.controller.refreshActiveCapabilities('arch');
+  raceSaving.state.status = { status: 'saving', activeBotId: 'arch' };
+  await inflight;
+  assert.equal(raceSaving.state.status.status, 'saving');
+
+  const raceBotChanged = makeHarness({ profiles: roster() });
+  await raceBotChanged.controller.selectBot('arch', { immediate: true });
+  await tick();
+  const inflight2 = raceBotChanged.controller.refreshActiveCapabilities('arch');
+  raceBotChanged.state.activeBotId = 'default';
+  await inflight2;
+  assert.equal(raceBotChanged.state.activeBotId, 'default');
+  assert.equal(raceBotChanged.state.activeDetail.id, 'arch');
+
+  // 4. 删除 MCP 后恰好使草稿与后端详情完全一致（不在脏态）时应从 drafts map 清除条目
+  const cleanDetail = detail({
+    id: 'arch',
+    displayName: '架构老王',
+    mcpServers: {
+      authoritative: true,
+      rows: [
+        { id: 'github-mcp', label: 'github-mcp', enabled: true, transport: 'stdio', online: true },
+        { id: 'temp-mcp', label: 'temp-mcp', enabled: false, transport: 'http', online: true },
+      ],
+    },
+  });
+  const zeroClean = makeHarness({ profiles: roster(), describeDetail: cleanDetail });
+  await zeroClean.controller.selectBot('arch', { immediate: true });
+  await tick();
+  zeroClean.controller.updateDraft('arch', { enabledMcpServers: ['github-mcp', 'temp-mcp'] });
+  assert.ok(zeroClean.state.drafts.arch, '必须先形成真实脏草稿，后续删除才真正走到归零清理分支');
+  cleanDetail.mcpServers = {
+    authoritative: true,
+    rows: [{ id: 'github-mcp', label: 'github-mcp', enabled: true, transport: 'stdio', online: true }],
+  };
+  await zeroClean.controller.refreshActiveCapabilities('arch', { removedMcpName: 'temp-mcp' });
+  await tick();
+  assert.equal(zeroClean.state.drafts.arch, undefined, '删去唯一差异项后应清空草稿池对应键');
+
+  // 5. describeBot 抛错保留既有详情并显式挂错误横幅；陈旧错误不污染新激活 BOT
+  let failNext = false;
+  let delayedReject = null;
+  // 通过 createBotManagementController 构建可注入失败的真实实例验证错误路径与陈旧错误丢弃
+  const state = {
+    status: { status: 'idle', activeBotId: 'arch' },
+    activeBotId: 'arch',
+    activeDetail: detail({ id: 'arch' }),
+    drafts: {},
+    errorBanner: undefined,
+    confirmPending: undefined,
+    isBusy: false,
+  };
+  const errController = createBotManagementController({
+    isConnected: () => true,
+    loadProfiles: async () => {},
+    getProfiles: () => ({ status: 'ready', data: roster() }),
+    getState: () => ({ ...state }),
+    setState: (patch) => Object.assign(state, patch),
+    describeBot: async (botId) => {
+      if (delayedReject) {
+        return new Promise((_res, rej) => {
+          delayedReject = rej;
+        });
+      }
+      if (failNext) throw new Error('boom-describe');
+      return detail({ id: botId });
+    },
+    fetchSkillInventory: async () => null,
+    fetchMcpStatus: async () => null,
+    configureBot: async () => ({ ok: true, applied: {} }),
+    setAsset: async () => true,
+    render: () => {},
+    translate: (k) => k,
+    describeError: (e) => (e instanceof Error ? e.message : String(e)),
+    notify: () => {},
+    onProfilesChanged: () => {},
+    onAvatarChanged: () => {},
+    schedule: (fn) => {
+      const id = setTimeout(fn, 0);
+      return () => clearTimeout(id);
+    },
+  });
+  failNext = true;
+  await errController.refreshActiveCapabilities('arch');
+  assert.equal(state.errorBanner, 'boom-describe');
+  assert.equal(state.activeDetail.id, 'arch', '失败时必须保留原有 activeDetail');
+
+  state.errorBanner = undefined;
+  failNext = false;
+  delayedReject = () => {};
+  const staleErrPromise = errController.refreshActiveCapabilities('arch');
+  const rejectNow = delayedReject;
+  delayedReject = null;
+  await errController.selectBot('default', { immediate: true });
+  await tick();
+  rejectNow(new Error('late-error'));
+  await staleErrPromise;
+  assert.equal(state.errorBanner, undefined, '过时令牌的拒绝不得污染新选中 BOT 的错误横幅');
+});
+
+test('能力补全：fetchSkillDescriptions 仅补填权威技能缺失简介，失败优雅降级，过期令牌丢弃', async () => {
+  const ok = makeHarness({
+    profiles: roster(),
+    describeDetail: detail({
+      skills: {
+        authoritative: true,
+        rows: [
+          { id: 'github', label: 'github', enabled: true, description: '原生说明' },
+          { id: 'dogfood', label: 'dogfood', enabled: false },
+        ],
+      },
+    }),
+    skillDescriptions: {
+      github: '不应覆写',
+      dogfood: '端到端浏览器走查',
+      extra: '无关技能不得混入权威清单',
+    },
+  });
+  await ok.controller.selectBot('arch', { immediate: true });
+  await tick();
+  assert.equal(ok.calls.some((call) => call.method === 'complete.slash'), true);
+  assert.equal(ok.calls.some((call) => call.method === 'skills.manage'), false, '权威技能清单补简介不得触发 skills.manage');
+  assert.deepEqual(ok.state.activeDetail.skills.rows, [
+    { id: 'github', label: 'github', enabled: true, description: '原生说明' },
+    { id: 'dogfood', label: 'dogfood', enabled: false, description: '端到端浏览器走查' },
+  ]);
+
+  // 权威技能全部自带有效简介时不得再请求 complete.slash
+  const alreadyDescribed = makeHarness({
+    profiles: roster(),
+    describeDetail: detail({
+      skills: {
+        authoritative: true,
+        rows: [{ id: 'github', label: 'github', enabled: true, description: '已自带说明' }],
+      },
+    }),
+    skillDescriptions: { github: '不应被调用' },
+  });
+  await alreadyDescribed.controller.selectBot('arch', { immediate: true });
+  await tick();
+  assert.equal(alreadyDescribed.calls.some((call) => call.method === 'complete.slash'), false);
+
+  // 失败优雅降级：技能行与启用态照常保留
+  const degraded = makeHarness({
+    profiles: roster(),
+    describeDetail: detail({
+      skills: { authoritative: true, rows: [{ id: 'dogfood', label: 'dogfood', enabled: false }] },
+    }),
+    skillDescriptionsError: 'slash-timeout',
+  });
+  await degraded.controller.selectBot('arch', { immediate: true });
+  await tick();
+  assert.equal(degraded.state.activeDetail.skills.rows.length, 1);
+  assert.equal(degraded.state.activeDetail.skills.rows[0].enabled, false);
+
+  // 过期令牌丢弃：慢响应 fetchSkillDescriptions 在切走 BOT 后不得回写旧 BOT 简介
+  let resolveSlowDesc = null;
+  const race = makeHarness({ profiles: roster() });
+  race.deps.describeBot = async (botId) =>
+    detail({
+      id: botId,
+      skills: { authoritative: true, rows: [{ id: 'dogfood', label: 'dogfood', enabled: false }] },
+    });
+  race.deps.fetchSkillDescriptions = (botId) =>
+    botId === 'arch'
+      ? new Promise((resolve) => {
+          resolveSlowDesc = resolve;
+        })
+      : Promise.resolve(null);
+  race.controller.selectBot('arch', { immediate: true });
+  await tick();
+  race.controller.selectBot('default', { immediate: true });
+  await tick();
+  resolveSlowDesc?.({ dogfood: '迟到的架构描述' });
+  await tick();
+  assert.equal(race.state.activeDetail.id, 'default');
+  assert.equal(race.state.activeDetail.skills.rows[0].description, undefined);
 });

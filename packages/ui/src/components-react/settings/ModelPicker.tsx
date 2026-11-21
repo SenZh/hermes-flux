@@ -1,46 +1,33 @@
 import * as React from 'react';
-import { Check, ChevronDown, Search, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Check, ChevronDown, ChevronRight, Search, X } from 'lucide-react';
+import { resolveProviderVendorId } from '@hermes-flux/core';
 import { t } from '../../i18n/index.js';
 import { cn } from '../../lib/utils.js';
 import { selectTriggerVariants } from '../../lib/selectTrigger.js';
-import { describeModelVendorIcon } from '../../lib/vendorIcon.js';
+import { describeModelVendorIcon, describeVendorIcon, type VendorIconDescriptor } from '../../lib/vendorIcon.js';
 import { presentModel, type ModelPresentation } from '../../lib/modelPresentation.js';
 import { Button } from '../primitives/Button.js';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../primitives/Dialog.js';
 import { Input } from '../primitives/Input.js';
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '../primitives/Menu.js';
 
-/**
- * 模型厂商图标（React 版）。
- *
- * 【设计意图 (Why)】
- *   与输入舱模型切换器必须是**同一个图标**：设置页曾经用 lucide 通用描边图形
- *   （Anthropic = 大脑、OpenAI = 闪电）冒充品牌，用户认不出是哪家。现在两条渲染路径
- *   共用 `describeModelVendorIcon` 的判定与 lobe 品牌资产，只差一层 DOM 表达。
- *
- * 【约束与规则 (Rules)】
- *   1. 资产路径相对渲染产物根目录（desktop 构建会把 `icons/lobe` 拷进 dist/renderer）；
- *   2. 判不出厂商时渲染首字母 badge，绝不返回 null 让行首塌陷；
- *   3. 图形只做装饰，`aria-hidden`；可读名由相邻文本承担，`title` 只放厂商展示名。
- */
-export function ModelVendorIcon({
-  modelId,
-  providerName = '',
-  // 与输入舱模型列表行同档 14px（触发按钮是 16px）；行内图标必须比模型名退后一层。
-  size = 14,
+/** 共享 `.vendor-icon` 五态 DOM 渲染内核，供模型维度与厂商维度共用，避免重复拼装。 */
+function VendorIconView({
+  icon,
   className = 'text-muted-foreground',
+  suppressBadge = false,
 }: {
-  modelId: string;
-  providerName?: string;
-  size?: number;
+  icon: VendorIconDescriptor;
   className?: string;
-}): React.ReactElement {
-  const icon = describeModelVendorIcon(modelId, providerName, { size });
+  suppressBadge?: boolean;
+}): React.ReactElement | null {
   const classes = ['vendor-icon', className].filter(Boolean).join(' ');
   const boxStyle: React.CSSProperties = { width: icon.size, height: icon.size };
   const title = icon.label || undefined;
 
   if (icon.variant === 'badge') {
+    if (suppressBadge) return null;
     return (
       <span className={`${classes} vendor-icon--badge`} style={boxStyle} title={title} aria-hidden="true">
         {icon.badgeLetter}
@@ -77,6 +64,60 @@ export function ModelVendorIcon({
       {mono}
     </span>
   );
+}
+
+/**
+ * 模型厂商图标（React 版）。
+ *
+ * 【设计意图 (Why)】
+ *   与输入舱模型切换器必须是**同一个图标**：设置页曾经用 lucide 通用描边图形
+ *   （Anthropic = 大脑、OpenAI = 闪电）冒充品牌，用户认不出是哪家。现在两条渲染路径
+ *   共用 `describeModelVendorIcon` 的判定与 lobe 品牌资产，只差一层 DOM 表达。
+ *
+ * 【约束与规则 (Rules)】
+ *   1. 资产路径相对渲染产物根目录（desktop 构建会把 `icons/lobe` 拷进 dist/renderer）；
+ *   2. 判不出厂商时渲染首字母 badge，绝不返回 null 让行首塌陷；
+ *   3. 图形只做装饰，`aria-hidden`；可读名由相邻文本承担，`title` 只放厂商展示名。
+ */
+export function ModelVendorIcon({
+  modelId,
+  providerName = '',
+  // 与输入舱模型列表行同档 14px（触发按钮是 16px）；行内图标必须比模型名退后一层。
+  size = 14,
+  className = 'text-muted-foreground',
+}: {
+  modelId: string;
+  providerName?: string;
+  size?: number;
+  className?: string;
+}): React.ReactElement {
+  const icon = describeModelVendorIcon(modelId, providerName, { size });
+  return <VendorIconView icon={icon} className={className} /> as React.ReactElement;
+}
+
+/**
+ * 提供商/厂商维度图标（React 版，对齐 InputDock 分组标题的厂商识别规范）。
+ */
+export function ProviderVendorIcon({
+  providerSlug,
+  providerName = '',
+  size = 14,
+  className = 'text-muted-foreground',
+  suppressBadge = false,
+}: {
+  providerSlug: string;
+  providerName?: string;
+  size?: number;
+  className?: string;
+  suppressBadge?: boolean;
+}): React.ReactElement | null {
+  const vendorId = resolveProviderVendorId(providerSlug, providerName);
+  const icon = describeVendorIcon({
+    vendorId,
+    label: providerName || providerSlug,
+    size,
+  });
+  return <VendorIconView icon={icon} className={className} suppressBadge={suppressBadge} />;
 }
 
 /**
@@ -591,5 +632,387 @@ export function ModelPickerDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+export interface GroupedModelOptionGroup {
+  id: string;
+  name: string;
+  models: ReadonlyArray<{ id: string; name: string }>;
+}
+
+export interface GroupedModelSelectProps {
+  id?: string;
+  value: string;
+  provider?: string;
+  groups: readonly GroupedModelOptionGroup[];
+  currentModelOffline?: boolean;
+  disabled?: boolean;
+  ariaLabel: string;
+  labels: {
+    unbound: string;
+    offline: string;
+    catalogUnavailable: string;
+    searchPlaceholder: string;
+    emptySearch: string;
+  };
+  onChange: (modelId: string, providerId: string) => void;
+}
+
+/**
+ * 对齐 InputDock 质感的分组模型选择器（同时展示模型图标与提供商/厂商图标）。
+ *
+ * 【设计意图 (Why)】
+ *   通用 `<Select>` 只有窄面板与纯文字分组头，在 BOT 配置中枢承担“主推理模型”核心绑定时
+ *   既放不下长模型名、也看不清代理接入方与模型原生厂商的区别。这里复刻 InputDock
+ *   的模型手风琴语言：触发器同时显示「模型图标 + 可读名」与右侧「厂商图标胶囊」，
+ *   展开浮层带即时搜索、可折叠提供商标题行与独立滚轮条。
+ */
+export function GroupedModelSelect({
+  id,
+  value,
+  provider,
+  groups,
+  currentModelOffline = false,
+  disabled = false,
+  ariaLabel,
+  labels,
+  onChange,
+}: GroupedModelSelectProps): React.ReactElement {
+  const [open, setOpen] = React.useState(false);
+  const [query, setQuery] = React.useState('');
+  const [collapsed, setCollapsed] = React.useState<Record<string, boolean>>({});
+  const [coords, setCoords] = React.useState<{
+    left: number;
+    width: number;
+    top?: number;
+    bottom?: number;
+  } | null>(null);
+
+  const triggerRef = React.useRef<HTMLButtonElement>(null);
+  const popoverRef = React.useRef<HTMLDivElement>(null);
+  const searchRef = React.useRef<HTMLInputElement>(null);
+
+  const activeGroup = React.useMemo(() => {
+    if (!value) return undefined;
+    if (provider) {
+      const exact = groups.find(
+        (group) => group.id === provider && group.models.some((item) => item.id === value),
+      );
+      if (exact) return exact;
+    }
+    return groups.find((group) => group.models.some((item) => item.id === value));
+  }, [groups, value, provider]);
+
+  const activeProviderId = activeGroup?.id || provider || '';
+  const activeProviderName = activeGroup?.name || provider || '';
+  const selectedLabel = React.useMemo(() => {
+    if (!value) return '';
+    return presentModel(value, activeProviderName).name || value;
+  }, [value, activeProviderName]);
+
+  const closeMenu = React.useCallback((returnFocus = false) => {
+    setOpen(false);
+    setQuery('');
+    if (returnFocus) triggerRef.current?.focus();
+  }, []);
+
+  const updateCoords = React.useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger || typeof window === 'undefined') return;
+    const rect = trigger.getBoundingClientRect();
+    const hostEl = trigger.closest('.flux-settings') as HTMLElement | null;
+    const hostRect = hostEl ? hostEl.getBoundingClientRect() : null;
+    const boundLeft = hostRect ? hostRect.left + 12 : 12;
+    const boundRight = hostRect ? hostRect.right - 12 : window.innerWidth - 12;
+    const boundTop = hostRect ? hostRect.top + 12 : 12;
+    const boundBottom = hostRect ? hostRect.bottom - 12 : window.innerHeight - 12;
+    const width = Math.min(Math.max(rect.width, 384), Math.max(240, boundRight - boundLeft));
+    const vpLeft = Math.min(Math.max(boundLeft, rect.left), Math.max(boundLeft, boundRight - width));
+    // `.flux-settings`（DialogContent）自带 translate(-50%,-50%) 与 overflow-hidden，
+    // 会成为内部 position:fixed 浮层的包含块；必须换算为相对 hostRect 的偏移量，否则会偏出右边界并在聚焦时引发整窗横向滚动。
+    const left = hostRect ? vpLeft - hostRect.left : vpLeft;
+    const spaceBelow = boundBottom - rect.bottom;
+    const spaceAbove = rect.top - boundTop;
+    if (spaceBelow < 300 && spaceAbove > spaceBelow) {
+      const bottomBase = hostRect ? hostRect.bottom : window.innerHeight;
+      setCoords({ left, width, bottom: Math.max(12, bottomBase - rect.top + 4) });
+    } else {
+      const topBase = hostRect ? hostRect.top : 0;
+      setCoords({ left, width, top: rect.bottom - topBase + 4 });
+    }
+  }, []);
+
+  React.useLayoutEffect(() => {
+    if (!open) return;
+    updateCoords();
+    window.requestAnimationFrame(() => searchRef.current?.focus({ preventScroll: true }));
+    const handlePointerDown = (event: MouseEvent): void => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (triggerRef.current?.contains(target) || popoverRef.current?.contains(target)) return;
+      closeMenu(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.isComposing || event.keyCode === 229) return;
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeMenu(true);
+    };
+    const handleScroll = (event: Event): void => {
+      const target = event.target as Node | null;
+      if (target && popoverRef.current?.contains(target)) return;
+      updateCoords();
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown, true);
+    document.addEventListener('scroll', handleScroll, { capture: true, passive: true });
+    window.addEventListener('resize', updateCoords);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown, true);
+      document.removeEventListener('scroll', handleScroll, true);
+      window.removeEventListener('resize', updateCoords);
+    };
+  }, [open, updateCoords, closeMenu]);
+
+  const needle = query.trim().toLowerCase();
+  const hasQuery = needle.length > 0;
+  const filteredGroups = React.useMemo(() => {
+    if (!hasQuery) return groups;
+    return groups
+      .map((group) => {
+        const providerMatch =
+          group.id.toLowerCase().includes(needle) || group.name.toLowerCase().includes(needle);
+        const matchingModels = providerMatch
+          ? group.models
+          : group.models.filter((item) => {
+              const readable = presentModel(item.id, group.name).name.toLowerCase();
+              return (
+                item.id.toLowerCase().includes(needle) ||
+                item.name.toLowerCase().includes(needle) ||
+                readable.includes(needle)
+              );
+            });
+        return { ...group, models: matchingModels };
+      })
+      .filter((group) => group.models.length > 0);
+  }, [groups, hasQuery, needle]);
+
+  const toggleGroup = (groupId: string): void => {
+    setCollapsed((prev) => ({ ...prev, [groupId]: !prev[groupId] }));
+  };
+
+  const portalHost =
+    typeof document !== 'undefined'
+      ? (triggerRef.current?.closest('.flux-settings') as HTMLElement | null) ?? document.body
+      : null;
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        id={id}
+        type="button"
+        disabled={disabled}
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => {
+          if (disabled) return;
+          if (open) closeMenu(false);
+          else setOpen(true);
+        }}
+        className="flex h-9 w-full items-center gap-2 rounded-card border border-border bg-input px-3 text-left text-body text-foreground transition-colors hover:border-border-strong hover:bg-card-hover focus-visible:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {groups.length === 0 ? (
+          <span className="min-w-0 flex-1 truncate text-body text-muted-foreground">
+            {labels.catalogUnavailable}
+          </span>
+        ) : !value ? (
+          <span className="min-w-0 flex-1 truncate text-body text-muted-foreground">{labels.unbound}</span>
+        ) : currentModelOffline ? (
+          <>
+            <ModelVendorIcon modelId={value} providerName={activeProviderName} size={16} />
+            <span className="min-w-0 flex-1 truncate text-body text-warning">{labels.offline}</span>
+          </>
+        ) : (
+          <>
+            <ModelVendorIcon modelId={value} providerName={activeProviderName} size={16} />
+            <span className="min-w-0 flex-1 truncate text-body font-medium text-foreground">
+              {selectedLabel}
+            </span>
+            {activeProviderName ? (
+              <span
+                data-model-trigger-vendor="true"
+                className="inline-flex h-6 max-w-36 shrink-0 items-center gap-1 rounded-inner border border-border-subtle bg-secondary px-2 text-caption text-muted-foreground"
+              >
+                <ProviderVendorIcon
+                  providerSlug={activeProviderId}
+                  providerName={activeProviderName}
+                  size={12}
+                />
+                <span className="truncate">{activeProviderName}</span>
+              </span>
+            ) : null}
+          </>
+        )}
+        <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+      </button>
+
+      {open && portalHost && coords
+        ? createPortal(
+            <div
+              ref={popoverRef}
+              data-grouped-model-popover="true"
+              style={{
+                position: 'fixed',
+                left: coords.left,
+                width: coords.width,
+                ...(coords.top !== undefined ? { top: coords.top } : {}),
+                ...(coords.bottom !== undefined ? { bottom: coords.bottom } : {}),
+              }}
+              className="z-menu flex flex-col overflow-hidden rounded-panel border border-border bg-popover shadow-window"
+            >
+              <div className="flex shrink-0 items-center gap-2 border-b border-border-subtle bg-panel px-3 py-2">
+                <div className="relative min-w-0 flex-1">
+                  <Search
+                    aria-hidden="true"
+                    className="pointer-events-none absolute left-3 top-1/2 size-3 -translate-y-1/2 text-muted-foreground"
+                  />
+                  <Input
+                    ref={searchRef}
+                    size="sm"
+                    value={query}
+                    data-grouped-model-search="true"
+                    placeholder={labels.searchPlaceholder}
+                    aria-label={labels.searchPlaceholder}
+                    onChange={(event) => setQuery(event.target.value)}
+                    className="pl-8 pr-7"
+                  />
+                  {query ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={t('settings.close')}
+                      onClick={() => setQuery('')}
+                      className="absolute right-1 top-1/2 -translate-y-1/2"
+                    >
+                      <X aria-hidden="true" className="size-3" />
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+
+              <div
+                role="listbox"
+                aria-label={ariaLabel}
+                className="scrollbar-thin max-h-80 overflow-y-auto p-2"
+              >
+                {currentModelOffline && value ? (
+                  <div className="mb-2 flex items-center gap-2 rounded-card border border-warning/30 bg-panel px-2 py-2 text-caption text-warning">
+                    <ModelVendorIcon modelId={value} providerName={activeProviderName} size={14} />
+                    <span className="truncate">{labels.offline}</span>
+                  </div>
+                ) : null}
+
+                {filteredGroups.length === 0 ? (
+                  <p className="px-3 py-6 text-center text-caption text-muted-foreground">
+                    {labels.emptySearch}
+                  </p>
+                ) : (
+                  filteredGroups.map((group, groupIndex) => {
+                    const isCollapsed = !hasQuery && Boolean(collapsed[group.id]);
+                    return (
+                      <div
+                        key={group.id}
+                        className={groupIndex > 0 ? 'mt-2 border-t border-border-subtle pt-2' : ''}
+                      >
+                        <button
+                          type="button"
+                          data-model-group={group.id}
+                          aria-expanded={!isCollapsed}
+                          disabled={hasQuery}
+                          onClick={() => toggleGroup(group.id)}
+                          className="flex min-h-7 w-full items-center justify-between gap-2 rounded-card px-2 py-1 text-left transition-colors hover:bg-card-hover disabled:cursor-default disabled:hover:bg-transparent"
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <ProviderVendorIcon
+                              providerSlug={group.id}
+                              providerName={group.name}
+                              size={14}
+                            />
+                            <span className="truncate text-caption font-medium text-secondary-foreground">
+                              {group.name}
+                            </span>
+                            <span className="font-code text-micro text-muted-foreground tabular-nums">
+                              ({group.models.length})
+                            </span>
+                          </span>
+                          {!hasQuery ? (
+                            isCollapsed ? (
+                              <ChevronRight aria-hidden="true" className="size-3 shrink-0 text-muted-foreground" />
+                            ) : (
+                              <ChevronDown aria-hidden="true" className="size-3 shrink-0 text-muted-foreground" />
+                            )
+                          ) : null}
+                        </button>
+
+                        {!isCollapsed ? (
+                          <div className="mt-1 flex flex-col gap-1">
+                            {group.models.map((model) => {
+                              const view = presentModel(model.id, group.name);
+                              const isSelected =
+                                model.id === value &&
+                                (provider ? group.id === provider : activeGroup?.id === group.id);
+                              return (
+                                <button
+                                  key={`${group.id}:${model.id}`}
+                                  type="button"
+                                  role="option"
+                                  aria-selected={isSelected}
+                                  data-model-option={model.id}
+                                  onClick={() => {
+                                    onChange(model.id, group.id);
+                                    closeMenu(true);
+                                  }}
+                                  className={`flex min-h-9 w-full items-center justify-between gap-2 rounded-card px-2 py-2 text-left transition-colors ${
+                                    isSelected
+                                      ? 'bg-card-active font-medium text-foreground'
+                                      : 'text-foreground hover:bg-card-hover'
+                                  }`}
+                                >
+                                  <span className="flex min-w-0 flex-1 items-center gap-2">
+                                    <ModelVendorIcon
+                                      modelId={model.id}
+                                      providerName={group.name}
+                                      size={16}
+                                    />
+                                    <span className="min-w-0 flex-1 truncate text-body">{view.name}</span>
+                                  </span>
+                                  {isSelected ? (
+                                    <Check
+                                      aria-hidden="true"
+                                      className="size-4 shrink-0 text-foreground"
+                                      strokeWidth={2}
+                                    />
+                                  ) : null}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>,
+            portalHost,
+          )
+        : null}
+    </>
   );
 }

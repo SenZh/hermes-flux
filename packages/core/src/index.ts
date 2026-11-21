@@ -37,6 +37,7 @@ export * from './subagent/subagentStore.js';
 export * from './profile/profileService.js';
 export * from './profile/botManagement.js';
 export * from './profile/botActivitySync.js';
+export * from './settings/extensionAdmin.js';
 export * from './group/groupService.js';
 export * from './group/groupLogPollerManager.js';
 export * from './project/projectService.js';

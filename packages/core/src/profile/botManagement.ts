@@ -375,6 +375,38 @@ export function mergeSkillInventory(skills: BotCapabilityList, names: readonly s
 }
 
 /**
+ * 用斜杠补全目录返回的说明文本丰富技能行（只填空缺，不增删条目、不改动 authoritative 与 enabled）。
+ *
+ * 【设计意图 (Why)】
+ *   网关 `profiles.describe` 的 `skills[]` 仅返回 `{ name, enabled }`，没有简介；
+ *   而 `complete.slash` 的 `meta` 带有每个已加载技能的一行简介。将两者按技能 ID 合并后，
+ *   技能页能像工具集页一样展示可读说明，同时保留权威启用态。
+ */
+export function mergeSkillDescriptions(
+  skills: BotCapabilityList,
+  descriptions: Readonly<Record<string, string>> | null | undefined,
+): BotCapabilityList {
+  if (!descriptions || skills.rows.length === 0) return skills;
+  const lookup = new Map<string, string>();
+  for (const [rawKey, rawValue] of Object.entries(descriptions)) {
+    const key = rawKey.replace(/^\/+/, '').trim().toLowerCase();
+    const desc = typeof rawValue === 'string' ? rawValue.trim() : '';
+    if (key && desc) lookup.set(key, desc);
+  }
+  if (lookup.size === 0) return skills;
+
+  let changed = false;
+  const nextRows = skills.rows.map((row) => {
+    if (row.description?.trim()) return row;
+    const desc = lookup.get(row.id.replace(/^\/+/, '').trim().toLowerCase());
+    if (!desc) return row;
+    changed = true;
+    return { ...row, description: desc };
+  });
+  return changed ? { authoritative: skills.authoritative, rows: nextRows } : skills;
+}
+
+/**
  * 合并 MCP 探活状态。
  * 【规则】探活失败（`statusRows` 为 null）时保留原清单，`online` 保持 undefined，
  *   界面据此显示"状态未知"，绝不允许把失败画成红灯。

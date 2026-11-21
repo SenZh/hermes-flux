@@ -273,3 +273,44 @@ test('ui barrel 必须导出设置岛入口，且旧模板文件已删除', () =
     '旧字符串模板设置页必须删除，避免两套真值并存',
   );
 });
+
+test('扩展新增/删除/探活与技能市场浏览/搜索/安装动作必须真实接线至网关 RPC 与控制器重对账', () => {
+  const fetchStart = source.indexOf('onFetchMcpCatalog:');
+  const installEnd = source.indexOf('onTestGateway:', fetchStart);
+  assert.ok(fetchStart !== -1 && installEnd > fetchStart, '必须声明 6 个扩展运维 SettingsActions 回调');
+  const extBlock = source.slice(fetchStart, installEnd);
+
+  for (const method of [
+    'mcp.catalog',
+    'mcp.servers.add',
+    'mcp.servers.remove',
+    'mcp.servers.test',
+    'skills.manage',
+    'skills.reload',
+  ]) {
+    const escaped = method.replace(/\./g, '\\.');
+    assert.match(
+      extBlock,
+      new RegExp(`request(?:<[^>]+>)?\\(\\s*'${escaped}'`),
+      `扩展接线块必须调用网关 RPC ${method}`,
+    );
+  }
+  assert.ok(
+    extBlock.includes('getBotManagementController().refreshActiveCapabilities(targetProfile)'),
+    '新增 MCP / 安装技能后必须同步刷新激活 BOT 能力详情',
+  );
+  assert.ok(
+    extBlock.includes('getBotManagementController().refreshActiveCapabilities(targetProfile, { removedMcpName: name })'),
+    '删除 MCP 后必须带 removedMcpName 清理草稿残留并重拉能力详情',
+  );
+  for (const symbol of [
+    'onFetchMcpCatalog',
+    'onAddMcpServer',
+    'onRemoveMcpServer',
+    'onTestMcpServer',
+    'onSearchSkillsHub',
+    'onInstallSkill',
+  ]) {
+    assert.ok(source.includes(symbol), `渲染进程动作接线缺失 ${symbol}`);
+  }
+});

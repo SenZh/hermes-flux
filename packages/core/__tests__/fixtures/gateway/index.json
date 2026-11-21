@@ -683,6 +683,34 @@
         },
         {
           "module": "extensions",
+          "method": "mcp.catalog",
+          "ok": false,
+          "skipped": true,
+          "reason": "新增 MCP 目录查询 RPC 在无 .env 离线探针下显式跳过，由契约白名单与核心/桌面端单测守护；连真实网关跑 probe:gateway 可补录"
+        },
+        {
+          "module": "extensions",
+          "method": "mcp.servers.add",
+          "ok": false,
+          "skipped": true,
+          "reason": "新增 MCP 服务器写操作在无 .env 离线探针下显式跳过，由契约白名单与参数构造单测守护；连真实网关跑 probe:gateway 可补录"
+        },
+        {
+          "module": "extensions",
+          "method": "mcp.servers.remove",
+          "ok": false,
+          "skipped": true,
+          "reason": "移除 MCP 服务器写操作在无 .env 离线探针下显式跳过，由契约白名单与控制器单测守护；连真实网关跑 probe:gateway 可补录"
+        },
+        {
+          "module": "extensions",
+          "method": "mcp.servers.test",
+          "ok": false,
+          "skipped": true,
+          "reason": "MCP 服务器探活 RPC 在无 .env 离线探针下显式跳过，由契约白名单与结果归一化单测守护；连真实网关跑 probe:gateway 可补录"
+        },
+        {
+          "module": "extensions",
           "method": "model.save_key",
           "ok": false,
           "skipped": true,
@@ -1436,6 +1464,34 @@
       "gatewayVersion": "0.21.6",
       "recordedAt": "2026-11-08T13:18:53.038Z",
       "note": "本机回环网关实测录制；主基线其余条目录制自 0.22.5"
+    },
+    {
+      "module": "extensions",
+      "method": "mcp.catalog",
+      "ok": false,
+      "skipped": true,
+      "reason": "新增 MCP 目录查询 RPC 在无 .env 离线探针下显式跳过，由契约白名单与核心/桌面端单测守护；连真实网关跑 probe:gateway 可补录"
+    },
+    {
+      "module": "extensions",
+      "method": "mcp.servers.add",
+      "ok": false,
+      "skipped": true,
+      "reason": "新增 MCP 服务器写操作在无 .env 离线探针下显式跳过，由契约白名单与参数构造单测守护；连真实网关跑 probe:gateway 可补录"
+    },
+    {
+      "module": "extensions",
+      "method": "mcp.servers.remove",
+      "ok": false,
+      "skipped": true,
+      "reason": "移除 MCP 服务器写操作在无 .env 离线探针下显式跳过，由契约白名单与控制器单测守护；连真实网关跑 probe:gateway 可补录"
+    },
+    {
+      "module": "extensions",
+      "method": "mcp.servers.test",
+      "ok": false,
+      "skipped": true,
+      "reason": "MCP 服务器探活 RPC 在无 .env 离线探针下显式跳过，由契约白名单与结果归一化单测守护；连真实网关跑 probe:gateway 可补录"
     },
     {
       "module": "extensions",

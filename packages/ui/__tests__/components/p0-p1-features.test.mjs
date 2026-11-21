@@ -373,12 +373,25 @@ test('P0 & P1 Features Rigorous Suite - Multi-Quadrant & Mutation Verified', asy
     const actions = new Proxy({}, { get: () => () => {} });
     const html = renderToStaticMarkup(React.createElement(BotManagerView, { snapshot, actions }));
 
-    assert.ok(html.includes('data-bot-carousel="true"'), '必须渲染 5 槽位头像选择器');
-    assert.equal((html.match(/data-bot-slot=/g) || []).length, 5, '槽位必须固定 5 个');
+    assert.ok(html.includes('data-bot-carousel="true"'), '必须渲染 BOT 成员选择栏');
+    assert.equal((html.match(/data-bot-slot=/g) || []).length, 2, '成员数应与花名册一致（N=2）');
     assert.ok(html.includes('id="bot-id"'), '必须包含只读 ID');
     assert.ok(html.includes('value="赫尔墨斯"'), '必须包含当前显示名称');
     assert.ok(html.includes('id="bot-description"'), '必须包含职能描述文本域');
-    assert.ok(html.includes('恢复默认头像'), '必须包含恢复默认头像入口');
+    assert.equal(html.includes('恢复默认头像'), false, '无自定义头像时不得冗余显示恢复默认头像按钮');
+    const htmlWithAvatar = renderToStaticMarkup(
+      React.createElement(BotManagerView, {
+        snapshot: {
+          ...snapshot,
+          botManagement: {
+            ...snapshot.botManagement,
+            activeDetail: { ...detail, avatar: 'data:image/png;base64,AAA' },
+          },
+        },
+        actions,
+      }),
+    );
+    assert.ok(htmlWithAvatar.includes('恢复默认头像'), '存在自定义头像时必须包含恢复默认头像入口');
     assert.ok(html.includes('保存配置'), '必须包含保存配置按钮');
     assert.ok(html.includes('重置'), '必须包含重置按钮');
     assert.equal(

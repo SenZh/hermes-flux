@@ -22,12 +22,12 @@ const PRIMITIVES_DIR = path.join(UI_SRC, 'components-react/primitives');
  * 【约束】consumed 至少一项；pending 的每项必须写清消费它的后续 PR，禁止"以后再说"。
  */
 const CONSUMPTION = {
-  ActivityIndicator: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/settings/BotManagerView.tsx'] },
-  Button: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/settings/LoadBoundary.tsx', 'components-react/settings/ProvidersAdminPanel.tsx', 'components-react/settings/AddProviderDialog.tsx', 'components-react/settings/SwitchDefaultProviderDialog.tsx', 'components-react/settings/ModelPicker.tsx', 'components-react/settings/BotManagerView.tsx', 'components-react/settings/LoginPanel.tsx', 'components-react/gallery/Gallery.tsx'] },
-  Input: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/settings/ProvidersAdminPanel.tsx', 'components-react/settings/AddProviderDialog.tsx', 'components-react/settings/SwitchDefaultProviderDialog.tsx', 'components-react/settings/ModelPicker.tsx', 'components-react/settings/BotManagerView.tsx'] },
-  Select: { state: 'consumed', consumers: ['components-react/settings/SettingsModal.tsx', 'components-react/settings/BotManagerView.tsx'] },
-  Textarea: { state: 'consumed', consumers: ['components-react/settings/BotManagerView.tsx'] },
-  Badge: { state: 'consumed', consumers: ['components-react/settings/SettingsModal.tsx', 'components-react/settings/BotHeroCarousel.tsx', 'components-react/gallery/Gallery.tsx'] },
+  ActivityIndicator: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx'] },
+  Button: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/settings/LoadBoundary.tsx', 'components-react/settings/ProvidersAdminPanel.tsx', 'components-react/settings/AddProviderDialog.tsx', 'components-react/settings/SwitchDefaultProviderDialog.tsx', 'components-react/settings/ModelPicker.tsx', 'components-react/settings/BotHeroCarousel.tsx', 'components-react/settings/BotManagerView.tsx', 'components-react/settings/McpAddDialog.tsx', 'components-react/settings/McpRemoveConfirmDialog.tsx', 'components-react/settings/SkillDetailDialog.tsx', 'components-react/settings/SkillInstallDialog.tsx', 'components-react/settings/LoginPanel.tsx', 'components-react/gallery/Gallery.tsx'] },
+  Input: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/settings/ProvidersAdminPanel.tsx', 'components-react/settings/AddProviderDialog.tsx', 'components-react/settings/SwitchDefaultProviderDialog.tsx', 'components-react/settings/ModelPicker.tsx', 'components-react/settings/BotHeroCarousel.tsx', 'components-react/settings/BotManagerView.tsx', 'components-react/settings/McpAddDialog.tsx', 'components-react/settings/SkillInstallDialog.tsx'] },
+  Select: { state: 'consumed', consumers: ['components-react/settings/SettingsModal.tsx'] },
+  Textarea: { state: 'consumed', consumers: ['components-react/settings/BotManagerView.tsx', 'components-react/settings/McpAddDialog.tsx'] },
+  Badge: { state: 'consumed', consumers: ['components-react/settings/SettingsModal.tsx', 'components-react/settings/BotHeroCarousel.tsx', 'components-react/settings/BotManagerView.tsx', 'components-react/settings/McpAddDialog.tsx', 'components-react/settings/SkillDetailDialog.tsx', 'components-react/settings/SkillInstallDialog.tsx', 'components-react/gallery/Gallery.tsx'] },
   Dialog: {
     state: 'consumed',
     consumers: [
@@ -36,9 +36,13 @@ const CONSUMPTION = {
       'components-react/settings/AddProviderDialog.tsx',
       'components-react/settings/SwitchDefaultProviderDialog.tsx',
       'components-react/settings/BotManagerView.tsx',
+      'components-react/settings/McpAddDialog.tsx',
+      'components-react/settings/McpRemoveConfirmDialog.tsx',
+      'components-react/settings/SkillDetailDialog.tsx',
+      'components-react/settings/SkillInstallDialog.tsx',
     ],
   },
-  Menu: { state: 'consumed', consumers: ['components-react/settings/ModelPicker.tsx'] },
+  Menu: { state: 'consumed', consumers: ['components-react/settings/ModelPicker.tsx', 'components-react/settings/BotManagerView.tsx'] },
   Switch: { state: 'consumed', consumers: ['components-react/settings/BotManagerView.tsx', 'components-react/settings/BotCapabilityList.tsx'] },
   /**
    * 业务原子（Surface / ListRow / Toolbar / Stat）。
@@ -52,7 +56,7 @@ const CONSUMPTION = {
    * 约束与规则 (Rules)：
    *   后续业务视图接入时，必须把新消费者补进本清单（测试会强制枚举，禁止隐式消费）。
    */
-  Surface: { state: 'consumed', consumers: ['components-react/gallery/Gallery.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/settings/ProvidersAdminPanel.tsx'] },
+  Surface: { state: 'consumed', consumers: ['components-react/gallery/Gallery.tsx', 'components-react/settings/SettingsModal.tsx', 'components-react/settings/ProvidersAdminPanel.tsx', 'components-react/settings/BotManagerView.tsx', 'components-react/settings/McpAddDialog.tsx', 'components-react/settings/SkillInstallDialog.tsx'] },
   ListRow: { state: 'consumed', consumers: ['components-react/gallery/Gallery.tsx'] },
   Toolbar: { state: 'consumed', consumers: ['components-react/gallery/Gallery.tsx'] },
   Stat: { state: 'consumed', consumers: ['components-react/gallery/Gallery.tsx'] },
@@ -62,14 +66,14 @@ const CONSUMPTION = {
    * 设计意图 (Why)：首屏加载骨架是"加载 ≠ 空"的唯一视觉出口，消费者是左轨与会话区的首屏占位，
    *   不是演示页，因此登记为 consumed。
    */
-  Skeleton: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/conversation/ConversationSkeleton.tsx', 'components-react/settings/BotManagerView.tsx'] },
+  Skeleton: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/conversation/ConversationSkeleton.tsx', 'components-react/settings/BotManagerView.tsx', 'components-react/settings/SkillDetailDialog.tsx'] },
   /**
    * 极客美学 Tooltip 微组件。
    *
    * 设计意图 (Why)：阻断浏览器原生 title 黑块墨渍，为控件注入 data-tooltip 属性，
    *   生产消费者为 LeftRail（新建会话/群聊等关键按钮）。
    */
-  Tooltip: { state: 'consumed', consumers: ['components-react/LeftRail.tsx'] },
+  Tooltip: { state: 'consumed', consumers: ['components-react/LeftRail.tsx', 'components-react/settings/BotHeroCarousel.tsx', 'components-react/settings/BotManagerView.tsx', 'components-react/settings/SettingsModal.tsx'] },
 };
 
 /** 收集 ui 包内所有未被排除的生产源文件（排除 primitives 自身与 barrel）。 */

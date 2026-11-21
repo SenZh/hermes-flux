@@ -5,6 +5,11 @@ import path from 'node:path';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { SettingsModal } from '../dist/components-react/settings/SettingsModal.js';
+import { Switch } from '../dist/components-react/primitives/Switch.js';
+import { McpAddDialog } from '../dist/components-react/settings/McpAddDialog.js';
+import { McpRemoveConfirmDialog } from '../dist/components-react/settings/McpRemoveConfirmDialog.js';
+import { SkillDetailDialog } from '../dist/components-react/settings/SkillDetailDialog.js';
+import { SkillInstallDialog } from '../dist/components-react/settings/SkillInstallDialog.js';
 import { AddProviderDialog } from '../dist/components-react/settings/AddProviderDialog.js';
 import { SwitchDefaultProviderDialog } from '../dist/components-react/settings/SwitchDefaultProviderDialog.js';
 import {
@@ -23,9 +28,11 @@ import {
   dispatchAgentBindingToggle,
 } from '../dist/components-react/settings/ProvidersAdminPanel.js';
 import {
+  GroupedModelSelect,
   ModelOptionRow,
   ModelPickerDialog,
   ModelPickerField,
+  ProviderVendorIcon,
   handleModelSearchKeyDown,
   resolveModelPick,
 } from '../dist/components-react/settings/ModelPicker.js';
@@ -147,7 +154,13 @@ const noopActions = {
 };
 
 function render(overrides = {}) {
-  return renderToStaticMarkup(React.createElement(SettingsModal, { snapshot: snapshot(overrides), actions: noopActions }));
+  const { actionsOverride, ...snapshotOverrides } = overrides;
+  return renderToStaticMarkup(
+    React.createElement(SettingsModal, {
+      snapshot: snapshot(snapshotOverrides),
+      actions: actionsOverride ? { ...noopActions, ...actionsOverride } : noopActions,
+    }),
+  );
 }
 
 test('设置中心关闭时必须渲染空 DOM（不保留隐藏壳）', () => {
@@ -310,7 +323,7 @@ function botManagement(overrides = {}) {
   };
 }
 
-test('BOT 页渲染 5 槽位选择器与基础身份字段，不再出现旧的只读员工列表', () => {
+test('BOT 页渲染全量成员选择栏与基础身份字段，不再出现旧的只读员工列表', () => {
   setLocale('zh-CN');
   const html = render({
     section: 'agents',
@@ -324,8 +337,8 @@ test('BOT 页渲染 5 槽位选择器与基础身份字段，不再出现旧的�
       activeDetail: botDetail({ id: 'arch', displayName: '架构老王', description: '负责架构评审', isDefault: false }),
     }),
   });
-  assert.ok(html.includes('data-bot-carousel="true"'), '必须有头像滑动选择器');
-  assert.equal((html.match(/data-bot-slot=/g) || []).length, 5, '槽位固定 5 个，不随数量增删');
+  assert.ok(html.includes('data-bot-carousel="true"'), '必须有成员选择栏');
+  assert.equal((html.match(/data-bot-slot=/g) || []).length, 2, 'N=2 时按实际数量平铺，不补空槽位也不截断');
   assert.equal(
     (html.match(/data-bot-id="default"/g) || []).length,
     1,
@@ -339,6 +352,326 @@ test('BOT 页渲染 5 槽位选择器与基础身份字段，不再出现旧的�
   assert.ok(html.includes(t('bot.saveBtn')));
   assert.ok(html.includes(t('bot.resetBtn')));
   assert.equal(html.includes(t('settings.agentOpen')), false, '旧的只读列表入口必须删除');
+});
+
+test('BOT 成员选择栏：超过 5 个全量展示不截断，头像 1:1 防变形且无选中外圈 ring', () => {
+  setLocale('zh-CN');
+  const roster = Array.from({ length: 7 }, (_, i) => ({
+    id: `bot-${i + 1}`,
+    displayName: `员工 ${i + 1}`,
+    model: i === 3 ? 'anthropic/claude-sonnet-5' : '',
+    isDefault: i === 0,
+    hasDraft: i === 3,
+  }));
+  const html = render({
+    section: 'agents',
+    botManagement: botManagement({
+      status: { status: 'idle', activeBotId: 'bot-4' },
+      activeBotId: 'bot-4',
+      roster,
+      activeDetail: botDetail({
+        id: 'bot-4',
+        displayName: '员工 4',
+        model: 'anthropic/claude-sonnet-5',
+        isDefault: false,
+      }),
+    }),
+  });
+
+  assert.equal((html.match(/data-bot-slot=/g) || []).length, 7, '超过 5 个 BOT 时必须全部渲染，不得截断为 5 槽位');
+  for (const row of roster) {
+    assert.ok(html.includes(`data-bot-id="${row.id}"`), `缺少成员 ${row.id}`);
+  }
+  assert.ok(html.includes('Sonnet 5'), '成员卡片必须展示人类可读的模型名');
+  assert.equal(html.includes('anthropic/claude-sonnet-5'), false, '成员卡片不得直接裸露原始模型 ID');
+
+  // 所有头像容器必须锁定 shrink-0 与 aspect-square，且禁止再套 ring 外圈。
+  const avatarTags = html.match(/<span[^>]*data-bot-avatar="true"[^>]*>/g) ?? [];
+  assert.equal(avatarTags.length, 8, '7 个成员栏头像 + 1 个身份卡头头像都必须带防变形标记');
+  for (const tag of avatarTags) {
+    assert.ok(tag.includes('shrink-0'), '头像容器必须声明 shrink-0，防止被 flex 压成椭圆');
+    assert.ok(tag.includes('aspect-square'), '头像容器必须声明 aspect-square，锁定 1:1 正圆');
+    assert.equal(/\bring-(?:primary|border-strong|1|2|offset)/.test(tag), false, '头像容器禁止套用选中外圈 ring');
+  }
+
+  const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  const carouselSource = stripComments(readSettingsSource('BotHeroCarousel.tsx'));
+  assert.equal(/\bring-(?:primary|border-strong|offset-)/.test(carouselSource), false, 'BotHeroCarousel 严禁再给头像画选中圆圈');
+  assert.ok(carouselSource.includes('scrollbar-thin'), '溢出头像微轨必须使用语义超细滚动条');
+  assert.ok(
+    carouselSource.includes('PanelLeftOpen') && carouselSource.includes('PanelLeftClose'),
+    '展开/收起开关必须使用 PanelLeftOpen / PanelLeftClose 标准图标',
+  );
+  assert.equal(
+    /ChevronLeft|ChevronRight|ArrowLeft|ArrowRight/.test(carouselSource),
+    false,
+    '折叠按钮严禁使用方向箭头图标',
+  );
+  assert.ok(html.includes('data-bot-rail-toggle="true"'), '列表底部必须渲染展开/收起开关');
+  assert.ok(html.includes('data-bot-rail-expanded="true"'), 'BOT 列表默认处于展开态（带姓名与搜索框，不再只剩细头像条）');
+  assert.ok(html.includes('data-bot-rail-filter="true"'), '默认展开态须直接展示 BOT 搜索输入框');
+  assert.ok(carouselSource.includes('<Tooltip'), '列表收起为 64px 微轨时须为头像挂载 Tooltip 轻名片');
+
+  const managerSource = stripComments(readSettingsSource('BotManagerView.tsx'));
+  assert.equal(/\bring-(?:primary|border-strong|offset-)/.test(managerSource), false, '身份主卡头像严禁画常驻选中圆圈');
+});
+
+test('BOT 下方主体区：默认展开列表 + 扁平五菜单（零数字徽标）、SOUL Studio、长期记忆只读卡与悬浮胶囊保存条', () => {
+  setLocale('zh-CN');
+  const detail = botDetail({
+    id: 'arch',
+    displayName: '架构老王',
+    isDefault: false,
+    soul: 'hello',
+    toolsets: {
+      authoritative: true,
+      rows: [
+        { id: 'web', label: '联网检索', enabled: true },
+        { id: 'browser', label: '浏览器', enabled: false },
+      ],
+    },
+    skills: {
+      authoritative: true,
+      rows: [
+        { id: 'codebase', label: 'codebase', enabled: true },
+        { id: 'dogfood', label: 'dogfood', enabled: false },
+      ],
+    },
+    mcpServers: {
+      authoritative: false,
+      rows: [],
+    },
+  });
+
+  const cleanHtml = render({
+    section: 'agents',
+    botManagement: botManagement({
+      status: { status: 'idle', activeBotId: 'arch' },
+      activeBotId: 'arch',
+      roster: [{ id: 'arch', displayName: '架构老王', model: '', isDefault: false, hasDraft: false }],
+      activeDetail: detail,
+    }),
+  });
+  assert.equal(cleanHtml.includes(t('bot.draftNotice')), false, '无草稿时底栏不得提示未保存修改');
+
+  const dirtyHtml = render({
+    section: 'agents',
+    botManagement: botManagement({
+      status: { status: 'idle', activeBotId: 'arch' },
+      activeBotId: 'arch',
+      roster: [{ id: 'arch', displayName: '架构老王', model: '', isDefault: false, hasDraft: true }],
+      activeDetail: detail,
+      activeDraft: {
+        displayName: '首席架构',
+        description: '',
+        model: '',
+        provider: '',
+        isDefault: false,
+        soul: 'hello',
+        avatar: { kind: 'unchanged' },
+        disabledSkills: ['dogfood'],
+        enabledToolsets: ['web'],
+        enabledMcpServers: [],
+      },
+    }),
+  });
+  for (const tab of ['basic', 'soul', 'toolsets', 'skills', 'mcp']) {
+    assert.ok(dirtyHtml.includes(`data-bot-tab="${tab}"`), `缺少扁平一级菜单 ${tab}`);
+    assert.ok(dirtyHtml.includes(`data-bot-tabpanel="${tab}"`), `缺少一级菜单对应内容页 ${tab}`);
+  }
+  const tabBtns = dirtyHtml.match(/<button[^>]*data-bot-tab="[^"]+"[^>]*>[\s\S]*?<\/button>/g) ?? [];
+  assert.equal(tabBtns.length, 5, '顶部菜单栏必须固定为 5 个一级扁平菜单');
+  for (const tabHtml of tabBtns) {
+    const labelText = tabHtml.replace(/<[^>]+>/g, '').trim();
+    assert.equal(/\d/.test(labelText), false, `顶部菜单项不得携带数字或徽标，实测 "${labelText}"`);
+  }
+  assert.equal(dirtyHtml.includes('data-bot-tab="caps"'), false, '禁止再出现二级聚合入口「能力矩阵」');
+  assert.ok(dirtyHtml.includes('data-bot-save-dock="true"'), '必须渲染底部悬浮胶囊保存条');
+  assert.ok(dirtyHtml.includes('data-bot-rail-toggle="true"'), '列表底部必须挂载展开/收起按钮');
+  assert.ok(dirtyHtml.includes('data-bot-cap-search="skills"'), '技能分页必须提供即时搜索框');
+  assert.ok(dirtyHtml.includes('data-bot-install-skill="true"'), '技能分页必须直出安装技能按钮');
+  assert.ok(dirtyHtml.includes('data-bot-add-mcp="true"'), 'MCP 分页必须直出新增 MCP 按钮');
+  assert.ok((dirtyHtml.match(/data-atom="surface"/g) || []).length >= 1, '长期记忆只读卡必须使用 Surface');
+  assert.ok(dirtyHtml.includes('lg:grid-cols-2'), '能力开关列表在宽屏下必须走双列网格');
+  assert.ok(dirtyHtml.includes(t('bot.capFilterAll', { count: 2 })), '分页筛选胶囊必须展示全部计数');
+  assert.ok(dirtyHtml.includes(t('bot.capabilityReadonly')), '非权威能力区必须展示只读摘要');
+  assert.ok(dirtyHtml.includes(t('bot.soulLines', { count: 1 })), 'SOUL Studio 页脚必须展示实时行数');
+  assert.ok(dirtyHtml.includes(t('bot.soulCount', { bytes: 5 })), 'SOUL Studio 页脚必须展示实时字节数');
+  assert.ok(dirtyHtml.includes(t('bot.draftNotice')), '有草稿时悬浮胶囊条必须提示未保存修改');
+  assert.ok(dirtyHtml.includes(t('bot.memoryLocked')), '长期记忆只读卡必须直出隔离徽标');
+  assert.equal(dirtyHtml.includes('data-bot-section="memory"'), false, '长期记忆不再藏进空洞折叠抽屉');
+});
+
+test('BOT 页草稿头像与状态回归：replace/clear 渲染、保存锁定态、跨组同名能力 ID 与 roving tabIndex', () => {
+  setLocale('zh-CN');
+  const detail = botDetail({
+    id: 'arch',
+    displayName: '架构老王',
+    avatar: 'data:image/png;base64,OLD_AVATAR',
+    isDefault: false,
+    toolsets: { authoritative: true, rows: [{ id: 'github', label: 'GitHub 工具', enabled: true }] },
+    skills: { authoritative: true, rows: [{ id: 'github', label: 'GitHub 技能', enabled: true }] },
+    mcpServers: { authoritative: true, rows: [{ id: 'github', label: 'GitHub MCP', enabled: true, online: true }] },
+  });
+  const baseRoster = [
+    { id: 'default', displayName: 'Hermes', model: '', avatar: 'data:image/png;base64,DEF', isDefault: true, hasDraft: false },
+    { id: 'arch', displayName: '架构老王', model: '', avatar: 'data:image/png;base64,OLD_AVATAR', isDefault: false, hasDraft: true },
+  ];
+  const makeDraft = (avatar) => ({
+    displayName: '架构老王',
+    description: '',
+    model: '',
+    provider: '',
+    isDefault: false,
+    soul: '',
+    avatar,
+    disabledSkills: [],
+    enabledToolsets: ['github'],
+    enabledMcpServers: ['github'],
+  });
+
+  // 1. replace 草稿必须在成员栏与身份主卡同步显示新图，且跨组同名能力 ID 各自独立。
+  const replacedHtml = render({
+    section: 'agents',
+    botManagement: botManagement({
+      status: { status: 'idle', activeBotId: 'arch' },
+      activeBotId: 'arch',
+      roster: baseRoster,
+      activeDetail: detail,
+      activeDraft: makeDraft({ kind: 'replace', dataUrl: 'data:image/png;base64,NEW_AVATAR' }),
+    }),
+  });
+  assert.equal((replacedHtml.match(/NEW_AVATAR/g) || []).length, 2, '新头像必须同时出现在成员栏与身份主卡');
+  assert.equal(replacedHtml.includes('OLD_AVATAR'), false, 'replace 必须覆盖旧头像');
+  assert.ok(replacedHtml.includes('id="bot-capability-toolsets-github"'));
+  assert.ok(replacedHtml.includes('for="bot-capability-toolsets-github"'));
+  assert.ok(replacedHtml.includes('id="bot-capability-skills-github"'));
+  assert.ok(replacedHtml.includes('for="bot-capability-skills-github"'));
+  assert.ok(replacedHtml.includes('id="bot-capability-mcp-github"'));
+  assert.ok(replacedHtml.includes('for="bot-capability-mcp-github"'));
+
+  // 2. clear 墓碑必须抹除花名册与详情里的旧头像，且禁用「恢复默认头像」按钮。
+  const clearedHtml = render({
+    section: 'agents',
+    botManagement: botManagement({
+      status: { status: 'idle', activeBotId: 'arch' },
+      activeBotId: 'arch',
+      roster: baseRoster,
+      activeDetail: detail,
+      activeDraft: makeDraft({ kind: 'clear' }),
+    }),
+  });
+  assert.equal(clearedHtml.includes('OLD_AVATAR'), false, 'clear 墓碑必须阻止花名册旧图回显');
+  assert.equal(clearedHtml.includes(t('bot.avatarReset')), false, '无自定义头像时头像旁不展示恢复默认头像图标');
+
+  const customAvatarHtml = render({
+    section: 'agents',
+    botManagement: botManagement({
+      status: { status: 'idle', activeBotId: 'arch' },
+      activeBotId: 'arch',
+      roster: baseRoster,
+      activeDetail: detail,
+      activeDraft: makeDraft({ kind: 'replace', dataUrl: 'data:image/png;base64,NEWIMG' }),
+    }),
+  });
+  assert.ok(
+    customAvatarHtml.includes(`aria-label="${t('bot.avatarReset')}"`),
+    '存在自定义头像时紧凑身份头必须显示可点击的恢复默认头像图标',
+  );
+
+  // 3. 保存锁定态：成员栏 tab、默认开关标签均须 disabled，保存按钮内不得挂载 ActivityIndicator。
+  const savingHtml = render({
+    section: 'agents',
+    botManagement: botManagement({
+      status: { status: 'saving', activeBotId: 'arch' },
+      isBusy: true,
+      activeBotId: 'arch',
+      roster: baseRoster,
+      activeDetail: detail,
+      activeDraft: makeDraft({ kind: 'unchanged' }),
+    }),
+  });
+  const tabTags = savingHtml.match(/<button[^>]*data-bot-slot="[^"]+"[^>]*>/g) ?? [];
+  assert.equal(tabTags.length, 2);
+  for (const tabTag of tabTags) {
+    assert.ok(/\sdisabled(=|>|\s)/.test(tabTag), '保存中成员栏按钮必须全部禁用');
+  }
+  const labelBtnAt = savingHtml.indexOf(`>${t('bot.setDefault')}</button>`);
+  assert.ok(labelBtnAt > 0);
+  assert.ok(/\sdisabled(=|>|\s)/.test(savingHtml.slice(savingHtml.lastIndexOf('<button', labelBtnAt), labelBtnAt)), '锁定态下默认 BOT 标签按钮必须同步禁用');
+  assert.equal(savingHtml.includes('flux-cloud'), false, '保存按钮内严禁再挂载 ActivityIndicator');
+
+  // 4. activeBotId 暂未命中花名册时，首项仍须保持 tabIndex=0（roving tabindex 兜底）。
+  const orphanHtml = render({
+    section: 'agents',
+    botManagement: botManagement({
+      status: { status: 'idle', activeBotId: 'missing-id' },
+      activeBotId: 'missing-id',
+      roster: baseRoster,
+      activeDetail: detail,
+    }),
+  });
+  const orphanTabs = orphanHtml.match(/<button[^>]*data-bot-slot="[^"]+"[^>]*>/g) ?? [];
+  assert.ok(orphanTabs[0].includes('tabIndex="0"') || orphanTabs[0].includes('tabindex="0"'));
+  assert.ok(orphanTabs[1].includes('tabIndex="-1"') || orphanTabs[1].includes('tabindex="-1"'));
+
+  const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  assert.equal(stripComments(readSettingsSource('BotHeroCarousel.tsx')).includes('leading-tight'), false, 'Badge 禁止覆写 leading-tight 非整数行高');
+  assert.equal(stripComments(readSettingsSource('BotManagerView.tsx')).includes('ActivityIndicator'), false, 'BotManagerView 不得再消费 ActivityIndicator');
+});
+
+test('BOT 左右栏头像对齐：activeDetail 缺头像时回落花名册头像，clear 墓碑仍清零两边显示', () => {
+  setLocale('zh-CN');
+  const uploadedUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk';
+  const html = render({
+    section: 'agents',
+    botManagement: botManagement({
+      status: { status: 'idle', activeBotId: 'default' },
+      activeBotId: 'default',
+      roster: [{ id: 'default', displayName: '大总管', model: '', avatar: uploadedUrl, isDefault: true, hasDraft: false }],
+      activeDetail: botDetail({ id: 'default', displayName: '大总管', avatar: undefined, isDefault: true }),
+    }),
+  });
+  const matchedImgs = html.match(/src="data:image\/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"/g) ?? [];
+  assert.equal(matchedImgs.length, 2, '左侧 BOT 列表与右侧身份头必须同时渲染同一张上传头像');
+
+  // normalizeAgentProfile 无头像时会 emit 空串 ''，必须同样回落到花名册头像并保留「恢复默认头像」按钮
+  const emptyStringHtml = render({
+    section: 'agents',
+    botManagement: botManagement({
+      status: { status: 'idle', activeBotId: 'default' },
+      activeBotId: 'default',
+      roster: [{ id: 'default', displayName: '大总管', model: '', avatar: uploadedUrl, isDefault: true, hasDraft: false }],
+      activeDetail: botDetail({ id: 'default', displayName: '大总管', avatar: '', isDefault: true }),
+    }),
+  });
+  const emptyImgs = emptyStringHtml.match(/src="data:image\/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"/g) ?? [];
+  assert.equal(emptyImgs.length, 2, 'activeDetail.avatar 为空串时同样必须回落花名册头像');
+  assert.ok(emptyStringHtml.includes(`aria-label="${t('bot.avatarReset')}"`), '回落出自定义头像时应展示恢复默认头像按钮');
+
+  const clearedHtml = render({
+    section: 'agents',
+    botManagement: botManagement({
+      status: { status: 'idle', activeBotId: 'default' },
+      activeBotId: 'default',
+      roster: [{ id: 'default', displayName: '大总管', model: '', avatar: uploadedUrl, isDefault: true, hasDraft: true }],
+      activeDetail: botDetail({ id: 'default', displayName: '大总管', avatar: undefined, isDefault: true }),
+      activeDraft: {
+        displayName: '大总管',
+        description: '',
+        model: '',
+        provider: '',
+        isDefault: true,
+        soul: '',
+        avatar: { kind: 'clear' },
+        disabledSkills: [],
+        enabledToolsets: [],
+        enabledMcpServers: [],
+      },
+    }),
+  });
+  assert.equal(clearedHtml.includes(uploadedUrl), false, 'avatar=clear 墓碑语义下左右栏均不得回显旧头像');
+  assert.equal(clearedHtml.includes(`aria-label="${t('bot.avatarReset')}"`), false, 'clear 墓碑下不得渲染恢复默认头像按钮');
 });
 
 test('BOT 页：有草稿时保存与重置可点，无草稿时禁用；保存中锁输入', () => {
@@ -506,10 +839,15 @@ test('BOT SOUL：等宽编辑器、字节计数、超 64KB 提示与变量/模�
   assert.ok(html.includes('id="bot-soul"'), '必须有 SOUL 编辑器');
   assert.ok(html.includes(t('bot.soulCount', { bytes: 70_000 })), '必须给出真实字节数');
   assert.ok(html.includes(t('bot.soulLengthWarn')), '超过 64KB 必须有醒目提示');
-  assert.ok(html.includes(t('bot.soulInsertUserName')));
-  assert.ok(html.includes(t('bot.soulInsertWorkspace')));
-  assert.ok(html.includes(t('bot.soulTemplateArchitect')));
-  assert.ok(html.includes(t('bot.soulTemplateReviewer')));
+  assert.ok(html.includes(t('bot.soulVarUserShort')));
+  assert.ok(html.includes(t('bot.soulVarWorkspaceShort')));
+  assert.ok(html.includes(t('bot.soulTemplates')));
+  const botManagerSource = readSettingsSource('BotManagerView.tsx');
+  assert.ok(
+    botManagerSource.includes("t('bot.soulTemplateArchitect')") &&
+      botManagerSource.includes("t('bot.soulTemplateReviewer')"),
+    'SOUL Studio 模板菜单必须提供 Architect / Reviewer 预置模板',
+  );
 });
 
 test('BOT 能力矩阵：逐项开关、非权威清单只读、MCP 未知不画红灯、长期记忆无编辑入口', () => {
@@ -564,6 +902,16 @@ test('BOT 能力矩阵：逐项开关、非权威清单只读、MCP 未知不画
   assert.equal((html.match(/data-bot-capability=/g) || []).length, 6, '三类清单都必须逐项渲染开关');
   assert.ok(html.includes('data-bot-capability="web"'));
   assert.ok(html.includes('data-bot-capability="dogfood"'));
+  const capRowTags = html.match(/<div[^>]*data-bot-capability-row="[^"]+"[^>]*>/g) ?? [];
+  assert.equal(capRowTags.length, 6, '三类清单的 6 个能力行都必须渲染 data-bot-capability-row');
+  for (const tag of capRowTags) {
+    assert.equal(tag.includes('border-primary-border'), false, `已启用 capability/skill/MCP 行不得画外框: ${tag}`);
+    assert.equal(tag.includes('bg-primary-subtle'), false, `已启用 capability/skill/MCP 行不得画底色框: ${tag}`);
+    assert.equal(/\bborder\b/.test(tag), false, `能力行容器不得含 border 类: ${tag}`);
+  }
+  const capListSrc = readSettingsSource('BotCapabilityList.tsx');
+  assert.equal(capListSrc.includes('border-primary-border'), false, 'BotCapabilityList 不得为选中行添加外框');
+  assert.equal(capListSrc.includes('bg-primary-subtle'), false, 'BotCapabilityList 不得为选中行添加底色框');
   assert.ok(html.includes(t('bot.mcpOnline')), '已连接 MCP 必须显示在线');
   assert.ok(html.includes(t('bot.mcpUnknown')), '探活没有结论时必须显示状态未知');
   assert.equal(html.includes(t('bot.mcpOffline')), false, '未知状态不得被画成离线红灯');
@@ -2045,7 +2393,18 @@ test('设置中心弹窗尺寸：按主窗口视口自适应放大，不再写�
 /* -------------------------------------------------------------------------- */
 
 const SETTINGS_SRC_DIR = path.resolve(import.meta.dirname, '../src/components-react/settings');
-const DIALOG_FAMILY = ['SettingsModal.tsx', 'ModelPicker.tsx', 'AddProviderDialog.tsx', 'SwitchDefaultProviderDialog.tsx', 'ProvidersAdminPanel.tsx', 'BotManagerView.tsx'];
+const DIALOG_FAMILY = [
+  'SettingsModal.tsx',
+  'ModelPicker.tsx',
+  'AddProviderDialog.tsx',
+  'SwitchDefaultProviderDialog.tsx',
+  'ProvidersAdminPanel.tsx',
+  'BotManagerView.tsx',
+  'McpAddDialog.tsx',
+  'McpRemoveConfirmDialog.tsx',
+  'SkillDetailDialog.tsx',
+  'SkillInstallDialog.tsx',
+];
 
 function readSettingsSource(file) {
   return fs.readFileSync(path.join(SETTINGS_SRC_DIR, file), 'utf8');
@@ -2471,7 +2830,19 @@ test('术语基准：设置中心统一 BOT / Bot，技能与 MCP 服务器不�
 });
 
 test('设置中心组件不得硬编码实体称谓（必须全部走 t()）', () => {
-  for (const file of ['SettingsModal.tsx', 'BotManagerView.tsx', 'AddProviderDialog.tsx', 'ProvidersAdminPanel.tsx', 'ModelPicker.tsx', 'BotCapabilityList.tsx']) {
+  for (const file of [
+    'SettingsModal.tsx',
+    'BotManagerView.tsx',
+    'AddProviderDialog.tsx',
+    'SwitchDefaultProviderDialog.tsx',
+    'ProvidersAdminPanel.tsx',
+    'ModelPicker.tsx',
+    'BotCapabilityList.tsx',
+    'McpAddDialog.tsx',
+    'McpRemoveConfirmDialog.tsx',
+    'SkillDetailDialog.tsx',
+    'SkillInstallDialog.tsx',
+  ]) {
     const source = readSettingsSource(file);
     // 只看 JSX 文本节点：>Agent< / >智能体< / >Bot< 这类直出文案。
     assert.equal(/>\s*(Agent|智能体|Bot)\s*</.test(source), false, `${file} 不得硬编码实体称谓，必须走 t()`);
@@ -2503,12 +2874,22 @@ test('配置内容必须自适应填满可用宽度：禁止限宽居中留白',
   const bot = readSettingsSource('BotManagerView.tsx');
   assert.equal(/max-w-4xl|mx-auto/.test(bot), false, 'BOT 面板同样必须自适应，不能单独限宽');
 
-  // 正向：内容容器仍是 flex-1 + 可滚动，收窄窗口时跟随父级收缩。
-  assert.ok(modal.includes("'flex-1 overflow-y-auto px-6 py-4'"), '内容区必须保留 flex-1 自适应与滚动兜底');
+  // 正向：内容容器仍是 flex-1 + 可滚动，收窄窗口时跟随父级收缩，agents 全高布局保留 flex-1 min-h-0。
+  assert.ok(modal.includes("'flex-1 overflow-y-auto px-6 py-4 scrollbar-thin'"), '内容区必须保留 flex-1 自适应、滚动与超细滚动条');
+  assert.ok(modal.includes("'flex-1 min-h-0'"), 'BOT 工作台须占满弹窗剩余高度');
 });
 
 test('二级弹窗高度收敛为语义档位：不得用任意值类或内联 maxHeight 规避审计', () => {
-  for (const file of ['ModelPicker.tsx', 'AddProviderDialog.tsx', 'SwitchDefaultProviderDialog.tsx', 'ProvidersAdminPanel.tsx']) {
+  for (const file of [
+    'ModelPicker.tsx',
+    'AddProviderDialog.tsx',
+    'SwitchDefaultProviderDialog.tsx',
+    'ProvidersAdminPanel.tsx',
+    'McpAddDialog.tsx',
+    'McpRemoveConfirmDialog.tsx',
+    'SkillDetailDialog.tsx',
+    'SkillInstallDialog.tsx',
+  ]) {
     const source = readSettingsSource(file);
     assert.equal(source.includes('max-h-['), false, `${file} 不得使用任意值 max-h-[...]`);
     assert.equal(/maxHeight:\s*'min\(/.test(source), false, `${file} 不得用内联 maxHeight 规避任意值审计`);
@@ -2516,6 +2897,10 @@ test('二级弹窗高度收敛为语义档位：不得用任意值类或内联 m
   assert.ok(readSettingsSource('ModelPicker.tsx').includes('max-h-modal-lg'), '模型弹窗必须使用 max-h-modal-lg 语义档位');
   assert.ok(readSettingsSource('AddProviderDialog.tsx').includes('max-h-modal-md'), '提供商弹窗必须使用 max-h-modal-md 语义档位');
   assert.ok(readSettingsSource('SwitchDefaultProviderDialog.tsx').includes('max-h-modal-lg'), '切换默认弹窗必须使用 max-h-modal-lg 语义档位');
+  assert.ok(readSettingsSource('McpAddDialog.tsx').includes('max-h-modal-md'), 'MCP 新增弹窗必须使用 max-h-modal-md 语义档位');
+  assert.ok(readSettingsSource('McpRemoveConfirmDialog.tsx').includes('max-h-modal-sm'), 'MCP 移除确认弹窗必须使用 max-h-modal-sm 语义档位');
+  assert.ok(readSettingsSource('SkillDetailDialog.tsx').includes('max-h-modal-md'), '技能详情弹窗必须使用 max-h-modal-md 语义档位');
+  assert.ok(readSettingsSource('SkillInstallDialog.tsx').includes('max-h-modal-md'), '技能安装弹窗必须使用 max-h-modal-md 语义档位');
 
   const css = fs.readFileSync(path.resolve(import.meta.dirname, '../src/tailwind-entry.css'), 'utf8');
   assert.ok(css.includes('@utility max-h-modal-sm'), '语义档位必须在 Token 入口登记（禁止散落在业务里）');
@@ -2539,4 +2924,257 @@ test('二级弹窗高度收敛为语义档位：不得用任意值类或内联 m
   assert.ok(css.includes('@utility z-menu'), '浮层菜单层级必须在 Token 入口登记');
   assert.ok(css.includes('z-index: 1200;'), 'z-menu 取值必须高于设置弹窗宿主（z-50）');
   assert.equal(cn('z-50', 'z-menu'), 'z-menu', 'z-menu 必须能覆盖原生 z-50');
+});
+
+test('扩展新增、移除确认与技能市场共用弹窗及 BOT 能力运维：SSR 分支与复用守卫', () => {
+  setLocale('zh-CN');
+  assert.equal(
+    renderToStaticMarkup(
+      React.createElement(McpAddDialog, {
+        open: false,
+        targetProfile: 'arch',
+        targetLabel: '架构老王',
+        installedNames: new Set(),
+        onClose: () => {},
+        onNotify: () => {},
+      }),
+    ),
+    '',
+  );
+  const mcpHtml = renderToStaticMarkup(
+    React.createElement(McpAddDialog, {
+      open: true,
+      targetProfile: 'arch',
+      targetLabel: '架构老王',
+      installedNames: new Set(['github-mcp']),
+      onClose: () => {},
+      onNotify: () => {},
+    }),
+  );
+  assert.ok(mcpHtml.includes('data-mcp-add-dialog="true"'));
+  assert.ok(mcpHtml.includes(t('bot.mcpAddTitle')));
+  assert.ok(mcpHtml.includes(t('bot.mcpAddPresetTab')));
+  assert.ok(mcpHtml.includes(t('bot.mcpAddCustomTab')));
+  assert.ok(mcpHtml.includes('max-h-modal-md'));
+
+  assert.equal(
+    renderToStaticMarkup(
+      React.createElement(SkillInstallDialog, {
+        open: false,
+        targetProfile: 'arch',
+        installedNames: new Set(),
+        onClose: () => {},
+        onNotify: () => {},
+      }),
+    ),
+    '',
+  );
+  const skillHtml = renderToStaticMarkup(
+    React.createElement(SkillInstallDialog, {
+      open: true,
+      targetProfile: 'arch',
+      installedNames: new Set(['github']),
+      onClose: () => {},
+      onNotify: () => {},
+    }),
+  );
+  assert.ok(skillHtml.includes('data-skill-install-dialog="true"'));
+  assert.ok(skillHtml.includes(t('bot.skillHubTitle')));
+  assert.ok(skillHtml.includes(t('bot.skillHubSearchAction')));
+  assert.ok(skillHtml.includes('max-h-modal-md'));
+
+  assert.equal(
+    renderToStaticMarkup(
+      React.createElement(McpRemoveConfirmDialog, {
+        serverName: null,
+        busy: false,
+        onCancel: () => {},
+        onConfirm: () => {},
+      }),
+    ),
+    '',
+  );
+  const rmOpenHtml = renderToStaticMarkup(
+    React.createElement(McpRemoveConfirmDialog, {
+      serverName: 'github-mcp',
+      busy: false,
+      onCancel: () => {},
+      onConfirm: () => {},
+    }),
+  );
+  assert.ok(rmOpenHtml.includes('data-mcp-remove-dialog="true"'));
+  assert.ok(rmOpenHtml.includes(t('bot.mcpRemoveConfirmTitle')));
+  assert.ok(rmOpenHtml.includes('github-mcp'));
+  assert.ok(rmOpenHtml.includes(t('bot.mcpRemoveBtn')));
+  const rmBusyHtml = renderToStaticMarkup(
+    React.createElement(McpRemoveConfirmDialog, {
+      serverName: 'github-mcp',
+      busy: true,
+      onCancel: () => {},
+      onConfirm: () => {},
+    }),
+  );
+  assert.ok(rmBusyHtml.includes(t('bot.mcpRemoving')));
+
+  // 审查守卫：共享弹窗、100% 头像防裁切、焦点环、64KB 进度轨道色阶、扩展页作用域对齐及异步 try/catch/finally 锁保护
+  const carouselSrc = readSettingsSource('BotHeroCarousel.tsx');
+  const managerSrc = readSettingsSource('BotManagerView.tsx');
+  const modalSrc = readSettingsSource('SettingsModal.tsx');
+  const addDlgSrc = readSettingsSource('McpAddDialog.tsx');
+  const skillDlgSrc = readSettingsSource('SkillInstallDialog.tsx');
+  assert.ok(carouselSrc.includes("AVATAR_SIZE = '100%'"), '微轨头像尺寸须用 100% 自适应防 13px 字号下裁切');
+  assert.ok(carouselSrc.includes('focus-visible:ring-2 focus-visible:ring-ring'), '微轨头像按钮须保留键盘焦点环');
+  assert.ok(managerSrc.includes("IDENTITY_AVATAR_SIZE = '100%'"), '身份头头像须用 100% 自适应防裁切');
+  assert.ok(managerSrc.includes('bg-card-active') && !managerSrc.includes('h-1 w-16 overflow-hidden rounded-full bg-secondary'), 'SOUL 进度轨道不得使用在 obsidian-gold 与 bg-panel 同色的 bg-secondary');
+  assert.equal(managerSrc.includes('mcpRemoveConfirmTitle'), false, 'BotManagerView 必须复用 McpRemoveConfirmDialog，禁止内联拷贝确认弹窗');
+  assert.equal(modalSrc.includes('mcpRemoveConfirmTitle'), false, 'SettingsModal 必须复用 McpRemoveConfirmDialog，禁止内联拷贝确认弹窗');
+  assert.ok(modalSrc.includes('const targetProfile = snapshot.gateway.profileName'), 'ExtensionsPanel 必须消费主连接 gateway.profileName，不得受 scopedProfile 漂移污染');
+  assert.ok(managerSrc.includes('probeEpochRef'), 'BotManagerView MCP 探活须带纪元令牌防止切换 BOT 后慢响应串台');
+  assert.ok(managerSrc.includes('testingMcpId === id'), 'BotManagerView 在 MCP 探活期间须锁定同行删除按钮');
+  assert.ok(/try\s*\{[\s\S]*finally\s*\{\s*setSubmitting\(false\)/.test(addDlgSrc), 'McpAddDialog 提交锁必须置于 finally 防止 reject 卡死弹窗');
+  assert.ok(/try\s*\{[\s\S]*finally\s*\{\s*setInstallingId\(null\)/.test(skillDlgSrc), 'SkillInstallDialog 安装锁必须置于 finally 防止 reject 卡死弹窗');
+  assert.ok(skillDlgSrc.includes('flex shrink-0 flex-col overflow-hidden'), 'SkillInstallDialog 列表 Surface 须声明 shrink-0 防止 flex 压缩裁切');
+  assert.ok(addDlgSrc.includes('flex shrink-0 flex-col overflow-hidden'), 'McpAddDialog 目录 Surface 须声明 shrink-0 防止 flex 压缩裁切');
+});
+
+test('Switch 单色高对比样式、模型/厂商双图标选择器、技能简介与 SkillDetailDialog 全方位回归', () => {
+  setLocale('zh-CN');
+
+  // 1. Switch 不得使用高饱和刺眼蓝（bg-primary），必须使用高对比中性单色语义
+  const switchSrc = fs.readFileSync(
+    path.resolve(import.meta.dirname, '../src/components-react/primitives/Switch.tsx'),
+    'utf8',
+  );
+  assert.equal(switchSrc.includes('bg-primary'), false, 'Switch 开启态不得使用 bg-primary（ayu-light/warm-paper 会变刺眼蓝）');
+  assert.ok(switchSrc.includes('data-[state=checked]:bg-foreground'), 'Switch 开启态轨底色应使用 --foreground');
+  assert.ok(switchSrc.includes('data-[state=checked]:bg-background'), 'Switch 开启态滑块应使用 --background');
+  const switchHtml = renderToStaticMarkup(React.createElement(Switch, { checked: true, ariaLabel: 'toggle' }));
+  assert.ok(switchHtml.includes('data-state="checked"'));
+
+  // 2. ProviderVendorIcon & GroupedModelSelect 触发器同时渲染模型图标 + 厂商图标
+  const anthropicIcon = renderToStaticMarkup(
+    React.createElement(ProviderVendorIcon, { providerSlug: 'anthropic', providerName: 'Anthropic' }),
+  );
+  assert.ok(anthropicIcon.includes('icons/lobe/anthropic.svg'), '已知厂商必须渲染官方 lobe 品牌 SVG');
+  const proxyIcon = renderToStaticMarkup(
+    React.createElement(ProviderVendorIcon, { providerSlug: 'cpa', providerName: 'CPA 代理' }),
+  );
+  assert.ok(proxyIcon.includes('vendor-icon--badge') && proxyIcon.includes('>C<'), '代理/转发厂商回落简洁首字母徽章');
+
+  const triggerHtml = renderToStaticMarkup(
+    React.createElement(GroupedModelSelect, {
+      id: 'bot-model',
+      value: 'deepseek-v4.1-flash',
+      provider: 'openrouter',
+      groups: [
+        { id: 'openrouter', name: 'OpenRouter', models: [{ id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' }] },
+      ],
+      ariaLabel: '主推理模型',
+      labels: {
+        unbound: '未绑定模型',
+        offline: '离线',
+        catalogUnavailable: '不可用',
+        searchPlaceholder: '搜索',
+        emptySearch: '无结果',
+      },
+      onChange: () => {},
+    }),
+  );
+  assert.ok(triggerHtml.includes('icons/lobe/deepseek'), '触发器必须渲染模型厂商图标');
+  assert.ok(triggerHtml.includes('data-model-trigger-vendor="true"') && triggerHtml.includes('icons/lobe/openrouter'), '触发器必须同步渲染接入厂商图标胶囊');
+
+  const unboundHtml = renderToStaticMarkup(
+    React.createElement(GroupedModelSelect, {
+      id: 'bot-model',
+      value: '',
+      groups: [{ id: 'openai', name: 'OpenAI', models: [{ id: 'gpt-5.6', name: 'GPT-5.6' }] }],
+      ariaLabel: '主推理模型',
+      labels: {
+        unbound: '未绑定模型',
+        offline: '离线',
+        catalogUnavailable: '不可用',
+        searchPlaceholder: '搜索',
+        emptySearch: '无结果',
+      },
+      onChange: () => {},
+    }),
+  );
+  assert.ok(unboundHtml.includes('未绑定模型') && unboundHtml.includes('data-model-trigger-vendor') === false);
+
+  // 3. BOT 技能分页展示简介与独立详情按钮（严禁嵌套进 label），扩展页支持点击技能打开详情弹窗
+  const botHtml = render({
+    section: 'agents',
+    actionsOverride: { onInspectSkill: async () => ({ ok: true, data: { name: 'github', tags: [], markdown: '# Hi', isPreview: false } }) },
+    botManagement: botManagement({
+      status: { status: 'idle', activeBotId: 'arch' },
+      activeBotId: 'arch',
+      roster: [{ id: 'arch', displayName: '架构老王', model: 'deepseek-v4.1-flash', isDefault: false, hasDraft: false }],
+      activeDetail: botDetail({
+        id: 'arch',
+        displayName: '架构老王',
+        skills: {
+          authoritative: true,
+          rows: [{ id: 'github', label: 'github', enabled: true, description: '仓库 PR 与 Issue 协同助手' }],
+        },
+      }),
+    }),
+  });
+  assert.ok(botHtml.includes('仓库 PR 与 Issue 协同助手'), '技能列表必须展示每项技能简介');
+  assert.ok(botHtml.includes('data-bot-capability-inspect="github"'), '提供 onInspectSkill 时技能行须生成详情按钮');
+  assert.ok(
+    botHtml.includes('flex min-h-7 min-w-0 flex-1 cursor-pointer flex-col justify-center'),
+    '能力详情按钮在无简介时仍须维持 ≥28px 触控热区并垂直居中',
+  );
+  const nestedButtonInLabel = Array.from(botHtml.matchAll(/<label\b[^>]*>([\s\S]*?)<\/label>/g)).some((m) =>
+    m[1].includes('<button'),
+  );
+  assert.equal(nestedButtonInLabel, false, '禁止把详情 button 嵌套进 Switch 的 label 内部');
+
+  const extHtml = render({
+    section: 'extensions',
+    actionsOverride: { onInspectSkill: async () => ({ ok: true, data: { name: 'github', tags: [], markdown: '# Hi', isPreview: false } }) },
+    skills: { status: 'ready', data: [{ name: 'github', category: 'official' }] },
+  });
+  assert.ok(extHtml.includes('data-ext-skill-inspect="github"'), '扩展页技能徽标在支持 inspect 时应可点击查看文档');
+  assert.ok(
+    extHtml.includes('inline-flex min-h-7 cursor-pointer items-center rounded-full'),
+    '扩展页技能按钮热区须 ≥28px 且焦点环贴合胶囊圆角',
+  );
+
+  const pickerSrc = readSettingsSource('ModelPicker.tsx');
+  assert.ok(pickerSrc.includes('data-model-group') && pickerSrc.includes('flex min-h-7 w-full items-center'), '模型分组标题按钮须维持 ≥28px 热区对齐 InputDock');
+  assert.ok(pickerSrc.includes('event.isComposing || event.keyCode === 229'), '模型搜索浮层 Esc 处理须尊重 IME 组词状态');
+
+  // 4. SkillDetailDialog 关闭态与打开态 SSR 及双视图源码契约守护
+  assert.equal(
+    renderToStaticMarkup(
+      React.createElement(SkillDetailDialog, {
+        skillName: null,
+        targetProfile: 'arch',
+        onClose: () => {},
+      }),
+    ),
+    '',
+  );
+  const skillDetailHtml = renderToStaticMarkup(
+    React.createElement(SkillDetailDialog, {
+      skillName: 'codebase-inspection',
+      targetProfile: 'arch',
+      fallbackDescription: '快速追踪源码调用链',
+      onClose: () => {},
+      onCopy: async () => true,
+    }),
+  );
+  assert.ok(skillDetailHtml.includes('data-skill-detail-dialog="true"'));
+  assert.ok(skillDetailHtml.includes('data-skill-detail-scroll="true"'));
+  assert.ok(skillDetailHtml.includes('快速追踪源码调用链'));
+  assert.ok(skillDetailHtml.includes(t('bot.skillViewRendered')));
+  assert.ok(skillDetailHtml.includes(t('bot.skillViewRaw')));
+  assert.ok(skillDetailHtml.includes(t('bot.skillCopyMarkdown')));
+
+  const detailDlgSrc = readSettingsSource('SkillDetailDialog.tsx');
+  assert.ok(detailDlgSrc.includes('seqRef'), 'SkillDetailDialog 必须持请求序号防止切换技能串台');
+  assert.ok(detailDlgSrc.includes('<MarkdownBlock'), '优雅预览必须复用全站唯一的 MarkdownBlock');
+  assert.ok(detailDlgSrc.includes('splitSkillMarkdownFrontmatter'), '优雅预览须拆分 YAML frontmatter 防止分割线误渲染');
+  assert.equal(detailDlgSrc.includes('content={parsed.body || markdown}'), false, '仅有 frontmatter 时不得回落到原始带分割线全文');
 });
