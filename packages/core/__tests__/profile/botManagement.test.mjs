@@ -8,6 +8,7 @@ import {
   isBotDraftDirty,
   mergeBotUiMeta,
   mergeMcpStatus,
+  mergeSkillDescriptions,
   mergeSkillInventory,
   parseBotDetail,
   projectBotRoster,
@@ -378,4 +379,40 @@ test('mergeMcpStatus：兼容网关 0.23.1 的 tools 字段', () => {
   ]);
   assert.equal(merged.rows[0].online, false);
   assert.equal(merged.rows[0].toolCount, 7);
+});
+
+test('mergeSkillDescriptions：大小写/斜杠归一化填空缺简介，不覆写已有简介且不增删技能行', () => {
+  const baseList = {
+    authoritative: true,
+    rows: [
+      { id: 'github', label: 'github', enabled: true, description: '已有说明' },
+      { id: 'dogfood', label: 'dogfood', enabled: false },
+      { id: 'codebase-inspection', label: 'codebase-inspection', enabled: true, description: '   ' },
+    ],
+  };
+
+  assert.equal(mergeSkillDescriptions(baseList, null), baseList, '空映射原样返回同一引用');
+  assert.equal(
+    mergeSkillDescriptions(baseList, { '': 'ignored', empty: '  ', nonStr: 42 }),
+    baseList,
+  );
+
+  const enriched = mergeSkillDescriptions(baseList, {
+    '/GITHUB': '不应覆写',
+    '/dogfood': '  全链路验证工作流  ',
+    Codebase_miss: '无关项不得新增进技能清单',
+    'codebase-inspection': '仓库源码检索',
+  });
+  assert.equal(enriched.authoritative, true);
+  assert.equal(enriched.rows.length, 3);
+  assert.deepEqual(
+    enriched.rows.map((r) => [r.id, r.enabled, r.description]),
+    [
+      ['github', true, '已有说明'],
+      ['dogfood', false, '全链路验证工作流'],
+      ['codebase-inspection', true, '仓库源码检索'],
+    ],
+  );
+  // 全部已有有效简介后再次调用必须零分配返回原引用
+  assert.equal(mergeSkillDescriptions(enriched, { dogfood: '新文案' }), enriched);
 });

@@ -378,6 +378,87 @@
 }
 
 /*
+ * 隐藏原生滚动条但保留横向/纵向滚轮与触控滚动（scrollbar-none）。
+ *
+ * 设计意图(Why)：设置中心 BOT 成员栏等横向轻轨道在溢出时通过左右箭头与滚轮操作，
+ *   保留浏览器原生滚动条会把一条 3~6px 的亮/暗滚动条压在卡片下缘，破坏微距发丝边界；
+ *   统一收进语义 utility，避免业务组件写 `[scrollbar-width:none]` 任意值类触发视觉警告。
+ * 防范的历史坑(Pitfall)：只在 CSS 写 `::-webkit-scrollbar { display: none }` 会漏掉
+ *   Firefox/标准引擎的 `scrollbar-width: none`，导致跨端不一致。
+ * 约束与规则(Rules)：严禁在此叠加 `scroll-behavior: smooth`（违反 Gate 4c 性能红线）。
+ */
+@utility scrollbar-none {
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/*
+ * 悬停才轻现的 5px 透明微滚动条（scrollbar-thin）。
+ *
+ * 设计意图(Why)：数百个技能、长篇 SOUL.md 或展开态微轨必须支持独立滚动，但 Chromium 原生
+ *   灰白滚动条极丑且破坏极客精密美学。改用透明轨道 + 悬停才显影的 5px 圆角微滑块，全皮肤自适应。
+ * 约束与规则(Rules)：色值必须走 `color-mix(in srgb, var(--foreground) ...)`，禁止裸色字面量；
+ *   严禁叠加 `scroll-behavior: smooth`。
+ */
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+
+  &:hover {
+    scrollbar-color: color-mix(in srgb, var(--foreground) 18%, transparent) transparent;
+  }
+
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 9999px;
+  }
+
+  &:hover::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--foreground) 18%, transparent);
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--foreground) 32%, transparent);
+  }
+}
+
+/*
+ * 一次性入场微位移淡入（animate-panel-enter）。
+ *
+ * 设计意图(Why)：切换 BOT 或分段 Tab 时提供 160ms 无过冲轻量过渡（仅单次播放，遵守 I6）。
+ */
+@keyframes fluxPanelEnter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@utility animate-panel-enter {
+  animation: fluxPanelEnter 160ms ease-out;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+/*
  * React 岛控件基线（preflight 的最小替代）。
  *
  * 设计意图(Why)：本入口刻意不引入 preflight（它会重置未迁移模板的 h1/margin/border），

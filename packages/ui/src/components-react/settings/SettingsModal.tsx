@@ -1,5 +1,5 @@
 ﻿import * as React from 'react';
-import { Blocks, Bot, Info, KeyRound, Palette, Plug, RefreshCw, Search, X } from 'lucide-react';
+import { Blocks, Bot, Download, Info, KeyRound, Palette, Plug, Plus, RefreshCw, Search, Trash2, X, Zap } from 'lucide-react';
 import { t } from '../../i18n/index.js';
 import type { I18nKey } from '../../i18n/index.js';
 import { SKINS, SKIN_ALIASES, type SkinId } from '../../tokens/skins.js';
@@ -12,12 +12,17 @@ import { Select } from '../primitives/Select.js';
 import { Surface } from '../primitives/Surface.js';
 import { Badge } from '../primitives/Badge.js';
 import { ActivityIndicator } from '../primitives/ActivityIndicator.js';
+import { Tooltip } from '../primitives/Tooltip.js';
 import { SegmentedControl } from './SegmentedControl.js';
 import { SettingField, SettingInset, SettingRow, SettingSection, SettingTwoColumn } from './SettingRow.js';
 import { SettingsSectionHeading } from './SettingsSectionHeading.js';
 import { LoadBoundary } from './LoadBoundary.js';
 import { ProvidersAdminPanel } from './ProvidersAdminPanel.js';
 import { BotManagerView } from './BotManagerView.js';
+import { McpAddDialog } from './McpAddDialog.js';
+import { McpRemoveConfirmDialog } from './McpRemoveConfirmDialog.js';
+import { SkillDetailDialog } from './SkillDetailDialog.js';
+import { SkillInstallDialog } from './SkillInstallDialog.js';
 import {
   SETTINGS_SECTIONS,
   SETTINGS_SEARCH_ENTRIES,
@@ -275,16 +280,82 @@ function ExtensionsPanel({
   snapshot: SettingsSnapshot;
   actions: SettingsActions;
 }): React.ReactElement {
+  // 与 settingsController.loadExtensions / reloadSkills 保持严格一致的作用域（主连接 Profile）。
+  const targetProfile = snapshot.gateway.profileName || 'default';
+  const [mcpAddOpen, setMcpAddOpen] = React.useState(false);
+  const [skillHubOpen, setSkillHubOpen] = React.useState(false);
+  const [inspectingSkill, setInspectingSkill] = React.useState<string | null>(null);
+  const [testingMcp, setTestingMcp] = React.useState<string | null>(null);
+  const [confirmRemoveMcp, setConfirmRemoveMcp] = React.useState<string | null>(null);
+  const [removingMcp, setRemovingMcp] = React.useState(false);
+
+  const installedMcp = React.useMemo(
+    () => new Set(snapshot.mcp.status === 'ready' ? snapshot.mcp.data.map((row) => row.name) : []),
+    [snapshot.mcp],
+  );
+  const installedSkills = React.useMemo(
+    () => new Set(snapshot.skills.status === 'ready' ? snapshot.skills.data.map((row) => row.name) : []),
+    [snapshot.skills],
+  );
+
+  const handleTest = async (name: string): Promise<void> => {
+    if (!actions.onTestMcpServer || testingMcp) return;
+    setTestingMcp(name);
+    actions.onNotify(t('bot.mcpTesting', { name }));
+    try {
+      const result = await actions.onTestMcpServer(targetProfile, name);
+      if (result.oauthNeeded) actions.onNotify(t('bot.mcpTestOauthNeeded', { name }));
+      else if (result.ok) actions.onNotify(t('bot.mcpTestOk', { name, count: result.tools.length }));
+      else actions.onNotify(t('bot.mcpTestFailed', { name, message: result.error || t('settings.loadFailed') }));
+      actions.onRefreshExtensions();
+    } catch (error) {
+      actions.onNotify(
+        t('bot.mcpTestFailed', { name, message: error instanceof Error ? error.message : String(error) }),
+      );
+    } finally {
+      setTestingMcp(null);
+    }
+  };
+
+  const handleConfirmRemove = async (): Promise<void> => {
+    if (!confirmRemoveMcp || !actions.onRemoveMcpServer || removingMcp) return;
+    const name = confirmRemoveMcp;
+    setRemovingMcp(true);
+    try {
+      const result = await actions.onRemoveMcpServer(targetProfile, name);
+      if (result.ok) {
+        actions.onNotify(t('bot.mcpRemoved', { name }));
+        setConfirmRemoveMcp(null);
+      } else {
+        actions.onNotify(t('bot.mcpRemoveFailed', { message: result.message || t('settings.loadFailed') }));
+      }
+    } catch (error) {
+      actions.onNotify(
+        t('bot.mcpRemoveFailed', { message: error instanceof Error ? error.message : String(error) }),
+      );
+    } finally {
+      setRemovingMcp(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-6">
       <SettingSection anchorId="ext-mcp">
         <SettingsSectionHeading
           title={t('settings.mcpTitle')}
           action={
-            <Button variant="outline" size="sm" type="button" disabled={snapshot.busy} onClick={actions.onRefreshExtensions}>
-              <RefreshCw size={12} />
-              {t('settings.refresh')}
-            </Button>
+            <div className="flex items-center gap-2">
+              {actions.onAddMcpServer ? (
+                <Button variant="outline" size="sm" type="button" disabled={snapshot.busy} onClick={() => setMcpAddOpen(true)}>
+                  <Plus aria-hidden="true" size={12} />
+                  {t('bot.mcpAddBtn')}
+                </Button>
+              ) : null}
+              <Button variant="outline" size="sm" type="button" disabled={snapshot.busy} onClick={actions.onRefreshExtensions}>
+                <RefreshCw aria-hidden="true" size={12} />
+                {t('settings.refresh')}
+              </Button>
+            </div>
           }
         />
         <LoadBoundary state={snapshot.mcp} onRetry={actions.onRefreshExtensions} emptyLabel={t('settings.mcpEmpty')}>
@@ -301,9 +372,41 @@ function ExtensionsPanel({
                     <span className="truncate text-body text-foreground">{row.name}</span>
                     <span className="font-code text-micro text-muted-foreground">{row.transport}</span>
                   </div>
-                  <span className="shrink-0 font-code text-caption text-muted-foreground">
-                    {t('settings.mcpToolCount', { count: row.toolCount })}
-                  </span>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="font-code text-caption text-muted-foreground">
+                      {t('settings.mcpToolCount', { count: row.toolCount })}
+                    </span>
+                    {actions.onTestMcpServer ? (
+                      <Tooltip content={t('bot.mcpTestBtn')} placement="top">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          disabled={snapshot.busy || testingMcp === row.name}
+                          aria-label={t('bot.mcpTestBtn')}
+                          onClick={() => {
+                            void handleTest(row.name);
+                          }}
+                        >
+                          <Zap aria-hidden="true" className="size-3" />
+                        </Button>
+                      </Tooltip>
+                    ) : null}
+                    {actions.onRemoveMcpServer ? (
+                      <Tooltip content={t('bot.mcpRemoveBtn')} placement="top">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          disabled={snapshot.busy || removingMcp || testingMcp === row.name}
+                          aria-label={t('bot.mcpRemoveBtn')}
+                          onClick={() => setConfirmRemoveMcp(row.name)}
+                        >
+                          <Trash2 aria-hidden="true" className="size-3" />
+                        </Button>
+                      </Tooltip>
+                    ) : null}
+                  </div>
                 </div>
               ))}
             </Surface>
@@ -315,10 +418,18 @@ function ExtensionsPanel({
         <SettingsSectionHeading
           title={t('settings.skillsTitle')}
           action={
-            <Button variant="outline" size="sm" type="button" disabled={snapshot.busy} onClick={actions.onReloadSkills}>
-              <RefreshCw size={12} />
-              {t('settings.skillsReload')}
-            </Button>
+            <div className="flex items-center gap-2">
+              {actions.onInstallSkill ? (
+                <Button variant="outline" size="sm" type="button" disabled={snapshot.busy} onClick={() => setSkillHubOpen(true)}>
+                  <Download aria-hidden="true" size={12} />
+                  {t('bot.skillInstallBtn')}
+                </Button>
+              ) : null}
+              <Button variant="outline" size="sm" type="button" disabled={snapshot.busy} onClick={actions.onReloadSkills}>
+                <RefreshCw aria-hidden="true" size={12} />
+                {t('settings.skillsReload')}
+              </Button>
+            </div>
           }
         />
         <LoadBoundary state={snapshot.skills} onRetry={actions.onRefreshExtensions} emptyLabel={t('settings.skillsEmpty')}>
@@ -340,11 +451,24 @@ function ExtensionsPanel({
                       <span className="font-code text-micro text-muted-foreground">{list.length}</span>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {list.map((row) => (
-                        <Badge key={`${category}:${row.name}`} variant="secondary">
-                          {row.name}
-                        </Badge>
-                      ))}
+                      {list.map((row) =>
+                        actions.onInspectSkill ? (
+                          <button
+                            key={`${category}:${row.name}`}
+                            type="button"
+                            data-ext-skill-inspect={row.name}
+                            aria-label={t('bot.skillInspectLabel', { name: row.name })}
+                            onClick={() => setInspectingSkill(row.name)}
+                            className="inline-flex min-h-7 cursor-pointer items-center rounded-full transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          >
+                            <Badge variant="secondary">{row.name}</Badge>
+                          </button>
+                        ) : (
+                          <Badge key={`${category}:${row.name}`} variant="secondary">
+                            {row.name}
+                          </Badge>
+                        ),
+                      )}
                     </div>
                   </div>
                 ))}
@@ -353,6 +477,45 @@ function ExtensionsPanel({
           }}
         </LoadBoundary>
       </SettingSection>
+
+      <McpAddDialog
+        open={mcpAddOpen}
+        targetProfile={targetProfile}
+        targetLabel={targetProfile}
+        installedNames={installedMcp}
+        onClose={() => setMcpAddOpen(false)}
+        onFetchCatalog={actions.onFetchMcpCatalog}
+        onAddServer={actions.onAddMcpServer}
+        onNotify={actions.onNotify}
+      />
+
+      <SkillInstallDialog
+        open={skillHubOpen}
+        targetProfile={targetProfile}
+        installedNames={installedSkills}
+        onClose={() => setSkillHubOpen(false)}
+        onSearchSkills={actions.onSearchSkillsHub}
+        onInstallSkill={actions.onInstallSkill}
+        onNotify={actions.onNotify}
+      />
+
+      <SkillDetailDialog
+        skillName={inspectingSkill}
+        targetProfile={targetProfile}
+        onClose={() => setInspectingSkill(null)}
+        onInspectSkill={actions.onInspectSkill}
+        onCopy={actions.onCopy}
+        onNotify={actions.onNotify}
+      />
+
+      <McpRemoveConfirmDialog
+        serverName={confirmRemoveMcp}
+        busy={removingMcp}
+        onCancel={() => setConfirmRemoveMcp(null)}
+        onConfirm={() => {
+          void handleConfirmRemove();
+        }}
+      />
     </div>
   );
 }
@@ -500,6 +663,7 @@ function renderPanel(
   snapshot: SettingsSnapshot,
   actions: SettingsActions,
   gateway: GatewayFormBinding,
+  botFocusAnchor: { anchorId: string; seq: number } | null,
 ): React.ReactElement {
   switch (section) {
     case 'appearance':
@@ -507,7 +671,7 @@ function renderPanel(
     case 'providers':
       return <ProvidersPanel snapshot={snapshot} actions={actions} />;
     case 'agents':
-      return <BotManagerView snapshot={snapshot} actions={actions} />;
+      return <BotManagerView snapshot={snapshot} actions={actions} focusAnchor={botFocusAnchor} />;
     case 'extensions':
       return <ExtensionsPanel snapshot={snapshot} actions={actions} />;
     case 'connection':
@@ -544,6 +708,7 @@ export function SettingsModal({
   actions: SettingsActions;
 }): React.ReactElement | null {
   const [query, setQuery] = React.useState('');
+  const [botFocusAnchor, setBotFocusAnchor] = React.useState<{ anchorId: string; seq: number } | null>(null);
   const dialogRef = React.useRef<HTMLDivElement>(null);
 
   /**
@@ -624,6 +789,9 @@ export function SettingsModal({
    */
   const jumpToEntry = (entry: SettingsSearchEntry): void => {
     if (snapshot.section !== entry.sectionId) actions.onSelectSection(entry.sectionId);
+    if (entry.sectionId === 'agents') {
+      setBotFocusAnchor((prev) => ({ anchorId: entry.id, seq: (prev?.seq ?? 0) + 1 }));
+    }
     setQuery('');
     const scheduler = jumpSchedulerRef.current;
     if (!scheduler) return;
@@ -665,7 +833,14 @@ export function SettingsModal({
         data-testid="settings-dialog"
         onEscapeKeyDown={(event) => {
           // 中文/日文输入法用 Esc 取消候选词时不得连带关闭设置弹窗。
-          if (event.isComposing || event.keyCode === 229) event.preventDefault();
+          if (event.isComposing || event.keyCode === 229) {
+            event.preventDefault();
+            return;
+          }
+          // 展开的分组模型选择器按 Esc 只收敛浮层自身，严禁穿透关闭设置弹窗。
+          if (dialogRef.current?.querySelector('[data-grouped-model-popover="true"]')) {
+            event.preventDefault();
+          }
         }}
         className="flux-settings flex max-w-none gap-0 overflow-hidden rounded-window border-border bg-popover p-0"
         style={{
@@ -698,7 +873,7 @@ export function SettingsModal({
           </div>
 
           {/* 导航行高 36px、行间 8px、左右 12px：全部落在 4px 网格上，且字号只走 text-body 一档。 */}
-          <nav className="flex flex-1 flex-col gap-2 overflow-y-auto px-3 pb-4" aria-label={t('settings.title')}>
+          <nav className="scrollbar-thin flex flex-1 flex-col gap-2 overflow-y-auto px-3 pb-4" aria-label={t('settings.title')}>
             {visible.map((section) => {
               const Icon = ICONS[section.icon];
               const selected = section.id === snapshot.section;
@@ -769,8 +944,8 @@ export function SettingsModal({
               <X size={14} aria-hidden="true" />
             </Button>
           </header>
-          <div className={snapshot.section === 'agents' ? 'flex-1 min-h-0' : 'flex-1 overflow-y-auto px-6 py-4'}>
-            {renderPanel(snapshot.section, snapshot, actions, gatewayForm)}
+          <div className={snapshot.section === 'agents' ? 'flex-1 min-h-0' : 'flex-1 overflow-y-auto px-6 py-4 scrollbar-thin'}>
+            {renderPanel(snapshot.section, snapshot, actions, gatewayForm, botFocusAnchor)}
           </div>
         </section>
       </DialogContent>

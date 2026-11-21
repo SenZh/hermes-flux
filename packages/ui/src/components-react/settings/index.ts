@@ -1,7 +1,43 @@
 export { SettingsModal } from './SettingsModal.js';
 export { BotManagerView } from './BotManagerView.js';
+export { McpAddDialog, type McpAddDialogProps } from './McpAddDialog.js';
+export { McpRemoveConfirmDialog, type McpRemoveConfirmDialogProps } from './McpRemoveConfirmDialog.js';
+export {
+  GroupedModelSelect,
+  ModelVendorIcon,
+  ProviderVendorIcon,
+  type GroupedModelOptionGroup,
+  type GroupedModelSelectProps,
+} from './ModelPicker.js';
+export { SkillDetailDialog, type SkillDetailDialogProps, type SkillMarkdownViewMode } from './SkillDetailDialog.js';
+export { SkillInstallDialog, type SkillInstallDialogProps } from './SkillInstallDialog.js';
 export { mountSettingsModal } from './mount.js';
 export { ProvidersAdminPanel } from './ProvidersAdminPanel.js';
+export {
+  OVERFLOW_THRESHOLD_PX,
+  SOUL_SOFT_LIMIT_BYTES,
+  canResetBotAvatar,
+  computeHorizontalOverflow,
+  computeSoulByteLength,
+  computeSoulLineCount,
+  computeTrackScrollStep,
+  computeWheelScrollDelta,
+  countEnabledCapabilities,
+  filterBotRoster,
+  filterCapabilities,
+  insertTextAtSelection,
+  isSoulOverLimit,
+  resolveAnchorNavigation,
+  resolveBotAvatar,
+  resolveBotCardSubtitle,
+  resolveBotDisplayTitle,
+  resolveCarouselKeyTarget,
+  resolveFocusableBotId,
+  toggleCapabilityId,
+  type BotCapCategory,
+  type BotCapFilterMode,
+  type BotDetailTab,
+} from './botPanelLogic.js';
 export {
   messageKeyForVerdict,
   pickProviderViewsState,

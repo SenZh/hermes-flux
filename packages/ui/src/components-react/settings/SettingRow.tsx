@@ -28,6 +28,7 @@ export function SettingRow({
   hint,
   htmlFor,
   onLabelActivate,
+  disabled = false,
   anchorId,
   children,
 }: {
@@ -40,6 +41,8 @@ export function SettingRow({
    *   不给回调时点标签没有任何反应，热区只剩行尾那个 32px 的开关。
    */
   onLabelActivate?: () => void;
+  /** 禁用状态：同步禁用可点击标签按钮，避免锁定态下仍可聚焦/误触发。 */
+  disabled?: boolean;
   /** 检索跳转锚点；设置中心按此定位并做一次性高亮。 */
   anchorId?: string;
   children: React.ReactNode;
@@ -51,7 +54,12 @@ export function SettingRow({
     >
       <div className="min-w-0">
         {onLabelActivate ? (
-          <button type="button" onClick={onLabelActivate} className="block text-left text-body text-foreground">
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={onLabelActivate}
+            className="block text-left text-body text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+          >
             {label}
           </button>
         ) : (

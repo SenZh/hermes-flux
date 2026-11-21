@@ -1284,6 +1284,8 @@ export async function runFeature(featureId) {
       await session.screenshot(path.join(featureArtifactsDir, 'screenshot-save-reachable.png'));
 
       const screenshot = path.join(featureArtifactsDir, 'screenshot.png');
+      // 等待 200ms 滑动滑块与保存胶囊淡出动画收敛后再抓拍稳态截图。
+      await new Promise((resolve) => setTimeout(resolve, 260));
       await session.screenshot(screenshot);
       const evidence = {
         featureId,
@@ -1396,6 +1398,8 @@ export async function runFeature(featureId) {
       if (hidden.notPaused.length > 0) throw new Error(`页面隐藏时动效必须暂停：${JSON.stringify(hidden.notPaused.slice(0, 5))}`);
 
       const screenshot = path.join(featureArtifactsDir, 'screenshot.png');
+      // 等待 200ms 滑动滑块与保存胶囊淡出动画收敛后再抓拍稳态截图。
+      await new Promise((resolve) => setTimeout(resolve, 260));
       await session.screenshot(screenshot);
 
       console.log('  6. 刷新页面：偏好必须跨会话恢复...');
@@ -1468,127 +1472,92 @@ export async function runFeature(featureId) {
       })()`);
       if (String(injected) !== 'ok') throw new Error(`BOT 面板状态注入失败: ${injected}`);
       await session.waitFor('document.querySelector("[data-bot-carousel]") !== null', 8000, 'bot carousel');
-      await session.waitFor('document.querySelectorAll("[data-bot-slot]").length === 5', 8000, 'five slots');
+      await session.waitFor('document.querySelectorAll("[data-bot-slot]").length === 2', 8000, 'two slots');
 
-      console.log('  2. 选择器与基础字段必须齐全，且当前模型回显...');
+      console.log('  2. 默认展开 204px BOT 列表 + 36px/48px 1:1 头像 + 扁平 5 菜单零数字...');
       const layout = await session.evaluate(`(() => {
         const panel = document.querySelector('[data-bot-carousel]');
         const model = document.querySelector('#bot-model');
         const slots = [...document.querySelectorAll('[data-bot-slot]')];
+        const topTabs = [...document.querySelectorAll('[data-bot-tab]')];
+        const avatars = [...document.querySelectorAll('[data-bot-avatar="true"]')];
+        const distorted = avatars.filter((n) => { const r = n.getBoundingClientRect(); return r.width === 0 || Math.abs(r.width - r.height) > 0.5; }).length;
+        const shadows = avatars.filter((n) => { const s = getComputedStyle(n).boxShadow; return s && s !== 'none'; }).length;
+        const hasArrows = Boolean(panel?.querySelector('svg.lucide-chevron-left, svg.lucide-chevron-right'));
         return {
-          slotCount: slots.length,
-          distinctTransforms: new Set(slots.map((n) => getComputedStyle(n).transform)).size,
+          slotCount: slots.length, distorted, shadows, hasArrows,
+          tabCount: topTabs.length,
+          tabWithDigits: topTabs.filter((n) => /\\d/.test(n.textContent || '')).length,
+          railExpanded: panel ? panel.getAttribute('data-bot-rail-expanded') : null,
+          railWidth: panel ? Math.round(panel.getBoundingClientRect().width) : 0,
           panelHeight: panel ? Math.round(panel.getBoundingClientRect().height) : 0,
+          hasFilter: Boolean(document.querySelector('[data-bot-rail-filter="true"]')),
           hasId: Boolean(document.querySelector('#bot-id')),
           hasName: Boolean(document.querySelector('#bot-display-name')),
           hasDescription: Boolean(document.querySelector('#bot-description')),
-          hasModel: Boolean(model),
-          modelValue: model ? model.value : '',
-          modelGroups: model ? model.querySelectorAll('optgroup').length : 0,
+          hasModel: Boolean(model), modelText: model ? model.textContent.trim() : '',
           overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
         };
       })()`);
-      if (layout.slotCount !== 5) throw new Error(`槽位必须固定 5 个，实测 ${layout.slotCount}`);
-      if (layout.distinctTransforms < 4) throw new Error(`槽位必须有近大远小位移，实测 ${layout.distinctTransforms} 种`);
-      if (layout.panelHeight !== 148) throw new Error(`滑动视口必须 148px，实测 ${layout.panelHeight}`);
+      if (layout.slotCount !== 2) throw new Error(`成员数应与花名册一致（2），实测 ${layout.slotCount}`);
+      if (layout.railExpanded !== 'true' || layout.railWidth < 196 || !layout.hasFilter) {
+        throw new Error(`BOT 列表默认应展开（~204px），实测 ${JSON.stringify(layout)}`);
+      }
+      if (layout.tabCount !== 5 || layout.tabWithDigits > 0) throw new Error(`顶部菜单须扁平 5 项且零数字: ${JSON.stringify(layout)}`);
+      if (layout.hasArrows) throw new Error('折叠按钮禁止出现方向箭头');
+      if (layout.distorted > 0 || layout.shadows > 0) throw new Error(`头像异常: ${JSON.stringify(layout)}`);
+      if (layout.panelHeight < 200) throw new Error(`列表高度异常，实测 ${layout.panelHeight}`);
       if (!layout.hasId || !layout.hasName || !layout.hasDescription) throw new Error('基础身份字段缺失');
-      if (!layout.hasModel) throw new Error('缺少模型绑定下拉');
-      if (layout.modelValue !== 'fn/m1') throw new Error(`模型必须回显当前值，实测 ${layout.modelValue}`);
-      if (layout.modelGroups < 1) throw new Error('模型下拉必须按 Provider 分组');
+      if (!layout.hasModel || !layout.modelText.toLowerCase().includes('m1')) throw new Error(`模型回显异常: ${layout.modelText}`);
       if (layout.overflowX) throw new Error('页面出现横向溢出');
 
-      console.log('  3. 折叠区必须按 Grid 契约展开（点击后 0fr -> 1fr），且能力开关真实可点...');
-      const collapsed = await session.evaluate(`(() => {
-        const nodes = [...document.querySelectorAll('[data-bot-section]')];
-        return nodes.map((node) => {
-          const btn = node.querySelector('button[aria-expanded]');
-          const grid = node.querySelector('div.grid');
-          return {
-            id: node.getAttribute('data-bot-section'),
-            expanded: btn ? btn.getAttribute('aria-expanded') : null,
-            controls: btn ? btn.getAttribute('aria-controls') : null,
-            rowsBefore: grid ? getComputedStyle(grid).gridTemplateRows : '',
-          };
-        });
-      })()`);
-      console.log('     · 初始折叠态:', JSON.stringify(collapsed));
-      if (collapsed.length < 4) throw new Error(`能力矩阵折叠区缺失，实测 ${collapsed.length} 个`);
-      for (const section of collapsed) {
-        if (!section.controls) throw new Error(`${section.id} 折叠按钮必须声明 aria-controls`);
-        if (section.expanded === 'true') throw new Error(`${section.id} 必须默认收起（design §7.2）`);
+      await session.evaluate(`(() => { const el = document.querySelector('[data-bot-rail-filter="true"]'); Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(el, '老王'); el.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+      await session.waitFor(`document.querySelectorAll('[data-bot-slot]').length === 1`, 5000, 'rail filter narrowed');
+      await session.click('[data-bot-rail-toggle="true"]');
+      await session.waitFor(`document.querySelector('[data-bot-carousel]')?.getAttribute('data-bot-rail-expanded') === 'false' && document.querySelectorAll('[data-bot-slot]').length === 2`, 5000, 'rail collapse');
+      await new Promise((r) => setTimeout(r, 260));
+      const railAfterCollapse = await session.evaluate(`({ width: Math.round(document.querySelector('[data-bot-carousel]').getBoundingClientRect().width), tooltipCount: [...document.querySelectorAll('[data-bot-slot]')].filter((n) => n.hasAttribute('data-tooltip')).length })`);
+      if (railAfterCollapse.width < 58 || railAfterCollapse.width > 72 || railAfterCollapse.tooltipCount !== 2) {
+        throw new Error(`微轨收起失败: ${JSON.stringify(railAfterCollapse)}`);
       }
-      // 逐个点开：Grid 契约必须是 0fr -> 1fr，且内容真实可交互。
-      for (const section of collapsed) {
-        await session.click(`[data-bot-section=${section.id}] > button[aria-expanded]`);
-      }
-      // 等展开过渡跑完（120ms）再测量，否则读到的是过渡起始帧。
-      await new Promise((resolve) => setTimeout(resolve, 400));
-      const sections = await session.evaluate(`(() => {
-        const nodes = [...document.querySelectorAll('[data-bot-section]')];
-        return nodes.map((node) => {
-          const btn = node.querySelector('button[aria-expanded]');
-          const grid = node.querySelector('div.grid');
-          const inner = grid ? grid.firstElementChild : null;
-          return {
-            id: node.getAttribute('data-bot-section'),
-            expanded: btn ? btn.getAttribute('aria-expanded') : null,
-            rows: grid ? grid.querySelectorAll('[data-bot-capability]').length : 0,
-            gridRows: grid ? getComputedStyle(grid).gridTemplateRows : '',
-            visible: inner ? getComputedStyle(inner).visibility : '',
-          };
-        });
-      })()`);
-      console.log('     · 展开后:', JSON.stringify(sections));
-      for (const section of sections) {
-        if (section.expanded !== 'true') throw new Error(`${section.id} 点击后必须展开`);
-        if (section.gridRows === '0px' || section.gridRows === '') {
-          throw new Error(`${section.id} 的 grid-template-rows 必须脱离 0fr，实测 ${section.gridRows}`);
-        }
-        if (section.visible !== 'visible') throw new Error(`${section.id} 展开后内容必须可见`);
-      }
-      const soulSection = sections.find((s) => s.id === 'soul');
-      if (!soulSection) throw new Error('缺少 SOUL 抽屉');
+      await session.click('[data-bot-rail-toggle="true"]');
+      await session.waitFor(`document.querySelector('[data-bot-carousel]')?.getAttribute('data-bot-rail-expanded') === 'true'`, 5000, 'rail expand');
+      await new Promise((r) => setTimeout(r, 260));
+      const railAfterExpand = await session.evaluate(`({ width: Math.round(document.querySelector('[data-bot-carousel]').getBoundingClientRect().width), hasFilter: Boolean(document.querySelector('[data-bot-rail-filter="true"]')) })`);
+      if (railAfterExpand.width < 196 || !railAfterExpand.hasFilter) throw new Error(`列表重展开失败: ${JSON.stringify(railAfterExpand)}`);
 
-      console.log('  4. 点开一个能力开关：草稿必须落池且脏点出现，且不得直接写网关...');
-      const beforeToggle = await session.evaluate(
-        `JSON.stringify(Object.keys(window.__fluxState.botDrafts))`,
-      );
+      console.log('  3. 扁平菜单切换（角色设定 & 工具即时搜索/过滤）...');
+      await session.click('[data-bot-tab="soul"]');
+      await session.waitFor(`document.querySelector('#bot-soul')?.getBoundingClientRect().height > 150`, 5000, 'soul studio open');
+      await session.click('[data-bot-tab="toolsets"]');
+      await session.waitFor(`document.querySelector('[data-bot-cap-search="toolsets"]') && document.querySelector('[data-bot-capability=browser]')?.getBoundingClientRect().height > 0`, 5000, 'toolsets tab open');
+      await session.evaluate(`(() => { const el = document.querySelector('[data-bot-cap-search="toolsets"]'); Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(el, 'Browser'); el.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+      await session.waitFor(`!document.querySelector('[data-bot-capability=web]') && Boolean(document.querySelector('[data-bot-capability=browser]'))`, 5000, 'cap search filter');
+      await session.evaluate(`(() => { const el = document.querySelector('[data-bot-cap-search="toolsets"]'); Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(el, ''); el.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+      await session.waitFor(`Boolean(document.querySelector('[data-bot-capability=web]')) && Boolean(document.querySelector('[data-bot-capability=browser]'))`, 5000, 'cap search reset');
+
+      console.log('  4. 切换能力开关：草稿入池、悬浮保存条浮起、重置清空...');
       await session.click('[data-bot-capability=browser]');
-      await session.waitFor(
-        `Object.prototype.hasOwnProperty.call(window.__fluxState.botDrafts, 'arch')`,
-        5000,
-        'draft written',
-      );
+      await session.waitFor(`Object.prototype.hasOwnProperty.call(window.__fluxState.botDrafts, 'arch')`, 5000, 'draft written');
+      await session.waitFor(`getComputedStyle(document.querySelector('[data-bot-save-dock="true"]'))?.opacity === '1'`, 3000, 'save dock faded in');
       const toggled = await session.evaluate(`(() => {
         const draft = window.__fluxState.botDrafts.arch;
+        const dock = document.querySelector('[data-bot-save-dock="true"]');
         return {
           enabledToolsets: draft ? draft.enabledToolsets : null,
-          disabledSkills: draft ? draft.disabledSkills : null,
-          saveDisabled: [...document.querySelectorAll('button')].some(
-            (b) => b.textContent.includes('保存配置') && b.disabled,
-          ),
+          dockVisible: dock ? getComputedStyle(dock).opacity === '1' : false,
+          saveDisabled: [...document.querySelectorAll('button')].some((b) => b.textContent.includes('保存配置') && b.disabled),
         };
       })()`);
-      console.log('     · 草稿:', JSON.stringify(toggled), '· 前置:', beforeToggle);
-      if (!toggled.enabledToolsets || !toggled.enabledToolsets.includes('browser')) {
-        throw new Error(`开关必须写入草稿 enabledToolsets，实测 ${JSON.stringify(toggled.enabledToolsets)}`);
-      }
-      if (toggled.saveDisabled) throw new Error('有草稿时保存按钮不得禁用');
+      if (!toggled.enabledToolsets?.includes('browser')) throw new Error(`开关未写入 enabledToolsets: ${JSON.stringify(toggled)}`);
+      if (!toggled.dockVisible || toggled.saveDisabled) throw new Error(`悬浮保存条应显示且可用: ${JSON.stringify(toggled)}`);
 
-      console.log('  5. 重置：草稿必须清空，开关回到权威快照...');
-      await session.evaluate(`(() => {
-        const btn = [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === '重置');
-        if (!btn) return false;
-        btn.click();
-        return true;
-      })()`);
-      await session.waitFor(
-        `Object.keys(window.__fluxState.botDrafts).length === 0`,
-        5000,
-        'draft cleared',
-      );
+      await session.evaluate(`(() => { const b = [...document.querySelectorAll('button')].find((n) => n.textContent.trim() === '重置'); if (b) b.click(); })()`);
+      await session.waitFor(`Object.keys(window.__fluxState.botDrafts).length === 0`, 5000, 'draft cleared');
 
-      console.log('  6. MCP 未知态必须是「状态未知」，不得画成离线红灯...');
+      console.log('  5. 直切 MCP 菜单：未知态不画红灯、打开并关闭新增 MCP 弹窗...');
+      await session.click('[data-bot-tab="mcp"]');
+      await session.waitFor(`Boolean(document.querySelector('[data-bot-add-mcp="true"]')) && (document.querySelector('[data-bot-section=mcp]')?.getBoundingClientRect().height || 0) > 0`, 5000, 'mcp tab visible');
       const mcp = await session.evaluate(`(() => {
         const section = document.querySelector('[data-bot-section=mcp]');
         const text = section ? section.textContent : '';
@@ -1596,38 +1565,33 @@ export async function runFeature(featureId) {
           unknown: text.includes('状态未知'),
           offline: text.includes('未连接'),
           online: text.includes('已连接'),
-          red: section
-            ? [...section.querySelectorAll('*')].some((el) => {
-                const color = getComputedStyle(el).color;
-                return /rgb\\(\\s*(2[0-9]{2}|1[5-9][0-9])\\s*,\\s*([0-9]|[1-6][0-9])\\s*,/.test(color);
-              })
-            : false,
+          red: section ? [...section.querySelectorAll('*')].some((el) => /rgb\\(\\s*(2[0-9]{2}|1[5-9][0-9])\\s*,\\s*([0-9]|[1-6][0-9])\\s*,/.test(getComputedStyle(el).color)) : false,
         };
       })()`);
-      console.log('     · MCP 状态:', JSON.stringify(mcp));
-      if (!mcp.online) throw new Error('已连接的 MCP 必须显示在线');
-      if (!mcp.unknown) throw new Error('探活无结论时必须显示"状态未知"');
-      if (mcp.red) throw new Error('未知态不得使用红色（会被读成服务挂了）');
+      if (!mcp.online || !mcp.unknown || mcp.offline || mcp.red) throw new Error(`MCP 状态异常: ${JSON.stringify(mcp)}`);
 
+      await session.click('[data-bot-add-mcp="true"]');
+      await session.waitFor(`document.querySelector('[data-mcp-add-dialog="true"]') !== null`, 5000, 'mcp add dialog open');
+      await session.evaluate(`(() => { const dlg = document.querySelector('[data-mcp-add-dialog="true"]'); const close = [...dlg.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === '关闭设置' || b.textContent.trim() === '取消'); if (close) close.click(); })()`);
+      await session.waitFor(`document.querySelector('[data-mcp-add-dialog="true"]') === null`, 5000, 'mcp add dialog close');
+
+      const capabilityIdCheck = await session.evaluate(`(() => { const ids = [...document.querySelectorAll('[data-bot-capability]')].map((n) => n.id); return { total: ids.length, unique: new Set(ids).size }; })()`);
+      if (capabilityIdCheck.total !== capabilityIdCheck.unique) throw new Error('能力开关存在重复 DOM id');
       const screenshot = path.join(featureArtifactsDir, 'screenshot.png');
+      // 等待 200ms 滑动滑块与保存胶囊淡出动画收敛后再抓拍稳态截图。
+      await new Promise((resolve) => setTimeout(resolve, 260));
       await session.screenshot(screenshot);
 
-      // 负向注入：这一条不可能是同源自证 —— 断言的是"错误态必须由状态机驱动渲染"，
-      // 若 UI 硬编码常量或忽略 status，注入 list_error 后仍会画出花名册与表单。
-      console.log('  7. 负向：注入 list_error 后必须画错误态，不得继续显示花名册与表单...');
-      const negative = await session.evaluate(`(() => {
-        const s = window.__fluxState;
-        s.botManagementStatus = { status: 'list_error', message: '网关连接已断开' };
-        s.botManagementDetail = undefined;
-        window.__fluxRender();
-        return 'ok';
-      })()`);
+      console.log('  6. 微轨点击与 ArrowDown 键盘切换 + 250ms 等待后注入 list_error 负向态...');
+      await session.click('[data-bot-id="default"]');
+      await session.waitFor(`window.__fluxState.botManagementActiveBotId === 'default'`, 5000, 'switch bot by click');
+      await session.evaluate(`document.querySelector('[data-bot-id="default"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))`);
+      await session.waitFor(`window.__fluxState.botManagementActiveBotId === 'arch'`, 5000, 'switch bot by ArrowDown');
+      // 超过 160ms 切人防抖窗再注错误态，杜绝旧定时器竟态覆写状态。
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const negative = await session.evaluate(`(() => { const s = window.__fluxState; s.botManagementStatus = { status: 'list_error', message: '网关连接已断开' }; s.botManagementDetail = undefined; window.__fluxRender(); return 'ok'; })()`);
       if (String(negative) !== 'ok') throw new Error(`负向注入失败: ${negative}`);
-      await session.waitFor(
-        `document.body.textContent.includes('网关连接已断开')`,
-        5000,
-        'list error surfaced',
-      );
+      await session.waitFor(`document.body.textContent.includes('网关连接已断开')`, 5000, 'list error surfaced');
       const errorState = await session.evaluate(`(() => {
         const dialog = document.querySelector('[data-testid=settings-dialog]');
         const text = dialog ? dialog.textContent : '';
@@ -1639,24 +1603,13 @@ export async function runFeature(featureId) {
           hasRetry: [...document.querySelectorAll('button')].some((b) => b.textContent.trim() === '重试'),
         };
       })()`);
-      console.log('     · 错误态:', JSON.stringify(errorState));
-      if (!errorState.rawMessage) throw new Error('错误态必须原样透出网关原因（Failure Is Not Empty）');
-      if (errorState.hasCarousel) throw new Error('错误态不得继续渲染花名册选择器');
-      if (errorState.hasIdField) throw new Error('错误态不得继续渲染详情表单');
-      if (errorState.hasSaveButton) throw new Error('错误态不得保留可点的保存按钮（假可用）');
-      if (!errorState.hasRetry) throw new Error('错误态必须给出重试入口');
+      if (!errorState.rawMessage || errorState.hasCarousel || errorState.hasIdField || errorState.hasSaveButton || !errorState.hasRetry) {
+        throw new Error(`错误态断言失败: ${JSON.stringify(errorState)}`);
+      }
 
       const evidence = {
-        featureId,
-        timestamp: new Date().toISOString(),
-        durationMs: Date.now() - startTime,
-        status: 'PASSED',
-        layout,
-        sections,
-        toggled,
-        mcp,
-        errorState,
-        screenshot,
+        featureId, timestamp: new Date().toISOString(), durationMs: Date.now() - startTime,
+        status: 'PASSED', layout, railAfterExpand, toggled, mcp, errorState, screenshot,
       };
       fs.writeFileSync(path.join(featureArtifactsDir, 'evidence.json'), JSON.stringify(evidence, null, 2));
       console.log(`  ✔ BOT 配置中枢验证成功！证据已落盘: ${screenshot}`);

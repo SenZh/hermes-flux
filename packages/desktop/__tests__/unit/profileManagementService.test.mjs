@@ -134,3 +134,56 @@ test('profileManagementService: switchProfile updates profileName and invokes fe
   assert.equal(deps.getState().profileName, 'bot-2');
   assert.equal(deps.getRenderCount() > 0, true);
 });
+
+test('profileManagementService: 过期代际的 getAsset 迟到响应不得污染最新 profiles 与头像缓存', async () => {
+  let resolveStaleAsset;
+  const stalePromise = new Promise((resolve) => {
+    resolveStaleAsset = resolve;
+  });
+  let persistAvatarCount = 0;
+  let fetchCount = 0;
+
+  const deps = createMockProfileDeps({
+    state: {
+      profiles: [],
+      sessions: [{ id: 'sess-1', botName: 'bot-1', botDisplayName: 'Old', botAvatar: undefined }],
+    },
+    gatewayClient: {
+      listProfiles: async () => {
+        fetchCount += 1;
+        if (fetchCount === 1) return [{ name: 'bot-1', displayName: 'Bot One' }];
+        return [{ name: 'bot-2', displayName: 'Bot Two' }];
+      },
+      call: async () => ({ sessions: [] }),
+      request: async (method, params) => {
+        if (method === 'profiles.get_asset' && params?.name === 'bot-1') {
+          return { found: true, data: await stalePromise };
+        }
+        if (method === 'profiles.get_asset' && params?.name === 'bot-2') {
+          return { found: false, data: '' };
+        }
+        return null;
+      },
+      fetchSessionMessages: async () => ({ status: 'success', messages: [] }),
+    },
+  });
+  deps.persistAvatarCache = () => {
+    persistAvatarCount += 1;
+  };
+
+  const service = createProfileManagementService(deps);
+  const firstFetch = service.fetchProfiles();
+  await new Promise((r) => setTimeout(r, 10));
+
+  // 第二代拉取先完成（无 bot-1，且此时 bot-1 的 getAsset 仍在途）
+  await service.fetchProfiles();
+  assert.equal(deps.getState().profiles.map((p) => p.name).join(','), 'bot-2');
+
+  // 现在让第一代迟到的 getAsset 返回头像；必须被 generation !== profileFetchGeneration 丢弃
+  resolveStaleAsset('STALE_AVATAR_BASE64');
+  await firstFetch;
+
+  assert.equal(deps.profileAvatarCache.size, 0, '迟到 getAsset 不得污染头像缓存');
+  assert.equal(deps.getState().sessions[0].botAvatar, undefined, '迟到 getAsset 不得篡改会话头像');
+  assert.equal(persistAvatarCount, 0, '迟到 getAsset 不得触发缓存写盘');
+});

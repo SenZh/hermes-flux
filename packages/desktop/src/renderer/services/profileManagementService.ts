@@ -150,8 +150,10 @@ export function createProfileManagementService(deps: ProfileManagementDeps): Pro
       void warmBotForeverChats(list, client);
       await Promise.allSettled(
         list.filter((p) => !p.avatar).map(async (p) => {
+          if (generation !== profileFetchGeneration) return;
           try {
             const assetBase64 = await profileService.getAsset(p.name, 'avatar', client);
+            if (generation !== profileFetchGeneration) return;
             if (assetBase64) {
               const finalUrl = assetBase64.startsWith('data:')
                 ? assetBase64

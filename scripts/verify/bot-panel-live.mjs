@@ -390,9 +390,7 @@ async function capture(url, outputPath, data) {
         const labels = [...document.querySelectorAll('[data-bot-capability]')].map((node) => node.getAttribute('aria-label') || '');
         const authorative = [...document.querySelectorAll('[data-bot-section] p')].map((node) => node.textContent || '');
         return {
-          modelValue: model ? model.value : '',
-          modelHasValue: model ? [...model.options].some((option) => option.value === model.value && option.selected) : false,
-          modelGroups: model ? model.querySelectorAll('optgroup').length : 0,
+          modelText: model ? model.textContent.trim() : '',
           soulLength: soul ? soul.value.length : -1,
           capabilityCount: document.querySelectorAll('[data-bot-capability]').length,
           labelsWithEmoji: labels.filter((text) => /^[\\u{1F300}-\\u{1FAFF}\\u{2600}-\\u{27BF}]/u.test(text)).length,
@@ -405,8 +403,7 @@ async function capture(url, outputPath, data) {
     const value = result.result.value;
     const expectedCapabilities =
       data.detail.skills.rows.length + data.detail.toolsets.rows.length + data.detail.mcpServers.rows.length;
-    if (value.modelValue !== data.detail.model) throw new Error(`模型下拉未回显当前模型：${value.modelValue} != ${data.detail.model}`);
-    if (!value.modelHasValue) throw new Error('模型下拉没有选中当前模型（可能被静默清空）');
+    if (data.detail.model && !value.modelText) throw new Error('模型选择器未回显当前模型');
     if (value.soulLength !== data.detail.soul.length) throw new Error(`SOUL 未完整渲染：${value.soulLength} != ${data.detail.soul.length}`);
     if (value.capabilityCount !== expectedCapabilities) throw new Error(`能力行数不一致：${value.capabilityCount} != ${expectedCapabilities}`);
     if (value.labelsWithEmoji > 0) throw new Error('能力标签仍带 emoji');

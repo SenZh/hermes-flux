@@ -33,6 +33,7 @@ import path from 'node:path';
 import http from 'node:http';
 import https from 'node:https';
 import { fileURLToPath } from 'node:url';
+import { buildExtensionsProbeModule } from './probeExtensions.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '../..');
@@ -585,37 +586,7 @@ function buildModules(ctx) {
       ],
     },
 
-    {
-      module: 'extensions',
-      // 设置中心的「扩展」页：MCP 运行态与技能清单都是纯读接口，任何网关都可安全探针。
-      // model.save_key / model.disconnect 是破坏性写操作，绝不进探针（见下方 skip 说明）。
-      cases: [
-        { method: 'mcp.servers.status', params: () => ({ profile }) },
-        { method: 'skills.manage', params: () => ({ profile, action: 'list' }) },
-        {
-          method: 'skills.reload',
-          // 热重载会重新扫描磁盘技能目录，属幂等只读重建；输出里含本机绝对路径，由 sanitize 脱敏
-          params: () => ({ profile }),
-        },
-        {
-          method: 'model.save_key',
-          // 探针会用假密钥覆盖用户真实凭据，且网关无对应"还原"接口——永久禁止真实执行。
-          params: () => ({ slug: ctx.probeBot }),
-          skip: () => '写操作会覆盖用户真实 API Key 且无法还原，仅由 CDP 场景在无凭据沙箱手工验证',
-        },
-        {
-          method: 'model.disconnect',
-          params: () => ({ slug: ctx.probeBot }),
-          skip: () => '断开提供商会破坏用户已配置的凭据，禁止在真实网关上执行',
-        },
-        {
-          method: 'reload.env',
-          params: () => ({}),
-          // 热重载 .env 会立刻改变运行中的凭据状态；用假密钥探针的副作用不可控，永久跳过
-          skip: () => '环境热重载会改变运行中的凭据状态，须与 model.save_key 成对执行，禁止单独探针',
-        },
-      ],
-    },
+    buildExtensionsProbeModule({ profile, ctx, stamp }),
 
     {
       module: 'prompt',
@@ -896,7 +867,8 @@ async function main() {
   // 结束再清一次，确保本轮创建的临时会话不留在网关上
   await sweepProbeSessions(call, ctx.profile);
 
-  console.log('\n[probe] === 负向探针（验证网关严格模式）===');  for (const negative of NEGATIVE_CASES) {
+  console.log('\n[probe] === 负向探针（验证网关严格模式）===');
+  for (const negative of NEGATIVE_CASES) {
     const record = { module: 'negative', method: negative.method, name: negative.name, kind: 'negative' };
     try {
       const params = negative.params(ctx);

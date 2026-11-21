@@ -29,12 +29,18 @@
 import type { AppState } from '../state/appState.js';
 import type { HermesDesktopBridge } from '../../preload/index.js';
 import {
+  type CompleteSlashResult,
   type HermesGatewayClient,
+  type McpServerAddRpcParams,
   type ProfilesConfigureParams,
   ProfileService,
   formatModelDisplayName,
   projectBotRoster,
   normalizeEndpointId,
+  normalizeMcpCatalog,
+  normalizeMcpTestResult,
+  normalizeSkillInspectResult,
+  normalizeSkillSearchResults,
   planBindingToggle,
   planProviderRemoval,
   draftForBindingAttach,
@@ -101,6 +107,7 @@ export interface SettingsDataDeps {
   readonly onPresenceLayoutChanged: () => void;
   readonly profileAvatarCache: Map<string, string>;
   readonly persistAvatarCache: () => void;
+  readonly persistAgentsToCache?: (profiles: AppState['profiles']) => void;
 }
 
 export interface SettingsDataService {
@@ -146,6 +153,26 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
     string,
     { signature: string; promise: Promise<ToggleProviderAgentResult> }
   >();
+
+  function resolveProfileAvatar(botId: string): string | undefined {
+    if (!botId) return undefined;
+    const state = deps.getState();
+    const settingsRow =
+      state.settingsProfiles.status === 'ready'
+        ? state.settingsProfiles.data.find((item) => item.name === botId)
+        : undefined;
+    if (settingsRow?.avatar) return settingsRow.avatar;
+    const profileRow = state.profiles.find((item) => item.name === botId);
+    if (profileRow?.avatar) return profileRow.avatar;
+    const cachedById = deps.profileAvatarCache.get(botId.toLowerCase());
+    if (cachedById) return cachedById;
+    const displayName = settingsRow?.displayName || profileRow?.displayName;
+    if (displayName) {
+      const cachedByName = deps.profileAvatarCache.get(displayName.toLowerCase());
+      if (cachedByName) return cachedByName;
+    }
+    return undefined;
+  }
 
   function scopedProfileName(): string {
     const state = deps.getState();
@@ -307,7 +334,12 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
       describeBot: (botId, hint) => {
         const client = deps.getGatewayClient();
         if (!client) return Promise.reject(new Error(deps.t('settings.notConnected')));
-        return profileService.describeBot(botId, client, hint);
+        const resolvedAvatar = resolveProfileAvatar(botId) || hint.avatar;
+        return profileService.describeBot(
+          botId,
+          client,
+          resolvedAvatar ? { ...hint, avatar: resolvedAvatar } : hint,
+        );
       },
       fetchSkillInventory: async (botId) => {
         const client = deps.getGatewayClient();
@@ -326,6 +358,31 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
           }
           return names;
         // gate-degrade: 技能目录读取失败只影响非权威清单的补全展示，界面会显示"清单读取不完整"；不阻塞 BOT 详情，也不伪装成空目录。
+        } catch {
+          return null;
+        }
+      },
+      fetchSkillDescriptions: async (botId) => {
+        const client = deps.getGatewayClient();
+        if (!client) return null;
+        try {
+          const result = await client.request<CompleteSlashResult>('complete.slash', {
+            text: '/',
+            profile: botId,
+          });
+          if (!Array.isArray(result?.items)) return null;
+          const map: Record<string, string> = {};
+          let count = 0;
+          for (const item of result.items) {
+            if (item?.kind !== 'skill' || typeof item.text !== 'string' || typeof item.meta !== 'string') continue;
+            const key = item.text.replace(/^\/+/, '').trim();
+            const desc = item.meta.trim();
+            if (!key || !desc) continue;
+            map[key] = desc;
+            count += 1;
+          }
+          return count > 0 ? map : null;
+        // gate-degrade: 技能简介补全失败只影响副标题展示，不阻塞技能开关清单与启用态管理。
         } catch {
           return null;
         }
@@ -367,18 +424,28 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
       notify: (message) => deps.showToast(message),
       onProfilesChanged: () => { void deps.fetchProfiles(); },
       onAvatarChanged: (botId, dataUrl) => {
-        const key = botId.toLowerCase();
-        if (dataUrl) deps.profileAvatarCache.set(key, dataUrl);
-        else deps.profileAvatarCache.delete(key);
+        const syncCacheKey = (rawKey?: string): void => {
+          if (!rawKey) return;
+          const normalized = rawKey.toLowerCase();
+          if (dataUrl) deps.profileAvatarCache.set(normalized, dataUrl);
+          else deps.profileAvatarCache.delete(normalized);
+        };
+
+        syncCacheKey(botId);
         const profile = state.profiles.find((item) => item.name === botId);
         if (profile) {
           profile.avatar = dataUrl;
           profile.hasAvatar = Boolean(dataUrl);
-          if (profile.displayName) {
-            const named = profile.displayName.toLowerCase();
-            if (dataUrl) deps.profileAvatarCache.set(named, dataUrl);
-            else deps.profileAvatarCache.delete(named);
-          }
+          syncCacheKey(profile.displayName);
+        }
+        const settingsRow =
+          state.settingsProfiles.status === 'ready'
+            ? state.settingsProfiles.data.find((row) => row.name === botId)
+            : undefined;
+        syncCacheKey(settingsRow?.displayName);
+        if (state.botManagementDetail?.id === botId) {
+          syncCacheKey(state.botManagementDetail.displayName);
+          state.botManagementDetail = { ...state.botManagementDetail, avatar: dataUrl };
         }
         if (state.settingsProfiles.status === 'ready') {
           state.settingsProfiles = {
@@ -392,6 +459,7 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
           if (session.botName === botId) session.botAvatar = dataUrl;
         }
         deps.persistAvatarCache();
+        deps.persistAgentsToCache?.(state.profiles);
       },
       schedule: (fn, ms) => {
         const timer = setTimeout(fn, ms);
@@ -467,7 +535,7 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
               name: row.name,
               displayName: row.displayName,
               model: row.model || state.profiles.find((item) => item.name === row.name)?.model || '',
-              avatar: row.avatar || state.profiles.find((item) => item.name === row.name)?.avatar || undefined,
+              avatar: resolveProfileAvatar(row.name),
               isDefault: row.isDefault,
             })),
             state.botDrafts,
@@ -493,11 +561,17 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
       }
     }
 
+    const detailAvatar = state.botManagementDetail
+      ? resolveProfileAvatar(state.botManagementDetail.id) || state.botManagementDetail.avatar
+      : undefined;
+
     return {
       status: state.botManagementStatus,
       roster,
       activeBotId: state.botManagementActiveBotId,
-      activeDetail: state.botManagementDetail,
+      activeDetail: state.botManagementDetail
+        ? { ...state.botManagementDetail, avatar: detailAvatar }
+        : undefined,
       availableModels,
       activeDraft: state.botManagementActiveBotId
         ? state.botDrafts[state.botManagementActiveBotId]
@@ -1007,6 +1081,197 @@ export function createSettingsDataService(deps: SettingsDataDeps): SettingsDataS
       },
       onRefreshExtensions: () => { void getSettingsController().loadExtensions(); },
       onReloadSkills: () => getSettingsController().reloadSkills(),
+      onFetchMcpCatalog: async (profile) => {
+        const client = deps.getGatewayClient();
+        if (!client || !state.gatewayConnected) {
+          return { ok: false, items: [], message: deps.t('settings.notConnected') };
+        }
+        const targetProfile = profile || state.profileName || 'default';
+        try {
+          const result = await client.request('mcp.catalog', { profile: targetProfile });
+          return { ok: true, items: normalizeMcpCatalog(result) };
+        } catch (error) {
+          return { ok: false, items: [], message: deps.describeRpcError(error) };
+        }
+      },
+      onAddMcpServer: async (profile, params) => {
+        const client = deps.getGatewayClient();
+        if (!client || !state.gatewayConnected) {
+          return { ok: false, message: deps.t('settings.notConnected') };
+        }
+        const targetProfile = profile || state.profileName || 'default';
+        const rpcParams: McpServerAddRpcParams = {
+          profile: targetProfile,
+          name: params.name,
+        };
+        if (params.preset) rpcParams.preset = params.preset;
+        if (params.config) rpcParams.config = params.config;
+        if (params.bearer_token) rpcParams.bearer_token = params.bearer_token;
+        try {
+          const result = await client.request<{ ok?: boolean; name?: string }>('mcp.servers.add', rpcParams);
+          if (result && result.ok === false) {
+            return { ok: false, message: deps.t('settings.malformedResponse') };
+          }
+          const serverName = (typeof result?.name === 'string' && result.name) || params.name;
+          await Promise.all([
+            getBotManagementController().refreshActiveCapabilities(targetProfile, { addedMcpName: serverName }),
+            state.settingsMcp.status === 'ready' || state.settingsSection === 'extensions'
+              ? getSettingsController().loadExtensions()
+              : Promise.resolve(),
+          ]);
+          return { ok: true, name: serverName };
+        } catch (error) {
+          return { ok: false, message: deps.describeRpcError(error) };
+        }
+      },
+      onRemoveMcpServer: async (profile, name) => {
+        const client = deps.getGatewayClient();
+        if (!client || !state.gatewayConnected) {
+          return { ok: false, message: deps.t('settings.notConnected') };
+        }
+        const targetProfile = profile || state.profileName || 'default';
+        try {
+          const result = await client.request<{ ok?: boolean }>('mcp.servers.remove', {
+            profile: targetProfile,
+            name,
+          });
+          if (result && result.ok === false) {
+            return { ok: false, message: deps.t('settings.malformedResponse') };
+          }
+          await Promise.all([
+            getBotManagementController().refreshActiveCapabilities(targetProfile, { removedMcpName: name }),
+            state.settingsMcp.status === 'ready' || state.settingsSection === 'extensions'
+              ? getSettingsController().loadExtensions()
+              : Promise.resolve(),
+          ]);
+          return { ok: true };
+        } catch (error) {
+          return { ok: false, message: deps.describeRpcError(error) };
+        }
+      },
+      onTestMcpServer: async (profile, name) => {
+        const client = deps.getGatewayClient();
+        if (!client || !state.gatewayConnected) {
+          return { ok: false, tools: [], oauthNeeded: false, error: deps.t('settings.notConnected') };
+        }
+        const targetProfile = profile || state.profileName || 'default';
+        try {
+          const result = await client.request('mcp.servers.test', {
+            profile: targetProfile,
+            name,
+          });
+          return normalizeMcpTestResult(result);
+        } catch (error) {
+          return {
+            ok: false,
+            tools: [],
+            oauthNeeded: false,
+            error: deps.describeRpcError(error),
+          };
+        }
+      },
+      onSearchSkillsHub: async (profile, query, page = 1) => {
+        const client = deps.getGatewayClient();
+        if (!client || !state.gatewayConnected) {
+          return { ok: false, message: deps.t('settings.notConnected') };
+        }
+        const targetProfile = profile || state.profileName || 'default';
+        const trimmed = query.trim();
+        try {
+          const result = trimmed
+            ? await client.request('skills.manage', {
+                profile: targetProfile,
+                action: 'search',
+                query: trimmed,
+                page,
+                page_size: 20,
+              })
+            : await client.request('skills.manage', {
+                profile: targetProfile,
+                action: 'browse',
+                page,
+                page_size: 20,
+              });
+          const installed = new Set<string>();
+          if (state.botManagementDetail?.id === targetProfile) {
+            for (const row of state.botManagementDetail.skills.rows) installed.add(row.id);
+          }
+          if (state.settingsSkills.status === 'ready') {
+            for (const row of state.settingsSkills.data) installed.add(row.name);
+          }
+          return { ok: true, data: normalizeSkillSearchResults(result, installed) };
+        } catch (error) {
+          return { ok: false, message: deps.describeRpcError(error) };
+        }
+      },
+      onInstallSkill: async (profile, name) => {
+        const client = deps.getGatewayClient();
+        if (!client || !state.gatewayConnected) {
+          return { ok: false, message: deps.t('settings.notConnected') };
+        }
+        const targetProfile = profile || state.profileName || 'default';
+        try {
+          const result = await client.request<{ installed?: boolean | null }>('skills.manage', {
+            profile: targetProfile,
+            action: 'install',
+            query: name,
+          });
+          if (result && result.installed === false) {
+            return { ok: false, message: deps.t('settings.malformedResponse') };
+          }
+          try {
+            await client.request('skills.reload', { profile: targetProfile });
+          // gate-degrade: 技能已写入磁盘但自动重载失败；记观测日志并允许用户后续手动刷新，不推翻安装成功结局。
+          } catch (reloadErr) {
+            deps.bootLog.warn('skills.reload after install failed', {
+              profile: targetProfile,
+              error: deps.describeRpcError(reloadErr),
+            });
+          }
+          await Promise.all([
+            getBotManagementController().refreshActiveCapabilities(targetProfile),
+            state.settingsSkills.status === 'ready' || state.settingsSection === 'extensions'
+              ? getSettingsController().loadExtensions()
+              : Promise.resolve(),
+          ]);
+          return { ok: true };
+        } catch (error) {
+          return { ok: false, message: deps.describeRpcError(error) };
+        }
+      },
+      onInspectSkill: async (profile, skillName, fallbackDescription) => {
+        const client = deps.getGatewayClient();
+        if (!client || !state.gatewayConnected) {
+          return { ok: false, message: deps.t('settings.notConnected') };
+        }
+        const targetProfile = profile || state.profileName || 'default';
+        const trimmedName = skillName.trim();
+        if (!trimmedName) {
+          return { ok: false, message: deps.t('settings.malformedResponse') };
+        }
+        const [inspectRes, dispatchRes] = await Promise.allSettled([
+          client.request('skills.manage', {
+            profile: targetProfile,
+            action: 'inspect',
+            query: trimmedName,
+          }),
+          client.request('command.dispatch', {
+            name: trimmedName,
+            profile: targetProfile,
+          }),
+        ]);
+        if (inspectRes.status === 'rejected' && dispatchRes.status === 'rejected') {
+          return { ok: false, message: deps.describeRpcError(inspectRes.reason) };
+        }
+        return {
+          ok: true,
+          data: normalizeSkillInspectResult(trimmedName, {
+            inspectPayload: inspectRes.status === 'fulfilled' ? inspectRes.value : undefined,
+            dispatchPayload: dispatchRes.status === 'fulfilled' ? dispatchRes.value : undefined,
+            fallbackDescription,
+          }),
+        };
+      },
       onTestGateway: (draft) => {
         applyGatewayDraft(draft);
         void getSettingsController().runBusy(async () => {

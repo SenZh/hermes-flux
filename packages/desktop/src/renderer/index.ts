@@ -1258,6 +1258,7 @@ const settingsDataService = createSettingsDataService({
     scrollEndController.syncHost();
   },
   profileAvatarCache, persistAvatarCache: () => persistAvatarCache(),
+  persistAgentsToCache: (profiles) => persistAgentsToCache(profiles),
 });
 
 const scopedProfileName = () => settingsDataService.scopedProfileName();
